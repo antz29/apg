@@ -1,266 +1,358 @@
 mod graph;
-mod lsp;
 
-use anyhow::Result;
-use graph::{EdgeKind, Graph, NodeKind};
-use lsp::LspClient;
-use lsp_types::{CallHierarchyItem, DocumentSymbol, SymbolKind, Uri};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 
-#[derive(Clone)]
-struct MethodRec {
-    fqn: String,
-    name: String,
-    kind: SymbolKind,
-    range: lsp_types::Range,
-    selection_range: lsp_types::Range,
-}
+use graph::*;
+use lbug::{Connection, Database};
 
-fn find_java_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().and_then(|s| s.to_str()) == Some("java") {
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
-    Ok(files)
-}
-
-fn path_to_uri(path: &Path) -> Uri {
-    let url = url::Url::from_file_path(path).unwrap();
-    Uri::from_str(url.as_str()).unwrap()
-}
-
-fn package_from_path(project_dir: &Path, file: &Path) -> String {
-    let relative = file.strip_prefix(project_dir).unwrap();
-    let mut parts: Vec<&str> = Vec::new();
-    for component in relative.parent().unwrap_or(Path::new("")).components() {
-        use std::path::Component;
-        if let Component::Normal(s) = component {
-            let s = s.to_str().unwrap();
-            if s == "java" || s == "main" || s == "test" {
-                continue;
-            }
-            parts.push(s);
-        }
-    }
-    parts.join(".")
-}
-
-fn ensure_package_hierarchy(
-    graph: &mut Graph,
-    package: &str,
-    fqn_to_id: &mut HashMap<String, usize>,
-) {
-    if package.is_empty() || fqn_to_id.contains_key(package) {
-        return;
-    }
-    let parent = package.rsplit_once('.').map(|(p, _)| p).unwrap_or("");
-    if !parent.is_empty() {
-        ensure_package_hierarchy(graph, parent, fqn_to_id);
-    }
-    let id = graph.add_node(package.to_string(), NodeKind::Package, None);
-    fqn_to_id.insert(package.to_string(), id);
-    if !parent.is_empty() {
-        let parent_id = fqn_to_id[parent];
-        graph.add_edge(parent_id, id, EdgeKind::Contains);
-    }
-}
-
-fn symbol_kind(kind: SymbolKind) -> Option<NodeKind> {
-    match kind {
-        SymbolKind::CLASS => Some(NodeKind::Class),
-        SymbolKind::INTERFACE => Some(NodeKind::Interface),
-        SymbolKind::ENUM => Some(NodeKind::Enum),
-        SymbolKind::STRUCT => Some(NodeKind::Record),
-        SymbolKind::METHOD => Some(NodeKind::Method),
-        SymbolKind::CONSTRUCTOR => Some(NodeKind::Constructor),
-        SymbolKind::FIELD => Some(NodeKind::Field),
-        _ => None,
-    }
-}
-
-fn process_symbols(
-    graph: &mut Graph,
-    symbols: &[DocumentSymbol],
-    parent_fqn: &str,
-    file_uri_str: &str,
-    fqn_to_id: &mut HashMap<String, usize>,
-    lookup: &mut HashMap<(String, u32), MethodRec>,
-    parent_id: usize,
-) {
-    for symbol in symbols {
-        let fqn = format!("{}.{}", parent_fqn, symbol.name);
-        dbg!(&fqn);
-        if let Some(kind) = symbol_kind(symbol.kind) {
-            let id = {
-                let entry = fqn_to_id.entry(fqn.clone());
-                *entry.or_insert_with(|| {
-                    let file = Some(file_uri_str.to_string());
-                    graph.add_node(fqn.clone(), kind, file)
-                })
-            };
-            graph.add_edge(parent_id, id, EdgeKind::Contains);
-
-            if kind == NodeKind::Method || kind == NodeKind::Constructor {
-                lookup.insert(
-                    (file_uri_str.to_string(), symbol.selection_range.start.line),
-                    MethodRec {
-                        fqn: fqn.clone(),
-                        name: symbol.name.clone(),
-                        kind: symbol.kind,
-                        range: symbol.range,
-                        selection_range: symbol.selection_range,
-                    },
-                );
-            }
-
-            if let Some(children) = &symbol.children {
-                process_symbols(graph, children, &fqn, file_uri_str, fqn_to_id, lookup, id);
-            }
-        } else if let Some(children) = &symbol.children {
-            process_symbols(graph, children, parent_fqn, file_uri_str, fqn_to_id, lookup, parent_id);
-        }
-    }
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() {
     let args: Vec<String> = std::env::args().collect();
     let project_dir = if args.len() > 1 {
         PathBuf::from(&args[1])
     } else {
         PathBuf::from("project")
     };
-
-    let jdtls_cmd = std::env::var("JDTLS_CMD").unwrap_or_else(|_| "jdtls".to_string());
-    let project_dir = project_dir.canonicalize()?;
+    let project_dir = project_dir.canonicalize().unwrap();
     eprintln!("Project: {}", project_dir.display());
 
-    let files = find_java_files(&project_dir)?;
-    eprintln!("Found {} .java files", files.len());
+    let mut frontend_output = Command::new("sh")
+        .args([
+            "-c",
+            &format!("{} \"{}\"", env!("APG_FRONTEND_CMD"), project_dir.display()),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("Failed to run apg frontend");
 
-    let root_uri = path_to_uri(&project_dir);
-    let project_root_str = root_uri.as_str().to_string();
+    let mut graph = Graph::default();
 
-    let mut lsp = LspClient::spawn(&jdtls_cmd).await?;
-    lsp.initialize(&root_uri).await?;
-    lsp.initialized().await?;
-    eprintln!("JDT LS ready");
-
-    // Open all files
-    for file in &files {
-        dbg!(file);
-        let uri = path_to_uri(file);
-        let content = tokio::fs::read_to_string(file).await?;
-        lsp.did_open(&uri, &content).await?;
-    }
-    eprintln!("Opened {} files", files.len());
-
-    // Get document symbols for each file
-    let mut file_symbols: Vec<(PathBuf, Vec<DocumentSymbol>)> = Vec::new();
-    for file in &files {
-        let uri = path_to_uri(file);
-        dbg!(file);
-        match lsp.document_symbols(&uri).await {
-            Ok(symbols) if !symbols.is_empty() => file_symbols.push((file.clone(), symbols)),
-            Ok(_) => eprintln!("  warn: {}: no symbols returned", file.display()),
-            Err(e) => eprintln!("  warn: {}: {e}", file.display()),
+    for line in BufReader::new(frontend_output.stdout.as_mut().unwrap())
+        .lines()
+        .map(|x| x.expect("io error"))
+    {
+        let msg: serde_json::Value = serde_json::from_str(&line).unwrap_or_else(|_| panic!("bad json: {line}"));
+        match msg["type"].as_str().unwrap() {
+            "pkg" => {
+                graph.nodes.insert(
+                    msg["fqn"].as_str().unwrap().to_owned(),
+                    Node {
+                        kind: NodeKind::Module,
+                        location: None,
+                    },
+                );
+            }
+            "decl" => {
+                graph.nodes.insert(
+                    msg["fqn"].as_str().unwrap().to_owned(),
+                    Node {
+                        kind: match msg["kind"].as_str().unwrap() {
+                            "class" => NodeKind::Struct,
+                            "method" => NodeKind::Function,
+                            x => panic!("invalid node kind {x}"),
+                        },
+                        location: Some(Location {
+                            path: PathBuf::from(msg["path"].as_str().unwrap()),
+                            start: msg["start"].as_u64().unwrap() as u32,
+                            end: msg["end"].as_u64().unwrap() as u32,
+                        }),
+                    },
+                );
+            }
+            "contains" => {
+                graph.contains.insert((
+                    msg["parent"].as_str().unwrap().to_owned(),
+                    msg["child"].as_str().unwrap().to_owned(),
+                ));
+            }
+            "call" => {
+                graph.calls.insert((
+                    msg["source"].as_str().unwrap().to_owned(),
+                    msg["target"].as_str().unwrap().to_owned(),
+                ));
+            }
+            "use" => {
+                graph.uses.insert((
+                    msg["source"].as_str().unwrap().to_owned(),
+                    msg["target"].as_str().unwrap().to_owned(),
+                ));
+            }
+            x => panic!("invalid msg type {x}"),
         }
     }
-    eprintln!("Got symbols from {} files", file_symbols.len());
 
-    // Build symbol hierarchy
-    let mut graph = Graph::new();
-    let mut fqn_to_id: HashMap<String, usize> = HashMap::new();
-    let mut lookup: HashMap<(String, u32), MethodRec> = HashMap::new();
+    if !frontend_output
+        .wait()
+        .expect("couldnt wait for apg frontend")
+        .success()
+    {
+        let mut buf = String::new();
+        frontend_output
+            .stderr
+            .unwrap()
+            .read_to_string(&mut buf)
+            .unwrap();
+        panic!("apg frontend failed:\n{buf}");
+    }
 
-    for (file, symbols) in &file_symbols {
-        let package = package_from_path(&project_dir, file);
-        ensure_package_hierarchy(&mut graph, &package, &mut fqn_to_id);
-        let file_uri = path_to_uri(file);
-        let file_uri_str = file_uri.as_str().to_string();
-        let package_id = fqn_to_id[&package];
-        process_symbols(
-            &mut graph,
-            symbols,
-            &package,
-            &file_uri_str,
-            &mut fqn_to_id,
-            &mut lookup,
-            package_id,
+    eprintln!(
+        "graph: {} nodes, {} contain edges, {} calls edges, {} uses edges",
+        graph.nodes.len(),
+        graph.contains.len(),
+        graph.calls.len(),
+        graph.uses.len(),
+    );
+
+    for (fqn, node) in graph.nodes.iter().take(10) {
+        println!("{}: {:?}", fqn, node.kind);
+        if node.location.is_none() {
+            continue;
+        }
+        println!(
+            "{}\n",
+            String::from_utf8_lossy(
+                &std::fs::read(&node.location.as_ref().unwrap().path).unwrap()[node
+                    .location
+                    .as_ref()
+                    .unwrap()
+                    .start
+                    as usize
+                    ..node.location.as_ref().unwrap().end as usize]
+            )
         );
     }
-    eprintln!(
-        "Symbol hierarchy: {} nodes, {} methods/ctors",
-        graph.nodes.len(),
-        lookup.len()
-    );
 
-    // Call hierarchy — construct CallHierarchyItem directly from symbol data
-    let methods: Vec<(Uri, MethodRec)> = lookup
-        .iter()
-        .map(|((uri_str, _), rec)| (Uri::from_str(uri_str).unwrap(), rec.clone()))
-        .collect();
-    let total = methods.len();
+    let db = Database::new("db.lbug", Default::default()).unwrap();
+    let conn = Connection::new(&db).unwrap();
+    conn.query(
+        "
+        CREATE NODE TABLE Module(
+            fqn STRING PRIMARY KEY
+        )",
+    )
+    .unwrap();
+    conn.query(
+        "
+        CREATE NODE TABLE Struct(
+            fqn STRING PRIMARY KEY,
+            path STRING,
+            start INT64,
+            `end` INT64
+        )",
+    )
+    .unwrap();
+    conn.query(
+        "
+        CREATE NODE TABLE Function(
+            fqn STRING PRIMARY KEY,
+            path STRING,
+            start INT64,
+            `end` INT64
+        )",
+    )
+    .unwrap();
+    conn.query(
+        "
+        CREATE REL TABLE Contains(
+            FROM Module TO Module,
+            FROM Module TO Struct,
+            FROM Module TO Function,
+            FROM Struct TO Struct,
+            FROM Struct TO Function
+        )",
+    )
+    .unwrap();
+    conn.query(
+        "
+        CREATE REL TABLE Calls(
+            FROM Function TO Function
+        )",
+    )
+    .unwrap();
+    conn.query(
+        "
+        CREATE REL TABLE Uses(
+            FROM Function TO Struct,
+            FROM Struct TO Struct
+        )",
+    )
+    .unwrap();
 
-    for (i, (uri, rec)) in methods.iter().enumerate() {
-        if (i + 1) % 100 == 0 || i == 0 {
-            eprintln!("Calls: {}/{}", i + 1, total);
-        }
+    {
+        let mut module_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("modules.csv")
+                .unwrap(),
+        );
+        let mut struct_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("structs.csv")
+                .unwrap(),
+        );
+        let mut function_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("functions.csv")
+                .unwrap(),
+        );
+        module_csv.write_all(b"fqn\n").unwrap();
+        struct_csv.write_all(b"fqn,path,start,end\n").unwrap();
+        function_csv.write_all(b"fqn,path,start,end\n").unwrap();
 
-        let item = CallHierarchyItem {
-            name: rec.name.clone(),
-            kind: rec.kind,
-            tags: None,
-            detail: None,
-            uri: uri.clone(),
-            range: rec.range,
-            selection_range: rec.selection_range,
-            data: None,
-        };
-
-        let calls = match lsp.outgoing_calls(item).await {
-            Ok(calls) => calls,
-            Err(_) => continue,
-        };
-
-        let source_id = match fqn_to_id.get(&rec.fqn) {
-            Some(&id) => id,
-            None => continue,
-        };
-
-        for call in calls {
-            let tu = call.to.uri.as_str();
-            if !tu.starts_with(&project_root_str) {
-                continue;
-            }
-            let tl = call.to.selection_range.start.line;
-            if let Some(target_rec) = lookup.get(&(call.to.uri.as_str().to_string(), tl)) {
-                if let Some(&target_id) = fqn_to_id.get(&target_rec.fqn) {
-                    eprintln!("{} -> {}", &rec.fqn, &target_rec.fqn);
-                    graph.add_edge(source_id, target_id, EdgeKind::Calls);
+        for (fqn, node) in &graph.nodes {
+            match (node.kind, &node.location) {
+                (NodeKind::Module, _) => {
+                    module_csv.write_all(fqn.as_bytes()).unwrap();
+                    module_csv.write_all(b"\n").unwrap();
                 }
+                (NodeKind::Struct, Some(loc)) => struct_csv
+                    .write_all(
+                        format!(
+                            "{},{},{},{}\n",
+                            fqn,
+                            loc.path.to_str().unwrap(),
+                            loc.start,
+                            loc.end
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap(),
+                (NodeKind::Function, Some(loc)) => function_csv
+                    .write_all(
+                        format!(
+                            "{},{},{},{}\n",
+                            fqn,
+                            loc.path.to_str().unwrap(),
+                            loc.start,
+                            loc.end
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap(),
+                (_, _) => panic!(),
             }
         }
     }
-    eprintln!("Call graph built: {} total edges",
-        graph.nodes.iter().map(|n| n.edges.len()).sum::<usize>()
-    );
 
-    let json = serde_json::to_string_pretty(&graph)?;
-    println!("{json}");
+    conn.query(
+        r#"
+        COPY Module FROM "modules.csv" (header=true);
+        COPY Struct FROM "structs.csv" (header=true);
+        COPY Function FROM "functions.csv" (header=true);
+        "#,
+    )
+    .unwrap();
 
-    lsp.shutdown().await?;
-    Ok(())
+    {
+        let mut contain_mod_mod_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("contains_mod_mod.csv")
+                .unwrap(),
+        );
+        let mut contain_mod_struct_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("contains_mod_struct.csv")
+                .unwrap(),
+        );
+        let mut contain_mod_fn_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("contains_mod_fn.csv")
+                .unwrap(),
+        );
+        let mut contain_struct_struct_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("contains_struct_struct.csv")
+                .unwrap(),
+        );
+        let mut contain_struct_fn_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("contains_struct_fn.csv")
+                .unwrap(),
+        );
+        let mut call_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("calls.csv")
+                .unwrap(),
+        );
+        let mut use_struct_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("uses_struct.csv")
+                .unwrap(),
+        );
+        let mut use_fn_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("uses_fn.csv")
+                .unwrap(),
+        );
+
+        for (a, b) in graph.contains {
+            match (graph.nodes[&a].kind, graph.nodes[&b].kind) {
+                (NodeKind::Module, NodeKind::Module) => contain_mod_mod_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
+                (NodeKind::Module, NodeKind::Struct) => contain_mod_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
+                (NodeKind::Module, NodeKind::Function) => contain_mod_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
+                (NodeKind::Struct, NodeKind::Struct) => contain_struct_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
+                (NodeKind::Struct, NodeKind::Function) => contain_struct_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
+                (x, y) => unreachable!("{a} {b} {x:?}{y:?}"),
+            }
+        }
+        for (a, b) in graph.calls {
+            call_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap();
+        }
+        for (a, b) in graph.uses {
+            match graph.nodes[&a].kind {
+                NodeKind::Struct => use_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
+                NodeKind::Function=> use_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    conn.query(
+        r#"
+        COPY Contains FROM "contains_mod_mod.csv" (from="Module",to="Module");
+        COPY Contains FROM "contains_mod_struct.csv" (from="Module",to="Struct");
+        COPY Contains FROM "contains_mod_fn.csv" (from="Module",to="Function");
+        COPY Contains FROM "contains_struct_struct.csv" (from="Struct",to="Struct");
+        COPY Contains FROM "contains_struct_fn.csv" (from="Struct",to="Function");
+        COPY Calls FROM "calls.csv" (from="Function",to="Function");
+        COPY Uses FROM "uses_struct.csv" (from="Struct",to="Struct");
+        COPY Uses FROM "uses_fn.csv" (from="Function",to="Struct");
+        "#,
+    )
+    .unwrap();
 }
