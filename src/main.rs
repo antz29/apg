@@ -1,12 +1,16 @@
 mod graph;
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use graph::*;
 use lbug::{Connection, Database};
+
+fn is_blacklisted(fqn: &str, blacklist: &[String]) -> bool {
+    blacklist.iter().any(|p| fqn.starts_with(p.as_str()))
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -17,6 +21,11 @@ fn main() {
     };
     let project_dir = project_dir.canonicalize().unwrap();
     eprintln!("Project: {}", project_dir.display());
+
+    let blacklist: Vec<String> = args.iter().skip(2).cloned().collect();
+    if !blacklist.is_empty() {
+        eprintln!("Blacklist: {:?}", blacklist);
+    }
 
     let mut frontend_output = Command::new("sh")
         .args([
@@ -29,6 +38,7 @@ fn main() {
         .expect("Failed to run apg frontend");
 
     let mut graph = Graph::default();
+    let mut skipped = 0u64;
 
     for line in BufReader::new(frontend_output.stdout.as_mut().unwrap())
         .lines()
@@ -37,8 +47,13 @@ fn main() {
         let msg: serde_json::Value = serde_json::from_str(&line).unwrap_or_else(|_| panic!("bad json: {line}"));
         match msg["type"].as_str().unwrap() {
             "pkg" => {
+                let fqn = msg["fqn"].as_str().unwrap();
+                if is_blacklisted(fqn, &blacklist) {
+                    skipped += 1;
+                    continue;
+                }
                 graph.nodes.insert(
-                    msg["fqn"].as_str().unwrap().to_owned(),
+                    fqn.to_owned(),
                     Node {
                         kind: NodeKind::Module,
                         location: None,
@@ -46,8 +61,13 @@ fn main() {
                 );
             }
             "decl" => {
+                let fqn = msg["fqn"].as_str().unwrap();
+                if is_blacklisted(fqn, &blacklist) {
+                    skipped += 1;
+                    continue;
+                }
                 graph.nodes.insert(
-                    msg["fqn"].as_str().unwrap().to_owned(),
+                    fqn.to_owned(),
                     Node {
                         kind: match msg["kind"].as_str().unwrap() {
                             "class" => NodeKind::Struct,
@@ -63,40 +83,57 @@ fn main() {
                 );
             }
             "contains" => {
+                let parent = msg["parent"].as_str().unwrap();
+                let child = msg["child"].as_str().unwrap();
+                if is_blacklisted(parent, &blacklist) || is_blacklisted(child, &blacklist) {
+                    skipped += 1;
+                    continue;
+                }
                 graph.contains.insert((
-                    msg["parent"].as_str().unwrap().to_owned(),
-                    msg["child"].as_str().unwrap().to_owned(),
+                    parent.to_owned(),
+                    child.to_owned(),
                 ));
             }
             "call" => {
+                let source = msg["source"].as_str().unwrap();
+                let target = msg["target"].as_str().unwrap();
+                if is_blacklisted(source, &blacklist) || is_blacklisted(target, &blacklist) {
+                    skipped += 1;
+                    continue;
+                }
                 graph.calls.insert((
-                    msg["source"].as_str().unwrap().to_owned(),
-                    msg["target"].as_str().unwrap().to_owned(),
+                    source.to_owned(),
+                    target.to_owned(),
                 ));
             }
             "use" => {
+                let source = msg["source"].as_str().unwrap();
+                let target = msg["target"].as_str().unwrap();
+                if is_blacklisted(source, &blacklist) || is_blacklisted(target, &blacklist) {
+                    skipped += 1;
+                    continue;
+                }
                 graph.uses.insert((
-                    msg["source"].as_str().unwrap().to_owned(),
-                    msg["target"].as_str().unwrap().to_owned(),
+                    source.to_owned(),
+                    target.to_owned(),
                 ));
             }
             x => panic!("invalid msg type {x}"),
         }
     }
 
+    eprintln!("Skipped {skipped} blacklisted messages");
+
     if !frontend_output
         .wait()
         .expect("couldnt wait for apg frontend")
         .success()
     {
-        let mut buf = String::new();
-        frontend_output
-            .stderr
-            .unwrap()
-            .read_to_string(&mut buf)
-            .unwrap();
-        panic!("apg frontend failed:\n{buf}");
+        panic!("apg frontend failed");
     }
+
+    dbg!(graph.uses.len());
+    graph.uses.retain(|pair| graph.nodes.contains_key(&pair.0) && graph.nodes.contains_key(&pair.1) && graph.nodes[&pair.1].kind == NodeKind::Struct);
 
     eprintln!(
         "graph: {} nodes, {} contain edges, {} calls edges, {} uses edges",
@@ -106,25 +143,7 @@ fn main() {
         graph.uses.len(),
     );
 
-    for (fqn, node) in graph.nodes.iter().take(10) {
-        println!("{}: {:?}", fqn, node.kind);
-        if node.location.is_none() {
-            continue;
-        }
-        println!(
-            "{}\n",
-            String::from_utf8_lossy(
-                &std::fs::read(&node.location.as_ref().unwrap().path).unwrap()[node
-                    .location
-                    .as_ref()
-                    .unwrap()
-                    .start
-                    as usize
-                    ..node.location.as_ref().unwrap().end as usize]
-            )
-        );
-    }
-
+    let _ = std::fs::remove_file("db.lbug");
     let db = Database::new("db.lbug", Default::default()).unwrap();
     let conn = Connection::new(&db).unwrap();
     conn.query(
@@ -327,7 +346,7 @@ fn main() {
                 (NodeKind::Module, NodeKind::Function) => contain_mod_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
                 (NodeKind::Struct, NodeKind::Struct) => contain_struct_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
                 (NodeKind::Struct, NodeKind::Function) => contain_struct_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                (x, y) => unreachable!("{a} {b} {x:?}{y:?}"),
+                (x, y) => println!("{a} {b} {x:?}{y:?}"),
             }
         }
         for (a, b) in graph.calls {
@@ -337,22 +356,25 @@ fn main() {
             match graph.nodes[&a].kind {
                 NodeKind::Struct => use_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
                 NodeKind::Function=> use_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                _ => unreachable!(),
+                x  => unreachable!("{a} {b} {x:?}"),
             }
         }
     }
 
-    conn.query(
-        r#"
+    let query = r#"
         COPY Contains FROM "contains_mod_mod.csv" (from="Module",to="Module");
         COPY Contains FROM "contains_mod_struct.csv" (from="Module",to="Struct");
         COPY Contains FROM "contains_mod_fn.csv" (from="Module",to="Function");
         COPY Contains FROM "contains_struct_struct.csv" (from="Struct",to="Struct");
         COPY Contains FROM "contains_struct_fn.csv" (from="Struct",to="Function");
-        COPY Calls FROM "calls.csv" (from="Function",to="Function");
+        COPY Calls FROM "calls.csv";
         COPY Uses FROM "uses_struct.csv" (from="Struct",to="Struct");
         COPY Uses FROM "uses_fn.csv" (from="Function",to="Struct");
-        "#,
-    )
-    .unwrap();
+        "#;
+    for line in query.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        println!("{:?}", conn.query(line).unwrap());
+    }
 }

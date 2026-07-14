@@ -18,7 +18,7 @@ pub struct Location {
     pub end: u32,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum NodeKind {
     Module,

@@ -42,7 +42,7 @@ public class CallGraphBuilder {
         c.flush();
     }
 
-    static String jstr(String s) {
+    static String jstrPath(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
@@ -71,15 +71,15 @@ public class CallGraphBuilder {
             } catch (Exception e) {
                 sourceText = "";
             }
-            if (!pkg.isEmpty()) {
+                    if (!pkg.isEmpty()) {
                 StringBuilder sb = new StringBuilder();
                 String prev = "";
                 for (int i = 0; i < pkg.length(); i++) {
                     if (pkg.charAt(i) == '.') {
                         String seg = sb.toString();
-                        System.out.println("{\"type\":\"pkg\",\"fqn\":\"" + jstr(seg) + "\"}");
+                        System.out.println("{\"type\":\"pkg\",\"fqn\":\"" + seg + "\"}");
                         if (!prev.isEmpty()) {
-                            System.out.println("{\"type\":\"contains\",\"parent\":\"" + jstr(prev) + "\",\"child\":\"" + jstr(seg) + "\"}");
+                            System.out.println("{\"type\":\"contains\",\"parent\":\"" + prev + "\",\"child\":\"" + seg + "\"}");
                         }
                         prev = seg;
                         sb.append('.');
@@ -87,9 +87,9 @@ public class CallGraphBuilder {
                         sb.append(pkg.charAt(i));
                         if (i == pkg.length() - 1) {
                             String full = sb.toString();
-                            System.out.println("{\"type\":\"pkg\",\"fqn\":\"" + jstr(full) + "\"}");
+                            System.out.println("{\"type\":\"pkg\",\"fqn\":\"" + full + "\"}");
                             if (!prev.isEmpty()) {
-                                System.out.println("{\"type\":\"contains\",\"parent\":\"" + jstr(prev) + "\",\"child\":\"" + jstr(full) + "\"}");
+                                System.out.println("{\"type\":\"contains\",\"parent\":\"" + prev + "\",\"child\":\"" + full + "\"}");
                             }
                         }
                     }
@@ -120,14 +120,14 @@ public class CallGraphBuilder {
             int bracePos = sourceText.indexOf('{', jc.getStartPosition());
             int end = bracePos > 0 ? bracePos + 1 : jc.getEndPosition(jcCu.endPositions);
 
-            System.out.println("{\"type\":\"decl\",\"kind\":\"class\",\"fqn\":\"" + jstr(fqn)
-                + "\",\"path\":\"" + jstr(currentFile)
+            System.out.println("{\"type\":\"decl\",\"kind\":\"class\",\"fqn\":\"" + fqn
+                + "\",\"path\":\"" + jstrPath(currentFile)
                 + "\",\"start\":" + start + ",\"end\":" + end + "}");
 
             String parentFqn = outer.isEmpty() ? pkg : pkg.isEmpty() ? outer : pkg + "." + outer;
             if (!parentFqn.isEmpty()) {
-                System.out.println("{\"type\":\"contains\",\"parent\":\"" + jstr(parentFqn)
-                    + "\",\"child\":\"" + jstr(fqn) + "\"}");
+                System.out.println("{\"type\":\"contains\",\"parent\":\"" + parentFqn
+                    + "\",\"child\":\"" + fqn + "\"}");
             }
 
             String simple = fqn.contains(".") ? fqn.substring(fqn.lastIndexOf('.') + 1) : fqn;
@@ -168,14 +168,14 @@ public class CallGraphBuilder {
             mtd = fqn;
             mtdKey = key;
 
-            System.out.println("{\"type\":\"decl\",\"kind\":\"method\",\"fqn\":\"" + jstr(fqn)
-                + "\",\"path\":\"" + jstr(currentFile)
+            System.out.println("{\"type\":\"decl\",\"kind\":\"method\",\"fqn\":\"" + fqn
+                + "\",\"path\":\"" + jstrPath(currentFile)
                 + "\",\"start\":" + start + ",\"end\":" + end + "}");
 
             String parentFqn = pkg.isEmpty() ? cls : pkg + "." + cls;
             if (!parentFqn.isEmpty()) {
-                System.out.println("{\"type\":\"contains\",\"parent\":\"" + jstr(parentFqn)
-                    + "\",\"child\":\"" + jstr(fqn) + "\"}");
+                System.out.println("{\"type\":\"contains\",\"parent\":\"" + parentFqn
+                    + "\",\"child\":\"" + fqn + "\"}");
             }
 
             byKey.computeIfAbsent(key, k -> new ArrayList<>()).add(fqn);
@@ -241,6 +241,7 @@ public class CallGraphBuilder {
         void flush() {
             int flushTotal = rawCalls.size() + rawTypeUses.size() + rawExtends.size() + rawImplements.size();
             int flushDone = 0;
+            int lastTick = -1;
 
             try {
                 var buf = new BufferedWriter(new OutputStreamWriter(System.out, StandardCharsets.UTF_8));
@@ -250,19 +251,23 @@ public class CallGraphBuilder {
                     String[] rc = it.next();
                     String caller = rc[0], targetKey = rc[1];
                     List<String> cands = byKey.get(targetKey);
-                    if (cands == null) continue;
-                    String callerClass = caller.contains(".")
-                            ? caller.substring(0, caller.lastIndexOf('.')) : "";
-                    String best = cands.get(0);
-                    for (String c : cands) {
-                        if (c.startsWith(callerClass + ".")) { best = c; break; }
-                    }
-                    buf.write("{\"type\":\"call\",\"source\":\"" + jstr(caller)
-                        + "\",\"target\":\"" + jstr(best) + "\"}");
-                    buf.newLine();
                     it.remove();
-                    if (++flushDone % 1000 == 0) {
-                        System.err.print("\rResolving: " + flushDone + "/" + flushTotal);
+                    if (cands != null) {
+                        String callerClass = caller.contains(".")
+                                ? caller.substring(0, caller.lastIndexOf('.')) : "";
+                        String best = cands.get(0);
+                        for (String c : cands) {
+                            if (c.startsWith(callerClass + ".")) { best = c; break; }
+                        }
+                        buf.write("{\"type\":\"call\",\"source\":\"" + caller
+                            + "\",\"target\":\"" + best + "\"}");
+                        buf.newLine();
+                    }
+                    flushDone++;
+                    int tick = (int)((long)flushDone * 1000 / flushTotal);
+                    if (tick != lastTick) {
+                        lastTick = tick;
+                        System.err.print("\rResolving: " + (tick / 10) + "." + (tick % 10) + "% (" + flushDone + "/" + flushTotal + ")");
                     }
                 }
 
@@ -270,14 +275,17 @@ public class CallGraphBuilder {
                 while (it.hasNext()) {
                     String[] tu = it.next();
                     String fqn = resolveSimple(tu[0], tu[1], simpleToFqn);
+                    it.remove();
                     if (fqn != null) {
-                        buf.write("{\"type\":\"use\",\"source\":\"" + jstr(tu[0])
-                            + "\",\"target\":\"" + jstr(fqn) + "\"}");
+                        buf.write("{\"type\":\"use\",\"source\":\"" + tu[0]
+                            + "\",\"target\":\"" + fqn + "\"}");
                         buf.newLine();
-                        it.remove();
-                        if (++flushDone % 1000 == 0) {
-                            System.err.print("\rResolving: " + flushDone + "/" + flushTotal);
-                        }
+                    }
+                    if (++flushDone % 10000 == 0) buf.flush();
+                    int tick = (int)((long)flushDone * 1000 / flushTotal);
+                    if (tick != lastTick) {
+                        lastTick = tick;
+                        System.err.print("\rResolving: " + (tick / 10) + "." + (tick % 10) + "% (" + flushDone + "/" + flushTotal + ")");
                     }
                 }
 
@@ -285,14 +293,17 @@ public class CallGraphBuilder {
                 while (it.hasNext()) {
                     String[] re = it.next();
                     String fqn = resolveSimple(re[0], re[1], simpleToFqn);
+                    it.remove();
                     if (fqn != null) {
-                        buf.write("{\"type\":\"use\",\"source\":\"" + jstr(re[0])
-                            + "\",\"target\":\"" + jstr(fqn) + "\"}");
+                        buf.write("{\"type\":\"use\",\"source\":\"" + re[0]
+                            + "\",\"target\":\"" + fqn + "\"}");
                         buf.newLine();
-                        it.remove();
-                        if (++flushDone % 1000 == 0) {
-                            System.err.print("\rResolving: " + flushDone + "/" + flushTotal);
-                        }
+                    }
+                    if (++flushDone % 10000 == 0) buf.flush();
+                    int tick = (int)((long)flushDone * 1000 / flushTotal);
+                    if (tick != lastTick) {
+                        lastTick = tick;
+                        System.err.print("\rResolving: " + (tick / 10) + "." + (tick % 10) + "% (" + flushDone + "/" + flushTotal + ")");
                     }
                 }
 
@@ -300,14 +311,17 @@ public class CallGraphBuilder {
                 while (it.hasNext()) {
                     String[] ri = it.next();
                     String fqn = resolveSimple(ri[0], ri[1], simpleToFqn);
+                    it.remove();
                     if (fqn != null) {
-                        buf.write("{\"type\":\"use\",\"source\":\"" + jstr(ri[0])
-                            + "\",\"target\":\"" + jstr(fqn) + "\"}");
+                        buf.write("{\"type\":\"use\",\"source\":\"" + ri[0]
+                            + "\",\"target\":\"" + fqn + "\"}");
                         buf.newLine();
-                        it.remove();
-                        if (++flushDone % 1000 == 0) {
-                            System.err.print("\rResolving: " + flushDone + "/" + flushTotal);
-                        }
+                    }
+                    if (++flushDone % 10000 == 0) buf.flush();
+                    int tick = (int)((long)flushDone * 1000 / flushTotal);
+                    if (tick != lastTick) {
+                        lastTick = tick;
+                        System.err.print("\rResolving: " + (tick / 10) + "." + (tick % 10) + "% (" + flushDone + "/" + flushTotal + ")");
                     }
                 }
 
