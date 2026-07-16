@@ -154,8 +154,30 @@ fn main() {
         panic!("apg frontend failed");
     }
 
-    dbg!(graph.uses.len());
-    graph.uses.retain(|pair| graph.nodes.contains_key(&pair.0) && graph.nodes.contains_key(&pair.1) && graph.nodes[&pair.1].kind == NodeKind::Struct);
+    graph.contains.retain(|(a, b)| {
+        graph.nodes.contains_key(a)
+            && graph.nodes.contains_key(b)
+            && matches!(
+                (graph.nodes[a].kind, graph.nodes[b].kind),
+                (NodeKind::Module, NodeKind::Module)
+                    | (NodeKind::Module, NodeKind::Struct)
+                    | (NodeKind::Module, NodeKind::Function)
+                    | (NodeKind::Struct, NodeKind::Struct)
+                    | (NodeKind::Struct, NodeKind::Function)
+            )
+    });
+    graph.calls.retain(|(a, b)| {
+        graph.nodes.contains_key(a)
+            && graph.nodes.contains_key(b)
+            && graph.nodes[a].kind == NodeKind::Function
+            && graph.nodes[b].kind == NodeKind::Function
+    });
+    graph.uses.retain(|(a, b)| {
+        graph.nodes.contains_key(a)
+            && graph.nodes.contains_key(b)
+            && graph.nodes[b].kind == NodeKind::Struct
+            && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
+    });
 
     eprintln!(
         "graph: {} nodes, {} contain edges, {} calls edges, {} uses edges",
