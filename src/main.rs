@@ -13,24 +13,46 @@ fn is_blacklisted(fqn: &str, blacklist: &[String]) -> bool {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let project_dir = if args.len() > 1 {
-        PathBuf::from(&args[1])
+    let raw: Vec<String> = std::env::args().collect();
+    let mut clean = vec![raw[0].clone()];
+    let mut path_excludes: Vec<String> = Vec::new();
+    let mut i = 1;
+    while i < raw.len() {
+        if raw[i] == "--exclude-path" {
+            i += 1;
+            if i < raw.len() {
+                path_excludes.push(raw[i].clone());
+            }
+        } else {
+            clean.push(raw[i].clone());
+        }
+        i += 1;
+    }
+
+    let project_dir = if clean.len() > 1 {
+        PathBuf::from(&clean[1])
     } else {
         PathBuf::from("project")
     };
     let project_dir = project_dir.canonicalize().unwrap();
     eprintln!("Project: {}", project_dir.display());
 
-    let blacklist: Vec<String> = args.iter().skip(2).cloned().collect();
+    let blacklist: Vec<String> = clean.iter().skip(2).cloned().collect();
     if !blacklist.is_empty() {
         eprintln!("Blacklist: {:?}", blacklist);
     }
+    if !path_excludes.is_empty() {
+        eprintln!("Path excludes: {:?}", path_excludes);
+    }
 
+    let mut java_args = format!("\"{}\"", project_dir.display());
+    for pat in &path_excludes {
+        java_args.push_str(&format!(" \"{}\"", pat));
+    }
     let mut frontend_output = Command::new("sh")
         .args([
             "-c",
-            &format!("{} \"{}\"", env!("APG_FRONTEND_CMD"), project_dir.display()),
+            &format!("{} {}", env!("APG_FRONTEND_CMD"), java_args),
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -274,6 +296,16 @@ fn main() {
     .unwrap();
 
     {
+        let mut edges_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("edges.csv")
+                .unwrap(),
+        );
+        edges_csv.write_all(b"from,to\n").unwrap();
+
         let mut contain_mod_mod_csv = BufWriter::new(
             File::options()
                 .write(true)
@@ -348,9 +380,11 @@ fn main() {
                 (NodeKind::Struct, NodeKind::Function) => contain_struct_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
                 (x, y) => println!("{a} {b} {x:?}{y:?}"),
             }
+            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
         }
         for (a, b) in graph.calls {
             call_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap();
+            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
         }
         for (a, b) in graph.uses {
             match graph.nodes[&a].kind {
@@ -358,23 +392,19 @@ fn main() {
                 NodeKind::Function=> use_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
                 x  => unreachable!("{a} {b} {x:?}"),
             }
+            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
         }
     }
 
-    let query = r#"
-        COPY Contains FROM "contains_mod_mod.csv" (from="Module",to="Module");
+    let query = r#"COPY Contains FROM "contains_mod_mod.csv" (from="Module",to="Module");
         COPY Contains FROM "contains_mod_struct.csv" (from="Module",to="Struct");
         COPY Contains FROM "contains_mod_fn.csv" (from="Module",to="Function");
         COPY Contains FROM "contains_struct_struct.csv" (from="Struct",to="Struct");
         COPY Contains FROM "contains_struct_fn.csv" (from="Struct",to="Function");
         COPY Calls FROM "calls.csv";
         COPY Uses FROM "uses_struct.csv" (from="Struct",to="Struct");
-        COPY Uses FROM "uses_fn.csv" (from="Function",to="Struct");
-        "#;
+        COPY Uses FROM "uses_fn.csv" (from="Function",to="Struct");"#;
     for line in query.lines() {
-        if line.is_empty() {
-            continue;
-        }
         println!("{:?}", conn.query(line).unwrap());
     }
 }

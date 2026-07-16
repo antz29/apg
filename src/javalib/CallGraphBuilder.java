@@ -10,9 +10,15 @@ import java.util.*;
 public class CallGraphBuilder {
     public static void main(String[] args) throws Exception {
         Path dir = Paths.get(args[0]);
+        List<String> excludePaths = new ArrayList<>();
+        for (int i = 1; i < args.length; i++) excludePaths.add(args[i]);
+
         List<Path> files = new ArrayList<>();
         try (var walk = Files.walk(dir)) {
-            walk.filter(p -> p.toString().endsWith(".java")).filter(Files::isRegularFile).forEach(files::add);
+            walk.filter(p -> p.toString().endsWith(".java"))
+                .filter(Files::isRegularFile)
+                .filter(p -> excludePaths.stream().noneMatch(pat -> p.toString().contains(pat)))
+                .forEach(files::add);
         }
 
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
