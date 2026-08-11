@@ -12,19 +12,84 @@ fn is_blacklisted(fqn: &str, blacklist: &[String]) -> bool {
     blacklist.iter().any(|p| fqn.starts_with(p.as_str()))
 }
 
+fn available_languages() -> Vec<String> {
+    env!("APG_LANGUAGES")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32) -> bool {
+    if depth == 0 {
+        return false;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.starts_with('.') || name == "target" || name == "node_modules" {
+            continue;
+        }
+        if p.is_dir() {
+            if has_extension(&p, exts, depth - 1) {
+                return true;
+            }
+        } else if p.extension().map_or(false, |e| exts.contains(&format!(".{}", e.to_str().unwrap_or("")).as_str())) {
+            return true;
+        }
+    }
+    false
+}
+
+fn auto_detect_language(dir: &std::path::Path, available: &[String]) -> Option<String> {
+    let candidates: Vec<(&str, &[&str])> = vec![
+        ("java", &[".java"] as &[&str]),
+        ("go", &[".go"]),
+        ("cpp", &[".cpp", ".cc", ".cxx", ".hpp", ".h", ".hh"]),
+    ];
+
+    for (lang, exts) in &candidates {
+        if available.iter().any(|l| l == lang) && has_extension(dir, exts, 5) {
+            return Some(lang.to_string());
+        }
+    }
+    None
+}
+
+fn frontend_cmd(language: &str) -> String {
+    match language {
+        "cpp" => env!("APG_FRONTEND_CPP").to_string(),
+        "go" => env!("APG_FRONTEND_GO").to_string(),
+        "java" => env!("APG_FRONTEND_JAVA").to_string(),
+        _ => panic!("unknown language: {language}"),
+    }
+}
+
 fn main() {
     let raw: Vec<String> = std::env::args().collect();
     let mut clean = vec![raw[0].clone()];
+    let mut language: Option<String> = None;
     let mut path_excludes: Vec<String> = Vec::new();
     let mut i = 1;
     while i < raw.len() {
-        if raw[i] == "--exclude-path" {
-            i += 1;
-            if i < raw.len() {
-                path_excludes.push(raw[i].clone());
+        match raw[i].as_str() {
+            "--language" | "-l" => {
+                i += 1;
+                if i < raw.len() {
+                    language = Some(raw[i].clone());
+                }
             }
-        } else {
-            clean.push(raw[i].clone());
+            "--exclude-path" => {
+                i += 1;
+                if i < raw.len() {
+                    path_excludes.push(raw[i].clone());
+                }
+            }
+            _ => clean.push(raw[i].clone()),
         }
         i += 1;
     }
@@ -37,6 +102,24 @@ fn main() {
     let project_dir = project_dir.canonicalize().unwrap();
     eprintln!("Project: {}", project_dir.display());
 
+    let available = available_languages();
+    if available.is_empty() {
+        panic!("No language frontends compiled. Install gcc, go, or javac and rebuild.");
+    }
+
+    let language = language.unwrap_or_else(|| {
+        auto_detect_language(&project_dir, &available)
+            .unwrap_or_else(|| available[0].clone())
+    });
+
+    if !available.iter().any(|l| l == &language) {
+        panic!(
+            "Language '{language}' is not available. Built with: {}. Install the required toolchain and rebuild.",
+            available.join(", ")
+        );
+    }
+    eprintln!("Language: {language}");
+
     let blacklist: Vec<String> = clean.iter().skip(2).cloned().collect();
     if !blacklist.is_empty() {
         eprintln!("Blacklist: {:?}", blacklist);
@@ -45,20 +128,51 @@ fn main() {
         eprintln!("Path excludes: {:?}", path_excludes);
     }
 
-    let mut java_args = format!("\"{}\"", project_dir.display());
-    for pat in &path_excludes {
-        java_args.push_str(&format!(" \"{}\"", pat));
-    }
-    let mut frontend_output = Command::new("sh")
-        .args([
-            "-c",
-            &format!("{} {}", env!("APG_FRONTEND_CMD"), java_args),
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("Failed to run apg frontend");
+    let cmd = frontend_cmd(&language);
 
+    if language == "cpp" || language == "go" {
+        let mut frontend_output = Command::new(&cmd)
+            .arg(project_dir.display().to_string())
+            .args(&path_excludes)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("Failed to run frontend");
+
+        build_graph(&mut frontend_output, &blacklist);
+
+        if !frontend_output
+            .wait()
+            .expect("couldn't wait for frontend")
+            .success()
+        {
+            panic!("{language} frontend failed");
+        }
+    } else {
+        let mut args = format!("\"{}\"", project_dir.display());
+        for pat in &path_excludes {
+            args.push_str(&format!(" \"{}\"", pat));
+        }
+        let mut frontend_output = Command::new("sh")
+            .args(["-c", &format!("{} {}", cmd, args)])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("Failed to run Java frontend");
+
+        build_graph(&mut frontend_output, &blacklist);
+
+        if !frontend_output
+            .wait()
+            .expect("couldn't wait for Java frontend")
+            .success()
+        {
+            panic!("java frontend failed");
+        }
+    }
+}
+
+fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) {
     let mut graph = Graph::default();
     let mut skipped = 0u64;
 
@@ -66,11 +180,12 @@ fn main() {
         .lines()
         .map(|x| x.expect("io error"))
     {
-        let msg: serde_json::Value = serde_json::from_str(&line).unwrap_or_else(|_| panic!("bad json: {line}"));
+        let msg: serde_json::Value =
+            serde_json::from_str(&line).unwrap_or_else(|_| panic!("bad json: {line}"));
         match msg["type"].as_str().unwrap() {
             "pkg" => {
                 let fqn = msg["fqn"].as_str().unwrap();
-                if is_blacklisted(fqn, &blacklist) {
+                if is_blacklisted(fqn, blacklist) {
                     skipped += 1;
                     continue;
                 }
@@ -84,7 +199,7 @@ fn main() {
             }
             "decl" => {
                 let fqn = msg["fqn"].as_str().unwrap();
-                if is_blacklisted(fqn, &blacklist) {
+                if is_blacklisted(fqn, blacklist) {
                     skipped += 1;
                     continue;
                 }
@@ -98,8 +213,8 @@ fn main() {
                         },
                         location: Some(Location {
                             path: PathBuf::from(msg["path"].as_str().unwrap()),
-                            start: msg["start"].as_u64().unwrap() as u32,
-                            end: msg["end"].as_u64().unwrap() as u32,
+                            start: msg["start"].as_u64().unwrap_or(0) as u32,
+                            end: msg["end"].as_u64().unwrap_or(0) as u32,
                         }),
                     },
                 );
@@ -107,52 +222,41 @@ fn main() {
             "contains" => {
                 let parent = msg["parent"].as_str().unwrap();
                 let child = msg["child"].as_str().unwrap();
-                if is_blacklisted(parent, &blacklist) || is_blacklisted(child, &blacklist) {
+                if is_blacklisted(parent, blacklist) || is_blacklisted(child, blacklist) {
                     skipped += 1;
                     continue;
                 }
-                graph.contains.insert((
-                    parent.to_owned(),
-                    child.to_owned(),
-                ));
+                graph
+                    .contains
+                    .insert((parent.to_owned(), child.to_owned()));
             }
             "call" => {
                 let source = msg["source"].as_str().unwrap();
                 let target = msg["target"].as_str().unwrap();
-                if is_blacklisted(source, &blacklist) || is_blacklisted(target, &blacklist) {
+                if is_blacklisted(source, blacklist) || is_blacklisted(target, blacklist) {
                     skipped += 1;
                     continue;
                 }
-                graph.calls.insert((
-                    source.to_owned(),
-                    target.to_owned(),
-                ));
+                graph
+                    .calls
+                    .insert((source.to_owned(), target.to_owned()));
             }
             "use" => {
                 let source = msg["source"].as_str().unwrap();
                 let target = msg["target"].as_str().unwrap();
-                if is_blacklisted(source, &blacklist) || is_blacklisted(target, &blacklist) {
+                if is_blacklisted(source, blacklist) || is_blacklisted(target, blacklist) {
                     skipped += 1;
                     continue;
                 }
-                graph.uses.insert((
-                    source.to_owned(),
-                    target.to_owned(),
-                ));
+                graph
+                    .uses
+                    .insert((source.to_owned(), target.to_owned()));
             }
             x => panic!("invalid msg type {x}"),
         }
     }
 
     eprintln!("Skipped {skipped} blacklisted messages");
-
-    if !frontend_output
-        .wait()
-        .expect("couldnt wait for apg frontend")
-        .success()
-    {
-        panic!("apg frontend failed");
-    }
 
     graph.contains.retain(|(a, b)| {
         graph.nodes.contains_key(a)

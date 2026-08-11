@@ -7,128 +7,119 @@ fn main() {
     println!("cargo:rerun-if-changed=src/cpplib/main.cpp");
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
+    let mut languages: Vec<String> = Vec::new();
 
-    // Try C++ frontend first (tree-sitter, no external deps)
+    // --- C++ frontend (tree-sitter, no external deps) ---
     let cppfrontend = Path::new(&out_dir).join("cppfrontend");
     let cpplib = Path::new("src/cpplib");
     let vendor = cpplib.join("vendor");
 
-    // Compile tree-sitter runtime
     let runtime_o = Path::new(&out_dir).join("ts_runtime.o");
-    if Command::new("gcc")
+    let parser_o = Path::new(&out_dir).join("ts_cpp_parser.o");
+    let scanner_o = Path::new(&out_dir).join("ts_cpp_scanner.o");
+    let main_o = Path::new(&out_dir).join("cppfrontend_main.o");
+    let ts_inc = vendor.join("tree-sitter/lib/include");
+    let ts_src = vendor.join("tree-sitter/lib/src");
+    let cpp_inc = vendor.join("tree-sitter-cpp/src");
+
+    let rt_ok = Command::new("gcc")
         .args([
-            "-c",
-            "-fPIC",
-            "-std=c11",
-            "-D_GNU_SOURCE",
-            "-I",
-            vendor.join("tree-sitter/lib/include").to_str().unwrap(),
-            "-I",
-            vendor.join("tree-sitter/lib/src").to_str().unwrap(),
-            vendor.join("tree-sitter/lib/src/lib.c").to_str().unwrap(),
-            "-o",
-            runtime_o.to_str().unwrap(),
+            "-c", "-fPIC", "-std=c11", "-D_GNU_SOURCE",
+            "-I", ts_inc.to_str().unwrap(),
+            "-I", ts_src.to_str().unwrap(),
+            ts_src.join("lib.c").to_str().unwrap(),
+            "-o", runtime_o.to_str().unwrap(),
         ])
         .status()
-        .is_ok_and(|s| s.success())
-    {
-        // Compile tree-sitter-cpp parser
-        let parser_o = Path::new(&out_dir).join("ts_cpp_parser.o");
-        let scanner_o = Path::new(&out_dir).join("ts_cpp_scanner.o");
-        let cpp_inc = vendor.join("tree-sitter-cpp/src");
-        let ts_inc = vendor.join("tree-sitter/lib/include");
+        .is_ok_and(|s| s.success());
 
-        let parser_ok = Command::new("gcc")
+    let parser_ok = Command::new("gcc")
+        .args([
+            "-c", "-fPIC", "-std=c11",
+            "-I", cpp_inc.to_str().unwrap(),
+            "-I", ts_inc.to_str().unwrap(),
+            vendor.join("tree-sitter-cpp/src/parser.c").to_str().unwrap(),
+            "-o", parser_o.to_str().unwrap(),
+        ])
+        .status()
+        .is_ok_and(|s| s.success());
+
+    let scanner_ok = Command::new("gcc")
+        .args([
+            "-c", "-fPIC", "-std=c11",
+            "-I", cpp_inc.to_str().unwrap(),
+            "-I", ts_inc.to_str().unwrap(),
+            vendor.join("tree-sitter-cpp/src/scanner.c").to_str().unwrap(),
+            "-o", scanner_o.to_str().unwrap(),
+        ])
+        .status()
+        .is_ok_and(|s| s.success());
+
+    let main_ok = Command::new("g++")
+        .args([
+            "-c", "-fPIC", "-std=c++17",
+            "-I", ts_inc.to_str().unwrap(),
+            "-I", cpp_inc.to_str().unwrap(),
+            cpplib.join("main.cpp").to_str().unwrap(),
+            "-o", main_o.to_str().unwrap(),
+        ])
+        .status()
+        .is_ok_and(|s| s.success());
+
+    if rt_ok && parser_ok && scanner_ok && main_ok {
+        let link_ok = Command::new("g++")
             .args([
-                "-c", "-fPIC", "-std=c11",
-                "-I", cpp_inc.to_str().unwrap(),
-                "-I", ts_inc.to_str().unwrap(),
-                vendor.join("tree-sitter-cpp/src/parser.c").to_str().unwrap(),
-                "-o", parser_o.to_str().unwrap(),
+                runtime_o.to_str().unwrap(),
+                parser_o.to_str().unwrap(),
+                scanner_o.to_str().unwrap(),
+                main_o.to_str().unwrap(),
+                "-lm",
+                "-o", cppfrontend.to_str().unwrap(),
             ])
             .status()
             .is_ok_and(|s| s.success());
 
-        let scanner_ok = Command::new("gcc")
-            .args([
-                "-c", "-fPIC", "-std=c11",
-                "-I", cpp_inc.to_str().unwrap(),
-                "-I", ts_inc.to_str().unwrap(),
-                vendor.join("tree-sitter-cpp/src/scanner.c").to_str().unwrap(),
-                "-o", scanner_o.to_str().unwrap(),
-            ])
-            .status()
-            .is_ok_and(|s| s.success());
-
-        if parser_ok && scanner_ok {
-            // Compile main.cpp
-            let main_o = Path::new(&out_dir).join("cppfrontend_main.o");
-            if Command::new("g++")
-                .args([
-                    "-c", "-fPIC", "-std=c++17",
-                    "-I", ts_inc.to_str().unwrap(),
-                    "-I", cpp_inc.to_str().unwrap(),
-                    cpplib.join("main.cpp").to_str().unwrap(),
-                    "-o", main_o.to_str().unwrap(),
-                ])
-                .status()
-                .is_ok_and(|s| s.success())
-            {
-                // Link everything together
-                if Command::new("g++")
-                    .args([
-                        runtime_o.to_str().unwrap(),
-                        parser_o.to_str().unwrap(),
-                        scanner_o.to_str().unwrap(),
-                        main_o.to_str().unwrap(),
-                        "-lm",
-                        "-o",
-                        cppfrontend.to_str().unwrap(),
-                    ])
-                    .status()
-                    .is_ok_and(|s| s.success())
-                {
-                    println!("cargo:rustc-env=APG_FRONTEND_CMD={}", cppfrontend.display());
-                    return;
-                }
-            }
+        if link_ok {
+            println!("cargo:rustc-env=APG_FRONTEND_CPP={}", cppfrontend.display());
+            languages.push("cpp".into());
         }
     }
 
-    // Try Go frontend (faster, no JVM overhead)
+    // --- Go frontend ---
     let gofrontend = Path::new(&out_dir).join("gofrontend");
-    if let Ok(status) = Command::new("go")
+    let go_ok = Command::new("go")
         .args(["build", "-o", gofrontend.to_str().unwrap(), "."])
         .current_dir("src/golib")
         .status()
-    {
-        if status.success() {
-            println!("cargo:rustc-env=APG_FRONTEND_CMD={}", gofrontend.display());
-            return;
-        }
+        .is_ok_and(|s| s.success());
+
+    if go_ok {
+        println!("cargo:rustc-env=APG_FRONTEND_GO={}", gofrontend.display());
+        languages.push("go".into());
     }
 
-    // Fall back to Java frontend
+    // --- Java frontend ---
     let java_classes = Path::new(&out_dir).join("java-classes");
+    std::fs::create_dir_all(&java_classes).ok();
 
-    std::fs::create_dir_all(&java_classes).unwrap();
-    let status = Command::new("javac")
+    let java_ok = Command::new("javac")
         .args([
-            "-d",
-            java_classes.to_str().unwrap(),
+            "-d", java_classes.to_str().unwrap(),
             "-proc:none",
-            "--add-exports",
-            "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
+            "--add-exports", "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
             "src/javalib/CallGraphBuilder.java",
         ])
         .status()
-        .expect("Failed to compile Java helper. Install a JDK (`javac` required).");
+        .is_ok_and(|s| s.success());
 
-    assert!(status.success(), "Java compilation failed");
+    if java_ok {
+        let cmd = format!(
+            "java -cp {} --add-exports jdk.compiler/com.sun.source.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.source.util=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED CallGraphBuilder",
+            java_classes.display()
+        );
+        println!("cargo:rustc-env=APG_FRONTEND_JAVA={}", cmd);
+        languages.push("java".into());
+    }
 
-    let cmd = format!(
-        "java -cp {} --add-exports jdk.compiler/com.sun.source.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.source.util=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED CallGraphBuilder",
-        java_classes.display()
-    );
-    println!("cargo:rustc-env=APG_FRONTEND_CMD={}", cmd);
+    println!("cargo:rustc-env=APG_LANGUAGES={}", languages.join(","));
 }
