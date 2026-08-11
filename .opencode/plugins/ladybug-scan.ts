@@ -1,7 +1,25 @@
+import { existsSync } from "node:fs"
+import path from "node:path"
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
 
-export const LadybugScanPlugin: Plugin = async ({ $, worktree }) => {
+function resolveProjectRoot(context: { directory: string; worktree: string }): string | null {
+  const candidates = [
+    context.directory,
+    process.cwd(),
+    context.worktree,
+    path.resolve(import.meta.dir, "..", ".."),
+  ]
+  for (const c of candidates) {
+    if (!c) continue
+    if (existsSync(path.join(c, "target", "release", "java_apg"))) {
+      return c
+    }
+  }
+  return null
+}
+
+export const LadybugScanPlugin: Plugin = async () => {
   return {
     tool: {
       ladybug_scan: tool({
@@ -26,16 +44,27 @@ export const LadybugScanPlugin: Plugin = async ({ $, worktree }) => {
             .describe("Comma-separated glob patterns for paths to exclude."),
         },
         async execute(args, context) {
-          const dir = args.directory ?? context.worktree
+          const root = resolveProjectRoot(context)
+          if (!root) {
+            return `Error: scanner binary not found. Tried roots:\n  ${[
+              context.directory,
+              process.cwd(),
+              context.worktree,
+              path.resolve(import.meta.dir, "..", ".."),
+            ]
+              .filter(Boolean)
+              .join("\n  ")}\nBuild it with: cargo build --release`
+          }
+
+          const dir = args.directory ?? root
           const candidates = [
-            `${context.worktree}/target/release/java_apg`,
-            `${context.worktree}/target/debug/java_apg`,
+            path.join(root, "target", "release", "java_apg"),
+            path.join(root, "target", "debug", "java_apg"),
           ]
 
           let scanner = ""
           for (const c of candidates) {
-            const check = await $`test -f ${c}`.nothrow()
-            if (check.exitCode === 0) {
+            if (existsSync(c)) {
               scanner = c
               break
             }
@@ -62,7 +91,7 @@ export const LadybugScanPlugin: Plugin = async ({ $, worktree }) => {
           const proc = Bun.spawn(spawnArgs, {
             stdout: "pipe",
             stderr: "pipe",
-            cwd: context.worktree,
+            cwd: root,
           })
           const output = await new Response(proc.stdout).text()
           const stderr = await new Response(proc.stderr).text()

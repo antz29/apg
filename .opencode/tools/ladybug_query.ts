@@ -1,4 +1,22 @@
+import { existsSync } from "node:fs"
+import path from "node:path"
 import { tool } from "@opencode-ai/plugin"
+
+function resolveProjectRoot(context: { directory: string; worktree: string }): string | null {
+  const candidates = [
+    context.directory,
+    process.cwd(),
+    context.worktree,
+    path.resolve(import.meta.dir, "..", ".."),
+  ]
+  for (const c of candidates) {
+    if (!c) continue
+    if (existsSync(path.join(c, "db.lbug"))) {
+      return c
+    }
+  }
+  return null
+}
 
 export default tool({
   description:
@@ -8,8 +26,22 @@ export default tool({
   },
   async execute(args, context) {
     const q = args.query.endsWith(";") ? args.query : args.query + ";"
-    const result =
-      await Bun.$`printf '%s' ${q} | lbug -r -m csv -s -b ${context.worktree}/db.lbug 2>/dev/null`.text()
-    return result.trim()
+    const root = resolveProjectRoot(context)
+    if (!root) {
+      return `Error: db.lbug not found. Tried:\n  ${[
+        context.directory,
+        process.cwd(),
+        context.worktree,
+        path.resolve(import.meta.dir, "..", ".."),
+      ]
+        .filter(Boolean)
+        .join("\n  ")}`
+    }
+    const db = path.join(root, "db.lbug")
+    const result = await Bun.$`printf '%s' ${q} | lbug -r -m csv -s -b ${db}`.nothrow()
+    if (result.exitCode !== 0) {
+      return `lbug failed (exit ${result.exitCode}) on db ${db}:\n${result.stderr.toString().trim()}`
+    }
+    return result.stdout.toString().trim()
   },
 })
