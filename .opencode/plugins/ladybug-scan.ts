@@ -27,35 +27,49 @@ export const LadybugScanPlugin: Plugin = async ({ $, worktree }) => {
         },
         async execute(args, context) {
           const dir = args.directory ?? context.worktree
-          const scanner = `${context.worktree}/target/release/java_apg`
+          const candidates = [
+            `${context.worktree}/target/release/java_apg`,
+            `${context.worktree}/target/debug/java_apg`,
+          ]
 
-          const exists = await $`test -f ${scanner}`.nothrow()
-          if (exists.exitCode !== 0) {
-            return `Error: scanner binary not found at ${scanner}. Build it with: cargo build --release`
+          let scanner = ""
+          for (const c of candidates) {
+            const check = await $`test -f ${c}`.nothrow()
+            if (check.exitCode === 0) {
+              scanner = c
+              break
+            }
           }
 
-          const cmdArgs: string[] = [scanner]
+          if (!scanner) {
+            return `Error: scanner binary not found. Checked:\n  ${candidates.join("\n  ")}\nBuild it with: cargo build --release`
+          }
+
+          const spawnArgs: string[] = [scanner, dir]
 
           if (args.language) {
-            cmdArgs.push("--language", args.language)
+            spawnArgs.splice(1, 0, "--language", args.language)
           }
 
-          cmdArgs.push(dir)
-
           for (const pat of (args.excludePath ?? "").split(",").filter(Boolean)) {
-            cmdArgs.push("--exclude-path", pat)
+            spawnArgs.push("--exclude-path", pat)
           }
 
           for (const prefix of (args.blacklist ?? "").split(",").filter(Boolean)) {
-            cmdArgs.push(prefix)
+            spawnArgs.push(prefix)
           }
 
-          const result = await $`${cmdArgs.map(String)}`.nothrow()
-          const output = result.text()
-          const stderr = result.stderr.toString()
+          const proc = Bun.spawn(spawnArgs, {
+            stdout: "pipe",
+            stderr: "pipe",
+            cwd: context.worktree,
+          })
+          const output = await new Response(proc.stdout).text()
+          const stderr = await new Response(proc.stderr).text()
+          const exitCode = await proc.exited
 
-          if (result.exitCode !== 0) {
-            return `Scan failed (exit code ${result.exitCode}):\n${stderr}\n${output}`
+          if (exitCode !== 0) {
+            return `Scan failed (exit code ${exitCode}):\n${stderr}\n${output.slice(-2000)}`
           }
 
           return stderr || "Scan completed successfully."
