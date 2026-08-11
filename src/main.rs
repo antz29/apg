@@ -16,18 +16,12 @@ fn main() {
     let raw: Vec<String> = std::env::args().collect();
     let mut clean = vec![raw[0].clone()];
     let mut path_excludes: Vec<String> = Vec::new();
-    let mut classpath: Option<String> = None;
     let mut i = 1;
     while i < raw.len() {
         if raw[i] == "--exclude-path" {
             i += 1;
             if i < raw.len() {
                 path_excludes.push(raw[i].clone());
-            }
-        } else if raw[i] == "--classpath" {
-            i += 1;
-            if i < raw.len() {
-                classpath = Some(raw[i].clone());
             }
         } else {
             clean.push(raw[i].clone());
@@ -50,16 +44,10 @@ fn main() {
     if !path_excludes.is_empty() {
         eprintln!("Path excludes: {:?}", path_excludes);
     }
-    if let Some(cp) = &classpath {
-        eprintln!("Classpath: {cp}");
-    }
 
     let mut java_args = format!("\"{}\"", project_dir.display());
-    if let Some(cp) = &classpath {
-        java_args.push_str(&format!(" --classpath \"{}\"", cp));
-    }
     for pat in &path_excludes {
-        java_args.push_str(&format!(" --exclude-path \"{}\"", pat));
+        java_args.push_str(&format!(" \"{}\"", pat));
     }
     let mut frontend_output = Command::new("sh")
         .args([
@@ -166,9 +154,30 @@ fn main() {
         panic!("apg frontend failed");
     }
 
-    graph.contains.retain(|pair| graph.nodes.contains_key(&pair.0) && graph.nodes.contains_key(&pair.1));
-    graph.calls.retain(|pair| graph.nodes.contains_key(&pair.0) && graph.nodes.contains_key(&pair.1));
-    graph.uses.retain(|pair| graph.nodes.contains_key(&pair.0) && graph.nodes.contains_key(&pair.1));
+    graph.contains.retain(|(a, b)| {
+        graph.nodes.contains_key(a)
+            && graph.nodes.contains_key(b)
+            && matches!(
+                (graph.nodes[a].kind, graph.nodes[b].kind),
+                (NodeKind::Module, NodeKind::Module)
+                    | (NodeKind::Module, NodeKind::Struct)
+                    | (NodeKind::Module, NodeKind::Function)
+                    | (NodeKind::Struct, NodeKind::Struct)
+                    | (NodeKind::Struct, NodeKind::Function)
+            )
+    });
+    graph.calls.retain(|(a, b)| {
+        graph.nodes.contains_key(a)
+            && graph.nodes.contains_key(b)
+            && graph.nodes[a].kind == NodeKind::Function
+            && graph.nodes[b].kind == NodeKind::Function
+    });
+    graph.uses.retain(|(a, b)| {
+        graph.nodes.contains_key(a)
+            && graph.nodes.contains_key(b)
+            && graph.nodes[b].kind == NodeKind::Struct
+            && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
+    });
 
     eprintln!(
         "graph: {} nodes, {} contain edges, {} calls edges, {} uses edges",
