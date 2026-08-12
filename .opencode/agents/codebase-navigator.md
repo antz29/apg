@@ -7,6 +7,7 @@ permission:
   ladybug_scan: allow
   question: allow
   read: allow
+  external_directory: ask
   bash:
     "*": deny
     "dd *": allow
