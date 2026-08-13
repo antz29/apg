@@ -38,7 +38,7 @@ export default tool({
         .join("\n  ")}`
     }
     const db = path.join(root, "db.lbug")
-    const result = await Bun.$`printf '%s' ${q} | lbug -r -m csv -s -b ${db}`.nothrow()
+    const result = await Bun.$`printf '%s' ${q} | lbug -r -m csv -s -b ${db}`.quiet().nothrow()
     if (result.exitCode !== 0) {
       return `lbug failed (exit ${result.exitCode}) on db ${db}:\n${result.stderr.toString().trim()}`
     }
