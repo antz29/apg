@@ -1,3 +1,4 @@
+mod cleanup;
 mod graph;
 
 use std::fs::File;
@@ -5,6 +6,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use cleanup::{cleanup, CleanupOptions};
 use graph::*;
 use lbug::{Connection, Database};
 
@@ -74,6 +76,8 @@ fn main() {
     let mut clean = vec![raw[0].clone()];
     let mut language: Option<String> = None;
     let mut path_excludes: Vec<String> = Vec::new();
+    let mut module_dirs: Vec<String> = Vec::new();
+    let mut include_tests = false;
     let mut i = 1;
     while i < raw.len() {
         match raw[i].as_str() {
@@ -88,6 +92,15 @@ fn main() {
                 if i < raw.len() {
                     path_excludes.push(raw[i].clone());
                 }
+            }
+            "--module" => {
+                i += 1;
+                if i < raw.len() {
+                    module_dirs.push(raw[i].clone());
+                }
+            }
+            "--include-tests" => {
+                include_tests = true;
             }
             _ => clean.push(raw[i].clone()),
         }
@@ -131,15 +144,17 @@ fn main() {
     let cmd = frontend_cmd(&language);
 
     if language == "cpp" || language == "go" {
-        let mut frontend_output = Command::new(&cmd)
-            .arg(project_dir.display().to_string())
-            .args(&path_excludes)
+        let mut cmd = Command::new(&cmd);
+        cmd.arg(project_dir.display().to_string());
+        for m in &module_dirs {
+            cmd.arg("--module").arg(m);
+        }
+        cmd.args(&path_excludes)
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("Failed to run frontend");
+            .stderr(Stdio::inherit());
+        let mut frontend_output = cmd.spawn().expect("Failed to run frontend");
 
-        build_graph(&mut frontend_output, &blacklist);
+        build_graph(&mut frontend_output, &blacklist, &path_excludes, include_tests, &language);
 
         if !frontend_output
             .wait()
@@ -150,6 +165,9 @@ fn main() {
         }
     } else {
         let mut args = format!("\"{}\"", project_dir.display());
+        for m in &module_dirs {
+            args.push_str(&format!(" --module \"{}\"", m));
+        }
         for pat in &path_excludes {
             args.push_str(&format!(" \"{}\"", pat));
         }
@@ -160,7 +178,7 @@ fn main() {
             .spawn()
             .expect("Failed to run Java frontend");
 
-        build_graph(&mut frontend_output, &blacklist);
+        build_graph(&mut frontend_output, &blacklist, &path_excludes, include_tests, &language);
 
         if !frontend_output
             .wait()
@@ -172,7 +190,13 @@ fn main() {
     }
 }
 
-fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) {
+fn build_graph(
+    frontend_output: &mut std::process::Child,
+    blacklist: &[String],
+    path_excludes: &[String],
+    include_tests: bool,
+    language: &str,
+) {
     let mut graph = Graph::default();
     let mut skipped = 0u64;
 
@@ -252,6 +276,42 @@ fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) 
                     .uses
                     .insert((source.to_owned(), target.to_owned()));
             }
+            "u_call" => {
+                let source = msg["source"].as_str().unwrap();
+                let target = msg["target"].as_str().unwrap();
+                if is_blacklisted(source, blacklist) {
+                    skipped += 1;
+                    continue;
+                }
+                graph.nodes.insert(
+                    target.to_owned(),
+                    Node {
+                        kind: NodeKind::UnresolvedTarget,
+                        location: None,
+                    },
+                );
+                graph
+                    .unresolved_calls
+                    .insert((source.to_owned(), target.to_owned()));
+            }
+            "u_use" => {
+                let source = msg["source"].as_str().unwrap();
+                let target = msg["target"].as_str().unwrap();
+                if is_blacklisted(source, blacklist) {
+                    skipped += 1;
+                    continue;
+                }
+                graph.nodes.insert(
+                    target.to_owned(),
+                    Node {
+                        kind: NodeKind::UnresolvedTarget,
+                        location: None,
+                    },
+                );
+                graph
+                    .unresolved_uses
+                    .insert((source.to_owned(), target.to_owned()));
+            }
             x => panic!("invalid msg type {x}"),
         }
     }
@@ -282,13 +342,46 @@ fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) 
             && graph.nodes[b].kind == NodeKind::Struct
             && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
     });
+    graph.unresolved_calls.retain(|(a, b)| {
+        graph.nodes.contains_key(a)
+            && graph.nodes.contains_key(b)
+            && graph.nodes[a].kind == NodeKind::Function
+            && graph.nodes[b].kind == NodeKind::UnresolvedTarget
+    });
+    graph.unresolved_uses.retain(|(a, b)| {
+        graph.nodes.contains_key(a)
+            && graph.nodes.contains_key(b)
+            && graph.nodes[b].kind == NodeKind::UnresolvedTarget
+            && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
+    });
 
     eprintln!(
-        "graph: {} nodes, {} contain edges, {} calls edges, {} uses edges",
+        "graph: {} nodes, {} contain edges, {} calls edges, {} uses edges, {} unresolved calls, {} unresolved uses",
         graph.nodes.len(),
         graph.contains.len(),
         graph.calls.len(),
         graph.uses.len(),
+        graph.unresolved_calls.len(),
+        graph.unresolved_uses.len(),
+    );
+
+    let report = cleanup(
+        &mut graph,
+        &CleanupOptions {
+            include_tests,
+            user_excludes: path_excludes.to_vec(),
+            language: language.to_string(),
+        },
+    );
+    eprintln!(
+        "cleanup: removed {} nodes, {} contains, {} calls, {} uses, {} unresolved calls, {} unresolved uses, {} span violations",
+        report.nodes_removed,
+        report.contains_removed,
+        report.calls_removed,
+        report.uses_removed,
+        report.unresolved_calls_removed,
+        report.unresolved_uses_removed,
+        report.span_violations_removed,
     );
 
     let _ = std::fs::remove_file("db.lbug");
@@ -323,6 +416,13 @@ fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) 
     .unwrap();
     conn.query(
         "
+        CREATE NODE TABLE UnresolvedTarget(
+            fqn STRING PRIMARY KEY
+        )",
+    )
+    .unwrap();
+    conn.query(
+        "
         CREATE REL TABLE Contains(
             FROM Module TO Module,
             FROM Module TO Struct,
@@ -344,6 +444,21 @@ fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) 
         CREATE REL TABLE Uses(
             FROM Function TO Struct,
             FROM Struct TO Struct
+        )",
+    )
+    .unwrap();
+    conn.query(
+        "
+        CREATE REL TABLE UnresolvedCall(
+            FROM Function TO UnresolvedTarget
+        )",
+    )
+    .unwrap();
+    conn.query(
+        "
+        CREATE REL TABLE UnresolvedUse(
+            FROM Function TO UnresolvedTarget,
+            FROM Struct TO UnresolvedTarget
         )",
     )
     .unwrap();
@@ -373,9 +488,18 @@ fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) 
                 .open("functions.csv")
                 .unwrap(),
         );
+        let mut unresolved_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("unresolved.csv")
+                .unwrap(),
+        );
         module_csv.write_all(b"fqn\n").unwrap();
         struct_csv.write_all(b"fqn,path,start,end\n").unwrap();
         function_csv.write_all(b"fqn,path,start,end\n").unwrap();
+        unresolved_csv.write_all(b"fqn\n").unwrap();
 
         for (fqn, node) in &graph.nodes {
             match (node.kind, &node.location) {
@@ -407,6 +531,10 @@ fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) 
                         .as_bytes(),
                     )
                     .unwrap(),
+                (NodeKind::UnresolvedTarget, None) => {
+                    unresolved_csv.write_all(fqn.as_bytes()).unwrap();
+                    unresolved_csv.write_all(b"\n").unwrap();
+                }
                 (_, _) => panic!(),
             }
         }
@@ -417,6 +545,7 @@ fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) 
         COPY Module FROM "modules.csv" (header=true);
         COPY Struct FROM "structs.csv" (header=true);
         COPY Function FROM "functions.csv" (header=true);
+        COPY UnresolvedTarget FROM "unresolved.csv" (header=true);
         "#,
     )
     .unwrap();
@@ -496,6 +625,33 @@ fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) 
                 .open("uses_fn.csv")
                 .unwrap(),
         );
+        let mut unresolved_call_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("unresolved_call.csv")
+                .unwrap(),
+        );
+        let mut unresolved_use_fn_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("unresolved_use_fn.csv")
+                .unwrap(),
+        );
+        let mut unresolved_use_struct_csv = BufWriter::new(
+            File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("unresolved_use_struct.csv")
+                .unwrap(),
+        );
+        unresolved_call_csv.write_all(b"from,to\n").unwrap();
+        unresolved_use_fn_csv.write_all(b"from,to\n").unwrap();
+        unresolved_use_struct_csv.write_all(b"from,to\n").unwrap();
 
         for (a, b) in graph.contains {
             match (graph.nodes[&a].kind, graph.nodes[&b].kind) {
@@ -520,16 +676,31 @@ fn build_graph(frontend_output: &mut std::process::Child, blacklist: &[String]) 
             }
             edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
         }
+        for (a, b) in graph.unresolved_calls {
+            unresolved_call_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap();
+            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
+        }
+        for (a, b) in graph.unresolved_uses {
+            match graph.nodes[&a].kind {
+                NodeKind::Function => unresolved_use_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
+                NodeKind::Struct => unresolved_use_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
+                x => unreachable!("{a} {b} {x:?}"),
+            }
+            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
+        }
     }
 
-    let query = r#"COPY Contains FROM "contains_mod_mod.csv" (from="Module",to="Module");
-        COPY Contains FROM "contains_mod_struct.csv" (from="Module",to="Struct");
-        COPY Contains FROM "contains_mod_fn.csv" (from="Module",to="Function");
-        COPY Contains FROM "contains_struct_struct.csv" (from="Struct",to="Struct");
-        COPY Contains FROM "contains_struct_fn.csv" (from="Struct",to="Function");
-        COPY Calls FROM "calls.csv";
-        COPY Uses FROM "uses_struct.csv" (from="Struct",to="Struct");
-        COPY Uses FROM "uses_fn.csv" (from="Function",to="Struct");"#;
+    let query = r#"COPY Contains FROM "contains_mod_mod.csv" (header=true, from="Module",to="Module");
+        COPY Contains FROM "contains_mod_struct.csv" (header=true, from="Module",to="Struct");
+        COPY Contains FROM "contains_mod_fn.csv" (header=true, from="Module",to="Function");
+        COPY Contains FROM "contains_struct_struct.csv" (header=true, from="Struct",to="Struct");
+        COPY Contains FROM "contains_struct_fn.csv" (header=true, from="Struct",to="Function");
+        COPY Calls FROM "calls.csv" (header=true);
+        COPY Uses FROM "uses_struct.csv" (header=true, from="Struct",to="Struct");
+        COPY Uses FROM "uses_fn.csv" (header=true, from="Function",to="Struct");
+        COPY UnresolvedCall FROM "unresolved_call.csv" (header=true);
+        COPY UnresolvedUse FROM "unresolved_use_fn.csv" (header=true, from="Function",to="UnresolvedTarget");
+        COPY UnresolvedUse FROM "unresolved_use_struct.csv" (header=true, from="Struct",to="UnresolvedTarget");"#;
     for line in query.lines() {
         println!("{:?}", conn.query(line).unwrap());
     }

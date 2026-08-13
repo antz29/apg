@@ -233,6 +233,22 @@ static void emit_use(const std::string &source, const std::string &target) {
     emit_json(jb.done());
 }
 
+static void emit_u_call(const std::string &source, const std::string &target) {
+    JsonBuilder jb;
+    jb.field("type", "u_call");
+    jb.field("source", source);
+    jb.field("target", target);
+    emit_json(jb.done());
+}
+
+static void emit_u_use(const std::string &source, const std::string &target) {
+    JsonBuilder jb;
+    jb.field("type", "u_use");
+    jb.field("source", source);
+    jb.field("target", target);
+    emit_json(jb.done());
+}
+
 // ── Variable name extraction from declarator ─────────────────────────
 
 static std::string declarator_name(TSNode node, const std::string &source) {
@@ -408,6 +424,8 @@ static void emit_use_from_type(TSNode type_node, const std::string &source,
     std::string resolved = resolve_type_fqn(type_name, scope, fqn_set);
     if (!resolved.empty()) {
         emit_use(source_fqn, resolved);
+    } else {
+        emit_u_use(source_fqn, type_name);
     }
 }
 
@@ -656,6 +674,8 @@ static void resolve_calls(TSNode node, const std::string &source,
                     jb.field("source", source_fn);
                     jb.field("target", target);
                     emit_json(jb.done());
+                } else {
+                    emit_u_call(source_fn, name);
                 }
             } else if (strcmp(fk, "field_expression") == 0) {
                 TSNode field = ts_node_child_by_field_name(func, "field", 5);
@@ -692,20 +712,30 @@ static void resolve_calls(TSNode node, const std::string &source,
                                             }
                                         }
                                     }
+                                    // Receiver type known but method not found in
+                                    // it: record a use edge on the receiver type
+                                    // so the dependency is kept at type level.
+                                    if (!resolved) {
+                                        emit_use(source_fn, type_fn);
+                                        resolved = true;
+                                    }
                                 }
                             }
                         }
                     }
 
-                    // Fallback: name-based resolution
+                    // Fallback: only resolve if unambiguous; otherwise record
+                    // an unresolved call so the dependency is not lost.
                     if (!resolved) {
                         auto it = name_map.find(method);
-                        if (it != name_map.end() && !it->second.empty()) {
+                        if (it != name_map.end() && it->second.size() == 1) {
                             JsonBuilder jb;
                             jb.field("type", "call");
                             jb.field("source", source_fn);
                             jb.field("target", it->second[0]);
                             emit_json(jb.done());
+                        } else {
+                            emit_u_call(source_fn, method);
                         }
                     }
                 }
@@ -728,6 +758,8 @@ static void resolve_calls(TSNode node, const std::string &source,
                         jb.field("source", source_fn);
                         jb.field("target", scoped);
                         emit_json(jb.done());
+                    } else {
+                        emit_u_call(source_fn, text);
                     }
                 }
             } else {
@@ -738,6 +770,8 @@ static void resolve_calls(TSNode node, const std::string &source,
                     jb.field("source", source_fn);
                     jb.field("target", tgt);
                     emit_json(jb.done());
+                } else {
+                    emit_u_call(source_fn, node_text(func, source));
                 }
             }
         }
@@ -777,7 +811,7 @@ static std::string resolve_name(const std::string &name,
             }
         }
     }
-    return candidates[0];
+    return "";
 }
 
 static std::string extract_call_target(TSNode node, const std::string &source,
@@ -794,7 +828,8 @@ static std::string extract_call_target(TSNode node, const std::string &source,
         if (!ts_node_is_null(field)) {
             std::string method = node_text(field, source);
             auto it = name_map.find(method);
-            if (it != name_map.end() && !it->second.empty()) return it->second[0];
+            // Only resolve if unambiguous; otherwise leave unresolved.
+            if (it != name_map.end() && it->second.size() == 1) return it->second[0];
         }
         return "";
     }
@@ -809,25 +844,63 @@ static std::string extract_call_target(TSNode node, const std::string &source,
     return "";
 }
 
-static std::string get_cpp_files(fs::path dir, std::vector<fs::path> &files) {
-    std::string mod_path = dir.filename().string();
-    if (!fs::exists(dir)) return mod_path;
+static bool is_cpp_ext(const std::string &ext) {
+    return ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".c++" ||
+           ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx" ||
+           ext == ".tpp" || ext == ".ipp";
+}
 
-    for (const auto &entry : fs::recursive_directory_iterator(dir)) {
+static bool dir_has_sources(const fs::path &dir) {
+    if (!fs::exists(dir)) return false;
+    // Non-recursive: only files directly in this dir count, so subdirs that
+    // are their own modules don't make the parent a module.
+    for (const auto &entry : fs::directory_iterator(dir)) {
         if (!fs::is_regular_file(entry)) continue;
         std::string name = entry.path().filename().string();
         if (name[0] == '.') continue;
-        if (name == "node_modules" || name == "target") continue;
-        std::string ext = entry.path().extension().string();
-        if (ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".c++" ||
-            ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx" ||
-            ext == ".tpp" || ext == ".ipp")
-        {
-            files.push_back(entry.path());
+        if (is_cpp_ext(entry.path().extension().string())) return true;
+    }
+    return false;
+}
+
+static void get_cpp_files(fs::path dir, std::vector<fs::path> &files,
+    const std::vector<std::string> &excludes, bool recursive)
+{
+    if (!fs::exists(dir)) return;
+    if (recursive) {
+        for (const auto &entry : fs::recursive_directory_iterator(dir)) {
+            if (!fs::is_regular_file(entry)) continue;
+            std::string name = entry.path().filename().string();
+            if (name[0] == '.') continue;
+            if (name == "node_modules" || name == "target") continue;
+            std::string path_str = entry.path().string();
+            bool excluded = false;
+            for (const auto &pat : excludes) {
+                if (path_str.find(pat) != std::string::npos) { excluded = true; break; }
+            }
+            if (excluded) continue;
+            if (is_cpp_ext(entry.path().extension().string())) {
+                files.push_back(entry.path());
+            }
+        }
+    } else {
+        for (const auto &entry : fs::directory_iterator(dir)) {
+            if (!fs::is_regular_file(entry)) continue;
+            std::string name = entry.path().filename().string();
+            if (name[0] == '.') continue;
+            if (name == "node_modules" || name == "target") continue;
+            std::string path_str = entry.path().string();
+            bool excluded = false;
+            for (const auto &pat : excludes) {
+                if (path_str.find(pat) != std::string::npos) { excluded = true; break; }
+            }
+            if (excluded) continue;
+            if (is_cpp_ext(entry.path().extension().string())) {
+                files.push_back(entry.path());
+            }
         }
     }
     std::sort(files.begin(), files.end());
-    return mod_path;
 }
 
 static std::string read_file(const fs::path &path) {
@@ -844,13 +917,60 @@ static std::string read_file(const fs::path &path) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: cppfrontend <dir> [exclude...]\n");
+        fprintf(stderr, "Usage: cppfrontend <dir> [--module <dir>]... [exclude...]\n");
         return 1;
     }
 
     fs::path root = fs::absolute(argv[1]);
-    std::vector<fs::path> files;
-    std::string mod_path = get_cpp_files(root, files);
+
+    // Parse --module <dir> pairs; remaining args are excludes.
+    std::vector<std::string> module_dirs;
+    std::vector<std::string> excludes;
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--module") == 0 && i + 1 < argc) {
+            module_dirs.push_back(argv[i + 1]);
+            i++;
+        } else {
+            excludes.push_back(argv[i]);
+        }
+    }
+
+    // Discover modules: explicit --module dirs, or top-level dirs under root
+    // that contain source files. The root itself is a module if it has sources.
+    struct Module {
+        std::string name;
+        fs::path dir;
+    };
+    std::vector<Module> modules;
+    if (!module_dirs.empty()) {
+        for (const auto &d : module_dirs) {
+            fs::path dir = d == "." ? root : fs::absolute(d);
+            if (!fs::exists(dir)) {
+                fprintf(stderr, "Warning: module dir %s does not exist\n", d.c_str());
+                continue;
+            }
+            std::string name = dir.filename().string();
+            if (name.empty()) name = root.filename().string();
+            modules.push_back({name, dir});
+        }
+    } else {
+        if (dir_has_sources(root)) {
+            modules.push_back({root.filename().string(), root});
+        }
+        for (const auto &entry : fs::directory_iterator(root)) {
+            if (!entry.is_directory()) continue;
+            std::string name = entry.path().filename().string();
+            if (name[0] == '.') continue;
+            if (name == "node_modules" || name == "target" || name == "build") continue;
+            if (dir_has_sources(entry.path())) {
+                modules.push_back({name, entry.path()});
+            }
+        }
+    }
+    if (modules.empty()) {
+        fprintf(stderr, "Error: no C++ modules found under %s\n", root.string().c_str());
+        return 1;
+    }
 
     parser = ts_parser_new();
     const TSLanguage *lang = tree_sitter_cpp();
@@ -864,27 +984,35 @@ int main(int argc, char **argv) {
         std::string path;
         std::string source;
         TSTree *tree;
+        std::string module;
     };
     std::vector<AstFile> ast_files;
 
-    for (const auto &path : files) {
-        std::string source = read_file(path);
-        if (source.empty()) continue;
-        TSTree *tree = ts_parser_parse_string(parser, nullptr, source.c_str(), source.size());
-        if (tree) {
-            ast_files.push_back({path.string(), std::move(source), tree});
+    for (const auto &mod : modules) {
+        std::vector<fs::path> files;
+        get_cpp_files(mod.dir, files, excludes, true);
+        for (const auto &path : files) {
+            std::string source = read_file(path);
+            if (source.empty()) continue;
+            TSTree *tree = ts_parser_parse_string(parser, nullptr, source.c_str(), source.size());
+            if (tree) {
+                ast_files.push_back({path.string(), std::move(source), tree, mod.name});
+            }
         }
     }
 
     size_t total = ast_files.size();
 
-    // Phase 1: collect declarations + base classes
+    // Phase 1: collect declarations + base classes. The module name is pushed
+    // onto the scope so every FQN is module-prefixed (module.namespace.Class),
+    // which keeps FQNs unique across modules.
     std::vector<Decl> all_decls;
     std::vector<std::pair<std::string, std::string>> base_classes;
     std::vector<std::string> scope;
 
     for (auto &af : ast_files) {
         scope.clear();
+        scope.push_back(af.module);
         collect_decls(ts_tree_root_node(af.tree), af.source, scope, af.path, all_decls, base_classes);
     }
 
@@ -910,9 +1038,14 @@ int main(int argc, char **argv) {
         }
     }
 
-    emit_json(JsonBuilder().field("type", "pkg").field("fqn", mod_path).done());
+    // Emit each module as a top-level pkg node.
+    std::unordered_set<std::string> module_names;
+    for (const auto &mod : modules) {
+        module_names.insert(mod.name);
+        emit_json(JsonBuilder().field("type", "pkg").field("fqn", mod.name).done());
+    }
 
-    // Emit namespace packages
+    // Emit namespace packages (module.namespace chains).
     std::unordered_set<std::string> all_ns;
     for (const auto &d : all_decls) {
         auto pos = d.fqn.rfind('.');
@@ -920,7 +1053,7 @@ int main(int argc, char **argv) {
             std::string ns = d.fqn.substr(0, pos);
             auto pos2 = ns.rfind('.');
             while (true) {
-                if (!decl_fqns.count(ns) && ns != mod_path) {
+                if (!decl_fqns.count(ns) && !module_names.count(ns)) {
                     all_ns.insert(ns);
                 }
                 pos2 = ns.rfind('.');
@@ -937,7 +1070,7 @@ int main(int argc, char **argv) {
                 pos = ns.rfind('.');
                 if (pos == std::string::npos) break;
                 std::string parent = ns.substr(0, pos);
-                if (!decl_fqns.count(parent) && parent != mod_path && parent.find('.') != std::string::npos) {
+                if (!decl_fqns.count(parent) && !module_names.count(parent) && parent.find('.') != std::string::npos) {
                     all_ns.insert(parent);
                 }
                 ns = parent;
@@ -957,8 +1090,6 @@ int main(int argc, char **argv) {
         if (last_dot != std::string::npos) {
             std::string parent = ns.substr(0, last_dot);
             emit_json(JsonBuilder().field("type", "contains").field("parent", parent).field("child", ns).done());
-        } else {
-            emit_json(JsonBuilder().field("type", "contains").field("parent", mod_path).field("child", ns).done());
         }
     }
 
@@ -977,8 +1108,6 @@ int main(int argc, char **argv) {
         if (pos != std::string::npos) {
             std::string parent = d.fqn.substr(0, pos);
             emit_json(JsonBuilder().field("type", "contains").field("parent", parent).field("child", d.fqn).done());
-        } else {
-            emit_json(JsonBuilder().field("type", "contains").field("parent", mod_path).field("child", d.fqn).done());
         }
     }
 
@@ -998,11 +1127,14 @@ int main(int argc, char **argv) {
         name_map[name].push_back(d.fqn);
     }
 
-    // Phase 2: resolve references with type awareness
+    // Phase 2: resolve references with type awareness. The module name is
+    // pushed onto the scope so resolution stays within the current module
+    // first, matching the module-prefixed FQNs.
     size_t scan_done = 0;
     for (auto &af : ast_files) {
         scope.clear();
-        resolve_refs(ts_tree_root_node(af.tree), af.source, scope, decl_fqns, name_map, mod_path,
+        scope.push_back(af.module);
+        resolve_refs(ts_tree_root_node(af.tree), af.source, scope, decl_fqns, name_map, af.module,
             "", nullptr, &class_methods);
         scan_done++;
         fprintf(stderr, "\rScanning: %zu%% (%zu/%zu)", scan_done * 100 / total, scan_done, total);

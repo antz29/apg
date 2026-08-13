@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/types"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -38,20 +39,54 @@ type edgeMsg struct {
 
 var enc *json.Encoder
 
+type moduleInfo struct {
+	Path string
+	Dir  string
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: gofrontend <dir> [exclude...]\n")
+		fmt.Fprintf(os.Stderr, "Usage: gofrontend <dir> [--module <dir>]... [exclude...]\n")
 		os.Exit(1)
 	}
 	root, _ := filepath.Abs(os.Args[1])
-	excludes := os.Args[2:]
 
+	// Parse --module <dir> pairs; remaining args are excludes.
+	var moduleDirs []string
+	var excludes []string
+	args := os.Args[2:]
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--module" && i+1 < len(args) {
+			moduleDirs = append(moduleDirs, args[i+1])
+			i++
+		} else {
+			excludes = append(excludes, args[i])
+		}
+	}
+
+	// Discover modules under root (or restricted to --module dirs).
+	mods := discoverModules(root, moduleDirs)
+	if len(mods) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no modules discovered under %s\n", root)
+		os.Exit(1)
+	}
+	modSet := map[string]bool{}
+	for _, m := range mods {
+		modSet[m.Path] = true
+	}
+
+	// Load all project modules in one go. Dir=root uses the root go.work,
+	// which sidesteps nested-workspace go-version mismatches.
+	patterns := make([]string, 0, len(mods))
+	for _, m := range mods {
+		patterns = append(patterns, m.Path+"/...")
+	}
 	cfg := &packages.Config{
-		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo,
+		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule,
 		Dir:   root,
 		Tests: false,
 	}
-	pkgs, err := packages.Load(cfg, "./...")
+	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -64,13 +99,12 @@ func main() {
 	defer out.Flush()
 	enc = json.NewEncoder(out)
 
-	modPath := modPathFor(pkgs, root)
-	if modPath == "" {
-		modPath = filepath.Base(root)
+	// Emit each module path as a top-level pkg node.
+	emittedPkg := map[string]bool{}
+	for _, m := range mods {
+		enc.Encode(pkgMsg{Type: "pkg", Fqn: m.Path})
+		emittedPkg[m.Path] = true
 	}
-
-	enc.Encode(pkgMsg{Type: "pkg", Fqn: modPath})
-	emittedPkg := map[string]bool{modPath: true}
 
 	var projectPkgs []*packages.Package
 	for _, p := range pkgs {
@@ -92,7 +126,11 @@ func main() {
 	scanDone := 0
 
 	for _, p := range projectPkgs {
-		emitPkgHierarchy(p.PkgPath, modPath, enc, emittedPkg)
+		mod := moduleForPkg(p.PkgPath, mods)
+		if mod == "" {
+			continue
+		}
+		emitPkgHierarchy(p.PkgPath, mod, enc, emittedPkg)
 	}
 
 	for _, p := range projectPkgs {
@@ -102,7 +140,7 @@ func main() {
 				scanDone++
 				continue
 			}
-			processFile(file, filePath, p, modPath)
+			processFile(file, filePath, p, modSet)
 			scanDone++
 			fmt.Fprintf(os.Stderr, "\rScanning: %d%% (%d/%d)", scanDone*100/totalFiles, scanDone, totalFiles)
 		}
@@ -110,7 +148,79 @@ func main() {
 	fmt.Fprintln(os.Stderr)
 }
 
-func processFile(file *ast.File, filePath string, p *packages.Package, modPath string) {
+// discoverModules runs `go list -m -json all` in root and returns the modules
+// whose Dir is under root (or under one of the --module dirs, if given).
+func discoverModules(root string, moduleDirs []string) []moduleInfo {
+	cmd := exec.Command("go", "list", "-m", "-json", "all")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: go list -m all failed: %v\n", err)
+		return nil
+	}
+
+	// Restrict to the given module dirs if any were provided.
+	restrict := make([]string, 0, len(moduleDirs))
+	for _, d := range moduleDirs {
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			continue
+		}
+		restrict = append(restrict, abs)
+	}
+
+	var mods []moduleInfo
+	dec := json.NewDecoder(strings.NewReader(string(out)))
+	for dec.More() {
+		var m struct {
+			Path string
+			Dir  string
+		}
+		if err := dec.Decode(&m); err != nil {
+			break
+		}
+		if m.Dir == "" {
+			continue
+		}
+		absDir, err := filepath.Abs(m.Dir)
+		if err != nil {
+			continue
+		}
+		if !strings.HasPrefix(absDir, root) {
+			continue
+		}
+		if len(restrict) > 0 {
+			ok := false
+			for _, r := range restrict {
+				if absDir == r || strings.HasPrefix(absDir, r+string(filepath.Separator)) {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				continue
+			}
+		}
+		mods = append(mods, moduleInfo{Path: m.Path, Dir: absDir})
+	}
+	sort.Slice(mods, func(i, j int) bool { return mods[i].Path < mods[j].Path })
+	return mods
+}
+
+// moduleForPkg returns the module path that owns pkgPath (longest prefix match).
+func moduleForPkg(pkgPath string, mods []moduleInfo) string {
+	best := ""
+	for _, m := range mods {
+		if pkgPath == m.Path || strings.HasPrefix(pkgPath, m.Path+"/") {
+			if len(m.Path) > len(best) {
+				best = m.Path
+			}
+		}
+	}
+	return best
+}
+
+func processFile(file *ast.File, filePath string, p *packages.Package, modSet map[string]bool) {
 	pkgFqn := p.PkgPath
 	ti := p.TypesInfo
 
@@ -140,32 +250,32 @@ func processFile(file *ast.File, filePath string, p *packages.Package, modPath s
 					for _, field := range st.Fields.List {
 						if len(field.Names) == 0 {
 							if tv := ti.Types[field.Type]; tv.Type != nil {
-								if fqn := typeFQN(tv.Type, modPath); fqn != "" {
+								if fqn := typeFQN(tv.Type, modSet); fqn != "" {
 									enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
 								}
 							}
 						}
 					}
 				}
-			if iface, ok := ts.Type.(*ast.InterfaceType); ok {
-				for _, m := range iface.Methods.List {
-					if len(m.Names) == 0 {
-						if tv := ti.Types[m.Type]; tv.Type != nil {
-							if fqn := typeFQN(tv.Type, modPath); fqn != "" {
-								enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
+				if iface, ok := ts.Type.(*ast.InterfaceType); ok {
+					for _, m := range iface.Methods.List {
+						if len(m.Names) == 0 {
+							if tv := ti.Types[m.Type]; tv.Type != nil {
+								if fqn := typeFQN(tv.Type, modSet); fqn != "" {
+									enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
+								}
 							}
-						}
-					} else {
-						for _, name := range m.Names {
-							methodFqn := fullName + "." + name.Name
-							start := p.Fset.Position(m.Pos()).Offset
-							end := p.Fset.Position(m.End()).Offset
-							enc.Encode(declMsg{Type: "decl", Kind: "method", Fqn: methodFqn, Path: filePath, Start: start, End: end})
-							enc.Encode(edgeMsg{Type: "contains", Parent: fullName, Child: methodFqn})
+						} else {
+							for _, name := range m.Names {
+								methodFqn := fullName + "." + name.Name
+								start := p.Fset.Position(m.Pos()).Offset
+								end := p.Fset.Position(m.End()).Offset
+								enc.Encode(declMsg{Type: "decl", Kind: "method", Fqn: methodFqn, Path: filePath, Start: start, End: end})
+								enc.Encode(edgeMsg{Type: "contains", Parent: fullName, Child: methodFqn})
+							}
 						}
 					}
 				}
-			}
 			}
 
 		case *ast.FuncDecl:
@@ -199,32 +309,37 @@ func processFile(file *ast.File, filePath string, p *packages.Package, modPath s
 			ast.Inspect(d.Body, func(n ast.Node) bool {
 				switch node := n.(type) {
 				case *ast.CallExpr:
-					target := resolveCall(node, ti, modPath)
+					target := resolveCall(node, ti, modSet)
 					if target != "" {
 						enc.Encode(edgeMsg{Type: "call", Source: fullName, Target: target})
 						return true
 					}
-					if tv := ti.Types[node.Fun]; tv.Type != nil {
-						if _, isSig := tv.Type.(*types.Signature); !isSig {
-							if fqn := typeFQN(tv.Type, modPath); fqn != "" {
-								enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
-							}
-						}
+					// External or unresolvable call: record as unresolved so the
+					// dependency is not lost.
+					ext := resolveCallExternal(node, ti)
+					if ext != "" {
+						enc.Encode(edgeMsg{Type: "u_call", Source: fullName, Target: ext})
+						return true
 					}
+					enc.Encode(edgeMsg{Type: "u_call", Source: fullName, Target: callRawName(node)})
 				case *ast.CompositeLit:
 					if node.Type != nil {
 						if tv := ti.Types[node.Type]; tv.Type != nil {
-							if fqn := typeFQN(tv.Type, modPath); fqn != "" {
+							if fqn := typeFQN(tv.Type, modSet); fqn != "" {
 								enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
 							}
+						} else {
+							enc.Encode(edgeMsg{Type: "u_use", Source: fullName, Target: exprString(node.Type)})
 						}
 					}
 				case *ast.TypeAssertExpr:
 					if node.Type != nil {
 						if tv := ti.Types[node.Type]; tv.Type != nil {
-							if fqn := typeFQN(tv.Type, modPath); fqn != "" {
+							if fqn := typeFQN(tv.Type, modSet); fqn != "" {
 								enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
 							}
+						} else {
+							enc.Encode(edgeMsg{Type: "u_use", Source: fullName, Target: exprString(node.Type)})
 						}
 					}
 				case *ast.DeclStmt:
@@ -239,9 +354,11 @@ func processFile(file *ast.File, filePath string, p *packages.Package, modPath s
 						}
 						if vs.Type != nil {
 							if tv := ti.Types[vs.Type]; tv.Type != nil {
-								if fqn := typeFQN(tv.Type, modPath); fqn != "" {
+								if fqn := typeFQN(tv.Type, modSet); fqn != "" {
 									enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
 								}
+							} else {
+								enc.Encode(edgeMsg{Type: "u_use", Source: fullName, Target: exprString(vs.Type)})
 							}
 						}
 					}
@@ -252,40 +369,117 @@ func processFile(file *ast.File, filePath string, p *packages.Package, modPath s
 	}
 }
 
-func resolveCall(call *ast.CallExpr, ti *types.Info, modPath string) string {
+func resolveCall(call *ast.CallExpr, ti *types.Info, modSet map[string]bool) string {
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
 		if obj, ok := ti.Uses[fun]; ok {
-			return funcFQN(obj, modPath)
+			return funcFQN(obj, modSet)
 		}
 	case *ast.SelectorExpr:
 		if sel, ok := ti.Selections[fun]; ok && sel.Kind() == types.MethodVal {
-			return funcFQN(sel.Obj(), modPath)
+			return funcFQN(sel.Obj(), modSet)
 		}
 		if obj, ok := ti.Uses[fun.Sel]; ok {
-			return funcFQN(obj, modPath)
+			return funcFQN(obj, modSet)
 		}
 	case *ast.IndexExpr:
 		if id, ok := fun.X.(*ast.Ident); ok {
 			if obj, ok := ti.Uses[id]; ok {
-				return funcFQN(obj, modPath)
+				return funcFQN(obj, modSet)
 			}
 		}
 		if sel, ok := fun.X.(*ast.SelectorExpr); ok {
 			if obj, ok := ti.Uses[sel.Sel]; ok {
-				return funcFQN(obj, modPath)
+				return funcFQN(obj, modSet)
 			}
 		}
 	}
 	return ""
 }
 
-func funcFQN(obj types.Object, modPath string) string {
+// resolveCallExternal returns the FQN of a call that resolves to a function
+// outside the project modules (e.g. fmt.Println), or "" if unresolvable.
+func resolveCallExternal(call *ast.CallExpr, ti *types.Info) string {
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		if obj, ok := ti.Uses[fun]; ok {
+			return funcFQNAny(obj)
+		}
+	case *ast.SelectorExpr:
+		if sel, ok := ti.Selections[fun]; ok && sel.Kind() == types.MethodVal {
+			return funcFQNAny(sel.Obj())
+		}
+		if obj, ok := ti.Uses[fun.Sel]; ok {
+			return funcFQNAny(obj)
+		}
+	case *ast.IndexExpr:
+		if id, ok := fun.X.(*ast.Ident); ok {
+			if obj, ok := ti.Uses[id]; ok {
+				return funcFQNAny(obj)
+			}
+		}
+		if sel, ok := fun.X.(*ast.SelectorExpr); ok {
+			if obj, ok := ti.Uses[sel.Sel]; ok {
+				return funcFQNAny(obj)
+			}
+		}
+	}
+	return ""
+}
+
+func callRawName(call *ast.CallExpr) string {
+	var name string
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		name = fun.Name
+	case *ast.SelectorExpr:
+		name = fun.Sel.Name
+	case *ast.IndexExpr:
+		name = callRawName(&ast.CallExpr{Fun: fun.X})
+	default:
+		name = exprString(call.Fun)
+	}
+	return sanitizeTarget(name)
+}
+
+func exprString(e ast.Expr) string {
+	if e == nil {
+		return ""
+	}
+	var sb strings.Builder
+	ast.Fprint(&sb, nil, e, nil)
+	return sanitizeTarget(strings.TrimSpace(sb.String()))
+}
+
+// sanitizeTarget strips characters that would break the CSV/JSON edge output
+// (commas, newlines, quotes).
+func sanitizeTarget(s string) string {
+	var sb strings.Builder
+	for _, r := range s {
+		switch r {
+		case ',', '\n', '\r', '"':
+			continue
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
+}
+
+func funcFQN(obj types.Object, modSet map[string]bool) string {
 	if obj == nil || obj.Pkg() == nil {
 		return ""
 	}
 	pkgPath := obj.Pkg().Path()
-	if !strings.HasPrefix(pkgPath, modPath) {
+	if !inProjectModules(pkgPath, modSet) {
+		return ""
+	}
+	return funcFQNAny(obj)
+}
+
+// funcFQNAny returns the FQN regardless of module membership.
+func funcFQNAny(obj types.Object) string {
+	if obj == nil || obj.Pkg() == nil {
 		return ""
 	}
 	fn, ok := obj.(*types.Func)
@@ -298,9 +492,18 @@ func funcFQN(obj types.Object, modPath string) string {
 		if rn == "" {
 			return ""
 		}
-		return pkgPath + "." + rn + "." + fn.Name()
+		return obj.Pkg().Path() + "." + rn + "." + fn.Name()
 	}
-	return pkgPath + "." + fn.Name()
+	return obj.Pkg().Path() + "." + fn.Name()
+}
+
+func inProjectModules(pkgPath string, modSet map[string]bool) bool {
+	for mod := range modSet {
+		if pkgPath == mod || strings.HasPrefix(pkgPath, mod+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func recvTypeName(t types.Type) string {
@@ -329,46 +532,22 @@ func recvTypeNameAST(t ast.Expr) string {
 	}
 }
 
-func typeFQN(t types.Type, modPath string) string {
+func typeFQN(t types.Type, modSet map[string]bool) string {
 	switch tt := t.(type) {
 	case *types.Named:
 		obj := tt.Obj()
 		if obj.Pkg() == nil {
 			return ""
 		}
-		if !strings.HasPrefix(obj.Pkg().Path(), modPath) {
+		if !inProjectModules(obj.Pkg().Path(), modSet) {
 			return ""
 		}
 		return obj.Pkg().Path() + "." + obj.Name()
 	case *types.Pointer:
-		return typeFQN(tt.Elem(), modPath)
+		return typeFQN(tt.Elem(), modSet)
 	default:
 		return ""
 	}
-}
-
-func modPathFor(pkgs []*packages.Package, root string) string {
-	for _, p := range pkgs {
-		if len(p.GoFiles) == 0 {
-			continue
-		}
-		if strings.HasPrefix(p.GoFiles[0], root) && p.Module != nil {
-			return p.Module.Path
-		}
-	}
-	// fallback: find package with shortest PkgPath under root
-	var best string
-	for _, p := range pkgs {
-		for _, f := range p.GoFiles {
-			if strings.HasPrefix(f, root) {
-				if best == "" || len(p.PkgPath) < len(best) {
-					best = p.PkgPath
-				}
-				break
-			}
-		}
-	}
-	return best
 }
 
 func isProjectPkg(p *packages.Package, root string) bool {

@@ -40,21 +40,32 @@ The database lives at `db.lbug` in the workspace root. All queries go through th
 
 ### Node types
 
-| Label    | Properties                          | Description                              |
-|----------|-------------------------------------|------------------------------------------|
-| Module   | fqn (STRING PK)                     | A Java package (no path/location)        |
-| Struct   | fqn (STRING PK), path, start, `end` | A class, interface, or enum              |
-| Function | fqn (STRING PK), path, start, `end` | A method or constructor                  |
+| Label             | Properties                          | Description                              |
+|-------------------|--------------------------------------|------------------------------------------|
+| Module            | fqn (STRING PK)                     | A Java package (no path/location)        |
+| Struct            | fqn (STRING PK), path, start, `end` | A class, interface, or enum              |
+| Function          | fqn (STRING PK), path, start, `end` | A method or constructor                  |
+| UnresolvedTarget  | fqn (STRING PK)                     | A call/type ref the scanner couldn't resolve to a project symbol |
 
 All FQNs are fully qualified (e.g. `org.jgrapht.Graph.addVertex`). `start` and `end` are 0-based byte offsets — use them to extract source code from the file at `path` with `dd if=<path> bs=1 skip=<start> count=<end-start>` if needed.
 
 ### Edge types
 
-| Edge     | From types                     | To types                       | Meaning                   |
-|----------|--------------------------------|--------------------------------|---------------------------|
-| Contains | Module, Struct                 | Module, Struct, Function       | Parent contains child     |
-| Calls    | Function                       | Function                       | Method calls method       |
-| Uses     | Function, Struct               | Struct                         | Type reference / usage    |
+| Edge            | From types                     | To types                       | Meaning                   |
+|-----------------|--------------------------------|--------------------------------|---------------------------|
+| Contains        | Module, Struct                 | Module, Struct, Function       | Parent contains child     |
+| Calls           | Function                       | Function                       | Method calls method       |
+| Uses            | Function, Struct               | Struct                         | Type reference / usage    |
+| UnresolvedCall  | Function                       | UnresolvedTarget               | Call that couldn't be resolved |
+| UnresolvedUse   | Function, Struct               | UnresolvedTarget               | Type ref that couldn't be resolved |
+
+### Fidelity
+
+- **Java and Go edges are exact** (compiler type-checker resolution). A `Calls` edge always points at the real declared method.
+- **C++ edges are heuristic** (tree-sitter). Unresolvable refs become `UnresolvedCall`/`UnresolvedUse`, never guessed FQNs.
+- **Test/generated/build code is excluded by default.** Pass `includeTests: true` to `ladybug_scan` to include it.
+- **Multi-module repos** (Go workspaces, C++ monorepos): each module is a top-level `Module` node; FQNs are module-prefixed (`modA.util.Foo` vs `modB.util.Foo`). Pass `modules: "dir1,dir2"` to restrict scanning.
+- To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
 ### Common query patterns
 
@@ -111,12 +122,14 @@ If the counts are zero (or the query errors), the database is empty. Guide the u
    - *"Any package prefixes to exclude?"* — e.g. test packages like `com.example.test` (optional).
    - *"Any extra classpath entries?"* — e.g. external JARs or dependency directories (optional).
    - *"Any paths to exclude?"* — e.g. `**/test/**`, `**/generated/**` (optional).
+   - *"Include test code?"* — off by default; pass `includeTests: true` if the user wants test/generated/build code in the graph.
+   - *"Restrict to specific modules?"* — for Go/C++ monorepos, pass `modules: "dir1,dir2"` to scan only those modules (optional).
 
    Only ask the questions that are relevant. Start with the project path — if they don't know the other options, skip them.
 
 3. **Run the scan** with `ladybug_scan`:
    ```
-   ladybug_scan(directory: "/path/to/project", blacklist: "com.example.test", classpath: "/path/to/lib", excludePath: "**/test/**")
+   ladybug_scan(directory: "/path/to/project", blacklist: "com.example.test", classpath: "/path/to/lib", excludePath: "**/test/**", includeTests: false, modules: "dir1,dir2")
    ```
 
 4. **Verify the results.** After the scan, query for counts to confirm data was loaded, then answer the user's original question.

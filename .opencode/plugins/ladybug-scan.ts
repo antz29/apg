@@ -42,6 +42,14 @@ export const LadybugScanPlugin: Plugin = async () => {
             .string()
             .optional()
             .describe("Comma-separated glob patterns for paths to exclude."),
+          includeTests: tool.schema
+            .boolean()
+            .optional()
+            .describe("Include test/generated/build code in the graph. Off by default."),
+          modules: tool.schema
+            .string()
+            .optional()
+            .describe("Comma-separated module dirs to scan (Go/C++). Restricts scanning to these modules; defaults to auto-discovery."),
         },
         async execute(args, context) {
           const root = resolveProjectRoot(context)
@@ -82,6 +90,14 @@ export const LadybugScanPlugin: Plugin = async () => {
 
           for (const pat of (args.excludePath ?? "").split(",").filter(Boolean)) {
             spawnArgs.push("--exclude-path", pat)
+          }
+
+          if (args.includeTests) {
+            spawnArgs.push("--include-tests")
+          }
+
+          for (const m of (args.modules ?? "").split(",").filter(Boolean)) {
+            spawnArgs.push("--module", m)
           }
 
           for (const prefix of (args.blacklist ?? "").split(",").filter(Boolean)) {

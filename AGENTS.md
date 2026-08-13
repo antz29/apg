@@ -23,17 +23,29 @@ The workspace has a LadybugDB graph database at `db.lbug` containing the parsed 
 
 ### Data model
 
-- 3 node types:
+- 4 node types:
   - `Module` — property: `fqn`
   - `Struct` — properties: `fqn`, `path`, `start`, `end`
   - `Function` — properties: `fqn`, `path`, `start`, `end`
-- 3 edge types:
+  - `UnresolvedTarget` — property: `fqn` (a call/type reference the scanner could not resolve to a project symbol; deduplicated by name)
+- 5 edge types:
   - `Contains` — Module↔Module, Module→Struct, Struct→Struct, Struct→Function
   - `Calls` — Function→Function
   - `Uses` — Function→Struct, Struct→Struct
-- Nodes without locations (Modules) have no `path`/`start`/`end`.
+  - `UnresolvedCall` — Function→UnresolvedTarget
+  - `UnresolvedUse` — Function→UnresolvedTarget, Struct→UnresolvedTarget
+- Nodes without locations (Modules, UnresolvedTargets) have no `path`/`start`/`end`.
 - `start` and `end` are **0-based byte indices**, not line numbers.
 - `path` is an **absolute filesystem path** under the project directory. Read those files with `read`, `grep`, or `bash`.
+
+### Fidelity & noise
+
+- **Java and Go edges are exact** — resolved via the compiler's type checker (javac attribution / `types.Info`). A `Calls` edge always points at the real declared method.
+- **C++ edges are heuristic** (tree-sitter + scope/type tracking). Unresolvable calls/types are recorded as `UnresolvedCall`/`UnresolvedUse` rather than guessed.
+- **The scanner never guesses**: if a call/type can't be resolved to a project symbol, it becomes an `UnresolvedTarget` edge, never a fabricated FQN.
+- **Test/generated/build code is excluded by default** (`**/test/**`, `**/qa-functional/**`, `**/generated/**`, `**/build/**`, etc.). Pass `includeTests: true` to `ladybug_scan` to include it.
+- **Multi-module repos**: Go workspaces (`go.work`) and C++ monorepos are supported. Each module is a top-level `Module` node; FQNs are module-prefixed so they stay unique across modules. Pass `modules: "dir1,dir2"` to `ladybug_scan` to restrict scanning to specific modules (Go/C++).
+- To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
 ### Other tools
 

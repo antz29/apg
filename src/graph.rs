@@ -9,6 +9,8 @@ pub struct Graph {
     pub contains: HashSet<(String, String)>,
     pub calls: HashSet<(String, String)>,
     pub uses: HashSet<(String, String)>,
+    pub unresolved_calls: HashSet<(String, String)>,
+    pub unresolved_uses: HashSet<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -24,6 +26,7 @@ pub enum NodeKind {
     Module,
     Struct,
     Function,
+    UnresolvedTarget,
 }
 
 #[derive(Debug, Clone, Serialize)]
