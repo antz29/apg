@@ -117,7 +117,14 @@ export const LadybugScanPlugin: Plugin = async () => {
             return `Scan failed (exit code ${exitCode}):\n${stderr}\n${output.slice(-2000)}`
           }
 
-          return stderr || "Scan completed successfully."
+          // stderr carries per-file progress bars and graph/cleanup counts.
+          // Surface only the summary lines, not the raw progress noise.
+          const summary = stderr
+            .split("\n")
+            .map((l) => l.replace(/\r/g, "").trim())
+            .filter((l) => /^(graph:|cleanup:|WARNING:|Skipped|Project:|Language:)/.test(l))
+            .join("\n")
+          return summary || "Scan completed successfully."
         },
       }),
     },

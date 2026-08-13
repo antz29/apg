@@ -702,6 +702,6 @@ fn build_graph(
         COPY UnresolvedUse FROM "unresolved_use_fn.csv" (header=true, from="Function",to="UnresolvedTarget");
         COPY UnresolvedUse FROM "unresolved_use_struct.csv" (header=true, from="Struct",to="UnresolvedTarget");"#;
     for line in query.lines() {
-        println!("{:?}", conn.query(line).unwrap());
+        conn.query(line).unwrap();
     }
 }
