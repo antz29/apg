@@ -27,13 +27,19 @@ The workspace has a LadybugDB graph database at `db.lbug` containing the parsed 
   - `Module` — property: `fqn`
   - `Struct` — properties: `fqn`, `path`, `start`, `end`
   - `Function` — properties: `fqn`, `path`, `start`, `end`
-  - `UnresolvedTarget` — property: `fqn` (a call/type reference the scanner could not resolve to a project symbol; deduplicated by name)
+  - `UnresolvedTarget` — properties: `fqn`, `category` (a call/type reference the scanner could not resolve to a project symbol; deduplicated by name)
 - 5 edge types:
   - `Contains` — Module↔Module, Module→Struct, Struct→Struct, Struct→Function
   - `Calls` — Function→Function
   - `Uses` — Function→Struct, Struct→Struct
-  - `UnresolvedCall` — Function→UnresolvedTarget
+  - `UnresolvedCall` — Function→UnresolvedTarget; rel-table property `target_type` (function type of a func-value call, Go-only, empty otherwise)
   - `UnresolvedUse` — Function→UnresolvedTarget, Struct→UnresolvedTarget
+
+### `UnresolvedTarget.category`
+
+One of `builtin` (Go predeclared func/type), `stdlib`, `external`, `func-value` (call through a function-valued variable or IIFE), `interface-method` (method on a universe-scope interface, e.g. `error.Error`), or `unknown` (fallback / frontend omitted it). Go populates this exactly from the type checker; Java classifies stdlib (`java.*`/`javax.*`/`jdk.*`) vs `external`; C++ is heuristic (`external` for qualified names, `func-value` for bare identifiers).
+
+Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are routed to `Uses`/`UnresolvedUse` edges, not `UnresolvedCall`. The `target_type` property only carries data on `UnresolvedCall` edges whose target is `func-value`.
 - Nodes without locations (Modules, UnresolvedTargets) have no `path`/`start`/`end`.
 - `start` and `end` are **0-based byte indices**, not line numbers.
 - `path` is an **absolute filesystem path** under the project directory. Read those files with `read`, `grep`, or `bash`.

@@ -233,20 +233,34 @@ static void emit_use(const std::string &source, const std::string &target) {
     emit_json(jb.done());
 }
 
-static void emit_u_call(const std::string &source, const std::string &target) {
+static void emit_u_call(const std::string &source, const std::string &target,
+    const std::string &category)
+{
     JsonBuilder jb;
     jb.field("type", "u_call");
     jb.field("source", source);
     jb.field("target", target);
+    jb.field("category", category);
     emit_json(jb.done());
 }
 
-static void emit_u_use(const std::string &source, const std::string &target) {
+static void emit_u_use(const std::string &source, const std::string &target,
+    const std::string &category)
+{
     JsonBuilder jb;
     jb.field("type", "u_use");
     jb.field("source", source);
     jb.field("target", target);
+    jb.field("category", category);
     emit_json(jb.done());
+}
+
+// Classify an unresolved symbol name. Qualified names are external symbols;
+// bare identifiers are function pointers/locals (func-value) or, for types,
+// unknown.
+static std::string category_for(const std::string &name, bool is_type) {
+    if (name.find('.') != std::string::npos) return "external";
+    return is_type ? "unknown" : "func-value";
 }
 
 // ── Variable name extraction from declarator ─────────────────────────
@@ -425,7 +439,7 @@ static void emit_use_from_type(TSNode type_node, const std::string &source,
     if (!resolved.empty()) {
         emit_use(source_fqn, resolved);
     } else {
-        emit_u_use(source_fqn, type_name);
+        emit_u_use(source_fqn, type_name, category_for(type_name, true));
     }
 }
 
@@ -675,7 +689,7 @@ static void resolve_calls(TSNode node, const std::string &source,
                     jb.field("target", target);
                     emit_json(jb.done());
                 } else {
-                    emit_u_call(source_fn, name);
+                    emit_u_call(source_fn, name, category_for(name, false));
                 }
             } else if (strcmp(fk, "field_expression") == 0) {
                 TSNode field = ts_node_child_by_field_name(func, "field", 5);
@@ -735,7 +749,7 @@ static void resolve_calls(TSNode node, const std::string &source,
                             jb.field("target", it->second[0]);
                             emit_json(jb.done());
                         } else {
-                            emit_u_call(source_fn, method);
+                            emit_u_call(source_fn, method, category_for(method, false));
                         }
                     }
                 }
@@ -759,7 +773,7 @@ static void resolve_calls(TSNode node, const std::string &source,
                         jb.field("target", scoped);
                         emit_json(jb.done());
                     } else {
-                        emit_u_call(source_fn, text);
+                        emit_u_call(source_fn, text, category_for(text, false));
                     }
                 }
             } else {
@@ -771,7 +785,8 @@ static void resolve_calls(TSNode node, const std::string &source,
                     jb.field("target", tgt);
                     emit_json(jb.done());
                 } else {
-                    emit_u_call(source_fn, node_text(func, source));
+                    emit_u_call(source_fn, node_text(func, source),
+                        category_for(node_text(func, source), false));
                 }
             }
         }

@@ -126,6 +126,15 @@ public class CallGraphBuilder {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
+    /** Classifies an out-of-project method FQN as stdlib or external. */
+    static String categoryOf(String mfqn) {
+        if (mfqn == null) return "unknown";
+        for (String p : new String[]{"java.", "javax.", "jdk.", "com.sun.", "sun."}) {
+            if (mfqn.startsWith(p)) return "stdlib";
+        }
+        return "external";
+    }
+
     static String stripGenerics(String s) {
         int i = s.indexOf('<');
         return i > 0 ? s.substring(0, i).strip() : s.strip();
@@ -443,7 +452,8 @@ public class CallGraphBuilder {
                     } else {
                         String target = mfqn != null ? mfqn : rawName;
                         emit("{\"type\":\"u_call\",\"source\":\"" + caller
-                            + "\",\"target\":\"" + (target == null ? "?" : target) + "\"}");
+                            + "\",\"target\":\"" + (target == null ? "?" : target)
+                            + "\",\"category\":\"" + categoryOf(mfqn) + "\"}");
                     }
                 }
 

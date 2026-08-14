@@ -9,7 +9,9 @@ pub struct Graph {
     pub contains: HashSet<(String, String)>,
     pub calls: HashSet<(String, String)>,
     pub uses: HashSet<(String, String)>,
-    pub unresolved_calls: HashSet<(String, String)>,
+    /// Unresolved calls: (source, target, target_type). target_type is the
+    /// function type of a func-value call (empty when not applicable).
+    pub unresolved_calls: HashSet<(String, String, String)>,
     pub unresolved_uses: HashSet<(String, String)>,
 }
 
@@ -34,4 +36,8 @@ pub struct Node {
     pub kind: NodeKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
+    /// Classification of an UnresolvedTarget: builtin/stdlib/external/
+    /// func-value/interface-method/unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
 }

@@ -110,7 +110,7 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
     graph.uses.retain(|(a, b)| is_removed(a) && is_removed(b));
     graph
         .unresolved_calls
-        .retain(|(a, b)| is_removed(a) && is_removed(b));
+        .retain(|(a, b, _)| is_removed(a) && is_removed(b));
     graph
         .unresolved_uses
         .retain(|(a, b)| is_removed(a) && is_removed(b));

@@ -14,6 +14,17 @@ fn is_blacklisted(fqn: &str, blacklist: &[String]) -> bool {
     blacklist.iter().any(|p| fqn.starts_with(p.as_str()))
 }
 
+/// Inserts an UnresolvedTarget node, setting its category on first write. If
+/// the node already exists, its existing category is preserved (categories are
+/// structurally disjoint per FQN, so a later conflict is treated as a no-op).
+fn insert_unresolved_target(graph: &mut Graph, fqn: &str, category: Option<&str>) {
+    graph.nodes.entry(fqn.to_owned()).or_insert_with(|| Node {
+        kind: NodeKind::UnresolvedTarget,
+        location: None,
+        category: category.map(str::to_owned),
+    });
+}
+
 fn available_languages() -> Vec<String> {
     env!("APG_LANGUAGES")
         .split(',')
@@ -218,6 +229,7 @@ fn build_graph(
                     Node {
                         kind: NodeKind::Module,
                         location: None,
+                        category: None,
                     },
                 );
             }
@@ -240,6 +252,7 @@ fn build_graph(
                             start: msg["start"].as_u64().unwrap_or(0) as u32,
                             end: msg["end"].as_u64().unwrap_or(0) as u32,
                         }),
+                        category: None,
                     },
                 );
             }
@@ -283,16 +296,20 @@ fn build_graph(
                     skipped += 1;
                     continue;
                 }
-                graph.nodes.insert(
+                let category = msg
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty());
+                let target_type = msg
+                    .get("target_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                insert_unresolved_target(&mut graph, target, category);
+                graph.unresolved_calls.insert((
+                    source.to_owned(),
                     target.to_owned(),
-                    Node {
-                        kind: NodeKind::UnresolvedTarget,
-                        location: None,
-                    },
-                );
-                graph
-                    .unresolved_calls
-                    .insert((source.to_owned(), target.to_owned()));
+                    target_type.to_owned(),
+                ));
             }
             "u_use" => {
                 let source = msg["source"].as_str().unwrap();
@@ -301,13 +318,11 @@ fn build_graph(
                     skipped += 1;
                     continue;
                 }
-                graph.nodes.insert(
-                    target.to_owned(),
-                    Node {
-                        kind: NodeKind::UnresolvedTarget,
-                        location: None,
-                    },
-                );
+                let category = msg
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty());
+                insert_unresolved_target(&mut graph, target, category);
                 graph
                     .unresolved_uses
                     .insert((source.to_owned(), target.to_owned()));
@@ -342,7 +357,7 @@ fn build_graph(
             && graph.nodes[b].kind == NodeKind::Struct
             && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
     });
-    graph.unresolved_calls.retain(|(a, b)| {
+    graph.unresolved_calls.retain(|(a, b, _)| {
         graph.nodes.contains_key(a)
             && graph.nodes.contains_key(b)
             && graph.nodes[a].kind == NodeKind::Function
@@ -417,7 +432,8 @@ fn build_graph(
     conn.query(
         "
         CREATE NODE TABLE UnresolvedTarget(
-            fqn STRING PRIMARY KEY
+            fqn STRING PRIMARY KEY,
+            category STRING
         )",
     )
     .unwrap();
@@ -450,7 +466,8 @@ fn build_graph(
     conn.query(
         "
         CREATE REL TABLE UnresolvedCall(
-            FROM Function TO UnresolvedTarget
+            FROM Function TO UnresolvedTarget,
+            target_type STRING
         )",
     )
     .unwrap();
@@ -499,7 +516,7 @@ fn build_graph(
         module_csv.write_all(b"fqn\n").unwrap();
         struct_csv.write_all(b"fqn,path,start,end\n").unwrap();
         function_csv.write_all(b"fqn,path,start,end\n").unwrap();
-        unresolved_csv.write_all(b"fqn\n").unwrap();
+        unresolved_csv.write_all(b"fqn,category\n").unwrap();
 
         for (fqn, node) in &graph.nodes {
             match (node.kind, &node.location) {
@@ -533,6 +550,10 @@ fn build_graph(
                     .unwrap(),
                 (NodeKind::UnresolvedTarget, None) => {
                     unresolved_csv.write_all(fqn.as_bytes()).unwrap();
+                    unresolved_csv.write_all(b",").unwrap();
+                    if let Some(cat) = &node.category {
+                        unresolved_csv.write_all(cat.as_bytes()).unwrap();
+                    }
                     unresolved_csv.write_all(b"\n").unwrap();
                 }
                 (_, _) => panic!(),
@@ -649,7 +670,7 @@ fn build_graph(
                 .open("unresolved_use_struct.csv")
                 .unwrap(),
         );
-        unresolved_call_csv.write_all(b"from,to\n").unwrap();
+        unresolved_call_csv.write_all(b"from,to,target_type\n").unwrap();
         unresolved_use_fn_csv.write_all(b"from,to\n").unwrap();
         unresolved_use_struct_csv.write_all(b"from,to\n").unwrap();
 
@@ -676,8 +697,10 @@ fn build_graph(
             }
             edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
         }
-        for (a, b) in graph.unresolved_calls {
-            unresolved_call_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap();
+        for (a, b, t) in graph.unresolved_calls {
+            unresolved_call_csv
+                .write_all(format!("{a},{b},{t}\n").as_bytes())
+                .unwrap();
             edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
         }
         for (a, b) in graph.unresolved_uses {
