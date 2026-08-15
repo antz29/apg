@@ -2,7 +2,7 @@
 
 ## Pipeline
 
-Scanner (per language) → Rust ingestor → `db.lbug` + `graph.jsonl`.
+Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`.
 
 - The **scanner** (Go: `src/golib/main.go`, Java: `src/javalib/CallGraphBuilder.java`,
   C++: `src/cpplib/main.cpp`) parses a codebase and streams one JSON object per
@@ -11,11 +11,30 @@ Scanner (per language) → Rust ingestor → `db.lbug` + `graph.jsonl`.
   never does graph assembly.
 - The **ingestor** (`src/ingest.rs`) spawns the scanner, resolves identity
   (canonical FQN), builds the graph, bulk-loads LadybugDB, and writes
-  `graph.jsonl` as the export. `db.lbug` is the query index; `graph.jsonl` is
-  the self-contained export artifact (canonical FQNs, no opaque ids).
+  `graph.jsonl` as the export. `.apg/db.lbug` is the query index; `.apg/graph.jsonl`
+  is the self-contained export artifact (canonical FQNs, no opaque ids).
 - Build: `build.rs` compiles the frontends (`gcc`/`g++` tree-sitter for C++,
-  `go build` for Go, `javac` for Java). Run a scan with `ladybug_scan` or
-  `cargo run -- -l <lang> <dir>`.
+  `go build` for Go, `javac` for Java) and stages them to
+  `target/<profile>/frontends`. Run a scan with `apg scan <dir>` (or the
+  `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
+  (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`).
+
+### CLI
+
+The project builds a single `apg` binary (package `apg`, was `java_apg`):
+
+- `apg init [dir]` — create `.apg/` with a default `config.json` and install the
+  opencode `apg_query` plugin into `<dir>/.opencode/tools/apg_query.ts`.
+- `apg scan [dir] [--language L] [--exclude-path G]* [--module M]* [blacklist...]`
+  — run the pipeline; writes `.apg/db.lbug`, `.apg/graph.jsonl`,
+  `.apg/apg-frontend.log`.
+- `apg query "<cypher>"` — read-only Cypher over `.apg/db.lbug` (found by walking
+  up from cwd), CSV output with header row.
+- `apg --version`, `apg --help`.
+
+The `apg` binary is brew-installable (`Formula/apg.rb`, tap
+`brew install antz29/apg/apg`). In the repo itself, run it via
+`cargo run -- scan <dir>` or `target/debug/apg scan <dir>`.
 
 ### Unified JSONL schema (abridged)
 
@@ -41,7 +60,7 @@ Edge records:
 - `id` is a scanner-local opaque counter (`n1`, `n2`, …); edges reference
   project nodes by `id`, unresolved targets by `fqn`. The ingestor maps `id`s
   to canonical FQNs. `code_type` is **not** emitted by scanners — the ingestor
-  computes it from `path` + `apg.json` (`src/classify.rs`).
+  computes it from `path` + `apg.json`/`.apg/config.json` (`src/classify.rs`).
 
 ### FQN convention (rendered ingestor-side, SPEC §4)
 
@@ -59,7 +78,7 @@ residual FQN collision rather than silently overwriting.
 
 ## LadybugDB Tooling
 
-The workspace has a LadybugDB graph database at `db.lbug` containing the parsed codebase. Interact via the `ladybug_query` tool — a Cypher-like query interface.
+The workspace has a LadybugDB graph database at `.apg/db.lbug` containing the parsed codebase. Interact via the `apg_query` tool — a Cypher-like query interface. (The legacy `ladybug_query`/`ladybug_scan` tools were renamed to `apg_query`/`apg_scan`.)
 
 ### Query syntax
 
@@ -107,7 +126,7 @@ Built-in defaults (per language):
 - **Java**: `test` = `*Test.java`/`*Tests.java` or `test`/`tests` segment; `generated` = `gen`/`generated` segment; `external` = `vendor`/`third_party`.
 - **C++**: `test` = `*_test.cpp`/`test_*.cpp` or `test`/`tests` segment; `generated` = `*.pb.cc`/`*.pb.h` or `gen`/`generated` segment; `external` = `vendor`/`third_party`/`external`.
 
-An `apg.json` at the project root **replaces** the defaults. Shape:
+An `apg.json` at the project root or `.apg/config.json` **replaces** the defaults. Shape:
 
 ```json
 {
@@ -131,7 +150,7 @@ An `apg.json` at the project root **replaces** the defaults. Shape:
 - **C++ edges are heuristic** (tree-sitter + scope/type tracking). Unresolvable calls/types are recorded as `UnresolvedCall`/`UnresolvedUse` rather than guessed.
 - **The scanner never guesses**: if a call/type can't be resolved to a project symbol, it becomes an `UnresolvedTarget` edge, never a fabricated FQN.
 - **All code is included** — tests, generated, and vendored code are scanned like everything else (the only exclusions are user `--exclude-path` patterns and files the compiler/frontend can't process). Filter by `code_type` instead.
-- **Multi-module repos**: Go workspaces (`go.work`) and C++ monorepos are supported. Each module is a top-level `Module` node; FQNs are module-prefixed so they stay unique across modules. Pass `modules: "dir1,dir2"` to `ladybug_scan` to restrict scanning to specific modules (Go/C++).
+- **Multi-module repos**: Go workspaces (`go.work`) and C++ monorepos are supported. Each module is a top-level `Module` node; FQNs are module-prefixed so they stay unique across modules. Pass `modules: "dir1,dir2"` to `apg_scan` to restrict scanning to specific modules (Go/C++).
 - To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
 ### Other tools

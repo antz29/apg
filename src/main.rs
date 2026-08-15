@@ -6,11 +6,68 @@ mod load;
 mod schema;
 
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use cleanup::{cleanup, CleanupOptions};
-use lbug::{Connection, Database};
+use lbug::{Connection, Database, SystemConfig};
+
+/// The `.opencode/tools/apg_query.ts` tool file that `apg init` installs into a
+/// project. Auto-discovered by opencode from `.opencode/tools/*.ts`; shells out
+/// to `apg query` (on PATH) from the project root.
+const APG_QUERY_TOOL: &str = r#"import { existsSync } from "node:fs"
+import path from "node:path"
+import { tool } from "@opencode-ai/plugin"
+
+function findApgRoot(context: { directory: string; worktree: string }): string | null {
+  const starts = [context.directory, process.cwd(), context.worktree]
+  for (const s of starts) {
+    if (!s) continue
+    let dir = s
+    while (true) {
+      if (existsSync(path.join(dir, ".apg", "db.lbug"))) return dir
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+  return null
+}
+
+export default tool({
+  description:
+    "Execute a read-only Cypher query on the project's LadybugDB graph database (.apg/db.lbug). CSV output, header row included. Use for graph traversal: MATCH/RETURN only. No modifications.",
+  args: {
+    query: tool.schema.string().describe("Cypher query, e.g. MATCH (n:Module) RETURN n.fqn LIMIT 10"),
+  },
+  async execute(args, context) {
+    const root = findApgRoot(context)
+    if (!root) {
+      return `Error: no .apg/db.lbug found. Run \`apg scan\` in the project root first.`
+    }
+    const result = await Bun.$`apg query ${args.query}`.cwd(root).quiet().nothrow()
+    if (result.exitCode !== 0) {
+      return `apg query failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
+    }
+    return result.stdout.toString().trim()
+  },
+})
+"#;
+
+/// The `.opencode/package.json` written by `apg init` when none exists, so the
+/// tool file's `@opencode-ai/plugin` import resolves.
+const OPENCODE_PACKAGE_JSON: &str = r#"{
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.10"
+  }
+}
+"#;
+
+const DEFAULT_CONFIG_JSON: &str = r#"{
+  "default": "src",
+  "types": []
+}
+"#;
 
 /// Mirrors every run message to stderr *and* to `apg-frontend.log`, so the log
 /// is a complete high-resolution record of the run (the frontend's stderr is
@@ -33,12 +90,73 @@ impl Log {
     }
 }
 
+/// Directory holding the built scanner frontends. Resolution order:
+/// 1. `APG_FRONTEND_DIR` env override.
+/// 2. Relative to the running executable: `<exe_dir>/frontends` (dev,
+///    `target/<profile>/frontends`) or `<exe_dir>/../libexec/frontends`
+///    (brew Cellar layout).
+/// 3. `None` — fall back to the compile-time baked paths.
+fn frontend_dir() -> Option<PathBuf> {
+    if let Ok(d) = std::env::var("APG_FRONTEND_DIR") {
+        let p = PathBuf::from(d);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    [dir.join("frontends"), dir.join("..").join("libexec").join("frontends")]
+        .into_iter()
+        .find(|c| c.is_dir())
+}
+
 fn available_languages() -> Vec<String> {
+    if let Some(dir) = frontend_dir() {
+        let mut langs = Vec::new();
+        if dir.join("cppfrontend").exists() {
+            langs.push("cpp".into());
+        }
+        if dir.join("gofrontend").exists() {
+            langs.push("go".into());
+        }
+        if dir.join("java-classes").is_dir() {
+            langs.push("java".into());
+        }
+        if !langs.is_empty() {
+            return langs;
+        }
+    }
     env!("APG_LANGUAGES")
         .split(',')
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .collect()
+}
+
+/// Full command for the scanner frontend of `language`. When a runtime
+/// frontend dir is present its artifacts win; otherwise the compile-time baked
+/// paths (dev `cargo run`).
+fn frontend_cmd(language: &str) -> String {
+    if let Some(dir) = frontend_dir() {
+        match language {
+            "cpp" => return dir.join("cppfrontend").display().to_string(),
+            "go" => return dir.join("gofrontend").display().to_string(),
+            "java" => {
+                let classes = dir.join("java-classes");
+                return format!(
+                    "java -Xmx5g -cp {} --add-exports jdk.compiler/com.sun.source.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.source.util=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED CallGraphBuilder",
+                    classes.display()
+                );
+            }
+            _ => panic!("unknown language: {language}"),
+        }
+    }
+    match language {
+        "cpp" => env!("APG_FRONTEND_CPP").to_string(),
+        "go" => env!("APG_FRONTEND_GO").to_string(),
+        "java" => env!("APG_FRONTEND_JAVA").to_string(),
+        _ => panic!("unknown language: {language}"),
+    }
 }
 
 fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32) -> bool {
@@ -61,7 +179,7 @@ fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32) -> bool {
             }
         } else if p
             .extension()
-            .map_or(false, |e| exts.contains(&format!(".{}", e.to_str().unwrap_or("")).as_str()))
+            .is_some_and(|e| exts.contains(&format!(".{}", e.to_str().unwrap_or("")).as_str()))
         {
             return true;
         }
@@ -84,15 +202,6 @@ fn auto_detect_language(dir: &std::path::Path, available: &[String]) -> Option<S
     None
 }
 
-fn frontend_cmd(language: &str) -> String {
-    match language {
-        "cpp" => env!("APG_FRONTEND_CPP").to_string(),
-        "go" => env!("APG_FRONTEND_GO").to_string(),
-        "java" => env!("APG_FRONTEND_JAVA").to_string(),
-        _ => panic!("unknown language: {language}"),
-    }
-}
-
 fn temp_dir() -> PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -101,44 +210,224 @@ fn temp_dir() -> PathBuf {
     std::env::temp_dir().join(format!("apg-load-{}-{nanos}", std::process::id()))
 }
 
+fn print_help() {
+    println!(
+        "apg — program graph scanner + LadybugDB query CLI for opencode
+
+USAGE:
+  apg init [dir]              Set up .apg/ (db + config) and install the
+                              opencode apg_query plugin into .opencode/
+  apg scan [dir] [options]    Scan a project; writes .apg/db.lbug and
+                              .apg/graph.jsonl
+  apg query \"<cypher>\"        Run a read-only Cypher query against
+                              .apg/db.lbug (found by walking up from cwd)
+  apg --version               Print version
+  apg --help                  Show this help
+
+SCAN OPTIONS:
+  --language <java|go|cpp>    Scanner language (auto-detected if omitted)
+  --exclude-path <glob>       Exclude path patterns (repeatable)
+  --module <dir>              Restrict scanning to a module (Go/C++, repeatable)
+  <blacklist...>              FQN prefixes to exclude from the graph"
+    );
+}
+
 fn main() {
     let raw: Vec<String> = std::env::args().collect();
-    let mut clean = vec![raw[0].clone()];
+    if raw.len() < 2 {
+        print_help();
+        std::process::exit(2);
+    }
+    let status = match raw[1].as_str() {
+        "init" => cmd_init(&raw[2..]),
+        "query" => cmd_query(&raw[2..]),
+        "scan" => cmd_scan(&raw[2..]),
+        "--version" | "-V" => {
+            println!("apg {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        "--help" | "-h" => {
+            print_help();
+            Ok(())
+        }
+        other => {
+            eprintln!("apg: unknown subcommand: {other}");
+            print_help();
+            Err(anyhow::anyhow!("unknown subcommand: {other}"))
+        }
+    };
+    if let Err(e) = status {
+        eprintln!("apg: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// `apg init [dir]`: create `.apg/` with a default `config.json`, then install
+/// the opencode `apg_query` plugin into `<dir>/.opencode/`.
+fn cmd_init(args: &[String]) -> anyhow::Result<()> {
+    let dir = if args.is_empty() {
+        std::env::current_dir()?
+    } else {
+        PathBuf::from(&args[0])
+    };
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+
+    let apg_dir = dir.join(".apg");
+    std::fs::create_dir_all(&apg_dir)?;
+    let cfg_path = apg_dir.join("config.json");
+    if !cfg_path.exists() {
+        std::fs::write(&cfg_path, DEFAULT_CONFIG_JSON)?;
+    }
+
+    let opencode_dir = dir.join(".opencode");
+    let tools_dir = opencode_dir.join("tools");
+    std::fs::create_dir_all(&tools_dir)?;
+
+    let pkg_path = opencode_dir.join("package.json");
+    if !pkg_path.exists() {
+        std::fs::write(&pkg_path, OPENCODE_PACKAGE_JSON)?;
+    }
+    std::fs::write(tools_dir.join("apg_query.ts"), APG_QUERY_TOOL)?;
+
+    if !opencode_dir
+        .join("node_modules")
+        .join("@opencode-ai")
+        .join("plugin")
+        .exists()
+    {
+        let status = Command::new("npm")
+            .arg("install")
+            .current_dir(&opencode_dir)
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            _ => eprintln!(
+                "warning: could not npm install in {}; run `npm install` there for the plugin import to resolve.",
+                opencode_dir.display()
+            ),
+        }
+    }
+
+    println!(
+        "Initialized .apg/ (config.json) and installed apg_query tool in {}",
+        opencode_dir.display()
+    );
+    Ok(())
+}
+
+/// `apg query "<cypher>"`: open `.apg/db.lbug` (found by walking up from cwd)
+/// read-only and print the result as CSV with a header row.
+fn cmd_query(args: &[String]) -> anyhow::Result<()> {
+    let query = args.join(" ");
+    if query.trim().is_empty() {
+        anyhow::bail!("usage: apg query \"<cypher>\"");
+    }
+    let start = std::env::current_dir()?;
+    let apg_dir = find_apg_dir(&start)
+        .ok_or_else(|| anyhow::anyhow!("no .apg directory found from {}", start.display()))?;
+    let db_path = apg_dir.join("db.lbug");
+    if !db_path.exists() {
+        anyhow::bail!(
+            "{} does not exist — run `apg scan` first",
+            db_path.display()
+        );
+    }
+
+    let query = if query.trim_end().ends_with(';') {
+        query
+    } else {
+        format!("{query};")
+    };
+    let db = Database::new(&db_path, SystemConfig::default().read_only(true))?;
+    let conn = Connection::new(&db)?;
+    let result = conn.query(&query)?;
+    let names = result.get_column_names();
+    let header: Vec<String> = names.iter().map(|n| csv_escape(n)).collect();
+    println!("{}", header.join(","));
+    for row in result {
+        let cells: Vec<String> = row.iter().map(|v| csv_escape(&v.to_string())).collect();
+        println!("{}", cells.join(","));
+    }
+    Ok(())
+}
+
+fn csv_escape(field: &str) -> String {
+    if field.contains(',') || field.contains('"') || field.contains('\n') {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
+    }
+}
+
+/// Walks up from `start` looking for a `.apg` directory.
+fn find_apg_dir(start: &Path) -> Option<PathBuf> {
+    let mut cur = start;
+    loop {
+        let cand = cur.join(".apg");
+        if cand.is_dir() {
+            return Some(cand);
+        }
+        cur = cur.parent()?;
+    }
+}
+
+/// Finds the project's `.apg` dir (walking up from the scanned dir) or creates
+/// one at `<dir>/.apg` if none exists.
+fn find_or_create_apg_dir(dir: &Path) -> PathBuf {
+    if let Some(apg) = find_apg_dir(dir) {
+        return apg;
+    }
+    let apg = dir.join(".apg");
+    std::fs::create_dir_all(&apg).unwrap();
+    apg
+}
+
+/// `apg scan [dir] [options] [blacklist...]`: run the scanner + ingestor
+/// pipeline and write `db.lbug`, `graph.jsonl`, and `apg-frontend.log` into
+/// the project's `.apg` directory.
+fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut language: Option<String> = None;
     let mut path_excludes: Vec<String> = Vec::new();
     let mut module_dirs: Vec<String> = Vec::new();
-    let mut i = 1;
-    while i < raw.len() {
-        match raw[i].as_str() {
+    let mut positional: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
             "--language" | "-l" => {
                 i += 1;
-                if i < raw.len() {
-                    language = Some(raw[i].clone());
+                if i < args.len() {
+                    language = Some(args[i].clone());
                 }
             }
             "--exclude-path" => {
                 i += 1;
-                if i < raw.len() {
-                    path_excludes.push(raw[i].clone());
+                if i < args.len() {
+                    path_excludes.push(args[i].clone());
                 }
             }
             "--module" => {
                 i += 1;
-                if i < raw.len() {
-                    module_dirs.push(raw[i].clone());
+                if i < args.len() {
+                    module_dirs.push(args[i].clone());
                 }
             }
-            _ => clean.push(raw[i].clone()),
+            _ => positional.push(args[i].clone()),
         }
         i += 1;
     }
 
-    let project_dir = if clean.len() > 1 {
-        PathBuf::from(&clean[1])
+    let project_dir = if positional.is_empty() {
+        std::env::current_dir()?
     } else {
-        PathBuf::from("project")
+        PathBuf::from(&positional[0])
     };
-    let project_dir = project_dir.canonicalize().unwrap();
+    let blacklist: Vec<String> = positional[1..].to_vec();
+    let project_dir = project_dir.canonicalize()?;
+
+    // Resolve the .apg output dir, then run the pipeline from inside it so
+    // db.lbug / graph.jsonl / apg-frontend.log all land there.
+    let apg_dir = find_or_create_apg_dir(&project_dir);
+    std::env::set_current_dir(&apg_dir)?;
 
     let mut log = Log::new();
     log.ln(&format!("Project: {}", project_dir.display()));
@@ -149,8 +438,7 @@ fn main() {
     }
 
     let language = language.unwrap_or_else(|| {
-        auto_detect_language(&project_dir, &available)
-            .unwrap_or_else(|| available[0].clone())
+        auto_detect_language(&project_dir, &available).unwrap_or_else(|| available[0].clone())
     });
 
     if !available.iter().any(|l| l == &language) {
@@ -161,7 +449,6 @@ fn main() {
     }
     log.ln(&format!("Language: {language}"));
 
-    let blacklist: Vec<String> = clean.iter().skip(2).cloned().collect();
     if !blacklist.is_empty() {
         log.ln(&format!("Blacklist: {:?}", blacklist));
     }
@@ -206,7 +493,7 @@ fn main() {
         {
             panic!("{language} frontend failed");
         }
-        log.ln(&format!("[load] frontend exited"));
+        log.ln("[load] frontend exited");
     } else {
         let mut args = vec![project_dir.display().to_string()];
         for m in &module_dirs {
@@ -249,6 +536,7 @@ fn main() {
         }
         log.ln("[load] java frontend exited");
     }
+    Ok(())
 }
 
 /// Consumes the scanner's unified-JSONL stdout, ingests it, and loads
@@ -315,7 +603,7 @@ fn process(
 
     let _ = std::fs::remove_file("db.lbug");
     if std::path::Path::new("db.lbug").exists() {
-        panic!("db.lbug still exists (a previous run is still holding it?) — kill any stray java_apg/java processes and retry");
+        panic!("db.lbug still exists (a previous run is still holding it?) — kill any stray apg/java processes and retry");
     }
     log.ln("[load] Database::new...");
     let db = Database::new("db.lbug", Default::default()).unwrap();

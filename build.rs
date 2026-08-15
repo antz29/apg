@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
@@ -8,6 +8,19 @@ fn main() {
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let mut languages: Vec<String> = Vec::new();
+
+    // Directory the runtime uses to find frontends relative to the binary:
+    // <target>/<profile>/frontends. Also populated by `apg`'s runtime lookup
+    // (see `frontend_dir` in main.rs) so dev builds and the brew formula can
+    // both resolve frontends from a known spot.
+    let profile_dir = PathBuf::from(&out_dir)
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .expect("OUT_DIR has unexpected shape")
+        .to_path_buf();
+    let stage_dir = profile_dir.join("frontends");
+    std::fs::create_dir_all(&stage_dir).ok();
 
     // --- C++ frontend (tree-sitter, no external deps) ---
     let cppfrontend = Path::new(&out_dir).join("cppfrontend");
@@ -81,6 +94,7 @@ fn main() {
 
         if link_ok {
             println!("cargo:rustc-env=APG_FRONTEND_CPP={}", cppfrontend.display());
+            let _ = std::fs::copy(&cppfrontend, stage_dir.join("cppfrontend"));
             languages.push("cpp".into());
         }
     }
@@ -95,6 +109,7 @@ fn main() {
 
     if go_ok {
         println!("cargo:rustc-env=APG_FRONTEND_GO={}", gofrontend.display());
+        let _ = std::fs::copy(&gofrontend, stage_dir.join("gofrontend"));
         languages.push("go".into());
     }
 
@@ -121,8 +136,28 @@ fn main() {
             java_classes.display()
         );
         println!("cargo:rustc-env=APG_FRONTEND_JAVA={}", cmd);
+        let stage_java = stage_dir.join("java-classes");
+        std::fs::create_dir_all(&stage_java).ok();
+        copy_dir(&java_classes, &stage_java);
         languages.push("java".into());
     }
 
     println!("cargo:rustc-env=APG_LANGUAGES={}", languages.join(","));
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    let entries = match std::fs::read_dir(from) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if src.is_dir() {
+            std::fs::create_dir_all(&dst).ok();
+            copy_dir(&src, &dst);
+        } else {
+            let _ = std::fs::copy(&src, &dst);
+        }
+    }
 }

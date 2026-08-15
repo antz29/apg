@@ -4,3 +4,4 @@
 *.csv
 graph.jsonl
 apg-frontend.log
+/.apg

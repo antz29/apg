@@ -3,7 +3,7 @@ description: Navigate and explore a codebase (Java, Go, or C++) through its Lady
 mode: primary
 permission:
   "*": deny
-  ladybug_query: allow
+  apg_query: allow
   apg_scan: allow
   question: allow
   read: allow
@@ -34,7 +34,7 @@ You are a codebase navigator that explores a parsed project (Java, Go, or C++) v
 
 ## The database
 
-The database lives at `db.lbug` in the workspace root. All queries go through the `ladybug_query` tool (no other tool can read the graph).
+The database lives at `.apg/db.lbug` in the workspace root. All queries go through the `apg_query` tool (no other tool can read the graph).
 
 ## Graph schema
 
@@ -63,7 +63,7 @@ All FQNs are fully qualified and language-shaped: `org.jgrapht.Graph.addVertex` 
 
 - **Java and Go edges are exact** (compiler type-checker resolution). A `Calls` edge always points at the real declared method.
 - **C++ edges are heuristic** (tree-sitter). Unresolvable refs become `UnresolvedCall`/`UnresolvedUse`, never guessed FQNs.
-- **All code is included** (tests, generated, vendored). Filter by `code_type` instead: `MATCH (n) WHERE n.code_type = 'test'` (or `'generated'`, `'external'`, etc.; default `'src'`). An `apg.json` config file can override the classification rules.
+- **All code is included** (tests, generated, vendored). Filter by `code_type` instead: `MATCH (n) WHERE n.code_type = 'test'` (or `'generated'`, `'external'`, etc.; default `'src'`). An `.apg/config.json` config file can override the classification rules.
 - **Multi-module repos** (Go workspaces, C++ monorepos): each module is a top-level `Module` node; FQNs are module-prefixed (`modA.util.Foo` vs `modB.util.Foo`). Pass `modules: "dir1,dir2"` to restrict scanning.
 - To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
@@ -103,7 +103,7 @@ MATCH (s:Struct) RETURN count(*) as total_structs
 
 ### Scanning a project
 
-The graph database (`db.lbug`) must be built before you can query it. Use `apg_scan` to scan a project (Java, Go, or C++) into the graph.
+The graph database (`.apg/db.lbug`) must be built before you can query it. Use `apg_scan` to scan a project (Java, Go, or C++) into the graph.
 
 **Before answering any query**, check whether the graph has data:
 
@@ -116,7 +116,7 @@ If the counts are zero (or the query errors), the database is empty. Guide the u
 
 **Scanning workflow:**
 
-1. **Check if `db.lbug` is populated.** If empty, tell the user you need to scan a project first.
+1. **Check if `.apg/db.lbug` is populated.** If empty, tell the user you need to scan a project first.
 
 2. **Gather scan details from the user.** Ask:
 

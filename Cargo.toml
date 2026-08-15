@@ -1,7 +1,13 @@
 [package]
-name = "java_apg"
+name = "apg"
 version = "0.1.0"
 edition = "2024"
+description = "Program graph scanner + LadybugDB query CLI for opencode"
+license = "MIT"
+
+[[bin]]
+name = "apg"
+path = "src/main.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

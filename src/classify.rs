@@ -26,9 +26,19 @@ fn default_code_type() -> String {
 }
 
 impl ApgConfig {
+    /// Loads the classification config from `.apg/config.json` (the current
+    /// location), falling back to a legacy `apg.json` at the project root.
     pub fn load(project_dir: &Path) -> Option<ApgConfig> {
-        let text = std::fs::read_to_string(project_dir.join("apg.json")).ok()?;
-        serde_json::from_str(&text).ok()
+        for cand in [project_dir.join(".apg/config.json"), project_dir.join("apg.json")] {
+            let text = std::fs::read_to_string(&cand);
+            let Ok(text) = text else {
+                continue;
+            };
+            if let Ok(cfg) = serde_json::from_str(&text) {
+                return Some(cfg);
+            }
+        }
+        None
     }
 }
 
