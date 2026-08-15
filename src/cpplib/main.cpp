@@ -15,12 +15,33 @@ namespace fs = std::filesystem;
 static TSParser *parser = nullptr;
 
 struct Decl {
-    std::string kind;
-    std::string fqn;
+    std::string kind;      // "class" | "method"
+    std::string id;        // opaque id (SPEC §3)
+    std::string fqn;       // canonical FQN (parent.name), no params
+    std::string name;      // simple name
+    std::string parent;    // enclosing scope FQN (module/namespace or class)
     std::string path;
     uint32_t start;
     uint32_t end;
+    std::vector<std::string> params;  // method parameter type names (best-effort)
 };
+
+// ── Global id state (SPEC §3) ────────────────────────────────────────
+//
+// nextId is the monotonic opaque-id counter. structID/funcID map canonical
+// keys to ids: structs by FQN, functions by `parent.name(params)` (so
+// overloads stay distinct). funcIDByFqn maps the plain FQN to the first id
+// for that name, used to resolve heuristic call targets.
+static int nextId = 0;
+static std::string newNodeID() {
+    return "n" + std::to_string(++nextId);
+}
+static std::unordered_map<std::string, std::string> structID;
+static std::unordered_map<std::string, std::string> funcID;
+static std::unordered_map<std::string, std::string> funcIDByFqn;
+
+// unresolvedSeen deduplicates unresolved node records by fqn.
+static std::unordered_set<std::string> unresolvedSeen;
 
 static std::string node_text(TSNode node, const std::string &source) {
     uint32_t start = ts_node_start_byte(node);
@@ -79,6 +100,12 @@ struct JsonBuilder {
     JsonBuilder &field(const std::string &key, uint32_t val) {
         if (buf.size() > 1) buf += ",";
         buf += "\"" + key + "\":" + std::to_string(val);
+        return *this;
+    }
+    // Appends a pre-built JSON value (e.g. the params array) verbatim.
+    JsonBuilder &raw(const std::string &key, const std::string &val) {
+        if (buf.size() > 1) buf += ",";
+        buf += "\"" + key + "\":" + val;
         return *this;
     }
     std::string done() { buf += "}"; return buf; }
@@ -186,6 +213,9 @@ static std::string type_node_to_fqn(TSNode node, const std::string &source) {
     if (strcmp(kind, "type_identifier") == 0) {
         return node_text(node, source);
     }
+    if (strcmp(kind, "primitive_type") == 0) {
+        return node_text(node, source);
+    }
     if (strcmp(kind, "nested_identifier") == 0 || strcmp(kind, "qualified_identifier") == 0) {
         std::string text = node_text(node, source);
         for (size_t p = 0; (p = text.find("::", p)) != std::string::npos; p += 1)
@@ -198,13 +228,17 @@ static std::string type_node_to_fqn(TSNode node, const std::string &source) {
         return "";
     }
     if (strcmp(kind, "sized_type_specifier") == 0) {
+        std::string out;
         uint32_t count = ts_node_named_child_count(node);
         for (uint32_t i = 0; i < count; i++) {
             TSNode child = ts_node_named_child(node, i);
             std::string result = type_node_to_fqn(child, source);
-            if (!result.empty()) return result;
+            if (!result.empty()) {
+                if (!out.empty()) out += " ";
+                out += result;
+            }
         }
-        return "";
+        return out;
     }
     if (strcmp(kind, "struct_specifier") == 0 || strcmp(kind, "class_specifier") == 0) {
         TSNode name = ts_node_child_by_field_name(node, "name", 4);
@@ -225,42 +259,84 @@ static std::string resolve_type_fqn(const std::string &type_name,
     return "";
 }
 
-static void emit_use(const std::string &source, const std::string &target) {
-    JsonBuilder jb;
-    jb.field("type", "use");
-    jb.field("source", source);
-    jb.field("target", target);
-    emit_json(jb.done());
-}
-
-static void emit_u_call(const std::string &source, const std::string &target,
-    const std::string &category)
-{
-    JsonBuilder jb;
-    jb.field("type", "u_call");
-    jb.field("source", source);
-    jb.field("target", target);
-    jb.field("category", category);
-    emit_json(jb.done());
-}
-
-static void emit_u_use(const std::string &source, const std::string &target,
-    const std::string &category)
-{
-    JsonBuilder jb;
-    jb.field("type", "u_use");
-    jb.field("source", source);
-    jb.field("target", target);
-    jb.field("category", category);
-    emit_json(jb.done());
-}
-
 // Classify an unresolved symbol name. Qualified names are external symbols;
 // bare identifiers are function pointers/locals (func-value) or, for types,
 // unknown.
 static std::string category_for(const std::string &name, bool is_type) {
     if (name.find('.') != std::string::npos) return "external";
     return is_type ? "unknown" : "func-value";
+}
+
+// ── Unified-schema emission ──────────────────────────────────────────
+
+// Resolves a project FQN (function or struct) to its opaque id, or "" if the
+// symbol was never declared. structs take priority (a class fqn cannot also be
+// a function fqn).
+static std::string node_id(const std::string &fqn) {
+    auto it = structID.find(fqn);
+    if (it != structID.end()) return it->second;
+    auto jt = funcIDByFqn.find(fqn);
+    if (jt != funcIDByFqn.end()) return jt->second;
+    return "";
+}
+
+static void emit_edge(const std::string &type, const std::string &from, const std::string &to) {
+    JsonBuilder jb;
+    jb.field("type", type);
+    jb.field("from", from);
+    jb.field("to", to);
+    emit_json(jb.done());
+}
+
+// Emits the unresolved node record for fqn on first encounter.
+static void emit_unresolved(const std::string &fqn, const std::string &category) {
+    if (fqn.empty() || unresolvedSeen.count(fqn)) return;
+    unresolvedSeen.insert(fqn);
+    JsonBuilder jb;
+    jb.field("type", "unresolved");
+    jb.field("fqn", fqn);
+    jb.field("category", category);
+    emit_json(jb.done());
+}
+
+// Resolved `uses` edge: source (function/struct) and target (struct) by id.
+static void emit_use(const std::string &source_fqn, const std::string &target_fqn) {
+    std::string sid = node_id(source_fqn);
+    auto tit = structID.find(target_fqn);
+    if (sid.empty() || tit == structID.end()) return;
+    emit_edge("uses", sid, tit->second);
+}
+
+static void emit_u_use(const std::string &source_fqn, const std::string &target,
+    const std::string &category)
+{
+    std::string sid = node_id(source_fqn);
+    if (sid.empty() || target.empty()) return;
+    emit_unresolved(target, category);
+    emit_edge("unresolved_use", sid, target);
+}
+
+static void emit_u_call(const std::string &source_fqn, const std::string &target,
+    const std::string &category)
+{
+    std::string sid = node_id(source_fqn);
+    if (sid.empty() || target.empty()) return;
+    emit_unresolved(target, category);
+    emit_edge("unresolved_call", sid, target);
+}
+
+// Resolved `calls` edge: source (function) to target (function) by id. A
+// target that never resolved to a declared function becomes an unresolved call
+// so the dependency is not lost.
+static void emit_call(const std::string &source_fqn, const std::string &target_fqn) {
+    std::string sid = node_id(source_fqn);
+    if (sid.empty()) return;
+    auto it = funcIDByFqn.find(target_fqn);
+    if (it != funcIDByFqn.end()) {
+        emit_edge("calls", sid, it->second);
+    } else {
+        emit_u_call(source_fqn, target_fqn, category_for(target_fqn, false));
+    }
 }
 
 // ── Variable name extraction from declarator ─────────────────────────
@@ -288,6 +364,53 @@ static std::string declarator_name(TSNode node, const std::string &source) {
 }
 
 // ── Declaration collection ───────────────────────────────────────────
+
+static std::string join_params(const std::vector<std::string> &params) {
+    std::string out;
+    for (size_t i = 0; i < params.size(); i++) {
+        if (i > 0) out += ",";
+        out += params[i];
+    }
+    return out;
+}
+
+// Best-effort parameter type names of a function declarator, in declaration
+// order (SPEC §2.3), used for overload disambiguation ingestor-side.
+static std::vector<std::string> decl_params(TSNode declarator, const std::string &source) {
+    std::vector<std::string> out;
+    const char *kind = ts_node_type(declarator);
+    if (strcmp(kind, "function_declarator") == 0) {
+        TSNode params = ts_node_child_by_field_name(declarator, "parameters", 10);
+        if (!ts_node_is_null(params)) {
+            uint32_t count = ts_node_named_child_count(params);
+            for (uint32_t i = 0; i < count; i++) {
+                TSNode param = ts_node_named_child(params, i);
+                const char *pk = ts_node_type(param);
+                if (strcmp(pk, "parameter_declaration") == 0 || strcmp(pk, "optional_parameter_declaration") == 0) {
+                    TSNode ptype = ts_node_child_by_field_name(param, "type", 4);
+                    if (!ts_node_is_null(ptype)) {
+                        out.push_back(type_node_to_fqn(ptype, source));
+                    }
+                }
+            }
+        }
+    }
+    // Recurse into nested declarators (e.g. pointer to function)
+    TSNode inner = ts_node_child_by_field_name(declarator, "declarator", 10);
+    if (!ts_node_is_null(inner)) {
+        auto nested = decl_params(inner, source);
+        out.insert(out.end(), nested.begin(), nested.end());
+    }
+    return out;
+}
+
+// The enclosing-scope FQN of a declaration (everything before the last dot),
+// or "" if there is none.
+static std::string parent_of(const std::string &fqn) {
+    size_t dot = fqn.rfind('.');
+    if (dot == std::string::npos) return "";
+    return fqn.substr(0, dot);
+}
 
 static void collect_decls(TSNode node, const std::string &source,
     std::vector<std::string> &scope, const std::string &path,
@@ -317,7 +440,10 @@ static void collect_decls(TSNode node, const std::string &source,
         std::string name = clean_fqn(attr(node, "name", source));
         if (!name.empty()) {
             std::string fqn = clean_fqn(fqn_in_scope(name, scope));
-            decls.push_back({"class", fqn, path, ts_node_start_byte(node), ts_node_end_byte(node)});
+            std::string id = newNodeID();
+            structID[fqn] = id;
+            decls.push_back({"class", id, fqn, name, parent_of(fqn), path,
+                             ts_node_start_byte(node), ts_node_end_byte(node), {}});
 
             // Collect base classes
             TSNode base = ts_node_child_by_field_name(node, "base", 4);
@@ -348,7 +474,10 @@ static void collect_decls(TSNode node, const std::string &source,
         std::string name = clean_fqn(attr(node, "name", source));
         if (!name.empty()) {
             std::string fqn = clean_fqn(fqn_in_scope(name, scope));
-            decls.push_back({"class", fqn, path, ts_node_start_byte(node), ts_node_end_byte(node)});
+            std::string id = newNodeID();
+            structID[fqn] = id;
+            decls.push_back({"class", id, fqn, name, parent_of(fqn), path,
+                             ts_node_start_byte(node), ts_node_end_byte(node), {}});
             scope.push_back(name);
             TSNode body = ts_node_child_by_field_name(node, "body", 4);
             if (!ts_node_is_null(body)) {
@@ -375,7 +504,16 @@ static void collect_decls(TSNode node, const std::string &source,
                 if (!scope.empty()) {
                     fqn = fqn_in_scope(fqn, scope);
                 }
-                decls.push_back({"method", clean_fqn(fqn), path, ts_node_start_byte(node), ts_node_end_byte(node)});
+                fqn = clean_fqn(fqn);
+                std::vector<std::string> params = decl_params(declarator, source);
+                std::string name = segments.back();
+                std::string parent = parent_of(fqn);
+                std::string key = parent + "." + name + "(" + join_params(params) + ")";
+                std::string id = newNodeID();
+                funcID[key] = id;
+                if (!funcIDByFqn.count(fqn)) funcIDByFqn[fqn] = id;
+                decls.push_back({"method", id, fqn, name, parent, path,
+                                 ts_node_start_byte(node), ts_node_end_byte(node), params});
             }
         }
         return;
@@ -436,8 +574,13 @@ static void emit_use_from_type(TSNode type_node, const std::string &source,
     std::string type_name = type_node_to_fqn(type_node, source);
     if (type_name.empty()) return;
     std::string resolved = resolve_type_fqn(type_name, scope, fqn_set);
-    if (!resolved.empty()) {
+    if (!resolved.empty() && structID.count(resolved)) {
         emit_use(source_fqn, resolved);
+    } else if (!resolved.empty()) {
+        // Resolved to a declared symbol that is not a struct (e.g. a method
+        // name used as a type); a uses edge cannot target it, so record an
+        // unresolved use to keep the dependency.
+        emit_u_use(source_fqn, type_name, category_for(type_name, true));
     } else {
         emit_u_use(source_fqn, type_name, category_for(type_name, true));
     }
@@ -683,11 +826,7 @@ static void resolve_calls(TSNode node, const std::string &source,
                 std::string name = node_text(func, source);
                 std::string target = resolve_name(name, scope, name_map, fqn_set);
                 if (!target.empty()) {
-                    JsonBuilder jb;
-                    jb.field("type", "call");
-                    jb.field("source", source_fn);
-                    jb.field("target", target);
-                    emit_json(jb.done());
+                    emit_call(source_fn, target);
                 } else {
                     emit_u_call(source_fn, name, category_for(name, false));
                 }
@@ -716,11 +855,7 @@ static void resolve_calls(TSNode node, const std::string &source,
                                             auto pos = candidate.rfind('.');
                                             std::string mname = (pos == std::string::npos) ? candidate : candidate.substr(pos + 1);
                                             if (mname == method) {
-                                                JsonBuilder jb;
-                                                jb.field("type", "call");
-                                                jb.field("source", source_fn);
-                                                jb.field("target", candidate);
-                                                emit_json(jb.done());
+                                                emit_call(source_fn, candidate);
                                                 resolved = true;
                                                 break;
                                             }
@@ -743,11 +878,7 @@ static void resolve_calls(TSNode node, const std::string &source,
                     if (!resolved) {
                         auto it = name_map.find(method);
                         if (it != name_map.end() && it->second.size() == 1) {
-                            JsonBuilder jb;
-                            jb.field("type", "call");
-                            jb.field("source", source_fn);
-                            jb.field("target", it->second[0]);
-                            emit_json(jb.done());
+                            emit_call(source_fn, it->second[0]);
                         } else {
                             emit_u_call(source_fn, method, category_for(method, false));
                         }
@@ -759,19 +890,11 @@ static void resolve_calls(TSNode node, const std::string &source,
                     text.replace(p, 2, ".");
                 }
                 if (fqn_set.count(text)) {
-                    JsonBuilder jb;
-                    jb.field("type", "call");
-                    jb.field("source", source_fn);
-                    jb.field("target", text);
-                    emit_json(jb.done());
+                    emit_call(source_fn, text);
                 } else {
                     std::string scoped = fqn_in_scope(text, scope);
                     if (fqn_set.count(scoped)) {
-                        JsonBuilder jb;
-                        jb.field("type", "call");
-                        jb.field("source", source_fn);
-                        jb.field("target", scoped);
-                        emit_json(jb.done());
+                        emit_call(source_fn, scoped);
                     } else {
                         emit_u_call(source_fn, text, category_for(text, false));
                     }
@@ -779,11 +902,7 @@ static void resolve_calls(TSNode node, const std::string &source,
             } else {
                 std::string tgt = extract_call_target(func, source, scope, name_map, fqn_set);
                 if (!tgt.empty()) {
-                    JsonBuilder jb;
-                    jb.field("type", "call");
-                    jb.field("source", source_fn);
-                    jb.field("target", tgt);
-                    emit_json(jb.done());
+                    emit_call(source_fn, tgt);
                 } else {
                     emit_u_call(source_fn, node_text(func, source),
                         category_for(node_text(func, source), false));
@@ -1050,11 +1169,11 @@ int main(int argc, char **argv) {
         }
     }
 
-    // Emit each module as a top-level pkg node.
+    // Emit each module as a top-level module node.
     std::unordered_set<std::string> module_names;
     for (const auto &mod : modules) {
         module_names.insert(mod.name);
-        emit_json(JsonBuilder().field("type", "pkg").field("fqn", mod.name).done());
+        emit_json(JsonBuilder().field("type", "module").field("fqn", mod.name).done());
     }
 
     // Emit namespace packages (module.namespace chains).
@@ -1094,39 +1213,61 @@ int main(int argc, char **argv) {
     std::sort(ns_sorted.begin(), ns_sorted.end());
 
     for (const auto &ns : ns_sorted) {
-        emit_json(JsonBuilder().field("type", "pkg").field("fqn", ns).done());
+        emit_json(JsonBuilder().field("type", "module").field("fqn", ns).done());
     }
 
     for (const auto &ns : ns_sorted) {
         auto last_dot = ns.rfind('.');
         if (last_dot != std::string::npos) {
             std::string parent = ns.substr(0, last_dot);
-            emit_json(JsonBuilder().field("type", "contains").field("parent", parent).field("child", ns).done());
+            emit_edge("contains", parent, ns);
         }
     }
 
+    // Emit struct/function nodes + contains edges.
     for (const auto &d : all_decls) {
         std::string path_str = d.path;
-        JsonBuilder jb;
-        jb.field("type", "decl");
-        jb.field("kind", d.kind);
-        jb.field("fqn", d.fqn);
-        jb.field("path", path_str);
-        jb.field("start", d.start);
-        jb.field("end", d.end);
-        emit_json(jb.done());
-
-        auto pos = d.fqn.rfind('.');
-        if (pos != std::string::npos) {
-            std::string parent = d.fqn.substr(0, pos);
-            emit_json(JsonBuilder().field("type", "contains").field("parent", parent).field("child", d.fqn).done());
+        if (d.kind == "class") {
+            JsonBuilder jb;
+            jb.field("type", "struct");
+            jb.field("id", d.id);
+            jb.field("parent", d.parent);
+            jb.field("name", d.name);
+            jb.field("path", path_str);
+            jb.field("start", d.start);
+            jb.field("end", d.end);
+            emit_json(jb.done());
+        } else {
+            std::string paramsJson = "[";
+            for (size_t i = 0; i < d.params.size(); i++) {
+                if (i > 0) paramsJson += ",";
+                paramsJson += "\"" + json_esc(d.params[i]) + "\"";
+            }
+            paramsJson += "]";
+            JsonBuilder jb;
+            jb.field("type", "function");
+            jb.field("id", d.id);
+            jb.field("parent", d.parent);
+            jb.field("name", d.name);
+            jb.raw("params", paramsJson);
+            jb.field("file", path_str);
+            jb.field("path", path_str);
+            jb.field("start", d.start);
+            jb.field("end", d.end);
+            emit_json(jb.done());
         }
+
+        // contains edge: parent is a module (namespace) fqn or a struct id.
+        std::string from = d.parent;
+        auto it = structID.find(d.parent);
+        if (it != structID.end()) from = it->second;
+        emit_edge("contains", from, d.id);
     }
 
     // Emit use edges for base classes
     for (const auto &bc : base_classes) {
-        if (decl_fqns.count(bc.first) && decl_fqns.count(bc.second)) {
-            emit_use(bc.first, bc.second);
+        if (structID.count(bc.first) && structID.count(bc.second)) {
+            emit_edge("uses", structID[bc.first], structID[bc.second]);
         }
     }
 

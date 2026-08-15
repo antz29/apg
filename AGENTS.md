@@ -1,5 +1,62 @@
 # APG Agent Guide
 
+## Pipeline
+
+Scanner (per language) → Rust ingestor → `db.lbug` + `graph.jsonl`.
+
+- The **scanner** (Go: `src/golib/main.go`, Java: `src/javalib/CallGraphBuilder.java`,
+  C++: `src/cpplib/main.cpp`) parses a codebase and streams one JSON object per
+  line to stdout — the **unified JSONL schema** (see `SPEC.md` §2). It emits
+  *facts only*: declarations, references, edges. It never computes FQNs and
+  never does graph assembly.
+- The **ingestor** (`src/ingest.rs`) spawns the scanner, resolves identity
+  (canonical FQN), builds the graph, bulk-loads LadybugDB, and writes
+  `graph.jsonl` as the export. `db.lbug` is the query index; `graph.jsonl` is
+  the self-contained export artifact (canonical FQNs, no opaque ids).
+- Build: `build.rs` compiles the frontends (`gcc`/`g++` tree-sitter for C++,
+  `go build` for Go, `javac` for Java). Run a scan with `ladybug_scan` or
+  `cargo run -- -l <lang> <dir>`.
+
+### Unified JSONL schema (abridged)
+
+Node records:
+
+```jsonl
+{"type":"module","fqn":"github.com/foundry/flow"}
+{"type":"struct","id":"n12","parent":"...v1","name":"Error","path":"/abs/error.go","start":12,"end":300}
+{"type":"function","id":"n13","parent":"...Store","name":"ComputeContentHash","params":["[]byte","int"],"file":"/abs/store.go","path":"/abs/store.go","start":1,"end":99}
+{"type":"unresolved","fqn":"fmt.Errorf","category":"stdlib"}
+```
+
+Edge records:
+
+```jsonl
+{"type":"contains","from":"n12","to":"n13"}
+{"type":"calls","from":"n13","to":"n14"}
+{"type":"uses","from":"n13","to":"n12"}
+{"type":"unresolved_call","from":"n13","to":"fmt.Errorf","target_type":"context.CancelFunc"}
+{"type":"unresolved_use","from":"n13","to":"protoimpl.Pointer"}
+```
+
+- `id` is a scanner-local opaque counter (`n1`, `n2`, …); edges reference
+  project nodes by `id`, unresolved targets by `fqn`. The ingestor maps `id`s
+  to canonical FQNs. `code_type` is **not** emitted by scanners — the ingestor
+  computes it from `path` + `apg.json` (`src/classify.rs`).
+
+### FQN convention (rendered ingestor-side, SPEC §4)
+
+| kind | FQN |
+|---|---|
+| module | `fqn` verbatim |
+| struct | `parent.name` |
+| function (unique in scope) | `parent.name` |
+| function (overloaded) | `parent.name(T1,T2,...)` — erased, comma-separated params |
+| Go `init` | `parent.init#<file-basename>` |
+
+Overloads are grouped by `(parent, name)`; any group of size > 1 renders every
+member with the `(params)` suffix. The ingestor fails loudly (panics) on any
+residual FQN collision rather than silently overwriting.
+
 ## LadybugDB Tooling
 
 The workspace has a LadybugDB graph database at `db.lbug` containing the parsed codebase. Interact via the `ladybug_query` tool — a Cypher-like query interface.

@@ -12,9 +12,9 @@ final stage of the atomic migration.
 
 ## Work items
 
-- [ ] Assign an opaque `id` (counter) to every declared struct/class/function;
+- [x] Assign an opaque `id` (counter) to every declared struct/class/function;
       reuse it in edge records.
-- [ ] Emit node records:
+- [x] Emit node records:
   - `module` for each module (as today).
   - `struct` with `id`, `parent` (module/namespace FQN), `name`, `path`, `start`,
     `end`.
@@ -24,17 +24,17 @@ final stage of the atomic migration.
   - `unresolved` with `fqn` and `category` (heuristic: `external` for qualified
     names, `func-value` for bare call targets, `unknown` for type refs) — reuse
     `category_for`.
-- [ ] Emit edge records (`contains`, `calls`, `uses`, `unresolved_call`,
+- [x] Emit edge records (`contains`, `calls`, `uses`, `unresolved_call`,
       `unresolved_use`) with `id`/`fqn` endpoints as in the spec.
-- [ ] Keep heuristic resolution rules unchanged (no new guessing).
-- [ ] Stop emitting `code_type`.
+- [x] Keep heuristic resolution rules unchanged (no new guessing).
+- [x] Stop emitting `code_type`.
 
 ## Docs
 
-- [ ] `AGENTS.md`: document the scanner→ingestor pipeline, the unified JSONL
+- [x] `AGENTS.md`: document the scanner→ingestor pipeline, the unified JSONL
       schema, the FQN convention (`parent.name(T1,T2)` / `init#file.go`), and
       that `graph.jsonl` is the export.
-- [ ] `.opencode/agents/codebase-navigator.md`: point agents at the new schema
+- [x] `.opencode/agents/codebase-navigator.md`: point agents at the new schema
       and FQN convention.
 
 ## Acceptance

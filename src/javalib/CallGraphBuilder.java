@@ -8,13 +8,44 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
-
 public class CallGraphBuilder {
+    static final long START = System.currentTimeMillis();
+
+    static String elapsed() {
+        long s = (System.currentTimeMillis() - START) / 1000;
+        return String.format("%d:%02d", s / 60, s % 60);
+    }
+
+    /** Basename of a compilation unit's source file. */
+    static String fileBase(CompilationUnitTree u) {
+        String p = u.getSourceFile().toUri().getPath();
+        int s = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+        return s >= 0 ? p.substring(s + 1) : p;
+    }
+
+    /**
+     * One newline-terminated progress line per unit, on stderr. stderr goes to
+     * a log file (apg-frontend.log), so this is safe to make verbose: it never
+     * streams into the terminal/tool.
+     */
+    static void progress(String label, int done, int total, String item) {
+        int pct = total == 0 ? 100 : done * 100 / total;
+        System.err.println("[" + elapsed() + "] " + label + " " + pct + "% (" + done + "/" + total + ")"
+            + (item.isEmpty() ? "" : " " + item));
+        System.err.flush();
+    }
+
+    static void endProgress() {
+        System.err.println();
+        System.err.flush();
+    }
+
     public static void main(String[] args) throws Exception {
         Path dir = Paths.get(args[0]);
         List<String> excludePaths = new ArrayList<>();
         for (int i = 1; i < args.length; i++) excludePaths.add(args[i]);
 
+        System.err.println("[" + elapsed() + "] collecting source files...");
         List<Path> files = new ArrayList<>();
         try (var walk = Files.walk(dir)) {
             walk.filter(p -> p.toString().endsWith(".java"))
@@ -22,21 +53,23 @@ public class CallGraphBuilder {
                 .filter(p -> excludePaths.stream().noneMatch(pat -> p.toString().contains(pat)))
                 .forEach(files::add);
         }
+        System.err.println("[" + elapsed() + "] " + files.size() + " .java files");
 
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         var fm = compiler.getStandardFileManager(null, null, null);
 
-        // Parse everything first (declarations are emitted from the parse tree).
+        // Parse everything first (declarations are collected/emitted from the
+        // parse tree; edges are resolved against attributed symbols).
         var task = newTask(compiler, fm, files);
         int total = files.size();
         var units = new ArrayList<CompilationUnitTree>();
         int i = 0;
-        for (var unit : task.parse()) {
+        for (CompilationUnitTree unit : task.parse()) {
             units.add(unit);
             i++;
-            System.err.print("\rParsing: " + (i * 100 / total) + "% (" + i + "/" + total + ")");
+            progress("Parsing", i, total, fileBase(unit));
         }
-        System.err.println();
+        endProgress();
 
         // Attribute for exact call/type resolution. javac can crash on a few
         // files (e.g. switch-expression AssertionError on JDK 17); isolate and
@@ -44,25 +77,25 @@ public class CallGraphBuilder {
         // exact edges everywhere else.
         List<Path> crashing = new ArrayList<>();
         if (!tryAnalyze(task, total)) {
-            System.err.println();
             System.err.println("WARNING: attribution crashed; isolating offending files...");
             crashing = findCrashingFiles(compiler, fm, files);
+            System.err.println();
             System.err.println("WARNING: excluding " + crashing.size() + " files from attribution: " + crashing);
             files.removeAll(crashing);
+            System.err.println("[" + elapsed() + "] re-parsing and re-attributing " + files.size() + " remaining files...");
             task = newTask(compiler, fm, files);
             units.clear();
             for (var unit : task.parse()) units.add(unit);
             tryAnalyze(task, total);
         }
 
+        System.err.println("[" + elapsed() + "] pass 1: assigning ids to declared classes and methods...");
         var c = new Collector();
-        i = 0;
-        for (var u : units) {
-            c.scan(u, null);
-            i++;
-            System.err.print("\rScanning: " + (i * 100 / total) + "% (" + i + "/" + total + ")");
-        }
-        System.err.println();
+        // Pass 1: assign opaque ids to every declared class and method.
+        c.collectAll(units);
+        System.err.println("[" + elapsed() + "] pass 2: emitting nodes and edges...");
+        // Pass 2: emit node + edge records, resolving endpoints by id.
+        c.emitAll(units, total);
         c.flush();
     }
 
@@ -73,22 +106,64 @@ public class CallGraphBuilder {
                 null, fm.getJavaFileObjectsFromPaths(files));
     }
 
+    /** Source file for a task event (ANALYZE fires per compilation unit). */
+    static String eventFile(TaskEvent e) {
+        try {
+            if (e.getCompilationUnit() != null) return fileBase(e.getCompilationUnit());
+        } catch (Throwable t) {
+            /* fall through */
+        }
+        try {
+            if (e.getTypeElement() != null) {
+                String q = e.getTypeElement().getQualifiedName().toString();
+                int s = Math.max(q.lastIndexOf('.'), q.lastIndexOf('$'));
+                return s >= 0 ? q.substring(s + 1) : q;
+            }
+        } catch (Throwable t) {
+            /* fall through */
+        }
+        return "";
+    }
+
+    /**
+     * Attribute everything for exact call/type resolution. `task.analyze()` is
+     * monolithic (it attributes all units before yielding any), so live
+     * per-file progress comes from a TaskListener's ANALYZE events instead of
+     * the iteration counter.
+     */
     static boolean tryAnalyze(JavacTask task, int total) {
         try {
-            int i = 0;
+            final int[] n = {0};
+            task.addTaskListener(new TaskListener() {
+                @Override
+                public void started(TaskEvent e) {
+                    if (e.getKind() == TaskEvent.Kind.ANALYZE) {
+                        n[0]++;
+                        progress("Attributing", n[0], total, eventFile(e));
+                    }
+                }
+
+                @Override
+                public void finished(TaskEvent e) {
+                    /* no-op */
+                }
+            });
             for (var unit : task.analyze()) {
-                i++;
-                System.err.print("\rAttributing: " + (i * 100 / total) + "% (" + i + "/" + total + ")");
+                // Work is driven by the iteration; live progress comes from
+                // the listener above.
             }
-            System.err.println();
+            endProgress();
             return true;
         } catch (Throwable t) {
+            endProgress();
             return false;
         }
     }
 
     /** Binary-search the files that crash javac attribution. */
     static List<Path> findCrashingFiles(JavaCompiler compiler, StandardJavaFileManager fm, List<Path> files) {
+        System.err.println("[" + elapsed() + "] binary-searching " + files.size()
+            + " files; each probe re-parses+re-attributes a chunk (slow)...");
         List<Path> crashing = new ArrayList<>();
         findCrashingFiles(compiler, fm, files, 0, files.size(), crashing);
         return crashing;
@@ -98,13 +173,18 @@ public class CallGraphBuilder {
             List<Path> files, int lo, int hi, List<Path> out) {
         if (lo >= hi) return;
         if (hi - lo == 1) {
+            System.err.println("  [" + elapsed() + "] crashing file: " + files.get(lo));
             out.add(files.get(lo));
             return;
         }
         int mid = (lo + hi) / 2;
+        System.err.println("[" + elapsed() + "] probing chunk [" + lo + "," + mid + ") of "
+            + files.size() + " (" + (mid - lo) + " files)...");
         if (chunkCrashes(compiler, fm, files.subList(lo, mid))) {
             findCrashingFiles(compiler, fm, files, lo, mid, out);
         }
+        System.err.println("[" + elapsed() + "] probing chunk [" + mid + "," + hi + ") of "
+            + files.size() + " (" + (hi - mid) + " files)...");
         if (chunkCrashes(compiler, fm, files.subList(mid, hi))) {
             findCrashingFiles(compiler, fm, files, mid, hi, out);
         }
@@ -122,8 +202,24 @@ public class CallGraphBuilder {
         }
     }
 
-    static String jstrPath(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    /** Escapes a string for a JSON string literal. */
+    static String jstr(String s) {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length() + 16);
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            switch (ch) {
+                case '\\': sb.append("\\\\"); break;
+                case '"': sb.append("\\\""); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (ch < 0x20) sb.append(String.format("\\u%04x", (int) ch));
+                    else sb.append(ch);
+            }
+        }
+        return sb.toString();
     }
 
     /** Classifies an out-of-project method FQN as stdlib or external. */
@@ -135,11 +231,6 @@ public class CallGraphBuilder {
         return "external";
     }
 
-    static String stripGenerics(String s) {
-        int i = s.indexOf('<');
-        return i > 0 ? s.substring(0, i).strip() : s.strip();
-    }
-
     /**
      * Returns the fully-qualified owning class (package.Outer.Inner) for a
      * symbol, walking up past synthetic anonymous/local classes ($-suffixed)
@@ -148,27 +239,42 @@ public class CallGraphBuilder {
     static String ownerFqn(Symbol owner) {
         while (owner instanceof Symbol.ClassSymbol cs) {
             String qn = cs.getQualifiedName().toString();
-            if (qn.indexOf('$') < 0) return qn;
+            // Anonymous classes have an empty qualified name; walk up past them
+            // (and past $-named synthetic classes) to the nearest named type.
+            if (!qn.isEmpty() && qn.indexOf('$') < 0) return qn;
             owner = cs.getEnclosingElement();
         }
         return null;
     }
 
     /**
-     * Returns the graph FQN for a method symbol: owning class FQN + method
-     * name (constructors use the class simple name to match declarations).
-     * Null if not a usable method symbol.
+     * Erased, package-qualified parameter types of a method symbol, in
+     * declaration order (SPEC §2.3). The same rendering is used for method
+     * declarations and call targets, so overloads resolve exactly.
      */
-    static String methodFqn(Symbol sym) {
-        if (!(sym instanceof Symbol.MethodSymbol ms)) return null;
-        String name = ms.getSimpleName().toString();
-        String ofqn = ownerFqn(ms.getEnclosingElement());
-        if (ofqn == null) return null;
-        // Constructors are declared as Class.<init>; match that naming so
-        // call targets line up with declarations.
-        if (name.equals("<init>")) return ofqn + ".<init>";
-        if (name.indexOf('<') >= 0 || name.equals("<error>")) return null;
-        return ofqn + "." + name;
+    static List<String> paramStrings(Symbol.MethodSymbol ms) {
+        List<String> out = new ArrayList<>();
+        if (ms == null) return out;
+        try {
+            Type mt = ms.asType();
+            for (Type pt : mt.getParameterTypes()) {
+                out.add(typeString(pt));
+            }
+        } catch (Throwable t) {
+            out.clear();
+        }
+        return out;
+    }
+
+    /** Renders a type: qualified for class types, recursed for arrays. */
+    static String typeString(Type t) {
+        if (t == null) return "";
+        if (t instanceof com.sun.tools.javac.code.Type.ArrayType at) {
+            return typeString(at.elemtype) + "[]";
+        }
+        Symbol ts = t.tsym;
+        if (ts != null) return ts.getQualifiedName().toString();
+        return t.toString();
     }
 
     /**
@@ -202,7 +308,7 @@ public class CallGraphBuilder {
         return sel.toString();
     }
 
-    /** Symbol attributed onto a call/method-ref expression, or null. */
+    /** Symbol attributed onto a call/method-ref/new-class expression, or null. */
     static Symbol symOf(Tree t) {
         if (t instanceof JCTree.JCMethodInvocation inv) {
             ExpressionTree sel = inv.getMethodSelect();
@@ -215,29 +321,107 @@ public class CallGraphBuilder {
         return null;
     }
 
+    /** Method symbol attributed onto a method declaration, or null. */
+    static Symbol.MethodSymbol symOfDecl(MethodTree mt) {
+        if (mt instanceof JCTree.JCMethodDecl jm) return jm.sym;
+        return null;
+    }
+
     static class Collector extends TreePathScanner<Void, Void> {
         String pkg = "", cls = "", mtd = "";
         String currentFile = "", sourceText = "";
+        boolean emitting = false;
         final BufferedWriter out = new BufferedWriter(
             new OutputStreamWriter(System.out, StandardCharsets.UTF_8));
 
-        // Complete sets of declared project nodes, used to decide whether a
-        // resolved symbol is in-project (call/use) or external (u_call/u_use).
-        final Set<String> declaredMethods = new HashSet<>();
-        final Set<String> declaredStructs = new HashSet<>();
+        // Opaque ids (SPEC §3): a single monotonic counter across structs and
+        // methods. structID/funcID map canonical keys to ids; treeID records
+        // which tree won a key, so a deduped (anonymous/local-collision)
+        // declaration is skipped at emit time rather than causing a residual
+        // FQN collision in the ingestor.
+        int nextId = 0;
+        final Map<String, String> structID = new HashMap<>();
+        final Map<String, String> funcID = new HashMap<>();
+        final IdentityHashMap<Tree, String> treeID = new IdentityHashMap<>();
 
-        // Buffered records resolved in flush() once declarations are complete:
-        //   calls:    caller, methodFqn, recvTypeFqn, rawName
-        //   typeUses: caller, typeFqn, rawName
-        //   classUses: classFqn, typeFqn, rawName  (extends/implements, Struct->Struct)
-        final List<String[]> rawCalls = new ArrayList<>();
-        final List<String[]> rawTypeUses = new ArrayList<>();
-        final List<String[]> rawClassUses = new ArrayList<>();
+        final Set<String> unresolvedSeen = new HashSet<>();
+        final Set<String> emittedPkg = new HashSet<>();
+
+        String newNodeID() {
+            return "n" + (++nextId);
+        }
 
         void emit(String line) {
             try {
                 out.write(line);
                 out.newLine();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        void emitEdge(String type, String from, String to) {
+            emit("{\"type\":\"" + type + "\",\"from\":\"" + jstr(from)
+                + "\",\"to\":\"" + jstr(to) + "\"}");
+        }
+
+        void emitUnresolvedCall(String from, String to) {
+            emit("{\"type\":\"unresolved_call\",\"from\":\"" + jstr(from)
+                + "\",\"to\":\"" + jstr(to) + "\"}");
+        }
+
+        /** Emits the unresolved node record for fqn on first encounter. */
+        void unresolved(String fqn, String category) {
+            if (fqn.isEmpty() || unresolvedSeen.contains(fqn)) return;
+            unresolvedSeen.add(fqn);
+            emit("{\"type\":\"unresolved\",\"fqn\":\"" + jstr(fqn)
+                + "\",\"category\":\"" + jstr(category) + "\"}");
+        }
+
+        void emitPkgHierarchy(String pkg) {
+            if (pkg.isEmpty()) return;
+            String prev = "";
+            String cur = "";
+            for (String seg : pkg.split("\\.")) {
+                cur = cur.isEmpty() ? seg : cur + "." + seg;
+                if (!emittedPkg.contains(cur)) {
+                    emittedPkg.add(cur);
+                    emit("{\"type\":\"module\",\"fqn\":\"" + jstr(cur) + "\"}");
+                }
+                if (!prev.isEmpty()) {
+                    emitEdge("contains", prev, cur);
+                }
+                prev = cur;
+            }
+        }
+
+        void collectAll(List<CompilationUnitTree> units) {
+            emitting = false;
+            int i = 0;
+            int total = units.size();
+            for (var u : units) {
+                scan(u, null);
+                i++;
+                progress("Collecting", i, total, fileBase(u));
+            }
+            endProgress();
+        }
+
+        void emitAll(List<CompilationUnitTree> units, int total) {
+            emitting = true;
+            int i = 0;
+            for (var u : units) {
+                scan(u, null);
+                i++;
+                progress("Emit", i, total, fileBase(u));
+            }
+            endProgress();
+        }
+
+        void flush() {
+            try {
+                out.flush();
+                System.err.println();
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -252,29 +436,8 @@ public class CallGraphBuilder {
             } catch (Exception e) {
                 sourceText = "";
             }
-            if (!pkg.isEmpty()) {
-                StringBuilder sb = new StringBuilder();
-                String prev = "";
-                for (int i = 0; i < pkg.length(); i++) {
-                    if (pkg.charAt(i) == '.') {
-                        String seg = sb.toString();
-                        emit("{\"type\":\"pkg\",\"fqn\":\"" + seg + "\"}");
-                        if (!prev.isEmpty()) {
-                            emit("{\"type\":\"contains\",\"parent\":\"" + prev + "\",\"child\":\"" + seg + "\"}");
-                        }
-                        prev = seg;
-                        sb.append('.');
-                    } else {
-                        sb.append(pkg.charAt(i));
-                        if (i == pkg.length() - 1) {
-                            String full = sb.toString();
-                            emit("{\"type\":\"pkg\",\"fqn\":\"" + full + "\"}");
-                            if (!prev.isEmpty()) {
-                                emit("{\"type\":\"contains\",\"parent\":\"" + prev + "\",\"child\":\"" + full + "\"}");
-                            }
-                        }
-                    }
-                }
+            if (emitting) {
+                emitPkgHierarchy(pkg);
             }
             return super.visitCompilationUnit(cu, nil);
         }
@@ -289,80 +452,98 @@ public class CallGraphBuilder {
             cls = cls.isEmpty() ? name : cls + "." + name;
             String fqn = pkg.isEmpty() ? cls : pkg + "." + cls;
 
-            JCTree jc = (JCTree) ct;
-            JCTree.JCCompilationUnit jcCu = (JCTree.JCCompilationUnit) getCurrentPath().getCompilationUnit();
-            int start = jc.getStartPosition();
-            if (jcCu.docComments != null && jcCu.docComments.hasComment(jc)) {
-                for (int p = start; p >= 2; p--) {
-                    if (sourceText.charAt(p - 1) == '*' && sourceText.charAt(p - 2) == '/') {
-                        start = p - 2;
-                        break;
+            if (!emitting) {
+                if (!structID.containsKey(fqn)) {
+                    String id = newNodeID();
+                    structID.put(fqn, id);
+                    treeID.put(ct, id);
+                }
+            } else {
+                String id = treeID.get(ct);
+                if (id != null) {
+                    String parentFqn = outer.isEmpty() ? pkg : pkg.isEmpty() ? outer : pkg + "." + outer;
+                    int[] span = classSpan((JCTree) ct);
+                    emit("{\"type\":\"struct\",\"id\":\"" + jstr(id)
+                        + "\",\"parent\":\"" + jstr(parentFqn)
+                        + "\",\"name\":\"" + jstr(name)
+                        + "\",\"path\":\"" + jstr(currentFile)
+                        + "\",\"start\":" + span[0] + ",\"end\":" + span[1] + "}");
+                    if (!parentFqn.isEmpty()) {
+                        String from = parentFqn;
+                        if (structID.containsKey(parentFqn)) from = structID.get(parentFqn);
+                        emitEdge("contains", from, id);
+                    }
+                    if (ct.getExtendsClause() != null) {
+                        recordUse(id, ct.getExtendsClause());
+                    }
+                    for (var iface : ct.getImplementsClause()) {
+                        recordUse(id, iface);
                     }
                 }
             }
-            // True closing position, not the first brace.
-            int bracePos = sourceText.indexOf('{', jc.getStartPosition());
-            int end = jc.getEndPosition(jcCu.endPositions);
-            if (end <= start) {
-                end = bracePos > 0 ? bracePos + 1 : end;
-            }
-
-            emit("{\"type\":\"decl\",\"kind\":\"class\",\"fqn\":\"" + fqn
-                + "\",\"path\":\"" + jstrPath(currentFile)
-                + "\",\"start\":" + start + ",\"end\":" + end + "}");
-            declaredStructs.add(fqn);
-
-            String parentFqn = outer.isEmpty() ? pkg : pkg.isEmpty() ? outer : pkg + "." + outer;
-            if (!parentFqn.isEmpty()) {
-                emit("{\"type\":\"contains\",\"parent\":\"" + parentFqn
-                    + "\",\"child\":\"" + fqn + "\"}");
-            }
-
-            if (ct.getExtendsClause() != null) {
-                recordClassUse(fqn, ct.getExtendsClause());
-            }
-            for (var iface : ct.getImplementsClause()) {
-                recordClassUse(fqn, iface);
-            }
-
             Void r = super.visitClass(ct, nil);
             cls = outer;
             return r;
         }
 
-        @Override
-        public Void visitMethod(MethodTree mt, Void nil) {
-            String name = mt.getName().toString();
-            String fqn = pkg.isEmpty() ? cls + "." + name : pkg + "." + cls + "." + name;
-            JCTree jc = (JCTree) mt;
-            JCTree.JCCompilationUnit jcCu = (JCTree.JCCompilationUnit) getCurrentPath().getCompilationUnit();
-            int start = jc.getStartPosition();
-            if (jcCu.docComments != null && jcCu.docComments.hasComment(jc)) {
-                for (int p = start; p >= 2; p--) {
-                    if (sourceText.charAt(p - 1) == '*' && sourceText.charAt(p - 2) == '/') {
-                        start = p - 2;
-                        break;
-                    }
+        /** True if this method is declared inside an anonymous class. */
+        boolean insideAnonymousClass() {
+            for (TreePath p = getCurrentPath().getParentPath(); p != null; p = p.getParentPath()) {
+                if (p.getLeaf() instanceof ClassTree ct) {
+                    return ct.getSimpleName().length() == 0;
                 }
             }
-            int end = jc.getEndPosition(jcCu.endPositions);
-            String prevMtd = mtd;
-            mtd = fqn;
+            return false;
+        }
 
-            emit("{\"type\":\"decl\",\"kind\":\"method\",\"fqn\":\"" + fqn
-                + "\",\"path\":\"" + jstrPath(currentFile)
-                + "\",\"start\":" + start + ",\"end\":" + end + "}");
-            declaredMethods.add(fqn);
-
-            String parentFqn = pkg.isEmpty() ? cls : pkg + "." + cls;
-            if (!parentFqn.isEmpty()) {
-                emit("{\"type\":\"contains\",\"parent\":\"" + parentFqn
-                    + "\",\"child\":\"" + fqn + "\"}");
+        @Override
+        public Void visitMethod(MethodTree mt, Void nil) {
+            // Methods of anonymous classes have no stable identity (javac even
+            // synthesizes a body-less <init> for them); walk their bodies for
+            // edges but never declare or register them.
+            if (insideAnonymousClass()) {
+                return super.visitMethod(mt, nil);
             }
+            String name = mt.getName().toString();
+            List<String> params = paramStrings(symOfDecl(mt));
+            String parentFqn = pkg.isEmpty() ? cls : pkg + "." + cls;
+            String key = parentFqn + "." + name + "(" + String.join(",", params) + ")";
 
-            Void r = super.visitMethod(mt, nil);
-            mtd = prevMtd;
-            return r;
+            if (!emitting) {
+                if (!funcID.containsKey(key)) {
+                    String id = newNodeID();
+                    funcID.put(key, id);
+                    treeID.put(mt, id);
+                }
+            } else {
+                String myId = treeID.get(mt);
+                if (myId != null) {
+                    int[] span = methodSpan((JCTree) mt);
+                    StringBuilder paramsJson = new StringBuilder();
+                    for (String p : params) {
+                        if (paramsJson.length() > 0) paramsJson.append(',');
+                        paramsJson.append('"').append(jstr(p)).append('"');
+                    }
+                    emit("{\"type\":\"function\",\"id\":\"" + jstr(myId)
+                        + "\",\"parent\":\"" + jstr(parentFqn)
+                        + "\",\"name\":\"" + jstr(name)
+                        + "\",\"params\":[" + paramsJson + "]"
+                        + ",\"file\":\"" + jstr(currentFile)
+                        + "\",\"path\":\"" + jstr(currentFile)
+                        + "\",\"start\":" + span[0] + ",\"end\":" + span[1] + "}");
+                    if (!parentFqn.isEmpty()) {
+                        String from = parentFqn;
+                        if (structID.containsKey(parentFqn)) from = structID.get(parentFqn);
+                        emitEdge("contains", from, myId);
+                    }
+                }
+                String prevMtd = mtd;
+                mtd = funcID.get(key);
+                Void r = super.visitMethod(mt, nil);
+                mtd = prevMtd;
+                return r;
+            }
+            return super.visitMethod(mt, nil);
         }
 
         @Override
@@ -370,8 +551,7 @@ public class CallGraphBuilder {
             if (!mtd.isEmpty()) {
                 Symbol sym = symOf(mc);
                 Type recv = receiverType(mc.getMethodSelect());
-                String recvFqn = recv == null ? null : typeFqnOf(recv);
-                rawCalls.add(new String[]{mtd, methodFqn(sym), recvFqn, methodRawName(mc.getMethodSelect())});
+                resolveCall(sym, recv == null ? null : typeFqnOf(recv), methodRawName(mc.getMethodSelect()));
             }
             return super.visitMethodInvocation(mc, nil);
         }
@@ -380,7 +560,7 @@ public class CallGraphBuilder {
         public Void visitMemberReference(MemberReferenceTree mref, Void nil) {
             if (!mtd.isEmpty()) {
                 Symbol sym = symOf(mref);
-                rawCalls.add(new String[]{mtd, methodFqn(sym), null, mref.getName().toString()});
+                resolveCall(sym, null, mref.getName().toString());
             }
             return super.visitMemberReference(mref, nil);
         }
@@ -388,37 +568,83 @@ public class CallGraphBuilder {
         @Override
         public Void visitNewClass(NewClassTree nc, Void nil) {
             if (!mtd.isEmpty()) {
-                recordTypeUse(mtd, nc.getIdentifier());
+                recordUse(mtd, nc.getIdentifier());
                 Symbol sym = symOf(nc);
-                rawCalls.add(new String[]{mtd, methodFqn(sym), typeFqn(nc.getIdentifier()), typeRawName(nc.getIdentifier())});
+                resolveCall(sym, typeFqn(nc.getIdentifier()), typeRawName(nc.getIdentifier()));
             }
             return super.visitNewClass(nc, nil);
         }
 
         @Override
         public Void visitVariable(VariableTree vt, Void nil) {
-            if (!mtd.isEmpty() && vt.getType() != null) recordTypeUse(mtd, vt.getType());
+            if (!mtd.isEmpty() && vt.getType() != null) recordUse(mtd, vt.getType());
             return super.visitVariable(vt, nil);
         }
 
         @Override
         public Void visitInstanceOf(InstanceOfTree io, Void nil) {
-            if (!mtd.isEmpty() && io.getType() != null) recordTypeUse(mtd, io.getType());
+            if (!mtd.isEmpty() && io.getType() != null) recordUse(mtd, io.getType());
             return super.visitInstanceOf(io, nil);
         }
 
         @Override
         public Void visitTypeCast(TypeCastTree tc, Void nil) {
-            if (!mtd.isEmpty() && tc.getType() != null) recordTypeUse(mtd, tc.getType());
+            if (!mtd.isEmpty() && tc.getType() != null) recordUse(mtd, tc.getType());
             return super.visitTypeCast(tc, nil);
         }
 
-        void recordTypeUse(String methodFqn, Tree type) {
-            rawTypeUses.add(new String[]{methodFqn, typeFqn(type), typeRawName(type)});
+        /**
+         * Resolves a method call to an edge. Exact in-project methods become
+         * `calls` (matched by erased parameter types, so overloads and
+         * constructors disambiguate). Otherwise the receiver type (if a project
+         * struct) becomes `uses`; everything else an `unresolved_call`.
+         */
+        void resolveCall(Symbol sym, String recvFqn, String rawName) {
+            if (sym instanceof Symbol.MethodSymbol ms) {
+                // Calls into an anonymous class's own synthetic members (e.g.
+                // its generated <init> calling super()) have no stable identity.
+                Symbol directOwner = ms.getEnclosingElement();
+                if (directOwner instanceof Symbol.ClassSymbol ocs && ocs.getQualifiedName().length() == 0) {
+                    return;
+                }
+                String parent = ownerFqn(directOwner);
+                String name = ms.getSimpleName().toString();
+                if (parent != null && (name.equals("<init>") || name.indexOf('<') < 0) && !name.equals("<error>")) {
+                    String key = parent + "." + name + "(" + String.join(",", paramStrings(ms)) + ")";
+                    String id = funcID.get(key);
+                    if (id != null) {
+                        emitEdge("calls", mtd, id);
+                        return;
+                    }
+                    String fqn = name.equals("<init>") ? parent + ".<init>" : parent + "." + name;
+                    unresolved(fqn, categoryOf(parent));
+                    emitUnresolvedCall(mtd, fqn);
+                    return;
+                }
+            }
+            if (recvFqn != null && structID.containsKey(recvFqn)) {
+                emitEdge("uses", mtd, structID.get(recvFqn));
+            } else {
+                String target = rawName == null ? "?" : rawName;
+                unresolved(target, "unknown");
+                emitUnresolvedCall(mtd, target);
+            }
         }
 
-        void recordClassUse(String classFqn, Tree type) {
-            rawClassUses.add(new String[]{classFqn, typeFqn(type), typeRawName(type)});
+        /**
+         * Records a type use: a project struct becomes a resolved `uses` edge,
+         * an unresolvable type an `unresolved_use`. Resolved external types
+         * are dropped (ubiquitous, low-signal).
+         */
+        void recordUse(String fromId, Tree type) {
+            String tfqn = typeFqn(type);
+            String raw = typeRawName(type);
+            if (tfqn == null) {
+                unresolved(raw == null ? "?" : raw, "unknown");
+                emitEdge("unresolved_use", fromId, raw == null ? "?" : raw);
+            } else if (structID.containsKey(tfqn)) {
+                emitEdge("uses", fromId, structID.get(tfqn));
+            }
         }
 
         /** Static type of the receiver expression of a method select, if any. */
@@ -439,53 +665,90 @@ public class CallGraphBuilder {
             return null;
         }
 
-        void flush() {
-            try {
-                for (String[] rc : rawCalls) {
-                    String caller = rc[0], mfqn = rc[1], recvFqn = rc[2], rawName = rc[3];
-                    if (mfqn != null && declaredMethods.contains(mfqn)) {
-                        emit("{\"type\":\"call\",\"source\":\"" + caller
-                            + "\",\"target\":\"" + mfqn + "\"}");
-                    } else if (recvFqn != null && declaredStructs.contains(recvFqn)) {
-                        emit("{\"type\":\"use\",\"source\":\"" + caller
-                            + "\",\"target\":\"" + recvFqn + "\"}");
-                    } else {
-                        String target = mfqn != null ? mfqn : rawName;
-                        emit("{\"type\":\"u_call\",\"source\":\"" + caller
-                            + "\",\"target\":\"" + (target == null ? "?" : target)
-                            + "\",\"category\":\"" + categoryOf(mfqn) + "\"}");
+        /** 0-based span of a class declaration, including its doc comment. */
+        int[] classSpan(JCTree jc) {
+            JCTree.JCCompilationUnit jcCu = (JCTree.JCCompilationUnit) getCurrentPath().getCompilationUnit();
+            int start = jc.getStartPosition();
+            if (jcCu.docComments != null && jcCu.docComments.hasComment(jc)) {
+                for (int p = start; p >= 2; p--) {
+                    if (sourceText.charAt(p - 1) == '*' && sourceText.charAt(p - 2) == '/') {
+                        start = p - 2;
+                        break;
                     }
                 }
-
-                for (String[] tu : rawTypeUses) {
-                    String caller = tu[0], tfqn = tu[1], rawName = tu[2];
-                    if (tfqn != null && declaredStructs.contains(tfqn)) {
-                        emit("{\"type\":\"use\",\"source\":\"" + caller
-                            + "\",\"target\":\"" + tfqn + "\"}");
-                    } else if (tfqn == null) {
-                        emit("{\"type\":\"u_use\",\"source\":\"" + caller
-                            + "\",\"target\":\"" + (rawName == null ? "?" : rawName) + "\"}");
-                    }
-                    // external (resolved but not in-project) types are dropped:
-                    // ubiquitous, low-signal, and were the fixture-collision source.
-                }
-
-                for (String[] cu : rawClassUses) {
-                    String caller = cu[0], tfqn = cu[1], rawName = cu[2];
-                    if (tfqn != null && declaredStructs.contains(tfqn)) {
-                        emit("{\"type\":\"use\",\"source\":\"" + caller
-                            + "\",\"target\":\"" + tfqn + "\"}");
-                    } else if (tfqn == null) {
-                        emit("{\"type\":\"u_use\",\"source\":\"" + caller
-                            + "\",\"target\":\"" + (rawName == null ? "?" : rawName) + "\"}");
-                    }
-                }
-
-                out.flush();
-                System.err.println();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
             }
+            int bracePos = sourceText.indexOf('{', jc.getStartPosition());
+            int end = jc.getEndPosition(jcCu.endPositions);
+            if (end <= start) {
+                if (bracePos > 0) {
+                    int close = matchingBraceEnd(sourceText, bracePos);
+                    end = close > 0 ? close + 1 : bracePos + 1;
+                } else {
+                    end = start;
+                }
+            }
+            return new int[]{start, end};
+        }
+
+        /** 0-based span of a method declaration, including its doc comment. */
+        int[] methodSpan(JCTree jc) {
+            JCTree.JCCompilationUnit jcCu = (JCTree.JCCompilationUnit) getCurrentPath().getCompilationUnit();
+            int start = jc.getStartPosition();
+            if (jcCu.docComments != null && jcCu.docComments.hasComment(jc)) {
+                for (int p = start; p >= 2; p--) {
+                    if (sourceText.charAt(p - 1) == '*' && sourceText.charAt(p - 2) == '/') {
+                        start = p - 2;
+                        break;
+                    }
+                }
+            }
+            int end = jc.getEndPosition(jcCu.endPositions);
+            if (end < 0 && jc instanceof JCTree.JCMethodDecl md && md.body != null) {
+                end = md.body.getEndPosition(jcCu.endPositions);
+            }
+            if (end < 0) {
+                int open = sourceText.indexOf('{', start);
+                if (open >= 0) {
+                    int close = matchingBraceEnd(sourceText, open);
+                    if (close >= 0) end = close + 1;
+                }
+            }
+            if (end < start) end = start;
+            return new int[]{start, end};
+        }
+
+        /**
+         * Returns the index just past the closing brace that matches the
+         * opening brace at {@code open}, skipping strings, chars, and comments.
+         */
+        static int matchingBraceEnd(String s, int open) {
+            int depth = 0;
+            for (int i = open; i < s.length(); i++) {
+                char c = s.charAt(i);
+                if (c == '"') {
+                    for (i++; i < s.length() && s.charAt(i) != '"'; i++) {
+                        if (s.charAt(i) == '\\') i++;
+                    }
+                } else if (c == '\'') {
+                    for (i++; i < s.length() && s.charAt(i) != '\''; i++) {
+                        if (s.charAt(i) == '\\') i++;
+                    }
+                } else if (c == '/' && i + 1 < s.length()) {
+                    if (s.charAt(i + 1) == '/') {
+                        while (i < s.length() && s.charAt(i) != '\n') i++;
+                    } else if (s.charAt(i + 1) == '*') {
+                        i += 2;
+                        while (i + 1 < s.length() && !(s.charAt(i) == '*' && s.charAt(i + 1) == '/')) i++;
+                        i++;
+                    }
+                } else if (c == '{') {
+                    depth++;
+                } else if (c == '}') {
+                    depth--;
+                    if (depth == 0) return i;
+                }
+            }
+            return -1;
         }
     }
 }

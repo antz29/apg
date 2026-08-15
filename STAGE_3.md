@@ -10,9 +10,9 @@ Rewrite `src/javalib/CallGraphBuilder.java` to emit the unified schema from
 
 ## Work items
 
-- [ ] Assign an opaque `id` (counter) to every declared class and method;
+- [x] Assign an opaque `id` (counter) to every declared class and method;
       reuse it in edge records.
-- [ ] Emit node records:
+- [x] Emit node records:
   - `module` for each package (as today).
   - `struct` with `id`, `parent` (enclosing package/outer class FQN), `name`,
     `path`, `start`, `end`.
@@ -22,16 +22,16 @@ Rewrite `src/javalib/CallGraphBuilder.java` to emit the unified schema from
   - `unresolved` with `fqn` and `category` (`stdlib` for `java.*`/`javax.*`/
     `jdk.*`, `external` otherwise, `unknown` when unresolved) — reuse
     `categoryOf`.
-- [ ] Emit edge records:
+- [x] Emit edge records:
   - `contains` (package/class→class, class→method).
   - `calls` (method→method by `id`).
   - `uses` (method→class, class→class by `id`).
   - `unresolved_call` (method→unresolved `fqn`; `target_type` empty).
   - `unresolved_use` (method/class→unresolved `fqn`).
-- [ ] Preserve the crash-isolation (re-attribute after dropping crashing files).
-- [ ] Keep constructor/overload resolution exact via `params` (no more simple-name
+- [x] Preserve the crash-isolation (re-attribute after dropping crashing files).
+- [x] Keep constructor/overload resolution exact via `params` (no more simple-name
       collision).
-- [ ] Stop emitting `code_type`.
+- [x] Stop emitting `code_type`.
 
 ## Acceptance
 

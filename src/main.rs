@@ -1,30 +1,36 @@
 mod classify;
 mod cleanup;
 mod graph;
+mod ingest;
+mod load;
+mod schema;
 
-use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use cleanup::{cleanup, CleanupOptions};
-use graph::*;
 use lbug::{Connection, Database};
 
-fn is_blacklisted(fqn: &str, blacklist: &[String]) -> bool {
-    blacklist.iter().any(|p| fqn.starts_with(p.as_str()))
+/// Mirrors every run message to stderr *and* to `apg-frontend.log`, so the log
+/// is a complete high-resolution record of the run (the frontend's stderr is
+/// also redirected there, so one file has the whole pipeline).
+struct Log {
+    f: std::fs::File,
 }
 
-/// Inserts an UnresolvedTarget node, setting its category on first write. If
-/// the node already exists, its existing category is preserved (categories are
-/// structurally disjoint per FQN, so a later conflict is treated as a no-op).
-fn insert_unresolved_target(graph: &mut Graph, fqn: &str, category: Option<&str>) {
-    graph.nodes.entry(fqn.to_owned()).or_insert_with(|| Node {
-        kind: NodeKind::UnresolvedTarget,
-        location: None,
-        category: category.map(str::to_owned),
-        code_type: String::new(),
-    });
+impl Log {
+    fn new() -> Log {
+        Log {
+            f: std::fs::File::create("apg-frontend.log")
+                .expect("failed to create apg-frontend.log"),
+        }
+    }
+
+    fn ln(&mut self, msg: &str) {
+        eprintln!("{msg}");
+        let _ = writeln!(self.f, "{msg}");
+    }
 }
 
 fn available_languages() -> Vec<String> {
@@ -53,7 +59,10 @@ fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32) -> bool {
             if has_extension(&p, exts, depth - 1) {
                 return true;
             }
-        } else if p.extension().map_or(false, |e| exts.contains(&format!(".{}", e.to_str().unwrap_or("")).as_str())) {
+        } else if p
+            .extension()
+            .map_or(false, |e| exts.contains(&format!(".{}", e.to_str().unwrap_or("")).as_str()))
+        {
             return true;
         }
     }
@@ -82,6 +91,14 @@ fn frontend_cmd(language: &str) -> String {
         "java" => env!("APG_FRONTEND_JAVA").to_string(),
         _ => panic!("unknown language: {language}"),
     }
+}
+
+fn temp_dir() -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("apg-load-{}-{nanos}", std::process::id()))
 }
 
 fn main() {
@@ -122,7 +139,9 @@ fn main() {
         PathBuf::from("project")
     };
     let project_dir = project_dir.canonicalize().unwrap();
-    eprintln!("Project: {}", project_dir.display());
+
+    let mut log = Log::new();
+    log.ln(&format!("Project: {}", project_dir.display()));
 
     let available = available_languages();
     if available.is_empty() {
@@ -140,18 +159,23 @@ fn main() {
             available.join(", ")
         );
     }
-    eprintln!("Language: {language}");
+    log.ln(&format!("Language: {language}"));
 
     let blacklist: Vec<String> = clean.iter().skip(2).cloned().collect();
     if !blacklist.is_empty() {
-        eprintln!("Blacklist: {:?}", blacklist);
+        log.ln(&format!("Blacklist: {:?}", blacklist));
     }
     if !path_excludes.is_empty() {
-        eprintln!("Path excludes: {:?}", path_excludes);
+        log.ln(&format!("Path excludes: {:?}", path_excludes));
     }
 
     let cmd = frontend_cmd(&language);
     let config = classify::ApgConfig::load(&project_dir);
+
+    // The scanner's stderr (progress + javac diagnostics) goes to the log file
+    // so its streaming output never floods the terminal.
+    let frontend_err = Stdio::from(log.f.try_clone().expect("clone log file"));
+    log.ln("Frontend progress -> apg-frontend.log");
 
     if language == "cpp" || language == "go" {
         let mut cmd = Command::new(&cmd);
@@ -160,12 +184,21 @@ fn main() {
             cmd.arg("--module").arg(m);
         }
         cmd.args(&path_excludes)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(frontend_err);
         let mut frontend_output = cmd.spawn().expect("Failed to run frontend");
 
-        build_graph(&mut frontend_output, &blacklist, &path_excludes, &language, config.as_ref());
+        process(
+            &mut frontend_output,
+            &blacklist,
+            &path_excludes,
+            &language,
+            config.as_ref(),
+            &mut log,
+        );
 
+        log.ln(&format!("[load] waiting on {language} frontend..."));
         if !frontend_output
             .wait()
             .expect("couldn't wait for frontend")
@@ -173,23 +206,40 @@ fn main() {
         {
             panic!("{language} frontend failed");
         }
+        log.ln(&format!("[load] frontend exited"));
     } else {
-        let mut args = format!("\"{}\"", project_dir.display());
+        let mut args = vec![project_dir.display().to_string()];
         for m in &module_dirs {
-            args.push_str(&format!(" --module \"{}\"", m));
+            args.push("--module".to_string());
+            args.push(m.clone());
         }
         for pat in &path_excludes {
-            args.push_str(&format!(" \"{}\"", pat));
+            args.push(pat.clone());
         }
-        let mut frontend_output = Command::new("sh")
-            .args(["-c", &format!("{} {}", cmd, args)])
+        // `cmd` is the full "java -Xmx5g -cp ... CallGraphBuilder" string;
+        // spawn it directly with argv (no `sh -c` wrapper) exactly like the
+        // Go/C++ frontends.
+        let mut parts = cmd.split_whitespace();
+        let prog = parts.next().expect("empty java frontend command");
+        let mut frontend_output = Command::new(prog)
+            .args(parts)
+            .args(args)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(frontend_err)
             .spawn()
             .expect("Failed to run Java frontend");
 
-        build_graph(&mut frontend_output, &blacklist, &path_excludes, &language, config.as_ref());
+        process(
+            &mut frontend_output,
+            &blacklist,
+            &path_excludes,
+            &language,
+            config.as_ref(),
+            &mut log,
+        );
 
+        log.ln("[load] waiting on Java frontend...");
         if !frontend_output
             .wait()
             .expect("couldn't wait for Java frontend")
@@ -197,182 +247,57 @@ fn main() {
         {
             panic!("java frontend failed");
         }
+        log.ln("[load] java frontend exited");
     }
 }
 
-fn build_graph(
+/// Consumes the scanner's unified-JSONL stdout, ingests it, and loads
+/// `db.lbug` + `graph.jsonl` (SPEC §6).
+fn process(
     frontend_output: &mut std::process::Child,
     blacklist: &[String],
     path_excludes: &[String],
     language: &str,
     config: Option<&classify::ApgConfig>,
+    log: &mut Log,
 ) {
-    let mut graph = Graph::default();
-    let mut skipped = 0u64;
+    let (mut graph, report) = {
+        // Stream the scanner's JSONL straight into the ingestor (which inserts
+        // nodes as they arrive and spools edges to disk) rather than buffering
+        // every record in memory (SPEC §6).
+        let lines = BufReader::new(frontend_output.stdout.as_mut().unwrap()).lines();
+        let records = lines.map(|x| {
+            let line = x.expect("io error");
+            serde_json::from_str::<schema::Record>(&line)
+                .unwrap_or_else(|e| panic!("bad json {e}: {line}"))
+        });
+        ingest::ingest(records, &ingest::IngestOptions {
+            blacklist,
+            language,
+            config,
+        })
+    };
+    log.ln(&format!("Skipped {} blacklisted messages", report.skipped));
 
-    for line in BufReader::new(frontend_output.stdout.as_mut().unwrap())
-        .lines()
-        .map(|x| x.expect("io error"))
-    {
-        let msg: serde_json::Value =
-            serde_json::from_str(&line).unwrap_or_else(|_| panic!("bad json: {line}"));
-        match msg["type"].as_str().unwrap() {
-            "pkg" => {
-                let fqn = msg["fqn"].as_str().unwrap();
-                if is_blacklisted(fqn, blacklist) {
-                    skipped += 1;
-                    continue;
-                }
-                graph.nodes.insert(
-                    fqn.to_owned(),
-                    Node {
-                        kind: NodeKind::Module,
-                        location: None,
-                        category: None,
-                        code_type: String::new(),
-                    },
-                );
-            }
-            "decl" => {
-                let fqn = msg["fqn"].as_str().unwrap();
-                if is_blacklisted(fqn, blacklist) {
-                    skipped += 1;
-                    continue;
-                }
-                let path = msg["path"].as_str().unwrap();
-                graph.nodes.insert(
-                    fqn.to_owned(),
-                    Node {
-                        kind: match msg["kind"].as_str().unwrap() {
-                            "class" => NodeKind::Struct,
-                            "method" => NodeKind::Function,
-                            x => panic!("invalid node kind {x}"),
-                        },
-                        location: Some(Location {
-                            path: PathBuf::from(path),
-                            start: msg["start"].as_u64().unwrap_or(0) as u32,
-                            end: msg["end"].as_u64().unwrap_or(0) as u32,
-                        }),
-                        category: None,
-                        code_type: classify::classify_code_type(path, fqn, language, config),
-                    },
-                );
-            }
-            "contains" => {
-                let parent = msg["parent"].as_str().unwrap();
-                let child = msg["child"].as_str().unwrap();
-                if is_blacklisted(parent, blacklist) || is_blacklisted(child, blacklist) {
-                    skipped += 1;
-                    continue;
-                }
-                graph
-                    .contains
-                    .insert((parent.to_owned(), child.to_owned()));
-            }
-            "call" => {
-                let source = msg["source"].as_str().unwrap();
-                let target = msg["target"].as_str().unwrap();
-                if is_blacklisted(source, blacklist) || is_blacklisted(target, blacklist) {
-                    skipped += 1;
-                    continue;
-                }
-                graph
-                    .calls
-                    .insert((source.to_owned(), target.to_owned()));
-            }
-            "use" => {
-                let source = msg["source"].as_str().unwrap();
-                let target = msg["target"].as_str().unwrap();
-                if is_blacklisted(source, blacklist) || is_blacklisted(target, blacklist) {
-                    skipped += 1;
-                    continue;
-                }
-                graph
-                    .uses
-                    .insert((source.to_owned(), target.to_owned()));
-            }
-            "u_call" => {
-                let source = msg["source"].as_str().unwrap();
-                let target = msg["target"].as_str().unwrap();
-                if is_blacklisted(source, blacklist) {
-                    skipped += 1;
-                    continue;
-                }
-                let category = msg
-                    .get("category")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty());
-                let target_type = msg
-                    .get("target_type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                insert_unresolved_target(&mut graph, target, category);
-                graph.unresolved_calls.insert((
-                    source.to_owned(),
-                    target.to_owned(),
-                    target_type.to_owned(),
-                ));
-            }
-            "u_use" => {
-                let source = msg["source"].as_str().unwrap();
-                let target = msg["target"].as_str().unwrap();
-                if is_blacklisted(source, blacklist) {
-                    skipped += 1;
-                    continue;
-                }
-                let category = msg
-                    .get("category")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty());
-                insert_unresolved_target(&mut graph, target, category);
-                graph
-                    .unresolved_uses
-                    .insert((source.to_owned(), target.to_owned()));
-            }
-            x => panic!("invalid msg type {x}"),
-        }
-    }
+    let cleanup_report = cleanup(
+        &mut graph,
+        &CleanupOptions {
+            user_excludes: path_excludes.to_vec(),
+            language: language.to_string(),
+        },
+    );
+    log.ln(&format!(
+        "cleanup: removed {} nodes, {} contains, {} calls, {} uses, {} unresolved calls, {} unresolved uses, {} span violations",
+        cleanup_report.nodes_removed,
+        cleanup_report.contains_removed,
+        cleanup_report.calls_removed,
+        cleanup_report.uses_removed,
+        cleanup_report.unresolved_calls_removed,
+        cleanup_report.unresolved_uses_removed,
+        cleanup_report.span_violations_removed,
+    ));
 
-    eprintln!("Skipped {skipped} blacklisted messages");
-
-    graph.contains.retain(|(a, b)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
-            && matches!(
-                (graph.nodes[a].kind, graph.nodes[b].kind),
-                (NodeKind::Module, NodeKind::Module)
-                    | (NodeKind::Module, NodeKind::Struct)
-                    | (NodeKind::Module, NodeKind::Function)
-                    | (NodeKind::Struct, NodeKind::Struct)
-                    | (NodeKind::Struct, NodeKind::Function)
-            )
-    });
-    graph.calls.retain(|(a, b)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
-            && graph.nodes[a].kind == NodeKind::Function
-            && graph.nodes[b].kind == NodeKind::Function
-    });
-    graph.uses.retain(|(a, b)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
-            && graph.nodes[b].kind == NodeKind::Struct
-            && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
-    });
-    graph.unresolved_calls.retain(|(a, b, _)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
-            && graph.nodes[a].kind == NodeKind::Function
-            && graph.nodes[b].kind == NodeKind::UnresolvedTarget
-    });
-    graph.unresolved_uses.retain(|(a, b)| {
-        graph.nodes.contains_key(a)
-            && graph.nodes.contains_key(b)
-            && graph.nodes[b].kind == NodeKind::UnresolvedTarget
-            && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
-    });
-
-    eprintln!(
+    log.ln(&format!(
         "graph: {} nodes, {} contain edges, {} calls edges, {} uses edges, {} unresolved calls, {} unresolved uses",
         graph.nodes.len(),
         graph.contains.len(),
@@ -380,356 +305,37 @@ fn build_graph(
         graph.uses.len(),
         graph.unresolved_calls.len(),
         graph.unresolved_uses.len(),
-    );
+    ));
 
-    let report = cleanup(
-        &mut graph,
-        &CleanupOptions {
-            user_excludes: path_excludes.to_vec(),
-            language: language.to_string(),
-        },
-    );
-    eprintln!(
-        "cleanup: removed {} nodes, {} contains, {} calls, {} uses, {} unresolved calls, {} unresolved uses, {} span violations",
-        report.nodes_removed,
-        report.contains_removed,
-        report.calls_removed,
-        report.uses_removed,
-        report.unresolved_calls_removed,
-        report.unresolved_uses_removed,
-        report.span_violations_removed,
-    );
+    let dir = temp_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    log.ln("[load] writing parquet load files...");
+    load::build_load_files(&graph, &dir).unwrap();
+    log.ln("[load] parquet files written");
 
     let _ = std::fs::remove_file("db.lbug");
+    if std::path::Path::new("db.lbug").exists() {
+        panic!("db.lbug still exists (a previous run is still holding it?) — kill any stray java_apg/java processes and retry");
+    }
+    log.ln("[load] Database::new...");
     let db = Database::new("db.lbug", Default::default()).unwrap();
+    log.ln("[load] Database::new done");
     let conn = Connection::new(&db).unwrap();
-    conn.query(
-        "
-        CREATE NODE TABLE Module(
-            fqn STRING PRIMARY KEY
-        )",
-    )
-    .unwrap();
-    conn.query(
-        "
-        CREATE NODE TABLE Struct(
-            fqn STRING PRIMARY KEY,
-            path STRING,
-            start INT64,
-            `end` INT64,
-            code_type STRING
-        )",
-    )
-    .unwrap();
-    conn.query(
-        "
-        CREATE NODE TABLE Function(
-            fqn STRING PRIMARY KEY,
-            path STRING,
-            start INT64,
-            `end` INT64,
-            code_type STRING
-        )",
-    )
-    .unwrap();
-    conn.query(
-        "
-        CREATE NODE TABLE UnresolvedTarget(
-            fqn STRING PRIMARY KEY,
-            category STRING
-        )",
-    )
-    .unwrap();
-    conn.query(
-        "
-        CREATE REL TABLE Contains(
-            FROM Module TO Module,
-            FROM Module TO Struct,
-            FROM Module TO Function,
-            FROM Struct TO Struct,
-            FROM Struct TO Function
-        )",
-    )
-    .unwrap();
-    conn.query(
-        "
-        CREATE REL TABLE Calls(
-            FROM Function TO Function
-        )",
-    )
-    .unwrap();
-    conn.query(
-        "
-        CREATE REL TABLE Uses(
-            FROM Function TO Struct,
-            FROM Struct TO Struct
-        )",
-    )
-    .unwrap();
-    conn.query(
-        "
-        CREATE REL TABLE UnresolvedCall(
-            FROM Function TO UnresolvedTarget,
-            target_type STRING
-        )",
-    )
-    .unwrap();
-    conn.query(
-        "
-        CREATE REL TABLE UnresolvedUse(
-            FROM Function TO UnresolvedTarget,
-            FROM Struct TO UnresolvedTarget
-        )",
-    )
-    .unwrap();
+    log.ln("[load] create_schema...");
+    load::create_schema(&conn).unwrap();
+    log.ln("[load] schema created");
+    log.ln("[load] copy_from...");
+    load::copy_from(&conn, &dir).unwrap();
+    log.ln("[load] copy_from done");
 
-    {
-        let mut module_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("modules.csv")
-                .unwrap(),
-        );
-        let mut struct_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("structs.csv")
-                .unwrap(),
-        );
-        let mut function_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("functions.csv")
-                .unwrap(),
-        );
-        let mut unresolved_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("unresolved.csv")
-                .unwrap(),
-        );
-        module_csv.write_all(b"fqn\n").unwrap();
-        struct_csv.write_all(b"fqn,path,start,end,code_type\n").unwrap();
-        function_csv.write_all(b"fqn,path,start,end,code_type\n").unwrap();
-        unresolved_csv.write_all(b"fqn,category\n").unwrap();
+    log.ln("[load] write_graph_jsonl...");
+    load::write_graph_jsonl(&graph, std::path::Path::new("graph.jsonl")).unwrap();
+    log.ln("[load] graph.jsonl written");
 
-        for (fqn, node) in &graph.nodes {
-            match (node.kind, &node.location) {
-                (NodeKind::Module, _) => {
-                    module_csv.write_all(fqn.as_bytes()).unwrap();
-                    module_csv.write_all(b"\n").unwrap();
-                }
-                (NodeKind::Struct, Some(loc)) => struct_csv
-                    .write_all(
-                        format!(
-                            "{},{},{},{},{}\n",
-                            fqn,
-                            loc.path.to_str().unwrap(),
-                            loc.start,
-                            loc.end,
-                            node.code_type
-                        )
-                        .as_bytes(),
-                    )
-                    .unwrap(),
-                (NodeKind::Function, Some(loc)) => function_csv
-                    .write_all(
-                        format!(
-                            "{},{},{},{},{}\n",
-                            fqn,
-                            loc.path.to_str().unwrap(),
-                            loc.start,
-                            loc.end,
-                            node.code_type
-                        )
-                        .as_bytes(),
-                    )
-                    .unwrap(),
-                (NodeKind::UnresolvedTarget, None) => {
-                    unresolved_csv.write_all(fqn.as_bytes()).unwrap();
-                    unresolved_csv.write_all(b",").unwrap();
-                    if let Some(cat) = &node.category {
-                        unresolved_csv.write_all(cat.as_bytes()).unwrap();
-                    }
-                    unresolved_csv.write_all(b"\n").unwrap();
-                }
-                (_, _) => panic!(),
-            }
-        }
-    }
-
-    conn.query(
-        r#"
-        COPY Module FROM "modules.csv" (header=true);
-        COPY Struct FROM "structs.csv" (header=true);
-        COPY Function FROM "functions.csv" (header=true);
-        COPY UnresolvedTarget FROM "unresolved.csv" (header=true);
-        "#,
-    )
-    .unwrap();
-
-    {
-        let mut edges_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("edges.csv")
-                .unwrap(),
-        );
-        edges_csv.write_all(b"from,to\n").unwrap();
-
-        let mut contain_mod_mod_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("contains_mod_mod.csv")
-                .unwrap(),
-        );
-        let mut contain_mod_struct_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("contains_mod_struct.csv")
-                .unwrap(),
-        );
-        let mut contain_mod_fn_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("contains_mod_fn.csv")
-                .unwrap(),
-        );
-        let mut contain_struct_struct_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("contains_struct_struct.csv")
-                .unwrap(),
-        );
-        let mut contain_struct_fn_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("contains_struct_fn.csv")
-                .unwrap(),
-        );
-        let mut call_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("calls.csv")
-                .unwrap(),
-        );
-        let mut use_struct_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("uses_struct.csv")
-                .unwrap(),
-        );
-        let mut use_fn_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("uses_fn.csv")
-                .unwrap(),
-        );
-        let mut unresolved_call_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("unresolved_call.csv")
-                .unwrap(),
-        );
-        let mut unresolved_use_fn_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("unresolved_use_fn.csv")
-                .unwrap(),
-        );
-        let mut unresolved_use_struct_csv = BufWriter::new(
-            File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("unresolved_use_struct.csv")
-                .unwrap(),
-        );
-        unresolved_call_csv.write_all(b"from,to,target_type\n").unwrap();
-        unresolved_use_fn_csv.write_all(b"from,to\n").unwrap();
-        unresolved_use_struct_csv.write_all(b"from,to\n").unwrap();
-
-        for (a, b) in graph.contains {
-            match (graph.nodes[&a].kind, graph.nodes[&b].kind) {
-                (NodeKind::Module, NodeKind::Module) => contain_mod_mod_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                (NodeKind::Module, NodeKind::Struct) => contain_mod_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                (NodeKind::Module, NodeKind::Function) => contain_mod_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                (NodeKind::Struct, NodeKind::Struct) => contain_struct_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                (NodeKind::Struct, NodeKind::Function) => contain_struct_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                (x, y) => println!("{a} {b} {x:?}{y:?}"),
-            }
-            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
-        }
-        for (a, b) in graph.calls {
-            call_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap();
-            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
-        }
-        for (a, b) in graph.uses {
-            match graph.nodes[&a].kind {
-                NodeKind::Struct => use_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                NodeKind::Function=> use_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                x  => unreachable!("{a} {b} {x:?}"),
-            }
-            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
-        }
-        for (a, b, t) in graph.unresolved_calls {
-            unresolved_call_csv
-                .write_all(format!("{a},{b},{t}\n").as_bytes())
-                .unwrap();
-            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
-        }
-        for (a, b) in graph.unresolved_uses {
-            match graph.nodes[&a].kind {
-                NodeKind::Function => unresolved_use_fn_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                NodeKind::Struct => unresolved_use_struct_csv.write_all(format!("{a},{b}\n").as_bytes()).unwrap(),
-                x => unreachable!("{a} {b} {x:?}"),
-            }
-            edges_csv.write_fmt(format_args!("{a},{b}\n")).unwrap();
-        }
-    }
-
-    let query = r#"COPY Contains FROM "contains_mod_mod.csv" (header=true, from="Module",to="Module");
-        COPY Contains FROM "contains_mod_struct.csv" (header=true, from="Module",to="Struct");
-        COPY Contains FROM "contains_mod_fn.csv" (header=true, from="Module",to="Function");
-        COPY Contains FROM "contains_struct_struct.csv" (header=true, from="Struct",to="Struct");
-        COPY Contains FROM "contains_struct_fn.csv" (header=true, from="Struct",to="Function");
-        COPY Calls FROM "calls.csv" (header=true);
-        COPY Uses FROM "uses_struct.csv" (header=true, from="Struct",to="Struct");
-        COPY Uses FROM "uses_fn.csv" (header=true, from="Function",to="Struct");
-        COPY UnresolvedCall FROM "unresolved_call.csv" (header=true);
-        COPY UnresolvedUse FROM "unresolved_use_fn.csv" (header=true, from="Function",to="UnresolvedTarget");
-        COPY UnresolvedUse FROM "unresolved_use_struct.csv" (header=true, from="Struct",to="UnresolvedTarget");"#;
-    for line in query.lines() {
-        conn.query(line).unwrap();
-    }
+    log.ln("[load] dropping db...");
+    drop(conn);
+    drop(db);
+    log.ln("[load] db dropped");
+    let _ = std::fs::remove_dir_all(&dir);
+    log.ln("[load] temp dir removed");
 }

@@ -17,35 +17,79 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-type pkgMsg struct {
-	Type string `json:"type"`
+// --- Unified schema messages (SPEC §2) ---
+
+type moduleMsg struct {
+	Type string `json:"type"` // module
 	Fqn  string `json:"fqn"`
 }
 
-type declMsg struct {
-	Type  string `json:"type"`
-	Kind  string `json:"kind"`
-	Fqn   string `json:"fqn"`
-	Path  string `json:"path"`
-	Start int    `json:"start"`
-	End   int    `json:"end"`
+type structMsg struct {
+	Type   string `json:"type"` // struct
+	ID     string `json:"id"`
+	Parent string `json:"parent"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Start  int    `json:"start"`
+	End    int    `json:"end"`
+}
+
+type funcMsg struct {
+	Type   string   `json:"type"` // function
+	ID     string   `json:"id"`
+	Parent string   `json:"parent"`
+	Name   string   `json:"name"`
+	Params []string `json:"params"`
+	File   string   `json:"file"`
+	Path   string   `json:"path"`
+	Start  int      `json:"start"`
+	End    int      `json:"end"`
+}
+
+type unresolvedMsg struct {
+	Type     string `json:"type"` // unresolved
+	Fqn      string `json:"fqn"`
+	Category string `json:"category"`
 }
 
 type edgeMsg struct {
-	Type       string `json:"type"`
-	Parent     string `json:"parent,omitempty"`
-	Child      string `json:"child,omitempty"`
-	Source     string `json:"source,omitempty"`
-	Target     string `json:"target,omitempty"`
-	Category   string `json:"category,omitempty"`
+	Type       string `json:"type"` // contains | calls | uses | unresolved_call | unresolved_use
+	From       string `json:"from"`
+	To         string `json:"to"`
 	TargetType string `json:"target_type,omitempty"`
 }
 
 var enc *json.Encoder
 
+// nextNodeID is the monotonic opaque-id counter (SPEC §3).
+var nextNodeID int
+
+func newNodeID() string {
+	nextNodeID++
+	return fmt.Sprintf("n%d", nextNodeID)
+}
+
+// structID / funcID map canonical FQNs (parent.name, or parent.init#file for
+// init) to the opaque ids assigned in pass 1, so edge records can reference
+// declarations by id in pass 2.
+var structID map[string]string
+var funcID map[string]string
+
+// unresolvedSeen deduplicates unresolved node records by fqn.
+var unresolvedSeen map[string]bool
+
 type moduleInfo struct {
 	Path string
 	Dir  string
+}
+
+// funcKey is the canonical FQN the ingestor will render for a function
+// declaration (SPEC §4): parent.name, or parent.init#<basename> for Go init.
+func funcKey(parent, name, file string) string {
+	if name == "init" {
+		return parent + ".init#" + filepath.Base(file)
+	}
+	return parent + "." + name
 }
 
 func main() {
@@ -103,10 +147,10 @@ func main() {
 	defer out.Flush()
 	enc = json.NewEncoder(out)
 
-	// Emit each module path as a top-level pkg node.
+	// Emit each module path as a module node.
 	emittedPkg := map[string]bool{}
 	for _, m := range mods {
-		enc.Encode(pkgMsg{Type: "pkg", Fqn: m.Path})
+		enc.Encode(moduleMsg{Type: "module", Fqn: m.Path})
 		emittedPkg[m.Path] = true
 	}
 
@@ -148,6 +192,14 @@ func main() {
 		emitPkgHierarchy(p.PkgPath, mod, enc, emittedPkg)
 	}
 
+	// Gather project source files (deduped by absolute path).
+	type fileScan struct {
+		file     *ast.File
+		filePath string
+		p        *packages.Package
+		decls    []fileDecl
+	}
+	var scans []fileScan
 	for _, p := range projectPkgs {
 		for fi, file := range p.Syntax {
 			filePath := p.GoFiles[fi]
@@ -155,10 +207,24 @@ func main() {
 				continue
 			}
 			scanned[filePath] = true
-			processFile(file, filePath, p, modSet)
-			scanDone++
-			fmt.Fprintf(os.Stderr, "\rScanning: %d%% (%d/%d)", scanDone*100/totalFiles, scanDone, totalFiles)
+			scans = append(scans, fileScan{file: file, filePath: filePath, p: p})
 		}
+	}
+
+	// Pass 1: assign an opaque id to every declared struct and function, and
+	// build the fqn->id maps used by edge records.
+	structID = map[string]string{}
+	funcID = map[string]string{}
+	unresolvedSeen = map[string]bool{}
+	for i := range scans {
+		scans[i].decls = collectDecls(scans[i].file, scans[i].filePath, scans[i].p)
+	}
+
+	// Pass 2: emit node records and edge records.
+	for _, s := range scans {
+		emitFile(s.file, s.filePath, s.p, s.decls, modSet)
+		scanDone++
+		fmt.Fprintf(os.Stderr, "\rScanning: %d%% (%d/%d)", scanDone*100/totalFiles, scanDone, totalFiles)
 	}
 	fmt.Fprintln(os.Stderr)
 }
@@ -235,9 +301,26 @@ func moduleForPkg(pkgPath string, mods []moduleInfo) string {
 	return best
 }
 
-func processFile(file *ast.File, filePath string, p *packages.Package, modSet map[string]bool) {
+// fileDecl is one declared struct/function node assigned an opaque id.
+type fileDecl struct {
+	kind    string // "struct" | "function"
+	id      string
+	parent  string
+	name    string
+	params  []string
+	file    string
+	path    string
+	start   int
+	end     int
+	astNode ast.Node // *ast.TypeSpec (struct) or *ast.FuncDecl (function)
+}
+
+// collectDecls walks one file's top-level declarations, assigning ids and
+// populating the structID/funcID maps.
+func collectDecls(file *ast.File, filePath string, p *packages.Package) []fileDecl {
 	pkgFqn := p.PkgPath
 	ti := p.TypesInfo
+	var decls []fileDecl
 
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
@@ -251,43 +334,38 @@ func processFile(file *ast.File, filePath string, p *packages.Package, modSet ma
 				if typeName == "_" || typeName == "" {
 					continue
 				}
-				fullName := pkgFqn + "." + typeName
-
-				start := p.Fset.Position(d.Pos()).Offset
-				if d.Doc != nil {
-					start = p.Fset.Position(d.Doc.Pos()).Offset
-				}
-				end := p.Fset.Position(ts.End()).Offset
-				enc.Encode(declMsg{Type: "decl", Kind: "class", Fqn: fullName, Path: filePath, Start: start, End: end})
-				enc.Encode(edgeMsg{Type: "contains", Parent: pkgFqn, Child: fullName})
-
-				if st, ok := ts.Type.(*ast.StructType); ok {
-					for _, field := range st.Fields.List {
-						if len(field.Names) == 0 {
-							if tv := ti.Types[field.Type]; tv.Type != nil {
-								if fqn := typeFQN(tv.Type, modSet); fqn != "" {
-									enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
-								}
-							}
-						}
-					}
-				}
+				id := newNodeID()
+				structID[pkgFqn+"."+typeName] = id
+				decls = append(decls, fileDecl{
+					kind:    "struct",
+					id:      id,
+					parent:  pkgFqn,
+					name:    typeName,
+					path:    filePath,
+					start:   spanStart(d, p),
+					end:     p.Fset.Position(ts.End()).Offset,
+					astNode: ts,
+				})
 				if iface, ok := ts.Type.(*ast.InterfaceType); ok {
 					for _, m := range iface.Methods.List {
 						if len(m.Names) == 0 {
-							if tv := ti.Types[m.Type]; tv.Type != nil {
-								if fqn := typeFQN(tv.Type, modSet); fqn != "" {
-									enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
-								}
-							}
-						} else {
-							for _, name := range m.Names {
-								methodFqn := fullName + "." + name.Name
-								start := p.Fset.Position(m.Pos()).Offset
-								end := p.Fset.Position(m.End()).Offset
-								enc.Encode(declMsg{Type: "decl", Kind: "method", Fqn: methodFqn, Path: filePath, Start: start, End: end})
-								enc.Encode(edgeMsg{Type: "contains", Parent: fullName, Child: methodFqn})
-							}
+							continue
+						}
+						for _, name := range m.Names {
+							mid := newNodeID()
+							parent := pkgFqn + "." + typeName
+							funcID[funcKey(parent, name.Name, filePath)] = mid
+							decls = append(decls, fileDecl{
+								kind:   "function",
+								id:     mid,
+								parent: parent,
+								name:   name.Name,
+								params: interfaceMethodParams(m, ti),
+								file:   filePath,
+								path:   filePath,
+								start:  p.Fset.Position(m.Pos()).Offset,
+								end:    p.Fset.Position(m.End()).Offset,
+							})
 						}
 					}
 				}
@@ -298,89 +376,186 @@ func processFile(file *ast.File, filePath string, p *packages.Package, modSet ma
 			if funcName == "_" || funcName == "" {
 				continue
 			}
-
-			var fullName, parentFqn string
+			var parentFqn string
 			if d.Recv != nil && len(d.Recv.List) > 0 {
 				recvType := recvTypeNameAST(d.Recv.List[0].Type)
+				if recvType == "" {
+					continue
+				}
 				parentFqn = pkgFqn + "." + recvType
-				fullName = parentFqn + "." + funcName
 			} else {
 				parentFqn = pkgFqn
-				fullName = pkgFqn + "." + funcName
 			}
-
-			start := p.Fset.Position(d.Pos()).Offset
-			if d.Doc != nil {
-				start = p.Fset.Position(d.Doc.Pos()).Offset
-			}
-			end := p.Fset.Position(d.End()).Offset
-
-			enc.Encode(declMsg{Type: "decl", Kind: "method", Fqn: fullName, Path: filePath, Start: start, End: end})
-			enc.Encode(edgeMsg{Type: "contains", Parent: parentFqn, Child: fullName})
-
-			if d.Body == nil {
-				continue
-			}
-			ast.Inspect(d.Body, func(n ast.Node) bool {
-				switch node := n.(type) {
-				case *ast.CallExpr:
-					cls := classifyCall(node, ti, modSet)
-					switch cls.kind {
-					case "call":
-						enc.Encode(edgeMsg{Type: "call", Source: fullName, Target: cls.target})
-					case "u_call":
-						enc.Encode(edgeMsg{Type: "u_call", Source: fullName, Target: cls.target, Category: cls.category, TargetType: cls.targetType})
-					case "use":
-						enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: cls.target})
-					case "u_use":
-						enc.Encode(edgeMsg{Type: "u_use", Source: fullName, Target: cls.target, Category: cls.category})
-					}
-					return true
-				case *ast.CompositeLit:
-					if node.Type != nil {
-						if tv := ti.Types[node.Type]; tv.Type != nil {
-							if fqn := typeFQN(tv.Type, modSet); fqn != "" {
-								enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
-							}
-						} else {
-							enc.Encode(edgeMsg{Type: "u_use", Source: fullName, Target: exprString(node.Type)})
-						}
-					}
-				case *ast.TypeAssertExpr:
-					if node.Type != nil {
-						if tv := ti.Types[node.Type]; tv.Type != nil {
-							if fqn := typeFQN(tv.Type, modSet); fqn != "" {
-								enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
-							}
-						} else {
-							enc.Encode(edgeMsg{Type: "u_use", Source: fullName, Target: exprString(node.Type)})
-						}
-					}
-				case *ast.DeclStmt:
-					gd, ok := node.Decl.(*ast.GenDecl)
-					if !ok {
-						return true
-					}
-					for _, spec := range gd.Specs {
-						vs, ok := spec.(*ast.ValueSpec)
-						if !ok {
-							continue
-						}
-						if vs.Type != nil {
-							if tv := ti.Types[vs.Type]; tv.Type != nil {
-								if fqn := typeFQN(tv.Type, modSet); fqn != "" {
-									enc.Encode(edgeMsg{Type: "use", Source: fullName, Target: fqn})
-								}
-							} else {
-								enc.Encode(edgeMsg{Type: "u_use", Source: fullName, Target: exprString(vs.Type)})
-							}
-						}
-					}
-				}
-				return true
+			id := newNodeID()
+			funcID[funcKey(parentFqn, funcName, filePath)] = id
+			decls = append(decls, fileDecl{
+				kind:    "function",
+				id:      id,
+				parent:  parentFqn,
+				name:    funcName,
+				params:  funcParams(d, p),
+				file:    filePath,
+				path:    filePath,
+				start:   spanStart(d, p),
+				end:     p.Fset.Position(d.End()).Offset,
+				astNode: d,
 			})
 		}
 	}
+	return decls
+}
+
+// emitFile emits node + contains records for the file's declarations and walks
+// struct bodies / function bodies for use, call, and unresolved edges.
+func emitFile(file *ast.File, filePath string, p *packages.Package, decls []fileDecl, modSet map[string]bool) {
+	ti := p.TypesInfo
+
+	for _, d := range decls {
+		switch d.kind {
+		case "struct":
+			enc.Encode(structMsg{
+				Type: "struct", ID: d.id, Parent: d.parent, Name: d.name,
+				Path: d.path, Start: d.start, End: d.end,
+			})
+			// module -> struct
+			enc.Encode(edgeMsg{Type: "contains", From: d.parent, To: d.id})
+			emitStructUses(d, ti, modSet)
+		case "function":
+			enc.Encode(funcMsg{
+				Type: "function", ID: d.id, Parent: d.parent, Name: d.name,
+				Params: d.params, File: d.file, Path: d.path, Start: d.start, End: d.end,
+			})
+			// module or struct -> function
+			from := d.parent
+			if id, ok := structID[d.parent]; ok {
+				from = id
+			}
+			enc.Encode(edgeMsg{Type: "contains", From: from, To: d.id})
+			if fn, ok := d.astNode.(*ast.FuncDecl); ok && fn.Body != nil {
+				emitBodyEdges(fn.Body, d.id, ti, modSet)
+			}
+		}
+	}
+}
+
+// emitStructUses emits `uses` edges for embedded struct fields and embedded
+// interfaces (struct -> struct).
+func emitStructUses(d fileDecl, ti *types.Info, modSet map[string]bool) {
+	ts, ok := d.astNode.(*ast.TypeSpec)
+	if !ok {
+		return
+	}
+	emitUse := func(typ ast.Expr) {
+		if tv, ok := ti.Types[typ]; ok && tv.Type != nil {
+			if fqn := typeFQN(tv.Type, modSet); fqn != "" {
+				if id, ok := structID[fqn]; ok {
+					enc.Encode(edgeMsg{Type: "uses", From: d.id, To: id})
+				}
+			}
+		}
+	}
+	if st, ok := ts.Type.(*ast.StructType); ok {
+		for _, field := range st.Fields.List {
+			if len(field.Names) == 0 {
+				emitUse(field.Type)
+			}
+		}
+	}
+	if iface, ok := ts.Type.(*ast.InterfaceType); ok {
+		for _, m := range iface.Methods.List {
+			if len(m.Names) == 0 {
+				emitUse(m.Type)
+			}
+		}
+	}
+}
+
+// emitBodyEdges walks a function body, emitting call/use/unresolved edges with
+// the enclosing function's id as the source.
+func emitBodyEdges(body *ast.BlockStmt, sourceID string, ti *types.Info, modSet map[string]bool) {
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.CallExpr:
+			cls := classifyCall(node, ti, modSet)
+			switch cls.kind {
+			case "call":
+				if id, ok := funcID[cls.target]; ok {
+					enc.Encode(edgeMsg{Type: "calls", From: sourceID, To: id})
+				}
+			case "u_call":
+				emitUnresolved(cls.target, cls.category)
+				enc.Encode(edgeMsg{Type: "unresolved_call", From: sourceID, To: cls.target, TargetType: cls.targetType})
+			case "use":
+				if id, ok := structID[cls.target]; ok {
+					enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: id})
+				}
+			case "u_use":
+				emitUnresolved(cls.target, cls.category)
+				enc.Encode(edgeMsg{Type: "unresolved_use", From: sourceID, To: cls.target})
+			}
+			return true
+		case *ast.CompositeLit:
+			if node.Type != nil {
+				if tv, ok := ti.Types[node.Type]; ok && tv.Type != nil {
+					if fqn := typeFQN(tv.Type, modSet); fqn != "" {
+						if id, ok := structID[fqn]; ok {
+							enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: id})
+						}
+					}
+				} else {
+					emitUnresolved(exprString(node.Type), "unknown")
+					enc.Encode(edgeMsg{Type: "unresolved_use", From: sourceID, To: exprString(node.Type)})
+				}
+			}
+		case *ast.TypeAssertExpr:
+			if node.Type != nil {
+				if tv, ok := ti.Types[node.Type]; ok && tv.Type != nil {
+					if fqn := typeFQN(tv.Type, modSet); fqn != "" {
+						if id, ok := structID[fqn]; ok {
+							enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: id})
+						}
+					}
+				} else {
+					emitUnresolved(exprString(node.Type), "unknown")
+					enc.Encode(edgeMsg{Type: "unresolved_use", From: sourceID, To: exprString(node.Type)})
+				}
+			}
+		case *ast.DeclStmt:
+			gd, ok := node.Decl.(*ast.GenDecl)
+			if !ok {
+				return true
+			}
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				if vs.Type != nil {
+					if tv, ok := ti.Types[vs.Type]; ok && tv.Type != nil {
+						if fqn := typeFQN(tv.Type, modSet); fqn != "" {
+							if id, ok := structID[fqn]; ok {
+								enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: id})
+							}
+						}
+					} else {
+						emitUnresolved(exprString(vs.Type), "unknown")
+						enc.Encode(edgeMsg{Type: "unresolved_use", From: sourceID, To: exprString(vs.Type)})
+					}
+				}
+			}
+		}
+		return true
+	})
+}
+
+// emitUnresolved emits the unresolved node record for fqn on first encounter
+// (records are deduplicated by fqn; the first category wins).
+func emitUnresolved(fqn, category string) {
+	if fqn == "" || unresolvedSeen[fqn] {
+		return
+	}
+	unresolvedSeen[fqn] = true
+	enc.Encode(unresolvedMsg{Type: "unresolved", Fqn: fqn, Category: category})
 }
 
 // callClass is the result of classifying a call expression.
@@ -406,7 +581,7 @@ func classifyCall(call *ast.CallExpr, ti *types.Info, modSet map[string]bool) ca
 		if tv, ok := ti.Types[call.Fun]; ok && tv.Type != nil {
 			tt = sigString(tv.Type)
 		}
-		return callClass{"u_call", "func", "func-value", sanitizeTarget(tt)}
+		return callClass{"u_call", "func", "func-value", tt}
 	}
 
 	obj, isMethodVal := callObject(call, ti)
@@ -444,9 +619,9 @@ func classifyCall(call *ast.CallExpr, ti *types.Info, modSet map[string]bool) ca
 		// Function-valued variable. Package-level vars have a resolvable
 		// identity; locals are recorded by bare name.
 		if o.Pkg() != nil && o.Parent() == o.Pkg().Scope() {
-			return callClass{"u_call", o.Pkg().Path() + "." + o.Name(), "func-value", sanitizeTarget(sigString(o.Type()))}
+			return callClass{"u_call", o.Pkg().Path() + "." + o.Name(), "func-value", sigString(o.Type())}
 		}
-		return callClass{"u_call", o.Name(), "func-value", sanitizeTarget(sigString(o.Type()))}
+		return callClass{"u_call", o.Name(), "func-value", sigString(o.Type())}
 	}
 	return callClass{"u_call", callRawName(call), "unknown", ""}
 }
@@ -532,6 +707,69 @@ func sigString(t types.Type) string {
 	})
 }
 
+// paramStrings renders a signature's parameter types (excluding the receiver),
+// package-qualified, in declaration order (SPEC §2.3).
+func paramStrings(sig *types.Signature) []string {
+	var out []string
+	params := sig.Params()
+	for i := 0; i < params.Len(); i++ {
+		out = append(out, types.TypeString(params.At(i).Type(), func(p *types.Package) string {
+			if p == nil {
+				return ""
+			}
+			return p.Path()
+		}))
+	}
+	if out == nil {
+		out = []string{}
+	}
+	return out
+}
+
+// funcParams returns the call-signature parameter types of a declared function.
+func funcParams(d *ast.FuncDecl, p *packages.Package) []string {
+	obj, ok := p.TypesInfo.Defs[d.Name]
+	if !ok {
+		return []string{}
+	}
+	fn, ok := obj.(*types.Func)
+	if !ok {
+		return []string{}
+	}
+	return paramStrings(fn.Type().(*types.Signature))
+}
+
+// interfaceMethodParams returns the parameter types of an interface method
+// declaration.
+func interfaceMethodParams(m *ast.Field, ti *types.Info) []string {
+	if len(m.Names) == 0 {
+		return []string{}
+	}
+	if obj, ok := ti.Defs[m.Names[0]]; ok {
+		if fn, ok := obj.(*types.Func); ok {
+			return paramStrings(fn.Type().(*types.Signature))
+		}
+	}
+	return []string{}
+}
+
+// spanStart is the 0-based start offset of a declaration, including any doc
+// comment.
+func spanStart(node ast.Node, p *packages.Package) int {
+	start := p.Fset.Position(node.Pos()).Offset
+	switch d := node.(type) {
+	case *ast.GenDecl:
+		if d.Doc != nil {
+			start = p.Fset.Position(d.Doc.Pos()).Offset
+		}
+	case *ast.FuncDecl:
+		if d.Doc != nil {
+			start = p.Fset.Position(d.Doc.Pos()).Offset
+		}
+	}
+	return start
+}
+
 // stdOrExternal classifies a package path as stdlib (first segment has no dot)
 // or external (first segment is a domain, e.g. github.com, google.golang.org).
 func stdOrExternal(pkgPath string) string {
@@ -589,7 +827,7 @@ func callRawName(call *ast.CallExpr) string {
 	default:
 		name = exprString(call.Fun)
 	}
-	return sanitizeTarget(name)
+	return name
 }
 
 func exprString(e ast.Expr) string {
@@ -598,22 +836,7 @@ func exprString(e ast.Expr) string {
 	}
 	var sb strings.Builder
 	printer.Fprint(&sb, token.NewFileSet(), e)
-	return sanitizeTarget(strings.TrimSpace(sb.String()))
-}
-
-// sanitizeTarget strips characters that would break the CSV/JSON edge output
-// (commas, newlines, quotes).
-func sanitizeTarget(s string) string {
-	var sb strings.Builder
-	for _, r := range s {
-		switch r {
-		case ',', '\n', '\r', '"':
-			continue
-		default:
-			sb.WriteRune(r)
-		}
-	}
-	return sb.String()
+	return strings.TrimSpace(sb.String())
 }
 
 // funcFQNAny returns the FQN regardless of module membership. Universe-scope
@@ -760,10 +983,10 @@ func emitPkgHierarchy(pkgFqn, modPath string, enc *json.Encoder, emitted map[str
 		}
 		child := cur + "/" + part
 		if !emitted[child] {
-			enc.Encode(pkgMsg{Type: "pkg", Fqn: child})
+			enc.Encode(moduleMsg{Type: "module", Fqn: child})
 			emitted[child] = true
 		}
-		enc.Encode(edgeMsg{Type: "contains", Parent: cur, Child: child})
+		enc.Encode(edgeMsg{Type: "contains", From: cur, To: child})
 		cur = child
 	}
 }

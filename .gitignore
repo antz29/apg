@@ -2,3 +2,5 @@
 /project*/
 *.lbug
 *.csv
+graph.jsonl
+apg-frontend.log
