@@ -1,10 +1,12 @@
 # Apg formula — program graph scanner + LadybugDB query CLI for opencode.
 #
 # Tap usage (from this repo):
-#   brew tap antz29/apg   # or `brew tap --force-auto-update <this-git-url>`
+#   brew tap antz29/apg https://github.com/antz29/apg.git
 #   brew install antz29/apg/apg
 #
-# NOTE: fill in `sha256` for the pinned v0.1.0 tarball once the tag exists.
+# NOTE: the bare `brew tap antz29/apg` form requires the repo to be named
+# `homebrew-apg`; since this repo is `apg`, pass the URL explicitly.
+# Fill in `sha256` for the pinned v0.1.0 tarball once the tag exists.
 # Until then, install from HEAD:
 #   brew install --HEAD antz29/apg/apg
 

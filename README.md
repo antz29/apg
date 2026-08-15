@@ -38,7 +38,7 @@ at scan time (see [below](#java-projects)).
 ## Install (Homebrew)
 
 ```sh
-brew tap antz29/apg
+brew tap antz29/apg https://github.com/antz29/apg.git
 brew install antz29/apg/apg
 ```
 
