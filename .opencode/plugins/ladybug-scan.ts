@@ -42,10 +42,6 @@ export const LadybugScanPlugin: Plugin = async () => {
             .string()
             .optional()
             .describe("Comma-separated glob patterns for paths to exclude."),
-          includeTests: tool.schema
-            .boolean()
-            .optional()
-            .describe("Include test/generated/build code in the graph. Off by default."),
           modules: tool.schema
             .string()
             .optional()
@@ -90,10 +86,6 @@ export const LadybugScanPlugin: Plugin = async () => {
 
           for (const pat of (args.excludePath ?? "").split(",").filter(Boolean)) {
             spawnArgs.push("--exclude-path", pat)
-          }
-
-          if (args.includeTests) {
-            spawnArgs.push("--include-tests")
           }
 
           for (const m of (args.modules ?? "").split(",").filter(Boolean)) {

@@ -88,7 +88,7 @@ func main() {
 	cfg := &packages.Config{
 		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule,
 		Dir:   root,
-		Tests: false,
+		Tests: true,
 	}
 	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
@@ -112,6 +112,9 @@ func main() {
 
 	var projectPkgs []*packages.Package
 	for _, p := range pkgs {
+		if p.TypesInfo == nil {
+			continue
+		}
 		if isProjectPkg(p, root) && !isExcludedPkg(p, excludes) {
 			projectPkgs = append(projectPkgs, p)
 		}
@@ -120,14 +123,22 @@ func main() {
 		return projectPkgs[i].PkgPath < projectPkgs[j].PkgPath
 	})
 
+	// With Tests:true, go/packages returns test-augmented packages whose
+	// Syntax re-includes non-test files alongside *_test.go files. Count and
+	// scan each source file exactly once by absolute path.
+	seen := map[string]bool{}
 	totalFiles := 0
 	for _, p := range projectPkgs {
-		for range p.Syntax {
-			totalFiles++
+		for _, f := range p.GoFiles {
+			if !seen[f] && !isExcluded(f, excludes) {
+				seen[f] = true
+				totalFiles++
+			}
 		}
 	}
 
 	scanDone := 0
+	scanned := map[string]bool{}
 
 	for _, p := range projectPkgs {
 		mod := moduleForPkg(p.PkgPath, mods)
@@ -140,10 +151,10 @@ func main() {
 	for _, p := range projectPkgs {
 		for fi, file := range p.Syntax {
 			filePath := p.GoFiles[fi]
-			if isExcluded(filePath, excludes) {
-				scanDone++
+			if isExcluded(filePath, excludes) || scanned[filePath] {
 				continue
 			}
+			scanned[filePath] = true
 			processFile(file, filePath, p, modSet)
 			scanDone++
 			fmt.Fprintf(os.Stderr, "\rScanning: %d%% (%d/%d)", scanDone*100/totalFiles, scanDone, totalFiles)

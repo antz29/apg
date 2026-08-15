@@ -887,7 +887,6 @@ static void get_cpp_files(fs::path dir, std::vector<fs::path> &files,
             if (!fs::is_regular_file(entry)) continue;
             std::string name = entry.path().filename().string();
             if (name[0] == '.') continue;
-            if (name == "node_modules" || name == "target") continue;
             std::string path_str = entry.path().string();
             bool excluded = false;
             for (const auto &pat : excludes) {
@@ -903,7 +902,6 @@ static void get_cpp_files(fs::path dir, std::vector<fs::path> &files,
             if (!fs::is_regular_file(entry)) continue;
             std::string name = entry.path().filename().string();
             if (name[0] == '.') continue;
-            if (name == "node_modules" || name == "target") continue;
             std::string path_str = entry.path().string();
             bool excluded = false;
             for (const auto &pat : excludes) {
@@ -976,7 +974,6 @@ int main(int argc, char **argv) {
             if (!entry.is_directory()) continue;
             std::string name = entry.path().filename().string();
             if (name[0] == '.') continue;
-            if (name == "node_modules" || name == "target" || name == "build") continue;
             if (dir_has_sources(entry.path())) {
                 modules.push_back({name, entry.path()});
             }

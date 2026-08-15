@@ -63,7 +63,7 @@ All FQNs are fully qualified (e.g. `org.jgrapht.Graph.addVertex`). `start` and `
 
 - **Java and Go edges are exact** (compiler type-checker resolution). A `Calls` edge always points at the real declared method.
 - **C++ edges are heuristic** (tree-sitter). Unresolvable refs become `UnresolvedCall`/`UnresolvedUse`, never guessed FQNs.
-- **Test/generated/build code is excluded by default.** Pass `includeTests: true` to `ladybug_scan` to include it.
+- **All code is included** (tests, generated, vendored). Filter by `code_type` instead: `MATCH (n) WHERE n.code_type = 'test'` (or `'generated'`, `'external'`, etc.; default `'src'`). An `apg.json` config file can override the classification rules.
 - **Multi-module repos** (Go workspaces, C++ monorepos): each module is a top-level `Module` node; FQNs are module-prefixed (`modA.util.Foo` vs `modB.util.Foo`). Pass `modules: "dir1,dir2"` to restrict scanning.
 - To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
@@ -122,15 +122,16 @@ If the counts are zero (or the query errors), the database is empty. Guide the u
    - *"Any package prefixes to exclude?"* — e.g. test packages like `com.example.test` (optional).
    - *"Any extra classpath entries?"* — e.g. external JARs or dependency directories (optional).
    - *"Any paths to exclude?"* — e.g. `**/test/**`, `**/generated/**` (optional).
-   - *"Include test code?"* — off by default; pass `includeTests: true` if the user wants test/generated/build code in the graph.
    - *"Restrict to specific modules?"* — for Go/C++ monorepos, pass `modules: "dir1,dir2"` to scan only those modules (optional).
 
    Only ask the questions that are relevant. Start with the project path — if they don't know the other options, skip them.
 
 3. **Run the scan** with `ladybug_scan`:
    ```
-   ladybug_scan(directory: "/path/to/project", blacklist: "com.example.test", classpath: "/path/to/lib", excludePath: "**/test/**", includeTests: false, modules: "dir1,dir2")
+   ladybug_scan(directory: "/path/to/project", blacklist: "com.example.test", excludePath: "**/generated/**", modules: "dir1,dir2")
    ```
+
+   Note: all code (including tests) is scanned by default; filter it out in queries via `code_type` (e.g. `WHERE n.code_type = 'test'`).
 
 4. **Verify the results.** After the scan, query for counts to confirm data was loaded, then answer the user's original question.
 

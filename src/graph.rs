@@ -40,4 +40,7 @@ pub struct Node {
     /// func-value/interface-method/unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    /// Code type of Struct/Function nodes (src/test/generated/external/lib/
+    /// user-defined). Lets queries filter test (or other) code out.
+    pub code_type: String,
 }

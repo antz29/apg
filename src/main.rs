@@ -1,3 +1,4 @@
+mod classify;
 mod cleanup;
 mod graph;
 
@@ -22,6 +23,7 @@ fn insert_unresolved_target(graph: &mut Graph, fqn: &str, category: Option<&str>
         kind: NodeKind::UnresolvedTarget,
         location: None,
         category: category.map(str::to_owned),
+        code_type: String::new(),
     });
 }
 
@@ -88,7 +90,6 @@ fn main() {
     let mut language: Option<String> = None;
     let mut path_excludes: Vec<String> = Vec::new();
     let mut module_dirs: Vec<String> = Vec::new();
-    let mut include_tests = false;
     let mut i = 1;
     while i < raw.len() {
         match raw[i].as_str() {
@@ -109,9 +110,6 @@ fn main() {
                 if i < raw.len() {
                     module_dirs.push(raw[i].clone());
                 }
-            }
-            "--include-tests" => {
-                include_tests = true;
             }
             _ => clean.push(raw[i].clone()),
         }
@@ -153,6 +151,7 @@ fn main() {
     }
 
     let cmd = frontend_cmd(&language);
+    let config = classify::ApgConfig::load(&project_dir);
 
     if language == "cpp" || language == "go" {
         let mut cmd = Command::new(&cmd);
@@ -165,7 +164,7 @@ fn main() {
             .stderr(Stdio::inherit());
         let mut frontend_output = cmd.spawn().expect("Failed to run frontend");
 
-        build_graph(&mut frontend_output, &blacklist, &path_excludes, include_tests, &language);
+        build_graph(&mut frontend_output, &blacklist, &path_excludes, &language, config.as_ref());
 
         if !frontend_output
             .wait()
@@ -189,7 +188,7 @@ fn main() {
             .spawn()
             .expect("Failed to run Java frontend");
 
-        build_graph(&mut frontend_output, &blacklist, &path_excludes, include_tests, &language);
+        build_graph(&mut frontend_output, &blacklist, &path_excludes, &language, config.as_ref());
 
         if !frontend_output
             .wait()
@@ -205,8 +204,8 @@ fn build_graph(
     frontend_output: &mut std::process::Child,
     blacklist: &[String],
     path_excludes: &[String],
-    include_tests: bool,
     language: &str,
+    config: Option<&classify::ApgConfig>,
 ) {
     let mut graph = Graph::default();
     let mut skipped = 0u64;
@@ -230,6 +229,7 @@ fn build_graph(
                         kind: NodeKind::Module,
                         location: None,
                         category: None,
+                        code_type: String::new(),
                     },
                 );
             }
@@ -239,6 +239,7 @@ fn build_graph(
                     skipped += 1;
                     continue;
                 }
+                let path = msg["path"].as_str().unwrap();
                 graph.nodes.insert(
                     fqn.to_owned(),
                     Node {
@@ -248,11 +249,12 @@ fn build_graph(
                             x => panic!("invalid node kind {x}"),
                         },
                         location: Some(Location {
-                            path: PathBuf::from(msg["path"].as_str().unwrap()),
+                            path: PathBuf::from(path),
                             start: msg["start"].as_u64().unwrap_or(0) as u32,
                             end: msg["end"].as_u64().unwrap_or(0) as u32,
                         }),
                         category: None,
+                        code_type: classify::classify_code_type(path, fqn, language, config),
                     },
                 );
             }
@@ -383,7 +385,6 @@ fn build_graph(
     let report = cleanup(
         &mut graph,
         &CleanupOptions {
-            include_tests,
             user_excludes: path_excludes.to_vec(),
             language: language.to_string(),
         },
@@ -415,7 +416,8 @@ fn build_graph(
             fqn STRING PRIMARY KEY,
             path STRING,
             start INT64,
-            `end` INT64
+            `end` INT64,
+            code_type STRING
         )",
     )
     .unwrap();
@@ -425,7 +427,8 @@ fn build_graph(
             fqn STRING PRIMARY KEY,
             path STRING,
             start INT64,
-            `end` INT64
+            `end` INT64,
+            code_type STRING
         )",
     )
     .unwrap();
@@ -514,8 +517,8 @@ fn build_graph(
                 .unwrap(),
         );
         module_csv.write_all(b"fqn\n").unwrap();
-        struct_csv.write_all(b"fqn,path,start,end\n").unwrap();
-        function_csv.write_all(b"fqn,path,start,end\n").unwrap();
+        struct_csv.write_all(b"fqn,path,start,end,code_type\n").unwrap();
+        function_csv.write_all(b"fqn,path,start,end,code_type\n").unwrap();
         unresolved_csv.write_all(b"fqn,category\n").unwrap();
 
         for (fqn, node) in &graph.nodes {
@@ -527,11 +530,12 @@ fn build_graph(
                 (NodeKind::Struct, Some(loc)) => struct_csv
                     .write_all(
                         format!(
-                            "{},{},{},{}\n",
+                            "{},{},{},{},{}\n",
                             fqn,
                             loc.path.to_str().unwrap(),
                             loc.start,
-                            loc.end
+                            loc.end,
+                            node.code_type
                         )
                         .as_bytes(),
                     )
@@ -539,11 +543,12 @@ fn build_graph(
                 (NodeKind::Function, Some(loc)) => function_csv
                     .write_all(
                         format!(
-                            "{},{},{},{}\n",
+                            "{},{},{},{},{}\n",
                             fqn,
                             loc.path.to_str().unwrap(),
                             loc.start,
-                            loc.end
+                            loc.end,
+                            node.code_type
                         )
                         .as_bytes(),
                     )

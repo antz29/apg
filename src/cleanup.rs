@@ -1,21 +1,7 @@
+use crate::classify::matches_glob;
 use crate::graph::{Graph, NodeKind};
 
-/// Built-in default path exclusions (opt-out via include_tests).
-/// Applied as path-segment matches so they work regardless of where the
-/// project root sits.
-const DEFAULT_EXCLUDED_SEGMENTS: &[&str] = &[
-    "test",
-    "tests",
-    "qa-functional",
-    "generated",
-    "build",
-    "external",
-    "node_modules",
-    "target",
-];
-
 pub struct CleanupOptions {
-    pub include_tests: bool,
     pub user_excludes: Vec<String>,
     /// Language of the scan. Span validation is Java-only: Go methods are
     /// declared outside the struct body (receiver-based), so their spans
@@ -33,47 +19,7 @@ pub struct CleanupReport {
     pub span_violations_removed: usize,
 }
 
-fn matches_glob(pattern: &str, path: &str) -> bool {
-    let pat: Vec<char> = pattern.chars().collect();
-    let txt: Vec<char> = path.chars().collect();
-    let (mut pi, mut ti) = (0usize, 0usize);
-    let mut star = None;
-    let mut star_ti = 0usize;
-    while ti < txt.len() {
-        if pi < pat.len() && (pat[pi] == '?' || pat[pi] == txt[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if pi < pat.len() && pat[pi] == '*' {
-            star = Some(pi);
-            star_ti = ti;
-            pi += 1;
-            while pi < pat.len() && pat[pi] == '*' {
-                pi += 1;
-            }
-        } else if let Some(sp) = star {
-            pi = sp + 1;
-            star_ti += 1;
-            ti = star_ti;
-        } else {
-            return false;
-        }
-    }
-    while pi < pat.len() && pat[pi] == '*' {
-        pi += 1;
-    }
-    pi == pat.len()
-}
-
 fn path_excluded(path: &str, opts: &CleanupOptions) -> bool {
-    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if !opts.include_tests {
-        if segments
-            .iter()
-            .any(|s| DEFAULT_EXCLUDED_SEGMENTS.contains(s))
-        {
-            return true;
-        }
-    }
     opts.user_excludes
         .iter()
         .any(|pat| matches_glob(pat, path))
