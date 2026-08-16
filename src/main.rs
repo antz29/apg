@@ -54,6 +54,14 @@ export default tool({
 })
 "#;
 
+/// The `.opencode/agents/codebase-navigator.md` agent file that `apg init`
+/// installs into a project. Auto-discovered by opencode from
+/// `.opencode/agents/*.md`; configured to use the `apg_query` tool and to guide
+/// the user through running `apg scan` on the CLI (there is no in-chat scan
+/// tool). Single-sourced from the repo's own agent file.
+const CODEBASE_NAVIGATOR_AGENT: &str =
+    include_str!("../.opencode/agents/codebase-navigator.md");
+
 /// The `.opencode/package.json` written by `apg init` when none exists, so the
 /// tool file's `@opencode-ai/plugin` import resolves.
 const OPENCODE_PACKAGE_JSON: &str = r#"{
@@ -222,7 +230,8 @@ fn print_help() {
 
 USAGE:
   apg init [dir]              Set up .apg/ (db + config) and install the
-                              opencode apg_query plugin into .opencode/
+                              opencode apg_query plugin + codebase-navigator
+                              agent into .opencode/
   apg scan [dir] [options]    Scan a project; writes .apg/db.lbug and
                               .apg/graph.jsonl
   apg query \"<cypher>\"        Run a read-only Cypher query against
@@ -269,7 +278,8 @@ fn main() {
 }
 
 /// `apg init [dir]`: create `.apg/` with a default `config.json`, then install
-/// the opencode `apg_query` plugin into `<dir>/.opencode/`.
+/// the opencode `apg_query` plugin and `codebase-navigator` agent into
+/// `<dir>/.opencode/`.
 fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     let dir = if args.is_empty() {
         std::env::current_dir()?
@@ -288,12 +298,18 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     let opencode_dir = dir.join(".opencode");
     let tools_dir = opencode_dir.join("tools");
     std::fs::create_dir_all(&tools_dir)?;
+    let agents_dir = opencode_dir.join("agents");
+    std::fs::create_dir_all(&agents_dir)?;
 
     let pkg_path = opencode_dir.join("package.json");
     if !pkg_path.exists() {
         std::fs::write(&pkg_path, OPENCODE_PACKAGE_JSON)?;
     }
     std::fs::write(tools_dir.join("apg_query.ts"), APG_QUERY_TOOL)?;
+    std::fs::write(
+        agents_dir.join("codebase-navigator.md"),
+        CODEBASE_NAVIGATOR_AGENT,
+    )?;
 
     if !opencode_dir
         .join("node_modules")
@@ -315,7 +331,7 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     }
 
     println!(
-        "Initialized .apg/ (config.json) and installed apg_query tool in {}",
+        "Initialized .apg/ (config.json) and installed apg_query tool + codebase-navigator agent in {}",
         opencode_dir.display()
     );
     Ok(())

@@ -33,8 +33,10 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
 
 The `scanner` formula builds the `apg` binary; the language frontends are
 separate formulae (`apg-go`, `apg-java`, `apg-cpp`). Install the base plus the
-frontends for the languages you scan. Java projects additionally need `java` on
-your PATH at scan time (see [below](#java-projects)).
+frontends for the languages you scan. Prebuilt bottles (macOS arm64 + x86_64)
+are published to each GitHub release by CI; if no bottle matches your system,
+Homebrew falls back to building from source. Java projects additionally need
+`java` on your PATH at scan time (see [below](#java-projects)).
 
 ## Install (Homebrew)
 
@@ -55,11 +57,11 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.2.0
+apg --version   # apg 0.3.0
 apg --help
 ```
 
-`v0.2.0` is tagged, so the stable install works as-is. If you want the latest
+`v0.3.0` is tagged, so the stable install works as-is. If you want the latest
 unreleased code instead, pass `--HEAD`:
 
 ## Quick start
@@ -67,7 +69,7 @@ unreleased code instead, pass `--HEAD`:
 In your project directory:
 
 ```sh
-apg init    # creates .apg/ (config + db location) and installs the opencode apg_query plugin
+apg init    # creates .apg/ (config + db location), installs the opencode apg_query plugin and codebase-navigator agent
 apg scan    # scans the project, writes .apg/db.lbug and .apg/graph.jsonl
 apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 ```
@@ -78,10 +80,12 @@ Sets up the project:
 
 - creates `.apg/` with a default `config.json` (classification rules),
 - installs the opencode `apg_query` plugin into `.opencode/tools/apg_query.ts`
-  (writing `.opencode/package.json` and running `npm install` if needed).
+  (writing `.opencode/package.json` and running `npm install` if needed),
+- installs the `codebase-navigator` agent into `.opencode/agents/codebase-navigator.md`.
 
-The plugin is auto-discovered by opencode. **Restart opencode** after running
-`apg init` so the `apg_query` tool is available in chat.
+The plugin and agent are auto-discovered by opencode. **Restart opencode** after
+running `apg init` so the `apg_query` tool and `codebase-navigator` agent are
+available in chat.
 
 ### 2. `apg scan [dir] [options]`
 

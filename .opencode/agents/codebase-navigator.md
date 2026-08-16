@@ -4,7 +4,6 @@ mode: primary
 permission:
   "*": deny
   apg_query: allow
-  apg_scan: allow
   question: allow
   read: allow
   external_directory: ask
@@ -64,7 +63,7 @@ All FQNs are fully qualified and language-shaped: `org.jgrapht.Graph.addVertex` 
 - **Java and Go edges are exact** (compiler type-checker resolution). A `Calls` edge always points at the real declared method.
 - **C++ edges are heuristic** (tree-sitter). Unresolvable refs become `UnresolvedCall`/`UnresolvedUse`, never guessed FQNs.
 - **All code is included** (tests, generated, vendored). Filter by `code_type` instead: `MATCH (n) WHERE n.code_type = 'test'` (or `'generated'`, `'external'`, etc.; default `'src'`). An `.apg/config.json` config file can override the classification rules.
-- **Multi-module repos** (Go workspaces, C++ monorepos): each module is a top-level `Module` node; FQNs are module-prefixed (`modA.util.Foo` vs `modB.util.Foo`). Pass `modules: "dir1,dir2"` to restrict scanning.
+- **Multi-module repos** (Go workspaces, C++ monorepos): each module is a top-level `Module` node; FQNs are module-prefixed (`modA.util.Foo` vs `modB.util.Foo`). Pass `--module dir1 --module dir2` to `apg scan` to restrict scanning.
 - To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
 ### Common query patterns
@@ -103,7 +102,7 @@ MATCH (s:Struct) RETURN count(*) as total_structs
 
 ### Scanning a project
 
-The graph database (`.apg/db.lbug`) must be built before you can query it. Use `apg_scan` to scan a project (Java, Go, or C++) into the graph.
+The graph database (`.apg/db.lbug`) is built with the `apg` CLI — there is no in-chat scan tool. If the database is missing or stale, instruct the user to run `apg scan` in the project root and come back once it finishes.
 
 **Before answering any query**, check whether the graph has data:
 
@@ -112,30 +111,19 @@ MATCH (s:Struct) RETURN count(*) as structs
 MATCH (f:Function) RETURN count(*) as functions
 ```
 
-If the counts are zero (or the query errors), the database is empty. Guide the user through scanning.
+If the counts are zero (or the query errors), the database is empty or stale. Tell the user to run `apg scan` in the project root to build/refresh `.apg/db.lbug`, then re-ask their question.
 
-**Scanning workflow:**
+When a scan is needed:
 
-1. **Check if `.apg/db.lbug` is populated.** If empty, tell the user you need to scan a project first.
+1. **Ask the user to run the scan.** Have them execute `apg scan` in the project root. They may pass options:
+   - `--language <java|go|cpp>` to force the language (auto-detected otherwise).
+   - `--exclude-path <glob>` to exclude paths (repeatable).
+   - `--module <dir>` to restrict scanning to specific modules (Go/C++ monorepos, repeatable).
+   - Trailing FQN prefixes as a blacklist (e.g. `com.example.test`).
 
-2. **Gather scan details from the user.** Ask:
+2. **Wait for the scan to finish.** Once the user confirms it completed, re-run your queries and answer the original question.
 
-   - *"Where is your project located?"* — They can provide a relative or absolute path. If they're already in the project directory, use `"."`.
-   - *"Which language is it?"* — `java`, `go`, or `cpp`. Auto-detected if omitted, but confirm for large repos.
-   - *"Any prefixes to exclude?"* — e.g. test packages/modules like `com.example.test` (optional).
-   - *"Any paths to exclude?"* — e.g. `**/test/**`, `**/generated/**` (optional).
-   - *"Restrict to specific modules?"* — for Go/C++ monorepos, pass `modules: "dir1,dir2"` to scan only those modules (optional).
-
-   Only ask the questions that are relevant. Start with the project path — if they don't know the other options, skip them.
-
-3. **Run the scan** with `apg_scan`:
-   ```
-   apg_scan(directory: "/path/to/project", language: "java", blacklist: "com.example.test", excludePath: "**/generated/**", modules: "dir1,dir2")
-   ```
-
-   Note: all code (including tests) is scanned by default; filter it out in queries via `code_type` (e.g. `WHERE n.code_type = 'test'`).
-
-4. **Verify the results.** After the scan, query for counts to confirm data was loaded, then answer the user's original question.
+Note: all code (including tests) is scanned by default; filter it out in queries via `code_type` (e.g. `WHERE n.code_type = 'test'`).
 
 If the scan fails, share the error output and ask the user to check their toolchain (javac, go, or g++) or project structure.
 

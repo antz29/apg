@@ -26,7 +26,8 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
 The project builds a single `apg` binary (package `apg`, was `java_apg`):
 
 - `apg init [dir]` — create `.apg/` with a default `config.json` and install the
-  opencode `apg_query` plugin into `<dir>/.opencode/tools/apg_query.ts`.
+  opencode `apg_query` plugin into `<dir>/.opencode/tools/apg_query.ts` plus the
+  `codebase-navigator` agent into `<dir>/.opencode/agents/codebase-navigator.md`.
 - `apg scan [dir] [--language L] [--exclude-path G]* [--module M]* [blacklist...]`
   — run the pipeline; writes `.apg/db.lbug`, `.apg/graph.jsonl`,
   `.apg/apg-frontend.log`.

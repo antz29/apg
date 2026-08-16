@@ -13,6 +13,11 @@ class Scanner < Formula
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
+  bottle do
+    root_url "https://github.com/antz29/apg/releases/download/v#{version}"
+    # sha256 lines are filled in by the .github/workflows/bottle.yml build.
+  end
+
   depends_on "cmake" => :build   # lbug (vendored LadybugDB C++) builds via cmake
   depends_on "rust" => :build
   depends_on "openssl@3"         # lbug links libssl/libcrypto dynamically

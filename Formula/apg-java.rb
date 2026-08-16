@@ -10,6 +10,11 @@ class ApgJava < Formula
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
+  bottle do
+    root_url "https://github.com/antz29/apg/releases/download/v#{version}"
+    # sha256 lines are filled in by the .github/workflows/bottle.yml build.
+  end
+
   depends_on "openjdk" # javac to build the frontend; java at runtime
   depends_on "scanner"
 
