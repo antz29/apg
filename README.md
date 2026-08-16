@@ -12,8 +12,8 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
 
 ## Features
 
-- **Per-language scanners** compiled in (Go, Java, C++) — no separate frontend
-  install.
+- **Per-language scanner frontends** installed separately via brew — install
+  only the languages you scan (Go, Java, C++).
 - **Exact edges for Go and Java** — call resolution uses the compiler's type
   checker; C++ is heuristic (tree-sitter), and unresolvable refs become
   `UnresolvedTarget` nodes rather than guessed FQNs.
@@ -31,15 +31,25 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
 - [Homebrew](https://brew.sh/) (for the brew install)
 - [opencode](https://opencode.ai) (for the chat plugin)
 
-The brew formula builds all three scanners for you, so nothing else is needed
-for Go and C++ projects. Java projects additionally need `java` on your PATH
-at scan time (see [below](#java-projects)).
+The `scanner` formula builds the `apg` binary; the language frontends are
+separate formulae (`apg-go`, `apg-java`, `apg-cpp`). Install the base plus the
+frontends for the languages you scan. Java projects additionally need `java` on
+your PATH at scan time (see [below](#java-projects)).
 
 ## Install (Homebrew)
 
 ```sh
 brew tap antz29/apg https://github.com/antz29/apg.git
-brew install antz29/apg/apg
+brew install antz29/apg/scanner \
+             antz29/apg/apg-go \
+             antz29/apg/apg-java \
+             antz29/apg/apg-cpp
+```
+
+Install only the frontends you need:
+
+```sh
+brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 ```
 
 Verify:
@@ -49,15 +59,18 @@ apg --version   # apg 0.1.0
 apg --help
 ```
 
-> **Note:** the formula's pinned release tarball (`v0.1.0`) is not published
+> **Note:** the formulae's pinned release tarball (`v0.1.0`) is not published
 > yet, so `brew install` will fail to fetch the stable URL until the tag is cut.
 > Until then, install from HEAD:
 >
 > ```sh
-> brew install --HEAD antz29/apg/apg
+> brew install --HEAD antz29/apg/scanner \
+>                      antz29/apg/apg-go \
+>                      antz29/apg/apg-java \
+>                      antz29/apg/apg-cpp
 > ```
 >
-> The formula in this repo needs its `sha256` filled in once `v0.1.0` is tagged.
+> The formulae in this repo need their `sha256` filled in once `v0.1.0` is tagged.
 
 ## Quick start
 
@@ -194,10 +207,12 @@ cargo build --release
 ./target/release/apg --version
 ```
 
-`build.rs` compiles all three scanners and stages them to
+`build.rs` compiles the scanner frontends and stages them to
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
-`APG_FRONTEND_DIR` to override.
+`APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
+allowlist: `go`, `java`, `cpp`; `0` to skip all) to limit what build.rs
+compiles — the split brew formulae rely on this.
 
 Run the test suite with `cargo test`.
 
@@ -211,7 +226,10 @@ src/classify.rs    code_type classification
 src/golib/         Go scanner
 src/javalib/       Java scanner (javac)
 src/cpplib/        C++ scanner (tree-sitter)
-Formula/apg.rb     Homebrew formula
+Formula/scanner.rb    apg binary (ingestor + query CLI)
+Formula/apg-go.rb     Go scanner frontend
+Formula/apg-java.rb   Java scanner frontend
+Formula/apg-cpp.rb    C++ scanner frontend
 ```
 
 ## License

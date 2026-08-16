@@ -17,7 +17,9 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
   `go build` for Go, `javac` for Java) and stages them to
   `target/<profile>/frontends`. Run a scan with `apg scan <dir>` (or the
   `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
-  (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`).
+  (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
+  `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
+  `cpp`; `0` to skip) limits what build.rs compiles.
 
 ### CLI
 
@@ -32,9 +34,12 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   up from cwd), CSV output with header row.
 - `apg --version`, `apg --help`.
 
-The `apg` binary is brew-installable (`Formula/apg.rb`, tap
-`brew install antz29/apg/apg`). In the repo itself, run it via
-`cargo run -- scan <dir>` or `target/debug/apg scan <dir>`.
+The `apg` binary is brew-installable via split formulae (tap
+`https://github.com/antz29/apg.git`): `scanner` (the binary), plus `apg-go`,
+`apg-java`, `apg-cpp` frontends installed to `$(brew --prefix)/share/apg/frontends`
+(the `scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
+In the repo itself, run it via `cargo run -- scan <dir>` or
+`target/debug/apg scan <dir>`.
 
 ### Unified JSONL schema (abridged)
 

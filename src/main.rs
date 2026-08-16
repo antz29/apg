@@ -126,7 +126,8 @@ fn available_languages() -> Vec<String> {
             return langs;
         }
     }
-    env!("APG_LANGUAGES")
+    option_env!("APG_LANGUAGES")
+        .unwrap_or("")
         .split(',')
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
@@ -135,28 +136,33 @@ fn available_languages() -> Vec<String> {
 
 /// Full command for the scanner frontend of `language`. When a runtime
 /// frontend dir is present its artifacts win; otherwise the compile-time baked
-/// paths (dev `cargo run`).
-fn frontend_cmd(language: &str) -> String {
+/// paths (dev `cargo run`). `None` if no frontend for that language exists.
+fn frontend_cmd(language: &str) -> Option<String> {
     if let Some(dir) = frontend_dir() {
         match language {
-            "cpp" => return dir.join("cppfrontend").display().to_string(),
-            "go" => return dir.join("gofrontend").display().to_string(),
-            "java" => {
+            "cpp" if dir.join("cppfrontend").exists() => {
+                return Some(dir.join("cppfrontend").display().to_string());
+            }
+            "go" if dir.join("gofrontend").exists() => {
+                return Some(dir.join("gofrontend").display().to_string());
+            }
+            "java" if dir.join("java-classes").is_dir() => {
                 let classes = dir.join("java-classes");
-                return format!(
+                return Some(format!(
                     "java -Xmx5g -cp {} --add-exports jdk.compiler/com.sun.source.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.source.util=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED CallGraphBuilder",
                     classes.display()
-                );
+                ));
             }
-            _ => panic!("unknown language: {language}"),
+            _ => {}
         }
     }
-    match language {
-        "cpp" => env!("APG_FRONTEND_CPP").to_string(),
-        "go" => env!("APG_FRONTEND_GO").to_string(),
-        "java" => env!("APG_FRONTEND_JAVA").to_string(),
-        _ => panic!("unknown language: {language}"),
-    }
+    let baked = match language {
+        "cpp" => option_env!("APG_FRONTEND_CPP"),
+        "go" => option_env!("APG_FRONTEND_GO"),
+        "java" => option_env!("APG_FRONTEND_JAVA"),
+        _ => None,
+    };
+    baked.map(|s| s.to_string())
 }
 
 fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32) -> bool {
@@ -434,7 +440,9 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     let available = available_languages();
     if available.is_empty() {
-        panic!("No language frontends compiled. Install gcc, go, or javac and rebuild.");
+        panic!(
+            "No scanner frontends found. Install one via brew (e.g. `brew install antz29/apg/apg-go`), set APG_FRONTEND_DIR, or rebuild with the required toolchain."
+        );
     }
 
     let language = language.unwrap_or_else(|| {
@@ -443,7 +451,7 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     if !available.iter().any(|l| l == &language) {
         panic!(
-            "Language '{language}' is not available. Built with: {}. Install the required toolchain and rebuild.",
+            "Language '{language}' is not available. Installed frontends: {}. Install it via brew (e.g. `brew install antz29/apg/apg-{language}`).",
             available.join(", ")
         );
     }
@@ -456,7 +464,9 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         log.ln(&format!("Path excludes: {:?}", path_excludes));
     }
 
-    let cmd = frontend_cmd(&language);
+    let cmd = frontend_cmd(&language).unwrap_or_else(|| {
+        panic!("frontend for language '{language}' is not installed");
+    });
     let config = classify::ApgConfig::load(&project_dir);
 
     // The scanner's stderr (progress + javac diagnostics) goes to the log file
