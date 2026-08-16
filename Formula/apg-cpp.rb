@@ -20,11 +20,11 @@ class ApgCpp < Formula
 
   def install
     (buildpath/"tmp").mkdir
-    cpplib = "src/cpplib"
-    vendor = cpplib / "vendor"
-    ts_inc = vendor / "tree-sitter/lib/include"
-    ts_src = vendor / "tree-sitter/lib/src"
-    cpp_inc = vendor / "tree-sitter-cpp/src"
+    cpplib = buildpath/"src/cpplib"
+    vendor = cpplib/"vendor"
+    ts_inc = vendor/"tree-sitter/lib/include"
+    ts_src = vendor/"tree-sitter/lib/src"
+    cpp_inc = vendor/"tree-sitter-cpp/src"
     args = ["-fPIC", "-std=c11"]
 
     system ENV.cc, *args,
