@@ -8,7 +8,7 @@ class ApgCpp < Formula
   url "https://github.com/antz29/apg/archive/refs/tags/v0.1.0.tar.gz"
   # sha256 "<FILL_ME — run `curl -sL <url> | shasum -a 256` after tagging v0.1.0>"
   license "MIT"
-  head "https://github.com/antz29/apg.git"
+  head "https://github.com/antz29/apg.git", branch: "main"
 
   depends_on "scanner"
 
