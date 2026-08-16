@@ -59,18 +59,8 @@ apg --version   # apg 0.1.0
 apg --help
 ```
 
-> **Note:** the formulae's pinned release tarball (`v0.1.0`) is not published
-> yet, so `brew install` will fail to fetch the stable URL until the tag is cut.
-> Until then, install from HEAD:
->
-> ```sh
-> brew install --HEAD antz29/apg/scanner \
->                      antz29/apg/apg-go \
->                      antz29/apg/apg-java \
->                      antz29/apg/apg-cpp
-> ```
->
-> The formulae in this repo need their `sha256` filled in once `v0.1.0` is tagged.
+`v0.1.0` is tagged, so the stable install works as-is. If you want the latest
+unreleased code instead, pass `--HEAD`:
 
 ## Quick start
 
