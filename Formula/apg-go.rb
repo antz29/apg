@@ -4,8 +4,9 @@
 class ApgGo < Formula
   desc "Go scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
-  url "https://github.com/antz29/apg/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed"
+  url "https://github.com/antz29/apg.git",
+      tag:      "v0.1.0",
+      revision: "ccbe74867c20f60ec81e2ad0300aac28854a4c6d"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
