@@ -19,7 +19,7 @@ class ApgCpp < Formula
   depends_on "scanner"
 
   def install
-    buildpath.mkdir("tmp")
+    (buildpath/"tmp").mkdir
     cpplib = "src/cpplib"
     vendor = cpplib / "vendor"
     ts_inc = vendor / "tree-sitter/lib/include"
