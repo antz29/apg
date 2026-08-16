@@ -5,8 +5,8 @@ class ApgGo < Formula
   desc "Go scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.2.0",
-      revision: "da1f81a0f62a12f746d41b233c9369cfb4aa2e55"
+      tag:      "v0.3.0",
+      revision: "013dd2173410bff71de45c09ac5c382354720365"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
