@@ -11,7 +11,7 @@ class ApgJava < Formula
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v#{version}"
+    root_url "https://github.com/antz29/apg/releases/download/v0.3.0"
     # sha256 lines are filled in by the .github/workflows/bottle.yml build.
   end
 
