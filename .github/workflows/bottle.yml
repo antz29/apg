@@ -40,7 +40,6 @@ jobs:
         run: |
           brew bottle \
             --json \
-            --no-commit \
             --root-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
             scanner apg-go apg-java apg-cpp
 
