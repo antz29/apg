@@ -6,8 +6,8 @@ class ApgCpp < Formula
   desc "C++ scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.1.0",
-      revision: "ccbe74867c20f60ec81e2ad0300aac28854a4c6d"
+      tag:      "v0.2.0",
+      revision: "da1f81a0f62a12f746d41b233c9369cfb4aa2e55"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 

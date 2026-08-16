@@ -55,11 +55,11 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.1.0
+apg --version   # apg 0.2.0
 apg --help
 ```
 
-`v0.1.0` is tagged, so the stable install works as-is. If you want the latest
+`v0.2.0` is tagged, so the stable install works as-is. If you want the latest
 unreleased code instead, pass `--HEAD`:
 
 ## Quick start
