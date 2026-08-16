@@ -427,7 +427,7 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     } else {
         PathBuf::from(&positional[0])
     };
-    let blacklist: Vec<String> = positional[1..].to_vec();
+    let blacklist: Vec<String> = positional.get(1..).unwrap_or(&[]).to_vec();
     let project_dir = project_dir.canonicalize()?;
 
     // Resolve the .apg output dir, then run the pipeline from inside it so
