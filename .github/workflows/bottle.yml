@@ -47,14 +47,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bottles-${{ matrix.arch }}
-          path: ${{ runner.temp }}/*.bottle.tar.gz
+          path: ${{ runner.temp }}/*.bottle*.tar.gz
           if-no-files-found: error
 
       - name: Upload bottle JSON
         uses: actions/upload-artifact@v4
         with:
           name: bottles-json-${{ matrix.arch }}
-          path: ${{ runner.temp }}/*.bottle.json
+          path: ${{ runner.temp }}/*.bottle*.json
           if-no-files-found: error
 
   publish:
