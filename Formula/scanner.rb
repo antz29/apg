@@ -25,12 +25,13 @@ class Scanner < Formula
     # apg-go / apg-java / apg-cpp formulae provide them.
     ENV["APG_BUILD_FRONTENDS"] = "0"
 
-    system "cargo", "install", *std_cargo_args
+    # Install the real binary into libexec (not bin/), then bin/apg becomes a
+    # small wrapper that points the binary at the shared frontends dir
+    # populated by the per-language formulae.
+    system "cargo", "install", *std_cargo_args(root: libexec)
 
-    # bin/apg is a small wrapper that points the binary at the shared
-    # frontends dir populated by the per-language formulae.
-    bin.write_env_script libexec/"bin"/"apg",
-                         APG_FRONTEND_DIR: "#{HOMEBREW_PREFIX}/share/apg/frontends"
+    (bin/"apg").write_env_script libexec/"bin"/"apg",
+                                 APG_FRONTEND_DIR: "#{HOMEBREW_PREFIX}/share/apg/frontends"
   end
 
   def caveats
