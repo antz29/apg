@@ -41,10 +41,10 @@ class Scanner < Formula
     # Point lbug's build.rs at the prebuilt static lib (the "lbug" resource)
     # instead of downloading or compiling from source. It takes the "external"
     # prebuilt path when both variables are set.
-    resource("lbug").stage do |staging|
-      ENV["LBUG_LIBRARY_DIR"] = staging
-      ENV["LBUG_INCLUDE_DIR"] = staging
-    end
+    lbug_dir = buildpath/"lbug-static"
+    resource("lbug").stage(lbug_dir)
+    ENV["LBUG_LIBRARY_DIR"] = lbug_dir.to_s
+    ENV["LBUG_INCLUDE_DIR"] = lbug_dir.to_s
 
     # Do not compile any scanner frontends in this build; the separate
     # apg-go / apg-java / apg-cpp formulae provide them.
