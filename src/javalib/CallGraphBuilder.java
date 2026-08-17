@@ -438,6 +438,11 @@ public class CallGraphBuilder {
             }
             if (emitting) {
                 emitPkgHierarchy(pkg);
+                LineMap lm = cu.getLineMap();
+                long last = sourceText.isEmpty() ? 1 : lm.getLineNumber(sourceText.length() - 1);
+                emit("{\"type\":\"file\",\"path\":\"" + jstr(currentFile)
+                    + "\",\"parent\":\"" + jstr(pkg)
+                    + "\",\"start_line\":1,\"end_line\":" + Math.max(1, last) + "}");
             }
             return super.visitCompilationUnit(cu, nil);
         }
@@ -470,11 +475,14 @@ public class CallGraphBuilder {
                         + "\",\"parent\":\"" + jstr(parentFqn)
                         + "\",\"name\":\"" + jstr(name)
                         + "\",\"path\":\"" + jstr(currentFile)
-                        + "\",\"start\":" + span[0] + ",\"end\":" + span[1] + "}");
-                    if (!parentFqn.isEmpty()) {
-                        String from = parentFqn;
-                        if (structID.containsKey(parentFqn)) from = structID.get(parentFqn);
-                        emitEdge("contains", from, id);
+                        + "\",\"start\":" + span[0] + ",\"end\":" + span[1]
+                        + ",\"start_line\":" + lineOf(span[0])
+                        + ",\"end_line\":" + lineOf(span[1] - 1) + "}");
+                    // Nested classes stay directly under their outer class;
+                    // top-level classes are reached through the file node
+                    // instead of the package (SPEC §7).
+                    if (structID.containsKey(parentFqn)) {
+                        emitEdge("contains", structID.get(parentFqn), id);
                     }
                     if (ct.getExtendsClause() != null) {
                         recordUse(id, ct.getExtendsClause());
@@ -541,11 +549,11 @@ public class CallGraphBuilder {
                         + "\",\"params\":[" + paramsJson + "]"
                         + ",\"file\":\"" + jstr(currentFile)
                         + "\",\"path\":\"" + jstr(currentFile)
-                        + "\",\"start\":" + span[0] + ",\"end\":" + span[1] + "}");
-                    if (!parentFqn.isEmpty()) {
-                        String from = parentFqn;
-                        if (structID.containsKey(parentFqn)) from = structID.get(parentFqn);
-                        emitEdge("contains", from, myId);
+                        + "\",\"start\":" + span[0] + ",\"end\":" + span[1]
+                        + ",\"start_line\":" + lineOf(span[0])
+                        + ",\"end_line\":" + lineOf(span[1] - 1) + "}");
+                    if (structID.containsKey(parentFqn)) {
+                        emitEdge("contains", structID.get(parentFqn), myId);
                     }
                 }
                 String prevMtd = mtd;
@@ -674,6 +682,13 @@ public class CallGraphBuilder {
                 return qn;
             }
             return null;
+        }
+
+        /** 1-based line number of a character position, clamped to 1. */
+        int lineOf(int pos) {
+            if (pos < 0) return 1;
+            long l = getCurrentPath().getCompilationUnit().getLineMap().getLineNumber(pos);
+            return l > 0 ? (int) l : 1;
         }
 
         /** 0-based span of a class declaration, including its doc comment. */

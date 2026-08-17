@@ -19,9 +19,9 @@ function findApgRoot(context: { directory: string; worktree: string }): string |
 
 export default tool({
   description:
-    "Execute a read-only Cypher query on the project's LadybugDB graph database (.apg/db.lbug). CSV output, header row included. Use for graph traversal: MATCH/RETURN only. No modifications.",
+    "Execute a read-only Cypher query on the project's LadybugDB program graph (.apg/db.lbug). CSV output, header row included. Graph schema: Module ->(Contains)-> File ->(Contains)-> Struct/Function; Struct ->(Contains)-> Struct/Function for nested types and methods; Calls/Uses/Unresolved* edges link functions and types. Struct/Function/File nodes carry start_line/end_line (1-based) plus path — use them to join against diffs/hunks. MATCH/RETURN only. No modifications.",
   args: {
-    query: tool.schema.string().describe("Cypher query, e.g. MATCH (n:Module) RETURN n.fqn LIMIT 10"),
+    query: tool.schema.string().describe("Cypher query, e.g. MATCH (f:File {fqn:'/abs/Graph.java'})-[:Contains]->(n) RETURN labels(n), n.fqn, n.start_line, n.end_line"),
   },
   async execute(args, context) {
     const root = findApgRoot(context)

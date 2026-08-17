@@ -37,11 +37,13 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
         .nodes
         .iter()
         .filter(|(_, n)| {
-            matches!(n.kind, NodeKind::Struct | NodeKind::Function)
-                && n.location
-                    .as_ref()
-                    .map(|l| path_excluded(&l.path.to_string_lossy(), opts))
-                    .unwrap_or(false)
+            matches!(
+                n.kind,
+                NodeKind::Struct | NodeKind::Function | NodeKind::File
+            ) && n.location
+                .as_ref()
+                .map(|l| path_excluded(&l.path.to_string_lossy(), opts))
+                .unwrap_or(false)
         })
         .map(|(fqn, _)| fqn.clone())
         .collect();

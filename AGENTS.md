@@ -48,8 +48,9 @@ Node records:
 
 ```jsonl
 {"type":"module","fqn":"github.com/foundry/flow"}
-{"type":"struct","id":"n12","parent":"...v1","name":"Error","path":"/abs/error.go","start":12,"end":300}
-{"type":"function","id":"n13","parent":"...Store","name":"ComputeContentHash","params":["[]byte","int"],"file":"/abs/store.go","path":"/abs/store.go","start":1,"end":99}
+{"type":"file","path":"/abs/store.go","parent":"github.com/foundry/flow","start_line":1,"end_line":142}
+{"type":"struct","id":"n12","parent":"...v1","name":"Error","path":"/abs/error.go","start":12,"end":300,"start_line":12,"end_line":45}
+{"type":"function","id":"n13","parent":"...Store","name":"ComputeContentHash","params":["[]byte","int"],"file":"/abs/store.go","path":"/abs/store.go","start":1,"end":99,"start_line":34,"end_line":99}
 {"type":"unresolved","fqn":"fmt.Errorf","category":"stdlib"}
 ```
 
@@ -67,6 +68,11 @@ Edge records:
   project nodes by `id`, unresolved targets by `fqn`. The ingestor maps `id`s
   to canonical FQNs. `code_type` is **not** emitted by scanners — the ingestor
   computes it from `path` + `apg.json`/`.apg/config.json` (`src/classify.rs`).
+- Line numbers (`start_line`/`end_line`) are computed by the scanners (Go and
+  C++ from byte offsets, Java from javac's UTF-16 char positions), never
+  derived from bytes ingestor-side. `file` nodes (emitted one per scanned
+  source file, including files with no declarations) carry `1..total-lines`;
+  the scanner also sets the file's `parent` module.
 
 ### FQN convention (rendered ingestor-side, SPEC §4)
 
@@ -105,13 +111,14 @@ The workspace has a LadybugDB graph database at `.apg/db.lbug` containing the pa
 
 ### Data model
 
-- 4 node types:
+- 5 node types:
   - `Module` — property: `fqn`
-  - `Struct` — properties: `fqn`, `path`, `start`, `end`, `code_type`
-  - `Function` — properties: `fqn`, `path`, `start`, `end`, `code_type`
+  - `File` — properties: `fqn` (the absolute path), `start_line`, `end_line` (`1..total-lines`), `code_type`
+  - `Struct` — properties: `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type`
+  - `Function` — properties: `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type`
   - `UnresolvedTarget` — properties: `fqn`, `category` (a call/type reference the scanner could not resolve to a project symbol; deduplicated by name)
 - 5 edge types:
-  - `Contains` — Module↔Module, Module→Struct, Struct→Struct, Struct→Function
+  - `Contains` — Module↔Module, Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function
   - `Calls` — Function→Function
   - `Uses` — Function→Struct, Struct→Struct
   - `UnresolvedCall` — Function→UnresolvedTarget; rel-table property `target_type` (function type of a func-value call, Go-only, empty otherwise)
@@ -147,7 +154,10 @@ An `apg.json` at the project root or `.apg/config.json` **replaces** the default
 
 `globs` match the full path; `names` match the node simple name or FQN. First matching type (list order) wins, else `default`.
 - Nodes without locations (Modules, UnresolvedTargets) have no `path`/`start`/`end` (and no `code_type`).
-- `start` and `end` are **0-based byte indices**, not line numbers.
+- `start` and `end` are **0-based byte indices**, not line numbers. Every
+  located node also carries `start_line`/`end_line`, **1-based inclusive line
+  numbers**; use them (not byte offsets) when joining against diffs, hunks, or
+  anything line-oriented.
 - `path` is an **absolute filesystem path** under the project directory. Read those files with `read`, `grep`, or `bash`.
 
 ### Fidelity & noise

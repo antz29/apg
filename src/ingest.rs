@@ -49,6 +49,8 @@ struct FuncDecl {
     path: String,
     start: u32,
     end: u32,
+    start_line: u32,
+    end_line: u32,
 }
 
 fn is_blacklisted(fqn: &str, blacklist: &[String]) -> bool {
@@ -134,6 +136,8 @@ pub fn ingest(
     let mut id_to_fqn: HashMap<String, String> = HashMap::new();
     let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
     let mut funcs: Vec<FuncDecl> = Vec::new();
+    // File nodes keyed by absolute path -> their parent module FQN.
+    let mut files: HashMap<String, String> = HashMap::new();
     // Modules are buffered (not claimed/inserted immediately): a package and a
     // type may legally share a name in the JVM (`pkg.A` the package and `pkg.A`
     // the class, e.g. NetBeans' QA test-data project layout), and flat FQN space
@@ -177,6 +181,8 @@ pub fn ingest(
                     path,
                     start,
                     end,
+                    start_line,
+                    end_line,
                 } => {
                     let fqn = format!("{parent}.{name}");
                     claim(&mut seen, &id, &fqn, NodeKind::Struct);
@@ -195,6 +201,8 @@ pub fn ingest(
                                 path: PathBuf::from(&path),
                                 start,
                                 end,
+                                start_line,
+                                end_line,
                             }),
                             category: None,
                             code_type,
@@ -210,6 +218,8 @@ pub fn ingest(
                     path,
                     start,
                     end,
+                    start_line,
+                    end_line,
                 } => funcs.push(FuncDecl {
                     id,
                     parent,
@@ -219,7 +229,41 @@ pub fn ingest(
                     path,
                     start,
                     end,
+                    start_line,
+                    end_line,
                 }),
+                Record::File {
+                    path,
+                    parent,
+                    start_line,
+                    end_line,
+                } => {
+                    // A file belongs to a module; if that module is blacklisted
+                    // the file and everything in it is out of scope too.
+                    if is_blacklisted(&parent, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    if !files.contains_key(&path) {
+                        files.insert(path.clone(), parent.clone());
+                        let code_type = classify_code_type(&path, &path, opts.language, opts.config);
+                        graph.nodes.insert(
+                            path.clone(),
+                            Node {
+                                kind: NodeKind::File,
+                                location: Some(Location {
+                                    path: PathBuf::from(&path),
+                                    start: 0,
+                                    end: 0,
+                                    start_line,
+                                    end_line,
+                                }),
+                                category: None,
+                                code_type,
+                            },
+                        );
+                    }
+                }
                 Record::Unresolved { fqn, category } => {
                     graph.nodes.entry(fqn).or_insert_with(|| Node {
                         kind: NodeKind::UnresolvedTarget,
@@ -272,6 +316,8 @@ pub fn ingest(
                     path: PathBuf::from(&f.path),
                     start: f.start,
                     end: f.end,
+                    start_line: f.start_line,
+                    end_line: f.end_line,
                 }),
                 category: None,
                 code_type,
@@ -301,6 +347,47 @@ pub fn ingest(
                 code_type: String::new(),
             },
         );
+    }
+
+    // Pass B3: wire the File layer into containment. Neither endpoint needs the
+    // edge spool: Module→File comes from each file record's parent module, and
+    // File→unit is derived from every located node's path (a file contains all
+    // structs and functions declared in it). A missing module parent (shadowed
+    // or blacklisted) leaves the File node in place but prunes the Module→File
+    // edge, like any other dangling-edge cleanup.
+    for (file_path, parent) in &files {
+        if parent.is_empty() {
+            continue;
+        }
+        if graph
+            .nodes
+            .get(parent)
+            .is_some_and(|n| n.kind == NodeKind::Module)
+        {
+            graph.contains.insert((parent.clone(), file_path.clone()));
+        }
+    }
+    let located: Vec<(String, String)> = graph
+        .nodes
+        .iter()
+        .filter_map(|(fqn, n)| {
+            if matches!(n.kind, NodeKind::Struct | NodeKind::Function) {
+                n.location
+                    .as_ref()
+                    .map(|l| (l.path.to_string_lossy().into_owned(), fqn.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    for (file_path, fqn) in located {
+        if graph
+            .nodes
+            .get(&file_path)
+            .is_some_and(|n| n.kind == NodeKind::File)
+        {
+            graph.contains.insert((file_path, fqn));
+        }
     }
 
     // Pass C: resolve edge endpoints from the spool.
@@ -372,14 +459,17 @@ pub fn ingest(
     let _ = std::fs::remove_file(&spool);
 
     // Drop edges whose endpoints do not exist (dangling ids, blacklisted nodes).
+    // Containment is a strict tree: Module→Module, Module→File, File→Struct,
+    // File→Function, Struct→Struct, Struct→Function (SPEC §7).
     graph.contains.retain(|(a, b)| {
         graph.nodes.contains_key(a)
             && graph.nodes.contains_key(b)
             && matches!(
                 (graph.nodes[a].kind, graph.nodes[b].kind),
                 (NodeKind::Module, NodeKind::Module)
-                    | (NodeKind::Module, NodeKind::Struct)
-                    | (NodeKind::Module, NodeKind::Function)
+                    | (NodeKind::Module, NodeKind::File)
+                    | (NodeKind::File, NodeKind::Struct)
+                    | (NodeKind::File, NodeKind::Function)
                     | (NodeKind::Struct, NodeKind::Struct)
                     | (NodeKind::Struct, NodeKind::Function)
             )
@@ -489,6 +579,55 @@ mod tests {
             path: "/x/a.go".to_string(),
             start: 0,
             end: 1,
+            start_line: 1,
+            end_line: 1,
+        }
+    }
+
+    fn srec(
+        id: &str,
+        parent: &str,
+        name: &str,
+        path: &str,
+    ) -> Record {
+        Record::Struct {
+            id: id.to_string(),
+            parent: parent.to_string(),
+            name: name.to_string(),
+            path: path.to_string(),
+            start: 0,
+            end: 1,
+            start_line: 1,
+            end_line: 1,
+        }
+    }
+
+    fn frec(
+        id: &str,
+        parent: &str,
+        name: &str,
+        path: &str,
+    ) -> Record {
+        Record::Function {
+            id: id.to_string(),
+            parent: parent.to_string(),
+            name: name.to_string(),
+            params: vec![],
+            file: path.to_string(),
+            path: path.to_string(),
+            start: 0,
+            end: 1,
+            start_line: 1,
+            end_line: 1,
+        }
+    }
+
+    fn file_rec(path: &str, parent: &str, end_line: u32) -> Record {
+        Record::File {
+            path: path.to_string(),
+            parent: parent.to_string(),
+            start_line: 1,
+            end_line,
         }
     }
 
@@ -543,22 +682,8 @@ mod tests {
             Record::Module {
                 fqn: "pkg".to_string(),
             },
-            Record::Struct {
-                id: "n1".to_string(),
-                parent: "pkg".to_string(),
-                name: "A".to_string(),
-                path: "/x/a.go".to_string(),
-                start: 0,
-                end: 1,
-            },
-            Record::Struct {
-                id: "n2".to_string(),
-                parent: "pkg".to_string(),
-                name: "A".to_string(),
-                path: "/x/b.go".to_string(),
-                start: 0,
-                end: 1,
-            },
+            srec("n1", "pkg", "A", "/x/a.go"),
+            srec("n2", "pkg", "A", "/x/b.go"),
         ];
         ingest(
             records,
@@ -573,8 +698,9 @@ mod tests {
     #[test]
     fn module_shadowed_by_type_does_not_panic() {
         // Java permits a package `org.pkg.A` and a class `org.pkg.A` to coexist.
-        // The type wins; the shadowed module is dropped and its contains edges
-        // pruned, while unrelated modules and edges survive.
+        // The type wins; the shadowed module is dropped and its Module→File edge
+        // pruned (the File node stays, containing the units declared in it),
+        // while unrelated modules, files, and edges survive.
         let records = vec![
             Record::Module {
                 fqn: "org.pkg".to_string(),
@@ -585,22 +711,10 @@ mod tests {
             Record::Module {
                 fqn: "org.pkg.A.deep".to_string(),
             },
-            Record::Struct {
-                id: "n1".to_string(),
-                parent: "org.pkg".to_string(),
-                name: "A".to_string(),
-                path: "/x/A.java".to_string(),
-                start: 0,
-                end: 1,
-            },
-            Record::Struct {
-                id: "n2".to_string(),
-                parent: "org.pkg.A.deep".to_string(),
-                name: "B".to_string(),
-                path: "/y/B.java".to_string(),
-                start: 0,
-                end: 1,
-            },
+            srec("n1", "org.pkg", "A", "/x/A.java"),
+            srec("n2", "org.pkg.A.deep", "B", "/y/B.java"),
+            file_rec("/x/A.java", "org.pkg", 30),
+            file_rec("/y/B.java", "org.pkg.A.deep", 40),
             Record::Contains {
                 from: "org.pkg".to_string(),
                 to: "org.pkg.A".to_string(),
@@ -608,10 +722,6 @@ mod tests {
             Record::Contains {
                 from: "org.pkg.A".to_string(),
                 to: "org.pkg.A.deep".to_string(),
-            },
-            Record::Contains {
-                from: "org.pkg.A.deep".to_string(),
-                to: "n2".to_string(),
             },
         ];
         let (graph, report) = ingest(
@@ -631,17 +741,25 @@ mod tests {
         assert!(graph.nodes.contains_key("org.pkg"));
         assert!(graph.nodes.contains_key("org.pkg.A.deep"));
         assert!(graph.nodes.contains_key("org.pkg.A.deep.B"));
-        // The parent module keeps its containment of the class (correct: the
-        // package `org.pkg` does contain the class `org.pkg.A`)...
+        // Files survive with their own module·file·unit containment chains.
+        assert!(graph.nodes.contains_key("/x/A.java"));
+        assert!(graph.nodes.contains_key("/y/B.java"));
+        assert_eq!(graph.nodes["/x/A.java"].kind, NodeKind::File);
+        assert!(graph.contains.contains(&("org.pkg".to_string(), "/x/A.java".to_string())));
         assert!(graph
             .contains
-            .contains(&("org.pkg".to_string(), "org.pkg.A".to_string())));
-        // ...and the class's own contains edge from its real parent survives.
+            .contains(&("/x/A.java".to_string(), "org.pkg.A".to_string())));
         assert!(graph
             .contains
-            .contains(&("org.pkg.A.deep".to_string(), "org.pkg.A.deep.B".to_string())));
-        // But the shadowed package is not a parent: the class does not contain
-        // the package beneath it.
+            .contains(&("org.pkg.A.deep".to_string(), "/y/B.java".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/y/B.java".to_string(), "org.pkg.A.deep.B".to_string())));
+        // But the shadowed package is not a parent: its Module→File edge and the
+        // package chain through it are pruned.
+        assert!(!graph
+            .contains
+            .contains(&("org.pkg.A".to_string(), "/x/A.java".to_string())));
         assert!(!graph
             .contains
             .contains(&("org.pkg.A".to_string(), "org.pkg.A.deep".to_string())));
@@ -659,49 +777,15 @@ mod tests {
             Record::Module {
                 fqn: "p.A".to_string(),
             },
-            Record::Struct {
-                id: "n1".to_string(),
-                parent: "p".to_string(),
-                name: "A".to_string(),
-                path: "/x/A.java".to_string(),
-                start: 0,
-                end: 1,
-            },
-            Record::Struct {
-                id: "n2".to_string(),
-                parent: "p.A".to_string(),
-                name: "test".to_string(),
-                path: "/y/test.java".to_string(),
-                start: 0,
-                end: 1,
-            },
-            Record::Function {
-                id: "n3".to_string(),
-                parent: "p.A".to_string(),
-                name: "test".to_string(),
-                params: vec![],
-                file: "/x/A.java".to_string(),
-                path: "/x/A.java".to_string(),
-                start: 0,
-                end: 1,
-            },
-            Record::Function {
-                id: "n5".to_string(),
-                parent: "p.A".to_string(),
-                name: "other".to_string(),
-                params: vec![],
-                file: "/x/A.java".to_string(),
-                path: "/x/A.java".to_string(),
-                start: 0,
-                end: 1,
-            },
+            srec("n1", "p", "A", "/x/A.java"),
+            srec("n2", "p.A", "test", "/y/test.java"),
+            frec("n3", "p.A", "test", "/x/A.java"),
+            frec("n5", "p.A", "other", "/x/A.java"),
+            file_rec("/x/A.java", "p", 60),
+            file_rec("/y/test.java", "p.A", 20),
             Record::Contains {
                 from: "p".to_string(),
-                to: "n1".to_string(),
-            },
-            Record::Contains {
-                from: "p.A".to_string(),
-                to: "n2".to_string(),
+                to: "p.A".to_string(),
             },
             Record::Contains {
                 from: "n1".to_string(),
@@ -727,10 +811,36 @@ mod tests {
         assert!(graph.nodes.contains_key("p.A.test"));
         assert_eq!(graph.nodes["p.A.test"].kind, NodeKind::Struct);
         assert!(graph.nodes.contains_key("p.A.other"));
-        // Edges through the shadowed package/module or dropped function are
-        // pruned; the surviving function's edge stays.
-        assert!(!graph.contains.contains(&("p.A".to_string(), "p.A.test".to_string())));
-        assert!(graph.contains.contains(&("p.A".to_string(), "p.A.other".to_string())));
+        // The shadowed module is gone as a module — `p.A` exists only as the
+        // winning struct — and the file in it survives but loses its module
+        // parent chain (`p→p.A` module edge pruned).
+        assert_eq!(graph.nodes["p.A"].kind, NodeKind::Struct);
+        assert!(graph.nodes.contains_key("/x/A.java"));
+        assert!(graph.nodes.contains_key("/y/test.java"));
+        assert!(graph.contains.contains(&("p".to_string(), "/x/A.java".to_string())));
+        assert!(!graph
+            .contains
+            .contains(&("p".to_string(), "p.A".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/x/A.java".to_string(), "p.A".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/y/test.java".to_string(), "p.A.test".to_string())));
+        // The dropped function's containment (by struct and by file) is pruned;
+        // the surviving function's edges stay.
+        assert!(!graph
+            .contains
+            .contains(&("p.A".to_string(), "p.A.test".to_string())));
+        assert!(!graph
+            .contains
+            .contains(&("/x/A.java".to_string(), "p.A.test".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("p.A".to_string(), "p.A.other".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/x/A.java".to_string(), "p.A.other".to_string())));
     }
 
     #[test]
@@ -804,35 +914,28 @@ mod tests {
             Record::Module {
                 fqn: "github.com/x/y".to_string(),
             },
-            Record::Struct {
-                id: "n1".to_string(),
-                parent: "github.com/x/y".to_string(),
-                name: "Store".to_string(),
-                path: "/abs/store.go".to_string(),
-                start: 0,
-                end: 100,
-            },
+            srec("n1", "github.com/x/y", "Store", "/abs/store.go"),
+            frec("n2", "github.com/x/y", "Compute", "/abs/store.go"),
             Record::Function {
-                id: "n2".to_string(),
-                parent: "github.com/x/y".to_string(),
-                name: "Compute".to_string(),
-                params: vec!["[]byte".to_string(), "int".to_string()],
+                id: "n2b".to_string(),
+                parent: "github.com/x/y.Store".to_string(),
+                name: "Get".to_string(),
+                params: vec![],
                 file: "/abs/store.go".to_string(),
                 path: "/abs/store.go".to_string(),
                 start: 1,
-                end: 99,
+                end: 50,
+                start_line: 1,
+                end_line: 50,
             },
+            file_rec("/abs/store.go", "github.com/x/y", 100),
             Record::Unresolved {
                 fqn: "fmt.Errorf".to_string(),
                 category: Some("stdlib".to_string()),
             },
             Record::Contains {
-                from: "github.com/x/y".to_string(),
-                to: "n1".to_string(),
-            },
-            Record::Contains {
                 from: "n1".to_string(),
-                to: "n2".to_string(),
+                to: "n2b".to_string(),
             },
             Record::UnresolvedCall {
                 from: "n2".to_string(),
@@ -851,13 +954,25 @@ mod tests {
         assert_eq!(report.skipped, 0);
         assert!(graph.nodes.contains_key("github.com/x/y.Store"));
         assert!(graph.nodes.contains_key("github.com/x/y.Compute"));
+        assert!(graph.nodes.contains_key("github.com/x/y.Store.Get"));
         assert!(graph.nodes.contains_key("fmt.Errorf"));
+        // File layer: module contains the file, the file contains its units,
+        // and methods stay under their struct.
         assert!(graph
+            .contains
+            .contains(&("github.com/x/y".to_string(), "/abs/store.go".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/abs/store.go".to_string(), "github.com/x/y.Store".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/abs/store.go".to_string(), "github.com/x/y.Compute".to_string())));
+        assert!(!graph
             .contains
             .contains(&("github.com/x/y".to_string(), "github.com/x/y.Store".to_string())));
         assert!(graph
             .contains
-            .contains(&("github.com/x/y.Store".to_string(), "github.com/x/y.Compute".to_string())));
+            .contains(&("github.com/x/y.Store".to_string(), "github.com/x/y.Store.Get".to_string())));
         assert!(graph
             .unresolved_calls
             .contains(&("github.com/x/y.Compute".to_string(), "fmt.Errorf".to_string(), String::new())));
@@ -872,25 +987,13 @@ mod tests {
             Record::Module {
                 fqn: "drop.mod".to_string(),
             },
-            Record::Struct {
-                id: "n1".to_string(),
-                parent: "keep.mod".to_string(),
-                name: "A".to_string(),
-                path: "/x/a.go".to_string(),
-                start: 0,
-                end: 1,
-            },
-            Record::Struct {
-                id: "n2".to_string(),
-                parent: "drop.mod".to_string(),
-                name: "B".to_string(),
-                path: "/x/b.go".to_string(),
-                start: 0,
-                end: 1,
-            },
+            srec("n1", "keep.mod", "A", "/x/a.go"),
+            srec("n2", "drop.mod", "B", "/x/b.go"),
+            file_rec("/x/a.go", "keep.mod", 10),
+            file_rec("/x/b.go", "drop.mod", 10),
             Record::Contains {
-                from: "keep.mod".to_string(),
-                to: "n2".to_string(),
+                from: "drop.mod".to_string(),
+                to: "/x/b.go".to_string(),
             },
         ];
         let (graph, report) = ingest(
@@ -901,11 +1004,20 @@ mod tests {
                 config: None,
             },
         );
-        assert!(report.skipped >= 2);
+        assert!(report.skipped >= 3);
         assert!(graph.nodes.contains_key("keep.mod"));
         assert!(!graph.nodes.contains_key("drop.mod"));
         assert!(!graph.nodes.contains_key("drop.mod.B"));
-        // contains edge referencing the dropped module is gone.
-        assert!(graph.contains.is_empty());
+        // A file whose parent module is blacklisted is dropped along with its
+        // units; the surviving file keeps its module and unit edges.
+        assert!(!graph.nodes.contains_key("/x/b.go"));
+        assert!(graph.nodes.contains_key("/x/a.go"));
+        assert!(graph
+            .contains
+            .contains(&("keep.mod".to_string(), "/x/a.go".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/x/a.go".to_string(), "keep.mod.A".to_string())));
+        assert!(!graph.contains.is_empty());
     }
 }

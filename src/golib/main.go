@@ -25,25 +25,37 @@ type moduleMsg struct {
 }
 
 type structMsg struct {
-	Type   string `json:"type"` // struct
-	ID     string `json:"id"`
-	Parent string `json:"parent"`
-	Name   string `json:"name"`
-	Path   string `json:"path"`
-	Start  int    `json:"start"`
-	End    int    `json:"end"`
+	Type      string `json:"type"` // struct
+	ID        string `json:"id"`
+	Parent    string `json:"parent"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Start     int    `json:"start"`
+	End       int    `json:"end"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
 }
 
 type funcMsg struct {
-	Type   string   `json:"type"` // function
-	ID     string   `json:"id"`
-	Parent string   `json:"parent"`
-	Name   string   `json:"name"`
-	Params []string `json:"params"`
-	File   string   `json:"file"`
-	Path   string   `json:"path"`
-	Start  int      `json:"start"`
-	End    int      `json:"end"`
+	Type      string   `json:"type"` // function
+	ID        string   `json:"id"`
+	Parent    string   `json:"parent"`
+	Name      string   `json:"name"`
+	Params    []string `json:"params"`
+	File      string   `json:"file"`
+	Path      string   `json:"path"`
+	Start     int      `json:"start"`
+	End       int      `json:"end"`
+	StartLine int      `json:"start_line"`
+	EndLine   int      `json:"end_line"`
+}
+
+type fileMsg struct {
+	Type      string `json:"type"` // file
+	Path      string `json:"path"`
+	Parent    string `json:"parent"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
 }
 
 type unresolvedMsg struct {
@@ -223,6 +235,14 @@ func main() {
 	// Pass 2: emit node records and edge records.
 	for _, s := range scans {
 		emitFile(s.file, s.filePath, s.p, s.decls, modSet)
+		// Emit the file node: parent module comes from the package, and the
+		// line count from the token.File (a file ending in a newline counts
+		// the last line as the line of its final byte).
+		f := s.p.Fset.File(s.file.Pos())
+		enc.Encode(fileMsg{
+			Type: "file", Path: s.filePath, Parent: moduleForPkg(s.p.PkgPath, mods),
+			StartLine: 1, EndLine: offsetLine(f, f.Size()-1),
+		})
 		scanDone++
 		fmt.Fprintf(os.Stderr, "\rScanning: %d%% (%d/%d)", scanDone*100/totalFiles, scanDone, totalFiles)
 	}
@@ -365,6 +385,7 @@ func collectDecls(file *ast.File, filePath string, p *packages.Package) []fileDe
 								path:   filePath,
 								start:  p.Fset.Position(m.Pos()).Offset,
 								end:    p.Fset.Position(m.End()).Offset,
+								astNode: m,
 							})
 						}
 					}
@@ -405,6 +426,15 @@ func collectDecls(file *ast.File, filePath string, p *packages.Package) []fileDe
 	return decls
 }
 
+// declTokenFile returns the token.File for a declaration's AST node, or nil if
+// the decl has no AST node (defensive: line numbers degrade to 1 then).
+func declTokenFile(p *packages.Package, d fileDecl) *token.File {
+	if d.astNode == nil {
+		return nil
+	}
+	return p.Fset.File(d.astNode.Pos())
+}
+
 // emitFile emits node + contains records for the file's declarations and walks
 // struct bodies / function bodies for use, call, and unresolved edges.
 func emitFile(file *ast.File, filePath string, p *packages.Package, decls []fileDecl, modSet map[string]bool) {
@@ -413,24 +443,29 @@ func emitFile(file *ast.File, filePath string, p *packages.Package, decls []file
 	for _, d := range decls {
 		switch d.kind {
 		case "struct":
+			f := declTokenFile(p, d)
 			enc.Encode(structMsg{
 				Type: "struct", ID: d.id, Parent: d.parent, Name: d.name,
 				Path: d.path, Start: d.start, End: d.end,
+				StartLine: offsetLine(f, d.start),
+				EndLine:   offsetLine(f, d.end-1),
 			})
-			// module -> struct
-			enc.Encode(edgeMsg{Type: "contains", From: d.parent, To: d.id})
+			// The file (emitted as a file node) contains the struct; the module
+			// reaches it through the file (SPEC §7).
 			emitStructUses(d, ti, modSet)
 		case "function":
+			f := declTokenFile(p, d)
 			enc.Encode(funcMsg{
 				Type: "function", ID: d.id, Parent: d.parent, Name: d.name,
 				Params: d.params, File: d.file, Path: d.path, Start: d.start, End: d.end,
+				StartLine: offsetLine(f, d.start),
+				EndLine:   offsetLine(f, d.end-1),
 			})
-			// module or struct -> function
-			from := d.parent
+			// Methods stay directly under their struct; free functions are
+			// reached through the file node instead of the module.
 			if id, ok := structID[d.parent]; ok {
-				from = id
+				enc.Encode(edgeMsg{Type: "contains", From: id, To: d.id})
 			}
-			enc.Encode(edgeMsg{Type: "contains", From: from, To: d.id})
 			if fn, ok := d.astNode.(*ast.FuncDecl); ok && fn.Body != nil {
 				emitBodyEdges(fn.Body, d.id, ti, modSet)
 			}
@@ -768,6 +803,21 @@ func spanStart(node ast.Node, p *packages.Package) int {
 		}
 	}
 	return start
+}
+
+// offsetLine returns the 1-based line number containing a 0-based byte offset.
+// `end` offsets are exclusive, so callers pass end-1 for the last byte.
+func offsetLine(f *token.File, offset int) int {
+	if f == nil {
+		return 1
+	}
+	if offset >= f.Size() {
+		offset = f.Size() - 1
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return f.Line(f.Pos(offset))
 }
 
 // stdOrExternal classifies a package path as stdlib (first segment has no dot)

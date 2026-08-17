@@ -57,11 +57,11 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.3.1
+apg --version   # apg 0.4.0
 apg --help
 ```
 
-`v0.3.1` is tagged, so the stable install works as-is. If you want the latest
+`v0.4.0` is tagged, so the stable install works as-is. If you want the latest
 unreleased code instead, pass `--HEAD`:
 
 ## Quick start
@@ -142,20 +142,28 @@ Node types:
 | Label | Properties |
 |---|---|
 | `Module` | `fqn` |
-| `Struct` | `fqn`, `path`, `start`, `end`, `code_type` |
-| `Function` | `fqn`, `path`, `start`, `end`, `code_type` |
+| `File` | `fqn` (absolute path), `start_line`, `end_line`, `code_type` |
+| `Struct` | `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type` |
+| `Function` | `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type` |
 | `UnresolvedTarget` | `fqn`, `category` (`builtin`/`stdlib`/`external`/`func-value`/`interface-method`/`unknown`) |
 
-Edge types: `Contains` (Module→Module/Struct/Function, Struct→Struct/Function),
-`Calls` (Function→Function), `Uses` (Function|Struct→Struct),
-`UnresolvedCall` (Function→UnresolvedTarget, prop `target_type`),
-`UnresolvedUse` (Function|Struct→UnresolvedTarget).
+Edge types: `Contains` (Module→Module, Module→File, File→Struct, File→Function,
+Struct→Struct, Struct→Function), `Calls` (Function→Function), `Uses`
+(Function|Struct→Struct), `UnresolvedCall` (Function→UnresolvedTarget, prop
+`target_type`), `UnresolvedUse` (Function|Struct→UnresolvedTarget).
+
+Containment is a strict tree: a module contains files, and a file contains the
+structs and functions declared in it. For review workflows, this gives you the
+file scope directly: `MATCH (f:File {fqn:'...'})-[:Contains]->(n) RETURN n.fqn`
+lists a file's units, and every node's `start_line`/`end_line` joins against
+diff hunks (which are line-based).
 
 FQN convention: `parent.name` for structs and unique functions;
 `parent.name(T1,T2)` for overloads; Go `init` → `parent.init#<file.go>`.
 
-`start`/`end` are **0-based byte offsets**; `path` is absolute under the
-project directory.
+`start`/`end` are **0-based byte offsets**; `start_line`/`end_line` are
+**1-based inclusive line numbers**; `path` is absolute under the project
+directory.
 
 ## Configuration
 

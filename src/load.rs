@@ -116,6 +116,15 @@ fn loc(graph: &Graph, fqn: &str) -> (String, i64, i64) {
         .unwrap_or_default()
 }
 
+fn lines(graph: &Graph, fqn: &str) -> (i64, i64) {
+    graph
+        .nodes
+        .get(fqn)
+        .and_then(|n| n.location.as_ref())
+        .map(|l| (l.start_line as i64, l.end_line as i64))
+        .unwrap_or_default()
+}
+
 /// Writes one PARQUET file per node table and one per rel-table `(from, to)`
 /// pair into `dir`. Columns match the LadybugDB table schema exactly.
 pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
@@ -125,12 +134,20 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut struct_path = Vec::new();
     let mut struct_start = Vec::new();
     let mut struct_end = Vec::new();
+    let mut struct_start_line = Vec::new();
+    let mut struct_end_line = Vec::new();
     let mut struct_ct = Vec::new();
     let mut fn_fqn = Vec::new();
     let mut fn_path = Vec::new();
     let mut fn_start = Vec::new();
     let mut fn_end = Vec::new();
+    let mut fn_start_line = Vec::new();
+    let mut fn_end_line = Vec::new();
     let mut fn_ct = Vec::new();
+    let mut file_fqn = Vec::new();
+    let mut file_start_line = Vec::new();
+    let mut file_end_line = Vec::new();
+    let mut file_ct = Vec::new();
     let mut unres_fqn = Vec::new();
     let mut unres_cat = Vec::new();
 
@@ -140,18 +157,31 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             NodeKind::Struct => {
                 struct_fqn.push(fqn.clone());
                 let (p, s, e) = loc(graph, fqn);
+                let (sl, el) = lines(graph, fqn);
                 struct_path.push(p);
                 struct_start.push(s);
                 struct_end.push(e);
+                struct_start_line.push(sl);
+                struct_end_line.push(el);
                 struct_ct.push(node.code_type.clone());
             }
             NodeKind::Function => {
                 fn_fqn.push(fqn.clone());
                 let (p, s, e) = loc(graph, fqn);
+                let (sl, el) = lines(graph, fqn);
                 fn_path.push(p);
                 fn_start.push(s);
                 fn_end.push(e);
+                fn_start_line.push(sl);
+                fn_end_line.push(el);
                 fn_ct.push(node.code_type.clone());
+            }
+            NodeKind::File => {
+                file_fqn.push(fqn.clone());
+                let (sl, el) = lines(graph, fqn);
+                file_start_line.push(sl);
+                file_end_line.push(el);
+                file_ct.push(node.code_type.clone());
             }
             NodeKind::UnresolvedTarget => {
                 unres_fqn.push(fqn.clone());
@@ -168,6 +198,8 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("path", Col::Str(struct_path)),
             ("start", Col::I64(struct_start)),
             ("end", Col::I64(struct_end)),
+            ("start_line", Col::I64(struct_start_line)),
+            ("end_line", Col::I64(struct_end_line)),
             ("code_type", Col::Str(struct_ct)),
         ],
     )?;
@@ -178,7 +210,18 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("path", Col::Str(fn_path)),
             ("start", Col::I64(fn_start)),
             ("end", Col::I64(fn_end)),
+            ("start_line", Col::I64(fn_start_line)),
+            ("end_line", Col::I64(fn_end_line)),
             ("code_type", Col::Str(fn_ct)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("file.parquet"),
+        &[
+            ("fqn", Col::Str(file_fqn)),
+            ("start_line", Col::I64(file_start_line)),
+            ("end_line", Col::I64(file_end_line)),
+            ("code_type", Col::Str(file_ct)),
         ],
     )?;
     write_parquet(
@@ -191,15 +234,17 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
 
     // --- Rel tables ---
     let mut c_mm = (Vec::new(), Vec::new());
-    let mut c_ms = (Vec::new(), Vec::new());
-    let mut c_mf = (Vec::new(), Vec::new());
+    let mut c_mfile = (Vec::new(), Vec::new());
+    let mut c_fs = (Vec::new(), Vec::new());
+    let mut c_ff = (Vec::new(), Vec::new());
     let mut c_ss = (Vec::new(), Vec::new());
     let mut c_sf = (Vec::new(), Vec::new());
     for (a, b) in &graph.contains {
         let dst = match (graph.nodes[a].kind, graph.nodes[b].kind) {
             (NodeKind::Module, NodeKind::Module) => &mut c_mm,
-            (NodeKind::Module, NodeKind::Struct) => &mut c_ms,
-            (NodeKind::Module, NodeKind::Function) => &mut c_mf,
+            (NodeKind::Module, NodeKind::File) => &mut c_mfile,
+            (NodeKind::File, NodeKind::Struct) => &mut c_fs,
+            (NodeKind::File, NodeKind::Function) => &mut c_ff,
             (NodeKind::Struct, NodeKind::Struct) => &mut c_ss,
             (NodeKind::Struct, NodeKind::Function) => &mut c_sf,
             _ => unreachable!("unvalidated contains edge"),
@@ -251,8 +296,9 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         write_parquet(&dir.join(name), &[("from", Col::Str(from)), ("to", Col::Str(to))])
     };
     rel("contains_mod_mod.parquet", c_mm.0, c_mm.1)?;
-    rel("contains_mod_struct.parquet", c_ms.0, c_ms.1)?;
-    rel("contains_mod_fn.parquet", c_mf.0, c_mf.1)?;
+    rel("contains_mod_file.parquet", c_mfile.0, c_mfile.1)?;
+    rel("contains_file_struct.parquet", c_fs.0, c_fs.1)?;
+    rel("contains_file_fn.parquet", c_ff.0, c_ff.1)?;
     rel("contains_struct_struct.parquet", c_ss.0, c_ss.1)?;
     rel("contains_struct_fn.parquet", c_sf.0, c_sf.1)?;
     rel("calls.parquet", calls.0, calls.1)?;
@@ -272,18 +318,21 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Creates the LadybugDB schema (SPEC §7): four node tables and five rel tables.
+/// Creates the LadybugDB schema (SPEC §7): five node tables and five rel tables.
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY)")?;
     conn.query(
-        "CREATE NODE TABLE Struct(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, code_type STRING)",
+        "CREATE NODE TABLE Struct(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, start_line INT64, end_line INT64, code_type STRING)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Function(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, code_type STRING)",
+        "CREATE NODE TABLE Function(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, start_line INT64, end_line INT64, code_type STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE File(fqn STRING PRIMARY KEY, start_line INT64, end_line INT64, code_type STRING)",
     )?;
     conn.query("CREATE NODE TABLE UnresolvedTarget(fqn STRING PRIMARY KEY, category STRING)")?;
     conn.query(
-        "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO Struct, FROM Module TO Function, FROM Struct TO Struct, FROM Struct TO Function)",
+        "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function)",
     )?;
     conn.query("CREATE REL TABLE Calls(FROM Function TO Function)")?;
     conn.query("CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct)")?;
@@ -304,18 +353,23 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
         format!(r#"COPY Struct FROM "{}""#, p("struct.parquet")),
         format!(r#"COPY Function FROM "{}""#, p("function.parquet")),
+        format!(r#"COPY File FROM "{}""#, p("file.parquet")),
         format!(r#"COPY UnresolvedTarget FROM "{}""#, p("unresolved.parquet")),
         format!(
             r#"COPY Contains FROM "{}" (from="Module", to="Module")"#,
             p("contains_mod_mod.parquet")
         ),
         format!(
-            r#"COPY Contains FROM "{}" (from="Module", to="Struct")"#,
-            p("contains_mod_struct.parquet")
+            r#"COPY Contains FROM "{}" (from="Module", to="File")"#,
+            p("contains_mod_file.parquet")
         ),
         format!(
-            r#"COPY Contains FROM "{}" (from="Module", to="Function")"#,
-            p("contains_mod_fn.parquet")
+            r#"COPY Contains FROM "{}" (from="File", to="Struct")"#,
+            p("contains_file_struct.parquet")
+        ),
+        format!(
+            r#"COPY Contains FROM "{}" (from="File", to="Function")"#,
+            p("contains_file_fn.parquet")
         ),
         format!(
             r#"COPY Contains FROM "{}" (from="Struct", to="Struct")"#,
@@ -362,6 +416,8 @@ enum Export {
         path: String,
         start: u32,
         end: u32,
+        start_line: u32,
+        end_line: u32,
         code_type: String,
     },
     Function {
@@ -369,6 +425,14 @@ enum Export {
         path: String,
         start: u32,
         end: u32,
+        start_line: u32,
+        end_line: u32,
+        code_type: String,
+    },
+    File {
+        fqn: String,
+        start_line: u32,
+        end_line: u32,
         code_type: String,
     },
     Unresolved { fqn: String, category: String },
@@ -400,21 +464,36 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             NodeKind::Module => Export::Module { fqn: fqn.clone() },
             NodeKind::Struct => {
                 let (path, start, end) = loc(graph, fqn);
+                let (start_line, end_line) = lines(graph, fqn);
                 Export::Struct {
                     fqn: fqn.clone(),
                     path,
                     start: start as u32,
                     end: end as u32,
+                    start_line: start_line as u32,
+                    end_line: end_line as u32,
                     code_type: node.code_type.clone(),
                 }
             }
             NodeKind::Function => {
                 let (path, start, end) = loc(graph, fqn);
+                let (start_line, end_line) = lines(graph, fqn);
                 Export::Function {
                     fqn: fqn.clone(),
                     path,
                     start: start as u32,
                     end: end as u32,
+                    start_line: start_line as u32,
+                    end_line: end_line as u32,
+                    code_type: node.code_type.clone(),
+                }
+            }
+            NodeKind::File => {
+                let (start_line, end_line) = lines(graph, fqn);
+                Export::File {
+                    fqn: fqn.clone(),
+                    start_line: start_line as u32,
+                    end_line: end_line as u32,
                     code_type: node.code_type.clone(),
                 }
             }
@@ -494,6 +573,20 @@ mod tests {
             node(NodeKind::Module, None, None),
         );
         g.nodes.insert(
+            "/x/a.go".to_string(),
+            node(
+                NodeKind::File,
+                Some(Location {
+                    path: "/x/a.go".into(),
+                    start: 0,
+                    end: 0,
+                    start_line: 1,
+                    end_line: 80,
+                }),
+                None,
+            ),
+        );
+        g.nodes.insert(
             "mod.A".to_string(),
             node(
                 NodeKind::Struct,
@@ -501,6 +594,8 @@ mod tests {
                     path: "/x/a.go".into(),
                     start: 0,
                     end: 50,
+                    start_line: 1,
+                    end_line: 50,
                 }),
                 None,
             ),
@@ -513,6 +608,8 @@ mod tests {
                     path: "/x/a.go".into(),
                     start: 1,
                     end: 49,
+                    start_line: 2,
+                    end_line: 49,
                 }),
                 None,
             ),
@@ -521,7 +618,9 @@ mod tests {
             "ext.Foo".to_string(),
             node(NodeKind::UnresolvedTarget, None, Some("external")),
         );
-        g.contains.insert(("mod".to_string(), "mod.A".to_string()));
+        g.contains.insert(("mod".to_string(), "/x/a.go".to_string()));
+        g.contains.insert(("/x/a.go".to_string(), "mod.A".to_string()));
+        g.contains.insert(("/x/a.go".to_string(), "mod.A.f".to_string()));
         g.contains.insert(("mod.A".to_string(), "mod.A.f".to_string()));
         g.calls.insert(("mod.A.f".to_string(), "mod.A.f".to_string()));
         g.uses.insert(("mod.A.f".to_string(), "mod.A".to_string()));
@@ -554,12 +653,16 @@ mod tests {
         assert!(out.contains("mod.A"), "struct rows: {out}");
         assert!(out.contains("src"), "struct code_type: {out}");
 
-        // `start`/`end` INT64 columns (including the reserved `end` name) load.
+        // `start`/`end` INT64 columns (including the reserved `end` name) and the
+        // line columns load.
         let out = conn
-            .query("MATCH (s:Struct) WHERE s.fqn = 'mod.A' RETURN s.start, s.`end`")
+            .query("MATCH (s:Struct) WHERE s.fqn = 'mod.A' RETURN s.start, s.`end`, s.start_line, s.end_line")
             .unwrap()
             .to_string();
-        assert!(out.contains("0") && out.contains("50"), "struct span: {out}");
+        assert!(
+            out.contains("0|50|1|50"),
+            "struct span: {out}"
+        );
 
         let out = conn
             .query("MATCH (t:UnresolvedTarget) RETURN t.fqn, t.category")
@@ -567,12 +670,35 @@ mod tests {
             .to_string();
         assert!(out.contains("ext.Foo") && out.contains("external"), "unresolved rows: {out}");
 
-        // Multi-pair rel table: Module -> Struct.
+        // File node table with line columns (fqn == absolute path).
         let out = conn
-            .query("MATCH (a:Module)-[:Contains]->(b:Struct) RETURN b.fqn")
+            .query("MATCH (f:File) RETURN f.fqn, f.start_line, f.end_line, f.code_type")
             .unwrap()
             .to_string();
-        assert!(out.contains("mod.A"), "contains Mod->Struct: {out}");
+        assert!(
+            out.contains("/x/a.go") && out.contains("80") && out.contains("src"),
+            "file rows: {out}"
+        );
+
+        // Multi-pair rel table: Module -> File.
+        let out = conn
+            .query("MATCH (a:Module)-[:Contains]->(b:File) RETURN b.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("/x/a.go"), "contains Mod->File: {out}");
+
+        // Multi-pair rel table: File -> Struct and File -> Function.
+        let out = conn
+            .query("MATCH (a:File)-[:Contains]->(b:Struct) RETURN b.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("mod.A"), "contains File->Struct: {out}");
+
+        let out = conn
+            .query("MATCH (a:File)-[:Contains]->(b:Function) RETURN b.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("mod.A.f"), "contains File->Function: {out}");
 
         // Multi-pair rel table: Struct -> Function.
         let out = conn

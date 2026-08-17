@@ -38,21 +38,24 @@ The database lives at `.apg/db.lbug` in the workspace root. All queries go throu
 ## Graph schema
 
 ### Node types
-
 | Label             | Properties                          | Description                              |
 |-------------------|--------------------------------------|------------------------------------------|
 | Module            | fqn (STRING PK)                     | A package (Java), module (Go/C++) — no path/location |
-| Struct            | fqn (STRING PK), path, start, `end` | A class, struct, interface, or enum      |
-| Function          | fqn (STRING PK), path, start, `end` | A function, method, or constructor       |
+| File              | fqn (STRING PK), start_line, end_line, code_type | A source file; `fqn` is the absolute path, lines are `1..total` |
+| Struct            | fqn (STRING PK), path, start, `end`, start_line, end_line, code_type | A class, struct, interface, or enum      |
+| Function          | fqn (STRING PK), path, start, `end`, start_line, end_line, code_type | A function, method, or constructor       |
 | UnresolvedTarget  | fqn (STRING PK)                     | A call/type ref the scanner couldn't resolve to a project symbol |
 
-All FQNs are fully qualified and language-shaped: `org.jgrapht.Graph.addVertex` (Java), `github.com/org/repo.Pkg.Method` (Go), `ns.Class.method` (C++). Overloaded functions and constructors carry their erased parameter types: `pkg.Calc.add(int,int)` vs `pkg.Calc.add(java.lang.String,java.lang.String)`, `pkg.Cls.<init>(java.lang.String)`; Go `init` functions are `pkg.init#<file.go>`. `start` and `end` are 0-based byte offsets — use them to extract source code from the file at `path` with `dd if=<path> bs=1 skip=<start> count=<end-start>` if needed.
+All FQNs are fully qualified and language-shaped: `org.jgrapht.Graph.addVertex` (Java),
+`github.com/org/repo.Pkg.Method` (Go), `ns.Class.method` (C++). Overloaded functions and constructors carry their erased parameter types: `pkg.Calc.add(int,int)`
+vs `pkg.Calc.add(java.lang.String,java.lang.String)`, `pkg.Cls.<init>(java.lang.String)`;
+Go `init` functions are `pkg.init#<file.go>`. `start` and `end` are 0-based byte offsets — use them to extract source code from the file at `path` with `dd if=<path> bs=1 skip=<start> count=<end-start>` if needed. Every located node also has `start_line` and `end_line` (**1-based inclusive line numbers**) — use those to join against diffs and hunks or to slice the file's source lines.
 
 ### Edge types
 
 | Edge            | From types                     | To types                       | Meaning                   |
 |-----------------|--------------------------------|--------------------------------|---------------------------|
-| Contains        | Module, Struct                 | Module, Struct, Function       | Parent contains child     |
+| Contains        | Module, File, Struct           | Module, File, Struct, Function | Parent contains child. Strict tree: Module→File→(Struct\|Function), Struct→Struct/Function |
 | Calls           | Function                       | Function                       | Function/method calls     |
 | Uses            | Function, Struct               | Struct                         | Type reference / usage    |
 | UnresolvedCall  | Function                       | UnresolvedTarget               | Call that couldn't be resolved |
@@ -87,7 +90,17 @@ MATCH (f:Function {fqn: "org.jgrapht.Graph.addVertex"})-[c:Calls]->(callee:Funct
 
 **List all types in a module/package:**
 ```
-MATCH (m:Module {fqn: "org.jgrapht.alg"})-[c:Contains]->(s:Struct) RETURN s.fqn
+MATCH (m:Module {fqn: "org.jgrapht.alg"})-[c:Contains]->(f:File)-[:Contains]->(s:Struct) RETURN s.fqn
+```
+
+**List everything in a file (review scope):**
+```
+MATCH (f:File {fqn: "/abs/path/Graph.java"})-[c:Contains]->(n) RETURN labels(n) as kind, n.fqn ORDER BY kind
+```
+
+**Find units a diff hunk touches (hunk in `File.java` from line `lo` to `hi`):**
+```
+MATCH (f:Function) WHERE f.path = "/abs/path/File.java" AND f.start_line <= :hi AND f.end_line >= :lo RETURN f.fqn, f.start_line, f.end_line
 ```
 
 **Find types that use a particular type:**

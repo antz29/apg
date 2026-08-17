@@ -18,8 +18,13 @@ pub struct Graph {
 #[derive(Debug, Clone, Serialize)]
 pub struct Location {
     pub path: PathBuf,
+    /// 0-based byte offsets of the node's span in `path`. File nodes carry
+    /// no byte span (start/end are 0); their span is the line range only.
     pub start: u32,
     pub end: u32,
+    /// 1-based inclusive line range of the node's span.
+    pub start_line: u32,
+    pub end_line: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -28,6 +33,7 @@ pub enum NodeKind {
     Module,
     Struct,
     Function,
+    File,
     UnresolvedTarget,
 }
 

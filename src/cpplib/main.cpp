@@ -23,6 +23,8 @@ struct Decl {
     std::string path;
     uint32_t start;
     uint32_t end;
+    uint32_t start_line;
+    uint32_t end_line;
     std::vector<std::string> params;  // method parameter type names (best-effort)
 };
 
@@ -47,6 +49,23 @@ static std::string node_text(TSNode node, const std::string &source) {
     uint32_t start = ts_node_start_byte(node);
     uint32_t end = ts_node_end_byte(node);
     return source.substr(start, end - start);
+}
+
+// 1-based line number containing the byte at `off` (0-based). `off` may point
+// at the byte just past the end of a span; callers pass the last byte instead.
+static uint32_t line_of(const std::string &src, uint32_t off) {
+    if (src.empty()) return 1;
+    if (off >= src.size()) off = (uint32_t)src.size() - 1;
+    uint32_t n = 1;
+    for (uint32_t i = 0; i < off; i++) {
+        if (src[i] == '\n') n++;
+    }
+    return n;
+}
+
+// Line number of the last byte of an exclusive-end span (end == 0 => 1).
+static uint32_t line_end_of(const std::string &src, uint32_t end) {
+    return end == 0 ? 1 : line_of(src, end - 1);
 }
 
 static void emit_json(const std::string &json) {
@@ -440,32 +459,42 @@ static void collect_decls(TSNode node, const std::string &source,
         std::string name = clean_fqn(attr(node, "name", source));
         if (!name.empty()) {
             std::string fqn = clean_fqn(fqn_in_scope(name, scope));
-            std::string id = newNodeID();
-            structID[fqn] = id;
-            decls.push_back({"class", id, fqn, name, parent_of(fqn), path,
-                             ts_node_start_byte(node), ts_node_end_byte(node), {}});
+            // Skip body-less specifiers (forward declarations like
+            // `struct Foo;`): they carry no members and would otherwise
+            // collide with the real definition's FQN (e.g. amalgamated
+            // headers list the forward decl and the definition separately).
+            // Only the first full declaration of an FQN is kept; later
+            // redefinitions are dropped rather than colliding in the ingestor.
+            TSNode body = ts_node_child_by_field_name(node, "body", 4);
+            if (!ts_node_is_null(body) && !structID.count(fqn)) {
+                std::string id = newNodeID();
+                structID[fqn] = id;
+                decls.push_back({"class", id, fqn, name, parent_of(fqn), path,
+                                 ts_node_start_byte(node), ts_node_end_byte(node),
+                                 line_of(source, ts_node_start_byte(node)),
+                                 line_end_of(source, ts_node_end_byte(node)), {}});
 
-            // Collect base classes
-            TSNode base = ts_node_child_by_field_name(node, "base", 4);
-            if (!ts_node_is_null(base)) {
-                TSNode base_type = ts_node_child_by_field_name(base, "type", 4);
-                if (!ts_node_is_null(base_type)) {
-                    std::string base_fqn = type_node_to_fqn(base_type, source);
-                    if (!base_fqn.empty()) {
-                        base_classes.push_back({fqn, base_fqn});
+                // Collect base classes
+                TSNode base = ts_node_child_by_field_name(node, "base", 4);
+                if (!ts_node_is_null(base)) {
+                    TSNode base_type = ts_node_child_by_field_name(base, "type", 4);
+                    if (!ts_node_is_null(base_type)) {
+                        std::string base_fqn = type_node_to_fqn(base_type, source);
+                        if (!base_fqn.empty()) {
+                            base_classes.push_back({fqn, base_fqn});
+                        }
                     }
                 }
             }
 
-            scope.push_back(name);
-            TSNode body = ts_node_child_by_field_name(node, "body", 4);
             if (!ts_node_is_null(body)) {
+                scope.push_back(name);
                 uint32_t count = ts_node_named_child_count(body);
                 for (uint32_t i = 0; i < count; i++) {
                     collect_decls(ts_node_named_child(body, i), source, scope, path, decls, base_classes);
                 }
+                scope.pop_back();
             }
-            scope.pop_back();
         }
         return;
     }
@@ -474,19 +503,24 @@ static void collect_decls(TSNode node, const std::string &source,
         std::string name = clean_fqn(attr(node, "name", source));
         if (!name.empty()) {
             std::string fqn = clean_fqn(fqn_in_scope(name, scope));
-            std::string id = newNodeID();
-            structID[fqn] = id;
-            decls.push_back({"class", id, fqn, name, parent_of(fqn), path,
-                             ts_node_start_byte(node), ts_node_end_byte(node), {}});
-            scope.push_back(name);
+            // Same forward-declaration/dedupe rule as class/struct specifiers.
             TSNode body = ts_node_child_by_field_name(node, "body", 4);
-            if (!ts_node_is_null(body)) {
-                uint32_t count = ts_node_named_child_count(body);
-                for (uint32_t i = 0; i < count; i++) {
-                    collect_decls(ts_node_named_child(body, i), source, scope, path, decls, base_classes);
+            if (!ts_node_is_null(body) && !structID.count(fqn)) {
+                std::string id = newNodeID();
+                structID[fqn] = id;
+                decls.push_back({"class", id, fqn, name, parent_of(fqn), path,
+                                 ts_node_start_byte(node), ts_node_end_byte(node),
+                                 line_of(source, ts_node_start_byte(node)),
+                                 line_end_of(source, ts_node_end_byte(node)), {}});
+                scope.push_back(name);
+                if (!ts_node_is_null(body)) {
+                    uint32_t count = ts_node_named_child_count(body);
+                    for (uint32_t i = 0; i < count; i++) {
+                        collect_decls(ts_node_named_child(body, i), source, scope, path, decls, base_classes);
+                    }
                 }
+                scope.pop_back();
             }
-            scope.pop_back();
         }
         return;
     }
@@ -509,11 +543,19 @@ static void collect_decls(TSNode node, const std::string &source,
                 std::string name = segments.back();
                 std::string parent = parent_of(fqn);
                 std::string key = parent + "." + name + "(" + join_params(params) + ")";
+                // The scanner is preprocessor-blind: mutually-exclusive #if/#elif
+                // branches can each define the same signature (e.g. a GCC and an
+                // MSVC implementation). Only one compiles per platform, so keep
+                // the first declaration and drop later duplicates rather than
+                // colliding in the ingestor.
+                if (funcID.count(key)) return;
                 std::string id = newNodeID();
                 funcID[key] = id;
                 if (!funcIDByFqn.count(fqn)) funcIDByFqn[fqn] = id;
                 decls.push_back({"method", id, fqn, name, parent, path,
-                                 ts_node_start_byte(node), ts_node_end_byte(node), params});
+                                 ts_node_start_byte(node), ts_node_end_byte(node),
+                                 line_of(source, ts_node_start_byte(node)),
+                                 line_end_of(source, ts_node_end_byte(node)), params});
             }
         }
         return;
@@ -1134,6 +1176,15 @@ int main(int argc, char **argv) {
 
     size_t total = ast_files.size();
 
+    // Emit one file node per scanned file: parent module, 1..line-count
+    // (SPEC §7).
+    for (const auto &af : ast_files) {
+        emit_json(JsonBuilder().field("type", "file").field("path", af.path)
+            .field("parent", af.module)
+            .field("start_line", (uint32_t)1)
+            .field("end_line", line_of(af.source, (uint32_t)af.source.size())).done());
+    }
+
     // Phase 1: collect declarations + base classes. The module name is pushed
     // onto the scope so every FQN is module-prefixed (module.namespace.Class),
     // which keeps FQNs unique across modules.
@@ -1236,6 +1287,8 @@ int main(int argc, char **argv) {
             jb.field("path", path_str);
             jb.field("start", d.start);
             jb.field("end", d.end);
+            jb.field("start_line", d.start_line);
+            jb.field("end_line", d.end_line);
             emit_json(jb.done());
         } else {
             std::string paramsJson = "[";
@@ -1254,14 +1307,16 @@ int main(int argc, char **argv) {
             jb.field("path", path_str);
             jb.field("start", d.start);
             jb.field("end", d.end);
+            jb.field("start_line", d.start_line);
+            jb.field("end_line", d.end_line);
             emit_json(jb.done());
         }
 
-        // contains edge: parent is a module (namespace) fqn or a struct id.
-        std::string from = d.parent;
+        // contains edge: methods and nested types stay directly under their
+        // class; top-level classes and free functions are reached through the
+        // file node instead of the module/namespace (SPEC §7).
         auto it = structID.find(d.parent);
-        if (it != structID.end()) from = it->second;
-        emit_edge("contains", from, d.id);
+        if (it != structID.end()) emit_edge("contains", it->second, d.id);
     }
 
     // Emit use edges for base classes
