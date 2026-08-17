@@ -107,4 +107,4 @@ jobs:
           fi
 
       - name: Upload bottles to release
-        run: gh release upload "${GITHUB_REF_NAME}" bottles/*.bottle.tar.gz --clobber
+        run: gh release upload "${GITHUB_REF_NAME}" bottles/*.bottle*.tar.gz --clobber
