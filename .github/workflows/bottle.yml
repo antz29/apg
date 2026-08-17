@@ -107,4 +107,10 @@ jobs:
           fi
 
       - name: Upload bottles to release
-        run: gh release upload "${GITHUB_REF_NAME}" bottles/*.bottle*.tar.gz --clobber
+        run: |
+          # brew writes bottle files as <name>--<version>... but builds the
+          # fetch URL as <name>-<version>...; rename to match what brew fetches.
+          for f in bottles/*--*.bottle*.tar.gz; do
+            mv "$f" "$(echo "$f" | sed 's/--/-/')"
+          done
+          gh release upload "${GITHUB_REF_NAME}" bottles/*.bottle*.tar.gz --clobber
