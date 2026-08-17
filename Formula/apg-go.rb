@@ -12,8 +12,8 @@ class ApgGo < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.3.0"
-    rebuild 2
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "12f37cb006dd98314b2f1398a7c5bf220eacd1d839bdd03dfb10517c3b66f40c"
+    rebuild 3
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "eb13e5245ed0b5b2ff5cca5cdf46d6a256a8ab3abdd138dd7e50be983e2803e4"
   end
 
   depends_on "go" => :build
