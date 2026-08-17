@@ -6,7 +6,7 @@ class ApgJava < Formula
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
       tag:      "v0.3.0",
-      revision: "29e8bd1df459c41852749992c731e68b964ef180"
+      revision: "9ee686e28a2fff4c17adb61de99b9a3c99972de2"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
