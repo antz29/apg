@@ -66,6 +66,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Download bottle artifacts
         uses: actions/download-artifact@v4
