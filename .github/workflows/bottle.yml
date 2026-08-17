@@ -13,6 +13,8 @@ env:
   # GitHub Actions runners can't satisfy Homebrew's tap-trust check (it needs a
   # user-scoped token); the taps here are our own first-party tap.
   HOMEBREW_NO_REQUIRE_TAP_TRUST: 1
+  # gh doesn't auto-read GITHUB_TOKEN in Actions.
+  GH_TOKEN: ${{ github.token }}
 
 jobs:
   bottle:
