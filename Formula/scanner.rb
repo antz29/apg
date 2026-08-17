@@ -9,7 +9,7 @@ class Scanner < Formula
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
       tag:      "v0.3.0",
-      revision: "efe2c989b1f08704ccb44f97f590e2c0025da3f2"
+      revision: "5044dca5134dc52f6e7cb976f5523b53210d04a2"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
