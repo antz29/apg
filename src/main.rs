@@ -12,14 +12,81 @@ use std::process::{Command, Stdio};
 use cleanup::{cleanup, CleanupOptions};
 use lbug::{Connection, Database, SystemConfig};
 
-/// The `.opencode/tools/apg_query.ts` tool file that `apg init` installs into a
-/// project. Auto-discovered by opencode from `.opencode/tools/*.ts`; shells out
-/// to `apg query` (on PATH) from the project root.
-const APG_QUERY_TOOL: &str = include_str!("../.opencode/tools/apg_query.ts");
+/// The opencode tool suite that `apg init` installs into a project. Each entry
+/// is a file under `.opencode/tools/` (auto-discovered by opencode from
+/// `.opencode/tools/*.ts`), single-sourced from this repo's own `.opencode`.
+/// The files shell out to `apg query` / `apg scan` (on PATH) from the project
+/// root; see `.opencode/lib/apg.ts` for the shared plumbing.
+const SUITE_TOOLS: &[(&str, &str)] = &[
+    (
+        "apg_query.ts",
+        include_str!("../.opencode/tools/apg_query.ts"),
+    ),
+    (
+        "apg_scan.ts",
+        include_str!("../.opencode/tools/apg_scan.ts"),
+    ),
+    (
+        "apg_find_symbol.ts",
+        include_str!("../.opencode/tools/apg_find_symbol.ts"),
+    ),
+    (
+        "apg_modules.ts",
+        include_str!("../.opencode/tools/apg_modules.ts"),
+    ),
+    (
+        "apg_module_files.ts",
+        include_str!("../.opencode/tools/apg_module_files.ts"),
+    ),
+    (
+        "apg_module_structs.ts",
+        include_str!("../.opencode/tools/apg_module_structs.ts"),
+    ),
+    (
+        "apg_file_units.ts",
+        include_str!("../.opencode/tools/apg_file_units.ts"),
+    ),
+    (
+        "apg_file_path.ts",
+        include_str!("../.opencode/tools/apg_file_path.ts"),
+    ),
+    (
+        "apg_methods.ts",
+        include_str!("../.opencode/tools/apg_methods.ts"),
+    ),
+    (
+        "apg_struct.ts",
+        include_str!("../.opencode/tools/apg_struct.ts"),
+    ),
+    (
+        "apg_callers.ts",
+        include_str!("../.opencode/tools/apg_callers.ts"),
+    ),
+    (
+        "apg_callees.ts",
+        include_str!("../.opencode/tools/apg_callees.ts"),
+    ),
+    (
+        "apg_uses.ts",
+        include_str!("../.opencode/tools/apg_uses.ts"),
+    ),
+    (
+        "apg_unresolved.ts",
+        include_str!("../.opencode/tools/apg_unresolved.ts"),
+    ),
+    (
+        "apg_hunk.ts",
+        include_str!("../.opencode/tools/apg_hunk.ts"),
+    ),
+];
+
+/// Shared helper module used by the suite tools (`.opencode/lib/apg.ts`),
+/// installed by `apg init` alongside the tools.
+const APG_LIB: &str = include_str!("../.opencode/lib/apg.ts");
 
 /// The `.opencode/agents/codebase-navigator.md` agent file that `apg init`
 /// installs into a project. Auto-discovered by opencode from
-/// `.opencode/agents/*.md`; configured to use the `apg_query` tool and to guide
+/// `.opencode/agents/*.md`; configured to use the apg suite tools and to guide
 /// the user through running `apg scan` on the CLI (there is no in-chat scan
 /// tool). Single-sourced from the repo's own agent file.
 const CODEBASE_NAVIGATOR_AGENT: &str =
@@ -193,7 +260,7 @@ fn print_help() {
 
 USAGE:
   apg init [dir]              Set up .apg/ (db + config) and install the
-                              opencode apg_query plugin + codebase-navigator
+                              opencode apg tool suite + codebase-navigator
                               agent into .opencode/
   apg scan [dir] [options]    Scan a project; writes .apg/db.lbug and
                               .apg/graph.jsonl
@@ -268,7 +335,12 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     if !pkg_path.exists() {
         std::fs::write(&pkg_path, OPENCODE_PACKAGE_JSON)?;
     }
-    std::fs::write(tools_dir.join("apg_query.ts"), APG_QUERY_TOOL)?;
+    for (name, content) in SUITE_TOOLS {
+        std::fs::write(tools_dir.join(name), content)?;
+    }
+    let lib_dir = opencode_dir.join("lib");
+    std::fs::create_dir_all(&lib_dir)?;
+    std::fs::write(lib_dir.join("apg.ts"), APG_LIB)?;
     std::fs::write(
         agents_dir.join("codebase-navigator.md"),
         CODEBASE_NAVIGATOR_AGENT,
@@ -294,7 +366,8 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     }
 
     println!(
-        "Initialized .apg/ (config.json) and installed apg_query tool + codebase-navigator agent in {}",
+        "Initialized .apg/ (config.json) and installed {} apg tools + codebase-navigator agent in {}",
+        SUITE_TOOLS.len(),
         opencode_dir.display()
     );
     Ok(())

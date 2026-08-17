@@ -19,8 +19,9 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
   `UnresolvedTarget` nodes rather than guessed FQNs.
 - **Everything is included** — tests, generated, and vendored code are scanned;
   filter by `code_type` (`src`, `test`, `generated`, `external`) in queries.
-- **`apg init`** installs an opencode plugin exposing the `apg_query` tool, so
-  you can query the graph from chat.
+- **`apg init`** installs an opencode tool suite (find symbols, list methods,
+  trace callers/callees, map diff hunks, …), so you can query the graph from
+  chat without writing Cypher.
 - **`apg query`** is self-contained — it uses the `lbug` crate directly, no
   separate LadybugDB shell needed.
 - **Brew-installable** via the tap `antz29/apg`.
@@ -57,11 +58,11 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.4.0
+apg --version   # apg 0.5.0
 apg --help
 ```
 
-`v0.4.0` is tagged, so the stable install works as-is. If you want the latest
+`v0.5.0` is tagged, so the stable install works as-is. If you want the latest
 unreleased code instead, pass `--HEAD`:
 
 ## Quick start
@@ -69,7 +70,7 @@ unreleased code instead, pass `--HEAD`:
 In your project directory:
 
 ```sh
-apg init    # creates .apg/ (config + db location), installs the opencode apg_query plugin and codebase-navigator agent
+apg init    # creates .apg/ (config + db location), installs the opencode apg tool suite and codebase-navigator agent
 apg scan    # scans the project, writes .apg/db.lbug and .apg/graph.jsonl
 apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 ```
@@ -79,13 +80,14 @@ apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 Sets up the project:
 
 - creates `.apg/` with a default `config.json` (classification rules),
-- installs the opencode `apg_query` plugin into `.opencode/tools/apg_query.ts`
-  (writing `.opencode/package.json` and running `npm install` if needed),
+- installs the **apg tool suite** into `.opencode/tools/` (query tools +
+  `apg_scan`, shared plumbing in `.opencode/lib/`) and writes
+  `.opencode/package.json` + runs `npm install` if needed,
 - installs the `codebase-navigator` agent into `.opencode/agents/codebase-navigator.md`.
 
 The plugin and agent are auto-discovered by opencode. **Restart opencode** after
-running `apg init` so the `apg_query` tool and `codebase-navigator` agent are
-available in chat.
+running `apg init` so the tools and `codebase-navigator` agent are available in
+chat.
 
 ### 2. `apg scan [dir] [options]`
 
@@ -125,15 +127,31 @@ Query syntax: `MATCH`/`RETURN` only (no raw SQL). `ORDER BY`, `LIMIT`,
 
 ## Querying from opencode
 
-`apg init` installs an `apg_query` tool. In an opencode session, ask the agent
-to run graph queries directly:
+`apg init` installs the **apg tool suite**. In an opencode session, ask the
+agent to explore the graph directly — it will pick the right tool:
 
-> *"Find all functions in the `store` package."*
+> *"List the methods of the `Transaction` type in `sdk/go`."*
 > *"Who calls `ComputeContentHash`?"*
+> *"What functions touch lines 190–240 of `store.go`?"*
 
-The agent uses `apg_query` to traverse the graph (`Contains`, `Calls`, `Uses`,
-`UnresolvedCall`, `UnresolvedUse` edges) and can read source files behind the
-nodes via the `path`/`start`/`end` properties.
+| Tool | What it returns |
+|---|---|
+| `apg_find_symbol` | symbols whose FQN contains a string |
+| `apg_modules` | list modules/packages |
+| `apg_module_files` / `apg_module_structs` | files / types under a module |
+| `apg_file_units` / `apg_file_path` | what a file contains; path → module |
+| `apg_methods` / `apg_struct` | methods of a type; type + nested types |
+| `apg_callers` / `apg_callees` | incoming / outgoing `Calls` |
+| `apg_uses` | `Uses` edges in/out of a unit |
+| `apg_unresolved` | unresolvable calls/uses for a unit or file |
+| `apg_hunk` | units overlapping a line range (diff/review join) |
+| `apg_query` | ad-hoc read-only Cypher (power users) |
+| `apg_scan` | rebuild `.apg/db.lbug` |
+
+Every row carries `fqn`, `path`, and `start_line`/`end_line` where relevant, so
+the agent can jump straight to source. All suite tools accept an optional
+`codeType` (`src`/`test`/`generated`/`external`); omitted = all code, matching
+the raw graph.
 
 ## Graph data model
 
