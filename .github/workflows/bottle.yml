@@ -80,8 +80,9 @@ jobs:
       - name: Merge bottle blocks into formulae
         run: |
           brew bottle --merge --write --no-commit --json bottles/*.bottle.json
-          # brew writes into the tap checkout; copy the updated formulae back.
-          cp "$(brew --prefix)/Library/Taps/antz29/apg/Formula/"*.rb "${GITHUB_WORKSPACE}/Formula/"
+          # brew writes into the tap checkout (dir name gets a "homebrew-" prefix);
+          # copy the updated formulae back into the workspace.
+          find "$(brew --prefix)/Library/Taps/antz29" -path '*/Formula/*.rb' -exec cp '{}' "${GITHUB_WORKSPACE}/Formula/" \;
 
       - name: Commit bottle updates
         run: |
