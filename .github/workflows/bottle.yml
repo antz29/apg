@@ -16,12 +16,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Intel (macos-13) runners have been retired upstream, so only ARM
+          # bottles are published; Intel Macs build from source.
           - os: macos-14
             arch: arm64
-          # Intel runners are deprecated upstream; drop this entry if macos-13
-          # is retired.
-          - os: macos-13
-            arch: x86_64
     runs-on: ${{ matrix.os }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
