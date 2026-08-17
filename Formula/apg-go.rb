@@ -12,7 +12,8 @@ class ApgGo < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.3.0"
-    # sha256 lines are filled in by the .github/workflows/bottle.yml build.
+    rebuild 1
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "aee5bbc722fbe129a90bf5ca2f31d4d7db40dc02eef48d5ec33e1623669a4085"
   end
 
   depends_on "go" => :build

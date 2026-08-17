@@ -13,7 +13,8 @@ class ApgCpp < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.3.0"
-    # sha256 lines are filled in by the .github/workflows/bottle.yml build.
+    rebuild 1
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "94bbfc826d6e367882e156a4c6fbc1dd92592412d17476ad0e5292b65c4c8a3e"
   end
 
   depends_on "scanner"

@@ -12,7 +12,8 @@ class ApgJava < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.3.0"
-    # sha256 lines are filled in by the .github/workflows/bottle.yml build.
+    rebuild 1
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "d1a6ee074d42074adbfb220ea8e1613d33589b530e66c5e8e7810d7cfe60ef11"
   end
 
   depends_on "openjdk" # javac to build the frontend; java at runtime
