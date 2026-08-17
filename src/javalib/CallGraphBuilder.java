@@ -448,6 +448,9 @@ public class CallGraphBuilder {
             // Anonymous classes: scan their members but attribute them to the
             // enclosing named class (matches javac's $-name collapse).
             if (name.isEmpty()) return super.visitClass(ct, nil);
+            // javac error recovery can synthesize a `<error>` class name; never
+            // declare such a tree (same rationale as visitMethod).
+            if (name.equals("<error>")) return super.visitClass(ct, nil);
             String outer = cls;
             cls = cls.isEmpty() ? name : cls + "." + name;
             String fqn = pkg.isEmpty() ? cls : pkg + "." + cls;
@@ -505,6 +508,14 @@ public class CallGraphBuilder {
                 return super.visitMethod(mt, nil);
             }
             String name = mt.getName().toString();
+            // javac error recovery: a method whose name is a keyword (e.g.
+            // `void enum(...)`) is parsed with the synthetic name `<error>`.
+            // It is not a real symbol; declaring it would pollute the graph and
+            // can collide (two `<error>` declarations, or one with a sibling
+            // `<error>` class tree). Skip the declaration but keep walking.
+            if (name.equals("<error>")) {
+                return super.visitMethod(mt, nil);
+            }
             List<String> params = paramStrings(symOfDecl(mt));
             String parentFqn = pkg.isEmpty() ? cls : pkg + "." + cls;
             String key = parentFqn + "." + name + "(" + String.join(",", params) + ")";

@@ -592,6 +592,18 @@ fn process(
         })
     };
     log.ln(&format!("Skipped {} blacklisted messages", report.skipped));
+    if report.shadowed_modules > 0 {
+        log.ln(&format!(
+            "{} module(s) shadowed by a type of the same name (package/type collision; type wins)",
+            report.shadowed_modules
+        ));
+    }
+    if report.shadowed_functions > 0 {
+        log.ln(&format!(
+            "{} function(s) shadowed by a struct of the same FQN (struct wins)",
+            report.shadowed_functions
+        ));
+    }
 
     let cleanup_report = cleanup(
         &mut graph,

@@ -6,10 +6,13 @@
 //! `init` → `parent.init#<file-basename>`), building both `id → FQN` and
 //! `FQN → Node` maps. Pass 2 resolves edge endpoints against those maps.
 //!
-//! The renderer fails loudly (panics) on any residual FQN collision rather than
-//! silently overwriting.
+//! The renderer fails loudly (panics) on any residual FQN collision between two
+//! declarations of the same kind rather than silently overwriting. Cross-kind
+//! collisions (a legal JVM package/type sharing a name, or a class in a
+//! shadowed package colliding with a method of the shadowing class) resolve by
+//! precedence: struct > module, struct > function.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
@@ -26,6 +29,14 @@ pub struct IngestOptions<'a> {
 pub struct IngestReport {
     /// Number of records skipped due to blacklist filtering.
     pub skipped: u64,
+    /// Number of module records dropped because a struct/function with the same
+    /// FQN claimed that name (Java permits a package and a type to share a
+    /// name; flat FQN space can't hold both, so the type wins).
+    pub shadowed_modules: u64,
+    /// Number of function records dropped because a struct with the same FQN
+    /// claimed that name first (a class in a shadowed package can render the
+    /// same FQN as a method of the class that shadowed it).
+    pub shadowed_functions: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -52,14 +63,15 @@ fn file_basename(file: &str) -> String {
 }
 
 /// Claims `fqn` for declaration `id`, panicking if a different declaration
-/// already rendered the same FQN.
-fn claim(seen: &mut HashMap<String, String>, id: &str, fqn: &str) {
-    if let Some(prev) = seen.get(fqn) {
+/// already rendered the same FQN. `seen` records the kind of the claimer so
+/// the caller can resolve cross-kind collisions (type wins over module/function).
+fn claim(seen: &mut HashMap<String, (String, NodeKind)>, id: &str, fqn: &str, kind: NodeKind) {
+    if let Some((prev, _)) = seen.get(fqn) {
         if prev != id {
             panic!("FQN collision: `{fqn}` claimed by both `{prev}` and `{id}`");
         }
     } else {
-        seen.insert(fqn.to_string(), id.to_string());
+        seen.insert(fqn.to_string(), (id.to_string(), kind));
     }
 }
 
@@ -101,8 +113,12 @@ fn render_function_fqns(decls: &[FuncDecl], language: &str) -> Vec<(String, Stri
 }
 
 fn insert_node(graph: &mut Graph, fqn: String, node: Node) {
-    if graph.nodes.contains_key(&fqn) {
-        panic!("duplicate project node FQN: `{fqn}`");
+    // A real declaration replaces an unresolved-target placeholder (which lives
+    // only in `graph.nodes`, not in `seen`), never the other way around.
+    match graph.nodes.get(&fqn) {
+        None => {}
+        Some(existing) if existing.kind == NodeKind::UnresolvedTarget => {}
+        Some(_) => panic!("duplicate project node FQN: `{fqn}`"),
     }
     graph.nodes.insert(fqn, node);
 }
@@ -113,9 +129,17 @@ pub fn ingest(
 ) -> (Graph, IngestReport) {
     let mut graph = Graph::default();
     let mut skipped = 0u64;
+    let mut shadowed_modules = 0u64;
+    let mut shadowed_functions = 0u64;
     let mut id_to_fqn: HashMap<String, String> = HashMap::new();
-    let mut seen: HashMap<String, String> = HashMap::new();
+    let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
     let mut funcs: Vec<FuncDecl> = Vec::new();
+    // Modules are buffered (not claimed/inserted immediately): a package and a
+    // type may legally share a name in the JVM (`pkg.A` the package and `pkg.A`
+    // the class, e.g. NetBeans' QA test-data project layout), and flat FQN space
+    // can't represent both. Modules are inserted only after every struct and
+    // function FQN is claimed, so a colliding module yields to the type.
+    let mut modules: Vec<String> = Vec::new();
 
     // Stream the records in one pass: modules, structs, and unresolved targets
     // have deterministic FQNs and enter the graph immediately; functions are
@@ -123,9 +147,11 @@ pub fn ingest(
     // to a temp file and resolved in a second pass once ids are known. This
     // keeps memory bounded for large projects instead of buffering every
     // record (SPEC §6).
+    static SPOOL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let spool = std::env::temp_dir().join(format!(
-        "apg-edge-spool-{}-{}",
+        "apg-edge-spool-{}-{}-{}",
         std::process::id(),
+        SPOOL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -140,20 +166,9 @@ pub fn ingest(
                         skipped += 1;
                         continue;
                     }
-                    if seen.contains_key(&fqn) {
-                        continue;
+                    if !modules.contains(&fqn) {
+                        modules.push(fqn);
                     }
-                    claim(&mut seen, &fqn, &fqn);
-                    insert_node(
-                        &mut graph,
-                        fqn,
-                        Node {
-                            kind: NodeKind::Module,
-                            location: None,
-                            category: None,
-                            code_type: String::new(),
-                        },
-                    );
                 }
                 Record::Struct {
                     id,
@@ -164,7 +179,7 @@ pub fn ingest(
                     end,
                 } => {
                     let fqn = format!("{parent}.{name}");
-                    claim(&mut seen, &id, &fqn);
+                    claim(&mut seen, &id, &fqn, NodeKind::Struct);
                     id_to_fqn.insert(id.clone(), fqn.clone());
                     if is_blacklisted(&fqn, opts.blacklist) {
                         skipped += 1;
@@ -218,13 +233,31 @@ pub fn ingest(
         }
     }
 
-    // Pass B: render function FQNs and insert function nodes.
+    // Pass B: render function FQNs and insert function nodes. Structs claim
+    // first (streaming pass), so a function whose FQN a struct already claimed
+    // is shadowed: a class in a shadowed package can render the same FQN as a
+    // method of the class that shadowed it (NetBeans QA test-data layout), and
+    // flat FQN space can't hold both. The struct wins; the function is dropped
+    // and its edges pruned as dangling. Function-vs-function still panics (a
+    // genuine duplicate declaration is a scanner bug).
     for (id, fqn) in render_function_fqns(&funcs, opts.language) {
-        claim(&mut seen, &id, &fqn);
-        id_to_fqn.insert(id, fqn);
+        match seen.get(&fqn) {
+            None => {
+                seen.insert(fqn.clone(), (id.clone(), NodeKind::Function));
+                id_to_fqn.insert(id, fqn);
+            }
+            Some((_, NodeKind::Struct)) => {
+                shadowed_functions += 1;
+            }
+            Some((prev, _)) => {
+                panic!("FQN collision: `{fqn}` claimed by both `{prev}` and `{id}`");
+            }
+        }
     }
     for f in &funcs {
-        let fqn = id_to_fqn[&f.id].clone();
+        let Some(fqn) = id_to_fqn.get(&f.id).cloned() else {
+            continue;
+        };
         if is_blacklisted(&fqn, opts.blacklist) {
             skipped += 1;
             continue;
@@ -246,6 +279,30 @@ pub fn ingest(
         );
     }
 
+    // Pass B2: insert module nodes. A module whose FQN was already claimed by a
+    // struct or function is shadowed (legal Java package/type name sharing); it
+    // is dropped and its contains edges are pruned by the dangling-edge cleanup
+    // below rather than panicking.
+    let mut shadowed: HashSet<String> = HashSet::new();
+    for fqn in &modules {
+        if seen.contains_key(fqn) {
+            shadowed.insert(fqn.clone());
+            shadowed_modules += 1;
+            continue;
+        }
+        claim(&mut seen, fqn, fqn, NodeKind::Module);
+        insert_node(
+            &mut graph,
+            fqn.clone(),
+            Node {
+                kind: NodeKind::Module,
+                location: None,
+                category: None,
+                code_type: String::new(),
+            },
+        );
+    }
+
     // Pass C: resolve edge endpoints from the spool.
     let resolve = |s: &str| -> String { id_to_fqn.get(s).cloned().unwrap_or_else(|| s.to_string()) };
     {
@@ -255,6 +312,13 @@ pub fn ingest(
         while let Some(e) = er.next_edge() {
             match e {
                 Record::Contains { from, to } => {
+                    // A shadowed package cannot be a parent: dropping the module
+                    // node re-roots its containment tree at the type of the same
+                    // name, and a class does not contain a package beneath it
+                    // (e.g. class `org.pkg.A` contains no such `org.pkg.A.deep`).
+                    if shadowed.contains(&from) {
+                        continue;
+                    }
                     let a = resolve(&from);
                     let b = resolve(&to);
                     if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
@@ -345,7 +409,7 @@ pub fn ingest(
             && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
     });
 
-    (graph, IngestReport { skipped })
+    (graph, IngestReport { skipped, shadowed_modules, shadowed_functions })
 }
 
 /// Binary spool format for edge records: one u8 tag (0 contains, 1 calls,
@@ -504,6 +568,195 @@ mod tests {
                 config: None,
             },
         );
+    }
+
+    #[test]
+    fn module_shadowed_by_type_does_not_panic() {
+        // Java permits a package `org.pkg.A` and a class `org.pkg.A` to coexist.
+        // The type wins; the shadowed module is dropped and its contains edges
+        // pruned, while unrelated modules and edges survive.
+        let records = vec![
+            Record::Module {
+                fqn: "org.pkg".to_string(),
+            },
+            Record::Module {
+                fqn: "org.pkg.A".to_string(),
+            },
+            Record::Module {
+                fqn: "org.pkg.A.deep".to_string(),
+            },
+            Record::Struct {
+                id: "n1".to_string(),
+                parent: "org.pkg".to_string(),
+                name: "A".to_string(),
+                path: "/x/A.java".to_string(),
+                start: 0,
+                end: 1,
+            },
+            Record::Struct {
+                id: "n2".to_string(),
+                parent: "org.pkg.A.deep".to_string(),
+                name: "B".to_string(),
+                path: "/y/B.java".to_string(),
+                start: 0,
+                end: 1,
+            },
+            Record::Contains {
+                from: "org.pkg".to_string(),
+                to: "org.pkg.A".to_string(),
+            },
+            Record::Contains {
+                from: "org.pkg.A".to_string(),
+                to: "org.pkg.A.deep".to_string(),
+            },
+            Record::Contains {
+                from: "org.pkg.A.deep".to_string(),
+                to: "n2".to_string(),
+            },
+        ];
+        let (graph, report) = ingest(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "java",
+                config: None,
+            },
+        );
+        assert_eq!(report.shadowed_modules, 1);
+        // The class survives with its canonical FQN.
+        assert!(graph.nodes.contains_key("org.pkg.A"));
+        assert_eq!(graph.nodes["org.pkg.A"].kind, NodeKind::Struct);
+        // The parent package and the package nested under the shadowed name
+        // survive; the shadowed package itself is not present.
+        assert!(graph.nodes.contains_key("org.pkg"));
+        assert!(graph.nodes.contains_key("org.pkg.A.deep"));
+        assert!(graph.nodes.contains_key("org.pkg.A.deep.B"));
+        // The parent module keeps its containment of the class (correct: the
+        // package `org.pkg` does contain the class `org.pkg.A`)...
+        assert!(graph
+            .contains
+            .contains(&("org.pkg".to_string(), "org.pkg.A".to_string())));
+        // ...and the class's own contains edge from its real parent survives.
+        assert!(graph
+            .contains
+            .contains(&("org.pkg.A.deep".to_string(), "org.pkg.A.deep.B".to_string())));
+        // But the shadowed package is not a parent: the class does not contain
+        // the package beneath it.
+        assert!(!graph
+            .contains
+            .contains(&("org.pkg.A".to_string(), "org.pkg.A.deep".to_string())));
+    }
+
+    #[test]
+    fn function_shadowed_by_struct_does_not_panic() {
+        // A class in a shadowed package (`p.A.test` in package `p.A`) renders
+        // the same FQN as a method of the class `p.A`; the struct wins and the
+        // function is dropped. Function-vs-function still panics.
+        let records = vec![
+            Record::Module {
+                fqn: "p".to_string(),
+            },
+            Record::Module {
+                fqn: "p.A".to_string(),
+            },
+            Record::Struct {
+                id: "n1".to_string(),
+                parent: "p".to_string(),
+                name: "A".to_string(),
+                path: "/x/A.java".to_string(),
+                start: 0,
+                end: 1,
+            },
+            Record::Struct {
+                id: "n2".to_string(),
+                parent: "p.A".to_string(),
+                name: "test".to_string(),
+                path: "/y/test.java".to_string(),
+                start: 0,
+                end: 1,
+            },
+            Record::Function {
+                id: "n3".to_string(),
+                parent: "p.A".to_string(),
+                name: "test".to_string(),
+                params: vec![],
+                file: "/x/A.java".to_string(),
+                path: "/x/A.java".to_string(),
+                start: 0,
+                end: 1,
+            },
+            Record::Function {
+                id: "n5".to_string(),
+                parent: "p.A".to_string(),
+                name: "other".to_string(),
+                params: vec![],
+                file: "/x/A.java".to_string(),
+                path: "/x/A.java".to_string(),
+                start: 0,
+                end: 1,
+            },
+            Record::Contains {
+                from: "p".to_string(),
+                to: "n1".to_string(),
+            },
+            Record::Contains {
+                from: "p.A".to_string(),
+                to: "n2".to_string(),
+            },
+            Record::Contains {
+                from: "n1".to_string(),
+                to: "n3".to_string(),
+            },
+            Record::Contains {
+                from: "n1".to_string(),
+                to: "n5".to_string(),
+            },
+        ];
+        let (graph, report) = ingest(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "java",
+                config: None,
+            },
+        );
+        // The struct `p.A.test` (from the shadowed package) wins over the
+        // method `p.A.test`; the distinct method `p.A.other` survives.
+        assert_eq!(report.shadowed_functions, 1);
+        assert_eq!(report.shadowed_modules, 1);
+        assert!(graph.nodes.contains_key("p.A.test"));
+        assert_eq!(graph.nodes["p.A.test"].kind, NodeKind::Struct);
+        assert!(graph.nodes.contains_key("p.A.other"));
+        // Edges through the shadowed package/module or dropped function are
+        // pruned; the surviving function's edge stays.
+        assert!(!graph.contains.contains(&("p.A".to_string(), "p.A.test".to_string())));
+        assert!(graph.contains.contains(&("p.A".to_string(), "p.A.other".to_string())));
+    }
+
+    #[test]
+    fn module_replaces_unresolved_target() {
+        // An unresolved placeholder node lives only in `graph.nodes`; a real
+        // declaration (here: the `tests` package vs a bare type reference that
+        // was emitted unresolved) replaces it instead of panicking.
+        let records = vec![
+            Record::Unresolved {
+                fqn: "tests".to_string(),
+                category: Some("unknown".to_string()),
+            },
+            Record::Module {
+                fqn: "tests".to_string(),
+            },
+        ];
+        let (graph, _) = ingest(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "java",
+                config: None,
+            },
+        );
+        assert!(graph.nodes.contains_key("tests"));
+        assert_eq!(graph.nodes["tests"].kind, NodeKind::Module);
     }
 
     #[test]

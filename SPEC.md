@@ -91,6 +91,16 @@ Rules:
   overloaded and every member gets the `(params)` suffix.
 - The ingestor **fails loudly** on any residual FQN collision (two distinct
   declarations mapping to the same rendered FQN). Never silently overwrite.
+- One legitimate exception: the JVM allows a **package** and a **type** to share
+  a name (`pkg.A` the package and `pkg.A` the class, as in NetBeans' QA test-data
+  layout). Flat FQN space cannot represent both, so the type wins and the
+  shadowed `module` node is dropped; contains edges touching it are pruned.
+- The same layout can make a **struct** and a **function** collide (a class in a
+  shadowed package renders the same FQN as a method of the class that shadowed
+  it). The struct wins; the function is dropped. Function-vs-function (a genuine
+  duplicate declaration) still panics.
+- A real declaration always replaces an `UnresolvedTarget` placeholder of the
+  same FQN (unresolved nodes are only guesswork from the scanner).
 
 ## 5. code_type and category
 
