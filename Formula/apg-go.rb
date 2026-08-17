@@ -6,7 +6,7 @@ class ApgGo < Formula
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
       tag:      "v0.3.0",
-      revision: "1d5d4a8a0ca54cf87c061c26fb66e3c43f0912e5"
+      revision: "cdba34d0baeddba753e0a2e0ddbde7bc00b552a8"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
