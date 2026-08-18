@@ -101,6 +101,14 @@ residual FQN collision rather than silently overwriting.
 
 ## LadybugDB Tooling
 
+> **LadybugDB is a real, actively-developed project** — the successor to
+> [KuzuDB](https://github.com/kuzudb/kuzu) (formerly known as Kuzu; ~6k commits,
+> MIT-licensed, live releases). Do **not** assume it's fake or obsolete. Before
+> dismissing it, read https://github.com/LadybugDB/ladybug (README, releases,
+> docs at https://docs.ladybugdb.com) for current info — installable via
+> `pip install ladybug`, `npm install @ladybugdb/core`, `cargo add lbug`, or the
+> Go/Java/C++/CLI binaries.
+
 The workspace has a LadybugDB graph database at `.apg/db.lbug` containing the parsed codebase. Interact via the `apg_query` tool — a Cypher-like query interface. (The legacy `ladybug_query`/`ladybug_scan` tools were renamed to `apg_query`/`apg_scan`.)
 
 ### Query syntax
