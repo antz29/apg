@@ -50,6 +50,10 @@ The `apg` binary is brew-installable via split formulae (tap
 `https://github.com/antz29/apg.git`): `scanner` (the binary), plus `apg-go`,
 `apg-java`, `apg-cpp` frontends installed to `$(brew --prefix)/share/apg/frontends`
 (the `scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
+On Linux there's a `curl | sh` installer (`install.sh` — installs a single
+tarball with the binary + all frontends to `/usr/local` or `--user`'s
+`~/.local`, layout `bin/apg` + `libexec/apg/`); the linux-release workflow
+builds `apg-linux-{x86_64,aarch64}.tar.gz` + `sha256sums.txt` per tag.
 In the repo itself, run it via `cargo run -- scan <dir>` or
 `target/debug/apg scan <dir>`.
 

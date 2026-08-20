@@ -24,18 +24,19 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
   chat without writing Cypher.
 - **`apg query`** is self-contained — it uses the `lbug` crate directly, no
   separate LadybugDB shell needed.
-- **Brew-installable** via the tap `antz29/apg`.
+- **Brew-installable** via the tap `antz29/apg`, plus a `curl | sh` installer
+  for Linux (prebuilt x86_64 + aarch64 tarballs on each release).
 
 ## Requirements
 
-- macOS or Linux
+- macOS (brew) or Linux (curl installer)
 - [Homebrew](https://brew.sh/) (for the brew install)
 - [opencode](https://opencode.ai) (for the chat plugin)
 
 The `scanner` formula builds the `apg` binary; the language frontends are
 separate formulae (`apg-go`, `apg-java`, `apg-cpp`). Install the base plus the
-frontends for the languages you scan. Prebuilt bottles (macOS arm64 + x86_64)
-are published to each GitHub release by CI; if no bottle matches your system,
+frontends for the languages you scan. Prebuilt bottles (macOS arm64) are
+published to each GitHub release by CI; if no bottle matches your system,
 Homebrew falls back to building from source. Java projects additionally need
 `java` on your PATH at scan time (see [below](#java-projects)).
 
@@ -64,6 +65,38 @@ apg --help
 
 `v0.5.0` is tagged, so the stable install works as-is. If you want the latest
 unreleased code instead, pass `--HEAD`:
+
+## Install (Linux, `curl | sh`)
+
+On Linux (x86_64 or aarch64), install system-wide (requires root):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sudo sh -s --
+```
+
+Or install to `~/.local` without root:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user
+```
+
+The installer fetches the latest release, verifies the tarball's sha256
+against the `sha256sums.txt` published with it, and installs the `apg` binary
+plus all three scanner frontends (Go, Java, C++) — no separate frontend
+install needed, unlike the split brew formulae.
+
+Options: `--version 0.5.0` to pin a specific release, `--prefix DIR` to choose
+an install location, `--force` to overwrite an existing install, `--uninstall`
+to remove it. The binary links OpenSSL dynamically, so `libssl.so.3` must be
+present (it is on Ubuntu 22.04+/Debian 12+/Fedora 36+; the installer warns if
+it is missing). Java scan projects still need `java` on your PATH at scan time.
+
+Verify:
+
+```sh
+apg --version   # apg 0.5.0
+apg --help
+```
 
 ## Quick start
 
@@ -246,6 +279,7 @@ src/classify.rs    code_type classification
 src/golib/         Go scanner
 src/javalib/       Java scanner (javac)
 src/cpplib/        C++ scanner (tree-sitter)
+install.sh         curl | sh installer for Linux (prebuilt release tarballs)
 Formula/scanner.rb    apg binary (ingestor + query CLI)
 Formula/apg-go.rb     Go scanner frontend
 Formula/apg-java.rb   Java scanner frontend

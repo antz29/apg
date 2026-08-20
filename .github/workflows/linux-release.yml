@@ -1,0 +1,107 @@
+name: Build and publish Linux binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          # lbug's build.rs uses pkg-config to find OpenSSL and links
+          # libssl/libcrypto dynamically; javac is needed for the Java
+          # frontend. go + gcc/g++ are preinstalled on the runners.
+          sudo apt-get install -y pkg-config libssl-dev default-jdk-headless
+
+      - name: Resolve lbug version from Cargo.lock
+        id: lbug
+        run: |
+          LBUG_VERSION="$(awk '/^name = "lbug"$/ { f=1 } f && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.lock)"
+          echo "version=${LBUG_VERSION}" >>"$GITHUB_OUTPUT"
+
+      - name: Fetch prebuilt liblbug
+        run: |
+          VERSION="${{ steps.lbug.outputs.version }}"
+          curl -fsSL -o lbug.tar.gz \
+            "https://github.com/LadybugDB/ladybug/releases/download/v${VERSION}/liblbug-static-linux-${{ matrix.arch }}-compat.tar.gz"
+          mkdir -p lbug-static
+          tar -xzf lbug.tar.gz -C lbug-static
+          # External prebuilt path: lbug's build.rs uses both vars and skips
+          # downloading/compiling its own copy.
+          echo "LBUG_LIBRARY_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
+          echo "LBUG_INCLUDE_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
+
+      # build.rs compiles all frontends (Go, C++, Java) and stages them into
+      # target/release/frontends; the default APG_BUILD_FRONTENDS (unset) does
+      # exactly what we want here.
+      - name: Build apg + frontends
+        run: cargo build --release
+
+      - name: Package tarball
+        run: |
+          mkdir -p dist/frontends
+          cp target/release/apg dist/apg
+          cp -r target/release/frontends/. dist/frontends/
+          tar -C dist -czf "apg-linux-${{ matrix.arch }}.tar.gz" .
+          sha256sum "apg-linux-${{ matrix.arch }}.tar.gz" >"apg-linux-${{ matrix.arch }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apg-linux-${{ matrix.arch }}
+          path: |
+            apg-linux-${{ matrix.arch }}.tar.gz
+            apg-linux-${{ matrix.arch }}.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish Linux binaries
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: apg-linux-*
+          merge-multiple: true
+          path: dist
+
+      - name: Merge checksums
+        working-directory: dist
+        run: |
+          cat apg-linux-*.sha256 > sha256sums.txt
+          rm apg-linux-*.sha256
+
+      - name: Ensure GitHub release exists
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" --generate-notes
+          fi
+
+      - name: Upload tarballs + checksums
+        working-directory: dist
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" apg-linux-*.tar.gz sha256sums.txt --clobber
