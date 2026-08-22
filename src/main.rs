@@ -343,20 +343,45 @@ fn write_if_changed(path: &Path, content: &str) -> std::io::Result<bool> {
     }
 }
 
+#[allow(clippy::type_complexity)]
+fn dir_entries_only(dir: &Path, names: &[&str]) -> bool {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return true,
+    };
+    entries.flatten().all(|e| names.contains(&e.file_name().to_string_lossy().as_ref()))
+}
+
+/// True when `opencode_dir` is the apg repo's own single-sourced `.opencode/`
+/// (the in-tree dir the installed files are compiled from): it carries a
+/// `.gitignore` that legacy project installs had no reason to contain, and it
+/// is apg-pure — `tools/`, `lib/`, and `agents/` hold only apg-owned files and
+/// there is no `skills/` or other user content. A project like `~/platform`
+/// that mixes user agents/skills with a stray `.gitignore` is *not* the source
+/// dir and its apg files *are* cleaned.
+fn is_apg_source_dir(opencode_dir: &Path) -> bool {
+    if !opencode_dir.join(".gitignore").is_file() || opencode_dir.join("skills").exists() {
+        return false;
+    }
+    let tool_names: Vec<&str> = SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
+    dir_entries_only(&opencode_dir.join("tools"), &tool_names)
+        && dir_entries_only(&opencode_dir.join("lib"), &["apg.ts"])
+        && dir_entries_only(&opencode_dir.join("agents"), &["codebase-navigator.md"])
+}
+
 /// Removes a legacy project-local `.opencode/` apg install written by older
 /// `apg init` versions (before the suite moved to `~/.opencode/`). Only
 /// apg-owned files are removed: the suite tools (`tools/apg_*.ts`), the shared
 /// plumbing (`lib/apg.ts`), the `codebase-navigator` agent, and — only when the
 /// `package.json` is byte-identical to the one `apg init` wrote — the
 /// apg-generated `package.json`/`package-lock.json`/`bun.lock`/`node_modules`.
-/// User-owned agents/tools and modified `package.json` files are left alone.
-/// Returns `(files_removed, dirs_removed)`; `Ok((0, 0))` when there is nothing
-/// to clean. The apg repo's own `.opencode/` — the single-sourced in-tree dir
-/// that marks itself with a `.gitignore` (legacy installs never contained one)
-/// — is skipped.
+/// User-owned agents/tools/skills and modified `package.json` files are left
+/// alone (so user content stays when it shares the directory with an old apg
+/// install). Returns `(files_removed, dirs_removed)`; `Ok((0, 0))` when there
+/// is nothing to clean. The apg repo's own apg-pure `.opencode/` is skipped.
 fn remove_legacy_project_install(dir: &Path) -> std::io::Result<(usize, usize)> {
     let opencode_dir = dir.join(".opencode");
-    if !opencode_dir.is_dir() || opencode_dir.join(".gitignore").exists() {
+    if !opencode_dir.is_dir() || is_apg_source_dir(&opencode_dir) {
         return Ok((0, 0));
     }
 
