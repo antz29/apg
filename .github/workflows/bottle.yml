@@ -103,8 +103,11 @@ jobs:
       - name: Ensure GitHub release exists
         run: |
           if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release create "${GITHUB_REF_NAME}" --generate-notes
+            # The linux-release workflow may create the release concurrently on
+            # the same tag push; absorb that 422 race, then confirm below.
+            gh release create "${GITHUB_REF_NAME}" --generate-notes || true
           fi
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1
 
       - name: Upload bottles to release
         run: |
