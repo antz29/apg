@@ -59,11 +59,11 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.5.0
+apg --version   # apg 0.5.1
 apg --help
 ```
 
-`v0.5.0` is tagged, so the stable install works as-is. If you want the latest
+`v0.5.1` is tagged, so the stable install works as-is. If you want the latest
 unreleased code instead, pass `--HEAD`:
 
 ## Install (Linux, `curl | sh`)
@@ -85,7 +85,7 @@ against the `sha256sums.txt` published with it, and installs the `apg` binary
 plus all three scanner frontends (Go, Java, C++) — no separate frontend
 install needed, unlike the split brew formulae.
 
-Options: `--version 0.5.0` to pin a specific release, `--prefix DIR` to choose
+Options: `--version 0.5.1` to pin a specific release, `--prefix DIR` to choose
 an install location, `--force` to overwrite an existing install, `--uninstall`
 to remove it. The binary links OpenSSL dynamically, so `libssl.so.3` must be
 present (it is on Ubuntu 22.04+/Debian 12+/Fedora 36+; the installer warns if
@@ -94,7 +94,7 @@ it is missing). Java scan projects still need `java` on your PATH at scan time.
 Verify:
 
 ```sh
-apg --version   # apg 0.5.0
+apg --version   # apg 0.5.1
 apg --help
 ```
 
