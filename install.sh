@@ -40,7 +40,7 @@ Usage: install.sh [options]
 Installs apg for Linux from the latest (or a pinned) GitHub release.
 
 Options:
-  --version V     Install a specific release tag, e.g. --version 0.5.1
+  --version V     Install a specific release tag, e.g. --version 0.6.0
   --user          Install under ~/.local (no root required)
   --prefix DIR    Install under DIR instead of /usr/local
   --uninstall     Remove an existing install from the target prefix

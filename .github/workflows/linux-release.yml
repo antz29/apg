@@ -56,9 +56,9 @@ jobs:
           echo "LBUG_LIBRARY_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
           echo "LBUG_INCLUDE_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
 
-      # build.rs compiles all frontends (Go, C++, Java) and stages them into
-      # target/release/frontends; the default APG_BUILD_FRONTENDS (unset) does
-      # exactly what we want here.
+      # build.rs compiles all frontends (Go, C++, Java, Rust) and stages them
+      # into target/release/frontends; the default APG_BUILD_FRONTENDS (unset)
+      # does exactly what we want here.
       - name: Build apg + frontends
         run: cargo build --release
 
