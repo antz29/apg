@@ -12,9 +12,9 @@ use std::process::{Command, Stdio};
 use cleanup::{cleanup, CleanupOptions};
 use lbug::{Connection, Database, SystemConfig};
 
-/// The opencode tool suite that `apg init` installs into a project. Each entry
-/// is a file under `.opencode/tools/` (auto-discovered by opencode from
-/// `.opencode/tools/*.ts`), single-sourced from this repo's own `.opencode`.
+/// The opencode tool suite that `apg init` installs into `~/.opencode/`. Each
+/// entry is a file under `tools/` (auto-discovered by opencode from
+/// `~/.opencode/tools/*.ts`), single-sourced from this repo's own `.opencode`.
 /// The files shell out to `apg query` / `apg scan` (on PATH) from the project
 /// root; see `.opencode/lib/apg.ts` for the shared plumbing.
 const SUITE_TOOLS: &[(&str, &str)] = &[
@@ -80,20 +80,20 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Shared helper module used by the suite tools (`.opencode/lib/apg.ts`),
-/// installed by `apg init` alongside the tools.
+/// Shared helper module used by the suite tools (`lib/apg.ts`), installed by
+/// `apg init` alongside the tools.
 const APG_LIB: &str = include_str!("../.opencode/lib/apg.ts");
 
-/// The `.opencode/agents/codebase-navigator.md` agent file that `apg init`
-/// installs into a project. Auto-discovered by opencode from
-/// `.opencode/agents/*.md`; configured to use the apg suite tools and to guide
-/// the user through running `apg scan` on the CLI (there is no in-chat scan
-/// tool). Single-sourced from the repo's own agent file.
+/// The `codebase-navigator.md` agent file that `apg init` installs into
+/// `~/.opencode/`. Auto-discovered by opencode from `~/.opencode/agents/*.md`;
+/// configured to use the apg suite tools and to guide the user through running
+/// `apg scan` on the CLI (there is no in-chat scan tool). Single-sourced from
+/// the repo's own agent file.
 const CODEBASE_NAVIGATOR_AGENT: &str =
     include_str!("../.opencode/agents/codebase-navigator.md");
 
-/// The `.opencode/package.json` written by `apg init` when none exists, so the
-/// tool file's `@opencode-ai/plugin` import resolves.
+/// The `package.json` written by `apg init` into `~/.opencode/` when none
+/// exists, so the tool files' `@opencode-ai/plugin` import resolves.
 const OPENCODE_PACKAGE_JSON: &str = r#"{
   "dependencies": {
     "@opencode-ai/plugin": "1.18.10"
@@ -267,9 +267,10 @@ fn print_help() {
         "apg — program graph scanner + LadybugDB query CLI for opencode
 
 USAGE:
-  apg init [dir]              Set up .apg/ (db + config) and install the
+  apg init [dir]              Set up .apg/ (db + config), install/update the
                               opencode apg tool suite + codebase-navigator
-                              agent into .opencode/
+                              agent in ~/.opencode/, and remove any legacy
+                              project-local .opencode/ install
   apg scan [dir] [options]    Scan a project; writes .apg/db.lbug and
                               .apg/graph.jsonl
   apg query \"<cypher>\"        Run a read-only Cypher query against
@@ -318,9 +319,111 @@ fn main() {
     }
 }
 
-/// `apg init [dir]`: create `.apg/` with a default `config.json`, then install
-/// the opencode `apg_query` plugin and `codebase-navigator` agent into
-/// `<dir>/.opencode/`.
+/// The user-level opencode config dir: `~/.opencode`. `apg init` installs the
+/// tool suite here (not into the project dir) so it's available to every
+/// project's opencode session; tool discovery is project-root based, so the
+/// global install works across all projects.
+fn user_opencode_dir() -> anyhow::Result<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|h| h.join(".opencode"))
+        .ok_or_else(|| anyhow::anyhow!("could not determine home directory (set $HOME)"))
+}
+
+/// Writes `content` to `path` only when the file is missing or its contents
+/// differ, so an existing install is updated where required. Returns whether a
+/// write happened.
+fn write_if_changed(path: &Path, content: &str) -> std::io::Result<bool> {
+    match std::fs::read(path) {
+        Ok(existing) if existing == content.as_bytes() => Ok(false),
+        _ => {
+            std::fs::write(path, content)?;
+            Ok(true)
+        }
+    }
+}
+
+/// Removes a legacy project-local `.opencode/` apg install written by older
+/// `apg init` versions (before the suite moved to `~/.opencode/`). Only
+/// apg-owned files are removed: the suite tools (`tools/apg_*.ts`), the shared
+/// plumbing (`lib/apg.ts`), the `codebase-navigator` agent, and — only when the
+/// `package.json` is byte-identical to the one `apg init` wrote — the
+/// apg-generated `package.json`/`package-lock.json`/`bun.lock`/`node_modules`.
+/// User-owned agents/tools and modified `package.json` files are left alone.
+/// Returns `(files_removed, dirs_removed)`; `Ok((0, 0))` when there is nothing
+/// to clean. The apg repo's own `.opencode/` — the single-sourced in-tree dir
+/// that marks itself with a `.gitignore` (legacy installs never contained one)
+/// — is skipped.
+fn remove_legacy_project_install(dir: &Path) -> std::io::Result<(usize, usize)> {
+    let opencode_dir = dir.join(".opencode");
+    if !opencode_dir.is_dir() || opencode_dir.join(".gitignore").exists() {
+        return Ok((0, 0));
+    }
+
+    let mut files_removed = 0usize;
+    let mut dirs_removed = 0usize;
+
+    let tools_dir = opencode_dir.join("tools");
+    for (name, _) in SUITE_TOOLS {
+        let p = tools_dir.join(name);
+        if p.is_file() && std::fs::remove_file(&p).is_ok() {
+            files_removed += 1;
+        }
+    }
+    let lib_dir = opencode_dir.join("lib");
+    let lib_apg = lib_dir.join("apg.ts");
+    if lib_apg.is_file() && std::fs::remove_file(&lib_apg).is_ok() {
+        files_removed += 1;
+    }
+    let agents_dir = opencode_dir.join("agents");
+    let agent_md = agents_dir.join("codebase-navigator.md");
+    if agent_md.is_file() && std::fs::remove_file(&agent_md).is_ok() {
+        files_removed += 1;
+    }
+
+    for d in [&tools_dir, &lib_dir, &agents_dir] {
+        if d.is_dir() && std::fs::read_dir(d)?.next().is_none() {
+            std::fs::remove_dir(d)?;
+            dirs_removed += 1;
+        }
+    }
+
+    let pkg_path = opencode_dir.join("package.json");
+    let apg_owned_pkg = pkg_path
+        .is_file()
+        && std::fs::read(&pkg_path)
+            .map(|b| b == OPENCODE_PACKAGE_JSON.as_bytes())
+            .unwrap_or(false);
+    if apg_owned_pkg {
+        for f in ["package.json", "package-lock.json", "bun.lock"] {
+            let p = opencode_dir.join(f);
+            if p.is_file() && std::fs::remove_file(&p).is_ok() {
+                files_removed += 1;
+            }
+        }
+        let nm = opencode_dir.join("node_modules");
+        if nm.is_dir() {
+            std::fs::remove_dir_all(&nm)?;
+            dirs_removed += 1;
+        }
+    }
+
+    if apg_owned_pkg
+        && std::fs::read_dir(&opencode_dir)
+            .map(|mut it| it.next().is_none())
+            .unwrap_or(false)
+    {
+        std::fs::remove_dir(&opencode_dir)?;
+        dirs_removed += 1;
+    }
+
+    Ok((files_removed, dirs_removed))
+}
+
+/// `apg init [dir]`: create `.apg/` with a default `config.json`, install (or
+/// update) the opencode `apg_query` plugin + `codebase-navigator` agent into
+/// `~/.opencode/`, and remove any legacy project-local `.opencode/` install
+/// left by older versions.
 fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     let dir = if args.is_empty() {
         std::env::current_dir()?
@@ -336,7 +439,7 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
         std::fs::write(&cfg_path, DEFAULT_CONFIG_JSON)?;
     }
 
-    let opencode_dir = dir.join(".opencode");
+    let opencode_dir = user_opencode_dir()?;
     let tools_dir = opencode_dir.join("tools");
     std::fs::create_dir_all(&tools_dir)?;
     let agents_dir = opencode_dir.join("agents");
@@ -346,16 +449,23 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     if !pkg_path.exists() {
         std::fs::write(&pkg_path, OPENCODE_PACKAGE_JSON)?;
     }
+    let mut updated = 0usize;
     for (name, content) in SUITE_TOOLS {
-        std::fs::write(tools_dir.join(name), content)?;
+        if write_if_changed(&tools_dir.join(name), content)? {
+            updated += 1;
+        }
     }
     let lib_dir = opencode_dir.join("lib");
     std::fs::create_dir_all(&lib_dir)?;
-    std::fs::write(lib_dir.join("apg.ts"), APG_LIB)?;
-    std::fs::write(
-        agents_dir.join("codebase-navigator.md"),
+    if write_if_changed(&lib_dir.join("apg.ts"), APG_LIB)? {
+        updated += 1;
+    }
+    if write_if_changed(
+        &agents_dir.join("codebase-navigator.md"),
         CODEBASE_NAVIGATOR_AGENT,
-    )?;
+    )? {
+        updated += 1;
+    }
 
     if !opencode_dir
         .join("node_modules")
@@ -376,11 +486,30 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    println!(
-        "Initialized .apg/ (config.json) and installed {} apg tools + codebase-navigator agent in {}",
-        SUITE_TOOLS.len(),
-        opencode_dir.display()
-    );
+    if updated == 0 {
+        println!(
+            "Initialized .apg/ (config.json); {} apg tools + codebase-navigator agent already up to date in {}",
+            SUITE_TOOLS.len(),
+            opencode_dir.display()
+        );
+    } else {
+        println!(
+            "Initialized .apg/ (config.json) and installed/updated {} of {} apg tools + codebase-navigator agent in {}",
+            updated,
+            SUITE_TOOLS.len() + 2,
+            opencode_dir.display()
+        );
+    }
+
+    let (cleaned_files, cleaned_dirs) = remove_legacy_project_install(&dir)?;
+    if cleaned_files > 0 || cleaned_dirs > 0 {
+        println!(
+            "Removed legacy project-local .opencode/ apg install from {} ({} files, {} dirs)",
+            dir.join(".opencode").display(),
+            cleaned_files,
+            cleaned_dirs
+        );
+    }
     Ok(())
 }
 

@@ -30,9 +30,13 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
 
 The project builds a single `apg` binary (package `apg`, was `java_apg`):
 
-- `apg init [dir]` — create `.apg/` with a default `config.json` and install the
-  opencode apg tool suite into `<dir>/.opencode/tools/` + `.opencode/lib/` plus
-  the `codebase-navigator` agent into `<dir>/.opencode/agents/codebase-navigator.md`.
+- `apg init [dir]` — create `.apg/` with a default `config.json` and install
+  (or update, where contents differ) the opencode apg tool suite into
+  `~/.opencode/tools/` + `~/.opencode/lib/` plus the `codebase-navigator` agent
+  into `~/.opencode/agents/codebase-navigator.md`. Also removes any apg-owned
+  files under `<dir>/.opencode/` left by pre-`~/.opencode` installs (user
+  tools/agents and non-apg `package.json` files are left alone; the apg repo's
+  own `.opencode/` is never touched).
 - `apg scan [dir] [--language L] [--exclude-path G]* [--module M]* [--no-build-scripts]
   [blacklist...]`
   — run the pipeline; writes `.apg/db.lbug`, `.apg/graph.jsonl`,
@@ -43,13 +47,13 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   up from cwd), CSV output with header row.
 - `apg --version`, `apg --help`.
 
-`apg init` also installs the **apg opencode tool suite** into the project's
-`.opencode/` (single-sourced from this repo's own `.opencode/`, embedded in
+`apg init` also installs the **apg opencode tool suite** into the user-level
+`~/.opencode/` (single-sourced from this repo's own `.opencode/`, embedded in
 `src/main.rs` via `include_str!`): `apg_scan`, `apg_query`, plus curated
 abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
-`apg_unresolved`, `apg_hunk`. Shared plumbing lives in `.opencode/lib/apg.ts`
+`apg_unresolved`, `apg_hunk`. Shared plumbing lives in `~/.opencode/lib/apg.ts`
 (root discovery, `apg query` subprocess, Cypher literal escaping). All suite
 tools take an optional `codeType` (default: all code); exact-FQN tools hint
 when a lookup comes up empty (overloads carry `(params)` suffixes).

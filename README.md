@@ -117,14 +117,22 @@ apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 Sets up the project:
 
 - creates `.apg/` with a default `config.json` (classification rules),
-- installs the **apg tool suite** into `.opencode/tools/` (query tools +
-  `apg_scan`, shared plumbing in `.opencode/lib/`) and writes
-  `.opencode/package.json` + runs `npm install` if needed,
-- installs the `codebase-navigator` agent into `.opencode/agents/codebase-navigator.md`.
+- installs the **apg tool suite** into `~/.opencode/tools/` (query tools +
+  `apg_scan`, shared plumbing in `~/.opencode/lib/`) and writes
+  `~/.opencode/package.json` + runs `npm install` if needed,
+- installs the `codebase-navigator` agent into `~/.opencode/agents/codebase-navigator.md`.
 
-The plugin and agent are auto-discovered by opencode. **Restart opencode** after
-running `apg init` so the tools and `codebase-navigator` agent are available in
-chat.
+The suite installs the first time and is then kept in sync (files are
+re-written only when their contents change), so running `apg init` again after
+upgrading `apg` updates the tools and agent where required.
+
+Installing to `~/.opencode/` makes the tools and agent available to every
+project's opencode session (not just this one). As part of that move, `apg init`
+also removes any legacy project-local `.opencode/` apg install left by older
+versions — apg-owned tools/agent/lib files only; your own agents/tools and any
+hand-written `package.json` are left alone. The plugin and agent are
+auto-discovered by opencode. **Restart opencode** after running `apg init` so
+the tools and `codebase-navigator` agent are available in chat.
 
 ### 2. `apg scan [dir] [options]`
 
