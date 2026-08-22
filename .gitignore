@@ -1,5 +1,7 @@
 /target
-/project*/
+/src/rustlib/target
+/testdata/rust/fixture/target
+/project*
 *.lbug
 *.csv
 graph.jsonl

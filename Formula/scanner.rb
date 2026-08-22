@@ -67,6 +67,7 @@ class Scanner < Formula
         brew install antz29/apg/apg-go     # Go
         brew install antz29/apg/apg-java   # Java
         brew install antz29/apg/apg-cpp    # C++
+        brew install antz29/apg/apg-rust   # Rust
     EOS
   end
 

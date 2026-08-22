@@ -70,7 +70,35 @@ Line numbers are **computed by the scanners**, never derived from byte offsets
 ingestor-side: Go offsets are bytes, Java offsets are UTF-16 character
 positions (which drift from bytes on non-ASCII files), and C++ offsets are
 bytes. Each scanner converts its own index space to 1-based line numbers and
-emits them directly.
+emits them directly. Rust offsets are bytes (TextRange), line numbers computed
+frontend-side like the C++ scanner.
+
+### Rust scanner notes
+
+Exact-fidelity tier (same as Go/Java): the `rustfrontend` binary resolves calls
+and types with rust-analyzer (`hir::Semantics`), no guessing. Mapping:
+
+- Crate and nested `mod` items → `Module` nodes (FQN `crate` / `crate.sub`,
+  `.`-joined), with `Module→Module` containment for `mod` children.
+- Structs, enums, unions, and traits → `Struct` nodes; enum variants are nested
+  `Struct` nodes under their enum.
+- Free functions → `Function` nodes under their module. Inherent-impl and
+  trait-impl methods are parented to the **self type** (`Type.method`): Rust
+  permits the same trait to be implemented for many types (and several traits
+  for one type), and every impl block's methods are distinct source items, so
+  self-type parenting keeps FQNs unique and lets concrete method calls resolve
+  to the exact impl function. Trait declarations and default methods hang under
+  the **trait**.
+- `impl Trait for Type` is graphed as a `Uses` edge `Type → Trait` when the
+  trait is a project node; otherwise an `UnresolvedUse` (category `external`).
+  Derive-generated impls are macro-generated and not emitted.
+- `UnresolvedTarget.category`: `stdlib` for `std`/`core`/`alloc` (sysroot)
+  targets, `external` for dependency-crate targets, `unknown` for project
+  `macro_rules!`, `func-value` for closure/function-pointer calls.
+
+The frontend requires a valid Cargo manifest (a bare directory scans nothing).
+Scans run cargo build scripts and the proc-macro server by default, degrading
+gracefully on failure; `--no-build-scripts` skips both.
 
 File nodes are emitted by the scanners (one per scanned source file, including
 files with no declarations). The ingestor wires the File layer into
@@ -124,7 +152,8 @@ Rules:
   `external`, `lib`, or user-defined. Computed ingestor-side by `classify.rs`
   from `path` + language + optional `apg.json` override. Unchanged from today.
 - `category` (on `UnresolvedTarget`): as in §2.3, populated by the scanner
-  (Go exact via type checker; Java coarse; C++ heuristic).
+  (Go exact via type checker; Java coarse; C++ heuristic; Rust exact via
+  rust-analyzer — see the Rust scanner notes under §2).
 
 ## 6. Ingestor pipeline
 

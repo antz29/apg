@@ -5,7 +5,10 @@
 Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`.
 
 - The **scanner** (Go: `src/golib/main.go`, Java: `src/javalib/CallGraphBuilder.java`,
-  C++: `src/cpplib/main.cpp`) parses a codebase and streams one JSON object per
+  C++: `src/cpplib/main.cpp`, Rust: `src/rustlib/src/main.rs` — a standalone
+  `rustfrontend` binary built on rust-analyzer's `ra_ap_*`-era engine crates,
+  pulled from the rust-analyzer repo at a pinned release tag) parses a codebase
+  and streams one JSON object per
   line to stdout — the **unified JSONL schema** (see `SPEC.md` §2). It emits
   *facts only*: declarations, references, edges. It never computes FQNs and
   never does graph assembly.
@@ -14,12 +17,14 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
   `graph.jsonl` as the export. `.apg/db.lbug` is the query index; `.apg/graph.jsonl`
   is the self-contained export artifact (canonical FQNs, no opaque ids).
 - Build: `build.rs` compiles the frontends (`gcc`/`g++` tree-sitter for C++,
-  `go build` for Go, `javac` for Java) and stages them to
+  `go build` for Go, `javac` for Java, `cargo build` for the Rust frontend —
+  `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
+  tag) and stages them to
   `target/<profile>/frontends`. Run a scan with `apg scan <dir>` (or the
   `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
   (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
   `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
-  `cpp`; `0` to skip) limits what build.rs compiles.
+  `cpp`, `rust`; `0` to skip) limits what build.rs compiles.
 
 ### CLI
 
@@ -28,9 +33,12 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
 - `apg init [dir]` — create `.apg/` with a default `config.json` and install the
   opencode apg tool suite into `<dir>/.opencode/tools/` + `.opencode/lib/` plus
   the `codebase-navigator` agent into `<dir>/.opencode/agents/codebase-navigator.md`.
-- `apg scan [dir] [--language L] [--exclude-path G]* [--module M]* [blacklist...]`
+- `apg scan [dir] [--language L] [--exclude-path G]* [--module M]* [--no-build-scripts]
+  [blacklist...]`
   — run the pipeline; writes `.apg/db.lbug`, `.apg/graph.jsonl`,
-  `.apg/apg-frontend.log`.
+  `.apg/apg-frontend.log`. `--no-build-scripts` is Rust-only (skip cargo build
+  scripts and the proc-macro server); the Rust frontend requires a Cargo
+  manifest (C++ tolerates bare dirs; Rust scans nothing without one).
 - `apg query "<cypher>"` — read-only Cypher over `.apg/db.lbug` (found by walking
   up from cwd), CSV output with header row.
 - `apg --version`, `apg --help`.
@@ -143,13 +151,17 @@ The workspace has a LadybugDB graph database at `.apg/db.lbug` containing the pa
 - 5 edge types:
   - `Contains` — Module↔Module, Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function
   - `Calls` — Function→Function
-  - `Uses` — Function→Struct, Struct→Struct
+  - `Uses` — Function→Struct, Struct→Struct. Rust `impl X for Y` is a `Uses`
+    edge `Y → X` (the type implements the trait); a foreign trait lands as an
+    `UnresolvedUse` instead. Rust impl methods (inherent and trait) hang under
+    the **self type** (`Type.method`); trait declarations/defaults under the
+    trait.
   - `UnresolvedCall` — Function→UnresolvedTarget; rel-table property `target_type` (function type of a func-value call, Go-only, empty otherwise)
   - `UnresolvedUse` — Function→UnresolvedTarget, Struct→UnresolvedTarget
 
 ### `UnresolvedTarget.category`
 
-One of `builtin` (Go predeclared func/type), `stdlib`, `external`, `func-value` (call through a function-valued variable or IIFE), `interface-method` (method on a universe-scope interface, e.g. `error.Error`), or `unknown` (fallback / frontend omitted it). Go populates this exactly from the type checker; Java classifies stdlib (`java.*`/`javax.*`/`jdk.*`) vs `external`; C++ is heuristic (`external` for qualified names, `func-value` for bare identifiers).
+One of `builtin` (Go predeclared func/type), `stdlib`, `external`, `func-value` (call through a function-valued variable or IIFE), `interface-method` (method on a universe-scope interface, e.g. `error.Error`), or `unknown` (fallback / frontend omitted it). Go populates this exactly from the type checker; Java classifies stdlib (`java.*`/`javax.*`/`jdk.*`) vs `external`; C++ is heuristic (`external` for qualified names, `func-value` for bare identifiers). Rust classifies exactly via crate origin (sysroot `std`/`core`/`alloc` → `stdlib`, dependency crates → `external`, project `macro_rules!` → `unknown`, closure calls → `func-value`).
 
 Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are routed to `Uses`/`UnresolvedUse` edges, not `UnresolvedCall`. The `target_type` property only carries data on `UnresolvedCall` edges whose target is `func-value`.
 
@@ -161,6 +173,7 @@ Built-in defaults (per language):
 - **Go**: `test` = `_test.go` or `test`/`tests` path segment; `generated` = `*.pb.go` or `gen`/`generated` segment; `external` = `vendor` segment.
 - **Java**: `test` = `*Test.java`/`*Tests.java` or `test`/`tests` segment; `generated` = `gen`/`generated` segment; `external` = `vendor`/`third_party`.
 - **C++**: `test` = `*_test.cpp`/`test_*.cpp` or `test`/`tests` segment; `generated` = `*.pb.cc`/`*.pb.h` or `gen`/`generated` segment; `external` = `vendor`/`third_party`/`external`.
+- **Rust**: `test` = `*_test.rs` or `test`/`tests` segment; `generated` = `gen`/`generated` segment; `external` = `vendor`; else `src`.
 
 An `apg.json` at the project root or `.apg/config.json` **replaces** the defaults. Shape:
 
@@ -185,11 +198,16 @@ An `apg.json` at the project root or `.apg/config.json` **replaces** the default
 
 ### Fidelity & noise
 
-- **Java and Go edges are exact** — resolved via the compiler's type checker (javac attribution / `types.Info`). A `Calls` edge always points at the real declared method.
+- **Java, Go, and Rust edges are exact** — resolved via the compiler's type
+  checker (javac attribution / `types.Info`) or rust-analyzer. A `Calls` edge
+  always points at the real declared method.
 - **C++ edges are heuristic** (tree-sitter + scope/type tracking). Unresolvable calls/types are recorded as `UnresolvedCall`/`UnresolvedUse` rather than guessed.
 - **The scanner never guesses**: if a call/type can't be resolved to a project symbol, it becomes an `UnresolvedTarget` edge, never a fabricated FQN.
 - **All code is included** — tests, generated, and vendored code are scanned like everything else (the only exclusions are user `--exclude-path` patterns and files the compiler/frontend can't process). Filter by `code_type` instead.
-- **Multi-module repos**: Go workspaces (`go.work`) and C++ monorepos are supported. Each module is a top-level `Module` node; FQNs are module-prefixed so they stay unique across modules. Pass `modules: "dir1,dir2"` to `apg_scan` to restrict scanning to specific modules (Go/C++).
+- **Multi-module repos**: Go workspaces (`go.work`), C++ monorepos, and Cargo
+  workspaces are supported. Each module is a top-level `Module` node; FQNs are
+  module-prefixed so they stay unique across modules. Pass `modules: "dir1,dir2"`
+  to `apg_scan` to restrict scanning to specific modules (Go/C++/Rust).
 - To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
 ### Other tools

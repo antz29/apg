@@ -2,7 +2,7 @@
 
 **Program graph scanner + LadybugDB query CLI for opencode.**
 
-`apg` parses a codebase (Go, Java, or C++), builds a program graph of its
+`apg` parses a codebase (Go, Java, C++, or Rust), builds a program graph of its
 types, functions, and call/use relationships, and stores it in a LadybugDB
 graph database that you can query with Cypher from inside opencode.
 
@@ -13,10 +13,10 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
 ## Features
 
 - **Per-language scanner frontends** installed separately via brew — install
-  only the languages you scan (Go, Java, C++).
-- **Exact edges for Go and Java** — call resolution uses the compiler's type
-  checker; C++ is heuristic (tree-sitter), and unresolvable refs become
-  `UnresolvedTarget` nodes rather than guessed FQNs.
+  only the languages you scan (Go, Java, C++, Rust).
+- **Exact edges for Go, Java, and Rust** — call resolution uses the compiler's
+  (or rust-analyzer's) type checker; C++ is heuristic (tree-sitter), and
+  unresolvable refs become `UnresolvedTarget` nodes rather than guessed FQNs.
 - **Everything is included** — tests, generated, and vendored code are scanned;
   filter by `code_type` (`src`, `test`, `generated`, `external`) in queries.
 - **`apg init`** installs an opencode tool suite (find symbols, list methods,
@@ -34,11 +34,14 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
 - [opencode](https://opencode.ai) (for the chat plugin)
 
 The `scanner` formula builds the `apg` binary; the language frontends are
-separate formulae (`apg-go`, `apg-java`, `apg-cpp`). Install the base plus the
-frontends for the languages you scan. Prebuilt bottles (macOS arm64) are
+separate formulae (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`). Install the
+base plus the frontends for the languages you scan. Prebuilt bottles (macOS
+arm64) are
 published to each GitHub release by CI; if no bottle matches your system,
 Homebrew falls back to building from source. Java projects additionally need
-`java` on your PATH at scan time (see [below](#java-projects)).
+`java` on your PATH at scan time (see [below](#java-projects)); Rust projects
+need a valid Cargo manifest (unlike C++, which tolerates bare directories), and
+the `apg-rust` formula builds the frontend with the current stable toolchain.
 
 ## Install (Homebrew)
 
@@ -47,7 +50,8 @@ brew tap antz29/apg https://github.com/antz29/apg.git
 brew install antz29/apg/scanner \
              antz29/apg/apg-go \
              antz29/apg/apg-java \
-             antz29/apg/apg-cpp
+             antz29/apg/apg-cpp \
+             antz29/apg/apg-rust
 ```
 
 Install only the frontends you need:
@@ -82,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 
 The installer fetches the latest release, verifies the tarball's sha256
 against the `sha256sums.txt` published with it, and installs the `apg` binary
-plus all three scanner frontends (Go, Java, C++) — no separate frontend
+plus all four scanner frontends (Go, Java, C++, Rust) — no separate frontend
 install needed, unlike the split brew formulae.
 
 Options: `--version 0.5.1` to pin a specific release, `--prefix DIR` to choose
@@ -131,7 +135,8 @@ directory). Language is auto-detected from the source files.
 apg scan
 apg scan --language go /path/to/project
 apg scan --exclude-path "**/*_test.go" --exclude-path "vendor/**"
-apg scan --module dir1 --module dir2     # Go/C++ monorepos
+apg scan --module dir1 --module dir2     # Go/C++/Rust monorepos
+apg scan --no-build-scripts              # Rust only: skip build scripts + proc-macro server
 apg scan . example.com/pkg other.prefix  # blacklist FQN prefixes (after the dir)
 ```
 
@@ -210,7 +215,10 @@ lists a file's units, and every node's `start_line`/`end_line` joins against
 diff hunks (which are line-based).
 
 FQN convention: `parent.name` for structs and unique functions;
-`parent.name(T1,T2)` for overloads; Go `init` → `parent.init#<file.go>`.
+`parent.name(T1,T2)` for overloads; Go `init` → `parent.init#<file.go>`. Rust
+impl methods hang under their self type (`crate.Type.method`), trait
+declarations and default methods under the trait; `Uses` edges record
+`impl Trait for Type` relationships (`Type → Trait`).
 
 `start`/`end` are **0-based byte offsets**; `start_line`/`end_line` are
 **1-based inclusive line numbers**; `path` is absolute under the project
@@ -220,7 +228,9 @@ directory.
 
 `.apg/config.json` (or a legacy `apg.json` at the project root) customizes
 code-type classification. Built-in defaults per language (test/generated/
-external) apply when no config is present. Shape:
+external) apply when no config is present. For Rust: `test` = `*_test.rs` or a
+`test`/`tests` path segment; `generated` = `gen`/`generated` segment; `external`
+= `vendor`. Shape:
 
 ```json
 {
@@ -251,7 +261,9 @@ brew link --force openjdk
 ## Building from source
 
 Requires: Rust, `gcc`/`g++`, Go, and `javac` (to build the frontends), plus
-`cmake` and `openssl` for the bundled LadybugDB.
+`cmake` and `openssl` for the bundled LadybugDB. The Rust frontend additionally
+needs a current stable Rust toolchain (rust-analyzer tracks the newest stable)
+and network at build time to fetch the pinned rust-analyzer crates.
 
 ```sh
 git clone git@github.com:antz29/apg.git
@@ -264,8 +276,8 @@ cargo build --release
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 `APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
-allowlist: `go`, `java`, `cpp`; `0` to skip all) to limit what build.rs
-compiles — the split brew formulae rely on this.
+allowlist: `go`, `java`, `cpp`, `rust`; `0` to skip all) to limit what
+build.rs compiles — the split brew formulae rely on this.
 
 Run the test suite with `cargo test`.
 
@@ -279,11 +291,13 @@ src/classify.rs    code_type classification
 src/golib/         Go scanner
 src/javalib/       Java scanner (javac)
 src/cpplib/        C++ scanner (tree-sitter)
+src/rustlib/       Rust scanner (rust-analyzer engine; separate Cargo project)
 install.sh         curl | sh installer for Linux (prebuilt release tarballs)
 Formula/scanner.rb    apg binary (ingestor + query CLI)
 Formula/apg-go.rb     Go scanner frontend
 Formula/apg-java.rb   Java scanner frontend
 Formula/apg-cpp.rb    C++ scanner frontend
+Formula/apg-rust.rb   Rust scanner frontend
 ```
 
 ## License

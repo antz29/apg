@@ -157,6 +157,9 @@ fn available_languages() -> Vec<String> {
         if dir.join("gofrontend").exists() {
             langs.push("go".into());
         }
+        if dir.join("rustfrontend").exists() {
+            langs.push("rust".into());
+        }
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
         }
@@ -184,6 +187,9 @@ fn frontend_cmd(language: &str) -> Option<String> {
             "go" if dir.join("gofrontend").exists() => {
                 return Some(dir.join("gofrontend").display().to_string());
             }
+            "rust" if dir.join("rustfrontend").exists() => {
+                return Some(dir.join("rustfrontend").display().to_string());
+            }
             "java" if dir.join("java-classes").is_dir() => {
                 let classes = dir.join("java-classes");
                 return Some(format!(
@@ -197,6 +203,7 @@ fn frontend_cmd(language: &str) -> Option<String> {
     let baked = match language {
         "cpp" => option_env!("APG_FRONTEND_CPP"),
         "go" => option_env!("APG_FRONTEND_GO"),
+        "rust" => option_env!("APG_FRONTEND_RUST"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         _ => None,
     };
@@ -236,6 +243,7 @@ fn auto_detect_language(dir: &std::path::Path, available: &[String]) -> Option<S
         ("java", &[".java"] as &[&str]),
         ("go", &[".go"]),
         ("cpp", &[".cpp", ".cc", ".cxx", ".hpp", ".h", ".hh"]),
+        ("rust", &[".rs"]),
     ];
 
     for (lang, exts) in &candidates {
@@ -270,9 +278,12 @@ USAGE:
   apg --help                  Show this help
 
 SCAN OPTIONS:
-  --language <java|go|cpp>    Scanner language (auto-detected if omitted)
+  --language <java|go|cpp|rust>  Scanner language (auto-detected if omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
-  --module <dir>              Restrict scanning to a module (Go/C++, repeatable)
+  --module <dir>              Restrict scanning to a module (Go/C++/Rust,
+                              repeatable)
+  --no-build-scripts          Rust only: skip cargo build scripts and the
+                              proc-macro server (hermetic scans)
   <blacklist...>              FQN prefixes to exclude from the graph"
     );
 }
@@ -447,6 +458,7 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut language: Option<String> = None;
     let mut path_excludes: Vec<String> = Vec::new();
     let mut module_dirs: Vec<String> = Vec::new();
+    let mut no_build_scripts = false;
     let mut positional: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -468,6 +480,9 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 if i < args.len() {
                     module_dirs.push(args[i].clone());
                 }
+            }
+            "--no-build-scripts" => {
+                no_build_scripts = true;
             }
             _ => positional.push(args[i].clone()),
         }
@@ -526,11 +541,14 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let frontend_err = Stdio::from(log.f.try_clone().expect("clone log file"));
     log.ln("Frontend progress -> apg-frontend.log");
 
-    if language == "cpp" || language == "go" {
+    if language == "cpp" || language == "go" || language == "rust" {
         let mut cmd = Command::new(&cmd);
         cmd.arg(project_dir.display().to_string());
         for m in &module_dirs {
             cmd.arg("--module").arg(m);
+        }
+        if language == "rust" && no_build_scripts {
+            cmd.arg("--no-build-scripts");
         }
         cmd.args(&path_excludes)
             .stdin(Stdio::null())

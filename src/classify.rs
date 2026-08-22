@@ -126,6 +126,18 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "src"
         }
+        "rust" => {
+            if filename_lower.ends_with("_test.rs") || has_seg(&["test", "tests"]) {
+                return "test";
+            }
+            if has_seg(&["gen", "generated"]) {
+                return "generated";
+            }
+            if has_seg(&["vendor"]) {
+                return "external";
+            }
+            "src"
+        }
         _ => "src",
     }
 }

@@ -11,7 +11,7 @@ fn build_frontends() -> Vec<String> {
         Ok(v) if v.is_empty() => vec![],
         Ok(v) if v == "0" || v == "none" || v == "false" => vec![],
         Ok(v) => v.split(',').map(|s| s.trim().to_string()).collect(),
-        Err(_) => vec!["go".into(), "java".into(), "cpp".into()],
+        Err(_) => vec!["go".into(), "java".into(), "cpp".into(), "rust".into()],
     }
 }
 
@@ -23,6 +23,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/javalib/CallGraphBuilder.java");
     println!("cargo:rerun-if-changed=src/golib/main.go");
     println!("cargo:rerun-if-changed=src/cpplib/main.cpp");
+    println!("cargo:rerun-if-changed=src/rustlib/Cargo.toml");
+    println!("cargo:rerun-if-changed=src/rustlib/src/main.rs");
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let frontends = build_frontends();
@@ -133,6 +135,30 @@ fn main() {
             println!("cargo:rustc-env=APG_FRONTEND_GO={}", gofrontend.display());
             let _ = std::fs::copy(&gofrontend, stage_dir.join("gofrontend"));
             languages.push("go".into());
+        }
+    }
+
+    // --- Rust frontend (rust-analyzer engine, compiled in isolation) ---
+    if enabled(&frontends, "rust") {
+        // Compile rustlib with cargo into its own isolated target dir
+        // (src/rustlib/target), matching the outer build profile (debug for
+        // fast dev compile, release for fast scans). Deps resolve from
+        // src/rustlib/Cargo.lock; bump the pinned rust-analyzer rev in
+        // src/rustlib/Cargo.toml atomically. On failure, skip rust rather
+        // than aborting the whole build (like the other frontends).
+        let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+        let rustfrontend = Path::new("src/rustlib").join("target").join(&profile).join("rustfrontend");
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build").arg("--manifest-path").arg("src/rustlib/Cargo.toml");
+        if profile == "release" {
+            cmd.arg("--release");
+        }
+        cmd.arg("--bin").arg("rustfrontend");
+        let rust_ok = cmd.status().is_ok_and(|s| s.success()) && rustfrontend.exists();
+        if rust_ok {
+            println!("cargo:rustc-env=APG_FRONTEND_RUST={}", rustfrontend.display());
+            let _ = std::fs::copy(&rustfrontend, stage_dir.join("rustfrontend"));
+            languages.push("rust".into());
         }
     }
 

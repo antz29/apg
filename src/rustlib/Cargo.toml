@@ -1,0 +1,26 @@
+[package]
+name = "apg-rustfrontend"
+version = "0.0.0"
+edition = "2021"
+
+[[bin]]
+name = "rustfrontend"
+path = "src/main.rs"
+
+# rust-analyzer engine crates.
+#
+# The `ra_ap_*` crates were unpublished from crates.io, so these are pulled
+# straight from the rust-analyzer repository (in-repo package names) at the
+# release tag that published 0.0.348 (`2026-08-17`). They are version-locked to
+# each other: bump by moving every dep to the next rust-analyzer release tag in
+# one commit, then re-run the fixture scan. Cargo.lock pins the resolved rev.
+[dependencies]
+load-cargo = { git = "https://github.com/rust-lang/rust-analyzer", tag = "2026-08-17" }
+hir = { git = "https://github.com/rust-lang/rust-analyzer", tag = "2026-08-17" }
+ide-db = { git = "https://github.com/rust-lang/rust-analyzer", tag = "2026-08-17" }
+project-model = { git = "https://github.com/rust-lang/rust-analyzer", tag = "2026-08-17" }
+syntax = { git = "https://github.com/rust-lang/rust-analyzer", tag = "2026-08-17" }
+vfs = { git = "https://github.com/rust-lang/rust-analyzer", tag = "2026-08-17" }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"
