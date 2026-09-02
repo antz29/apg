@@ -3,7 +3,7 @@ use crate::graph::{Graph, NodeKind};
 
 pub struct CleanupOptions {
     pub user_excludes: Vec<String>,
-    /// Language of the scan. Span validation is Java- and TS-only: their
+    /// Language of the scan. Span validation is Java-, TS-, and C#-only: their
     /// methods are declared inside the class/interface body. Go methods are
     /// declared outside the struct body (receiver-based), so the check would
     /// wrongly drop them. A multi-language scan passes a non-matching value
@@ -22,9 +22,7 @@ pub struct CleanupReport {
 }
 
 fn path_excluded(path: &str, opts: &CleanupOptions) -> bool {
-    opts.user_excludes
-        .iter()
-        .any(|pat| matches_glob(pat, path))
+    opts.user_excludes.iter().any(|pat| matches_glob(pat, path))
 }
 
 pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
@@ -42,7 +40,8 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
             matches!(
                 n.kind,
                 NodeKind::Struct | NodeKind::Function | NodeKind::File
-            ) && n.location
+            ) && n
+                .location
                 .as_ref()
                 .map(|l| path_excluded(&l.path.to_string_lossy(), opts))
                 .unwrap_or(false)
@@ -55,7 +54,9 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
     }
     let is_removed = |fqn: &String| graph.nodes.contains_key(fqn);
 
-    graph.contains.retain(|(a, b)| is_removed(a) && is_removed(b));
+    graph
+        .contains
+        .retain(|(a, b)| is_removed(a) && is_removed(b));
     graph.calls.retain(|(a, b)| is_removed(a) && is_removed(b));
     graph.uses.retain(|(a, b)| is_removed(a) && is_removed(b));
     graph
@@ -66,14 +67,18 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
         .retain(|(a, b)| is_removed(a) && is_removed(b));
 
     // Containment span validation: a Struct may only contain Functions whose
-    // start offset falls inside the struct's span. Java- and TS-only — Go
-    // methods are declared outside the struct body, so the check would wrongly
-    // drop them.
+    // start offset falls inside the struct's span. Java-, TS-, and C#-only —
+    // Go methods are declared outside the struct body, so the check would
+    // wrongly drop them.
     let mut span_violations = 0usize;
-    if opts.language == "java" || opts.language == "ts" {
+    if opts.language == "java" || opts.language == "ts" || opts.language == "csharp" {
         graph.contains.retain(|(a, b)| {
-            let Some(na) = graph.nodes.get(a) else { return false };
-            let Some(nb) = graph.nodes.get(b) else { return false };
+            let Some(na) = graph.nodes.get(a) else {
+                return false;
+            };
+            let Some(nb) = graph.nodes.get(b) else {
+                return false;
+            };
             if na.kind != NodeKind::Struct || nb.kind != NodeKind::Function {
                 return true;
             }

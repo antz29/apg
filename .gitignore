@@ -2,6 +2,8 @@
 /src/rustlib/target
 /src/tslib/node_modules
 /testdata/rust/fixture/target
+/src/csharplib/bin
+/src/csharplib/obj
 /project*
 *.lbug
 *.csv

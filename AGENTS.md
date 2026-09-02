@@ -9,8 +9,10 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
   `rustfrontend` binary built on rust-analyzer's `ra_ap_*`-era engine crates,
   pulled from the rust-analyzer repo at a pinned release tag, TypeScript:
   `src/tslib/scanner.mjs` — a Node script using the official `typescript`
-  compiler API, npm-installed with a committed `package-lock.json`) parses a
-  codebase and streams one JSON object per
+  compiler API, npm-installed with a committed `package-lock.json`, C#:
+  `src/csharplib/Program.cs` — a standalone single-file `csharpfrontend` binary
+  built on Roslyn `Microsoft.CodeAnalysis.CSharp`) parses a codebase and streams
+  one JSON object per
   line to stdout — the **unified JSONL schema** (see `SPEC.md` §2). It emits
   *facts only*: declarations, references, edges. It never computes FQNs and
   never does graph assembly.
@@ -24,9 +26,9 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
   tag, `npm ci` for the TypeScript frontend — `src/tslib`) and stages them to
   `target/<profile>/frontends`. Run a scan with `apg scan <dir>` (or the
   `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
-  (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
+  (  `<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
   `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
-  `cpp`, `rust`, `ts`; `0` to skip) limits what build.rs compiles.
+  `cpp`, `rust`, `ts`, `csharp`; `0` to skip) limits what build.rs compiles.
 
 ### CLI
 

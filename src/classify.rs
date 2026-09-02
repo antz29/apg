@@ -29,7 +29,10 @@ impl ApgConfig {
     /// Loads the classification config from `.apg/config.json` (the current
     /// location), falling back to a legacy `apg.json` at the project root.
     pub fn load(project_dir: &Path) -> Option<ApgConfig> {
-        for cand in [project_dir.join(".apg/config.json"), project_dir.join("apg.json")] {
+        for cand in [
+            project_dir.join(".apg/config.json"),
+            project_dir.join("apg.json"),
+        ] {
             let text = std::fs::read_to_string(&cand);
             let Ok(text) = text else {
                 continue;
@@ -153,6 +156,26 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
                 return "generated";
             }
             if has_seg(&["vendor"]) {
+                return "external";
+            }
+            "src"
+        }
+        "csharp" => {
+            if filename_lower.ends_with("test.cs")
+                || filename_lower.ends_with("tests.cs")
+                || filename_lower.starts_with("test")
+                || has_seg(&["test", "tests", "Test", "Tests"])
+            {
+                return "test";
+            }
+            if filename_lower.ends_with(".g.cs")
+                || filename_lower.ends_with(".designer.cs")
+                || filename_lower.ends_with(".generated.cs")
+                || has_seg(&["gen", "generated", "obj"])
+            {
+                return "generated";
+            }
+            if has_seg(&["vendor", "packages", "bin", "third_party", "thirdparty"]) {
                 return "external";
             }
             "src"

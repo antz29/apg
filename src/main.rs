@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use cleanup::{cleanup, CleanupOptions};
+use cleanup::{CleanupOptions, cleanup};
 use lbug::{Connection, Database, SystemConfig};
 
 /// The opencode tool suite that `apg init` installs into `~/.opencode/`. Each
@@ -89,8 +89,7 @@ const APG_LIB: &str = include_str!("../.opencode/lib/apg.ts");
 /// configured to use the apg suite tools and to guide the user through running
 /// `apg scan` on the CLI (there is no in-chat scan tool). Single-sourced from
 /// the repo's own agent file.
-const CODEBASE_NAVIGATOR_AGENT: &str =
-    include_str!("../.opencode/agents/codebase-navigator.md");
+const CODEBASE_NAVIGATOR_AGENT: &str = include_str!("../.opencode/agents/codebase-navigator.md");
 
 /// The `package.json` written by `apg init` into `~/.opencode/` when none
 /// exists, so the tool files' `@opencode-ai/plugin` import resolves.
@@ -143,9 +142,12 @@ fn frontend_dir() -> Option<PathBuf> {
     }
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    [dir.join("frontends"), dir.join("..").join("libexec").join("frontends")]
-        .into_iter()
-        .find(|c| c.is_dir())
+    [
+        dir.join("frontends"),
+        dir.join("..").join("libexec").join("frontends"),
+    ]
+    .into_iter()
+    .find(|c| c.is_dir())
 }
 
 fn available_languages() -> Vec<String> {
@@ -159,6 +161,9 @@ fn available_languages() -> Vec<String> {
         }
         if dir.join("rustfrontend").exists() {
             langs.push("rust".into());
+        }
+        if dir.join("csharpfrontend").exists() || dir.join("csharpfrontend.exe").exists() {
+            langs.push("csharp".into());
         }
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
@@ -193,6 +198,17 @@ fn frontend_cmd(language: &str) -> Option<String> {
             "rust" if dir.join("rustfrontend").exists() => {
                 return Some(dir.join("rustfrontend").display().to_string());
             }
+            "csharp"
+                if dir.join("csharpfrontend").exists()
+                    || dir.join("csharpfrontend.exe").exists() =>
+            {
+                let bin = if dir.join("csharpfrontend").exists() {
+                    dir.join("csharpfrontend")
+                } else {
+                    dir.join("csharpfrontend.exe")
+                };
+                return Some(bin.display().to_string());
+            }
             "java" if dir.join("java-classes").is_dir() => {
                 let classes = dir.join("java-classes");
                 return Some(format!(
@@ -213,6 +229,7 @@ fn frontend_cmd(language: &str) -> Option<String> {
         "cpp" => option_env!("APG_FRONTEND_CPP"),
         "go" => option_env!("APG_FRONTEND_GO"),
         "rust" => option_env!("APG_FRONTEND_RUST"),
+        "csharp" => option_env!("APG_FRONTEND_CSHARP"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         "ts" => option_env!("APG_FRONTEND_TS"),
         _ => None,
@@ -258,6 +275,7 @@ fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec<Str
         ("cpp", &[".cpp", ".cc", ".cxx", ".hpp", ".h", ".hh"]),
         ("rust", &[".rs"]),
         ("ts", &[".ts", ".tsx", ".mts", ".cts"]),
+        ("csharp", &[".cs", ".csx"]),
     ];
     let mut out = Vec::new();
     for (lang, exts) in &candidates {
@@ -279,6 +297,7 @@ fn id_prefix_for(language: &str) -> &'static str {
         "cpp" => "c",
         "rust" => "r",
         "ts" => "t",
+        "csharp" => "cs",
         _ => "x",
     }
 }
@@ -308,11 +327,11 @@ USAGE:
   apg --help                  Show this help
 
 SCAN OPTIONS:
-  --language <lang>            Scanner language(s): java, go, cpp, rust, ts
-                               (comma-separated or repeated; auto-detected for
-                               every language present if omitted)
+  --language <lang>            Scanner language(s): java, go, cpp, rust, ts,
+                               csharp (comma-separated or repeated; auto-detected
+                               for every language present if omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
-  --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS,
+  --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS/C#,
                                repeatable)
   --no-build-scripts          Rust only: skip cargo build scripts and the
                               proc-macro server (hermetic scans)
@@ -380,7 +399,9 @@ fn dir_entries_only(dir: &Path, names: &[&str]) -> bool {
         Ok(e) => e,
         Err(_) => return true,
     };
-    entries.flatten().all(|e| names.contains(&e.file_name().to_string_lossy().as_ref()))
+    entries
+        .flatten()
+        .all(|e| names.contains(&e.file_name().to_string_lossy().as_ref()))
 }
 
 /// True when `opencode_dir` is the apg repo's own single-sourced `.opencode/`
@@ -445,8 +466,7 @@ fn remove_legacy_project_install(dir: &Path) -> std::io::Result<(usize, usize)> 
     }
 
     let pkg_path = opencode_dir.join("package.json");
-    let apg_owned_pkg = pkg_path
-        .is_file()
+    let apg_owned_pkg = pkg_path.is_file()
         && std::fs::read(&pkg_path)
             .map(|b| b == OPENCODE_PACKAGE_JSON.as_bytes())
             .unwrap_or(false);
@@ -761,9 +781,7 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         let mut parts = cmd.split_whitespace();
         let prog = parts.next().expect("empty frontend command");
         let mut child = Command::new(prog);
-        child
-            .args(parts)
-            .arg(project_dir.display().to_string());
+        child.args(parts).arg(project_dir.display().to_string());
         for m in &module_dirs {
             child.arg("--module").arg(m);
         }
@@ -797,16 +815,14 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let iterators: Vec<Box<dyn Iterator<Item = schema::Record>>> = spools
         .into_iter()
         .map(|(lang, spool)| {
-            let lines =
-                BufReader::new(std::fs::File::open(&spool).unwrap()).lines();
+            let lines = BufReader::new(std::fs::File::open(&spool).unwrap()).lines();
             let records = lines.map(|x| {
                 let line = x.expect("io error");
                 serde_json::from_str::<schema::Record>(&line)
                     .unwrap_or_else(|e| panic!("bad json {e}: {line}"))
             });
-            Box::new(
-                std::iter::once(schema::Record::LangSwitch { language: lang }).chain(records),
-            ) as Box<dyn Iterator<Item = schema::Record>>
+            Box::new(std::iter::once(schema::Record::LangSwitch { language: lang }).chain(records))
+                as Box<dyn Iterator<Item = schema::Record>>
         })
         .collect();
     let records = iterators.into_iter().flatten();
@@ -847,11 +863,14 @@ fn run_pipeline(
         // Stream the scanner JSONL straight into the ingestor (which inserts
         // nodes as they arrive and spools edges to disk) rather than buffering
         // every record in memory (SPEC §6).
-        ingest::ingest(records, &ingest::IngestOptions {
-            blacklist,
-            language,
-            config,
-        })
+        ingest::ingest(
+            records,
+            &ingest::IngestOptions {
+                blacklist,
+                language,
+                config,
+            },
+        )
     };
     log.ln(&format!("Skipped {} blacklisted messages", report.skipped));
     if report.shadowed_modules > 0 {
@@ -903,7 +922,9 @@ fn run_pipeline(
 
     let _ = std::fs::remove_file("db.lbug");
     if std::path::Path::new("db.lbug").exists() {
-        panic!("db.lbug still exists (a previous run is still holding it?) — kill any stray apg/java processes and retry");
+        panic!(
+            "db.lbug still exists (a previous run is still holding it?) — kill any stray apg/java processes and retry"
+        );
     }
     log.ln("[load] Database::new...");
     let db = Database::new("db.lbug", Default::default()).unwrap();
