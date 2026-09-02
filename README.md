@@ -84,7 +84,7 @@ unreleased code instead, pass `--HEAD`:
 
 ## Install (Linux, `curl | sh`)
 
-On Linux (x86_64 or aarch64), install system-wide (requires root):
+On Linux (x86_64 or aarch64), install the core `apg` scanner system-wide (requires root):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sudo sh -s --
@@ -96,16 +96,31 @@ Or install to `~/.local` without root:
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user
 ```
 
-The installer fetches the latest release, verifies the tarball's sha256
-against the `sha256sums.txt` published with it, and installs the `apg` binary
-plus all six scanner frontends (Go, Java, C++, Rust, TypeScript, C#) — no
-separate frontend install needed, unlike the split brew formulae.
+Like the Homebrew setup, language frontends can be installed individually to keep installations lightweight:
 
-Options: `--version 0.7.0` to pin a specific release, `--prefix DIR` to choose
-an install location, `--force` to overwrite an existing install, `--uninstall`
-to remove it. The binary links OpenSSL dynamically, so `libssl.so.3` must be
-present (it is on Ubuntu 22.04+/Debian 12+/Fedora 36+; the installer warns if
-it is missing). Java scan projects still need `java` on your PATH at scan time.
+```sh
+# Install specific frontends only (e.g. Go and Rust):
+curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user go rust
+
+# Or use the --frontends flag:
+curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,ts
+
+# Install everything (scanner + all 6 frontends):
+curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
+```
+
+The installer verifies sha256 checksums for each component against `sha256sums.txt`.
+
+Options:
+- `--version 0.7.0`: pin a specific release tag
+- `--user`: install under `~/.local` (no root required)
+- `--prefix DIR`: choose a custom install location (default `/usr/local`)
+- `--frontends L,L...`: comma-separated list of frontends to install
+- `--all`: install scanner and all frontends
+- `--force`: overwrite existing files without prompting
+- `--uninstall [component...]`: remove specific components or the entire install
+
+The binary links OpenSSL dynamically, so `libssl.so.3` must be present (it is on Ubuntu 22.04+/Debian 12+/Fedora 36+; the installer warns if it is missing). Java scan projects still need `java` on your PATH at scan time. TypeScript scan projects need `node` on your PATH.
 
 Verify:
 

@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use cleanup::{CleanupOptions, cleanup};
+use cleanup::{cleanup, CleanupOptions};
 use lbug::{Connection, Database, SystemConfig};
 
 /// The opencode tool suite that `apg init` installs into `~/.opencode/`. Each
@@ -723,7 +723,7 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let available = available_languages();
     if available.is_empty() {
         panic!(
-            "No scanner frontends found. Install one via brew (e.g. `brew install antz29/apg/apg-go`), set APG_FRONTEND_DIR, or rebuild with the required toolchain."
+            "No scanner frontends found. Install one via brew (e.g. `brew install antz29/apg/apg-go`), the curl installer (e.g. `install.sh go`), set APG_FRONTEND_DIR, or rebuild with the required toolchain."
         );
     }
 
@@ -731,7 +731,7 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         for l in &language_args {
             if !available.iter().any(|a| a == l) {
                 panic!(
-                    "Language '{l}' is not available. Installed frontends: {}. Install it via brew (e.g. `brew install antz29/apg/apg-{l}`).",
+                    "Language '{l}' is not available. Installed frontends: {}. Install it via brew (e.g. `brew install antz29/apg/apg-{l}`) or the curl installer (`install.sh {l}`).",
                     available.join(", ")
                 );
             }

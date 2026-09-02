@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
-use crate::classify::{ApgConfig, classify_code_type};
+use crate::classify::{classify_code_type, ApgConfig};
 use crate::graph::{Graph, Location, Node, NodeKind};
 use crate::schema::Record;
 
@@ -761,38 +761,26 @@ mod tests {
         assert!(graph.nodes.contains_key("/x/A.java"));
         assert!(graph.nodes.contains_key("/y/B.java"));
         assert_eq!(graph.nodes["/x/A.java"].kind, NodeKind::File);
-        assert!(
-            graph
-                .contains
-                .contains(&("org.pkg".to_string(), "/x/A.java".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/x/A.java".to_string(), "org.pkg.A".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("org.pkg.A.deep".to_string(), "/y/B.java".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/y/B.java".to_string(), "org.pkg.A.deep.B".to_string()))
-        );
+        assert!(graph
+            .contains
+            .contains(&("org.pkg".to_string(), "/x/A.java".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/x/A.java".to_string(), "org.pkg.A".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("org.pkg.A.deep".to_string(), "/y/B.java".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/y/B.java".to_string(), "org.pkg.A.deep.B".to_string())));
         // But the shadowed package is not a parent: its Module→File edge and the
         // package chain through it are pruned.
-        assert!(
-            !graph
-                .contains
-                .contains(&("org.pkg.A".to_string(), "/x/A.java".to_string()))
-        );
-        assert!(
-            !graph
-                .contains
-                .contains(&("org.pkg.A".to_string(), "org.pkg.A.deep".to_string()))
-        );
+        assert!(!graph
+            .contains
+            .contains(&("org.pkg.A".to_string(), "/x/A.java".to_string())));
+        assert!(!graph
+            .contains
+            .contains(&("org.pkg.A".to_string(), "org.pkg.A.deep".to_string())));
     }
 
     #[test]
@@ -847,48 +835,32 @@ mod tests {
         assert_eq!(graph.nodes["p.A"].kind, NodeKind::Struct);
         assert!(graph.nodes.contains_key("/x/A.java"));
         assert!(graph.nodes.contains_key("/y/test.java"));
-        assert!(
-            graph
-                .contains
-                .contains(&("p".to_string(), "/x/A.java".to_string()))
-        );
-        assert!(
-            !graph
-                .contains
-                .contains(&("p".to_string(), "p.A".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/x/A.java".to_string(), "p.A".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/y/test.java".to_string(), "p.A.test".to_string()))
-        );
+        assert!(graph
+            .contains
+            .contains(&("p".to_string(), "/x/A.java".to_string())));
+        assert!(!graph
+            .contains
+            .contains(&("p".to_string(), "p.A".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/x/A.java".to_string(), "p.A".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/y/test.java".to_string(), "p.A.test".to_string())));
         // The dropped function's containment (by struct and by file) is pruned;
         // the surviving function's edges stay.
-        assert!(
-            !graph
-                .contains
-                .contains(&("p.A".to_string(), "p.A.test".to_string()))
-        );
-        assert!(
-            !graph
-                .contains
-                .contains(&("/x/A.java".to_string(), "p.A.test".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("p.A".to_string(), "p.A.other".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/x/A.java".to_string(), "p.A.other".to_string()))
-        );
+        assert!(!graph
+            .contains
+            .contains(&("p.A".to_string(), "p.A.test".to_string())));
+        assert!(!graph
+            .contains
+            .contains(&("/x/A.java".to_string(), "p.A.test".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("p.A".to_string(), "p.A.other".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/x/A.java".to_string(), "p.A.other".to_string())));
     }
 
     #[test]
@@ -1076,11 +1048,9 @@ mod tests {
         assert!(graph.nodes.contains_key("fmt.Errorf"));
         // File layer: module contains the file, the file contains its units,
         // and methods stay under their struct.
-        assert!(
-            graph
-                .contains
-                .contains(&("github.com/x/y".to_string(), "/abs/store.go".to_string()))
-        );
+        assert!(graph
+            .contains
+            .contains(&("github.com/x/y".to_string(), "/abs/store.go".to_string())));
         assert!(graph.contains.contains(&(
             "/abs/store.go".to_string(),
             "github.com/x/y.Store".to_string()
@@ -1138,16 +1108,12 @@ mod tests {
         // units; the surviving file keeps its module and unit edges.
         assert!(!graph.nodes.contains_key("/x/b.go"));
         assert!(graph.nodes.contains_key("/x/a.go"));
-        assert!(
-            graph
-                .contains
-                .contains(&("keep.mod".to_string(), "/x/a.go".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/x/a.go".to_string(), "keep.mod.A".to_string()))
-        );
+        assert!(graph
+            .contains
+            .contains(&("keep.mod".to_string(), "/x/a.go".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("/x/a.go".to_string(), "keep.mod.A".to_string())));
         assert!(!graph.contains.is_empty());
     }
 }

@@ -64,20 +64,38 @@ jobs:
       - name: Build apg + frontends
         run: cargo build --release
 
-      - name: Package tarball
+      - name: Package tarballs
         run: |
-          mkdir -p dist/frontends
-          cp target/release/apg dist/apg
-          cp -r target/release/frontends/. dist/frontends/
-          tar -C dist -czf "apg-linux-${{ matrix.arch }}.tar.gz" .
-          sha256sum "apg-linux-${{ matrix.arch }}.tar.gz" >"apg-linux-${{ matrix.arch }}.sha256"
+          mkdir -p dist/packages
+
+          # 1. Base scanner
+          tar -C target/release -czf "dist/packages/apg-linux-${{ matrix.arch }}.tar.gz" apg
+
+          # 2. Per-language frontends
+          tar -C target/release/frontends -czf "dist/packages/apg-cpp-linux-${{ matrix.arch }}.tar.gz" cppfrontend
+          tar -C target/release/frontends -czf "dist/packages/apg-go-linux-${{ matrix.arch }}.tar.gz" gofrontend
+          tar -C target/release/frontends -czf "dist/packages/apg-rust-linux-${{ matrix.arch }}.tar.gz" rustfrontend
+          tar -C target/release/frontends -czf "dist/packages/apg-csharp-linux-${{ matrix.arch }}.tar.gz" csharpfrontend
+          tar -C target/release/frontends -czf "dist/packages/apg-java-linux-${{ matrix.arch }}.tar.gz" java-classes
+          tar -C target/release/frontends -czf "dist/packages/apg-ts-linux-${{ matrix.arch }}.tar.gz" tsfrontend
+
+          # 3. All-in-one bundle
+          mkdir -p dist/all/frontends
+          cp target/release/apg dist/all/
+          cp -r target/release/frontends/. dist/all/frontends/
+          tar -C dist/all -czf "dist/packages/apg-all-linux-${{ matrix.arch }}.tar.gz" .
+
+          cd dist/packages
+          for f in *.tar.gz; do
+            sha256sum "$f" > "${f}.sha256"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
           name: apg-linux-${{ matrix.arch }}
           path: |
-            apg-linux-${{ matrix.arch }}.tar.gz
-            apg-linux-${{ matrix.arch }}.sha256
+            dist/packages/*.tar.gz
+            dist/packages/*.sha256
           if-no-files-found: error
 
   publish:
@@ -97,8 +115,8 @@ jobs:
       - name: Merge checksums
         working-directory: dist
         run: |
-          cat apg-linux-*.sha256 > sha256sums.txt
-          rm apg-linux-*.sha256
+          cat *.sha256 > sha256sums.txt
+          rm *.sha256
 
       - name: Ensure GitHub release exists
         run: |
@@ -112,4 +130,4 @@ jobs:
       - name: Upload tarballs + checksums
         working-directory: dist
         run: |
-          gh release upload "${GITHUB_REF_NAME}" apg-linux-*.tar.gz sha256sums.txt --clobber
+          gh release upload "${GITHUB_REF_NAME}" *.tar.gz sha256sums.txt --clobber
