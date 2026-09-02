@@ -8,7 +8,7 @@ class ApgRust < Formula
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
       tag:      "v0.7.1",
-      revision: "6a503f7981ae0062b05042a1bb942c02824dba35"
+      revision: "959d27bd5526b97037851523aecc09478fb90d70"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
