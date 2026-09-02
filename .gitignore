@@ -1,6 +1,8 @@
 /target
 /src/rustlib/target
 /testdata/rust/fixture/target
+/src/csharplib/bin
+/src/csharplib/obj
 /project*
 *.lbug
 *.csv

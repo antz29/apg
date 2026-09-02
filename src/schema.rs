@@ -11,7 +11,9 @@ use serde::Deserialize;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Record {
     /// `{"type":"module","fqn":"github.com/foundry/flow"}`
-    Module { fqn: String },
+    Module {
+        fqn: String,
+    },
 
     /// `{"type":"struct","id":"n12","parent":"...","name":"Error","path":"/abs/error.go","start":12,"end":300,"start_line":12,"end_line":45}`
     Struct {
@@ -57,9 +59,18 @@ pub enum Record {
         category: Option<String>,
     },
 
-    Contains { from: String, to: String },
-    Calls { from: String, to: String },
-    Uses { from: String, to: String },
+    Contains {
+        from: String,
+        to: String,
+    },
+    Calls {
+        from: String,
+        to: String,
+    },
+    Uses {
+        from: String,
+        to: String,
+    },
 
     UnresolvedCall {
         from: String,
@@ -67,5 +78,8 @@ pub enum Record {
         #[serde(default)]
         target_type: String,
     },
-    UnresolvedUse { from: String, to: String },
+    UnresolvedUse {
+        from: String,
+        to: String,
+    },
 }

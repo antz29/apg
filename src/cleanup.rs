@@ -20,9 +20,7 @@ pub struct CleanupReport {
 }
 
 fn path_excluded(path: &str, opts: &CleanupOptions) -> bool {
-    opts.user_excludes
-        .iter()
-        .any(|pat| matches_glob(pat, path))
+    opts.user_excludes.iter().any(|pat| matches_glob(pat, path))
 }
 
 pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
@@ -40,7 +38,8 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
             matches!(
                 n.kind,
                 NodeKind::Struct | NodeKind::Function | NodeKind::File
-            ) && n.location
+            ) && n
+                .location
                 .as_ref()
                 .map(|l| path_excluded(&l.path.to_string_lossy(), opts))
                 .unwrap_or(false)
@@ -53,7 +52,9 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
     }
     let is_removed = |fqn: &String| graph.nodes.contains_key(fqn);
 
-    graph.contains.retain(|(a, b)| is_removed(a) && is_removed(b));
+    graph
+        .contains
+        .retain(|(a, b)| is_removed(a) && is_removed(b));
     graph.calls.retain(|(a, b)| is_removed(a) && is_removed(b));
     graph.uses.retain(|(a, b)| is_removed(a) && is_removed(b));
     graph
@@ -69,8 +70,12 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
     let mut span_violations = 0usize;
     if opts.language == "java" {
         graph.contains.retain(|(a, b)| {
-            let Some(na) = graph.nodes.get(a) else { return false };
-            let Some(nb) = graph.nodes.get(b) else { return false };
+            let Some(na) = graph.nodes.get(a) else {
+                return false;
+            };
+            let Some(nb) = graph.nodes.get(b) else {
+                return false;
+            };
             if na.kind != NodeKind::Struct || nb.kind != NodeKind::Function {
                 return true;
             }

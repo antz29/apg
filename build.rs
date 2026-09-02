@@ -2,16 +2,22 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
-/// comma-separated allowlist (`go`, `java`, `cpp`); `0`/`none`/empty skips all.
+/// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `csharp`); `0`/`none`/empty skips all.
 /// Unset = build everything (the dev default). The brew `scanner` formula sets
-/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp` formulae build each
+/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-csharp` formulae build each
 /// frontend directly and don't use build.rs for that.
 fn build_frontends() -> Vec<String> {
     match std::env::var("APG_BUILD_FRONTENDS") {
         Ok(v) if v.is_empty() => vec![],
         Ok(v) if v == "0" || v == "none" || v == "false" => vec![],
         Ok(v) => v.split(',').map(|s| s.trim().to_string()).collect(),
-        Err(_) => vec!["go".into(), "java".into(), "cpp".into(), "rust".into()],
+        Err(_) => vec![
+            "go".into(),
+            "java".into(),
+            "cpp".into(),
+            "rust".into(),
+            "csharp".into(),
+        ],
     }
 }
 
@@ -25,6 +31,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/cpplib/main.cpp");
     println!("cargo:rerun-if-changed=src/rustlib/Cargo.toml");
     println!("cargo:rerun-if-changed=src/rustlib/src/main.rs");
+    println!("cargo:rerun-if-changed=src/csharplib/CsharpFrontend.csproj");
+    println!("cargo:rerun-if-changed=src/csharplib/Program.cs");
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let frontends = build_frontends();
@@ -59,44 +67,71 @@ fn main() {
 
         let rt_ok = Command::new("gcc")
             .args([
-                "-c", "-fPIC", "-std=c11", "-D_GNU_SOURCE",
-                "-I", ts_inc.to_str().unwrap(),
-                "-I", ts_src.to_str().unwrap(),
+                "-c",
+                "-fPIC",
+                "-std=c11",
+                "-D_GNU_SOURCE",
+                "-I",
+                ts_inc.to_str().unwrap(),
+                "-I",
+                ts_src.to_str().unwrap(),
                 ts_src.join("lib.c").to_str().unwrap(),
-                "-o", runtime_o.to_str().unwrap(),
+                "-o",
+                runtime_o.to_str().unwrap(),
             ])
             .status()
             .is_ok_and(|s| s.success());
 
         let parser_ok = Command::new("gcc")
             .args([
-                "-c", "-fPIC", "-std=c11",
-                "-I", cpp_inc.to_str().unwrap(),
-                "-I", ts_inc.to_str().unwrap(),
-                vendor.join("tree-sitter-cpp/src/parser.c").to_str().unwrap(),
-                "-o", parser_o.to_str().unwrap(),
+                "-c",
+                "-fPIC",
+                "-std=c11",
+                "-I",
+                cpp_inc.to_str().unwrap(),
+                "-I",
+                ts_inc.to_str().unwrap(),
+                vendor
+                    .join("tree-sitter-cpp/src/parser.c")
+                    .to_str()
+                    .unwrap(),
+                "-o",
+                parser_o.to_str().unwrap(),
             ])
             .status()
             .is_ok_and(|s| s.success());
 
         let scanner_ok = Command::new("gcc")
             .args([
-                "-c", "-fPIC", "-std=c11",
-                "-I", cpp_inc.to_str().unwrap(),
-                "-I", ts_inc.to_str().unwrap(),
-                vendor.join("tree-sitter-cpp/src/scanner.c").to_str().unwrap(),
-                "-o", scanner_o.to_str().unwrap(),
+                "-c",
+                "-fPIC",
+                "-std=c11",
+                "-I",
+                cpp_inc.to_str().unwrap(),
+                "-I",
+                ts_inc.to_str().unwrap(),
+                vendor
+                    .join("tree-sitter-cpp/src/scanner.c")
+                    .to_str()
+                    .unwrap(),
+                "-o",
+                scanner_o.to_str().unwrap(),
             ])
             .status()
             .is_ok_and(|s| s.success());
 
         let main_ok = Command::new("g++")
             .args([
-                "-c", "-fPIC", "-std=c++17",
-                "-I", ts_inc.to_str().unwrap(),
-                "-I", cpp_inc.to_str().unwrap(),
+                "-c",
+                "-fPIC",
+                "-std=c++17",
+                "-I",
+                ts_inc.to_str().unwrap(),
+                "-I",
+                cpp_inc.to_str().unwrap(),
                 cpplib.join("main.cpp").to_str().unwrap(),
-                "-o", main_o.to_str().unwrap(),
+                "-o",
+                main_o.to_str().unwrap(),
             ])
             .status()
             .is_ok_and(|s| s.success());
@@ -109,7 +144,8 @@ fn main() {
                     scanner_o.to_str().unwrap(),
                     main_o.to_str().unwrap(),
                     "-lm",
-                    "-o", cppfrontend.to_str().unwrap(),
+                    "-o",
+                    cppfrontend.to_str().unwrap(),
                 ])
                 .status()
                 .is_ok_and(|s| s.success());
@@ -147,16 +183,24 @@ fn main() {
         // src/rustlib/Cargo.toml atomically. On failure, skip rust rather
         // than aborting the whole build (like the other frontends).
         let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
-        let rustfrontend = Path::new("src/rustlib").join("target").join(&profile).join("rustfrontend");
+        let rustfrontend = Path::new("src/rustlib")
+            .join("target")
+            .join(&profile)
+            .join("rustfrontend");
         let mut cmd = Command::new("cargo");
-        cmd.arg("build").arg("--manifest-path").arg("src/rustlib/Cargo.toml");
+        cmd.arg("build")
+            .arg("--manifest-path")
+            .arg("src/rustlib/Cargo.toml");
         if profile == "release" {
             cmd.arg("--release");
         }
         cmd.arg("--bin").arg("rustfrontend");
         let rust_ok = cmd.status().is_ok_and(|s| s.success()) && rustfrontend.exists();
         if rust_ok {
-            println!("cargo:rustc-env=APG_FRONTEND_RUST={}", rustfrontend.display());
+            println!(
+                "cargo:rustc-env=APG_FRONTEND_RUST={}",
+                rustfrontend.display()
+            );
             let _ = std::fs::copy(&rustfrontend, stage_dir.join("rustfrontend"));
             languages.push("rust".into());
         }
@@ -169,12 +213,17 @@ fn main() {
 
         let java_ok = Command::new("javac")
             .args([
-                "-d", java_classes.to_str().unwrap(),
+                "-d",
+                java_classes.to_str().unwrap(),
                 "-proc:none",
-                "--add-exports", "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
-                "--add-exports", "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
-                "--add-exports", "jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
-                "--add-exports", "jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
+                "--add-exports",
+                "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
+                "--add-exports",
+                "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
+                "--add-exports",
+                "jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
+                "--add-exports",
+                "jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
                 "src/javalib/CallGraphBuilder.java",
             ])
             .status()
@@ -190,6 +239,61 @@ fn main() {
             std::fs::create_dir_all(&stage_java).ok();
             copy_dir(&java_classes, &stage_java);
             languages.push("java".into());
+        }
+    }
+
+    // --- C# frontend (Roslyn, published as self-contained single-file) ---
+    if enabled(&frontends, "csharp") {
+        let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+        let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+        let rid = match (
+            target_os.as_str(),
+            target_arch.as_str(),
+            target_env.as_str(),
+        ) {
+            ("linux", "x86_64", "musl") => "linux-musl-x64",
+            ("linux", "aarch64", "musl") => "linux-musl-arm64",
+            ("linux", "x86_64", _) => "linux-x64",
+            ("linux", "aarch64", _) => "linux-arm64",
+            ("macos", "x86_64", _) => "osx-x64",
+            ("macos", "aarch64", _) => "osx-arm64",
+            ("windows", "x86_64", _) => "win-x64",
+            ("windows", "aarch64", _) => "win-arm64",
+            _ => "linux-x64",
+        };
+
+        let cs_dist = Path::new(&out_dir).join("csharp-dist");
+        let mut cmd = Command::new("dotnet");
+        cmd.arg("publish")
+            .arg("src/csharplib/CsharpFrontend.csproj")
+            .arg("-c")
+            .arg("Release")
+            .arg("-r")
+            .arg(rid)
+            .arg("--self-contained")
+            .arg("true")
+            .arg("-p:PublishSingleFile=true")
+            .arg("-p:PublishReadyToRun=true")
+            .arg("-o")
+            .arg(cs_dist.to_str().unwrap());
+
+        let exe_name = if target_os == "windows" {
+            "csharpfrontend.exe"
+        } else {
+            "csharpfrontend"
+        };
+        let csharpfrontend = cs_dist.join(exe_name);
+
+        let cs_ok = cmd.status().is_ok_and(|s| s.success()) && csharpfrontend.exists();
+        if cs_ok {
+            println!(
+                "cargo:rustc-env=APG_FRONTEND_CSHARP={}",
+                csharpfrontend.display()
+            );
+            let _ = std::fs::copy(&csharpfrontend, stage_dir.join(exe_name));
+            languages.push("csharp".into());
         }
     }
 

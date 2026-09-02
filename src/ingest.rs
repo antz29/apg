@@ -107,7 +107,10 @@ fn render_function_fqns(decls: &[FuncDecl], language: &str) -> Vec<(String, Stri
         } else {
             for i in idxs {
                 let d = &decls[i];
-                out.push((d.id.clone(), format!("{parent}.{name}({})", d.params.join(","))));
+                out.push((
+                    d.id.clone(),
+                    format!("{parent}.{name}({})", d.params.join(",")),
+                ));
             }
         }
     }
@@ -246,7 +249,8 @@ pub fn ingest(
                     }
                     if !files.contains_key(&path) {
                         files.insert(path.clone(), parent.clone());
-                        let code_type = classify_code_type(&path, &path, opts.language, opts.config);
+                        let code_type =
+                            classify_code_type(&path, &path, opts.language, opts.config);
                         graph.nodes.insert(
                             path.clone(),
                             Node {
@@ -391,7 +395,8 @@ pub fn ingest(
     }
 
     // Pass C: resolve edge endpoints from the spool.
-    let resolve = |s: &str| -> String { id_to_fqn.get(s).cloned().unwrap_or_else(|| s.to_string()) };
+    let resolve =
+        |s: &str| -> String { id_to_fqn.get(s).cloned().unwrap_or_else(|| s.to_string()) };
     {
         let mut er = EdgeReader {
             r: BufReader::new(std::fs::File::open(&spool).unwrap()),
@@ -499,7 +504,14 @@ pub fn ingest(
             && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
     });
 
-    (graph, IngestReport { skipped, shadowed_modules, shadowed_functions })
+    (
+        graph,
+        IngestReport {
+            skipped,
+            shadowed_modules,
+            shadowed_functions,
+        },
+    )
 }
 
 /// Binary spool format for edge records: one u8 tag (0 contains, 1 calls,
@@ -584,12 +596,7 @@ mod tests {
         }
     }
 
-    fn srec(
-        id: &str,
-        parent: &str,
-        name: &str,
-        path: &str,
-    ) -> Record {
+    fn srec(id: &str, parent: &str, name: &str, path: &str) -> Record {
         Record::Struct {
             id: id.to_string(),
             parent: parent.to_string(),
@@ -602,12 +609,7 @@ mod tests {
         }
     }
 
-    fn frec(
-        id: &str,
-        parent: &str,
-        name: &str,
-        path: &str,
-    ) -> Record {
+    fn frec(id: &str, parent: &str, name: &str, path: &str) -> Record {
         Record::Function {
             id: id.to_string(),
             parent: parent.to_string(),
@@ -745,7 +747,9 @@ mod tests {
         assert!(graph.nodes.contains_key("/x/A.java"));
         assert!(graph.nodes.contains_key("/y/B.java"));
         assert_eq!(graph.nodes["/x/A.java"].kind, NodeKind::File);
-        assert!(graph.contains.contains(&("org.pkg".to_string(), "/x/A.java".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("org.pkg".to_string(), "/x/A.java".to_string())));
         assert!(graph
             .contains
             .contains(&("/x/A.java".to_string(), "org.pkg.A".to_string())));
@@ -817,7 +821,9 @@ mod tests {
         assert_eq!(graph.nodes["p.A"].kind, NodeKind::Struct);
         assert!(graph.nodes.contains_key("/x/A.java"));
         assert!(graph.nodes.contains_key("/y/test.java"));
-        assert!(graph.contains.contains(&("p".to_string(), "/x/A.java".to_string())));
+        assert!(graph
+            .contains
+            .contains(&("p".to_string(), "/x/A.java".to_string())));
         assert!(!graph
             .contains
             .contains(&("p".to_string(), "p.A".to_string())));
@@ -961,21 +967,27 @@ mod tests {
         assert!(graph
             .contains
             .contains(&("github.com/x/y".to_string(), "/abs/store.go".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("/abs/store.go".to_string(), "github.com/x/y.Store".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("/abs/store.go".to_string(), "github.com/x/y.Compute".to_string())));
-        assert!(!graph
-            .contains
-            .contains(&("github.com/x/y".to_string(), "github.com/x/y.Store".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("github.com/x/y.Store".to_string(), "github.com/x/y.Store.Get".to_string())));
-        assert!(graph
-            .unresolved_calls
-            .contains(&("github.com/x/y.Compute".to_string(), "fmt.Errorf".to_string(), String::new())));
+        assert!(graph.contains.contains(&(
+            "/abs/store.go".to_string(),
+            "github.com/x/y.Store".to_string()
+        )));
+        assert!(graph.contains.contains(&(
+            "/abs/store.go".to_string(),
+            "github.com/x/y.Compute".to_string()
+        )));
+        assert!(!graph.contains.contains(&(
+            "github.com/x/y".to_string(),
+            "github.com/x/y.Store".to_string()
+        )));
+        assert!(graph.contains.contains(&(
+            "github.com/x/y.Store".to_string(),
+            "github.com/x/y.Store.Get".to_string()
+        )));
+        assert!(graph.unresolved_calls.contains(&(
+            "github.com/x/y.Compute".to_string(),
+            "fmt.Errorf".to_string(),
+            String::new()
+        )));
     }
 
     #[test]

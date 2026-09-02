@@ -7,7 +7,8 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
 - The **scanner** (Go: `src/golib/main.go`, Java: `src/javalib/CallGraphBuilder.java`,
   C++: `src/cpplib/main.cpp`, Rust: `src/rustlib/src/main.rs` — a standalone
   `rustfrontend` binary built on rust-analyzer's `ra_ap_*`-era engine crates,
-  pulled from the rust-analyzer repo at a pinned release tag) parses a codebase
+  C#: `src/csharplib/Program.cs` — a standalone single-file `csharpfrontend` binary built on Roslyn
+  `Microsoft.CodeAnalysis.CSharp`) parses a codebase
   and streams one JSON object per
   line to stdout — the **unified JSONL schema** (see `SPEC.md` §2). It emits
   *facts only*: declarations, references, edges. It never computes FQNs and
@@ -22,9 +23,9 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
   tag) and stages them to
   `target/<profile>/frontends`. Run a scan with `apg scan <dir>` (or the
   `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
-  (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
+  (  `<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
   `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
-  `cpp`, `rust`; `0` to skip) limits what build.rs compiles.
+  `cpp`, `rust`, `csharp`; `0` to skip) limits what build.rs compiles.
 
 ### CLI
 

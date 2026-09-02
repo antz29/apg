@@ -52,7 +52,9 @@ pub fn write_parquet(path: &Path, cols: &[(&str, Col)]) -> anyhow::Result<()> {
             Col::Str(_) => builder.with_converted_type(ConvertedType::UTF8),
             Col::I64(_) => builder,
         };
-        fields.push(Arc::new(builder.with_repetition(Repetition::REQUIRED).build()?));
+        fields.push(Arc::new(
+            builder.with_repetition(Repetition::REQUIRED).build()?,
+        ));
     }
     let schema = Arc::new(
         Type::group_type_builder("schema")
@@ -190,7 +192,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         }
     }
 
-    write_parquet(&dir.join("module.parquet"), &[("fqn", Col::Str(module_fqn))])?;
+    write_parquet(
+        &dir.join("module.parquet"),
+        &[("fqn", Col::Str(module_fqn))],
+    )?;
     write_parquet(
         &dir.join("struct.parquet"),
         &[
@@ -293,7 +298,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     }
 
     let rel = |name: &str, from: Vec<String>, to: Vec<String>| -> anyhow::Result<()> {
-        write_parquet(&dir.join(name), &[("from", Col::Str(from)), ("to", Col::Str(to))])
+        write_parquet(
+            &dir.join(name),
+            &[("from", Col::Str(from)), ("to", Col::Str(to))],
+        )
     };
     rel("contains_mod_mod.parquet", c_mm.0, c_mm.1)?;
     rel("contains_mod_file.parquet", c_mfile.0, c_mfile.1)?;
@@ -354,7 +362,10 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         format!(r#"COPY Struct FROM "{}""#, p("struct.parquet")),
         format!(r#"COPY Function FROM "{}""#, p("function.parquet")),
         format!(r#"COPY File FROM "{}""#, p("file.parquet")),
-        format!(r#"COPY UnresolvedTarget FROM "{}""#, p("unresolved.parquet")),
+        format!(
+            r#"COPY UnresolvedTarget FROM "{}""#,
+            p("unresolved.parquet")
+        ),
         format!(
             r#"COPY Contains FROM "{}" (from="Module", to="Module")"#,
             p("contains_mod_mod.parquet")
@@ -410,7 +421,9 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Export {
-    Module { fqn: String },
+    Module {
+        fqn: String,
+    },
     Struct {
         fqn: String,
         path: String,
@@ -435,16 +448,31 @@ enum Export {
         end_line: u32,
         code_type: String,
     },
-    Unresolved { fqn: String, category: String },
-    Contains { from: String, to: String },
-    Calls { from: String, to: String },
-    Uses { from: String, to: String },
+    Unresolved {
+        fqn: String,
+        category: String,
+    },
+    Contains {
+        from: String,
+        to: String,
+    },
+    Calls {
+        from: String,
+        to: String,
+    },
+    Uses {
+        from: String,
+        to: String,
+    },
     UnresolvedCall {
         from: String,
         to: String,
         target_type: String,
     },
-    UnresolvedUse { from: String, to: String },
+    UnresolvedUse {
+        from: String,
+        to: String,
+    },
 }
 
 /// Writes `graph.jsonl`: the final graph re-serialized with canonical FQNs
@@ -568,10 +596,8 @@ mod tests {
             category: cat.map(str::to_string),
             code_type: "src".to_string(),
         };
-        g.nodes.insert(
-            "mod".to_string(),
-            node(NodeKind::Module, None, None),
-        );
+        g.nodes
+            .insert("mod".to_string(), node(NodeKind::Module, None, None));
         g.nodes.insert(
             "/x/a.go".to_string(),
             node(
@@ -618,11 +644,16 @@ mod tests {
             "ext.Foo".to_string(),
             node(NodeKind::UnresolvedTarget, None, Some("external")),
         );
-        g.contains.insert(("mod".to_string(), "/x/a.go".to_string()));
-        g.contains.insert(("/x/a.go".to_string(), "mod.A".to_string()));
-        g.contains.insert(("/x/a.go".to_string(), "mod.A.f".to_string()));
-        g.contains.insert(("mod.A".to_string(), "mod.A.f".to_string()));
-        g.calls.insert(("mod.A.f".to_string(), "mod.A.f".to_string()));
+        g.contains
+            .insert(("mod".to_string(), "/x/a.go".to_string()));
+        g.contains
+            .insert(("/x/a.go".to_string(), "mod.A".to_string()));
+        g.contains
+            .insert(("/x/a.go".to_string(), "mod.A.f".to_string()));
+        g.contains
+            .insert(("mod.A".to_string(), "mod.A.f".to_string()));
+        g.calls
+            .insert(("mod.A.f".to_string(), "mod.A.f".to_string()));
         g.uses.insert(("mod.A.f".to_string(), "mod.A".to_string()));
         g.unresolved_calls
             .insert(("mod.A.f".to_string(), "ext.Foo".to_string(), String::new()));
@@ -659,16 +690,16 @@ mod tests {
             .query("MATCH (s:Struct) WHERE s.fqn = 'mod.A' RETURN s.start, s.`end`, s.start_line, s.end_line")
             .unwrap()
             .to_string();
-        assert!(
-            out.contains("0|50|1|50"),
-            "struct span: {out}"
-        );
+        assert!(out.contains("0|50|1|50"), "struct span: {out}");
 
         let out = conn
             .query("MATCH (t:UnresolvedTarget) RETURN t.fqn, t.category")
             .unwrap()
             .to_string();
-        assert!(out.contains("ext.Foo") && out.contains("external"), "unresolved rows: {out}");
+        assert!(
+            out.contains("ext.Foo") && out.contains("external"),
+            "unresolved rows: {out}"
+        );
 
         // File node table with line columns (fqn == absolute path).
         let out = conn

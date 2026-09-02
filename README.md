@@ -2,7 +2,7 @@
 
 **Program graph scanner + LadybugDB query CLI for opencode.**
 
-`apg` parses a codebase (Go, Java, C++, or Rust), builds a program graph of its
+`apg` parses a codebase (Go, Java, C++, Rust, or C#), builds a program graph of its
 types, functions, and call/use relationships, and stores it in a LadybugDB
 graph database that you can query with Cypher from inside opencode.
 
@@ -13,9 +13,9 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
 ## Features
 
 - **Per-language scanner frontends** installed separately via brew — install
-  only the languages you scan (Go, Java, C++, Rust).
-- **Exact edges for Go, Java, and Rust** — call resolution uses the compiler's
-  (or rust-analyzer's) type checker; C++ is heuristic (tree-sitter), and
+  only the languages you scan (Go, Java, C++, Rust, C#).
+- **Exact edges for Go, Java, Rust, and C#** — call resolution uses the compiler's
+  (javac, go/types, Roslyn, or rust-analyzer's) type checker; C++ is heuristic (tree-sitter), and
   unresolvable refs become `UnresolvedTarget` nodes rather than guessed FQNs.
 - **Everything is included** — tests, generated, and vendored code are scanned;
   filter by `code_type` (`src`, `test`, `generated`, `external`) in queries.
@@ -51,7 +51,8 @@ brew install antz29/apg/scanner \
              antz29/apg/apg-go \
              antz29/apg/apg-java \
              antz29/apg/apg-cpp \
-             antz29/apg/apg-rust
+             antz29/apg/apg-rust \
+             antz29/apg/apg-csharp
 ```
 
 Install only the frontends you need:
@@ -86,7 +87,7 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 
 The installer fetches the latest release, verifies the tarball's sha256
 against the `sha256sums.txt` published with it, and installs the `apg` binary
-plus all four scanner frontends (Go, Java, C++, Rust) — no separate frontend
+plus all five scanner frontends (Go, Java, C++, Rust, C#) — no separate frontend
 install needed, unlike the split brew formulae.
 
 Options: `--version 0.6.2` to pin a specific release, `--prefix DIR` to choose
