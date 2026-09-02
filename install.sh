@@ -64,7 +64,7 @@ Components:
 Options:
   --frontends L,L Comma-separated frontends to install (e.g. --frontends go,rust)
   --all           Install core scanner and all frontends
-  --version V     Install a specific release tag, e.g. --version 0.7.0
+  --version V     Install a specific release tag, e.g. --version 0.7.1
   --user          Install under ~/.local (no root required)
   --prefix DIR    Install under DIR instead of /usr/local
   --uninstall     Remove specified components (or entire install if none specified)

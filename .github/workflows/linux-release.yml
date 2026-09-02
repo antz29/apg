@@ -29,6 +29,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
 
       - name: Install build deps
         run: |
@@ -36,9 +39,9 @@ jobs:
           # lbug's build.rs uses pkg-config to find OpenSSL and links
           # libssl/libcrypto dynamically; javac is needed for the Java
           # frontend; node/npm for the TypeScript frontend (build.rs runs
-          # `npm ci` in src/tslib); dotnet-sdk-9.0 for the C# frontend.
+          # `npm ci` in src/tslib); dotnet is installed via setup-dotnet above.
           # go + gcc/g++ are preinstalled on the runners.
-          sudo apt-get install -y pkg-config libssl-dev default-jdk-headless nodejs npm dotnet-sdk-9.0
+          sudo apt-get install -y pkg-config libssl-dev default-jdk-headless nodejs npm
 
       - name: Resolve lbug version from Cargo.lock
         id: lbug
