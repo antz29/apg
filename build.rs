@@ -11,7 +11,7 @@ fn build_frontends() -> Vec<String> {
         Ok(v) if v.is_empty() => vec![],
         Ok(v) if v == "0" || v == "none" || v == "false" => vec![],
         Ok(v) => v.split(',').map(|s| s.trim().to_string()).collect(),
-        Err(_) => vec!["go".into(), "java".into(), "cpp".into(), "rust".into()],
+        Err(_) => vec!["go".into(), "java".into(), "cpp".into(), "rust".into(), "ts".into()],
     }
 }
 
@@ -25,6 +25,9 @@ fn main() {
     println!("cargo:rerun-if-changed=src/cpplib/main.cpp");
     println!("cargo:rerun-if-changed=src/rustlib/Cargo.toml");
     println!("cargo:rerun-if-changed=src/rustlib/src/main.rs");
+    println!("cargo:rerun-if-changed=src/tslib/package.json");
+    println!("cargo:rerun-if-changed=src/tslib/package-lock.json");
+    println!("cargo:rerun-if-changed=src/tslib/scanner.mjs");
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let frontends = build_frontends();
@@ -159,6 +162,36 @@ fn main() {
             println!("cargo:rustc-env=APG_FRONTEND_RUST={}", rustfrontend.display());
             let _ = std::fs::copy(&rustfrontend, stage_dir.join("rustfrontend"));
             languages.push("rust".into());
+        }
+    }
+
+    // --- TypeScript frontend (Node + official TypeScript compiler) ---
+    if enabled(&frontends, "ts") {
+        // npm ci (with the committed package-lock) installs typescript into
+        // src/tslib/node_modules. Skipped when already installed so repeated
+        // builds don't re-fetch. The staged frontend is the scanner script +
+        // its node_modules, run via `node <dir>/scanner.mjs`.
+        let tslib = Path::new("src/tslib");
+        let ts_dep = tslib.join("node_modules").join("typescript").join("package.json");
+        let ts_ok = if ts_dep.is_file() {
+            true
+        } else {
+            Command::new("npm")
+                .args(["ci", "--no-audit", "--no-fund"])
+                .current_dir(tslib)
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        if ts_ok {
+            let stage_ts = stage_dir.join("tsfrontend");
+            std::fs::create_dir_all(&stage_ts).ok();
+            copy_dir(&tslib.join("node_modules"), &stage_ts.join("node_modules"));
+            let _ = std::fs::copy(tslib.join("scanner.mjs"), stage_ts.join("scanner.mjs"));
+            println!(
+                "cargo:rustc-env=APG_FRONTEND_TS={}",
+                stage_ts.join("scanner.mjs").display()
+            );
+            languages.push("ts".into());
         }
     }
 

@@ -30,13 +30,17 @@ struct Decl {
 
 // ── Global id state (SPEC §3) ────────────────────────────────────────
 //
-// nextId is the monotonic opaque-id counter. structID/funcID map canonical
-// keys to ids: structs by FQN, functions by `parent.name(params)` (so
-// overloads stay distinct). funcIDByFqn maps the plain FQN to the first id
-// for that name, used to resolve heuristic call targets.
+// nextId is the monotonic opaque-id counter. idPrefix (`--id-prefix`, default
+// "n") keeps ids unique across frontends when a scan merges multiple
+// languages, so `n1` from C++ and `n1` from another frontend never collide.
+// structID/funcID map canonical keys to ids: structs by FQN, functions by
+// `parent.name(params)` (so overloads stay distinct). funcIDByFqn maps the
+// plain FQN to the first id for that name, used to resolve heuristic call
+// targets.
 static int nextId = 0;
+static std::string idPrefix = "n";
 static std::string newNodeID() {
-    return "n" + std::to_string(++nextId);
+    return idPrefix + std::to_string(++nextId);
 }
 static std::unordered_map<std::string, std::string> structID;
 static std::unordered_map<std::string, std::string> funcID;
@@ -1097,12 +1101,15 @@ int main(int argc, char **argv) {
 
     fs::path root = fs::absolute(argv[1]);
 
-    // Parse --module <dir> pairs; remaining args are excludes.
+    // Parse --module <dir> pairs and --id-prefix; remaining args are excludes.
     std::vector<std::string> module_dirs;
     std::vector<std::string> excludes;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--module") == 0 && i + 1 < argc) {
             module_dirs.push_back(argv[i + 1]);
+            i++;
+        } else if (strcmp(argv[i], "--id-prefix") == 0 && i + 1 < argc) {
+            idPrefix = argv[i + 1];
             i++;
         } else {
             excludes.push_back(argv[i]);

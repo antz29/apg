@@ -3,9 +3,11 @@ use crate::graph::{Graph, NodeKind};
 
 pub struct CleanupOptions {
     pub user_excludes: Vec<String>,
-    /// Language of the scan. Span validation is Java-only: Go methods are
-    /// declared outside the struct body (receiver-based), so their spans
-    /// legitimately fall outside the struct's span.
+    /// Language of the scan. Span validation is Java- and TS-only: their
+    /// methods are declared inside the class/interface body. Go methods are
+    /// declared outside the struct body (receiver-based), so the check would
+    /// wrongly drop them. A multi-language scan passes a non-matching value
+    /// (e.g. "go,ts") to disable the per-language safety net.
     pub language: String,
 }
 
@@ -64,10 +66,11 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
         .retain(|(a, b)| is_removed(a) && is_removed(b));
 
     // Containment span validation: a Struct may only contain Functions whose
-    // start offset falls inside the struct's span. Java-only — Go methods are
-    // declared outside the struct body, so the check would wrongly drop them.
+    // start offset falls inside the struct's span. Java- and TS-only — Go
+    // methods are declared outside the struct body, so the check would wrongly
+    // drop them.
     let mut span_violations = 0usize;
-    if opts.language == "java" {
+    if opts.language == "java" || opts.language == "ts" {
         graph.contains.retain(|(a, b)| {
             let Some(na) = graph.nodes.get(a) else { return false };
             let Some(nb) = graph.nodes.get(b) else { return false };

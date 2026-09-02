@@ -1,0 +1,9 @@
+{
+  "name": "apg-tsfrontend",
+  "private": true,
+  "type": "module",
+  "description": "apg TypeScript scanner frontend (exact tier: official TypeScript compiler API)",
+  "dependencies": {
+    "typescript": "5.9.3"
+  }
+}

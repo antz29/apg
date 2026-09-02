@@ -2,7 +2,7 @@
 
 **Program graph scanner + LadybugDB query CLI for opencode.**
 
-`apg` parses a codebase (Go, Java, C++, or Rust), builds a program graph of its
+`apg` parses a codebase (Go, Java, C++, Rust, or TypeScript), builds a program graph of its
 types, functions, and call/use relationships, and stores it in a LadybugDB
 graph database that you can query with Cypher from inside opencode.
 
@@ -13,10 +13,14 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
 ## Features
 
 - **Per-language scanner frontends** installed separately via brew — install
-  only the languages you scan (Go, Java, C++, Rust).
-- **Exact edges for Go, Java, and Rust** — call resolution uses the compiler's
-  (or rust-analyzer's) type checker; C++ is heuristic (tree-sitter), and
-  unresolvable refs become `UnresolvedTarget` nodes rather than guessed FQNs.
+  only the languages you scan (Go, Java, C++, Rust, TypeScript).
+- **Exact edges for Go, Java, Rust, and TypeScript** — call resolution uses the
+  compiler's (or rust-analyzer's, or the official TypeScript compiler's) type
+  checker; C++ is heuristic (tree-sitter), and unresolvable refs become
+  `UnresolvedTarget` nodes rather than guessed FQNs.
+- **Multi-language codebases in one graph** — `apg scan` auto-detects every
+  language present and merges their graphs into a single `.apg/db.lbug` (a Go
+  backend + TS frontend repo is one database, not two).
 - **Everything is included** — tests, generated, and vendored code are scanned;
   filter by `code_type` (`src`, `test`, `generated`, `external`) in queries.
 - **`apg init`** installs an opencode tool suite (find symbols, list methods,
@@ -42,6 +46,9 @@ Homebrew falls back to building from source. Java projects additionally need
 `java` on your PATH at scan time (see [below](#java-projects)); Rust projects
 need a valid Cargo manifest (unlike C++, which tolerates bare directories), and
 the `apg-rust` formula builds the frontend with the current stable toolchain.
+TypeScript projects need `node` on your PATH at scan time (the `apg-ts`
+frontend runs the official TypeScript compiler); a repo's `node_modules` is
+always skipped, and workspace-package imports resolve even before `npm install`.
 
 ## Install (Homebrew)
 
@@ -86,8 +93,9 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 
 The installer fetches the latest release, verifies the tarball's sha256
 against the `sha256sums.txt` published with it, and installs the `apg` binary
-plus all four scanner frontends (Go, Java, C++, Rust) — no separate frontend
-install needed, unlike the split brew formulae.
+plus the scanner frontends (Go, Java, C++, Rust; TypeScript once packaged in
+the release tarball) — no separate frontend install needed, unlike the split
+brew formulae.
 
 Options: `--version 0.6.2` to pin a specific release, `--prefix DIR` to choose
 an install location, `--force` to overwrite an existing install, `--uninstall`
@@ -137,13 +145,15 @@ the tools and `codebase-navigator` agent are available in chat.
 ### 2. `apg scan [dir] [options]`
 
 Runs the scanner + ingestor for the project in `dir` (default: current
-directory). Language is auto-detected from the source files.
+directory). Language is auto-detected from the source files — **every language
+present** in a multi-language repo is scanned and merged into one graph.
 
 ```
 apg scan
 apg scan --language go /path/to/project
+apg scan --language go,ts /path/to/project   # mixed repo, one graph
 apg scan --exclude-path "**/*_test.go" --exclude-path "vendor/**"
-apg scan --module dir1 --module dir2     # Go/C++/Rust monorepos
+apg scan --module dir1 --module dir2     # Go/C++/Rust/TS monorepos
 apg scan --no-build-scripts              # Rust only: skip build scripts + proc-macro server
 apg scan . example.com/pkg other.prefix  # blacklist FQN prefixes (after the dir)
 ```
@@ -226,11 +236,16 @@ FQN convention: `parent.name` for structs and unique functions;
 `parent.name(T1,T2)` for overloads; Go `init` → `parent.init#<file.go>`. Rust
 impl methods hang under their self type (`crate.Type.method`), trait
 declarations and default methods under the trait; `Uses` edges record
-`impl Trait for Type` relationships (`Type → Trait`).
+`impl Trait for Type` relationships (`Type → Trait`). TypeScript FQNs are
+npm-package + file-path-prefixed: a class `Button` in `src/components/Button.tsx`
+of package `@co/ui` is `@co/ui.src.components.Button.Button`, and its method
+`onClick` is `@co/ui.src.components.Button.Button.onClick` (each ES module file
+is its own namespace, so same-named symbols in different files never collide).
 
 `start`/`end` are **0-based byte offsets**; `start_line`/`end_line` are
 **1-based inclusive line numbers**; `path` is absolute under the project
-directory.
+directory. (Java and TypeScript scanners report `start`/`end` as UTF-16 code-unit
+offsets, matching their compilers' native positions.)
 
 ## Configuration
 
@@ -268,10 +283,12 @@ brew link --force openjdk
 
 ## Building from source
 
-Requires: Rust, `gcc`/`g++`, Go, and `javac` (to build the frontends), plus
+Requires: Rust, `gcc`/`g++`, Go, `javac` (to build the frontends), plus
 `cmake` and `openssl` for the bundled LadybugDB. The Rust frontend additionally
 needs a current stable Rust toolchain (rust-analyzer tracks the newest stable)
-and network at build time to fetch the pinned rust-analyzer crates.
+and network at build time to fetch the pinned rust-analyzer crates; the
+TypeScript frontend needs `node`/`npm` at build time (`build.rs` runs `npm ci`
+in `src/tslib`).
 
 ```sh
 git clone git@github.com:antz29/apg.git
@@ -284,7 +301,7 @@ cargo build --release
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 `APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
-allowlist: `go`, `java`, `cpp`, `rust`; `0` to skip all) to limit what
+allowlist: `go`, `java`, `cpp`, `rust`, `ts`; `0` to skip all) to limit what
 build.rs compiles — the split brew formulae rely on this.
 
 Run the test suite with `cargo test`.
@@ -300,6 +317,7 @@ src/golib/         Go scanner
 src/javalib/       Java scanner (javac)
 src/cpplib/        C++ scanner (tree-sitter)
 src/rustlib/       Rust scanner (rust-analyzer engine; separate Cargo project)
+src/tslib/         TypeScript scanner (official TypeScript compiler, Node)
 install.sh         curl | sh installer for Linux (prebuilt release tarballs)
 Formula/scanner.rb    apg binary (ingestor + query CLI)
 Formula/apg-go.rb     Go scanner frontend

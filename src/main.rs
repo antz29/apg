@@ -163,6 +163,9 @@ fn available_languages() -> Vec<String> {
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
         }
+        if dir.join("tsfrontend").is_dir() {
+            langs.push("ts".into());
+        }
         if !langs.is_empty() {
             return langs;
         }
@@ -197,6 +200,12 @@ fn frontend_cmd(language: &str) -> Option<String> {
                     classes.display()
                 ));
             }
+            "ts" if dir.join("tsfrontend").is_dir() => {
+                return Some(format!(
+                    "node {}",
+                    dir.join("tsfrontend").join("scanner.mjs").display()
+                ));
+            }
             _ => {}
         }
     }
@@ -205,6 +214,7 @@ fn frontend_cmd(language: &str) -> Option<String> {
         "go" => option_env!("APG_FRONTEND_GO"),
         "rust" => option_env!("APG_FRONTEND_RUST"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
+        "ts" => option_env!("APG_FRONTEND_TS"),
         _ => None,
     };
     baked.map(|s| s.to_string())
@@ -238,20 +248,39 @@ fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32) -> bool {
     false
 }
 
-fn auto_detect_language(dir: &std::path::Path, available: &[String]) -> Option<String> {
+/// Detects every language present under `dir` (in canonical order), restricted
+/// to installed frontends. A multi-language repo returns several entries; a
+/// scan then runs each frontend and merges their graphs.
+fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec<String> {
     let candidates: Vec<(&str, &[&str])> = vec![
         ("java", &[".java"] as &[&str]),
         ("go", &[".go"]),
         ("cpp", &[".cpp", ".cc", ".cxx", ".hpp", ".h", ".hh"]),
         ("rust", &[".rs"]),
+        ("ts", &[".ts", ".tsx", ".mts", ".cts"]),
     ];
-
+    let mut out = Vec::new();
     for (lang, exts) in &candidates {
         if available.iter().any(|l| l == lang) && has_extension(dir, exts, 5) {
-            return Some(lang.to_string());
+            out.push(lang.to_string());
         }
     }
-    None
+    out
+}
+
+/// Short, language-specific opaque-id prefix (`--id-prefix`) so ids stay
+/// globally unique when a scan merges multiple frontend streams (each starts
+/// its counter at `n1`). Single-language scans pass no prefix; the frontends
+/// default to `n`.
+fn id_prefix_for(language: &str) -> &'static str {
+    match language {
+        "go" => "g",
+        "java" => "j",
+        "cpp" => "c",
+        "rust" => "r",
+        "ts" => "t",
+        _ => "x",
+    }
 }
 
 fn temp_dir() -> PathBuf {
@@ -279,10 +308,12 @@ USAGE:
   apg --help                  Show this help
 
 SCAN OPTIONS:
-  --language <java|go|cpp|rust>  Scanner language (auto-detected if omitted)
+  --language <lang>            Scanner language(s): java, go, cpp, rust, ts
+                               (comma-separated or repeated; auto-detected for
+                               every language present if omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
-  --module <dir>              Restrict scanning to a module (Go/C++/Rust,
-                              repeatable)
+  --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS,
+                               repeatable)
   --no-build-scripts          Rust only: skip cargo build scripts and the
                               proc-macro server (hermetic scans)
   <blacklist...>              FQN prefixes to exclude from the graph"
@@ -607,9 +638,14 @@ fn find_or_create_apg_dir(dir: &Path) -> PathBuf {
 
 /// `apg scan [dir] [options] [blacklist...]`: run the scanner + ingestor
 /// pipeline and write `db.lbug`, `graph.jsonl`, and `apg-frontend.log` into
-/// the project's `.apg` directory.
+/// the project's `.apg` directory. A repo may mix languages: auto-detection
+/// (or `--language a,b`) runs every frontend present and merges their graphs
+/// into one database. Opaque ids are namespaced per language
+/// (`--id-prefix`), and a `lang_switch` record before each stream tells the
+/// ingestor which language the following records came from (for code_type
+/// classification and FQN rendering).
 fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
-    let mut language: Option<String> = None;
+    let mut language_args: Vec<String> = Vec::new();
     let mut path_excludes: Vec<String> = Vec::new();
     let mut module_dirs: Vec<String> = Vec::new();
     let mut no_build_scripts = false;
@@ -620,7 +656,12 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             "--language" | "-l" => {
                 i += 1;
                 if i < args.len() {
-                    language = Some(args[i].clone());
+                    for l in args[i].split(',') {
+                        let l = l.trim();
+                        if !l.is_empty() {
+                            language_args.push(l.to_string());
+                        }
+                    }
                 }
             }
             "--exclude-path" => {
@@ -666,17 +707,25 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         );
     }
 
-    let language = language.unwrap_or_else(|| {
-        auto_detect_language(&project_dir, &available).unwrap_or_else(|| available[0].clone())
-    });
-
-    if !available.iter().any(|l| l == &language) {
-        panic!(
-            "Language '{language}' is not available. Installed frontends: {}. Install it via brew (e.g. `brew install antz29/apg/apg-{language}`).",
-            available.join(", ")
-        );
-    }
-    log.ln(&format!("Language: {language}"));
+    let languages: Vec<String> = if !language_args.is_empty() {
+        for l in &language_args {
+            if !available.iter().any(|a| a == l) {
+                panic!(
+                    "Language '{l}' is not available. Installed frontends: {}. Install it via brew (e.g. `brew install antz29/apg/apg-{l}`).",
+                    available.join(", ")
+                );
+            }
+        }
+        language_args
+    } else {
+        let detected = auto_detect_languages(&project_dir, &available);
+        if detected.is_empty() {
+            available.clone()
+        } else {
+            detected
+        }
+    };
+    log.ln(&format!("Languages: {}", languages.join(", ")));
 
     if !blacklist.is_empty() {
         log.ln(&format!("Blacklist: {:?}", blacklist));
@@ -685,98 +734,109 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         log.ln(&format!("Path excludes: {:?}", path_excludes));
     }
 
-    let cmd = frontend_cmd(&language).unwrap_or_else(|| {
-        panic!("frontend for language '{language}' is not installed");
-    });
     let config = classify::ApgConfig::load(&project_dir);
 
-    // The scanner's stderr (progress + javac diagnostics) goes to the log file
-    // so its streaming output never floods the terminal.
-    let frontend_err = Stdio::from(log.f.try_clone().expect("clone log file"));
+    // The scanners' stderr (progress + compiler diagnostics) goes to the log
+    // file so their streaming output never floods the terminal.
+    let frontend_err = |log: &mut Log| Stdio::from(log.f.try_clone().expect("clone log file"));
     log.ln("Frontend progress -> apg-frontend.log");
 
-    if language == "cpp" || language == "go" || language == "rust" {
-        let mut cmd = Command::new(&cmd);
-        cmd.arg(project_dir.display().to_string());
+    // Drain each frontend's stdout to a temp file (spooled to disk, never
+    // buffered in memory), then ingest the merged streams. Running them
+    // sequentially avoids pipe-backpressure deadlock and matches the old
+    // single-frontend behavior.
+    let tmp = temp_dir();
+    std::fs::create_dir_all(&tmp).unwrap();
+    let multi = languages.len() > 1;
+    let mut spools: Vec<(String, PathBuf)> = Vec::new();
+    for lang in &languages {
+        let cmd = frontend_cmd(lang).unwrap_or_else(|| {
+            panic!("frontend for language '{lang}' is not installed");
+        });
+        let spool = tmp.join(format!("{lang}.jsonl"));
+        let spool_file = std::fs::File::create(&spool).unwrap();
+        // `cmd` is a full command line (e.g. "node /path/scanner.mjs" or the
+        // java wrapper); split it into argv so every frontend spawns the same
+        // way.
+        let mut parts = cmd.split_whitespace();
+        let prog = parts.next().expect("empty frontend command");
+        let mut child = Command::new(prog);
+        child
+            .args(parts)
+            .arg(project_dir.display().to_string());
         for m in &module_dirs {
-            cmd.arg("--module").arg(m);
+            child.arg("--module").arg(m);
         }
-        if language == "rust" && no_build_scripts {
-            cmd.arg("--no-build-scripts");
+        if *lang == "rust" && no_build_scripts {
+            child.arg("--no-build-scripts");
         }
-        cmd.args(&path_excludes)
+        if multi {
+            child.arg("--id-prefix").arg(id_prefix_for(lang));
+        }
+        child
+            .args(&path_excludes)
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(frontend_err);
-        let mut frontend_output = cmd.spawn().expect("Failed to run frontend");
-
-        process(
-            &mut frontend_output,
-            &blacklist,
-            &path_excludes,
-            &language,
-            config.as_ref(),
-            &mut log,
-        );
-
-        log.ln(&format!("[load] waiting on {language} frontend..."));
+            .stdout(Stdio::from(spool_file.try_clone().unwrap()))
+            .stderr(frontend_err(&mut log));
+        log.ln(&format!("[scan] running {lang} frontend..."));
+        let mut frontend_output = child.spawn().expect("Failed to run frontend");
         if !frontend_output
             .wait()
             .expect("couldn't wait for frontend")
             .success()
         {
-            panic!("{language} frontend failed");
+            panic!("{lang} frontend failed");
         }
-        log.ln("[load] frontend exited");
-    } else {
-        let mut args = vec![project_dir.display().to_string()];
-        for m in &module_dirs {
-            args.push("--module".to_string());
-            args.push(m.clone());
-        }
-        for pat in &path_excludes {
-            args.push(pat.clone());
-        }
-        // `cmd` is the full "java -Xmx5g -cp ... CallGraphBuilder" string;
-        // spawn it directly with argv (no `sh -c` wrapper) exactly like the
-        // Go/C++ frontends.
-        let mut parts = cmd.split_whitespace();
-        let prog = parts.next().expect("empty java frontend command");
-        let mut frontend_output = Command::new(prog)
-            .args(parts)
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(frontend_err)
-            .spawn()
-            .expect("Failed to run Java frontend");
-
-        process(
-            &mut frontend_output,
-            &blacklist,
-            &path_excludes,
-            &language,
-            config.as_ref(),
-            &mut log,
-        );
-
-        log.ln("[load] waiting on Java frontend...");
-        if !frontend_output
-            .wait()
-            .expect("couldn't wait for Java frontend")
-            .success()
-        {
-            panic!("java frontend failed");
-        }
-        log.ln("[load] java frontend exited");
+        log.ln(&format!("[scan] {lang} frontend exited"));
+        spools.push((lang.clone(), spool));
     }
+
+    // Merge the streams into one record iterator, with a `lang_switch` record
+    // before each language's records so the ingestor classifies and renders
+    // each under the right language.
+    let iterators: Vec<Box<dyn Iterator<Item = schema::Record>>> = spools
+        .into_iter()
+        .map(|(lang, spool)| {
+            let lines =
+                BufReader::new(std::fs::File::open(&spool).unwrap()).lines();
+            let records = lines.map(|x| {
+                let line = x.expect("io error");
+                serde_json::from_str::<schema::Record>(&line)
+                    .unwrap_or_else(|e| panic!("bad json {e}: {line}"))
+            });
+            Box::new(
+                std::iter::once(schema::Record::LangSwitch { language: lang }).chain(records),
+            ) as Box<dyn Iterator<Item = schema::Record>>
+        })
+        .collect();
+    let records = iterators.into_iter().flatten();
+
+    // Cleanup span validation is per-language: keep the single-language value,
+    // and disable it (by joining) for mixed scans where the check cannot be
+    // attributed per node.
+    let cleanup_language = if languages.len() == 1 {
+        languages[0].clone()
+    } else {
+        languages.join(",")
+    };
+
+    run_pipeline(
+        records,
+        &blacklist,
+        &path_excludes,
+        &cleanup_language,
+        config.as_ref(),
+        &mut log,
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+    log.ln("[scan] spool temp dir removed");
     Ok(())
 }
 
-/// Consumes the scanner's unified-JSONL stdout, ingests it, and loads
-/// `db.lbug` + `graph.jsonl` (SPEC §6).
-fn process(
-    frontend_output: &mut std::process::Child,
+/// Consumes the merged scanner JSONL stream, ingests it, and loads `db.lbug` +
+/// `graph.jsonl` (SPEC §6).
+fn run_pipeline(
+    records: impl IntoIterator<Item = schema::Record>,
     blacklist: &[String],
     path_excludes: &[String],
     language: &str,
@@ -784,15 +844,9 @@ fn process(
     log: &mut Log,
 ) {
     let (mut graph, report) = {
-        // Stream the scanner's JSONL straight into the ingestor (which inserts
+        // Stream the scanner JSONL straight into the ingestor (which inserts
         // nodes as they arrive and spools edges to disk) rather than buffering
         // every record in memory (SPEC §6).
-        let lines = BufReader::new(frontend_output.stdout.as_mut().unwrap()).lines();
-        let records = lines.map(|x| {
-            let line = x.expect("io error");
-            serde_json::from_str::<schema::Record>(&line)
-                .unwrap_or_else(|e| panic!("bad json {e}: {line}"))
-        });
         ingest::ingest(records, &ingest::IngestOptions {
             blacklist,
             language,

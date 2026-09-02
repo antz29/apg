@@ -15,7 +15,7 @@ function findProjectRoot(context: { directory: string; worktree: string }): stri
 
 export default tool({
   description:
-    "Rebuild the project's LadybugDB graph database (.apg/db.lbug + .apg/graph.jsonl) by running the apg scanner + ingestor pipeline (Java, Go, or C++). Run this when source files have changed and the graph is stale.",
+    "Rebuild the project's LadybugDB graph database (.apg/db.lbug + .apg/graph.jsonl) by running the apg scanner + ingestor pipeline. Run this when source files have changed and the graph is stale.",
   args: {
     directory: tool.schema
       .string()
@@ -24,7 +24,7 @@ export default tool({
     language: tool.schema
       .string()
       .optional()
-      .describe("Language to scan: java, go, or cpp. Auto-detected if omitted."),
+      .describe("Language(s) to scan: java, go, cpp, rust, or ts. Comma-separated for a multi-language repo (e.g. \"go,ts\"); auto-detected for every language present if omitted."),
     blacklist: tool.schema
       .string()
       .optional()

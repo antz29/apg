@@ -138,6 +138,25 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "src"
         }
+        "ts" => {
+            if filename_lower.ends_with("_test.ts")
+                || filename_lower.ends_with("_test.tsx")
+                || filename_lower.ends_with(".test.ts")
+                || filename_lower.ends_with(".test.tsx")
+                || filename_lower.ends_with(".spec.ts")
+                || filename_lower.ends_with(".spec.tsx")
+                || has_seg(&["test", "tests", "__tests__"])
+            {
+                return "test";
+            }
+            if has_seg(&["gen", "generated", "dist", "build", "out"]) {
+                return "generated";
+            }
+            if has_seg(&["vendor"]) {
+                return "external";
+            }
+            "src"
+        }
         _ => "src",
     }
 }

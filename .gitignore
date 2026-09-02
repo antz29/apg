@@ -1,5 +1,6 @@
 /target
 /src/rustlib/target
+/src/tslib/node_modules
 /testdata/rust/fixture/target
 /project*
 *.lbug

@@ -51,6 +51,9 @@ struct FuncDecl {
     end: u32,
     start_line: u32,
     end_line: u32,
+    /// Language this declaration was scanned under (a `lang_switch` record may
+    /// set it mid-stream when a scan covers multiple languages).
+    language: String,
 }
 
 fn is_blacklisted(fqn: &str, blacklist: &[String]) -> bool {
@@ -82,8 +85,10 @@ fn claim(seen: &mut HashMap<String, (String, NodeKind)>, id: &str, fqn: &str, ki
 /// Declarations are grouped by `(parent, name)`: a singleton group renders
 /// `parent.name`, an overloaded group renders `parent.name(T1,T2,...)` for every
 /// member. Go `init` functions carry no signature, so each is rendered
-/// `parent.init#<file-basename>` instead.
-fn render_function_fqns(decls: &[FuncDecl], language: &str) -> Vec<(String, String)> {
+/// `parent.init#<file-basename>` instead. The per-declaration language drives
+/// the Go `init` special case (multi-language scans mix languages in one
+/// buffer).
+fn render_function_fqns(decls: &[FuncDecl]) -> Vec<(String, String)> {
     let mut groups: HashMap<(&str, &str), Vec<usize>> = HashMap::new();
     for (i, d) in decls.iter().enumerate() {
         groups
@@ -94,7 +99,7 @@ fn render_function_fqns(decls: &[FuncDecl], language: &str) -> Vec<(String, Stri
 
     let mut out = Vec::with_capacity(decls.len());
     for ((parent, name), idxs) in groups {
-        if language == "go" && name == "init" {
+        if name == "init" && idxs.iter().any(|&i| decls[i].language == "go") {
             for i in idxs {
                 out.push((
                     decls[i].id.clone(),
@@ -144,6 +149,11 @@ pub fn ingest(
     // can't represent both. Modules are inserted only after every struct and
     // function FQN is claimed, so a colliding module yields to the type.
     let mut modules: Vec<String> = Vec::new();
+    // Current language: starts at the scan's language and switches when a
+    // `lang_switch` record (injected by `apg scan` between frontend streams of
+    // a multi-language scan) appears. Drives code_type classification and FQN
+    // rendering per record.
+    let mut lang: String = opts.language.to_string();
 
     // Stream the records in one pass: modules, structs, and unresolved targets
     // have deterministic FQNs and enter the graph immediately; functions are
@@ -191,7 +201,7 @@ pub fn ingest(
                         skipped += 1;
                         continue;
                     }
-                    let code_type = classify_code_type(&path, &fqn, opts.language, opts.config);
+                    let code_type = classify_code_type(&path, &fqn, &lang, opts.config);
                     insert_node(
                         &mut graph,
                         fqn,
@@ -231,6 +241,7 @@ pub fn ingest(
                     end,
                     start_line,
                     end_line,
+                    language: lang.clone(),
                 }),
                 Record::File {
                     path,
@@ -246,7 +257,7 @@ pub fn ingest(
                     }
                     if !files.contains_key(&path) {
                         files.insert(path.clone(), parent.clone());
-                        let code_type = classify_code_type(&path, &path, opts.language, opts.config);
+                        let code_type = classify_code_type(&path, &path, &lang, opts.config);
                         graph.nodes.insert(
                             path.clone(),
                             Node {
@@ -272,6 +283,9 @@ pub fn ingest(
                         code_type: String::new(),
                     });
                 }
+                Record::LangSwitch { language } => {
+                    lang = language;
+                }
                 edge => write_edge(&mut sw, edge),
             }
         }
@@ -284,7 +298,7 @@ pub fn ingest(
     // flat FQN space can't hold both. The struct wins; the function is dropped
     // and its edges pruned as dangling. Function-vs-function still panics (a
     // genuine duplicate declaration is a scanner bug).
-    for (id, fqn) in render_function_fqns(&funcs, opts.language) {
+    for (id, fqn) in render_function_fqns(&funcs) {
         match seen.get(&fqn) {
             None => {
                 seen.insert(fqn.clone(), (id.clone(), NodeKind::Function));
@@ -306,7 +320,7 @@ pub fn ingest(
             skipped += 1;
             continue;
         }
-        let code_type = classify_code_type(&f.path, &fqn, opts.language, opts.config);
+        let code_type = classify_code_type(&f.path, &fqn, &f.language, opts.config);
         insert_node(
             &mut graph,
             fqn,
@@ -581,6 +595,7 @@ mod tests {
             end: 1,
             start_line: 1,
             end_line: 1,
+            language: "go".to_string(),
         }
     }
 
@@ -631,14 +646,14 @@ mod tests {
         }
     }
 
-    fn fqns(decls: &[FuncDecl], language: &str) -> HashMap<String, String> {
-        render_function_fqns(decls, language).into_iter().collect()
+    fn fqns(decls: &[FuncDecl]) -> HashMap<String, String> {
+        render_function_fqns(decls).into_iter().collect()
     }
 
     #[test]
     fn unique_function_keeps_simple_name() {
         let decls = [fd("n1", "pkg", "foo", &[], "/x/a.go")];
-        let m = fqns(&decls, "go");
+        let m = fqns(&decls);
         assert_eq!(m["n1"], "pkg.foo");
     }
 
@@ -648,7 +663,7 @@ mod tests {
             fd("n1", "pkg.C", "foo", &["int"], "/x/a.go"),
             fd("n2", "pkg.C", "foo", &["java.lang.String"], "/x/a.go"),
         ];
-        let m = fqns(&decls, "go");
+        let m = fqns(&decls);
         assert_eq!(m["n1"], "pkg.C.foo(int)");
         assert_eq!(m["n2"], "pkg.C.foo(java.lang.String)");
     }
@@ -659,7 +674,7 @@ mod tests {
             fd("n1", "pkg", "init", &[], "/x/a.go"),
             fd("n2", "pkg", "init", &[], "/x/b.go"),
         ];
-        let m = fqns(&decls, "go");
+        let m = fqns(&decls);
         assert_eq!(m["n1"], "pkg.init#a.go");
         assert_eq!(m["n2"], "pkg.init#b.go");
     }
@@ -670,7 +685,7 @@ mod tests {
             fd("n1", "pkg.C", "foo", &[], "/x/a.go"),
             fd("n2", "pkg.C", "foo", &["int"], "/x/a.go"),
         ];
-        let m = fqns(&decls, "go");
+        let m = fqns(&decls);
         assert_eq!(m["n1"], "pkg.C.foo()");
         assert_eq!(m["n2"], "pkg.C.foo(int)");
     }
@@ -906,6 +921,76 @@ mod tests {
             out.push(e);
         }
         assert_eq!(out, edges);
+    }
+
+    #[test]
+    fn lang_switch_classifies_and_renders_per_record() {
+        // A multi-language scan merges several frontend streams, each preceded
+        // by a `lang_switch` record. code_type classification uses each
+        // record's language (ts test rules vs go test rules), and Go `init`
+        // disambiguation applies only to Go declarations.
+        let records = vec![
+            Record::LangSwitch {
+                language: "go".to_string(),
+            },
+            Record::Module {
+                fqn: "github.com/x/y".to_string(),
+            },
+            srec("g1", "github.com/x/y", "Store", "/abs/store.go"),
+            Record::Function {
+                id: "g2".to_string(),
+                parent: "github.com/x/y".to_string(),
+                name: "init".to_string(),
+                params: vec![],
+                file: "/abs/store.go".to_string(),
+                path: "/abs/store.go".to_string(),
+                start: 1,
+                end: 5,
+                start_line: 1,
+                end_line: 5,
+            },
+            file_rec("/abs/store.go", "github.com/x/y", 100),
+            Record::LangSwitch {
+                language: "ts".to_string(),
+            },
+            Record::Module {
+                fqn: "@co/ui".to_string(),
+            },
+            srec("t1", "@co/ui.src.app", "App", "/proj/src/app.ts"),
+            Record::Function {
+                id: "t2".to_string(),
+                parent: "@co/ui.src.app".to_string(),
+                name: "init".to_string(),
+                params: vec![],
+                file: "/proj/src/app.ts".to_string(),
+                path: "/proj/src/app.ts".to_string(),
+                start: 1,
+                end: 5,
+                start_line: 1,
+                end_line: 5,
+            },
+            file_rec("/proj/src/app.ts", "@co/ui", 30),
+            file_rec("/proj/src/app.test.ts", "@co/ui", 20),
+            srec("t3", "@co/ui.src.app", "Helper", "/proj/src/app.test.ts"),
+        ];
+        let (graph, report) = ingest(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "go",
+                config: None,
+            },
+        );
+        assert_eq!(report.skipped, 0);
+        // Go init is file-disambiguated; the TS function named `init` is not.
+        assert!(graph.nodes.contains_key("github.com/x/y.init#store.go"));
+        assert!(graph.nodes.contains_key("@co/ui.src.app.init"));
+        // code_type is per-language: the Go store is src, the .test.ts file
+        // (ts test rule) and its struct are test.
+        assert_eq!(graph.nodes["/abs/store.go"].code_type, "src");
+        assert_eq!(graph.nodes["/proj/src/app.ts"].code_type, "src");
+        assert_eq!(graph.nodes["/proj/src/app.test.ts"].code_type, "test");
+        assert_eq!(graph.nodes["@co/ui.src.app.Helper"].code_type, "test");
     }
 
     #[test]

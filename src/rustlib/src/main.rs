@@ -164,6 +164,9 @@ fn run(args: Vec<String>) -> Result<()> {
     let mut module_dirs: Vec<String> = Vec::new();
     let mut excludes: Vec<String> = Vec::new();
     let mut no_build_scripts = false;
+    // id prefix (`--id-prefix`, default "n") keeps opaque ids unique across
+    // frontends when a scan merges multiple languages.
+    let mut id_prefix = "n";
     {
         let mut i = 2;
         while i < args.len() {
@@ -173,6 +176,9 @@ fn run(args: Vec<String>) -> Result<()> {
                 i += 1;
             } else if a == "--no-build-scripts" {
                 no_build_scripts = true;
+            } else if a == "--id-prefix" && i + 1 < args.len() {
+                id_prefix = &args[i + 1];
+                i += 1;
             } else {
                 excludes.push(args[i].clone());
             }
@@ -209,7 +215,7 @@ fn run(args: Vec<String>) -> Result<()> {
 
     // Type inference (method resolution, type resolution) interns through a
     // thread-local db; run the whole scan inside it.
-    hir::attach_db(ctx.db, || scan(ctx, &root_abs, module_dirs, excludes))
+    hir::attach_db(ctx.db, || scan(ctx, &root_abs, module_dirs, excludes, id_prefix))
 }
 
 fn scan(
@@ -217,6 +223,7 @@ fn scan(
     root_abs: &std::path::Path,
     module_dirs: Vec<String>,
     excludes: Vec<String>,
+    id_prefix: &str,
 ) -> Result<()> {
     let mut state = State::new();
     let out = std::io::stdout();
@@ -352,7 +359,7 @@ fn scan(
     // and register the id maps used by pass 2 and structural edges.
     for d in &mut decls {
         state.next_id += 1;
-        d.id = format!("n{}", state.next_id);
+        d.id = format!("{}{}", id_prefix, state.next_id);
         let fqn = format!("{}.{}", d.parent, d.name);
         let key = d.src_key.clone();
         if d.kind == "struct" {

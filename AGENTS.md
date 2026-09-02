@@ -7,8 +7,10 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
 - The **scanner** (Go: `src/golib/main.go`, Java: `src/javalib/CallGraphBuilder.java`,
   C++: `src/cpplib/main.cpp`, Rust: `src/rustlib/src/main.rs` — a standalone
   `rustfrontend` binary built on rust-analyzer's `ra_ap_*`-era engine crates,
-  pulled from the rust-analyzer repo at a pinned release tag) parses a codebase
-  and streams one JSON object per
+  pulled from the rust-analyzer repo at a pinned release tag, TypeScript:
+  `src/tslib/scanner.mjs` — a Node script using the official `typescript`
+  compiler API, npm-installed with a committed `package-lock.json`) parses a
+  codebase and streams one JSON object per
   line to stdout — the **unified JSONL schema** (see `SPEC.md` §2). It emits
   *facts only*: declarations, references, edges. It never computes FQNs and
   never does graph assembly.
@@ -19,12 +21,12 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
 - Build: `build.rs` compiles the frontends (`gcc`/`g++` tree-sitter for C++,
   `go build` for Go, `javac` for Java, `cargo build` for the Rust frontend —
   `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
-  tag) and stages them to
+  tag, `npm ci` for the TypeScript frontend — `src/tslib`) and stages them to
   `target/<profile>/frontends`. Run a scan with `apg scan <dir>` (or the
   `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
   (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
   `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
-  `cpp`, `rust`; `0` to skip) limits what build.rs compiles.
+  `cpp`, `rust`, `ts`; `0` to skip) limits what build.rs compiles.
 
 ### CLI
 
@@ -37,12 +39,20 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   files under `<dir>/.opencode/` left by pre-`~/.opencode` installs (user
   tools/agents and non-apg `package.json` files are left alone; the apg repo's
   own `.opencode/` is never touched).
-- `apg scan [dir] [--language L] [--exclude-path G]* [--module M]* [--no-build-scripts]
+- `apg scan [dir] [--language L[,L...]] [--exclude-path G]* [--module M]* [--no-build-scripts]
   [blacklist...]`
   — run the pipeline; writes `.apg/db.lbug`, `.apg/graph.jsonl`,
-  `.apg/apg-frontend.log`. `--no-build-scripts` is Rust-only (skip cargo build
-  scripts and the proc-macro server); the Rust frontend requires a Cargo
-  manifest (C++ tolerates bare dirs; Rust scans nothing without one).
+  `.apg/apg-frontend.log`. `--language` accepts one or more comma-separated
+  languages; when omitted, `apg` auto-detects **every** language present and
+  scans them all, merging their graphs into one database (a multi-language repo
+  like a Go backend + TS frontend gets a single `.apg/db.lbug`). Each frontend's
+  opaque ids are namespaced per language (`--id-prefix`), and the ingestor
+  classifies `code_type` and renders FQNs per record (a `lang_switch` control
+  record precedes each frontend's stream). `--no-build-scripts` is Rust-only
+  (skip cargo build scripts and the proc-macro server); the Rust frontend
+  requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
+  without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
+  is always skipped).
 - `apg query "<cypher>"` — read-only Cypher over `.apg/db.lbug` (found by walking
   up from cwd), CSV output with header row.
 - `apg --version`, `apg --help`.
@@ -95,6 +105,11 @@ Edge records:
   project nodes by `id`, unresolved targets by `fqn`. The ingestor maps `id`s
   to canonical FQNs. `code_type` is **not** emitted by scanners — the ingestor
   computes it from `path` + `apg.json`/`.apg/config.json` (`src/classify.rs`).
+- `apg scan` injects a control record before each frontend's stream in a
+  multi-language scan: `{"type":"lang_switch","language":"go"}`. The ingestor
+  uses the current language for `code_type` classification and FQN rendering,
+  and `--id-prefix` (per-frontend, `g1`/`t1`/…) keeps opaque ids unique across
+  merged streams.
 - Line numbers (`start_line`/`end_line`) are computed by the scanners (Go and
   C++ from byte offsets, Java from javac's UTF-16 char positions), never
   derived from bytes ingestor-side. `file` nodes (emitted one per scanned
@@ -110,6 +125,7 @@ Edge records:
 | function (unique in scope) | `parent.name` |
 | function (overloaded) | `parent.name(T1,T2,...)` — erased, comma-separated params |
 | Go `init` | `parent.init#<file-basename>` |
+| TypeScript | `pkg.relpath.name` — npm package + dot-path prefix per ES-module file (`@co/ui.src.components.Button.Button`); TS getters/setters land as overloads (`diameter()` / `diameter(number)`) |
 
 Overloads are grouped by `(parent, name)`; any group of size > 1 renders every
 member with the `(params)` suffix. The ingestor fails loudly (panics) on any
@@ -202,16 +218,23 @@ An `apg.json` at the project root or `.apg/config.json` **replaces** the default
 
 ### Fidelity & noise
 
-- **Java, Go, and Rust edges are exact** — resolved via the compiler's type
-  checker (javac attribution / `types.Info`) or rust-analyzer. A `Calls` edge
-  always points at the real declared method.
+- **Java, Go, Rust, and TypeScript edges are exact** — resolved via the
+  compiler's type checker (javac attribution / `types.Info`), rust-analyzer,
+  or the official TypeScript compiler API. A `Calls` edge always points at the
+  real declared method.
 - **C++ edges are heuristic** (tree-sitter + scope/type tracking). Unresolvable calls/types are recorded as `UnresolvedCall`/`UnresolvedUse` rather than guessed.
 - **The scanner never guesses**: if a call/type can't be resolved to a project symbol, it becomes an `UnresolvedTarget` edge, never a fabricated FQN.
-- **All code is included** — tests, generated, and vendored code are scanned like everything else (the only exclusions are user `--exclude-path` patterns and files the compiler/frontend can't process). Filter by `code_type` instead.
-- **Multi-module repos**: Go workspaces (`go.work`), C++ monorepos, and Cargo
-  workspaces are supported. Each module is a top-level `Module` node; FQNs are
-  module-prefixed so they stay unique across modules. Pass `modules: "dir1,dir2"`
-  to `apg_scan` to restrict scanning to specific modules (Go/C++/Rust).
+- **All code is included** — tests, generated, and vendored code are scanned like everything else (the only exclusions are user `--exclude-path` patterns, `node_modules`, and files the compiler/frontend can't process). Filter by `code_type` instead.
+- **Multi-module repos**: Go workspaces (`go.work`), C++ monorepos, Cargo
+  workspaces, and npm workspaces are supported. Each module is a top-level
+  `Module` node; FQNs are module-prefixed so they stay unique across modules.
+  Pass `modules: "dir1,dir2"` to `apg_scan` to restrict scanning to specific
+  modules (Go/C++/Rust/TS).
+- **Multi-language repos** (a Go backend + TS frontend, say): `apg scan`
+  auto-detects every language present and merges their graphs into one
+  database. Opaque ids are namespaced per language (`--id-prefix`, `g1`/`t1`/…);
+  a `lang_switch` control record before each stream drives per-record
+  `code_type` classification and FQN rendering.
 - To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
 ### Other tools

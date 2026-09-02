@@ -73,12 +73,16 @@ type edgeMsg struct {
 
 var enc *json.Encoder
 
-// nextNodeID is the monotonic opaque-id counter (SPEC §3).
+// nextNodeID is the monotonic opaque-id counter (SPEC §3). idPrefix
+// (`--id-prefix`, default "n") keeps ids unique across frontends when a scan
+// merges multiple languages, so `n1` from Go and `n1` from another frontend
+// never collide in the shared stream.
+var idPrefix = "n"
 var nextNodeID int
 
 func newNodeID() string {
 	nextNodeID++
-	return fmt.Sprintf("n%d", nextNodeID)
+	return fmt.Sprintf("%s%d", idPrefix, nextNodeID)
 }
 
 // structID / funcID map canonical FQNs (parent.name, or parent.init#file for
@@ -111,13 +115,16 @@ func main() {
 	}
 	root, _ := filepath.Abs(os.Args[1])
 
-	// Parse --module <dir> pairs; remaining args are excludes.
+	// Parse --module <dir> pairs and --id-prefix; remaining args are excludes.
 	var moduleDirs []string
 	var excludes []string
 	args := os.Args[2:]
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--module" && i+1 < len(args) {
 			moduleDirs = append(moduleDirs, args[i+1])
+			i++
+		} else if args[i] == "--id-prefix" && i+1 < len(args) {
+			idPrefix = args[i+1]
 			i++
 		} else {
 			excludes = append(excludes, args[i])

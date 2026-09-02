@@ -35,8 +35,9 @@ jobs:
           sudo apt-get update
           # lbug's build.rs uses pkg-config to find OpenSSL and links
           # libssl/libcrypto dynamically; javac is needed for the Java
-          # frontend. go + gcc/g++ are preinstalled on the runners.
-          sudo apt-get install -y pkg-config libssl-dev default-jdk-headless
+          # frontend; node/npm for the TypeScript frontend (build.rs runs
+          # `npm ci` in src/tslib). go + gcc/g++ are preinstalled on the runners.
+          sudo apt-get install -y pkg-config libssl-dev default-jdk-headless nodejs npm
 
       - name: Resolve lbug version from Cargo.lock
         id: lbug
@@ -56,7 +57,7 @@ jobs:
           echo "LBUG_LIBRARY_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
           echo "LBUG_INCLUDE_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
 
-      # build.rs compiles all frontends (Go, C++, Java, Rust) and stages them
+      # build.rs compiles all frontends (Go, C++, Java, Rust, TS) and stages them
       # into target/release/frontends; the default APG_BUILD_FRONTENDS (unset)
       # does exactly what we want here.
       - name: Build apg + frontends

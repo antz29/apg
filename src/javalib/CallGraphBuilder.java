@@ -42,8 +42,19 @@ public class CallGraphBuilder {
 
     public static void main(String[] args) throws Exception {
         Path dir = Paths.get(args[0]);
+        // `--id-prefix <p>` (default "n") keeps opaque ids unique across
+        // frontends when a scan merges multiple languages.
+        String idPrefix = "n";
         List<String> excludePaths = new ArrayList<>();
-        for (int i = 1; i < args.length; i++) excludePaths.add(args[i]);
+        for (int i = 1; i < args.length; i++) {
+            if (args[i].equals("--id-prefix") && i + 1 < args.length) {
+                idPrefix = args[i + 1];
+                i++;
+            } else {
+                excludePaths.add(args[i]);
+            }
+        }
+        String prefix = idPrefix;
 
         System.err.println("[" + elapsed() + "] collecting source files...");
         List<Path> files = new ArrayList<>();
@@ -346,9 +357,10 @@ public class CallGraphBuilder {
 
         final Set<String> unresolvedSeen = new HashSet<>();
         final Set<String> emittedPkg = new HashSet<>();
+        final String idPrefix = prefix;
 
         String newNodeID() {
-            return "n" + (++nextId);
+            return idPrefix + (++nextId);
         }
 
         void emit(String line) {

@@ -57,6 +57,14 @@ pub enum Record {
         category: Option<String>,
     },
 
+    /// Pipeline-internal control record, emitted by `apg scan` (never by a
+    /// scanner) between frontend streams when a scan covers multiple
+    /// languages: `{"type":"lang_switch","language":"go"}`. The ingestor uses
+    /// the current language for code_type classification and FQN rendering
+    /// (e.g. Go `init`), so a merged multi-language stream classifies and
+    /// renders each record under its own frontend's language.
+    LangSwitch { language: String },
+
     Contains { from: String, to: String },
     Calls { from: String, to: String },
     Uses { from: String, to: String },
