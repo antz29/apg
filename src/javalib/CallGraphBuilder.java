@@ -101,7 +101,7 @@ public class CallGraphBuilder {
         }
 
         System.err.println("[" + elapsed() + "] pass 1: assigning ids to declared classes and methods...");
-        var c = new Collector();
+        var c = new Collector(prefix);
         // Pass 1: assign opaque ids to every declared class and method.
         c.collectAll(units);
         System.err.println("[" + elapsed() + "] pass 2: emitting nodes and edges...");
@@ -357,7 +357,11 @@ public class CallGraphBuilder {
 
         final Set<String> unresolvedSeen = new HashSet<>();
         final Set<String> emittedPkg = new HashSet<>();
-        final String idPrefix = prefix;
+        final String idPrefix;
+
+        Collector(String idPrefix) {
+            this.idPrefix = idPrefix;
+        }
 
         String newNodeID() {
             return idPrefix + (++nextId);
