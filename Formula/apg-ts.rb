@@ -9,7 +9,7 @@ class ApgTs < Formula
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
       tag:      "v0.7.1",
-      revision: "f2b808136b6b0991546d9ae38932946bfc767455"
+      revision: "6a503f7981ae0062b05042a1bb942c02824dba35"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
