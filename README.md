@@ -50,6 +50,8 @@ the `apg-rust` formula builds the frontend with the current stable toolchain.
 TypeScript projects need `node` on your PATH at scan time (the `apg-ts`
 frontend runs the official TypeScript compiler); a repo's `node_modules` is
 always skipped, and workspace-package imports resolve even before `npm install`.
+The C# frontend (`apg-csharp`) needs a .NET SDK only at build time — the
+published binary is self-contained.
 
 ## Install (Homebrew)
 
@@ -60,6 +62,7 @@ brew install antz29/apg/scanner \
              antz29/apg/apg-java \
              antz29/apg/apg-cpp \
              antz29/apg/apg-rust \
+             antz29/apg/apg-ts \
              antz29/apg/apg-csharp
 ```
 
@@ -72,11 +75,11 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.6.2
+apg --version   # apg 0.7.0
 apg --help
 ```
 
-`v0.6.2` is tagged, so the stable install works as-is. If you want the latest
+`v0.7.0` will be tagged, so the stable install works as-is. If you want the latest
 unreleased code instead, pass `--HEAD`:
 
 ## Install (Linux, `curl | sh`)
@@ -95,11 +98,10 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 
 The installer fetches the latest release, verifies the tarball's sha256
 against the `sha256sums.txt` published with it, and installs the `apg` binary
-plus the scanner frontends (Go, Java, C++, Rust; TypeScript and C# once
-packaged in the release tarball) — no separate frontend install needed, unlike
-the split brew formulae.
+plus all six scanner frontends (Go, Java, C++, Rust, TypeScript, C#) — no
+separate frontend install needed, unlike the split brew formulae.
 
-Options: `--version 0.6.2` to pin a specific release, `--prefix DIR` to choose
+Options: `--version 0.7.0` to pin a specific release, `--prefix DIR` to choose
 an install location, `--force` to overwrite an existing install, `--uninstall`
 to remove it. The binary links OpenSSL dynamically, so `libssl.so.3` must be
 present (it is on Ubuntu 22.04+/Debian 12+/Fedora 36+; the installer warns if
@@ -108,7 +110,7 @@ it is missing). Java scan projects still need `java` on your PATH at scan time.
 Verify:
 
 ```sh
-apg --version   # apg 0.6.2
+apg --version   # apg 0.7.0
 apg --help
 ```
 
@@ -290,7 +292,8 @@ Requires: Rust, `gcc`/`g++`, Go, `javac` (to build the frontends), plus
 needs a current stable Rust toolchain (rust-analyzer tracks the newest stable)
 and network at build time to fetch the pinned rust-analyzer crates; the
 TypeScript frontend needs `node`/`npm` at build time (`build.rs` runs `npm ci`
-in `src/tslib`).
+in `src/tslib`); the C# frontend needs a .NET SDK at build time
+(`build.rs` runs `dotnet publish`).
 
 ```sh
 git clone git@github.com:antz29/apg.git
@@ -303,8 +306,8 @@ cargo build --release
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 `APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
-allowlist: `go`, `java`, `cpp`, `rust`, `ts`; `0` to skip all) to limit what
-build.rs compiles — the split brew formulae rely on this.
+allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`; `0` to skip all) to
+limit what build.rs compiles — the split brew formulae rely on this.
 
 Run the test suite with `cargo test`.
 

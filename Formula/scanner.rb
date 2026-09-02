@@ -8,13 +8,13 @@ class Scanner < Formula
   desc "Program graph scanner + LadybugDB query CLI for opencode"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.6.2",
-      revision: "79a06465786ec446c55bb6777f00daea1b85350c"
+      tag:      "v0.7.0",
+      revision: "1e23ebf"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.6.2"
+    root_url "https://github.com/antz29/apg/releases/download/v0.7.0"
     rebuild 6
     sha256 cellar: :any, arm64_sonoma: "fb584cbaab40369d8ee8b289aca76b8fe0d81d59a13da7e3e9f845727f435714"
   end
@@ -64,10 +64,12 @@ class Scanner < Formula
     <<~EOS
       apg needs at least one scanner frontend. Install the ones you use:
 
-        brew install antz29/apg/apg-go     # Go
-        brew install antz29/apg/apg-java   # Java
-        brew install antz29/apg/apg-cpp    # C++
-        brew install antz29/apg/apg-rust   # Rust
+        brew install antz29/apg/apg-go       # Go
+        brew install antz29/apg/apg-java     # Java
+        brew install antz29/apg/apg-cpp      # C++
+        brew install antz29/apg/apg-rust     # Rust
+        brew install antz29/apg/apg-ts       # TypeScript (needs `node` at scan time)
+        brew install antz29/apg/apg-csharp   # C# (needs `dotnet` at build time only)
     EOS
   end
 

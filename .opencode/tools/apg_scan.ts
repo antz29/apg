@@ -24,7 +24,7 @@ export default tool({
     language: tool.schema
       .string()
       .optional()
-      .describe("Language(s) to scan: java, go, cpp, rust, or ts. Comma-separated for a multi-language repo (e.g. \"go,ts\"); auto-detected for every language present if omitted."),
+      .describe("Language(s) to scan: java, go, cpp, rust, ts, or csharp. Comma-separated for a multi-language repo (e.g. \"go,ts\"); auto-detected for every language present if omitted."),
     blacklist: tool.schema
       .string()
       .optional()
