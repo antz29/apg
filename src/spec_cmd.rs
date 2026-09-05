@@ -310,7 +310,6 @@ fn add_note(
         return Ok(());
     }
     let db = artifacts::ArtifactDb::open(apg_root)?;
-    let mut any_code_target = false;
     for target in &ons {
         if !db.has_node(target) {
             anyhow::bail!("note target `{target}` does not exist in the graph");
@@ -318,7 +317,6 @@ fn add_note(
         // A code FQN routes to the per-module note ledger; a spec/Future FQN
         // (anything not in the code graph) to the project's spec JSONL.
         if db.code_label(target).is_some() {
-            any_code_target = true;
             let file = db.note_file(apg_root, target);
             let mut ledger = if file.exists() {
                 specs::read_jsonl(&file)?
@@ -347,15 +345,17 @@ fn add_note(
                 kind: kind.clone(),
             });
             records.push(Record::Details {
-                from: fqn,
+                from: fqn.clone(),
                 to: target.clone(),
             });
+            println!("Added note `{fqn}` to {project}");
         }
     }
     drop(db);
-    if !any_code_target {
-        write_through(apg_root, project, records)?;
-    }
+    // Code notes also land in the live DB immediately (R5): the ledger is
+    // written above; `write_through` re-ingests the project spec/plan and
+    // every note ledger (MERGE upserts the annotations nodes).
+    write_through(apg_root, project, records)?;
     Ok(())
 }
 
