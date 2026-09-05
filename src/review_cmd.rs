@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::artifacts::{self, node_fqn, parse_args, reingest_project};
+use crate::artifacts::{self, node_fqn, parse_args};
 use crate::schema::Record;
 use crate::spec_cmd::project_of;
 use crate::specs;
@@ -47,6 +47,7 @@ fn review_add(args: &[String]) -> anyhow::Result<()> {
     // accepted for CLI compatibility and ignored.
     let _ = p.get("kind");
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
 
     // Derive the project and the target file.
     let (project, target_is_spec) = if let Some(proj) = project_of(target) {
@@ -99,10 +100,7 @@ fn review_add(args: &[String]) -> anyhow::Result<()> {
     };
     records.push(rec);
     records.push(edge);
-    specs::write_jsonl(&file, &records)?;
-    if let Err(e) = reingest_project(&apg_root, &project) {
-        eprintln!("warning: write-through re-ingest failed: {e:#}");
-    }
+    artifacts::write_jsonl_and_reingest(&apg_root, &file, &project, &records)?;
     println!("Attached {fqn} (open) → {target}");
     Ok(())
 }
@@ -162,6 +160,7 @@ fn set_feedback(
         anyhow::anyhow!("feedback fqn `{fqn}` must be `future/<project>/feedback-<n>`")
     })?;
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
 
     let candidates = [
         specs::spec_jsonl_path(&apg_root, &project),
@@ -199,10 +198,7 @@ fn set_feedback(
     if !found {
         anyhow::bail!("feedback `{fqn}` not found");
     }
-    specs::write_jsonl(&file, &records)?;
-    if let Err(e) = reingest_project(&apg_root, &project) {
-        eprintln!("warning: write-through re-ingest failed: {e:#}");
-    }
+    artifacts::write_jsonl_and_reingest(&apg_root, &file, &project, &records)?;
     println!("Feedback {fqn} → {status}{}", disposition.map(|d| format!(" ({d})")).unwrap_or_default());
     Ok(())
 }

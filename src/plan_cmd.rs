@@ -28,11 +28,7 @@ fn load_plan(apg_root: &Path, project: &str) -> anyhow::Result<Vec<Record>> {
 }
 
 fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Result<()> {
-    specs::write_jsonl(&specs::plan_jsonl_path(apg_root, project), records)?;
-    if let Err(e) = reingest_project(apg_root, project) {
-        eprintln!("warning: write-through re-ingest failed: {e:#}");
-    }
-    Ok(())
+    artifacts::write_jsonl_and_reingest(apg_root, &specs::plan_jsonl_path(apg_root, project), project, records)
 }
 
 pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
@@ -59,6 +55,7 @@ fn plan_init(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan init <project> [--title T] [--strategy S]");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let spec_path = specs::spec_jsonl_path(&apg_root, project);
     if !spec_path.exists() {
         anyhow::bail!(
@@ -89,6 +86,7 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan add <project> <phase|task> …");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_plan(&apg_root, project)?;
     let plan_fqn = format!("future/{project}/plan");
     match kind {
@@ -195,6 +193,7 @@ fn plan_link(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan link <project> <phase-n> [--satisfies <req-id>]* [--prereq <n>]*");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_plan(&apg_root, project)?;
     let phase_fqn = format!("future/{project}/plan.phase-{phase:02}");
     for req in p.all("satisfies") {
@@ -202,22 +201,45 @@ fn plan_link(args: &[String]) -> anyhow::Result<()> {
         if !spec_has_requirement(&apg_root, project, &req_fqn)? {
             anyhow::bail!("satisfies target `{req}` is not a requirement of `{project}`");
         }
-        artifacts::remove_incident_edges(&mut records, &phase_fqn);
+    }
+    link_phase_edges(&phase_fqn, &p.all("satisfies"), &p.all("prereq"), &mut records)?;
+    write_through(&apg_root, project, &records)?;
+    println!("Linked plan.phase-{phase} of {project}");
+    Ok(())
+}
+
+/// Set semantics for a phase's edges: replaces the phase's own outgoing
+/// Satisfies/Gates once, then adds every target. The removal is scoped to
+/// outgoing edges only (never incident — incoming Gates from a later phase on
+/// an earlier one would be severed) and hoisted out of the loop (in-loop
+/// removal would drop every edge added by an earlier iteration, keeping only
+/// the last). `reqs` are the requirement ids, `prereqs` the phase numbers.
+fn link_phase_edges(
+    phase_fqn: &str,
+    reqs: &[String],
+    prereqs: &[String],
+    records: &mut Vec<Record>,
+) -> anyhow::Result<()> {
+    let project = phase_fqn
+        .strip_prefix("future/")
+        .and_then(|s| s.split('/').next())
+        .ok_or_else(|| anyhow::anyhow!("bad phase fqn `{phase_fqn}`"))?;
+    records.retain(|r| !matches!(r, Record::Satisfies { from, .. } if from.as_str() == phase_fqn));
+    for req in reqs {
+        let req_fqn = format!("future/{project}/spec.{req}");
         records.push(Record::Satisfies {
-            from: phase_fqn.clone(),
+            from: phase_fqn.to_string(),
             to: req_fqn,
         });
     }
-    for g in p.all("prereq") {
+    records.retain(|r| !matches!(r, Record::Gates { from, .. } if from.as_str() == phase_fqn));
+    for g in prereqs {
         let g = g.parse::<u32>().map_err(|_| anyhow::anyhow!("bad phase number `{g}`"))?;
-        artifacts::remove_incident_edges(&mut records, &phase_fqn);
         records.push(Record::Gates {
-            from: phase_fqn.clone(),
+            from: phase_fqn.to_string(),
             to: format!("future/{project}/plan.phase-{g:02}"),
         });
     }
-    write_through(&apg_root, project, &records)?;
-    println!("Linked plan.phase-{phase} of {project}");
     Ok(())
 }
 
@@ -231,6 +253,7 @@ fn plan_done(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan done <project> <task-fqn>");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_plan(&apg_root, project)?;
     if !records.iter().any(|r| matches!(r, Record::Task { fqn, .. } if fqn == task_fqn)) {
         anyhow::bail!("task `{task_fqn}` not found in plan `{project}`");
@@ -266,6 +289,7 @@ fn plan_undone(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan undone <project> <task-fqn>");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_plan(&apg_root, project)?;
     let mut found = false;
     for r in &mut records {
@@ -299,6 +323,7 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan complete <project> <phase-n>");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let records = load_plan(&apg_root, project)?;
     let phase_fqn = format!("future/{project}/plan.phase-{phase:02}");
 
@@ -387,8 +412,8 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
         .unwrap_or(0);
     if phase >= max_phase {
         std::fs::remove_file(specs::plan_jsonl_path(&apg_root, project))?;
-        if let Err(e) = reingest_project(&apg_root, project) {
-            eprintln!("warning: write-through re-ingest failed: {e:#}");
+        if apg_root.join(".trans").join("db.lbug").exists() {
+            reingest_project(&apg_root, project)?;
         }
         println!("Completed final phase {phase} — plan {project} retired (JSONL dropped)");
     } else {
@@ -558,6 +583,83 @@ fn spec_has_future(apg_root: &Path, project: &str, future_fqn: &str) -> anyhow::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn link_phase_edges_keeps_all_satisfies_and_preserves_other_phases() {
+        // Regression: the removal ran inside the loop (only the last edge
+        // survived) and removed edges incident to the phase (incoming Gates
+        // from a later phase were severed).
+        let mut records = vec![
+            Record::PlanPhase {
+                fqn: "future/foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "D".into(),
+            },
+            Record::PlanPhase {
+                fqn: "future/foo/plan.phase-02".into(),
+                number: 2,
+                title: "P2".into(),
+                deliverable: "D".into(),
+            },
+            // A later phase gating this one: incoming edge, must survive.
+            Record::Gates {
+                from: "future/foo/plan.phase-02".into(),
+                to: "future/foo/plan.phase-01".into(),
+            },
+        ];
+        link_phase_edges(
+            "future/foo/plan.phase-01",
+            &["R1".into(), "R2".into(), "R3".into()],
+            &["2".into()],
+            &mut records,
+        )
+        .unwrap();
+        let satisfies: Vec<&str> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::Satisfies { from, to }
+                    if from == "future/foo/plan.phase-01" =>
+                {
+                    Some(to.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            satisfies,
+            vec![
+                "future/foo/spec.R1",
+                "future/foo/spec.R2",
+                "future/foo/spec.R3"
+            ]
+        );
+        // Outgoing Gates set; the incoming phase-02 → phase-01 gate survives.
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Gates { from, to }
+                if from == "future/foo/plan.phase-01" && to == "future/foo/plan.phase-02"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Gates { from, to }
+                if from == "future/foo/plan.phase-02" && to == "future/foo/plan.phase-01"
+        )));
+        // Re-linking replaces, never duplicates.
+        link_phase_edges("future/foo/plan.phase-01", &["R9".into()], &[], &mut records).unwrap();
+        let satisfies: Vec<&str> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::Satisfies { from, to }
+                    if from == "future/foo/plan.phase-01" =>
+                {
+                    Some(to.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(satisfies, vec!["future/foo/spec.R9"]);
+    }
 
     #[test]
     fn plan_complete_implements_are_idempotent_and_preserve_spec_edges() {

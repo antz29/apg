@@ -6,12 +6,66 @@
 //! are detached and re-merged from its JSONL files.
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use lbug::{Connection, Database, SystemConfig};
 
 use crate::schema::Record;
 use crate::specs;
+
+/// The process-wide reentrant spec/plan/review write lock (see
+/// `acquire_spec_lock`). Held for the life of the process, so the flock is
+/// released when the CLI process exits.
+static SPEC_LOCK: OnceLock<Mutex<Option<File>>> = OnceLock::new();
+
+/// Acquires the exclusive cross-process lock that serializes spec/plan/review
+/// read-modify-writes on the project's JSONL + DB. Called at the top of every
+/// mutating command; the lock spans the whole load → modify → write_through
+/// sequence, so concurrent tool calls (an agent issuing a batch in parallel)
+/// never lose each other's edges. Reentrant within the process — a second
+/// acquire is a no-op — so a command that loads both the plan and the spec
+/// (plan complete) does not deadlock. The flock lives on `apg/.trans/specs.lock`
+/// and is released at process exit.
+pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<()> {
+    let holder = SPEC_LOCK.get_or_init(|| Mutex::new(None));
+    let mut held = holder.lock().unwrap();
+    if held.is_some() {
+        return Ok(());
+    }
+    let trans = apg_root.join(".trans");
+    std::fs::create_dir_all(&trans)?;
+    let lock_path = trans.join("specs.lock");
+    let f = File::create(&lock_path)?;
+    #[cfg(unix)]
+    {
+        let rc = unsafe { libc::flock(std::os::unix::io::AsRawFd::as_raw_fd(&f), libc::LOCK_EX) };
+        if rc != 0 {
+            anyhow::bail!("could not acquire write lock {}", lock_path.display());
+        }
+    }
+    *held = Some(f);
+    Ok(())
+}
+
+/// Writes `records` to `path`, then re-ingests the project into the live DB.
+/// A missing DB (no scan yet) is not an error — the JSONL is the durable
+/// form — but a re-ingest failure when the DB exists is a hard error: the
+/// mutation must be visible in the query index, and silently dropping it is
+/// what let the authoring agents believe writes had landed when they had not.
+pub fn write_jsonl_and_reingest(
+    apg_root: &Path,
+    path: &Path,
+    project: &str,
+    records: &[Record],
+) -> anyhow::Result<()> {
+    specs::write_jsonl(path, records)?;
+    if apg_root.join(".trans").join("db.lbug").exists() {
+        reingest_project(apg_root, project)?;
+    }
+    Ok(())
+}
 
 pub struct ArtifactDb {
     pub db: Database,
@@ -442,14 +496,6 @@ pub fn remove_node(records: &mut Vec<Record>, fqn: &str) {
     records.retain(|r| match (node_fqn(r), edge_endpoints(r)) {
         (Some(n), _) => n != fqn,
         (None, Some((a, b))) => a != fqn && b != fqn,
-        _ => true,
-    });
-}
-
-/// Removes every edge record incident to `fqn`, leaving the node record.
-pub fn remove_incident_edges(records: &mut Vec<Record>, fqn: &str) {
-    records.retain(|r| match edge_endpoints(r) {
-        Some((a, b)) => a != fqn && b != fqn,
         _ => true,
     });
 }

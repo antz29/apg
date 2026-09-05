@@ -43,6 +43,7 @@ version = "0.8.0"
 dependencies = [
  "anyhow",
  "lbug",
+ "libc",
  "parquet",
  "serde",
  "serde_json",

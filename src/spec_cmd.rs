@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::artifacts::{
-    self, node_fqn, parse_args, reingest_project, remove_node, ParsedArgs,
+    self, node_fqn, parse_args, remove_node, ParsedArgs,
 };
 use crate::schema::Record;
 use crate::specs;
@@ -28,14 +28,9 @@ pub(crate) fn load_project(apg_root: &Path, project: &str) -> anyhow::Result<Vec
 }
 
 /// Writes a project's spec JSONL and re-ingests it into the live DB (R5). A
-/// missing DB (no scan yet) is a warning, not an error — the JSONL is the
-/// durable form.
+/// missing DB (no scan yet) is not an error — the JSONL is the durable form.
 pub(crate) fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Result<()> {
-    specs::write_jsonl(&specs::spec_jsonl_path(apg_root, project), records)?;
-    if let Err(e) = reingest_project(apg_root, project) {
-        eprintln!("warning: write-through re-ingest failed: {e:#}");
-    }
-    Ok(())
+    artifacts::write_jsonl_and_reingest(apg_root, &specs::spec_jsonl_path(apg_root, project), project, records)
 }
 
 /// The project of a `future/<project>/…` fqn.
@@ -81,6 +76,7 @@ fn spec_init(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg spec init <project> [--title T] [--goal G]");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let path = specs::spec_jsonl_path(&apg_root, project);
     if path.exists() {
         anyhow::bail!("spec for project `{project}` already exists at {}", path.display());
@@ -107,6 +103,7 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg spec add <project> <kind> …");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_project(&apg_root, project)?;
 
     let spec_fqn = format!("future/{project}/spec");
@@ -370,6 +367,7 @@ fn spec_anchor(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg spec anchor <project> <req-id> <fqn>");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_project(&apg_root, project)?;
     let req_fqn = format!("future/{project}/spec.{req_id}");
     if !records
@@ -382,14 +380,21 @@ fn spec_anchor(args: &[String]) -> anyhow::Result<()> {
         let db = artifacts::ArtifactDb::open(&apg_root)?;
         db.resolve_anchor(fqn)?;
     }
-    artifacts::remove_incident_edges(&mut records, &req_fqn);
-    records.push(Record::Anchors {
-        from: req_fqn,
-        to: fqn.clone(),
-    });
+    anchor_upsert(&req_fqn, fqn, &mut records);
     write_through(&apg_root, project, &records)?;
     println!("Anchored {project}.{req_id} → {fqn}");
     Ok(())
+}
+
+/// Adds the `Anchors(req→fqn)` edge, replacing only an existing edge on the
+/// same `(from, to)` pair (idempotent upsert). Other anchors on `req` are
+/// preserved — sequential anchor calls accumulate, they never clobber.
+fn anchor_upsert(req_fqn: &str, fqn: &str, records: &mut Vec<Record>) {
+    records.retain(|r| !matches!(r, Record::Anchors { from, to } if from == req_fqn && to == fqn));
+    records.push(Record::Anchors {
+        from: req_fqn.to_string(),
+        to: fqn.to_string(),
+    });
 }
 
 /// `apg spec link <project> <req-id> [--depends-on <id>]*` (R8).
@@ -399,6 +404,7 @@ fn spec_link(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg spec link <project> <req-id> [--depends-on <id>]*");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_project(&apg_root, project)?;
     link_depends_on(project, req_id, &p.all("depends-on"), &mut records)?;
     write_through(&apg_root, project, &records)?;
@@ -422,7 +428,11 @@ fn link_depends_on(
     {
         anyhow::bail!("requirement `{req_id}` does not exist in `{project}`");
     }
-    artifacts::remove_incident_edges(records, &req_fqn);
+    // Drop only this requirement's own outgoing DependsOn edges. `rm`'s
+    // incident-edge removal must not be used here: it also deletes edges INTO
+    // the requirement (other requirements depending on it), silently severing
+    // the rest of the dependency graph when a requirement is re-linked.
+    records.retain(|r| !matches!(r, Record::DependsOn { from, .. } if from.as_str() == req_fqn));
     for dep in deps {
         let dep_fqn = format!("future/{project}/spec.{dep}");
         if dep.as_str() == req_id {
@@ -449,6 +459,7 @@ fn spec_rm(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg spec rm <project> <fqn|id>");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_project(&apg_root, project)?;
     let fqn = if id.starts_with("future/") {
         id.clone()
@@ -769,6 +780,7 @@ fn spec_promote(args: &[String]) -> anyhow::Result<()> {
     }
 
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let records = load_project(&apg_root, project)?;
 
     // The futures to consider: all in the project, or the named one.
@@ -832,7 +844,13 @@ pub fn promote_future(apg_root: &Path, project: &str, future_fqn: &str) -> anyho
         })
         .collect();
     for req in anchors {
-        artifacts::remove_incident_edges(&mut records, &req);
+        // Re-point only this requirement's anchor to the promoted future. The
+        // incident-edge removal used by `rm` must not be used here — it would
+        // also sever the requirement's DependsOn edges and every other edge
+        // that touches it.
+        records.retain(|r| {
+            !matches!(r, Record::Anchors { from, to } if from.as_str() == req && to.as_str() == future_fqn)
+        });
         records.push(Record::Anchors {
             from: req.clone(),
             to: target.clone(),
@@ -858,6 +876,7 @@ fn spec_archive(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg spec archive <project>");
     };
     let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
     let records = load_project(&apg_root, project)?;
 
     let unresolved = records.iter().any(|r| {
@@ -1038,6 +1057,58 @@ mod tests {
     }
 
     #[test]
+    fn link_depends_on_preserves_incoming_edges() {
+        // Regression: re-linking a requirement used `remove_incident_edges`,
+        // which deletes edges in BOTH directions — re-linking R2 wiped
+        // R3→R2 (a requirement that depends on R2) from the graph.
+        let mut records = vec![
+            Record::Requirement {
+                fqn: "future/foo/spec.R1".into(),
+                id: "R1".into(),
+                title: "A".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.R2".into(),
+                id: "R2".into(),
+                title: "B".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.R3".into(),
+                id: "R3".into(),
+                title: "C".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::DependsOn {
+                from: "future/foo/spec.R3".into(),
+                to: "future/foo/spec.R2".into(),
+            },
+        ];
+        link_depends_on("foo", "R2", &["R1".into()], &mut records).unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::DependsOn { from, to }
+                if from == "future/foo/spec.R2" && to == "future/foo/spec.R1"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::DependsOn { from, to }
+                if from == "future/foo/spec.R3" && to == "future/foo/spec.R2"
+        )));
+        assert_eq!(
+            records
+                .iter()
+                .filter(|r| matches!(r, Record::DependsOn { .. }))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
     fn write_through_and_promote_roundtrip() {
         let (apg_root, dir) = fixture_layout("roundtrip");
 
@@ -1070,7 +1141,7 @@ mod tests {
             },
         ];
         specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
-        reingest_project(&apg_root, "foo").unwrap();
+        artifacts::reingest_project(&apg_root, "foo").unwrap();
 
         // The pending anchor materializes in the live DB.
         {
@@ -1112,7 +1183,7 @@ mod tests {
         assert!(out.contains("github.com/x/y.Store"), "re-anchor: {out}");
 
         // A rebuild from the committed JSONL reproduces the same state.
-        reingest_project(&apg_root, "foo").unwrap();
+        artifacts::reingest_project(&apg_root, "foo").unwrap();
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
         let out = db
             .conn()
@@ -1141,7 +1212,7 @@ mod tests {
             },
         ];
         specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
-        reingest_project(&apg_root, "foo").unwrap();
+        artifacts::reingest_project(&apg_root, "foo").unwrap();
         // A stale target is never guessed: promote errors.
         let err = promote_future(&apg_root, "foo", "future/foo/gateway")
             .unwrap_err()
@@ -1169,12 +1240,36 @@ mod tests {
                 to: "github.com/x/y.Store".to_string(),
             },
         ];
-        artifacts::remove_incident_edges(&mut records, "future/foo/spec.R1");
-        // R1's anchor is gone; R2's (same code target) survives; R1 node stays.
-        assert_eq!(records.len(), 2);
-        assert!(records.iter().any(|r| matches!(r, Record::Requirement { .. })));
+        artifacts::remove_node(&mut records, "future/foo/spec.R1");
+        // R1's node and its anchor are gone; R2's anchor (same code target)
+        // survives untouched.
+        assert_eq!(records.len(), 1);
         assert!(records.iter().any(|r| {
             matches!(r, Record::Anchors { from, .. } if from == "future/foo/spec.R2")
         }));
+    }
+
+    #[test]
+    fn anchor_upsert_accumulates_across_calls() {
+        let mut records = Vec::new();
+        // Two sequential anchor calls on the same requirement: the first must
+        // survive the second (last-wins was the bug that lost anchors).
+        anchor_upsert("future/foo/spec.R1", "github.com/x/y.Store", &mut records);
+        anchor_upsert("future/foo/spec.R1", "github.com/x/y.Loader", &mut records);
+        anchor_upsert("future/foo/spec.R2", "github.com/x/y.Loader", &mut records);
+        let edges: Vec<(&str, &str)> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::Anchors { from, to } => Some((from.as_str(), to.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(edges.len(), 3);
+        assert!(edges.contains(&("future/foo/spec.R1", "github.com/x/y.Store")));
+        assert!(edges.contains(&("future/foo/spec.R1", "github.com/x/y.Loader")));
+        assert!(edges.contains(&("future/foo/spec.R2", "github.com/x/y.Loader")));
+        // Re-adding an existing (from, to) pair is an idempotent no-op.
+        anchor_upsert("future/foo/spec.R1", "github.com/x/y.Store", &mut records);
+        assert_eq!(records.len(), 3);
     }
 }
