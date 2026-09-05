@@ -17,7 +17,7 @@ fn require_apg_root() -> anyhow::Result<PathBuf> {
 }
 
 /// Reads a project's spec JSONL (erroring when it does not exist).
-fn load_project(apg_root: &Path, project: &str) -> anyhow::Result<Vec<Record>> {
+pub(crate) fn load_project(apg_root: &Path, project: &str) -> anyhow::Result<Vec<Record>> {
     let path = specs::spec_jsonl_path(apg_root, project);
     if !path.exists() {
         anyhow::bail!(
@@ -30,7 +30,7 @@ fn load_project(apg_root: &Path, project: &str) -> anyhow::Result<Vec<Record>> {
 /// Writes a project's spec JSONL and re-ingests it into the live DB (R5). A
 /// missing DB (no scan yet) is a warning, not an error — the JSONL is the
 /// durable form.
-fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Result<()> {
+pub(crate) fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Result<()> {
     specs::write_jsonl(&specs::spec_jsonl_path(apg_root, project), records)?;
     if let Err(e) = reingest_project(apg_root, project) {
         eprintln!("warning: write-through re-ingest failed: {e:#}");
@@ -400,6 +400,21 @@ fn spec_link(args: &[String]) -> anyhow::Result<()> {
     };
     let apg_root = require_apg_root()?;
     let mut records = load_project(&apg_root, project)?;
+    link_depends_on(project, req_id, &p.all("depends-on"), &mut records)?;
+    write_through(&apg_root, project, &records)?;
+    println!("Linked {project}.{req_id} depends-on");
+    Ok(())
+}
+
+/// Applies the depends-on edges for `req_id`: removes its existing edges once,
+/// then adds every dep (R8). A dep may repeat across calls (idempotent upsert);
+/// self-deps and undeclared targets are write-time errors.
+fn link_depends_on(
+    project: &str,
+    req_id: &str,
+    deps: &[String],
+    records: &mut Vec<Record>,
+) -> anyhow::Result<()> {
     let req_fqn = format!("future/{project}/spec.{req_id}");
     if !records
         .iter()
@@ -407,9 +422,10 @@ fn spec_link(args: &[String]) -> anyhow::Result<()> {
     {
         anyhow::bail!("requirement `{req_id}` does not exist in `{project}`");
     }
-    for dep in p.all("depends-on") {
+    artifacts::remove_incident_edges(records, &req_fqn);
+    for dep in deps {
         let dep_fqn = format!("future/{project}/spec.{dep}");
-        if dep == *req_id {
+        if dep.as_str() == req_id {
             anyhow::bail!("requirement `{req_id}` cannot depend on itself");
         }
         if !records
@@ -418,14 +434,11 @@ fn spec_link(args: &[String]) -> anyhow::Result<()> {
         {
             anyhow::bail!("depends-on target `{dep}` is not an existing requirement");
         }
-        artifacts::remove_incident_edges(&mut records, &req_fqn);
         records.push(Record::DependsOn {
             from: req_fqn.clone(),
             to: dep_fqn,
         });
     }
-    write_through(&apg_root, project, &records)?;
-    println!("Linked {project}.{req_id} depends-on");
     Ok(())
 }
 
@@ -954,6 +967,74 @@ mod tests {
         drop(conn);
         drop(db);
         (dir.join("apg"), dir)
+    }
+
+    #[test]
+    fn link_depends_on_adds_all_edges_once() {
+        let mut records = vec![
+            Record::Requirement {
+                fqn: "future/foo/spec.R1".into(),
+                id: "R1".into(),
+                title: "A".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.R2".into(),
+                id: "R2".into(),
+                title: "B".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.R3".into(),
+                id: "R3".into(),
+                title: "C".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+        ];
+        // Multiple --depends-on in one call must all land (regression: the
+        // incident-edge removal used to run inside the loop, dropping earlier
+        // edges so only the last dep survived).
+        link_depends_on(
+            "foo",
+            "R1",
+            &["R2".into(), "R3".into()],
+            &mut records,
+        )
+        .unwrap();
+        let deps: Vec<_> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::DependsOn { from, to }
+                    if from == "future/foo/spec.R1" =>
+                {
+                    Some(to.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deps, vec!["future/foo/spec.R2", "future/foo/spec.R3"]);
+
+        // Re-linking replaces, never duplicates.
+        link_depends_on("foo", "R1", &["R3".into()], &mut records).unwrap();
+        let deps: Vec<_> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::DependsOn { from, to }
+                    if from == "future/foo/spec.R1" =>
+                {
+                    Some(to.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deps, vec!["future/foo/spec.R3"]);
+
+        // Self-deps and undeclared targets are write-time errors.
+        assert!(link_depends_on("foo", "R1", &["R1".into()], &mut records).is_err());
+        assert!(link_depends_on("foo", "R1", &["R9".into()], &mut records).is_err());
     }
 
     #[test]

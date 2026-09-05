@@ -299,7 +299,7 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan complete <project> <phase-n>");
     };
     let apg_root = require_apg_root()?;
-    let mut records = load_plan(&apg_root, project)?;
+    let records = load_plan(&apg_root, project)?;
     let phase_fqn = format!("future/{project}/plan.phase-{phase:02}");
 
     let tasks: Vec<String> = records
@@ -352,32 +352,25 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
     }
 
     // Satisfies → Implements from the phase's built code (done tasks' anchors).
-    let mut built: Vec<String> = Vec::new();
-    for t in &tasks {
-        for (a, _) in records.iter().filter_map(|e| match e {
-            Record::Anchors { from, to } if from == t => Some((to.clone(), ())),
-            _ => None,
-        }) {
-            if !built.contains(&a) {
-                built.push(a);
+    // These are *spec* records: they serialize into apg/specs/<project>.jsonl
+    // (the durable form), never the transient plan JSONL — the final-phase
+    // complete retires the plan file, which would otherwise lose them (R18).
+    let built = built_codes(&records, &tasks);
+    let satisfied = satisfied_reqs(&records, &phase_fqn);
+    if !built.is_empty() && !satisfied.is_empty() {
+        let mut spec_records = spec_cmd::load_project(&apg_root, project)?;
+        for req in &satisfied {
+            // Idempotent Implements: replace only existing Implements edges on
+            // the requirement (depends-on/anchors are untouched).
+            spec_records.retain(|r| !matches!(r, Record::Implements { to, .. } if to == req));
+            for code in &built {
+                spec_records.push(Record::Implements {
+                    from: code.clone(),
+                    to: req.clone(),
+                });
             }
         }
-    }
-    let satisfied: Vec<String> = records
-        .iter()
-        .filter_map(|e| match e {
-            Record::Satisfies { from, to } if from == &phase_fqn => Some(to.clone()),
-            _ => None,
-        })
-        .collect();
-    for req in satisfied {
-        for code in &built {
-            artifacts::remove_incident_edges(&mut records, &req);
-            records.push(Record::Implements {
-                from: code.clone(),
-                to: req.clone(),
-            });
-        }
+        spec_cmd::write_through(&apg_root, project, &spec_records)?;
     }
     write_through(&apg_root, project, &records)?;
 
@@ -402,6 +395,34 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
         println!("Completed phase {phase} of plan {project}");
     }
     Ok(())
+}
+
+/// The built code nodes of a phase: the unique set of its tasks' `Anchors`
+/// (files/functions the tasks touched).
+fn built_codes(records: &[Record], tasks: &[String]) -> Vec<String> {
+    let mut built: Vec<String> = Vec::new();
+    for t in tasks {
+        for (a, _) in records.iter().filter_map(|e| match e {
+            Record::Anchors { from, to } if from == t => Some((to.clone(), ())),
+            _ => None,
+        }) {
+            if !built.contains(&a) {
+                built.push(a);
+            }
+        }
+    }
+    built
+}
+
+/// The requirements a plan phase `Satisfies`.
+fn satisfied_reqs(records: &[Record], phase_fqn: &str) -> Vec<String> {
+    records
+        .iter()
+        .filter_map(|e| match e {
+            Record::Satisfies { from, to } if from == phase_fqn => Some(to.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// `apg plan render <project> [--out <path>|-]` — PLAN.md-style markdown with
@@ -533,4 +554,94 @@ fn spec_has_future(apg_root: &Path, project: &str, future_fqn: &str) -> anyhow::
     Ok(specs::read_jsonl(&path)?.iter().any(|r| {
         matches!(r, Record::Future { fqn, .. } if fqn == future_fqn)
     }))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_complete_implements_are_idempotent_and_preserve_spec_edges() {
+        // Plan records: one done task anchored to two code nodes, phase
+        // Satisfying R1.
+        let records = vec![
+            Record::PlanPhase {
+                fqn: "future/foo/plan.phase-01".into(),
+                number: 1,
+                title: "P".into(),
+                deliverable: "D".into(),
+            },
+            Record::Task {
+                fqn: "future/foo/plan.phase-01.task-1".into(),
+                title: "T".into(),
+                tier: "source".into(),
+                status: "done".into(),
+            },
+            Record::Contains {
+                from: "future/foo/plan.phase-01".into(),
+                to: "future/foo/plan.phase-01.task-1".into(),
+            },
+            Record::Satisfies {
+                from: "future/foo/plan.phase-01".into(),
+                to: "future/foo/spec.R1".into(),
+            },
+            Record::Anchors {
+                from: "future/foo/plan.phase-01.task-1".into(),
+                to: "code/one".into(),
+            },
+            Record::Anchors {
+                from: "future/foo/plan.phase-01.task-1".into(),
+                to: "code/two".into(),
+            },
+        ];
+        let tasks = vec!["future/foo/plan.phase-01.task-1".to_string()];
+        let built = built_codes(&records, &tasks);
+        assert_eq!(built, vec!["code/one", "code/two"]);
+        let satisfied = satisfied_reqs(&records, "future/foo/plan.phase-01");
+        assert_eq!(satisfied, vec!["future/foo/spec.R1"]);
+
+        // Spec records carry the requirement's own edges — must survive.
+        let mut spec_records = vec![
+            Record::Requirement {
+                fqn: "future/foo/spec.R1".into(),
+                id: "R1".into(),
+                title: "A".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::DependsOn {
+                from: "future/foo/spec.R1".into(),
+                to: "future/foo/spec.R2".into(),
+            },
+            Record::Anchors {
+                from: "future/foo/spec.R1".into(),
+                to: "code/one".into(),
+            },
+        ];
+        for req in &satisfied {
+            spec_records
+                .retain(|r| !matches!(r, Record::Implements { to, .. } if to == req));
+            for code in &built {
+                spec_records.push(Record::Implements {
+                    from: code.clone(),
+                    to: req.clone(),
+                });
+            }
+        }
+
+        // Implements from BOTH built code nodes to R1.
+        let impls: Vec<&str> = spec_records
+            .iter()
+            .filter_map(|r| match r {
+                Record::Implements { from, to } if to == "future/foo/spec.R1" => Some(from.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(impls, vec!["code/one", "code/two"]);
+
+        // The requirement's DependsOn + Anchors survive in the spec records.
+        assert!(spec_records.iter().any(|r| matches!(r, Record::DependsOn { from, to }
+            if from == "future/foo/spec.R1" && to == "future/foo/spec.R2")));
+        assert!(spec_records.iter().any(|r| matches!(r, Record::Anchors { from, to }
+            if from == "future/foo/spec.R1" && to == "code/one")));
+    }
 }
