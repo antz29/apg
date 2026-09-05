@@ -26,11 +26,11 @@ fn default_code_type() -> String {
 }
 
 impl ApgConfig {
-    /// Loads the classification config from `.apg/config.json` (the current
-    /// location), falling back to a legacy `apg.json` at the project root.
+    /// Loads the classification config from `apg/config.json` (the committed
+    /// layout root), falling back to a legacy `apg.json` at the project root.
     pub fn load(project_dir: &Path) -> Option<ApgConfig> {
         for cand in [
-            project_dir.join(".apg/config.json"),
+            project_dir.join("apg/config.json"),
             project_dir.join("apg.json"),
         ] {
             let text = std::fs::read_to_string(&cand);

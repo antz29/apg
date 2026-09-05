@@ -6,6 +6,7 @@
 //! PARQUET reader derives logical types from `converted_type` only, so the
 //! arrow-rs default (`LogicalType::String`) would be misread as `BLOB`.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -152,6 +153,47 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut file_ct = Vec::new();
     let mut unres_fqn = Vec::new();
     let mut unres_cat = Vec::new();
+    let mut spec_fqn = Vec::new();
+    let mut spec_title = Vec::new();
+    let mut spec_goal = Vec::new();
+    let mut req_fqn = Vec::new();
+    let mut req_id = Vec::new();
+    let mut req_title = Vec::new();
+    let mut req_body = Vec::new();
+    let mut req_feature = Vec::new();
+    let mut phase_fqn = Vec::new();
+    let mut phase_number = Vec::new();
+    let mut phase_title = Vec::new();
+    let mut decision_fqn = Vec::new();
+    let mut decision_id = Vec::new();
+    let mut decision_summary = Vec::new();
+    let mut future_fqn = Vec::new();
+    let mut future_kind = Vec::new();
+    let mut future_target = Vec::new();
+    let mut nongoal_fqn = Vec::new();
+    let mut nongoal_body = Vec::new();
+    let mut ac_fqn = Vec::new();
+    let mut ac_body = Vec::new();
+    let mut vi_fqn = Vec::new();
+    let mut vi_body = Vec::new();
+    let mut note_fqn = Vec::new();
+    let mut note_body = Vec::new();
+    let mut note_kind = Vec::new();
+    let mut feedback_fqn = Vec::new();
+    let mut feedback_body = Vec::new();
+    let mut feedback_status = Vec::new();
+    let mut feedback_disposition = Vec::new();
+    let mut plan_fqn = Vec::new();
+    let mut plan_title = Vec::new();
+    let mut plan_strategy = Vec::new();
+    let mut planphase_fqn = Vec::new();
+    let mut planphase_number = Vec::new();
+    let mut planphase_title = Vec::new();
+    let mut planphase_deliverable = Vec::new();
+    let mut task_fqn = Vec::new();
+    let mut task_title = Vec::new();
+    let mut task_tier = Vec::new();
+    let mut task_status = Vec::new();
 
     for (fqn, node) in &graph.nodes {
         match node.kind {
@@ -188,6 +230,73 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             NodeKind::UnresolvedTarget => {
                 unres_fqn.push(fqn.clone());
                 unres_cat.push(node.category.clone().unwrap_or_default());
+            }
+            NodeKind::Spec => {
+                spec_fqn.push(fqn.clone());
+                spec_title.push(node.title.clone().unwrap_or_default());
+                spec_goal.push(node.goal.clone().unwrap_or_default());
+            }
+            NodeKind::Requirement => {
+                req_fqn.push(fqn.clone());
+                req_id.push(node.id.clone().unwrap_or_default());
+                req_title.push(node.title.clone().unwrap_or_default());
+                req_body.push(node.body.clone().unwrap_or_default());
+                req_feature.push(node.feature.clone().unwrap_or_default());
+            }
+            NodeKind::Phase => {
+                phase_fqn.push(fqn.clone());
+                phase_number.push(node.number.map(|n| n as i64).unwrap_or_default());
+                phase_title.push(node.title.clone().unwrap_or_default());
+            }
+            NodeKind::Decision => {
+                decision_fqn.push(fqn.clone());
+                decision_id.push(node.id.clone().unwrap_or_default());
+                decision_summary.push(node.summary.clone().unwrap_or_default());
+            }
+            NodeKind::Future => {
+                future_fqn.push(fqn.clone());
+                future_kind.push(node.sub_kind.clone().unwrap_or_default());
+                future_target.push(node.target.clone().unwrap_or_default());
+            }
+            NodeKind::NonGoal => {
+                nongoal_fqn.push(fqn.clone());
+                nongoal_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::AcceptanceCriterion => {
+                ac_fqn.push(fqn.clone());
+                ac_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::VerificationItem => {
+                vi_fqn.push(fqn.clone());
+                vi_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Note => {
+                note_fqn.push(fqn.clone());
+                note_body.push(node.body.clone().unwrap_or_default());
+                note_kind.push(node.sub_kind.clone().unwrap_or_default());
+            }
+            NodeKind::Feedback => {
+                feedback_fqn.push(fqn.clone());
+                feedback_body.push(node.body.clone().unwrap_or_default());
+                feedback_status.push(node.status.clone().unwrap_or_default());
+                feedback_disposition.push(node.disposition.clone().unwrap_or_default());
+            }
+            NodeKind::Plan => {
+                plan_fqn.push(fqn.clone());
+                plan_title.push(node.title.clone().unwrap_or_default());
+                plan_strategy.push(node.strategy.clone().unwrap_or_default());
+            }
+            NodeKind::PlanPhase => {
+                planphase_fqn.push(fqn.clone());
+                planphase_number.push(node.number.map(|n| n as i64).unwrap_or_default());
+                planphase_title.push(node.title.clone().unwrap_or_default());
+                planphase_deliverable.push(node.deliverable.clone().unwrap_or_default());
+            }
+            NodeKind::Task => {
+                task_fqn.push(fqn.clone());
+                task_title.push(node.title.clone().unwrap_or_default());
+                task_tier.push(node.tier.clone().unwrap_or_default());
+                task_status.push(node.status.clone().unwrap_or_default());
             }
         }
     }
@@ -236,6 +345,103 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("category", Col::Str(unres_cat)),
         ],
     )?;
+    write_parquet(
+        &dir.join("spec.parquet"),
+        &[
+            ("fqn", Col::Str(spec_fqn)),
+            ("title", Col::Str(spec_title)),
+            ("goal", Col::Str(spec_goal)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("requirement.parquet"),
+        &[
+            ("fqn", Col::Str(req_fqn)),
+            ("id", Col::Str(req_id)),
+            ("title", Col::Str(req_title)),
+            ("body", Col::Str(req_body)),
+            ("feature", Col::Str(req_feature)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("phase.parquet"),
+        &[
+            ("fqn", Col::Str(phase_fqn)),
+            ("number", Col::I64(phase_number)),
+            ("title", Col::Str(phase_title)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("decision.parquet"),
+        &[
+            ("fqn", Col::Str(decision_fqn)),
+            ("id", Col::Str(decision_id)),
+            ("summary", Col::Str(decision_summary)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("future.parquet"),
+        &[
+            ("fqn", Col::Str(future_fqn)),
+            ("kind", Col::Str(future_kind)),
+            ("target", Col::Str(future_target)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("non_goal.parquet"),
+        &[("fqn", Col::Str(nongoal_fqn)), ("body", Col::Str(nongoal_body))],
+    )?;
+    write_parquet(
+        &dir.join("acceptance_criterion.parquet"),
+        &[("fqn", Col::Str(ac_fqn)), ("body", Col::Str(ac_body))],
+    )?;
+    write_parquet(
+        &dir.join("verification_item.parquet"),
+        &[("fqn", Col::Str(vi_fqn)), ("body", Col::Str(vi_body))],
+    )?;
+    write_parquet(
+        &dir.join("note.parquet"),
+        &[
+            ("fqn", Col::Str(note_fqn)),
+            ("body", Col::Str(note_body)),
+            ("kind", Col::Str(note_kind)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("feedback.parquet"),
+        &[
+            ("fqn", Col::Str(feedback_fqn)),
+            ("body", Col::Str(feedback_body)),
+            ("status", Col::Str(feedback_status)),
+            ("disposition", Col::Str(feedback_disposition)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("plan.parquet"),
+        &[
+            ("fqn", Col::Str(plan_fqn)),
+            ("title", Col::Str(plan_title)),
+            ("strategy", Col::Str(plan_strategy)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("plan_phase.parquet"),
+        &[
+            ("fqn", Col::Str(planphase_fqn)),
+            ("number", Col::I64(planphase_number)),
+            ("title", Col::Str(planphase_title)),
+            ("deliverable", Col::Str(planphase_deliverable)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("task.parquet"),
+        &[
+            ("fqn", Col::Str(task_fqn)),
+            ("title", Col::Str(task_title)),
+            ("tier", Col::Str(task_tier)),
+            ("status", Col::Str(task_status)),
+        ],
+    )?;
 
     // --- Rel tables ---
     let mut c_mm = (Vec::new(), Vec::new());
@@ -245,17 +451,34 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut c_ss = (Vec::new(), Vec::new());
     let mut c_sf = (Vec::new(), Vec::new());
     for (a, b) in &graph.contains {
-        let dst = match (graph.nodes[a].kind, graph.nodes[b].kind) {
-            (NodeKind::Module, NodeKind::Module) => &mut c_mm,
-            (NodeKind::Module, NodeKind::File) => &mut c_mfile,
-            (NodeKind::File, NodeKind::Struct) => &mut c_fs,
-            (NodeKind::File, NodeKind::Function) => &mut c_ff,
-            (NodeKind::Struct, NodeKind::Struct) => &mut c_ss,
-            (NodeKind::Struct, NodeKind::Function) => &mut c_sf,
-            _ => unreachable!("unvalidated contains edge"),
-        };
-        dst.0.push(a.clone());
-        dst.1.push(b.clone());
+        match (graph.nodes[a].kind, graph.nodes[b].kind) {
+            (NodeKind::Module, NodeKind::Module) => {
+                c_mm.0.push(a.clone());
+                c_mm.1.push(b.clone());
+            }
+            (NodeKind::Module, NodeKind::File) => {
+                c_mfile.0.push(a.clone());
+                c_mfile.1.push(b.clone());
+            }
+            (NodeKind::File, NodeKind::Struct) => {
+                c_fs.0.push(a.clone());
+                c_fs.1.push(b.clone());
+            }
+            (NodeKind::File, NodeKind::Function) => {
+                c_ff.0.push(a.clone());
+                c_ff.1.push(b.clone());
+            }
+            (NodeKind::Struct, NodeKind::Struct) => {
+                c_ss.0.push(a.clone());
+                c_ss.1.push(b.clone());
+            }
+            (NodeKind::Struct, NodeKind::Function) => {
+                c_sf.0.push(a.clone());
+                c_sf.1.push(b.clone());
+            }
+            // Spec/plan contains pairs are bucketed below.
+            _ => {}
+        }
     }
 
     let mut calls = (Vec::new(), Vec::new());
@@ -323,10 +546,235 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     rel("unresolved_use_fn.parquet", uu_fn.0, uu_fn.1)?;
     rel("unresolved_use_struct.parquet", uu_st.0, uu_st.1)?;
 
+    // Spec/plan rel tables, one file per `(from, to)` pair. `contains`
+    // (multi-pair) keeps its explicit code pair files; the new tables reuse
+    // the pair enumeration so COPY statements stay in sync (SPEC R2/R21).
+    let mut contains_spec: HashMap<String, (Vec<String>, Vec<String>)> = HashMap::new();
+    for (a, b) in &graph.contains {
+        let Some(name) = contains_pair_name(graph.nodes[a].kind, graph.nodes[b].kind) else {
+            continue;
+        };
+        let bucket = contains_spec.entry(name).or_default();
+        bucket.0.push(a.clone());
+        bucket.1.push(b.clone());
+    }
+    for (from, to) in contains_pairs() {
+        let name = pair_file("contains", from, to);
+        let empty = (Vec::new(), Vec::new());
+        let (fa, fb) = contains_spec.get(&name).unwrap_or(&empty);
+        rel(&name, fa.clone(), fb.clone())?;
+    }
+
+    for (table, from, to) in spec_rel_pairs() {
+        let mut fa = Vec::new();
+        let mut fb = Vec::new();
+        match table {
+            "Details" => {
+                for (a, b) in &graph.details {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Reviews" => {
+                for (a, b) in &graph.reviews {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Anchors" => {
+                for (a, b) in &graph.anchors {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Implements" => {
+                for (a, b) in &graph.implements {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Gates" => {
+                for (a, b) in &graph.gates {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "DependsOn" => {
+                for (a, b) in &graph.depends_on {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "SpecDependsOn" => {
+                for (a, b) in &graph.spec_depends {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Satisfies" => {
+                for (a, b) in &graph.satisfies {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Builds" => {
+                for (a, b) in &graph.builds {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            _ => unreachable!("unknown spec rel table: {table}"),
+        }
+        rel(&pair_file(table, from, to), fa, fb)?;
+    }
+
     Ok(())
 }
 
-/// Creates the LadybugDB schema (SPEC §7): five node tables and five rel tables.
+/// The `(from, to)` kind pairs of the extended `Contains` table (SPEC §7, R2,
+/// R21), with the per-pair PARQUET filename (internal to the load dir).
+fn contains_pairs() -> Vec<(NodeKind, NodeKind)> {
+    use NodeKind::*;
+    vec![
+        (Module, Module),
+        (Module, File),
+        (File, Struct),
+        (File, Function),
+        (Struct, Struct),
+        (Struct, Function),
+        (Spec, Requirement),
+        (Spec, Phase),
+        (Phase, Requirement),
+        (Spec, Decision),
+        (Spec, NonGoal),
+        (Spec, AcceptanceCriterion),
+        (Spec, VerificationItem),
+        (Plan, PlanPhase),
+        (PlanPhase, Task),
+        (PlanPhase, AcceptanceCriterion),
+        (PlanPhase, VerificationItem),
+    ]
+}
+
+fn contains_pair_name(a: NodeKind, b: NodeKind) -> Option<String> {
+    if contains_pairs().contains(&(a, b)) {
+        Some(pair_file("contains", a, b))
+    } else {
+        None
+    }
+}
+
+/// The `(from, to)` kind pairs of the spec/plan rel tables (SPEC R2/R21), with
+/// the owning table name. Shared by `build_load_files` and `copy_from` so the
+/// PARQUET filenames and COPY statements can never drift.
+fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
+    use NodeKind::*;
+    let mut v = Vec::new();
+    for to in [
+        Module, Function, Struct, File, Spec, Requirement, Phase, Decision, NonGoal,
+        AcceptanceCriterion, VerificationItem, Plan, PlanPhase, Task,
+    ] {
+        v.push(("Details", Note, to));
+    }
+    for to in [
+        Module, Function, Struct, File, Spec, Requirement, Phase, Decision, NonGoal,
+        AcceptanceCriterion, VerificationItem, Future, Plan, PlanPhase, Task,
+    ] {
+        v.push(("Reviews", Feedback, to));
+    }
+    for to in [Function, Struct, File, Future] {
+        v.push(("Anchors", Requirement, to));
+    }
+    for to in [Function, Struct, File] {
+        v.push(("Anchors", Task, to));
+    }
+    for from in [Function, Struct, File] {
+        v.push(("Implements", from, Requirement));
+    }
+    v.push(("Gates", Phase, Phase));
+    v.push(("Gates", PlanPhase, PlanPhase));
+    v.push(("DependsOn", Requirement, Requirement));
+    v.push(("SpecDependsOn", Spec, Spec));
+    v.push(("Satisfies", PlanPhase, Requirement));
+    v.push(("Builds", Task, Future));
+    v
+}
+
+/// Load-file basename for a rel-table `(from, to)` kind pair, e.g.
+/// `details_note_module.parquet`. The slug only names the file; the COPY
+/// override uses the exact table labels.
+fn pair_file(table: &str, from: NodeKind, to: NodeKind) -> String {
+    format!("{table}_{}_{}.parquet", kind_slug(from), kind_slug(to))
+}
+
+fn kind_slug(k: NodeKind) -> &'static str {
+    match k {
+        NodeKind::Module => "module",
+        NodeKind::Struct => "struct",
+        NodeKind::Function => "function",
+        NodeKind::File => "file",
+        NodeKind::UnresolvedTarget => "unresolved_target",
+        NodeKind::Spec => "spec",
+        NodeKind::Requirement => "requirement",
+        NodeKind::Phase => "phase",
+        NodeKind::Decision => "decision",
+        NodeKind::Future => "future",
+        NodeKind::NonGoal => "non_goal",
+        NodeKind::AcceptanceCriterion => "acceptance_criterion",
+        NodeKind::VerificationItem => "verification_item",
+        NodeKind::Note => "note",
+        NodeKind::Feedback => "feedback",
+        NodeKind::Plan => "plan",
+        NodeKind::PlanPhase => "plan_phase",
+        NodeKind::Task => "task",
+    }
+}
+
+/// The exact node-table label used in `CREATE REL TABLE` and COPY overrides.
+fn label_of(k: NodeKind) -> &'static str {
+    match k {
+        NodeKind::Module => "Module",
+        NodeKind::Struct => "Struct",
+        NodeKind::Function => "Function",
+        NodeKind::File => "File",
+        NodeKind::UnresolvedTarget => "UnresolvedTarget",
+        NodeKind::Spec => "Spec",
+        NodeKind::Requirement => "Requirement",
+        NodeKind::Phase => "Phase",
+        NodeKind::Decision => "Decision",
+        NodeKind::Future => "Future",
+        NodeKind::NonGoal => "NonGoal",
+        NodeKind::AcceptanceCriterion => "AcceptanceCriterion",
+        NodeKind::VerificationItem => "VerificationItem",
+        NodeKind::Note => "Note",
+        NodeKind::Feedback => "Feedback",
+        NodeKind::Plan => "Plan",
+        NodeKind::PlanPhase => "PlanPhase",
+        NodeKind::Task => "Task",
+    }
+}
+
+/// Creates the LadybugDB schema (SPEC §7, R1/R2/R20/R21): the five code node
+/// tables, the thirteen spec/plan node tables, and the rel tables (Contains
+/// extended with spec/plan pairs, plus the nine spec/plan rel tables).
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY)")?;
     conn.query(
@@ -340,7 +788,42 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     )?;
     conn.query("CREATE NODE TABLE UnresolvedTarget(fqn STRING PRIMARY KEY, category STRING)")?;
     conn.query(
-        "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function)",
+        "CREATE NODE TABLE Spec(fqn STRING PRIMARY KEY, title STRING, goal STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Requirement(fqn STRING PRIMARY KEY, id STRING, title STRING, body STRING, feature STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Phase(fqn STRING PRIMARY KEY, number INT64, title STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Decision(fqn STRING PRIMARY KEY, id STRING, summary STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Future(fqn STRING PRIMARY KEY, kind STRING, target STRING)",
+    )?;
+    conn.query("CREATE NODE TABLE NonGoal(fqn STRING PRIMARY KEY, body STRING)")?;
+    conn.query(
+        "CREATE NODE TABLE AcceptanceCriterion(fqn STRING PRIMARY KEY, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE VerificationItem(fqn STRING PRIMARY KEY, body STRING)",
+    )?;
+    conn.query("CREATE NODE TABLE Note(fqn STRING PRIMARY KEY, body STRING, kind STRING)")?;
+    conn.query(
+        "CREATE NODE TABLE Feedback(fqn STRING PRIMARY KEY, body STRING, status STRING, disposition STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Plan(fqn STRING PRIMARY KEY, title STRING, strategy STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE PlanPhase(fqn STRING PRIMARY KEY, number INT64, title STRING, deliverable STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, tier STRING, status STRING)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Spec TO Requirement, FROM Spec TO Phase, FROM Phase TO Requirement, FROM Spec TO Decision, FROM Spec TO NonGoal, FROM Spec TO AcceptanceCriterion, FROM Spec TO VerificationItem, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM PlanPhase TO AcceptanceCriterion, FROM PlanPhase TO VerificationItem)",
     )?;
     conn.query("CREATE REL TABLE Calls(FROM Function TO Function)")?;
     conn.query("CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct)")?;
@@ -350,6 +833,25 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query(
         "CREATE REL TABLE UnresolvedUse(FROM Function TO UnresolvedTarget, FROM Struct TO UnresolvedTarget)",
     )?;
+    conn.query(
+        "CREATE REL TABLE Details(FROM Note TO Module, FROM Note TO Function, FROM Note TO Struct, FROM Note TO File, FROM Note TO Spec, FROM Note TO Requirement, FROM Note TO Phase, FROM Note TO Decision, FROM Note TO NonGoal, FROM Note TO AcceptanceCriterion, FROM Note TO VerificationItem, FROM Note TO Plan, FROM Note TO PlanPhase, FROM Note TO Task)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Spec, FROM Feedback TO Requirement, FROM Feedback TO Phase, FROM Feedback TO Decision, FROM Feedback TO NonGoal, FROM Feedback TO AcceptanceCriterion, FROM Feedback TO VerificationItem, FROM Feedback TO Future, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task)",
+    )?;
+    conn.query("CREATE REL TABLE DependsOn(FROM Requirement TO Requirement)")?;
+    conn.query(
+        "CREATE REL TABLE Gates(FROM Phase TO Phase, FROM PlanPhase TO PlanPhase)",
+    )?;
+    conn.query("CREATE REL TABLE SpecDependsOn(FROM Spec TO Spec)")?;
+    conn.query(
+        "CREATE REL TABLE Anchors(FROM Requirement TO Function, FROM Requirement TO Struct, FROM Requirement TO File, FROM Requirement TO Future, FROM Task TO Function, FROM Task TO Struct, FROM Task TO File)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Implements(FROM Function TO Requirement, FROM Struct TO Requirement, FROM File TO Requirement)",
+    )?;
+    conn.query("CREATE REL TABLE Satisfies(FROM PlanPhase TO Requirement)")?;
+    conn.query("CREATE REL TABLE Builds(FROM Task TO Future)")?;
     Ok(())
 }
 
@@ -366,6 +868,25 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
             r#"COPY UnresolvedTarget FROM "{}""#,
             p("unresolved.parquet")
         ),
+        format!(r#"COPY Spec FROM "{}""#, p("spec.parquet")),
+        format!(r#"COPY Requirement FROM "{}""#, p("requirement.parquet")),
+        format!(r#"COPY Phase FROM "{}""#, p("phase.parquet")),
+        format!(r#"COPY Decision FROM "{}""#, p("decision.parquet")),
+        format!(r#"COPY Future FROM "{}""#, p("future.parquet")),
+        format!(r#"COPY NonGoal FROM "{}""#, p("non_goal.parquet")),
+        format!(
+            r#"COPY AcceptanceCriterion FROM "{}""#,
+            p("acceptance_criterion.parquet")
+        ),
+        format!(
+            r#"COPY VerificationItem FROM "{}""#,
+            p("verification_item.parquet")
+        ),
+        format!(r#"COPY Note FROM "{}""#, p("note.parquet")),
+        format!(r#"COPY Feedback FROM "{}""#, p("feedback.parquet")),
+        format!(r#"COPY Plan FROM "{}""#, p("plan.parquet")),
+        format!(r#"COPY PlanPhase FROM "{}""#, p("plan_phase.parquet")),
+        format!(r#"COPY Task FROM "{}""#, p("task.parquet")),
         format!(
             r#"COPY Contains FROM "{}" (from="Module", to="Module")"#,
             p("contains_mod_mod.parquet")
@@ -414,6 +935,42 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
     ];
     for s in stmts {
         conn.query(&s)?;
+    }
+    // Spec/plan rel tables: one COPY per `(from, to)` pair, generated from the
+    // same pair enumeration that wrote the files.
+    let mut contains_stmt = Vec::new();
+    for (from, to) in contains_pairs() {
+        let name = pair_file("contains", from, to);
+        if [
+            (NodeKind::Module, NodeKind::Module),
+            (NodeKind::Module, NodeKind::File),
+            (NodeKind::File, NodeKind::Struct),
+            (NodeKind::File, NodeKind::Function),
+            (NodeKind::Struct, NodeKind::Struct),
+            (NodeKind::Struct, NodeKind::Function),
+        ]
+        .contains(&(from, to))
+        {
+            continue;
+        }
+        contains_stmt.push(format!(
+            r#"COPY Contains FROM "{}" (from="{}", to="{}")"#,
+            p(&name),
+            label_of(from),
+            label_of(to)
+        ));
+    }
+    for s in contains_stmt {
+        conn.query(&s)?;
+    }
+    for (table, from, to) in spec_rel_pairs() {
+        let name = pair_file(table, from, to);
+        conn.query(&format!(
+            r#"COPY {table} FROM "{}" (from="{}", to="{}")"#,
+            p(&name),
+            label_of(from),
+            label_of(to)
+        ))?;
     }
     Ok(())
 }
@@ -473,6 +1030,123 @@ enum Export {
         from: String,
         to: String,
     },
+    Spec {
+        fqn: String,
+        title: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        goal: String,
+    },
+    Requirement {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        id: String,
+        title: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        feature: String,
+    },
+    Phase {
+        fqn: String,
+        number: u32,
+        title: String,
+    },
+    Decision {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        id: String,
+        summary: String,
+    },
+    Future {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        kind: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        target: String,
+    },
+    NonGoal {
+        fqn: String,
+        body: String,
+    },
+    AcceptanceCriterion {
+        fqn: String,
+        body: String,
+    },
+    VerificationItem {
+        fqn: String,
+        body: String,
+    },
+    Note {
+        fqn: String,
+        body: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        kind: String,
+    },
+    Feedback {
+        fqn: String,
+        body: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        status: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        disposition: String,
+    },
+    Plan {
+        fqn: String,
+        title: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        strategy: String,
+    },
+    PlanPhase {
+        fqn: String,
+        number: u32,
+        title: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        deliverable: String,
+    },
+    Task {
+        fqn: String,
+        title: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        tier: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        status: String,
+    },
+    Details {
+        from: String,
+        to: String,
+    },
+    Reviews {
+        from: String,
+        to: String,
+    },
+    DependsOn {
+        from: String,
+        to: String,
+    },
+    Gates {
+        from: String,
+        to: String,
+    },
+    SpecDepends {
+        from: String,
+        to: String,
+    },
+    Anchors {
+        from: String,
+        to: String,
+    },
+    Implements {
+        from: String,
+        to: String,
+    },
+    Satisfies {
+        from: String,
+        to: String,
+    },
+    Builds {
+        from: String,
+        to: String,
+    },
 }
 
 /// Writes `graph.jsonl`: the final graph re-serialized with canonical FQNs
@@ -529,6 +1203,73 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                 fqn: fqn.clone(),
                 category: node.category.clone().unwrap_or_default(),
             },
+            NodeKind::Spec => Export::Spec {
+                fqn: fqn.clone(),
+                title: node.title.clone().unwrap_or_default(),
+                goal: node.goal.clone().unwrap_or_default(),
+            },
+            NodeKind::Requirement => Export::Requirement {
+                fqn: fqn.clone(),
+                id: node.id.clone().unwrap_or_default(),
+                title: node.title.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+                feature: node.feature.clone().unwrap_or_default(),
+            },
+            NodeKind::Phase => Export::Phase {
+                fqn: fqn.clone(),
+                number: node.number.unwrap_or_default(),
+                title: node.title.clone().unwrap_or_default(),
+            },
+            NodeKind::Decision => Export::Decision {
+                fqn: fqn.clone(),
+                id: node.id.clone().unwrap_or_default(),
+                summary: node.summary.clone().unwrap_or_default(),
+            },
+            NodeKind::Future => Export::Future {
+                fqn: fqn.clone(),
+                kind: node.sub_kind.clone().unwrap_or_default(),
+                target: node.target.clone().unwrap_or_default(),
+            },
+            NodeKind::NonGoal => Export::NonGoal {
+                fqn: fqn.clone(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::AcceptanceCriterion => Export::AcceptanceCriterion {
+                fqn: fqn.clone(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::VerificationItem => Export::VerificationItem {
+                fqn: fqn.clone(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Note => Export::Note {
+                fqn: fqn.clone(),
+                body: node.body.clone().unwrap_or_default(),
+                kind: node.sub_kind.clone().unwrap_or_default(),
+            },
+            NodeKind::Feedback => Export::Feedback {
+                fqn: fqn.clone(),
+                body: node.body.clone().unwrap_or_default(),
+                status: node.status.clone().unwrap_or_default(),
+                disposition: node.disposition.clone().unwrap_or_default(),
+            },
+            NodeKind::Plan => Export::Plan {
+                fqn: fqn.clone(),
+                title: node.title.clone().unwrap_or_default(),
+                strategy: node.strategy.clone().unwrap_or_default(),
+            },
+            NodeKind::PlanPhase => Export::PlanPhase {
+                fqn: fqn.clone(),
+                number: node.number.unwrap_or_default(),
+                title: node.title.clone().unwrap_or_default(),
+                deliverable: node.deliverable.clone().unwrap_or_default(),
+            },
+            NodeKind::Task => Export::Task {
+                fqn: fqn.clone(),
+                title: node.title.clone().unwrap_or_default(),
+                tier: node.tier.clone().unwrap_or_default(),
+                status: node.status.clone().unwrap_or_default(),
+            },
         };
         write_line(&mut w, &rec)?;
     }
@@ -578,6 +1319,87 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             },
         )?;
     }
+    for (a, b) in &graph.details {
+        write_line(
+            &mut w,
+            &Export::Details {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.reviews {
+        write_line(
+            &mut w,
+            &Export::Reviews {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.depends_on {
+        write_line(
+            &mut w,
+            &Export::DependsOn {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.gates {
+        write_line(
+            &mut w,
+            &Export::Gates {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.spec_depends {
+        write_line(
+            &mut w,
+            &Export::SpecDepends {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.anchors {
+        write_line(
+            &mut w,
+            &Export::Anchors {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.implements {
+        write_line(
+            &mut w,
+            &Export::Implements {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.satisfies {
+        write_line(
+            &mut w,
+            &Export::Satisfies {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.builds {
+        write_line(
+            &mut w,
+            &Export::Builds {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
     w.flush()?;
     Ok(())
 }
@@ -595,6 +1417,7 @@ mod tests {
             location: loc,
             category: cat.map(str::to_string),
             code_type: "src".to_string(),
+            ..Node::default()
         };
         g.nodes
             .insert("mod".to_string(), node(NodeKind::Module, None, None));
@@ -751,6 +1574,288 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(out.contains("ext.Foo"), "unresolved_call: {out}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn spec_plan_schema_roundtrip() {
+        // A spec + plan graph (SPEC R1/R2/R20/R21) survives the PARQUET load
+        // path: node tables with their own columns, multi-pair Contains, and
+        // the nine spec/plan rel tables (one COPY per pair, empty pairs too).
+        let mut g = Graph::default();
+        let sp = |kind: NodeKind| Node {
+            kind,
+            code_type: String::new(),
+            ..Node::default()
+        };
+        let mut n = |fqn: &str, node: Node| {
+            g.nodes.insert(fqn.to_string(), node);
+        };
+        n(
+            "future/foo/spec",
+            Node {
+                title: Some("Widget timer".to_string()),
+                goal: Some("Let widgets time out".to_string()),
+                ..sp(NodeKind::Spec)
+            },
+        );
+        n(
+            "future/foo/spec.R1",
+            Node {
+                id: Some("R1".to_string()),
+                title: Some("Timer".to_string()),
+                feature: Some("feature-a".to_string()),
+                ..sp(NodeKind::Requirement)
+            },
+        );
+        n(
+            "future/foo/spec.R2",
+            Node {
+                id: Some("R2".to_string()),
+                title: Some("Expiry".to_string()),
+                ..sp(NodeKind::Requirement)
+            },
+        );
+        n(
+            "future/foo/spec.phase-1",
+            Node {
+                number: Some(1),
+                title: Some("Core".to_string()),
+                ..sp(NodeKind::Phase)
+            },
+        );
+        n(
+            "future/foo/spec.phase-2",
+            Node {
+                number: Some(2),
+                title: Some("Polish".to_string()),
+                ..sp(NodeKind::Phase)
+            },
+        );
+        n(
+            "future/foo/spec.decision-d1",
+            Node {
+                id: Some("d1".to_string()),
+                summary: Some("Timeout in wall clock".to_string()),
+                ..sp(NodeKind::Decision)
+            },
+        );
+        n(
+            "future/foo/spec.ng1",
+            Node {
+                body: Some("No daemon".to_string()),
+                ..sp(NodeKind::NonGoal)
+            },
+        );
+        n(
+            "future/foo/spec.ac1",
+            Node {
+                body: Some("Timer fires once".to_string()),
+                ..sp(NodeKind::AcceptanceCriterion)
+            },
+        );
+        n(
+            "future/foo/spec.vi1",
+            Node {
+                body: Some("cargo test green".to_string()),
+                ..sp(NodeKind::VerificationItem)
+            },
+        );
+        n(
+            "future/foo/gateway",
+            Node {
+                sub_kind: Some("rpc".to_string()),
+                target: Some("github.com/x/gateway".to_string()),
+                ..sp(NodeKind::Future)
+            },
+        );
+        n(
+            "future/foo/note-1",
+            Node {
+                body: Some("Background prose".to_string()),
+                sub_kind: Some("background".to_string()),
+                ..sp(NodeKind::Note)
+            },
+        );
+        n(
+            "future/other/spec",
+            Node {
+                title: Some("Other".to_string()),
+                ..sp(NodeKind::Spec)
+            },
+        );
+        n(
+            "future/foo/feedback-1",
+            Node {
+                body: Some("Split R1".to_string()),
+                status: Some("open".to_string()),
+                ..sp(NodeKind::Feedback)
+            },
+        );
+        n(
+            "future/foo/plan",
+            Node {
+                title: Some("Plan".to_string()),
+                strategy: Some("Layer-first".to_string()),
+                ..sp(NodeKind::Plan)
+            },
+        );
+        n(
+            "future/foo/plan.phase-1",
+            Node {
+                number: Some(1),
+                title: Some("P1".to_string()),
+                deliverable: Some("Core".to_string()),
+                ..sp(NodeKind::PlanPhase)
+            },
+        );
+        n(
+            "future/foo/plan.phase-1.task-1",
+            Node {
+                title: Some("Add RootStore".to_string()),
+                tier: Some("source".to_string()),
+                status: Some("pending".to_string()),
+                ..sp(NodeKind::Task)
+            },
+        );
+
+        g.contains.extend([
+            ("future/foo/spec".into(), "future/foo/spec.R1".into()),
+            ("future/foo/spec".into(), "future/foo/spec.phase-1".into()),
+            ("future/foo/spec".into(), "future/foo/spec.phase-2".into()),
+            ("future/foo/spec".into(), "future/foo/spec.decision-d1".into()),
+            ("future/foo/spec".into(), "future/foo/spec.ng1".into()),
+            ("future/foo/spec".into(), "future/foo/spec.ac1".into()),
+            ("future/foo/spec".into(), "future/foo/spec.vi1".into()),
+            ("future/foo/spec.phase-1".into(), "future/foo/spec.R1".into()),
+            ("future/foo/plan".into(), "future/foo/plan.phase-1".into()),
+            (
+                "future/foo/plan.phase-1".into(),
+                "future/foo/plan.phase-1.task-1".into(),
+            ),
+        ]);
+        g.details
+            .insert(("future/foo/note-1".into(), "future/foo/spec".into()));
+        g.reviews.insert((
+            "future/foo/feedback-1".into(),
+            "future/foo/spec.R1".into(),
+        ));
+        g.depends_on
+            .insert(("future/foo/spec.R2".into(), "future/foo/spec.R1".into()));
+        g.gates.insert((
+            "future/foo/spec.phase-2".into(),
+            "future/foo/spec.phase-1".into(),
+        ));
+        g.spec_depends
+            .insert(("future/foo/spec".into(), "future/other/spec".into()));
+        g.anchors.insert((
+            "future/foo/spec.R1".into(),
+            "future/foo/gateway".into(),
+        ));
+        g.satisfies.insert((
+            "future/foo/plan.phase-1".into(),
+            "future/foo/spec.R1".into(),
+        ));
+        g.builds.insert((
+            "future/foo/plan.phase-1.task-1".into(),
+            "future/foo/gateway".into(),
+        ));
+
+        let dir = std::env::temp_dir().join(format!("apg-test-spec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        build_load_files(&g, &dir).unwrap();
+
+        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        create_schema(&conn).unwrap();
+        copy_from(&conn, &dir).unwrap();
+
+        // Node tables carry their own columns.
+        let out = conn
+            .query("MATCH (s:Spec) RETURN s.fqn, s.title, s.goal")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("future/foo/spec") && out.contains("Widget timer"),
+            "spec rows: {out}"
+        );
+        let out = conn
+            .query("MATCH (r:Requirement) RETURN r.id, r.feature")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("R1") && out.contains("feature-a"), "req rows: {out}");
+        let out = conn
+            .query("MATCH (p:PlanPhase) RETURN p.number, p.deliverable")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("1") && out.contains("Core"), "plan phase rows: {out}");
+        let out = conn
+            .query("MATCH (t:Task) RETURN t.tier, t.status")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("source") && out.contains("pending"), "task rows: {out}");
+        let out = conn
+            .query("MATCH (f:Future) RETURN f.kind, f.target")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("rpc") && out.contains("github.com/x/gateway"),
+            "future rows: {out}"
+        );
+
+        // Multi-pair Contains: Spec -> Requirement and Spec -> Phase.
+        let out = conn
+            .query("MATCH (s:Spec)-[:Contains]->(r:Requirement) RETURN r.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/foo/spec.R1"), "contains spec->req: {out}");
+        let out = conn
+            .query("MATCH (s:Spec)-[:Contains]->(p:Phase) RETURN p.fqn")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("future/foo/spec.phase-1"),
+            "contains spec->phase: {out}"
+        );
+
+        // Spec/plan rel tables.
+        let out = conn
+            .query("MATCH (:Note)-[:Details]->(s:Spec) RETURN s.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/foo/spec"), "details: {out}");
+        let out = conn
+            .query("MATCH (:Feedback)-[:Reviews]->(r:Requirement) RETURN r.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/foo/spec.R1"), "reviews: {out}");
+        let out = conn
+            .query("MATCH (a:Requirement)-[:DependsOn]->(b:Requirement) RETURN b.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/foo/spec.R1"), "depends_on: {out}");
+        let out = conn
+            .query("MATCH (a:Phase)-[:Gates]->(b:Phase) RETURN b.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/foo/spec.phase-1"), "gates: {out}");
+        let out = conn
+            .query("MATCH (a:Requirement)-[:Anchors]->(f:Future) RETURN f.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/foo/gateway"), "anchors: {out}");
+        let out = conn
+            .query("MATCH (:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/foo/spec.R1"), "satisfies: {out}");
+        let out = conn
+            .query("MATCH (:Task)-[:Builds]->(f:Future) RETURN f.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/foo/gateway"), "builds: {out}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -15,14 +15,14 @@ export interface ToolContext {
   worktree: string
 }
 
-/** Walks up from the session dirs looking for the project's `.apg/db.lbug`. */
+/** Walks up from the session dirs looking for the project's `apg/.trans/db.lbug`. */
 export function findApgRoot(context: ToolContext): string | null {
   const starts = [context.directory, process.cwd(), context.worktree]
   for (const s of starts) {
     if (!s) continue
     let dir = s
     while (true) {
-      if (existsSync(path.join(dir, ".apg", "db.lbug"))) return dir
+      if (existsSync(path.join(dir, "apg", ".trans", "db.lbug"))) return dir
       const parent = path.dirname(dir)
       if (parent === dir) break
       dir = parent
@@ -38,7 +38,7 @@ export function findApgRoot(context: ToolContext): string | null {
 export async function runCypher(context: ToolContext, cypher: string): Promise<string> {
   const root = findApgRoot(context)
   if (!root) {
-    return "Error: no .apg/db.lbug found. Run `apg scan` in the project root first."
+    return "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
   }
   const result = await Bun.$`apg query ${cypher}`.cwd(root).quiet().nothrow()
   if (result.exitCode !== 0) {

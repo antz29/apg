@@ -5,9 +5,9 @@
 //! verbatim `fqn` (`module`/`unresolved`). Edge records reference endpoints by
 //! `id` (project node) or `fqn` (unresolved target).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Record {
     /// `{"type":"module","fqn":"github.com/foundry/flow"}`
@@ -92,4 +92,239 @@ pub enum Record {
         from: String,
         to: String,
     },
+
+    // --- Spec/plan graph records (SPEC R1/R20; canonical FQNs, no ids) ---
+
+    /// `{"type":"spec","fqn":"future/<project>/spec","title":"...","goal":"..."}`
+    Spec {
+        fqn: String,
+        title: String,
+        #[serde(default)]
+        goal: String,
+    },
+
+    /// `{"type":"requirement","fqn":"future/<project>/spec.<id>","id":"R1","title":"...","body":"...","feature":"..."}`
+    Requirement {
+        fqn: String,
+        id: String,
+        title: String,
+        #[serde(default)]
+        body: String,
+        #[serde(default)]
+        feature: String,
+    },
+
+    /// `{"type":"phase","fqn":"future/<project>/spec.phase-<n>","number":1,"title":"..."}`
+    Phase {
+        fqn: String,
+        number: u32,
+        title: String,
+    },
+
+    /// `{"type":"decision","fqn":"future/<project>/spec.decision-<id>","id":"...","summary":"..."}`
+    Decision {
+        fqn: String,
+        id: String,
+        summary: String,
+    },
+
+    /// `{"type":"future","fqn":"future/<project>/<name>","kind":"function","target":"..."}`
+    Future {
+        fqn: String,
+        kind: String,
+        #[serde(default)]
+        target: String,
+    },
+
+    NonGoal {
+        fqn: String,
+        body: String,
+    },
+    AcceptanceCriterion {
+        fqn: String,
+        body: String,
+    },
+    VerificationItem {
+        fqn: String,
+        body: String,
+    },
+
+    /// `{"type":"note","fqn":"future/<project>/note-<n>","body":"...","kind":"background"}`
+    Note {
+        fqn: String,
+        body: String,
+        #[serde(default)]
+        kind: String,
+    },
+
+    /// `{"type":"feedback","fqn":"future/<project>/feedback-<n>","body":"...","status":"open","disposition":""}`
+    Feedback {
+        fqn: String,
+        body: String,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        disposition: String,
+    },
+
+    /// `{"type":"plan","fqn":"future/<project>/plan","title":"...","strategy":"..."}`
+    Plan {
+        fqn: String,
+        title: String,
+        #[serde(default)]
+        strategy: String,
+    },
+
+    /// `{"type":"plan_phase","fqn":"future/<project>/plan.phase-<n>","number":1,"title":"...","deliverable":"..."}`
+    PlanPhase {
+        fqn: String,
+        number: u32,
+        title: String,
+        #[serde(default)]
+        deliverable: String,
+    },
+
+    /// `{"type":"task","fqn":"future/<project>/plan.phase-<n>.task-<k>","title":"...","tier":"source","status":"pending"}`
+    Task {
+        fqn: String,
+        title: String,
+        #[serde(default)]
+        tier: String,
+        #[serde(default)]
+        status: String,
+    },
+
+    Details {
+        from: String,
+        to: String,
+    },
+    Reviews {
+        from: String,
+        to: String,
+    },
+    DependsOn {
+        from: String,
+        to: String,
+    },
+    Gates {
+        from: String,
+        to: String,
+    },
+    SpecDepends {
+        from: String,
+        to: String,
+    },
+    Anchors {
+        from: String,
+        to: String,
+    },
+    Implements {
+        from: String,
+        to: String,
+    },
+    Satisfies {
+        from: String,
+        to: String,
+    },
+    Builds {
+        from: String,
+        to: String,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(line: &str) -> Record {
+        serde_json::from_str(line).expect("fixture line must parse")
+    }
+
+    #[test]
+    fn spec_node_records_parse() {
+        // Fixture lines in the unified-JSONL style of the SPEC serialization
+        // section (canonical fqns, type-tagged).
+        let lines = [
+            r#"{"type":"spec","fqn":"future/workitem-timer/spec","title":"Workitem Timer","goal":"Let workitems time out"}"#,
+            r#"{"type":"requirement","fqn":"future/workitem-timer/spec.R1","id":"R1","title":"Timer","body":"A workitem can be started","feature":"feature-a"}"#,
+            r#"{"type":"phase","fqn":"future/workitem-timer/spec.phase-1","number":1,"title":"Core"}"#,
+            r#"{"type":"decision","fqn":"future/workitem-timer/spec.decision-d1","id":"d1","summary":"Wall-clock"}"#,
+            r#"{"type":"future","fqn":"future/workitem-timer/gateway","kind":"rpc","target":"github.com/foundry/flow.Gateway"}"#,
+            r#"{"type":"non_goal","fqn":"future/workitem-timer/spec.ng1","body":"No daemon"}"#,
+            r#"{"type":"acceptance_criterion","fqn":"future/workitem-timer/spec.ac1","body":"Fires once"}"#,
+            r#"{"type":"verification_item","fqn":"future/workitem-timer/spec.vi1","body":"cargo test green"}"#,
+            r#"{"type":"note","fqn":"future/workitem-timer/note-1","body":"Prose","kind":"background"}"#,
+            r#"{"type":"feedback","fqn":"future/workitem-timer/feedback-1","body":"Split R1","status":"open"}"#,
+            r#"{"type":"plan","fqn":"future/workitem-timer/plan","title":"Plan","strategy":"Layer-first"}"#,
+            r#"{"type":"plan_phase","fqn":"future/workitem-timer/plan.phase-01","number":1,"title":"P1","deliverable":"Schema"}"#,
+            r#"{"type":"task","fqn":"future/workitem-timer/plan.phase-01.task-1","title":"Add RootStore","tier":"source","status":"pending"}"#,
+        ];
+        for l in lines {
+            let _ = parse(l);
+        }
+        // Field extraction sanity checks.
+        let r = parse(lines[1]);
+        match r {
+            Record::Requirement {
+                fqn, id, feature, ..
+            } => {
+                assert_eq!(fqn, "future/workitem-timer/spec.R1");
+                assert_eq!(id, "R1");
+                assert_eq!(feature, "feature-a");
+            }
+            other => panic!("expected requirement, got {other:?}"),
+        }
+        let r = parse(lines[4]);
+        match r {
+            Record::Future { fqn, kind, target } => {
+                assert_eq!(fqn, "future/workitem-timer/gateway");
+                assert_eq!(kind, "rpc");
+                assert_eq!(target, "github.com/foundry/flow.Gateway");
+            }
+            other => panic!("expected future, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spec_edge_records_parse() {
+        let lines = [
+            r#"{"type":"contains","from":"future/foo/spec","to":"future/foo/spec.R1"}"#,
+            r#"{"type":"details","from":"future/foo/note-1","to":"future/foo/spec"}"#,
+            r#"{"type":"reviews","from":"future/foo/feedback-1","to":"future/foo/spec.R1"}"#,
+            r#"{"type":"depends_on","from":"future/foo/spec.R2","to":"future/foo/spec.R1"}"#,
+            r#"{"type":"gates","from":"future/foo/spec.phase-2","to":"future/foo/spec.phase-1"}"#,
+            r#"{"type":"spec_depends","from":"future/foo/spec","to":"future/bar/spec"}"#,
+            r#"{"type":"anchors","from":"future/foo/spec.R1","to":"github.com/x/impl"}"#,
+            r#"{"type":"implements","from":"github.com/x/impl","to":"future/foo/spec.R1"}"#,
+            r#"{"type":"satisfies","from":"future/foo/plan.phase-01","to":"future/foo/spec.R1"}"#,
+            r#"{"type":"builds","from":"future/foo/plan.phase-01.task-1","to":"future/foo/gateway"}"#,
+        ];
+        for l in lines {
+            let _ = parse(l);
+        }
+        assert!(
+            matches!(parse(lines[4]), Record::Gates { from, to } if from == "future/foo/spec.phase-2" && to == "future/foo/spec.phase-1")
+        );
+        assert!(
+            matches!(parse(lines[9]), Record::Builds { to, .. } if to == "future/foo/gateway")
+        );
+    }
+
+    #[test]
+    fn missing_optional_fields_default() {
+        // Edge and optional-field records tolerate absent optional props.
+        let r: Record = serde_json::from_str(
+            r#"{"type":"unresolved_call","from":"x","to":"fmt.Errorf"}"#,
+        )
+        .unwrap();
+        assert!(matches!(r, Record::UnresolvedCall { ref target_type, .. } if target_type.is_empty()));
+        let r: Record = serde_json::from_str(
+            r#"{"type":"future","fqn":"future/foo/g","kind":"function"}"#,
+        )
+        .unwrap();
+        assert!(matches!(r, Record::Future { ref target, .. } if target.is_empty()));
+        let r: Record = serde_json::from_str(r#"{"type":"requirement","fqn":"f","id":"R1","title":"t"}"#)
+            .unwrap();
+        assert!(matches!(r, Record::Requirement { ref feature, .. } if feature.is_empty()));
+    }
 }

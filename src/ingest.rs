@@ -67,6 +67,25 @@ fn file_basename(file: &str) -> String {
         .unwrap_or_else(|| file.to_string())
 }
 
+/// `None` for empty strings, so spec/plan node fields that are absent stay
+/// absent in the DB (queryable with `IS NULL`) instead of storing `""`.
+fn opt(s: String) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// A spec/plan node carries no location, category, or code_type (SPEC R1).
+fn spec_node(kind: NodeKind) -> Node {
+    Node {
+        kind,
+        code_type: String::new(),
+        ..Node::default()
+    }
+}
+
 /// Claims `fqn` for declaration `id`, panicking if a different declaration
 /// already rendered the same FQN. `seen` records the kind of the claimer so
 /// the caller can resolve cross-kind collisions (type wins over module/function).
@@ -219,6 +238,7 @@ pub fn ingest(
                             }),
                             category: None,
                             code_type,
+                            ..Node::default()
                         },
                     );
                 }
@@ -274,6 +294,7 @@ pub fn ingest(
                                 }),
                                 category: None,
                                 code_type,
+                                ..Node::default()
                             },
                         );
                     }
@@ -284,11 +305,156 @@ pub fn ingest(
                         location: None,
                         category,
                         code_type: String::new(),
+                        ..Node::default()
                     });
                 }
                 Record::LangSwitch { language } => {
                     lang = language;
                 }
+                // Spec/plan node records carry canonical FQNs (no opaque ids),
+                // so they enter the graph immediately like modules and
+                // unresolved targets. `insert_node` panics on a residual FQN
+                // collision (SPEC R3), never silently overwrites.
+                Record::Spec { fqn, title, goal } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        title: Some(title),
+                        goal: opt(goal),
+                        ..spec_node(NodeKind::Spec)
+                    },
+                ),
+                Record::Requirement {
+                    fqn,
+                    id,
+                    title,
+                    body,
+                    feature,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        id: opt(id),
+                        title: Some(title),
+                        body: opt(body),
+                        feature: opt(feature),
+                        ..spec_node(NodeKind::Requirement)
+                    },
+                ),
+                Record::Phase { fqn, number, title } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        number: Some(number),
+                        title: Some(title),
+                        ..spec_node(NodeKind::Phase)
+                    },
+                ),
+                Record::Decision { fqn, id, summary } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        id: opt(id),
+                        summary: Some(summary),
+                        ..spec_node(NodeKind::Decision)
+                    },
+                ),
+                Record::Future { fqn, kind, target } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        sub_kind: opt(kind),
+                        target: opt(target),
+                        ..spec_node(NodeKind::Future)
+                    },
+                ),
+                Record::NonGoal { fqn, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        body: Some(body),
+                        ..spec_node(NodeKind::NonGoal)
+                    },
+                ),
+                Record::AcceptanceCriterion { fqn, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        body: Some(body),
+                        ..spec_node(NodeKind::AcceptanceCriterion)
+                    },
+                ),
+                Record::VerificationItem { fqn, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        body: Some(body),
+                        ..spec_node(NodeKind::VerificationItem)
+                    },
+                ),
+                Record::Note { fqn, body, kind } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        body: Some(body),
+                        sub_kind: opt(kind),
+                        ..spec_node(NodeKind::Note)
+                    },
+                ),
+                Record::Feedback {
+                    fqn,
+                    body,
+                    status,
+                    disposition,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        body: Some(body),
+                        status: opt(status),
+                        disposition: opt(disposition),
+                        ..spec_node(NodeKind::Feedback)
+                    },
+                ),
+                Record::Plan { fqn, title, strategy } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        title: Some(title),
+                        strategy: opt(strategy),
+                        ..spec_node(NodeKind::Plan)
+                    },
+                ),
+                Record::PlanPhase {
+                    fqn,
+                    number,
+                    title,
+                    deliverable,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        number: Some(number),
+                        title: Some(title),
+                        deliverable: opt(deliverable),
+                        ..spec_node(NodeKind::PlanPhase)
+                    },
+                ),
+                Record::Task {
+                    fqn,
+                    title,
+                    tier,
+                    status,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        title: Some(title),
+                        tier: opt(tier),
+                        status: opt(status),
+                        ..spec_node(NodeKind::Task)
+                    },
+                ),
                 edge => write_edge(&mut sw, edge),
             }
         }
@@ -338,6 +504,7 @@ pub fn ingest(
                 }),
                 category: None,
                 code_type,
+                ..Node::default()
             },
         );
     }
@@ -362,6 +529,7 @@ pub fn ingest(
                 location: None,
                 category: None,
                 code_type: String::new(),
+                ..Node::default()
             },
         );
     }
@@ -470,6 +638,81 @@ pub fn ingest(
                     }
                     graph.unresolved_uses.insert((a, to));
                 }
+                // Spec/plan edges reference canonical FQNs directly; `resolve`
+                // is identity for them. Blacklisting prunes edges into excluded
+                // code, like any other edge.
+                Record::Details { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.details.insert((a, b));
+                }
+                Record::Reviews { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.reviews.insert((a, b));
+                }
+                Record::DependsOn { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.depends_on.insert((a, b));
+                }
+                Record::Gates { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.gates.insert((a, b));
+                }
+                Record::SpecDepends { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.spec_depends.insert((a, b));
+                }
+                Record::Anchors { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.anchors.insert((a, b));
+                }
+                Record::Implements { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.implements.insert((a, b));
+                }
+                Record::Satisfies { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.satisfies.insert((a, b));
+                }
+                Record::Builds { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.builds.insert((a, b));
+                }
                 _ => unreachable!("non-edge record reached the edge pass"),
             }
         }
@@ -477,20 +720,17 @@ pub fn ingest(
     let _ = std::fs::remove_file(&spool);
 
     // Drop edges whose endpoints do not exist (dangling ids, blacklisted nodes).
-    // Containment is a strict tree: Module→Module, Module→File, File→Struct,
-    // File→Function, Struct→Struct, Struct→Function (SPEC §7).
+    // Containment is a strict tree: the six code pairs (Module→Module,
+    // Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function),
+    // the seven spec pairs (Spec→Requirement, Spec→Phase, Phase→Requirement,
+    // Spec→Decision, Spec→NonGoal, Spec→AcceptanceCriterion,
+    // Spec→VerificationItem), and the four plan pairs (Plan→PlanPhase,
+    // PlanPhase→Task, PlanPhase→AcceptanceCriterion, PlanPhase→VerificationItem)
+    // (SPEC §7, R2, R21).
     graph.contains.retain(|(a, b)| {
         graph.nodes.contains_key(a)
             && graph.nodes.contains_key(b)
-            && matches!(
-                (graph.nodes[a].kind, graph.nodes[b].kind),
-                (NodeKind::Module, NodeKind::Module)
-                    | (NodeKind::Module, NodeKind::File)
-                    | (NodeKind::File, NodeKind::Struct)
-                    | (NodeKind::File, NodeKind::Function)
-                    | (NodeKind::Struct, NodeKind::Struct)
-                    | (NodeKind::Struct, NodeKind::Function)
-            )
+            && valid_contains_pair(&graph.nodes[a].kind, &graph.nodes[b].kind)
     });
     graph.calls.retain(|(a, b)| {
         graph.nodes.contains_key(a)
@@ -517,6 +757,51 @@ pub fn ingest(
             && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
     });
 
+    // Spec/plan edge validation (SPEC R2/R21). Spec records carry no ids, so
+    // dangling here means a JSONL referenced a node that isn't in the graph
+    // (e.g. an anchor to code that was blacklisted, or a cross-file reference
+    // the author will fix in the JSONL). Pending anchors (to a Future) are
+    // valid; the R10 pending-anchor reconciliation runs here too.
+    graph.details = filter_edges(&graph, &graph.details, |g, a, b| {
+        g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Note
+    });
+    graph.reviews = filter_edges(&graph, &graph.reviews, |g, a, b| {
+        g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Feedback
+    });
+    graph.depends_on = filter_edges(&graph, &graph.depends_on, |g, a, b| {
+        kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Requirement)
+    });
+    graph.gates = filter_edges(&graph, &graph.gates, |g, a, b| {
+        (kind_is(g, a, NodeKind::Phase) && kind_is(g, b, NodeKind::Phase))
+            || (kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::PlanPhase))
+    });
+    graph.spec_depends = filter_edges(&graph, &graph.spec_depends, |g, a, b| {
+        kind_is(g, a, NodeKind::Spec) && kind_is(g, b, NodeKind::Spec)
+    });
+    graph.anchors = filter_edges(&graph, &graph.anchors, |g, a, _| {
+        g.nodes.contains_key(a)
+            && matches!(g.nodes[a].kind, NodeKind::Requirement | NodeKind::Task)
+    });
+    // R10: an anchor whose target is not in the code graph is reconciled to a
+    // pending anchor on a Future node (the requirement references future
+    // code), unless it is a Task anchor (tasks anchor files touched — a stale
+    // file reference is dropped, not promoted to future work).
+    reconcile_pending_anchors(&mut graph);
+    graph.implements = filter_edges(&graph, &graph.implements, |g, a, b| {
+        g.nodes.contains_key(a)
+            && kind_is(g, b, NodeKind::Requirement)
+            && matches!(
+                g.nodes[a].kind,
+                NodeKind::Function | NodeKind::Struct | NodeKind::File
+            )
+    });
+    graph.satisfies = filter_edges(&graph, &graph.satisfies, |g, a, b| {
+        kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::Requirement)
+    });
+    graph.builds = filter_edges(&graph, &graph.builds, |g, a, b| {
+        kind_is(g, a, NodeKind::Task) && kind_is(g, b, NodeKind::Future)
+    });
+
     (
         graph,
         IngestReport {
@@ -527,9 +812,109 @@ pub fn ingest(
     )
 }
 
+/// Whether a `(from, to)` kind pair is a valid `Contains` edge (SPEC §7, R2,
+/// R21): the six code pairs, seven spec pairs, and four plan pairs.
+fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
+    matches!(
+        (a, b),
+        (NodeKind::Module, NodeKind::Module)
+            | (NodeKind::Module, NodeKind::File)
+            | (NodeKind::File, NodeKind::Struct)
+            | (NodeKind::File, NodeKind::Function)
+            | (NodeKind::Struct, NodeKind::Struct)
+            | (NodeKind::Struct, NodeKind::Function)
+            | (NodeKind::Spec, NodeKind::Requirement)
+            | (NodeKind::Spec, NodeKind::Phase)
+            | (NodeKind::Phase, NodeKind::Requirement)
+            | (NodeKind::Spec, NodeKind::Decision)
+            | (NodeKind::Spec, NodeKind::NonGoal)
+            | (NodeKind::Spec, NodeKind::AcceptanceCriterion)
+            | (NodeKind::Spec, NodeKind::VerificationItem)
+            | (NodeKind::Plan, NodeKind::PlanPhase)
+            | (NodeKind::PlanPhase, NodeKind::Task)
+            | (NodeKind::PlanPhase, NodeKind::AcceptanceCriterion)
+            | (NodeKind::PlanPhase, NodeKind::VerificationItem)
+    )
+}
+
+/// The project a `future/<project>/…` FQN belongs to.
+fn project_of(fqn: &str) -> Option<String> {
+    let rest = fqn.strip_prefix("future/")?;
+    rest.split("/spec").next().map(|s| s.to_string())
+}
+
+fn kind_is(graph: &Graph, fqn: &str, k: NodeKind) -> bool {
+    graph.nodes.get(fqn).is_some_and(|n| n.kind == k)
+}
+
+/// Returns the edges of `edges` that pass `keep`. A free function so each call
+/// scopes its immutable borrow of `graph` (unlike a capturing closure, which
+/// would block a later mutable borrow).
+fn filter_edges(
+    graph: &Graph,
+    edges: &HashSet<(String, String)>,
+    keep: impl Fn(&Graph, &str, &str) -> bool,
+) -> HashSet<(String, String)> {
+    edges
+        .iter()
+        .filter(|(a, b)| keep(graph, a, b))
+        .cloned()
+        .collect()
+}
+
+/// Reconciles dangling requirement anchors (SPEC R10): an `Anchors(req→X)`
+/// whose `X` is not a node in the code graph becomes a pending anchor on a
+/// `Future` node (created only by this reconciliation of an explicit
+/// requirement reference, never auto-created at authoring time). The Future's
+/// `target` keeps the intended FQN so drift/satisfaction is detectable. Task
+/// anchors to missing files are stale and dropped.
+fn reconcile_pending_anchors(graph: &mut Graph) {
+    let dangling: Vec<(String, String)> = graph
+        .anchors
+        .iter()
+        .filter(|(_, b)| !graph.nodes.contains_key(b))
+        .cloned()
+        .collect();
+    for (a, b) in dangling {
+        if graph.nodes[&a].kind != NodeKind::Requirement {
+            continue;
+        }
+        let Some(project) = project_of(&a) else {
+            continue;
+        };
+        let name = b
+            .rsplit(['.', '/'])
+            .next()
+            .unwrap_or(&b)
+            .to_string();
+        let future_fqn = format!("future/{project}/{name}");
+        match graph.nodes.get(&future_fqn) {
+            None => {
+                graph.nodes.insert(
+                    future_fqn.clone(),
+                    Node {
+                        kind: NodeKind::Future,
+                        sub_kind: Some("other".to_string()),
+                        target: Some(b.clone()),
+                        ..Node::default()
+                    },
+                );
+            }
+            Some(existing) if existing.kind == NodeKind::Future => {}
+            Some(_) => panic!(
+                "FQN collision: pending anchor `{a}` target `{b}` wants `{future_fqn}`, already a non-Future node"
+            ),
+        }
+        graph.anchors.insert((a, future_fqn));
+    }
+    graph.anchors.retain(|(_, b)| graph.nodes.contains_key(b));
+}
+
 /// Binary spool format for edge records: one u8 tag (0 contains, 1 calls,
-/// 2 uses, 3 unresolved_call, 4 unresolved_use) followed by three length-
-/// prefixed UTF-8 strings (from, to, target_type; the last empty for most).
+/// 2 uses, 3 unresolved_call, 4 unresolved_use, 5 details, 6 reviews,
+/// 7 depends_on, 8 gates, 9 spec_depends, 10 anchors, 11 implements,
+/// 12 satisfies, 13 builds) followed by three length-prefixed UTF-8 strings
+/// (from, to, target_type; the last empty for most).
 fn write_edge(w: &mut impl Write, r: Record) {
     match r {
         Record::Contains { from, to } => write_edge_fields(w, 0, &from, &to, ""),
@@ -541,6 +926,15 @@ fn write_edge(w: &mut impl Write, r: Record) {
             target_type,
         } => write_edge_fields(w, 3, &from, &to, &target_type),
         Record::UnresolvedUse { from, to } => write_edge_fields(w, 4, &from, &to, ""),
+        Record::Details { from, to } => write_edge_fields(w, 5, &from, &to, ""),
+        Record::Reviews { from, to } => write_edge_fields(w, 6, &from, &to, ""),
+        Record::DependsOn { from, to } => write_edge_fields(w, 7, &from, &to, ""),
+        Record::Gates { from, to } => write_edge_fields(w, 8, &from, &to, ""),
+        Record::SpecDepends { from, to } => write_edge_fields(w, 9, &from, &to, ""),
+        Record::Anchors { from, to } => write_edge_fields(w, 10, &from, &to, ""),
+        Record::Implements { from, to } => write_edge_fields(w, 11, &from, &to, ""),
+        Record::Satisfies { from, to } => write_edge_fields(w, 12, &from, &to, ""),
+        Record::Builds { from, to } => write_edge_fields(w, 13, &from, &to, ""),
         other => unreachable!("non-edge record reached the edge spool: {other:?}"),
     }
 }
@@ -576,6 +970,15 @@ impl<R: BufRead> EdgeReader<R> {
                 target_type: c,
             },
             4 => Record::UnresolvedUse { from: a, to: b },
+            5 => Record::Details { from: a, to: b },
+            6 => Record::Reviews { from: a, to: b },
+            7 => Record::DependsOn { from: a, to: b },
+            8 => Record::Gates { from: a, to: b },
+            9 => Record::SpecDepends { from: a, to: b },
+            10 => Record::Anchors { from: a, to: b },
+            11 => Record::Implements { from: a, to: b },
+            12 => Record::Satisfies { from: a, to: b },
+            13 => Record::Builds { from: a, to: b },
             t => panic!("bad edge spool tag: {t}"),
         })
     }
@@ -1071,6 +1474,148 @@ mod tests {
             "github.com/x/y.Compute".to_string(),
             "fmt.Errorf".to_string(),
             String::new()
+        )));
+    }
+
+    #[test]
+    fn pending_anchor_reconciles_to_future() {
+        // An anchor to a code FQN that isn't in the graph becomes a pending
+        // anchor on a synthesized Future node (R10); the Future carries the
+        // intended target so drift/satisfaction is detectable. A Task anchor
+        // to a missing file is stale and dropped; the Task's Builds edge to a
+        // (now reconciled) Future survives.
+        let records = vec![
+            Record::Spec {
+                fqn: "future/foo/spec".to_string(),
+                title: "T".to_string(),
+                goal: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.R1".to_string(),
+                id: "R1".to_string(),
+                title: "Timer".to_string(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Contains {
+                from: "future/foo/spec".to_string(),
+                to: "future/foo/spec.R1".to_string(),
+            },
+            Record::Anchors {
+                from: "future/foo/spec.R1".to_string(),
+                to: "github.com/x/gateway".to_string(),
+            },
+            Record::Plan {
+                fqn: "future/foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "future/foo/plan.phase-1".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: String::new(),
+            },
+            Record::Task {
+                fqn: "future/foo/plan.phase-1.task-1".to_string(),
+                title: "t".to_string(),
+                tier: String::new(),
+                status: String::new(),
+            },
+            Record::Contains {
+                from: "future/foo/plan".to_string(),
+                to: "future/foo/plan.phase-1".to_string(),
+            },
+            Record::Contains {
+                from: "future/foo/plan.phase-1".to_string(),
+                to: "future/foo/plan.phase-1.task-1".to_string(),
+            },
+            Record::Anchors {
+                from: "future/foo/plan.phase-1.task-1".to_string(),
+                to: "/missing/file.go".to_string(),
+            },
+            Record::Builds {
+                from: "future/foo/plan.phase-1.task-1".to_string(),
+                to: "future/foo/gateway".to_string(),
+            },
+        ];
+        let (graph, _) = ingest(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "go",
+                config: None,
+            },
+        );
+        // The dangling requirement anchor reconciled to a Future node.
+        let future_fqn = "future/foo/gateway".to_string();
+        assert!(graph.nodes.contains_key(&future_fqn));
+        assert_eq!(graph.nodes[&future_fqn].kind, NodeKind::Future);
+        assert_eq!(
+            graph.nodes[&future_fqn].target.as_deref(),
+            Some("github.com/x/gateway")
+        );
+        assert!(graph.anchors.contains(&(
+            "future/foo/spec.R1".to_string(),
+            future_fqn.clone()
+        )));
+        // The Task anchor to a missing file is dropped; its Builds edge to the
+        // reconciled Future survives.
+        assert!(!graph.anchors.contains(&(
+            "future/foo/plan.phase-1.task-1".to_string(),
+            "/missing/file.go".to_string()
+        )));
+        assert!(graph
+            .builds
+            .contains(&("future/foo/plan.phase-1.task-1".to_string(), future_fqn)));
+    }
+
+    #[test]
+    fn spec_anchor_resolves_to_code_node() {
+        // An anchor to a real code node resolves directly; no Future is
+        // synthesized for it.
+        let records = vec![
+            Record::Module {
+                fqn: "github.com/x/y".to_string(),
+            },
+            srec("n1", "github.com/x/y", "Store", "/abs/store.go"),
+            file_rec("/abs/store.go", "github.com/x/y", 10),
+            Record::Spec {
+                fqn: "future/foo/spec".to_string(),
+                title: "T".to_string(),
+                goal: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.R1".to_string(),
+                id: "R1".to_string(),
+                title: "Timer".to_string(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Contains {
+                from: "future/foo/spec".to_string(),
+                to: "future/foo/spec.R1".to_string(),
+            },
+            Record::Anchors {
+                from: "future/foo/spec.R1".to_string(),
+                to: "github.com/x/y.Store".to_string(),
+            },
+        ];
+        let (graph, _) = ingest(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "go",
+                config: None,
+            },
+        );
+        assert!(graph.anchors.contains(&(
+            "future/foo/spec.R1".to_string(),
+            "github.com/x/y.Store".to_string()
+        )));
+        assert!(graph.contains.contains(&(
+            "future/foo/spec".to_string(),
+            "future/foo/spec.R1".to_string()
         )));
     }
 

@@ -65,6 +65,21 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
     graph
         .unresolved_uses
         .retain(|(a, b)| is_removed(a) && is_removed(b));
+    // Spec/plan edges reference code nodes (anchors to a file that gets
+    // excluded, Details/Reviews on excluded units); drop those that dangle.
+    for edges in [
+        &mut graph.details,
+        &mut graph.reviews,
+        &mut graph.depends_on,
+        &mut graph.gates,
+        &mut graph.spec_depends,
+        &mut graph.anchors,
+        &mut graph.implements,
+        &mut graph.satisfies,
+        &mut graph.builds,
+    ] {
+        edges.retain(|(a, b)| is_removed(a) && is_removed(b));
+    }
 
     // Containment span validation: a Struct may only contain Functions whose
     // start offset falls inside the struct's span. Java-, TS-, and C#-only —

@@ -4,6 +4,7 @@ mod graph;
 mod ingest;
 mod load;
 mod schema;
+mod specs;
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -315,14 +316,14 @@ fn print_help() {
         "apg — program graph scanner + LadybugDB query CLI for opencode
 
 USAGE:
-  apg init [dir]              Set up .apg/ (db + config), install/update the
+  apg init [dir]              Set up apg/ (config + .trans/), install/update the
                               opencode apg tool suite + codebase-navigator
                               agent in ~/.opencode/, and remove any legacy
                               project-local .opencode/ install
-  apg scan [dir] [options]    Scan a project; writes .apg/db.lbug and
-                              .apg/graph.jsonl
+  apg scan [dir] [options]    Scan a project; writes apg/.trans/db.lbug and
+                              apg/.trans/graph.jsonl
   apg query \"<cypher>\"        Run a read-only Cypher query against
-                              .apg/db.lbug (found by walking up from cwd)
+                              apg/.trans/db.lbug (found by walking up from cwd)
   apg --version               Print version
   apg --help                  Show this help
 
@@ -496,10 +497,10 @@ fn remove_legacy_project_install(dir: &Path) -> std::io::Result<(usize, usize)> 
     Ok((files_removed, dirs_removed))
 }
 
-/// `apg init [dir]`: create `.apg/` with a default `config.json`, install (or
-/// update) the opencode `apg_query` plugin + `codebase-navigator` agent into
-/// `~/.opencode/`, and remove any legacy project-local `.opencode/` install
-/// left by older versions.
+/// `apg init [dir]`: create the committed `apg/` layout (config.json +
+/// `.trans/`), install (or update) the opencode apg tool suite + the six
+/// distributed agents into `~/.opencode/`, scaffold the repo `.gitignore` for
+/// `apg/.trans/`, and remove any legacy project-local `.opencode/` install.
 fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     let dir = if args.is_empty() {
         std::env::current_dir()?
@@ -508,8 +509,8 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     };
     let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
 
-    let apg_dir = dir.join(".apg");
-    std::fs::create_dir_all(&apg_dir)?;
+    let apg_dir = dir.join(specs::LAYOUT);
+    std::fs::create_dir_all(apg_dir.join(specs::TRANS))?;
     let cfg_path = apg_dir.join("config.json");
     if !cfg_path.exists() {
         std::fs::write(&cfg_path, DEFAULT_CONFIG_JSON)?;
@@ -564,13 +565,13 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
 
     if updated == 0 {
         println!(
-            "Initialized .apg/ (config.json); {} apg tools + codebase-navigator agent already up to date in {}",
+            "Initialized apg/ (config.json); {} apg tools + codebase-navigator agent already up to date in {}",
             SUITE_TOOLS.len(),
             opencode_dir.display()
         );
     } else {
         println!(
-            "Initialized .apg/ (config.json) and installed/updated {} of {} apg tools + codebase-navigator agent in {}",
+            "Initialized apg/ (config.json) and installed/updated {} of {} apg tools + codebase-navigator agent in {}",
             updated,
             SUITE_TOOLS.len() + 2,
             opencode_dir.display()
@@ -589,17 +590,17 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `apg query "<cypher>"`: open `.apg/db.lbug` (found by walking up from cwd)
-/// read-only and print the result as CSV with a header row.
+/// `apg query "<cypher>"`: open `apg/.trans/db.lbug` (found by walking up from
+/// cwd) read-only and print the result as CSV with a header row.
 fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     let query = args.join(" ");
     if query.trim().is_empty() {
         anyhow::bail!("usage: apg query \"<cypher>\"");
     }
     let start = std::env::current_dir()?;
-    let apg_dir = find_apg_dir(&start)
-        .ok_or_else(|| anyhow::anyhow!("no .apg directory found from {}", start.display()))?;
-    let db_path = apg_dir.join("db.lbug");
+    let apg_root = find_apg_root(&start)
+        .ok_or_else(|| anyhow::anyhow!("no apg/ directory found from {}", start.display()))?;
+    let db_path = apg_root.join(specs::TRANS).join("db.lbug");
     if !db_path.exists() {
         anyhow::bail!(
             "{} does not exist — run `apg scan` first",
@@ -633,26 +634,29 @@ fn csv_escape(field: &str) -> String {
     }
 }
 
-/// Walks up from `start` looking for a `.apg` directory.
-fn find_apg_dir(start: &Path) -> Option<PathBuf> {
+/// Walks up from `start` looking for the committed `apg/` layout root (a
+/// directory named `apg` carrying the gitignored `apg/.trans/` subdir, which
+/// `apg scan`/`apg init` create). The `apg/` name is shared, so the transient
+/// marker disambiguates the repo's layout root from an unrelated dir.
+fn find_apg_root(start: &Path) -> Option<PathBuf> {
     let mut cur = start;
     loop {
-        let cand = cur.join(".apg");
-        if cand.is_dir() {
+        let cand = cur.join(specs::LAYOUT);
+        if cand.is_dir() && specs::is_apg_layout_root(&cand) {
             return Some(cand);
         }
         cur = cur.parent()?;
     }
 }
 
-/// Finds the project's `.apg` dir (walking up from the scanned dir) or creates
-/// one at `<dir>/.apg` if none exists.
-fn find_or_create_apg_dir(dir: &Path) -> PathBuf {
-    if let Some(apg) = find_apg_dir(dir) {
+/// Finds the project's `apg/` layout root (walking up from the scanned dir) or
+/// creates one at `<dir>/apg` (with `.trans/`) if none exists.
+fn find_or_create_apg_root(dir: &Path) -> PathBuf {
+    if let Some(apg) = find_apg_root(dir) {
         return apg;
     }
-    let apg = dir.join(".apg");
-    std::fs::create_dir_all(&apg).unwrap();
+    let apg = dir.join(specs::LAYOUT);
+    std::fs::create_dir_all(apg.join(specs::TRANS)).unwrap();
     apg
 }
 
@@ -712,10 +716,14 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let blacklist: Vec<String> = positional.get(1..).unwrap_or(&[]).to_vec();
     let project_dir = project_dir.canonicalize()?;
 
-    // Resolve the .apg output dir, then run the pipeline from inside it so
-    // db.lbug / graph.jsonl / apg-frontend.log all land there.
-    let apg_dir = find_or_create_apg_dir(&project_dir);
-    std::env::set_current_dir(&apg_dir)?;
+    // Resolve the committed `apg/` layout root, then run the pipeline from
+    // inside its gitignored `.trans/` so db.lbug / graph.jsonl /
+    // apg-frontend.log all land there (the committed `apg/` data — config,
+    // specs, notes — stays in the root).
+    let apg_root = find_or_create_apg_root(&project_dir);
+    let trans_dir = apg_root.join(specs::TRANS);
+    std::fs::create_dir_all(&trans_dir)?;
+    std::env::set_current_dir(&trans_dir)?;
 
     let mut log = Log::new();
     log.ln(&format!("Project: {}", project_dir.display()));
@@ -826,6 +834,29 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         })
         .collect();
     let records = iterators.into_iter().flatten();
+
+    // Re-ingest the committed spec/plan/note data after code (SPEC R10):
+    // `apg/specs/*.jsonl`, `apg/notes/*.jsonl`, `apg/.trans/plans/*.jsonl`.
+    // Spec records carry canonical FQNs and reference code by FQN, so they
+    // merge into the same stream; pending anchors are reconciled ingestor-side.
+    let spec_inputs = specs::scan_inputs(&apg_root);
+    let mut spec_count = 0;
+    for set in [
+        spec_inputs.0.clone(),
+        spec_inputs.1.clone(),
+        spec_inputs.2.clone(),
+    ] {
+        spec_count += set.len();
+    }
+    if spec_count > 0 {
+        log.ln(&format!(
+            "Spec/plan/note inputs: {} spec files, {} note files, {} plan files",
+            spec_inputs.0.len(),
+            spec_inputs.1.len(),
+            spec_inputs.2.len(),
+        ));
+    }
+    let records = records.chain(specs::read_all(&apg_root));
 
     // Cleanup span validation is per-language: keep the single-language value,
     // and disable it (by joining) for mixed scans where the check cannot be

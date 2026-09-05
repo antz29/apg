@@ -6,7 +6,7 @@ function findProjectRoot(context: { directory: string; worktree: string }): stri
   const candidates = [context.directory, process.cwd(), context.worktree]
   for (const c of candidates) {
     if (!c) continue
-    if (existsSync(path.join(c, ".apg"))) {
+    if (existsSync(path.join(c, "apg", ".trans")) || existsSync(path.join(c, "apg", "specs"))) {
       return c
     }
   }
@@ -15,7 +15,7 @@ function findProjectRoot(context: { directory: string; worktree: string }): stri
 
 export default tool({
   description:
-    "Rebuild the project's LadybugDB graph database (.apg/db.lbug + .apg/graph.jsonl) by running the apg scanner + ingestor pipeline. Run this when source files have changed and the graph is stale.",
+    "Rebuild the project's LadybugDB graph database (apg/.trans/db.lbug + apg/.trans/graph.jsonl) by running the apg scanner + ingestor pipeline. Run this when source files have changed and the graph is stale.",
   args: {
     directory: tool.schema
       .string()
