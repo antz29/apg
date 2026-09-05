@@ -21,6 +21,32 @@ pub const LAYOUT: &str = "apg";
 /// The gitignored transient subdir.
 pub const TRANS: &str = ".trans";
 
+/// Walks up from `start` looking for the committed `apg/` layout root (a
+/// directory named `apg` carrying the gitignored `apg/.trans/` subdir, which
+/// `apg scan`/`apg init` create). The `apg/` name is shared, so the transient
+/// marker disambiguates the repo's layout root from an unrelated dir.
+pub fn find_apg_root(start: &Path) -> Option<PathBuf> {
+    let mut cur = start;
+    loop {
+        let cand = cur.join(LAYOUT);
+        if cand.is_dir() && is_apg_layout_root(&cand) {
+            return Some(cand);
+        }
+        cur = cur.parent()?;
+    }
+}
+
+/// Finds the project's `apg/` layout root (walking up from `dir`) or creates
+/// one at `<dir>/apg` (with `.trans/`) if none exists.
+pub fn find_or_create_apg_root(dir: &Path) -> PathBuf {
+    if let Some(apg) = find_apg_root(dir) {
+        return apg;
+    }
+    let apg = dir.join(LAYOUT);
+    std::fs::create_dir_all(apg.join(TRANS)).unwrap();
+    apg
+}
+
 /// True when `dir` is the repo's committed `apg/` layout root (it carries the
 /// gitignored transient subdir, created by `apg scan`/`apg init`).
 pub fn is_apg_layout_root(dir: &Path) -> bool {

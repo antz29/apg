@@ -1,9 +1,13 @@
+mod artifacts;
 mod classify;
 mod cleanup;
 mod graph;
 mod ingest;
 mod load;
+mod plan_cmd;
+mod review_cmd;
 mod schema;
+mod spec_cmd;
 mod specs;
 
 use std::io::{BufRead, BufReader, Write};
@@ -324,6 +328,12 @@ USAGE:
                               apg/.trans/graph.jsonl
   apg query \"<cypher>\"        Run a read-only Cypher query against
                               apg/.trans/db.lbug (found by walking up from cwd)
+  apg spec <sub> …            Author + lifecycle a graph-native spec:
+                              init/add/anchor/link/rm/render/promote/archive
+  apg plan <sub> …            The phased execution plan (transient):
+                              init/add/link/done/undone/complete/render
+  apg review <sub> …          Writer↔reviewer feedback cycle:
+                              add/action/resolve/reject/list
   apg --version               Print version
   apg --help                  Show this help
 
@@ -350,6 +360,9 @@ fn main() {
         "init" => cmd_init(&raw[2..]),
         "query" => cmd_query(&raw[2..]),
         "scan" => cmd_scan(&raw[2..]),
+        "spec" => spec_cmd::cmd_spec(&raw[2..]),
+        "plan" => plan_cmd::cmd_plan(&raw[2..]),
+        "review" => review_cmd::cmd_review(&raw[2..]),
         "--version" | "-V" => {
             println!("apg {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -634,30 +647,15 @@ fn csv_escape(field: &str) -> String {
     }
 }
 
-/// Walks up from `start` looking for the committed `apg/` layout root (a
-/// directory named `apg` carrying the gitignored `apg/.trans/` subdir, which
-/// `apg scan`/`apg init` create). The `apg/` name is shared, so the transient
-/// marker disambiguates the repo's layout root from an unrelated dir.
+/// Walks up from `start` looking for the committed `apg/` layout root.
 fn find_apg_root(start: &Path) -> Option<PathBuf> {
-    let mut cur = start;
-    loop {
-        let cand = cur.join(specs::LAYOUT);
-        if cand.is_dir() && specs::is_apg_layout_root(&cand) {
-            return Some(cand);
-        }
-        cur = cur.parent()?;
-    }
+    specs::find_apg_root(start)
 }
 
 /// Finds the project's `apg/` layout root (walking up from the scanned dir) or
 /// creates one at `<dir>/apg` (with `.trans/`) if none exists.
 fn find_or_create_apg_root(dir: &Path) -> PathBuf {
-    if let Some(apg) = find_apg_root(dir) {
-        return apg;
-    }
-    let apg = dir.join(specs::LAYOUT);
-    std::fs::create_dir_all(apg.join(specs::TRANS)).unwrap();
-    apg
+    specs::find_or_create_apg_root(dir)
 }
 
 /// `apg scan [dir] [options] [blacklist...]`: run the scanner + ingestor
