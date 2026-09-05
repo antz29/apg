@@ -2,7 +2,7 @@
 
 ## Pipeline
 
-Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`.
+Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/graph.jsonl`.
 
 - The **scanner** (Go: `src/golib/main.go`, Java: `src/javalib/CallGraphBuilder.java`,
   C++: `src/cpplib/main.cpp`, Rust: `src/rustlib/src/main.rs` — a standalone
@@ -18,7 +18,8 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
   never does graph assembly.
 - The **ingestor** (`src/ingest.rs`) spawns the scanner, resolves identity
   (canonical FQN), builds the graph, bulk-loads LadybugDB, and writes
-  `graph.jsonl` as the export. `.apg/db.lbug` is the query index; `.apg/graph.jsonl`
+  `graph.jsonl` as the export. `apg/.trans/db.lbug` is the query index;
+  `apg/.trans/graph.jsonl`
   is the self-contained export artifact (canonical FQNs, no opaque ids).
 - Build: `build.rs` compiles the frontends (`gcc`/`g++` tree-sitter for C++,
   `go build` for Go, `javac` for Java, `cargo build` for the Rust frontend —
@@ -34,20 +35,23 @@ Scanner (per language) → Rust ingestor → `.apg/db.lbug` + `.apg/graph.jsonl`
 
 The project builds a single `apg` binary (package `apg`, was `java_apg`):
 
-- `apg init [dir]` — create `.apg/` with a default `config.json` and install
-  (or update, where contents differ) the opencode apg tool suite into
-  `~/.opencode/tools/` + `~/.opencode/lib/` plus the `codebase-navigator` agent
-  into `~/.opencode/agents/codebase-navigator.md`. Also removes any apg-owned
-  files under `<dir>/.opencode/` left by pre-`~/.opencode` installs (user
+- `apg init [dir]` — create `apg/` (committed `config.json` + gitignored
+  `.trans/`), scaffold the repo `.gitignore` for `apg/.trans/` (added if
+  missing, other lines untouched), and install (or update, where contents
+  differ) the opencode apg tool suite into `~/.opencode/tools/` +
+  `~/.opencode/lib/` plus the **six distributed agents** — `codebase-navigator`,
+  `spec-writer`, `plan-writer`, `spec-review`, `plan-review`, `agent-builder` —
+  into `~/.opencode/agents/`. Also removes any apg-owned files under
+  `<dir>/.opencode/` left by pre-`~/.opencode` installs (user
   tools/agents and non-apg `package.json` files are left alone; the apg repo's
   own `.opencode/` is never touched).
 - `apg scan [dir] [--language L[,L...]] [--exclude-path G]* [--module M]* [--no-build-scripts]
   [blacklist...]`
-  — run the pipeline; writes `.apg/db.lbug`, `.apg/graph.jsonl`,
-  `.apg/apg-frontend.log`. `--language` accepts one or more comma-separated
+  — run the pipeline; writes `apg/.trans/db.lbug`, `apg/.trans/graph.jsonl`,
+  `apg/.trans/apg-frontend.log`. `--language` accepts one or more comma-separated
   languages; when omitted, `apg` auto-detects **every** language present and
   scans them all, merging their graphs into one database (a multi-language repo
-  like a Go backend + TS frontend gets a single `.apg/db.lbug`). Each frontend's
+  like a Go backend + TS frontend gets a single `apg/.trans/db.lbug`). Each frontend's
   opaque ids are namespaced per language (`--id-prefix`), and the ingestor
   classifies `code_type` and renders FQNs per record (a `lang_switch` control
   record precedes each frontend's stream). `--no-build-scripts` is Rust-only
@@ -55,8 +59,17 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
   is always skipped).
-- `apg query "<cypher>"` — read-only Cypher over `.apg/db.lbug` (found by walking
+- `apg query "<cypher>"` — read-only Cypher over `apg/.trans/db.lbug` (found by walking
   up from cwd), CSV output with header row.
+- `apg spec <sub> …` — author + lifecycle a graph-native spec: `init`, `add`
+  (requirement/future/phase/decision/non-goal/acceptance-criterion/verification/note),
+  `anchor`, `link`, `rm`, `render`, `promote`, `archive` (see "Graph-native
+  specs" below).
+- `apg plan <sub> …` — the phased execution plan (transient, serialized to
+  `apg/.trans/plans/<project>.jsonl`): `init`, `add` (phase/task), `link`,
+  `done`/`undone`, `complete`, `render`.
+- `apg review <sub> …` — the closed writer↔reviewer feedback cycle: `add`,
+  `action`, `resolve`, `reject`, `list`.
 - `apg --version`, `apg --help`.
 
 `apg init` also installs the **apg opencode tool suite** into the user-level
@@ -65,8 +78,13 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
 abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
-`apg_unresolved`, `apg_hunk`. Shared plumbing lives in `~/.opencode/lib/apg.ts`
-(root discovery, `apg query` subprocess, Cypher literal escaping). All suite
+`apg_unresolved`, `apg_hunk` — and the spec/plan/review suite: `apg_spec`
+(+ requirements/phases/deps/anchors/trace/unresolved/init/add/anchor/link/rm/
+render/promote/archive), `apg_plan` (+ phases/tasks/complete/render/init/add/
+link/done/undone), `apg_review` (+ add/action/resolve/reject). Shared plumbing
+lives in `~/.opencode/lib/apg.ts`
+(root discovery, `apg query`/`apg spec`/`apg plan`/`apg review` subprocess,
+Cypher literal escaping). All suite
 tools take an optional `codeType` (default: all code); exact-FQN tools hint
 when a lookup comes up empty (overloads carry `(params)` suffixes).
 
@@ -107,7 +125,7 @@ Edge records:
 - `id` is a scanner-local opaque counter (`n1`, `n2`, …); edges reference
   project nodes by `id`, unresolved targets by `fqn`. The ingestor maps `id`s
   to canonical FQNs. `code_type` is **not** emitted by scanners — the ingestor
-  computes it from `path` + `apg.json`/`.apg/config.json` (`src/classify.rs`).
+  computes it from `path` + `apg/config.json` (`src/classify.rs`).
 - `apg scan` injects a control record before each frontend's stream in a
   multi-language scan: `{"type":"lang_switch","language":"go"}`. The ingestor
   uses the current language for `code_type` classification and FQN rendering,
@@ -144,7 +162,7 @@ residual FQN collision rather than silently overwriting.
 > `pip install ladybug`, `npm install @ladybugdb/core`, `cargo add lbug`, or the
 > Go/Java/C++/CLI binaries.
 
-The workspace has a LadybugDB graph database at `.apg/db.lbug` containing the parsed codebase. Interact via the `apg_query` tool — a Cypher-like query interface. (The legacy `ladybug_query`/`ladybug_scan` tools were renamed to `apg_query`/`apg_scan`.)
+The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing the parsed codebase. Interact via the `apg_query` tool — a Cypher-like query interface. (The legacy `ladybug_query`/`ladybug_scan` tools were renamed to `apg_query`/`apg_scan`.)
 
 ### Query syntax
 
@@ -188,6 +206,45 @@ One of `builtin` (Go predeclared func/type), `stdlib`, `external`, `func-value` 
 
 Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are routed to `Uses`/`UnresolvedUse` edges, not `UnresolvedCall`. The `target_type` property only carries data on `UnresolvedCall` edges whose target is `func-value`.
 
+### Graph-native specs & plans
+
+A repo can carry a **graph-native spec** (SPEC.md in this repo) authored via
+`apg spec`/`apg plan`/`apg review`, living in the same `apg/.trans/db.lbug`:
+spec/plan nodes live under the `future/` FQN root (`future/<project>/spec`,
+`future/<project>/plan`, `future/<project>/<future-code>`). Durable
+serialization is committed `apg/specs/<project>.jsonl` (specs + spec notes +
+spec-review feedback), `apg/notes/<module>.jsonl` (notes on code nodes, one
+file per owning module, `_root.jsonl` fallback); the plans themselves are
+**transient** (`apg/.trans/plans/<project>.jsonl`, retired on final-phase
+complete). `apg scan` auto-discovers all three after code and re-ingests them;
+`apg spec` mutations are write-through (JSONL first, then re-merge into the
+live DB).
+
+Additional node labels: `Spec`, `Requirement`, `Phase`, `Decision`, `Future`,
+`NonGoal`, `AcceptanceCriterion`, `VerificationItem`, `Note`, `Feedback`,
+`Plan`, `PlanPhase`, `Task`. Additional edges: `Details` (Note→any),
+`Reviews` (Feedback→any), `DependsOn` (Requirement→Requirement), `Gates`
+(Phase→Phase, PlanPhase→PlanPhase), `SpecDependsOn` (Spec→Spec), `Anchors`
+(Requirement/Task→code or Future), `Implements` (code→Requirement),
+`Satisfies` (PlanPhase→Requirement), `Builds` (Task→Future).
+
+- `Future {fqn, kind, target}` is a placeholder for not-yet-built code
+  (`kind` ∈ function/struct/service/rpc/endpoint/other, `target` = intended
+  real FQN); a pending anchor is `Anchors(req→Future)`.
+- Requirement state is **derived**: `delivered` (an `Implements` edge exists)
+  vs `planned`; a spec is `implemented` when every requirement is delivered.
+- `Feedback {fqn, body, status, disposition}` is a review item;
+  `status` ∈ open/actioned/resolved. An artifact is done only when every
+  `Feedback` on it is `resolved` — `apg spec archive` and
+  `apg plan complete` refuse otherwise.
+- Query patterns: pending anchors `MATCH (r:Requirement)-[:Anchors]->(f:Future) RETURN r.fqn, f.fqn`; what's left in a spec `MATCH (p:Phase)-[:Contains]->(r:Requirement) WHERE NOT (r)<-[:Implements]-(:Struct)` — or use the suite tools (`apg_spec`, `apg_spec_requirements`, `apg_spec_phases`, `apg_spec_anchors`, `apg_spec_trace`, `apg_spec_unresolved`, `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
+- The six distributed agents (installed by `apg init`): `codebase-navigator`
+  (delegates spec/plan authoring to the writers via `task`), `spec-writer` /
+  `plan-writer` (author through the `apg_spec_*`/`apg_plan_*` tools, **no file
+  writes**), `spec-review` / `plan-review` (attach/resolve/reject feedback,
+  **no authoring tools**), and `agent-builder` (`mode: primary`, the only write
+  grant `.opencode/agents/**`, scaffolds a repo's code-writer agents).
+
 ### `Struct.code_type` / `Function.code_type`
 
 Classifies what kind of code a node lives in: `src` (default), `test`, `generated`, `external`, `lib`, or a user-defined value. All code is included in the graph; this column is how you filter it. Example: `MATCH (n:Function) WHERE n.code_type = 'test' RETURN n.fqn`.
@@ -198,7 +255,7 @@ Built-in defaults (per language):
 - **C++**: `test` = `*_test.cpp`/`test_*.cpp` or `test`/`tests` segment; `generated` = `*.pb.cc`/`*.pb.h` or `gen`/`generated` segment; `external` = `vendor`/`third_party`/`external`.
 - **Rust**: `test` = `*_test.rs` or `test`/`tests` segment; `generated` = `gen`/`generated` segment; `external` = `vendor`; else `src`.
 
-An `apg.json` at the project root or `.apg/config.json` **replaces** the defaults. Shape:
+An `apg/config.json` at the project root **replaces** the defaults. Shape:
 
 ```json
 {

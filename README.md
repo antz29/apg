@@ -7,7 +7,7 @@ types, functions, and call/use relationships, and stores it in a LadybugDB
 graph database that you can query with Cypher from inside opencode.
 
 ```
-Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
+Scanner (per language) → Rust ingestor → apg/.trans/db.lbug + apg/.trans/graph.jsonl
 ```
 
 ## Features
@@ -20,7 +20,7 @@ Scanner (per language) → Rust ingestor → .apg/db.lbug + .apg/graph.jsonl
   unresolvable refs become
   `UnresolvedTarget` nodes rather than guessed FQNs.
 - **Multi-language codebases in one graph** — `apg scan` auto-detects every
-  language present and merges their graphs into a single `.apg/db.lbug` (a Go
+  language present and merges their graphs into a single `apg/.trans/db.lbug` (a Go
   backend + TS frontend repo is one database, not two).
 - **Everything is included** — tests, generated, and vendored code are scanned;
   filter by `code_type` (`src`, `test`, `generated`, `external`) in queries.
@@ -134,8 +134,8 @@ apg --help
 In your project directory:
 
 ```sh
-apg init    # creates .apg/ (config + db location), installs the opencode apg tool suite and codebase-navigator agent
-apg scan    # scans the project, writes .apg/db.lbug and .apg/graph.jsonl
+apg init    # creates apg/ (committed config + gitignored .trans/), installs the opencode apg tool suite + six agents
+apg scan    # scans the project, writes apg/.trans/db.lbug and apg/.trans/graph.jsonl
 apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 ```
 
@@ -143,23 +143,27 @@ apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 
 Sets up the project:
 
-- creates `.apg/` with a default `config.json` (classification rules),
+- creates `apg/` with a default `config.json` (classification rules) and a
+  gitignored `apg/.trans/`, and scaffolds the repo `.gitignore` for `apg/.trans/`
+  (added if missing, other lines untouched),
 - installs the **apg tool suite** into `~/.opencode/tools/` (query tools +
-  `apg_scan`, shared plumbing in `~/.opencode/lib/`) and writes
-  `~/.opencode/package.json` + runs `npm install` if needed,
-- installs the `codebase-navigator` agent into `~/.opencode/agents/codebase-navigator.md`.
+  `apg_scan` + the spec/plan/review suite, shared plumbing in `~/.opencode/lib/`)
+  and writes `~/.opencode/package.json` + runs `npm install` if needed,
+- installs the **six distributed agents** into `~/.opencode/agents/`:
+  `codebase-navigator`, `spec-writer`, `plan-writer`, `spec-review`,
+  `plan-review`, and `agent-builder`.
 
 The suite installs the first time and is then kept in sync (files are
 re-written only when their contents change), so running `apg init` again after
-upgrading `apg` updates the tools and agent where required.
+upgrading `apg` updates the tools and agents where required.
 
-Installing to `~/.opencode/` makes the tools and agent available to every
+Installing to `~/.opencode/` makes the tools and agents available to every
 project's opencode session (not just this one). As part of that move, `apg init`
 also removes any legacy project-local `.opencode/` apg install left by older
 versions — apg-owned tools/agent/lib files only; your own agents/tools and any
-hand-written `package.json` are left alone. The plugin and agent are
+hand-written `package.json` are left alone. The plugin and agents are
 auto-discovered by opencode. **Restart opencode** after running `apg init` so
-the tools and `codebase-navigator` agent are available in chat.
+the tools and agents are available in chat.
 
 ### 2. `apg scan [dir] [options]`
 
@@ -177,7 +181,9 @@ apg scan --no-build-scripts              # Rust only: skip build scripts + proc-
 apg scan . example.com/pkg other.prefix  # blacklist FQN prefixes (after the dir)
 ```
 
-Outputs (all under the project's `.apg/` directory):
+Outputs (all under the gitignored `apg/.trans/` directory; the committed
+`apg/` dir holds only `config.json` plus the durable `apg/specs/*.jsonl` and
+`apg/notes/*.jsonl` when the repo has a graph-native spec):
 
 | File | Contents |
 |---|---|
@@ -188,7 +194,7 @@ Outputs (all under the project's `.apg/` directory):
 
 ### 3. `apg query "<cypher>"`
 
-Runs a read-only Cypher query against `.apg/db.lbug` (located by walking up
+Runs a read-only Cypher query against `apg/.trans/db.lbug` (located by walking up
 from the current directory), printing CSV with a header row:
 
 ```sh
@@ -221,7 +227,7 @@ agent to explore the graph directly — it will pick the right tool:
 | `apg_unresolved` | unresolvable calls/uses for a unit or file |
 | `apg_hunk` | units overlapping a line range (diff/review join) |
 | `apg_query` | ad-hoc read-only Cypher (power users) |
-| `apg_scan` | rebuild `.apg/db.lbug` |
+| `apg_scan` | rebuild `apg/.trans/db.lbug` |
 
 Every row carries `fqn`, `path`, and `start_line`/`end_line` where relevant, so
 the agent can jump straight to source. All suite tools accept an optional
@@ -268,7 +274,7 @@ offsets, matching their compilers' native positions.)
 
 ## Configuration
 
-`.apg/config.json` (or a legacy `apg.json` at the project root) customizes
+`apg/config.json` (or a legacy `apg.json` at the project root) customizes
 code-type classification. Built-in defaults per language (test/generated/
 external) apply when no config is present. For Rust: `test` = `*_test.rs` or a
 `test`/`tests` path segment; `generated` = `gen`/`generated` segment; `external`

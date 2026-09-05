@@ -217,6 +217,43 @@ const APG_LIB: &str = include_str!("../.opencode/lib/apg.ts");
 /// the repo's own agent file.
 const CODEBASE_NAVIGATOR_AGENT: &str = include_str!("../.opencode/agents/codebase-navigator.md");
 
+/// The six distributed agents that `apg init` installs into `~/.opencode/agents/`
+/// (SPEC R13/R15): the navigator plus the five spec/plan/review/builder agents,
+/// single-sourced from the repo's own `.opencode/agents/`.
+const AGENTS: &[(&str, &str)] = &[
+    ("codebase-navigator.md", CODEBASE_NAVIGATOR_AGENT),
+    (
+        "spec-writer.md",
+        include_str!("../.opencode/agents/spec-writer.md"),
+    ),
+    (
+        "plan-writer.md",
+        include_str!("../.opencode/agents/plan-writer.md"),
+    ),
+    (
+        "spec-review.md",
+        include_str!("../.opencode/agents/spec-review.md"),
+    ),
+    (
+        "plan-review.md",
+        include_str!("../.opencode/agents/plan-review.md"),
+    ),
+    (
+        "agent-builder.md",
+        include_str!("../.opencode/agents/agent-builder.md"),
+    ),
+];
+
+/// Every agent name apg owns, for source-dir purity and legacy cleanup.
+const AGENT_FILES: &[&str] = &[
+    "codebase-navigator.md",
+    "spec-writer.md",
+    "plan-writer.md",
+    "spec-review.md",
+    "plan-review.md",
+    "agent-builder.md",
+];
+
 /// The `package.json` written by `apg init` into `~/.opencode/` when none
 /// exists, so the tool files' `@opencode-ai/plugin` import resolves.
 const OPENCODE_PACKAGE_JSON: &str = r#"{
@@ -441,10 +478,11 @@ fn print_help() {
         "apg — program graph scanner + LadybugDB query CLI for opencode
 
 USAGE:
-  apg init [dir]              Set up apg/ (config + .trans/), install/update the
-                              opencode apg tool suite + codebase-navigator
-                              agent in ~/.opencode/, and remove any legacy
-                              project-local .opencode/ install
+  apg init [dir]              Set up apg/ (config.json + .trans/), scaffold the
+                              repo .gitignore for apg/.trans/, install/update the
+                              opencode apg tool suite + six distributed agents in
+                              ~/.opencode/, and remove any legacy project-local
+                              .opencode/ install
   apg scan [dir] [options]    Scan a project; writes apg/.trans/db.lbug and
                               apg/.trans/graph.jsonl
   apg query \"<cypher>\"        Run a read-only Cypher query against
@@ -503,7 +541,6 @@ fn main() {
         std::process::exit(1);
     }
 }
-
 /// The user-level opencode config dir: `~/.opencode`. `apg init` installs the
 /// tool suite here (not into the project dir) so it's available to every
 /// project's opencode session; tool discovery is project-root based, so the
@@ -553,7 +590,7 @@ fn is_apg_source_dir(opencode_dir: &Path) -> bool {
     let tool_names: Vec<&str> = SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
     dir_entries_only(&opencode_dir.join("tools"), &tool_names)
         && dir_entries_only(&opencode_dir.join("lib"), &["apg.ts"])
-        && dir_entries_only(&opencode_dir.join("agents"), &["codebase-navigator.md"])
+        && dir_entries_only(&opencode_dir.join("agents"), AGENT_FILES)
 }
 
 /// Removes a legacy project-local `.opencode/` apg install written by older
@@ -588,9 +625,11 @@ fn remove_legacy_project_install(dir: &Path) -> std::io::Result<(usize, usize)> 
         files_removed += 1;
     }
     let agents_dir = opencode_dir.join("agents");
-    let agent_md = agents_dir.join("codebase-navigator.md");
-    if agent_md.is_file() && std::fs::remove_file(&agent_md).is_ok() {
-        files_removed += 1;
+    for name in AGENT_FILES {
+        let p = agents_dir.join(name);
+        if p.is_file() && std::fs::remove_file(&p).is_ok() {
+            files_removed += 1;
+        }
     }
 
     for d in [&tools_dir, &lib_dir, &agents_dir] {
@@ -671,11 +710,10 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     if write_if_changed(&lib_dir.join("apg.ts"), APG_LIB)? {
         updated += 1;
     }
-    if write_if_changed(
-        &agents_dir.join("codebase-navigator.md"),
-        CODEBASE_NAVIGATOR_AGENT,
-    )? {
-        updated += 1;
+    for (name, content) in AGENTS {
+        if write_if_changed(&agents_dir.join(name), content)? {
+            updated += 1;
+        }
     }
 
     if !opencode_dir
@@ -699,18 +737,22 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
 
     if updated == 0 {
         println!(
-            "Initialized apg/ (config.json); {} apg tools + codebase-navigator agent already up to date in {}",
-            SUITE_TOOLS.len(),
+            "Initialized apg/ (config.json + .trans/); {} apg tools + {} agents already up to date in {}",
+            SUITE_TOOLS.len() + 1,
+            AGENTS.len(),
             opencode_dir.display()
         );
     } else {
         println!(
-            "Initialized apg/ (config.json) and installed/updated {} of {} apg tools + codebase-navigator agent in {}",
+            "Initialized apg/ (config.json + .trans/) and installed/updated {} of {} apg tools + {} agents in {}",
             updated,
-            SUITE_TOOLS.len() + 2,
+            SUITE_TOOLS.len() + 1,
+            AGENTS.len(),
             opencode_dir.display()
         );
     }
+
+    scaffold_gitignore(&dir)?;
 
     let (cleaned_files, cleaned_dirs) = remove_legacy_project_install(&dir)?;
     if cleaned_files > 0 || cleaned_dirs > 0 {
@@ -720,6 +762,28 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
             cleaned_files,
             cleaned_dirs
         );
+    }
+    Ok(())
+}
+
+/// Ensures the repo `.gitignore` carries `apg/.trans/` (added if missing; other
+/// lines untouched), so the durable `apg/` data (specs, notes, config) is
+/// committed and only transient state (db, export, plans, renders, logs) is
+/// ignored (SPEC R4/R15).
+fn scaffold_gitignore(dir: &Path) -> anyhow::Result<()> {
+    let p = dir.join(".gitignore");
+    let content = std::fs::read_to_string(&p).unwrap_or_default();
+    let lines: Vec<&str> = content.lines().collect();
+    let has = lines
+        .iter()
+        .any(|l| l.trim() == "apg/.trans/" || l.trim() == "apg/.trans");
+    if !has {
+        let mut out = content.clone();
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("# apg transient state (rebuildable; committed apg/ data lives above it)\napg/.trans/\n");
+        std::fs::write(&p, out)?;
     }
     Ok(())
 }
@@ -1098,3 +1162,67 @@ fn run_pipeline(
     let _ = std::fs::remove_dir_all(&dir);
     log.ln("[load] temp dir removed");
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds a `.opencode/` dir shaped like the apg repo's own single-sourced
+    /// dir: `.gitignore` + apg-pure `tools/` + `lib/` + all six `agents/`, no
+    /// `skills/`. Returns the `.opencode` path.
+    fn source_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("apg-src-dir-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("tools")).unwrap();
+        std::fs::create_dir_all(d.join("lib")).unwrap();
+        std::fs::create_dir_all(d.join("agents")).unwrap();
+        std::fs::write(d.join(".gitignore"), "").unwrap();
+        for (name, _) in SUITE_TOOLS {
+            std::fs::write(d.join("tools").join(name), "").unwrap();
+        }
+        std::fs::write(d.join("lib").join("apg.ts"), "").unwrap();
+        for name in AGENT_FILES {
+            std::fs::write(d.join("agents").join(name), "").unwrap();
+        }
+        d
+    }
+
+    #[test]
+    fn source_dir_with_all_six_agents_is_pure() {
+        let d = source_dir("six");
+        assert!(is_apg_source_dir(&d));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn source_dir_with_foreign_agent_is_not_pure() {
+        let d = source_dir("foreign");
+        std::fs::write(d.join("agents").join("my-custom-agent.md"), "").unwrap();
+        assert!(!is_apg_source_dir(&d));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn source_dir_with_skills_or_user_content_is_not_pure() {
+        let d = source_dir("skills");
+        std::fs::create_dir_all(d.join("skills")).unwrap();
+        assert!(!is_apg_source_dir(&d));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn scaffold_gitignore_adds_apg_trans_once() {
+        let d = std::env::temp_dir().join(format!("apg-gitignore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join(".gitignore"), "/target\n").unwrap();
+        scaffold_gitignore(&d).unwrap();
+        let once = std::fs::read_to_string(d.join(".gitignore")).unwrap();
+        assert!(once.contains("apg/.trans/"));
+        assert!(once.starts_with("/target\n"));
+        scaffold_gitignore(&d).unwrap();
+        let twice = std::fs::read_to_string(d.join(".gitignore")).unwrap();
+        assert_eq!(once, twice);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+

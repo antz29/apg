@@ -10,3 +10,5 @@
 graph.jsonl
 apg-frontend.log
 /.apg
+# apg transient state (rebuildable; committed apg/ data lives above it)
+apg/.trans/
