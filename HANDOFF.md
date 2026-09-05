@@ -1,5 +1,14 @@
 # Love letter to my future compacted self
 
+> **Status: ALL FIVE PHASES DONE (Aug/Sep 2026).** Phases 1–5 implemented and
+> committed (`33c5681` → `938bb0a` → `b31beb6`, plus `621bf26`). `cargo test` =
+> 29 green, clippy clean, `cargo build --release` clean. The only remaining
+> items are the two interactive `human` checks from PLAN Phase 05 (agent prose
+> checks + agent-builder scaffold demo) and the closing dogfood exercise
+> (represent this SPEC.md + PLAN.md in the graph). If you're here after a
+> compaction, skip to "Where we are" and don't redo anything — the system is
+> built and verified.
+
 Hey — if you're reading this, the context got compacted (or a session died) and
 you need to pick up mid-build. This is everything you need. Breathe, read
 `SPEC.md` (§1) and `PLAN.md`, then continue.
@@ -15,16 +24,27 @@ built in prose first — the graph tooling is what makes them graph-native later
 
 ## Where we are (start here)
 
-**Phases 1–3 are DONE and committed** (3 commits on `main`):
+**ALL FIVE PHASES ARE DONE and committed** (on `main`):
 - `33c5681` — schema + serialization (Phase 1+2): 13 spec/plan node kinds, 9 rel
   tables, pending-anchor reconciliation, committed `apg/` layout + scan re-ingest.
 - `621bf26` — the CLI (Phase 3): `apg spec|plan|review` with write-through.
+- `938bb0a` — the suite tools (Phase 4): 30 `apg_spec_*`/`apg_plan_*`/`apg_review*`
+  opencode tools, `apg.ts` helpers (runCli/projectOf/csvToRows/resolvesInCode),
+  code-note write-through R5 fix.
+- `b31beb6` — the agents (Phase 5): five new distributed agents + navigator
+  `task`/delegation/reading, `apg init` six-agent install + ownership + `.gitignore`
+  scaffold, AGENTS.md/README.md layout refresh, `is_apg_source_dir` tests.
 
-`cargo test` = **25 passing**, `cargo clippy --all-targets` = **0 warnings**.
-Do NOT skip running both after any change.
+`cargo test` = **29 passing**, `cargo clippy --all-targets` = **0 warnings**,
+`cargo build --release` clean. Do NOT skip running both after any change.
 
-**NEXT UP: Phase 4 — Suite tools (R12/R16).** Then **Phase 5 — Agents + `apg init`
-distribution (R13/R14/R15/R24/R26/R27/R28/R29)**. Plan details in `PLAN.md`.
+**REMAINING (interactive-only, blocked on a human session):**
+- PLAN Phase 05 `human` items: agent prose checks (navigator reads a prose spec
+  → proposes graph structure; spec-writer materializes; plan-writer authors a
+  plan; a review cycle attaches/actions/resolves/rejects; agent-builder
+  scaffolds a sample repo's writer suite).
+- The closing dogfood: represent this very `SPEC.md` + `PLAN.md` in the graph
+  via the spec-writer → spec graph, plan-writer → plan graph.
 
 ## The layout (migrated, no more `.apg`)
 
@@ -86,7 +106,7 @@ the spec + plan + notes records (code graph untouched). `promote_future`
 `apg plan done`. `apg plan complete` on the final phase retires the plan (drops
 its JSONL — plans are transient by design, R22).
 
-## Phase 4 — Suite tools (R12/R16) — the concrete to-do
+## Phase 4 — Suite tools (R12/R16) — **DONE** (938bb0a)
 
 New TypeScript tools in `.opencode/tools/` (install via `SUITE_TOOLS` in
 `src/main.rs`, shared plumbing in `.opencode/lib/apg.ts`):
@@ -104,7 +124,7 @@ New TypeScript tools in `.opencode/tools/` (install via `SUITE_TOOLS` in
 - Verify: run every tool against a scanned fixture; smoke test in the apg repo
   itself after `apg scan /Users/jledrew/apg`.
 
-## Phase 5 — Agents + `apg init` (R13/R14/R15/R24/R26/R27/R28/R29)
+## Phase 5 — Agents + `apg init` (R13/R14/R15/R24/R26/R27/R28/R29) — **DONE** (b31beb6)
 
 Six distributed agents, single-sourced from `.opencode/agents/*.md` via
 `include_str!` consts, installed by `apg init` into `~/.opencode/agents/`:
@@ -140,10 +160,15 @@ scaffold for `apg/.trans/` (add line, don't touch others). Also update
 
 ## State at handoff
 
-- `cargo test` 25/25 green, clippy clean, binary builds. Working tree clean
-  (3 commits: `33c5681`, `621bf26`, plus the pre-existing history).
+- `cargo test` 29/29 green, clippy clean, release build clean. 4 feature
+  commits on `main` (`33c5681`, `621bf26`, `938bb0a`, `b31beb6`).
+- `~/.opencode/agents/` holds the installed six agents; `apg init` idempotent.
 - Fixture (scratch): `/var/folders/ff/x5n4qwb54c3dltyhgn7gl7440000gn/T/opencode/apg-fixture`
-  — a Go project with a scanned db + lifecycle spec/plan/notes used for e2e.
-  Safe to recreate with `apg scan`.
+  — a Go project with a scanned db + fixture/lifecycle/2/3 spec projects used
+  for e2e. Safe to recreate with `apg scan`.
+- Tool smoke harness: `/var/folders/ff/x5n4qwb54c3dltyhgn7gl7440000gn/T/opencode/tool-smoke`
+  (smoke.ts read tools, mutate.ts author wrappers). Uses `~/.opencode/node_modules`
+  for the plugin import; PATH must point at `target/debug` first.
 
-Go make Phase 4+5 sing. 🚀
+Remaining: the interactive human agent checks + the dogfood exercise (see
+"Where we are"). Take a well-earned break. 🚀
