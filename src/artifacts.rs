@@ -584,3 +584,51 @@ pub fn next_free(records: &[Record], kind: &str) -> u64 {
         .map(|n| n + 1)
         .unwrap_or(1)
 }
+
+/// The next free `annotations/<stem>/<n>` number for a code-note ledger,
+/// scanning the ledger's own records. Each per-module ledger is its own
+/// namespace, so note FQNs never collide across modules (a flat `annotations/N`
+/// numbering would collide as soon as two modules each carry their first note).
+pub fn next_free_annotation(records: &[Record], stem: &str) -> u64 {
+    let prefix = format!("annotations/{stem}/");
+    records
+        .iter()
+        .filter_map(|r| node_fqn(r))
+        .filter_map(|f| f.strip_prefix(&prefix).map(str::to_owned))
+        .filter_map(|s| s.parse::<u64>().ok())
+        .max()
+        .map(|n| n + 1)
+        .unwrap_or(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn annotation_fqns_are_per_ledger_namespaced() {
+        // Two modules' ledgers each number from 1 — the FQNs must stay unique
+        // (a flat `annotations/N` numbering collides on graph merge).
+        let mod_a = vec![
+            Record::Note {
+                fqn: "annotations/github.com_flow_a/1".into(),
+                body: "a1".into(),
+                kind: "background".into(),
+            },
+            Record::Note {
+                fqn: "annotations/github.com_flow_a/2".into(),
+                body: "a2".into(),
+                kind: "background".into(),
+            },
+        ];
+        let mod_b = vec![Record::Note {
+            fqn: "annotations/github.com_flow_b/1".into(),
+            body: "b1".into(),
+            kind: "background".into(),
+        }];
+        assert_eq!(next_free_annotation(&mod_a, "github.com_flow_a"), 3);
+        assert_eq!(next_free_annotation(&mod_b, "github.com_flow_b"), 2);
+        // Fresh ledger starts at 1.
+        assert_eq!(next_free_annotation(&[], "_root"), 1);
+    }
+}

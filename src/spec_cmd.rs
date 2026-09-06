@@ -327,8 +327,16 @@ fn add_note(
             } else {
                 Vec::new()
             };
-            let n = artifacts::next_free(&ledger, "note");
-            let fqn = format!("annotations/{n}");
+            // Per-module ledger namespace: note fqns are
+            // `annotations/<ledger-stem>/<n>`, so two modules' notes never
+            // collide when the ledgers merge into one graph.
+            let stem = file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("_root")
+                .to_string();
+            let n = artifacts::next_free_annotation(&ledger, &stem);
+            let fqn = format!("annotations/{stem}/{n}");
             ledger.push(Record::Note {
                 fqn: fqn.clone(),
                 body: body.clone(),
