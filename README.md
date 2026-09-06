@@ -75,11 +75,11 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.8.0
+apg --version   # apg 0.9.0
 apg --help
 ```
 
-`v0.8.0` will be tagged, so the stable install works as-is. If you want the latest
+`v0.9.0` will be tagged, so the stable install works as-is. If you want the latest
 unreleased code instead, pass `--HEAD`:
 
 ## Install (Linux, `curl | sh`)
@@ -112,7 +112,7 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 The installer verifies sha256 checksums for each component against `sha256sums.txt`.
 
 Options:
-- `--version 0.8.0`: pin a specific release tag
+- `--version 0.9.0`: pin a specific release tag
 - `--user`: install under `~/.local` (no root required)
 - `--prefix DIR`: choose a custom install location (default `/usr/local`)
 - `--frontends L,L...`: comma-separated list of frontends to install
@@ -125,7 +125,7 @@ The binary links OpenSSL dynamically, so `libssl.so.3` must be present (it is on
 Verify:
 
 ```sh
-apg --version   # apg 0.8.0
+apg --version   # apg 0.9.0
 apg --help
 ```
 
