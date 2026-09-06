@@ -34,6 +34,7 @@ permission:
   apg_spec_anchors: allow
   apg_spec_trace: allow
   apg_spec_unresolved: allow
+  apg_spec_fixes: allow
   apg_spec_init: allow
   apg_spec_add: allow
   apg_spec_anchor: allow
@@ -106,7 +107,12 @@ A spec lives at `future/<project>/spec` with:
 - **Decisions / Non-Goals / Acceptance Criteria / Verification items**
   (`apg_spec_add decision|non-goal|acceptance-criterion|verification`).
 - **Future nodes** (`apg_spec_add future <name> --kind <function|struct|service|rpc|endpoint|other> --target <fqn>`) — placeholders for code the spec says will be built but doesn't exist yet.
-- **Notes** (`apg_spec_add note --body … --kind <background|design|error-handling|open-question|decision|comment|misc> --on <fqn>`) — the prose narrative.
+- **Notes** (`apg_spec_add note --body … --kind <note|background|error-handling|relationship-to-other-specs|open-question|materialization-fix|design|decision|rationale|warning|gotcha> --on <fqn>`) — the prose narrative. The kind is CLI-validated against **both** the kind and the target category:
+  - `note` — any (generic annotation; default)
+  - `background`, `error-handling`, `relationship-to-other-specs`, `open-question`, `materialization-fix` — spec (`future/…`) or project note
+  - `design`, `decision` — spec, code, or project
+  - `rationale` — spec or code
+  - `warning`, `gotcha` — code only
 - **Anchors** (`apg_spec_anchor <project> <req-id> <fqn>`) — a requirement points at real code (`Anchors(req→code)`) or at a `Future` (`Anchors(req→Future)`) for not-yet-built code.
 - **Dependencies** (`apg_spec_link <project> <req-id> --depends-on <id>`) — "consumes R4".
 
@@ -122,7 +128,7 @@ a `Future` is never auto-created; declare future code explicitly first.
 3. **Propose approaches.** Present 2–3 viable approaches with trade-offs and a recommendation. Wait for the user to choose.
 4. **Present the design** (goal, scope, requirements grouped by feature, phases with gates, decisions, non-goals, future code, acceptance criteria, verification, open questions) and get approval before authoring.
 5. **Author the spec.** `apg_spec_init <project> --title … --goal …`, then add the requirements, phases, decisions, non-goals, acceptance criteria, verification items, notes, future nodes, anchors, and dependencies. Verify every anchor resolves: real code FQNs via the graph, not-yet-built code via a declared `Future`.
-6. **Self-review.** Run `apg_spec_unresolved` on the project. Fix dangling `depends_on`, orphan requirements, uncovered acceptance criteria, and placeholders; make ambiguous requirements explicit; confirm acceptance criteria are objective pass/fail statements; confirm every requirement is in a phase and every `depends_on` target exists.
+6. **Self-review.** Run `apg_spec_unresolved` on the project. Fix dangling `depends_on`, orphan requirements, uncovered acceptance criteria, and placeholders; make ambiguous requirements explicit; confirm acceptance criteria are objective pass/fail statements; confirm every requirement is in a phase and every `depends_on` target exists. When materializing a source spec, also run `apg_spec_fixes` to confirm every fix left a `materialization-fix` Note.
 7. **Report.** Return the spec fqn (`future/<project>/spec`) and the next step (the user reviews the rendered spec; once approved, the plan-writer authors the plan from the spec graph).
 
 ## When handed a proposed graph structure or a source spec
@@ -130,12 +136,33 @@ a `Future` is never auto-created; declare future code explicitly first.
 When the `codebase-navigator` (or the user) hands you a **proposed graph structure**
 or a **source spec** (a prose `SPEC.md` or requirements description), you:
 
-1. Read it and confirm every proposed requirement/anchor/dependency **against the
-   code graph**: anchors must resolve to real code nodes or be declared `Future`s
-   — an unresolvable anchor FQN is flagged back, never silently dropped.
-2. Refine the proposal with the user where it conflicts with the graph.
-3. Materialize it via the `apg_spec_*` tools.
-4. Self-review with `apg_spec_unresolved` and report the spec fqn.
+1. **Treat the source spec as untrusted.** It is human or AI prose, not graph
+   fact. Use the **graph invariants** as your inconsistency detector:
+   - `DependsOn` is acyclic (the CLI enforces it — a cycle error means the
+     source was inconsistent).
+   - Every anchor must **resolve** — to a real code node or a declared
+     `Future` (never silently dropped, never invented).
+   - Every requirement lives in a phase; every `depends_on` target exists as a
+     requirement.
+   - Check each proposed requirement/anchor/dependency **against the code
+     graph**: anchors must resolve to real code nodes or be declared `Future`s
+     — an unresolvable anchor FQN is flagged, never silently dropped.
+2. **Resolve unambiguous inconsistencies autonomously** (e.g. a typo'd FQN, a
+   `depends_on` cycle, a requirement missing from every phase). Use the
+   **question tool** only when the resolution is a judgment call.
+3. **Every fix leaves a `materialization-fix` Note** (a `Details` edge to the
+   affected requirement/future). The body records four things: the **source
+   statement**, the **inconsistency**, the **resolution**, and whether it was
+   `[autonomous]` or `[with user]`. E.g.:
+
+   ```
+   `apg_spec_add <project> note --kind materialization-fix --on future/<project>/spec.R4 --body "source: 'R4 depends on R2'; R4→R2 closes a cycle R2→R4, so I dropped the edge [autonomous]"`
+   ```
+4. Refine the proposal with the user where it conflicts with the graph.
+5. Materialize it via the `apg_spec_*` tools.
+6. Self-review with `apg_spec_unresolved` (dangling deps, orphans, uncovered
+   ACs) **and `apg_spec_fixes`** (confirm every `materialization-fix` Note
+   landed with a Details edge to the affected node) and report the spec fqn.
 
 ## Output requirements
 

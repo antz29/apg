@@ -34,6 +34,7 @@ permission:
   apg_spec_anchors: allow
   apg_spec_trace: allow
   apg_spec_unresolved: allow
+  apg_spec_fixes: allow
   apg_spec_render: allow
   apg_review: allow
   apg_review_add: allow

@@ -113,6 +113,10 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         include_str!("../.opencode/tools/apg_spec_unresolved.ts"),
     ),
     (
+        "apg_spec_fixes.ts",
+        include_str!("../.opencode/tools/apg_spec_fixes.ts"),
+    ),
+    (
         "apg_spec_init.ts",
         include_str!("../.opencode/tools/apg_spec_init.ts"),
     ),

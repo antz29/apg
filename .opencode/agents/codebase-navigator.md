@@ -26,6 +26,7 @@ permission:
   apg_spec_anchors: allow
   apg_spec_trace: allow
   apg_spec_unresolved: allow
+  apg_spec_fixes: allow
   apg_spec_render: allow
   apg_plan: allow
   apg_plan_phases: allow
@@ -300,9 +301,15 @@ cross-spec references.
 
 This is **agent prose** — you reason about the source spec and present the
 proposed structure, then **delegate authoring of that structure to the
-`spec-writer` subagent** (which confirms the proposal against the code graph,
-refines it with the user, and materializes it via the `apg_spec_*` tools). You
-never author the graph yourself.
+`spec-writer` subagent** (which treats the source spec as **untrusted**, confirms
+the proposal against the code graph, resolves inconsistencies — autonomously
+when unambiguous, via the `question` tool when it's a judgment call — and
+materializes it via the `apg_spec_*` tools, leaving a `materialization-fix`
+Note for every change). You never author the graph yourself.
+
+After the spec-writer returns, **verify the materialization**: re-check the
+anchors/deps counts against the source (no lost anchors, no DependsOn cycles)
+and run `apg_spec_fixes` to confirm the `materialization-fix` Notes landed.
 
 ### Tips
 

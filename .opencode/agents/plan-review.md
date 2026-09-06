@@ -31,6 +31,7 @@ permission:
   apg_plan_phases: allow
   apg_plan_tasks: allow
   apg_plan_render: allow
+  apg_spec_fixes: allow
   apg_review: allow
   apg_review_add: allow
   apg_review_resolve: allow
