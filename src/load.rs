@@ -133,6 +133,10 @@ fn lines(graph: &Graph, fqn: &str) -> (i64, i64) {
 pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     // --- Node tables ---
     let mut module_fqn = Vec::new();
+    let mut scan_fqn = Vec::new();
+    let mut scan_git_sha = Vec::new();
+    let mut scan_git_clean = Vec::new();
+    let mut scan_scanned_at = Vec::new();
     let mut struct_fqn = Vec::new();
     let mut struct_path = Vec::new();
     let mut struct_start = Vec::new();
@@ -199,6 +203,15 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     for (fqn, node) in &graph.nodes {
         match node.kind {
             NodeKind::Module => module_fqn.push(fqn.clone()),
+            NodeKind::Scan => {
+                scan_fqn.push(fqn.clone());
+                scan_git_sha.push(node.git_sha.clone().unwrap_or_default());
+                // The Scan table stores `git_clean` as a STRING ("true"/"false",
+                // empty when not a git repo) — the load path's parquet writer
+                // has STRING/INT64 columns only.
+                scan_git_clean.push(node.git_clean.map(|c| c.to_string()).unwrap_or_default());
+                scan_scanned_at.push(node.scanned_at.clone().unwrap_or_default());
+            }
             NodeKind::Struct => {
                 struct_fqn.push(fqn.clone());
                 let (p, s, e) = loc(graph, fqn);
@@ -308,6 +321,15 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         &[("fqn", Col::Str(module_fqn))],
     )?;
     write_parquet(
+        &dir.join("scan.parquet"),
+        &[
+            ("fqn", Col::Str(scan_fqn)),
+            ("git_sha", Col::Str(scan_git_sha)),
+            ("git_clean", Col::Str(scan_git_clean)),
+            ("scanned_at", Col::Str(scan_scanned_at)),
+        ],
+    )?;
+    write_parquet(
         &dir.join("struct.parquet"),
         &[
             ("fqn", Col::Str(struct_fqn)),
@@ -391,7 +413,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     )?;
     write_parquet(
         &dir.join("non_goal.parquet"),
-        &[("fqn", Col::Str(nongoal_fqn)), ("body", Col::Str(nongoal_body))],
+        &[
+            ("fqn", Col::Str(nongoal_fqn)),
+            ("body", Col::Str(nongoal_body)),
+        ],
     )?;
     write_parquet(
         &dir.join("acceptance_criterion.parquet"),
@@ -692,14 +717,39 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     use NodeKind::*;
     let mut v = Vec::new();
     for to in [
-        Module, Function, Struct, File, Spec, Requirement, Phase, Decision, NonGoal,
-        AcceptanceCriterion, VerificationItem, Plan, PlanPhase, Task,
+        Module,
+        Function,
+        Struct,
+        File,
+        Spec,
+        Requirement,
+        Phase,
+        Decision,
+        NonGoal,
+        AcceptanceCriterion,
+        VerificationItem,
+        Plan,
+        PlanPhase,
+        Task,
     ] {
         v.push(("Details", Note, to));
     }
     for to in [
-        Module, Function, Struct, File, Spec, Requirement, Phase, Decision, NonGoal,
-        AcceptanceCriterion, VerificationItem, Future, Plan, PlanPhase, Task,
+        Module,
+        Function,
+        Struct,
+        File,
+        Spec,
+        Requirement,
+        Phase,
+        Decision,
+        NonGoal,
+        AcceptanceCriterion,
+        VerificationItem,
+        Future,
+        Plan,
+        PlanPhase,
+        Task,
     ] {
         v.push(("Reviews", Feedback, to));
     }
@@ -748,6 +798,7 @@ fn kind_slug(k: NodeKind) -> &'static str {
         NodeKind::Plan => "plan",
         NodeKind::PlanPhase => "plan_phase",
         NodeKind::Task => "task",
+        NodeKind::Scan => "scan",
     }
 }
 
@@ -772,6 +823,7 @@ fn label_of(k: NodeKind) -> &'static str {
         NodeKind::Plan => "Plan",
         NodeKind::PlanPhase => "PlanPhase",
         NodeKind::Task => "Task",
+        NodeKind::Scan => "Scan",
     }
 }
 
@@ -780,6 +832,9 @@ fn label_of(k: NodeKind) -> &'static str {
 /// extended with spec/plan pairs, plus the nine spec/plan rel tables).
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY)")?;
+    conn.query(
+        "CREATE NODE TABLE Scan(fqn STRING PRIMARY KEY, git_sha STRING, git_clean STRING, scanned_at STRING)",
+    )?;
     conn.query(
         "CREATE NODE TABLE Struct(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, start_line INT64, end_line INT64, code_type STRING)",
     )?;
@@ -790,35 +845,21 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE NODE TABLE File(fqn STRING PRIMARY KEY, start_line INT64, end_line INT64, code_type STRING)",
     )?;
     conn.query("CREATE NODE TABLE UnresolvedTarget(fqn STRING PRIMARY KEY, category STRING)")?;
-    conn.query(
-        "CREATE NODE TABLE Spec(fqn STRING PRIMARY KEY, title STRING, goal STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE Spec(fqn STRING PRIMARY KEY, title STRING, goal STRING)")?;
     conn.query(
         "CREATE NODE TABLE Requirement(fqn STRING PRIMARY KEY, id STRING, title STRING, body STRING, feature STRING)",
     )?;
-    conn.query(
-        "CREATE NODE TABLE Phase(fqn STRING PRIMARY KEY, number INT64, title STRING)",
-    )?;
-    conn.query(
-        "CREATE NODE TABLE Decision(fqn STRING PRIMARY KEY, id STRING, summary STRING)",
-    )?;
-    conn.query(
-        "CREATE NODE TABLE Future(fqn STRING PRIMARY KEY, kind STRING, target STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE Phase(fqn STRING PRIMARY KEY, number INT64, title STRING)")?;
+    conn.query("CREATE NODE TABLE Decision(fqn STRING PRIMARY KEY, id STRING, summary STRING)")?;
+    conn.query("CREATE NODE TABLE Future(fqn STRING PRIMARY KEY, kind STRING, target STRING)")?;
     conn.query("CREATE NODE TABLE NonGoal(fqn STRING PRIMARY KEY, body STRING)")?;
-    conn.query(
-        "CREATE NODE TABLE AcceptanceCriterion(fqn STRING PRIMARY KEY, body STRING)",
-    )?;
-    conn.query(
-        "CREATE NODE TABLE VerificationItem(fqn STRING PRIMARY KEY, body STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE AcceptanceCriterion(fqn STRING PRIMARY KEY, body STRING)")?;
+    conn.query("CREATE NODE TABLE VerificationItem(fqn STRING PRIMARY KEY, body STRING)")?;
     conn.query("CREATE NODE TABLE Note(fqn STRING PRIMARY KEY, body STRING, kind STRING)")?;
     conn.query(
         "CREATE NODE TABLE Feedback(fqn STRING PRIMARY KEY, body STRING, status STRING, disposition STRING)",
     )?;
-    conn.query(
-        "CREATE NODE TABLE Plan(fqn STRING PRIMARY KEY, title STRING, strategy STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE Plan(fqn STRING PRIMARY KEY, title STRING, strategy STRING)")?;
     conn.query(
         "CREATE NODE TABLE PlanPhase(fqn STRING PRIMARY KEY, number INT64, title STRING, deliverable STRING)",
     )?;
@@ -843,9 +884,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Spec, FROM Feedback TO Requirement, FROM Feedback TO Phase, FROM Feedback TO Decision, FROM Feedback TO NonGoal, FROM Feedback TO AcceptanceCriterion, FROM Feedback TO VerificationItem, FROM Feedback TO Future, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task)",
     )?;
     conn.query("CREATE REL TABLE DependsOn(FROM Requirement TO Requirement)")?;
-    conn.query(
-        "CREATE REL TABLE Gates(FROM Phase TO Phase, FROM PlanPhase TO PlanPhase)",
-    )?;
+    conn.query("CREATE REL TABLE Gates(FROM Phase TO Phase, FROM PlanPhase TO PlanPhase)")?;
     conn.query("CREATE REL TABLE SpecDependsOn(FROM Spec TO Spec)")?;
     conn.query(
         "CREATE REL TABLE Anchors(FROM Requirement TO Function, FROM Requirement TO Struct, FROM Requirement TO File, FROM Requirement TO Future, FROM Task TO Function, FROM Task TO Struct, FROM Task TO File)",
@@ -864,6 +903,7 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
     let p = |name: &str| dir.join(name).to_string_lossy().into_owned();
     let stmts = [
         format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
+        format!(r#"COPY Scan FROM "{}""#, p("scan.parquet")),
         format!(r#"COPY Struct FROM "{}""#, p("struct.parquet")),
         format!(r#"COPY Function FROM "{}""#, p("function.parquet")),
         format!(r#"COPY File FROM "{}""#, p("file.parquet")),
@@ -981,6 +1021,16 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Export {
+    /// The export control record, written as **line 1** of graph.jsonl from a
+    /// `Scan` graph node (the git state the scan ran under). Git fields are
+    /// absent when the scan was not in a git repo.
+    ScanMeta {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        git_sha: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        git_clean: Option<bool>,
+        scanned_at: String,
+    },
     Module {
         fqn: String,
     },
@@ -1155,7 +1205,9 @@ enum Export {
 }
 
 /// Writes `graph.jsonl`: the final graph re-serialized with canonical FQNs
-/// (nodes) and resolved endpoints (edges), without opaque ids.
+/// (nodes) and resolved endpoints (edges), without opaque ids. A `Scan` node
+/// exports as a `scan_meta` control record on **line 1** (before every node
+/// and edge line), mirroring the `lang_switch` control-record convention.
 pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
@@ -1166,8 +1218,22 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
         Ok(())
     };
 
+    // The scan_meta control record leads the export (line 1). A Scan node is
+    // not emitted again in the node loop below.
+    for (_, node) in graph.nodes.iter().filter(|(_, n)| n.kind == NodeKind::Scan) {
+        write_line(
+            &mut w,
+            &Export::ScanMeta {
+                git_sha: node.git_sha.clone(),
+                git_clean: node.git_clean,
+                scanned_at: node.scanned_at.clone().unwrap_or_default(),
+            },
+        )?;
+    }
+
     for (fqn, node) in &graph.nodes {
         let rec = match node.kind {
+            NodeKind::Scan => continue,
             NodeKind::Module => Export::Module { fqn: fqn.clone() },
             NodeKind::Struct => {
                 let (path, start, end) = loc(graph, fqn);
@@ -1731,11 +1797,17 @@ mod tests {
             ("future/foo/spec".into(), "future/foo/spec.R1".into()),
             ("future/foo/spec".into(), "future/foo/spec.phase-1".into()),
             ("future/foo/spec".into(), "future/foo/spec.phase-2".into()),
-            ("future/foo/spec".into(), "future/foo/spec.decision-d1".into()),
+            (
+                "future/foo/spec".into(),
+                "future/foo/spec.decision-d1".into(),
+            ),
             ("future/foo/spec".into(), "future/foo/spec.ng1".into()),
             ("future/foo/spec".into(), "future/foo/spec.ac1".into()),
             ("future/foo/spec".into(), "future/foo/spec.vi1".into()),
-            ("future/foo/spec.phase-1".into(), "future/foo/spec.R1".into()),
+            (
+                "future/foo/spec.phase-1".into(),
+                "future/foo/spec.R1".into(),
+            ),
             ("future/foo/plan".into(), "future/foo/plan.phase-1".into()),
             (
                 "future/foo/plan.phase-1".into(),
@@ -1744,10 +1816,8 @@ mod tests {
         ]);
         g.details
             .insert(("future/foo/note-1".into(), "future/foo/spec".into()));
-        g.reviews.insert((
-            "future/foo/feedback-1".into(),
-            "future/foo/spec.R1".into(),
-        ));
+        g.reviews
+            .insert(("future/foo/feedback-1".into(), "future/foo/spec.R1".into()));
         g.depends_on
             .insert(("future/foo/spec.R2".into(), "future/foo/spec.R1".into()));
         g.gates.insert((
@@ -1756,10 +1826,8 @@ mod tests {
         ));
         g.spec_depends
             .insert(("future/foo/spec".into(), "future/other/spec".into()));
-        g.anchors.insert((
-            "future/foo/spec.R1".into(),
-            "future/foo/gateway".into(),
-        ));
+        g.anchors
+            .insert(("future/foo/spec.R1".into(), "future/foo/gateway".into()));
         g.satisfies.insert((
             "future/foo/plan.phase-1".into(),
             "future/foo/spec.R1".into(),
@@ -1792,17 +1860,26 @@ mod tests {
             .query("MATCH (r:Requirement) RETURN r.id, r.feature")
             .unwrap()
             .to_string();
-        assert!(out.contains("R1") && out.contains("feature-a"), "req rows: {out}");
+        assert!(
+            out.contains("R1") && out.contains("feature-a"),
+            "req rows: {out}"
+        );
         let out = conn
             .query("MATCH (p:PlanPhase) RETURN p.number, p.deliverable")
             .unwrap()
             .to_string();
-        assert!(out.contains("1") && out.contains("Core"), "plan phase rows: {out}");
+        assert!(
+            out.contains("1") && out.contains("Core"),
+            "plan phase rows: {out}"
+        );
         let out = conn
             .query("MATCH (t:Task) RETURN t.kind, t.tier, t.status")
             .unwrap()
             .to_string();
-        assert!(out.contains("source") && out.contains("pending"), "task rows: {out}");
+        assert!(
+            out.contains("source") && out.contains("pending"),
+            "task rows: {out}"
+        );
         let out = conn
             .query("MATCH (f:Future) RETURN f.kind, f.target")
             .unwrap()
@@ -1817,7 +1894,10 @@ mod tests {
             .query("MATCH (s:Spec)-[:Contains]->(r:Requirement) RETURN r.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/foo/spec.R1"), "contains spec->req: {out}");
+        assert!(
+            out.contains("future/foo/spec.R1"),
+            "contains spec->req: {out}"
+        );
         let out = conn
             .query("MATCH (s:Spec)-[:Contains]->(p:Phase) RETURN p.fqn")
             .unwrap()
@@ -1895,5 +1975,109 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A fixture graph with one `Scan` node added (a scan that ran in a clean
+    /// git repo at `abc123`).
+    fn fixture_graph_with_scan() -> Graph {
+        let mut g = fixture_graph();
+        g.nodes.insert(
+            crate::schema::SCAN_HEAD.to_string(),
+            Node {
+                kind: NodeKind::Scan,
+                git_sha: Some("abc123".to_string()),
+                git_clean: Some(true),
+                scanned_at: Some("2026-09-07T00:00:00Z".to_string()),
+                ..Node::default()
+            },
+        );
+        g
+    }
+
+    #[test]
+    fn scan_meta_is_graph_jsonl_line_one() {
+        let dir = std::env::temp_dir().join(format!("apg-test-scanmeta-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = fixture_graph_with_scan();
+        let out_path = dir.join("graph.jsonl");
+        write_graph_jsonl(&graph, &out_path).unwrap();
+
+        let text = std::fs::read_to_string(&out_path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        // Line 1 is the scan_meta control record with the git fields.
+        let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(first["type"], "scan_meta");
+        assert_eq!(first["git_sha"], "abc123");
+        assert_eq!(first["git_clean"], true);
+        assert_eq!(first["scanned_at"], "2026-09-07T00:00:00Z");
+        assert!(
+            first.get("fqn").is_none(),
+            "scan_meta is a control record, not a node"
+        );
+        // The Scan node is exported exactly once (line 1), not again as a node.
+        assert_eq!(
+            lines.len(),
+            graph.nodes.len()
+                + graph.contains.len()
+                + graph.calls.len()
+                + graph.uses.len()
+                + graph.unresolved_calls.len()
+                + graph.unresolved_uses.len()
+        );
+        // No later line is a scan node record.
+        for line in &lines[1..] {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_ne!(v["type"], "scan", "scan node leaked into export: {line}");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_node_loads_into_db() {
+        let dir = std::env::temp_dir().join(format!("apg-test-scandb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = fixture_graph_with_scan();
+        build_load_files(&graph, &dir).unwrap();
+
+        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        create_schema(&conn).unwrap();
+        copy_from(&conn, &dir).unwrap();
+
+        let out = conn
+            .query("MATCH (s:Scan) RETURN s.fqn, s.git_sha, s.git_clean, s.scanned_at")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("scan/HEAD") && out.contains("abc123") && out.contains("true"),
+            "scan rows: {out}"
+        );
+        assert!(
+            out.contains("2026-09-07T00:00:00Z"),
+            "scan scanned_at: {out}"
+        );
+
+        // A graph without a Scan node still loads (empty Scan table).
+        let dir2 = std::env::temp_dir().join(format!("apg-test-scandb2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir2);
+        std::fs::create_dir_all(&dir2).unwrap();
+        build_load_files(&fixture_graph(), &dir2).unwrap();
+        let db2 = Database::in_memory(SystemConfig::default()).unwrap();
+        let conn2 = Connection::new(&db2).unwrap();
+        create_schema(&conn2).unwrap();
+        copy_from(&conn2, &dir2).unwrap();
+        let out2 = conn2
+            .query("MATCH (s:Scan) RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert!(out2.contains("0"), "expected empty Scan table, got: {out2}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
     }
 }

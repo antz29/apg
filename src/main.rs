@@ -1,6 +1,7 @@
 mod artifacts;
 mod classify;
 mod cleanup;
+mod git;
 mod graph;
 mod ingest;
 mod load;
@@ -14,7 +15,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use cleanup::{cleanup, CleanupOptions};
+use cleanup::{CleanupOptions, cleanup};
 use lbug::{Connection, Database, SystemConfig};
 
 /// The opencode tool suite that `apg init` installs into `~/.opencode/`. Each
@@ -874,7 +875,9 @@ fn find_or_create_apg_root(dir: &Path) -> PathBuf {
 /// into one database. Opaque ids are namespaced per language
 /// (`--id-prefix`), and a `lang_switch` record before each stream tells the
 /// ingestor which language the following records came from (for code_type
-/// classification and FQN rendering).
+/// classification and FQN rendering). A `scan_meta` control record leads the
+/// whole stream with the git state the scan ran under (recorded as the DB's
+/// `Scan` node and graph.jsonl line 1).
 fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut language_args: Vec<String> = Vec::new();
     let mut path_excludes: Vec<String> = Vec::new();
@@ -923,6 +926,11 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let blacklist: Vec<String> = positional.get(1..).unwrap_or(&[]).to_vec();
     let project_dir = project_dir.canonicalize()?;
 
+    // The git state this scan runs under (repo HEAD sha + tree cleanliness),
+    // recorded as the scan_meta control record and the DB's Scan node so later
+    // spec/plan/review mutations can refuse to run against a stale DB.
+    let git_state = git::git_state(&project_dir);
+
     // Resolve the committed `apg/` layout root, then run the pipeline from
     // inside its gitignored `.trans/` so db.lbug / graph.jsonl /
     // apg-frontend.log all land there (the committed `apg/` data — config,
@@ -934,6 +942,8 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     let mut log = Log::new();
     log.ln(&format!("Project: {}", project_dir.display()));
+    // Staleness of the pre-scan DB vs the tree (STALE/FRESH/N-A).
+    log.ln(&git::staleness_line(&apg_root, &git_state));
 
     let available = available_languages();
     if available.is_empty() {
@@ -1039,7 +1049,9 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     // Merge the streams into one record iterator, with a `lang_switch` record
     // before each language's records so the ingestor classifies and renders
-    // each under the right language.
+    // each under the right language. A `scan_meta` control record (the git
+    // state this scan ran under) leads the whole stream; the ingestor turns it
+    // into the DB's `Scan` node and the export puts it on graph.jsonl line 1.
     let iterators: Vec<Box<dyn Iterator<Item = schema::Record>>> = spools
         .into_iter()
         .map(|(lang, spool)| {
@@ -1054,6 +1066,12 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         })
         .collect();
     let records = iterators.into_iter().flatten();
+    let records = std::iter::once(schema::Record::ScanMeta {
+        git_sha: git_state.sha.clone(),
+        git_clean: git_state.sha.as_ref().map(|_| git_state.clean),
+        scanned_at: git::now_iso8601(),
+    })
+    .chain(records);
 
     // Re-ingest the committed spec/plan/note data after code (SPEC R10):
     // `apg/specs/*.jsonl`, `apg/notes/*.jsonl`, `apg/.trans/plans/*.jsonl`.
@@ -1269,4 +1287,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
-

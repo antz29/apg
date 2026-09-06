@@ -16,9 +16,9 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
-use crate::classify::{classify_code_type, ApgConfig};
+use crate::classify::{ApgConfig, classify_code_type};
 use crate::graph::{Graph, Location, Node, NodeKind};
-use crate::schema::Record;
+use crate::schema::{Record, SCAN_HEAD};
 
 pub struct IngestOptions<'a> {
     pub blacklist: &'a [String],
@@ -70,11 +70,7 @@ fn file_basename(file: &str) -> String {
 /// `None` for empty strings, so spec/plan node fields that are absent stay
 /// absent in the DB (queryable with `IS NULL`) instead of storing `""`.
 fn opt(s: String) -> Option<String> {
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
+    if s.is_empty() { None } else { Some(s) }
 }
 
 /// A spec/plan node carries no location, category, or code_type (SPEC R1).
@@ -311,6 +307,25 @@ pub fn ingest(
                 Record::LangSwitch { language } => {
                     lang = language;
                 }
+                // The scan_meta control record (emitted by `apg scan` ahead of
+                // the whole stream) becomes the DB's single `Scan` node: the
+                // git state the scan ran under. It leads the stream so a real
+                // module can never claim the FQN first; fqn collisions still
+                // panic loudly via `insert_node`.
+                Record::ScanMeta {
+                    git_sha,
+                    git_clean,
+                    scanned_at,
+                } => insert_node(
+                    &mut graph,
+                    SCAN_HEAD.to_string(),
+                    Node {
+                        git_sha,
+                        git_clean,
+                        scanned_at: Some(scanned_at),
+                        ..spec_node(NodeKind::Scan)
+                    },
+                ),
                 // Spec/plan node records carry canonical FQNs (no opaque ids),
                 // so they enter the graph immediately like modules and
                 // unresolved targets. `insert_node` panics on a residual FQN
@@ -416,7 +431,11 @@ pub fn ingest(
                         ..spec_node(NodeKind::Feedback)
                     },
                 ),
-                Record::Plan { fqn, title, strategy } => insert_node(
+                Record::Plan {
+                    fqn,
+                    title,
+                    strategy,
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -781,8 +800,7 @@ pub fn ingest(
         kind_is(g, a, NodeKind::Spec) && kind_is(g, b, NodeKind::Spec)
     });
     graph.anchors = filter_edges(&graph, &graph.anchors, |g, a, _| {
-        g.nodes.contains_key(a)
-            && matches!(g.nodes[a].kind, NodeKind::Requirement | NodeKind::Task)
+        g.nodes.contains_key(a) && matches!(g.nodes[a].kind, NodeKind::Requirement | NodeKind::Task)
     });
     // R10: an anchor whose target is not in the code graph is reconciled to a
     // pending anchor on a Future node (the requirement references future
@@ -884,11 +902,7 @@ fn reconcile_pending_anchors(graph: &mut Graph) {
         let Some(project) = project_of(&a) else {
             continue;
         };
-        let name = b
-            .rsplit(['.', '/'])
-            .next()
-            .unwrap_or(&b)
-            .to_string();
+        let name = b.rsplit(['.', '/']).next().unwrap_or(&b).to_string();
         let future_fqn = format!("future/{project}/{name}");
         match graph.nodes.get(&future_fqn) {
             None => {
@@ -1166,26 +1180,38 @@ mod tests {
         assert!(graph.nodes.contains_key("/x/A.java"));
         assert!(graph.nodes.contains_key("/y/B.java"));
         assert_eq!(graph.nodes["/x/A.java"].kind, NodeKind::File);
-        assert!(graph
-            .contains
-            .contains(&("org.pkg".to_string(), "/x/A.java".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("/x/A.java".to_string(), "org.pkg.A".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("org.pkg.A.deep".to_string(), "/y/B.java".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("/y/B.java".to_string(), "org.pkg.A.deep.B".to_string())));
+        assert!(
+            graph
+                .contains
+                .contains(&("org.pkg".to_string(), "/x/A.java".to_string()))
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("/x/A.java".to_string(), "org.pkg.A".to_string()))
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("org.pkg.A.deep".to_string(), "/y/B.java".to_string()))
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("/y/B.java".to_string(), "org.pkg.A.deep.B".to_string()))
+        );
         // But the shadowed package is not a parent: its Module→File edge and the
         // package chain through it are pruned.
-        assert!(!graph
-            .contains
-            .contains(&("org.pkg.A".to_string(), "/x/A.java".to_string())));
-        assert!(!graph
-            .contains
-            .contains(&("org.pkg.A".to_string(), "org.pkg.A.deep".to_string())));
+        assert!(
+            !graph
+                .contains
+                .contains(&("org.pkg.A".to_string(), "/x/A.java".to_string()))
+        );
+        assert!(
+            !graph
+                .contains
+                .contains(&("org.pkg.A".to_string(), "org.pkg.A.deep".to_string()))
+        );
     }
 
     #[test]
@@ -1240,32 +1266,48 @@ mod tests {
         assert_eq!(graph.nodes["p.A"].kind, NodeKind::Struct);
         assert!(graph.nodes.contains_key("/x/A.java"));
         assert!(graph.nodes.contains_key("/y/test.java"));
-        assert!(graph
-            .contains
-            .contains(&("p".to_string(), "/x/A.java".to_string())));
-        assert!(!graph
-            .contains
-            .contains(&("p".to_string(), "p.A".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("/x/A.java".to_string(), "p.A".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("/y/test.java".to_string(), "p.A.test".to_string())));
+        assert!(
+            graph
+                .contains
+                .contains(&("p".to_string(), "/x/A.java".to_string()))
+        );
+        assert!(
+            !graph
+                .contains
+                .contains(&("p".to_string(), "p.A".to_string()))
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("/x/A.java".to_string(), "p.A".to_string()))
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("/y/test.java".to_string(), "p.A.test".to_string()))
+        );
         // The dropped function's containment (by struct and by file) is pruned;
         // the surviving function's edges stay.
-        assert!(!graph
-            .contains
-            .contains(&("p.A".to_string(), "p.A.test".to_string())));
-        assert!(!graph
-            .contains
-            .contains(&("/x/A.java".to_string(), "p.A.test".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("p.A".to_string(), "p.A.other".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("/x/A.java".to_string(), "p.A.other".to_string())));
+        assert!(
+            !graph
+                .contains
+                .contains(&("p.A".to_string(), "p.A.test".to_string()))
+        );
+        assert!(
+            !graph
+                .contains
+                .contains(&("/x/A.java".to_string(), "p.A.test".to_string()))
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("p.A".to_string(), "p.A.other".to_string()))
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("/x/A.java".to_string(), "p.A.other".to_string()))
+        );
     }
 
     #[test]
@@ -1404,6 +1446,54 @@ mod tests {
     }
 
     #[test]
+    fn scan_meta_record_becomes_scan_node() {
+        // `apg scan` leads the stream with a scan_meta record (git state at
+        // scan time); the ingestor turns it into the `scan/HEAD` Scan node.
+        let records = vec![
+            Record::ScanMeta {
+                git_sha: Some("abc123".to_string()),
+                git_clean: Some(true),
+                scanned_at: "2026-09-07T00:00:00Z".to_string(),
+            },
+            Record::Module {
+                fqn: "github.com/x/y".to_string(),
+            },
+        ];
+        let (graph, _) = ingest(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "go",
+                config: None,
+            },
+        );
+        let n = &graph.nodes[SCAN_HEAD];
+        assert_eq!(n.kind, NodeKind::Scan);
+        assert_eq!(n.git_sha.as_deref(), Some("abc123"));
+        assert_eq!(n.git_clean, Some(true));
+        assert_eq!(n.scanned_at.as_deref(), Some("2026-09-07T00:00:00Z"));
+
+        // A non-git scan emits a scan_meta with no git fields; the node still
+        // records the timestamp.
+        let (graph, _) = ingest(
+            vec![Record::ScanMeta {
+                git_sha: None,
+                git_clean: None,
+                scanned_at: "2026-09-07T00:00:00Z".to_string(),
+            }],
+            &IngestOptions {
+                blacklist: &[],
+                language: "go",
+                config: None,
+            },
+        );
+        let n = &graph.nodes[SCAN_HEAD];
+        assert_eq!(n.kind, NodeKind::Scan);
+        assert_eq!(n.git_sha, None);
+        assert_eq!(n.git_clean, None);
+    }
+
+    #[test]
     fn end_to_end_ingest_resolves_edges() {
         let records = vec![
             Record::Module {
@@ -1453,9 +1543,11 @@ mod tests {
         assert!(graph.nodes.contains_key("fmt.Errorf"));
         // File layer: module contains the file, the file contains its units,
         // and methods stay under their struct.
-        assert!(graph
-            .contains
-            .contains(&("github.com/x/y".to_string(), "/abs/store.go".to_string())));
+        assert!(
+            graph
+                .contains
+                .contains(&("github.com/x/y".to_string(), "/abs/store.go".to_string()))
+        );
         assert!(graph.contains.contains(&(
             "/abs/store.go".to_string(),
             "github.com/x/y.Store".to_string()
@@ -1558,19 +1650,22 @@ mod tests {
             graph.nodes[&future_fqn].target.as_deref(),
             Some("github.com/x/gateway")
         );
-        assert!(graph.anchors.contains(&(
-            "future/foo/spec.R1".to_string(),
-            future_fqn.clone()
-        )));
+        assert!(
+            graph
+                .anchors
+                .contains(&("future/foo/spec.R1".to_string(), future_fqn.clone()))
+        );
         // The Task anchor to a missing file is dropped; its Builds edge to the
         // reconciled Future survives.
         assert!(!graph.anchors.contains(&(
             "future/foo/plan.phase-1.task-1".to_string(),
             "/missing/file.go".to_string()
         )));
-        assert!(graph
-            .builds
-            .contains(&("future/foo/plan.phase-1.task-1".to_string(), future_fqn)));
+        assert!(
+            graph
+                .builds
+                .contains(&("future/foo/plan.phase-1.task-1".to_string(), future_fqn))
+        );
     }
 
     #[test]
@@ -1656,12 +1751,16 @@ mod tests {
         // units; the surviving file keeps its module and unit edges.
         assert!(!graph.nodes.contains_key("/x/b.go"));
         assert!(graph.nodes.contains_key("/x/a.go"));
-        assert!(graph
-            .contains
-            .contains(&("keep.mod".to_string(), "/x/a.go".to_string())));
-        assert!(graph
-            .contains
-            .contains(&("/x/a.go".to_string(), "keep.mod.A".to_string())));
+        assert!(
+            graph
+                .contains
+                .contains(&("keep.mod".to_string(), "/x/a.go".to_string()))
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("/x/a.go".to_string(), "keep.mod.A".to_string()))
+        );
         assert!(!graph.contains.is_empty());
     }
 }

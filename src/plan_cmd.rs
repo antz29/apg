@@ -20,15 +20,18 @@ fn require_apg_root() -> anyhow::Result<PathBuf> {
 fn load_plan(apg_root: &Path, project: &str) -> anyhow::Result<Vec<Record>> {
     let path = specs::plan_jsonl_path(apg_root, project);
     if !path.exists() {
-        anyhow::bail!(
-            "no plan for project `{project}` — run `apg plan init {project}` first"
-        );
+        anyhow::bail!("no plan for project `{project}` — run `apg plan init {project}` first");
     }
     specs::read_jsonl(&path)
 }
 
 fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Result<()> {
-    artifacts::write_jsonl_and_reingest(apg_root, &specs::plan_jsonl_path(apg_root, project), project, records)
+    artifacts::write_jsonl_and_reingest(
+        apg_root,
+        &specs::plan_jsonl_path(apg_root, project),
+        project,
+        records,
+    )
 }
 
 pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
@@ -58,9 +61,7 @@ fn plan_init(args: &[String]) -> anyhow::Result<()> {
     artifacts::acquire_spec_lock(&apg_root)?;
     let spec_path = specs::spec_jsonl_path(&apg_root, project);
     if !spec_path.exists() {
-        anyhow::bail!(
-            "no spec for `{project}` — author a spec first (`apg spec init {project}`)"
-        );
+        anyhow::bail!("no spec for `{project}` — author a spec first (`apg spec init {project}`)");
     }
     let path = specs::plan_jsonl_path(&apg_root, project);
     if path.exists() {
@@ -68,7 +69,9 @@ fn plan_init(args: &[String]) -> anyhow::Result<()> {
     }
     let records = vec![Record::Plan {
         fqn: format!("future/{project}/plan"),
-        title: p.get("title").unwrap_or_else(|| format!("Plan for {project}")),
+        title: p
+            .get("title")
+            .unwrap_or_else(|| format!("Plan for {project}")),
         strategy: p.get("strategy").unwrap_or_default(),
     }];
     write_through(&apg_root, project, &records)?;
@@ -92,7 +95,9 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
     match kind {
         "phase" => {
             let Some(n) = p.positional.get(2).and_then(|s| s.parse::<u32>().ok()) else {
-                anyhow::bail!("usage: apg plan add <project> phase <n> --title … [--deliverable …] [--prereq <n>]* [--satisfies <req-id>]*");
+                anyhow::bail!(
+                    "usage: apg plan add <project> phase <n> --title … [--deliverable …] [--prereq <n>]* [--satisfies <req-id>]*"
+                );
             };
             let Some(title) = p.get("title") else {
                 anyhow::bail!("phase requires --title");
@@ -109,7 +114,9 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 to: fqn.clone(),
             });
             for g in p.all("prereq") {
-                let g = g.parse::<u32>().map_err(|_| anyhow::anyhow!("bad phase number `{g}`"))?;
+                let g = g
+                    .parse::<u32>()
+                    .map_err(|_| anyhow::anyhow!("bad phase number `{g}`"))?;
                 recs.push(Record::Gates {
                     from: fqn.clone(),
                     to: format!("future/{project}/plan.phase-{g:02}"),
@@ -135,7 +142,9 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 p.positional.get(2).and_then(|s| s.parse::<u32>().ok()),
                 p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
             ) else {
-                anyhow::bail!("usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs|human>] [--tier <unit|int|e2e>] [--builds <future-name>] [--anchor <fqn>]*");
+                anyhow::bail!(
+                    "usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs|human>] [--tier <unit|int|e2e>] [--builds <future-name>] [--anchor <fqn>]*"
+                );
             };
             let Some(title) = p.get("title") else {
                 anyhow::bail!("task requires --title");
@@ -173,7 +182,10 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                     if db.code_label(&a).is_none() {
                         anyhow::bail!("task anchor `{a}` is not a resolved code node");
                     }
-                    recs.push(Record::Anchors { from: fqn.clone(), to: a });
+                    recs.push(Record::Anchors {
+                        from: fqn.clone(),
+                        to: a,
+                    });
                 }
             }
             remove_node(&mut records, &fqn);
@@ -214,7 +226,9 @@ fn plan_link(args: &[String]) -> anyhow::Result<()> {
         p.positional.first(),
         p.positional.get(1).and_then(|s| s.parse::<u32>().ok()),
     ) else {
-        anyhow::bail!("usage: apg plan link <project> <phase-n> [--satisfies <req-id>]* [--prereq <n>]*");
+        anyhow::bail!(
+            "usage: apg plan link <project> <phase-n> [--satisfies <req-id>]* [--prereq <n>]*"
+        );
     };
     let apg_root = require_apg_root()?;
     artifacts::acquire_spec_lock(&apg_root)?;
@@ -226,7 +240,12 @@ fn plan_link(args: &[String]) -> anyhow::Result<()> {
             anyhow::bail!("satisfies target `{req}` is not a requirement of `{project}`");
         }
     }
-    link_phase_edges(&phase_fqn, &p.all("satisfies"), &p.all("prereq"), &mut records)?;
+    link_phase_edges(
+        &phase_fqn,
+        &p.all("satisfies"),
+        &p.all("prereq"),
+        &mut records,
+    )?;
     write_through(&apg_root, project, &records)?;
     println!("Linked plan.phase-{phase} of {project}");
     Ok(())
@@ -258,17 +277,21 @@ fn link_phase_edges(
     }
     records.retain(|r| !matches!(r, Record::Gates { from, .. } if from.as_str() == phase_fqn));
     for g in prereqs {
-        let g = g.parse::<u32>().map_err(|_| anyhow::anyhow!("bad phase number `{g}`"))?;
+        let g = g
+            .parse::<u32>()
+            .map_err(|_| anyhow::anyhow!("bad phase number `{g}`"))?;
         let target = format!("future/{project}/plan.phase-{g:02}");
         let phase_n = phase_fqn
             .rsplit("phase-")
             .next()
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(0);
-        if let Some(path) = artifacts::cycle_closing_path(records, phase_fqn, &target, |r| match r {
-            Record::Gates { from, to } => Some((from.as_str(), to.as_str())),
-            _ => None,
-        }) {
+        if let Some(path) =
+            artifacts::cycle_closing_path(records, phase_fqn, &target, |r| match r {
+                Record::Gates { from, to } => Some((from.as_str(), to.as_str())),
+                _ => None,
+            })
+        {
             let short: Vec<String> = path
                 .iter()
                 .map(|f| {
@@ -302,7 +325,10 @@ fn plan_done(args: &[String]) -> anyhow::Result<()> {
     let apg_root = require_apg_root()?;
     artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_plan(&apg_root, project)?;
-    if !records.iter().any(|r| matches!(r, Record::Task { fqn, .. } if fqn == task_fqn)) {
+    if !records
+        .iter()
+        .any(|r| matches!(r, Record::Task { fqn, .. } if fqn == task_fqn))
+    {
         anyhow::bail!("task `{task_fqn}` not found in plan `{project}`");
     }
     let builds: Vec<String> = records
@@ -380,7 +406,11 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
             Record::Contains { from, to } if from == &phase_fqn => Some(to.clone()),
             _ => None,
         })
-        .filter(|t| records.iter().any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t)))
+        .filter(|t| {
+            records
+                .iter()
+                .any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t))
+        })
         .collect();
 
     // Human-teeth (R…): a `human`-kind task is owned by the person — an agent
@@ -494,10 +524,7 @@ fn human_tasks_not_done(records: &[Record], phase_fqn: &str) -> Vec<String> {
         .filter_map(|t| {
             records.iter().find_map(|r| match r {
                 Record::Task {
-                    fqn,
-                    kind,
-                    status,
-                    ..
+                    fqn, kind, status, ..
                 } if fqn == &t => Some((t.clone(), kind, status)),
                 _ => None,
             })
@@ -545,7 +572,9 @@ fn plan_render(args: &[String]) -> anyhow::Result<()> {
     let apg_root = require_apg_root()?;
     let records = load_plan(&apg_root, project)?;
     let Some((title, strategy)) = records.iter().find_map(|r| match r {
-        Record::Plan { title, strategy, .. } => Some((title, strategy)),
+        Record::Plan {
+            title, strategy, ..
+        } => Some((title, strategy)),
         _ => None,
     }) else {
         anyhow::bail!("plan `{project}` has no plan node");
@@ -569,9 +598,9 @@ fn plan_render(args: &[String]) -> anyhow::Result<()> {
         let deliverable = records
             .iter()
             .find_map(|r| match r {
-                Record::PlanPhase { fqn, deliverable, .. } if fqn == &pfqn => {
-                    Some(deliverable.clone())
-                }
+                Record::PlanPhase {
+                    fqn, deliverable, ..
+                } if fqn == &pfqn => Some(deliverable.clone()),
                 _ => None,
             })
             .unwrap_or_default();
@@ -609,7 +638,10 @@ fn plan_render(args: &[String]) -> anyhow::Result<()> {
             println!("Rendered plan {project} to {path}");
         }
         None => {
-            let out_path = apg_root.join(specs::TRANS).join("plans").join(format!("{project}.md"));
+            let out_path = apg_root
+                .join(specs::TRANS)
+                .join("plans")
+                .join(format!("{project}.md"));
             std::fs::write(&out_path, &out)?;
             println!("Rendered plan {project} to {}", out_path.display());
         }
@@ -626,7 +658,11 @@ fn render_phase_tasks(records: &[Record], pfqn: &str) -> String {
             Record::Contains { from, to } if from == pfqn => Some(to.clone()),
             _ => None,
         })
-        .filter(|t| records.iter().any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t)))
+        .filter(|t| {
+            records
+                .iter()
+                .any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t))
+        })
         .collect();
     const KIND_ORDER: [&str; 5] = ["source", "test", "gate", "docs", "human"];
     type TaskLine = (String, String, String, String);
@@ -678,9 +714,9 @@ fn spec_has_requirement(apg_root: &Path, project: &str, req_fqn: &str) -> anyhow
     if !path.exists() {
         return Ok(false);
     }
-    Ok(specs::read_jsonl(&path)?.iter().any(|r| {
-        matches!(r, Record::Requirement { fqn, .. } if fqn == req_fqn)
-    }))
+    Ok(specs::read_jsonl(&path)?
+        .iter()
+        .any(|r| matches!(r, Record::Requirement { fqn, .. } if fqn == req_fqn)))
 }
 
 /// Whether the spec project has a future with this fqn.
@@ -689,9 +725,9 @@ fn spec_has_future(apg_root: &Path, project: &str, future_fqn: &str) -> anyhow::
     if !path.exists() {
         return Ok(false);
     }
-    Ok(specs::read_jsonl(&path)?.iter().any(|r| {
-        matches!(r, Record::Future { fqn, .. } if fqn == future_fqn)
-    }))
+    Ok(specs::read_jsonl(&path)?
+        .iter()
+        .any(|r| matches!(r, Record::Future { fqn, .. } if fqn == future_fqn)))
 }
 #[cfg(test)]
 mod tests {
@@ -731,9 +767,7 @@ mod tests {
         let satisfies: Vec<&str> = records
             .iter()
             .filter_map(|r| match r {
-                Record::Satisfies { from, to }
-                    if from == "future/foo/plan.phase-01" =>
-                {
+                Record::Satisfies { from, to } if from == "future/foo/plan.phase-01" => {
                     Some(to.as_str())
                 }
                 _ => None,
@@ -760,21 +794,22 @@ mod tests {
         )));
         // Linking phase-01 to gate phase-02 would close the incoming
         // phase-02 → phase-01 gate into a cycle — rejected.
-        assert!(link_phase_edges(
+        assert!(
+            link_phase_edges("future/foo/plan.phase-01", &[], &["2".into()], &mut records,)
+                .is_err()
+        );
+        // Re-linking replaces, never duplicates.
+        link_phase_edges(
             "future/foo/plan.phase-01",
+            &["R9".into()],
             &[],
-            &["2".into()],
             &mut records,
         )
-        .is_err());
-        // Re-linking replaces, never duplicates.
-        link_phase_edges("future/foo/plan.phase-01", &["R9".into()], &[], &mut records).unwrap();
+        .unwrap();
         let satisfies: Vec<&str> = records
             .iter()
             .filter_map(|r| match r {
-                Record::Satisfies { from, to }
-                    if from == "future/foo/plan.phase-01" =>
-                {
+                Record::Satisfies { from, to } if from == "future/foo/plan.phase-01" => {
                     Some(to.as_str())
                 }
                 _ => None,
@@ -843,8 +878,7 @@ mod tests {
             },
         ];
         for req in &satisfied {
-            spec_records
-                .retain(|r| !matches!(r, Record::Implements { to, .. } if to == req));
+            spec_records.retain(|r| !matches!(r, Record::Implements { to, .. } if to == req));
             for code in &built {
                 spec_records.push(Record::Implements {
                     from: code.clone(),
@@ -857,17 +891,27 @@ mod tests {
         let impls: Vec<&str> = spec_records
             .iter()
             .filter_map(|r| match r {
-                Record::Implements { from, to } if to == "future/foo/spec.R1" => Some(from.as_str()),
+                Record::Implements { from, to } if to == "future/foo/spec.R1" => {
+                    Some(from.as_str())
+                }
                 _ => None,
             })
             .collect();
         assert_eq!(impls, vec!["code/one", "code/two"]);
 
         // The requirement's DependsOn + Anchors survive in the spec records.
-        assert!(spec_records.iter().any(|r| matches!(r, Record::DependsOn { from, to }
-            if from == "future/foo/spec.R1" && to == "future/foo/spec.R2")));
-        assert!(spec_records.iter().any(|r| matches!(r, Record::Anchors { from, to }
-            if from == "future/foo/spec.R1" && to == "code/one")));
+        assert!(
+            spec_records
+                .iter()
+                .any(|r| matches!(r, Record::DependsOn { from, to }
+            if from == "future/foo/spec.R1" && to == "future/foo/spec.R2"))
+        );
+        assert!(
+            spec_records
+                .iter()
+                .any(|r| matches!(r, Record::Anchors { from, to }
+            if from == "future/foo/spec.R1" && to == "code/one"))
+        );
     }
 
     #[test]
@@ -970,8 +1014,14 @@ mod tests {
         let docs_pos = out.find("**docs**").unwrap();
         assert!(source_pos < test_pos && test_pos < docs_pos, "order: {out}");
         // Test depth renders as test/unit.
-        assert!(out.contains("- [ ] `future/foo/plan.phase-01.task-2` — Unit tests (test/unit)"), "{out}");
+        assert!(
+            out.contains("- [ ] `future/foo/plan.phase-01.task-2` — Unit tests (test/unit)"),
+            "{out}"
+        );
         // Done checkbox preserved.
-        assert!(out.contains("- [x] `future/foo/plan.phase-01.task-1` — Implement (source)"), "{out}");
+        assert!(
+            out.contains("- [x] `future/foo/plan.phase-01.task-1` — Implement (source)"),
+            "{out}"
+        );
     }
 }

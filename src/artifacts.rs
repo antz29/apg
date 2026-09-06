@@ -12,6 +12,7 @@ use std::sync::{Mutex, OnceLock};
 
 use lbug::{Connection, Database, SystemConfig};
 
+use crate::git;
 use crate::schema::Record;
 use crate::specs;
 
@@ -49,22 +50,51 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Writes `records` to `path`, then re-ingests the project into the live DB.
+/// Writes `records` to `path` and re-ingests the project into the live DB.
 /// A missing DB (no scan yet) is not an error — the JSONL is the durable
 /// form — but a re-ingest failure when the DB exists is a hard error: the
 /// mutation must be visible in the query index, and silently dropping it is
 /// what let the authoring agents believe writes had landed when they had not.
+///
+/// Refuse-on-stale gate (agent-loop hardening): when a DB exists **and** the
+/// DB is stale (`is_stale` — the tree moved on since the scan that built it),
+/// the mutation bails *before* any JSONL write or re-ingest. Every spec/plan/
+/// review mutation funnels through here, so the single check covers them all.
+/// Missing-DB and non-git paths stay allowed.
+///
+/// Atomic by design (D1): the JSONL is never committed before the DB merge
+/// succeeds. The new records go to a sibling temp file first, the re-ingest
+/// runs against the live DB from the in-memory `records` (the committed file
+/// still holds the old content), and only then is the temp atomically renamed
+/// over `path` — a single commit point for the durable JSONL and the query
+/// index. On failure the temp is removed and the committed JSONL is untouched.
 pub fn write_jsonl_and_reingest(
     apg_root: &Path,
     path: &Path,
     project: &str,
     records: &[Record],
 ) -> anyhow::Result<()> {
-    specs::write_jsonl(path, records)?;
-    if apg_root.join(".trans").join("db.lbug").exists() {
-        reingest_project(apg_root, project)?;
+    if apg_root.join(specs::TRANS).join("db.lbug").exists() {
+        if let Some(msg) = git::refusal_message(apg_root) {
+            anyhow::bail!("{msg}");
+        }
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(".tmp");
+        let tmp = PathBuf::from(tmp);
+        specs::write_jsonl(&tmp, records)?;
+        match reingest_project_with(apg_root, project, Some((path, records))) {
+            Ok(()) => {
+                std::fs::rename(&tmp, path)?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                Err(e)
+            }
+        }
+    } else {
+        specs::write_jsonl(path, records)
     }
-    Ok(())
 }
 
 pub struct ArtifactDb {
@@ -73,7 +103,10 @@ pub struct ArtifactDb {
 
 /// True when `fqn` resolves to a node in the live graph (any kind).
 fn node_exists(db: &Database, fqn: &str) -> bool {
-    count(db, &format!("MATCH (n {{fqn: {}}}) RETURN count(*)", lit(fqn))) > 0
+    count(
+        db,
+        &format!("MATCH (n {{fqn: {}}}) RETURN count(*)", lit(fqn)),
+    ) > 0
 }
 
 /// Runs `RETURN count(*)` and returns the number.
@@ -120,10 +153,7 @@ pub fn parse_args(args: &[String]) -> ParsedArgs {
         }
         i += 1;
     }
-    ParsedArgs {
-        positional,
-        flags,
-    }
+    ParsedArgs { positional, flags }
 }
 
 impl ParsedArgs {
@@ -172,13 +202,7 @@ impl ArtifactDb {
     /// The code-graph label of `fqn` (Function/Struct/File/Module/
     /// UnresolvedTarget), or `None` when it is not a code node.
     pub fn code_label(&self, fqn: &str) -> Option<&'static str> {
-        for l in [
-            "Function",
-            "Struct",
-            "File",
-            "Module",
-            "UnresolvedTarget",
-        ] {
+        for l in ["Function", "Struct", "File", "Module", "UnresolvedTarget"] {
             if count(
                 &self.db,
                 &format!("MATCH (n:{l} {{fqn: {}}}) RETURN count(*)", lit(fqn)),
@@ -217,7 +241,8 @@ impl ArtifactDb {
         // File targets sit directly under a module; structs/functions under a
         // file. Try the direct chain first, then the file-mediated one.
         let direct = "MATCH (m:Module)-[:Contains]->(n {fqn: X}) RETURN m.fqn";
-        let via_file = "MATCH (m:Module)-[:Contains]->(:File)-[:Contains]->(n {fqn: X}) RETURN m.fqn";
+        let via_file =
+            "MATCH (m:Module)-[:Contains]->(:File)-[:Contains]->(n {fqn: X}) RETURN m.fqn";
         for q in [direct, via_file] {
             let q = q.replace("X", &lit(fqn));
             if let Ok(s) = self.q(&q) {
@@ -245,9 +270,10 @@ impl ArtifactDb {
 
     /// Deletes every node with fqn `future/<project>/…` and its incident
     /// edges. Used to reset a project's spec/plan/feedback state before
-    /// re-merging its JSONL (code nodes are untouched).
-    pub fn detach_delete_project(&self, project: &str) -> anyhow::Result<()> {
-        self.conn()?.query(&format!(
+    /// re-merging its JSONL (code nodes are untouched). Runs on `conn` so the
+    /// deletion shares the caller's transaction.
+    pub fn detach_delete_project(&self, conn: &Connection, project: &str) -> anyhow::Result<()> {
+        conn.query(&format!(
             "MATCH (n) WHERE n.fqn STARTS WITH {} DETACH DELETE n",
             lit(&format!("future/{project}/"))
         ))?;
@@ -257,7 +283,14 @@ impl ArtifactDb {
     /// Re-merges one node record: `MERGE (n:Label {fqn}) SET props` (an
     /// upsert — idempotent, and updates props when the node pre-exists).
     /// `number` is the one INT64 column; every other prop is a string literal.
-    fn merge_node(&self, label: &str, fqn: &str, props: &[(&str, String)]) -> anyhow::Result<()> {
+    /// Runs on `conn` so the write shares the caller's transaction.
+    fn merge_node(
+        &self,
+        conn: &Connection,
+        label: &str,
+        fqn: &str,
+        props: &[(&str, String)],
+    ) -> anyhow::Result<()> {
         let set = props
             .iter()
             .map(|(k, v)| {
@@ -269,7 +302,7 @@ impl ArtifactDb {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        self.conn()?.query(&format!(
+        conn.query(&format!(
             "MERGE (n:{label} {{fqn: {}}}) SET {set}",
             lit(fqn)
         ))?;
@@ -278,24 +311,23 @@ impl ArtifactDb {
 
     /// Re-merges one edge record. Endpoint labels come from `known` (nodes in
     /// this record set) or the code graph. A dangling endpoint is skipped.
+    /// Runs on `conn` so the write shares the caller's transaction.
     fn merge_edge(
         &self,
+        conn: &Connection,
         rel_table: &str,
         from: &str,
         to: &str,
         known: &HashMap<String, &'static str>,
     ) -> anyhow::Result<()> {
-        let la = known
-            .get(from)
-            .copied()
-            .or_else(|| self.code_label(from));
+        let la = known.get(from).copied().or_else(|| self.code_label(from));
         let lb = known.get(to).copied().or_else(|| self.code_label(to));
         if let (Some(a), Some(b)) = (la, lb) {
             // Two-variable MATCH + MERGE rel: the endpoints already exist (node
             // records merged above, or code nodes in the graph). The one-shot
             // pattern MERGE `(a:.. {fqn})-[:R]->(b:.. {fqn})` fails when the
             // endpoints pre-exist (it re-attempts their creation → PK clash).
-            self.conn()?.query(&format!(
+            conn.query(&format!(
                 "MATCH (a:{a} {{fqn: {}}}), (b:{b} {{fqn: {}}}) MERGE (a)-[:{rel_table}]->(b)",
                 lit(from),
                 lit(to)
@@ -306,18 +338,20 @@ impl ArtifactDb {
 
     /// Re-ingests a set of records into the live DB (write-through, R5): nodes
     /// first (upserts), then edges (endpoints resolved against the code graph
-    /// or the node set being merged).
-    pub fn merge_records(&self, records: &[Record]) -> anyhow::Result<()> {
+    /// or the node set being merged). Every statement runs on `conn` so the
+    /// caller can run the merge inside a single transaction — a failed edge
+    /// merge then rolls back the node merges instead of leaving orphans.
+    pub fn merge_records(&self, conn: &Connection, records: &[Record]) -> anyhow::Result<()> {
         let mut known: HashMap<String, &'static str> = HashMap::new();
         for r in records {
             if let Some((label, fqn, props)) = node_merge(r) {
                 known.insert(fqn.to_string(), label);
-                self.merge_node(label, fqn, &props)?;
+                self.merge_node(conn, label, fqn, &props)?;
             }
         }
         for r in records {
             if let Some((table, from, to)) = edge_merge(r) {
-                self.merge_edge(table, from, to, &known)?;
+                self.merge_edge(conn, table, from, to, &known)?;
             }
         }
         Ok(())
@@ -352,10 +386,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
         Record::Phase { fqn, number, title } => Some((
             "Phase",
             fqn,
-            vec![
-                ("number", number.to_string()),
-                ("title", title.clone()),
-            ],
+            vec![("number", number.to_string()), ("title", title.clone())],
         )),
         Record::Decision { fqn, id, summary } => Some((
             "Decision",
@@ -367,19 +398,13 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             fqn,
             vec![("kind", kind.clone()), ("target", target.clone())],
         )),
-        Record::NonGoal { fqn, body } => {
-            Some(("NonGoal", fqn, vec![("body", body.clone())]))
+        Record::NonGoal { fqn, body } => Some(("NonGoal", fqn, vec![("body", body.clone())])),
+        Record::AcceptanceCriterion { fqn, body } => {
+            Some(("AcceptanceCriterion", fqn, vec![("body", body.clone())]))
         }
-        Record::AcceptanceCriterion { fqn, body } => Some((
-            "AcceptanceCriterion",
-            fqn,
-            vec![("body", body.clone())],
-        )),
-        Record::VerificationItem { fqn, body } => Some((
-            "VerificationItem",
-            fqn,
-            vec![("body", body.clone())],
-        )),
+        Record::VerificationItem { fqn, body } => {
+            Some(("VerificationItem", fqn, vec![("body", body.clone())]))
+        }
         Record::Note { fqn, body, kind } => Some((
             "Note",
             fqn,
@@ -399,7 +424,11 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("disposition", disposition.clone()),
             ],
         )),
-        Record::Plan { fqn, title, strategy } => Some((
+        Record::Plan {
+            fqn,
+            title,
+            strategy,
+        } => Some((
             "Plan",
             fqn,
             vec![("title", title.clone()), ("strategy", strategy.clone())],
@@ -556,22 +585,103 @@ pub fn cycle_closing_path(
 /// project's records would leave that endpoint out of `known` and the edge
 /// silently skipped. Node merges are idempotent upserts, so the extra projects
 /// are a no-op cost.
+///
+/// The detach + merge runs inside one transaction: a failed edge merge aborts
+/// it, so the DB is never left partially re-merged (no orphan nodes) — the
+/// prior committed state is preserved.
 pub fn reingest_project(apg_root: &Path, project: &str) -> anyhow::Result<()> {
+    reingest_project_with(apg_root, project, None)
+}
+
+/// Re-ingests with an optional substitute record set for one file `path`: the
+/// in-memory `records` a write-through is about to commit. This lets the
+/// re-ingest run BEFORE the new records hit the committed JSONL — the durable
+/// file is only swapped in after the merge succeeds (D1), so a re-ingest
+/// failure leaves the committed JSONL and the live DB both on the old state.
+fn reingest_project_with(
+    apg_root: &Path,
+    project: &str,
+    substitute: Option<(&Path, &[Record])>,
+) -> anyhow::Result<()> {
     let db = ArtifactDb::open(apg_root)?;
-    db.detach_delete_project(project)?;
-    let mut records: Vec<Record> = Vec::new();
-    for f in specs::jsonl_files(&apg_root.join("specs")) {
-        records.extend(specs::read_jsonl(&f)?);
+    let conn = db.conn()?;
+    conn.query("BEGIN TRANSACTION")?;
+    let result = (|| -> anyhow::Result<()> {
+        db.detach_delete_project(&conn, project)?;
+        let records = assembled_records(apg_root, project, substitute)?;
+        db.merge_records(&conn, &records)?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            conn.query("COMMIT")?;
+            Ok(())
+        }
+        Err(e) => {
+            // A failed query aborts the write transaction in the engine; roll
+            // back so the DB keeps its prior committed state (no residue from
+            // the failed mutation). The transaction may already be gone.
+            let _ = conn.query("ROLLBACK");
+            Err(e)
+        }
     }
+}
+
+/// Assembles the full record set a re-ingest merges: every spec project's
+/// JSONL (spec graphs form one merged space — see `reingest_project`), plus
+/// `project`'s plan JSONL and every committed note ledger. When `substitute`
+/// names a file, that file contributes `records` instead of its on-disk
+/// content (write-through re-ingests the in-memory records before they are
+/// committed). A substituted spec/plan file that is not yet on disk (first
+/// write) still contributes its records.
+fn assembled_records(
+    apg_root: &Path,
+    project: &str,
+    substitute: Option<(&Path, &[Record])>,
+) -> anyhow::Result<Vec<Record>> {
+    let (sub_path, sub_records) = match substitute {
+        Some((p, r)) => (Some(p), r),
+        None => (None, &[][..]),
+    };
+    let specs_dir = apg_root.join("specs");
     let plan_path = specs::plan_jsonl_path(apg_root, project);
-    if plan_path.exists() {
-        records.extend(specs::read_jsonl(&plan_path)?);
+
+    let mut records: Vec<Record> = Vec::new();
+
+    // Specs: every committed spec JSONL, with the substituted file replaced.
+    let sub_is_spec = sub_path.is_some_and(|p| p.starts_with(&specs_dir));
+    let mut subbed = false;
+    for f in specs::jsonl_files(&specs_dir) {
+        if sub_is_spec && sub_path == Some(f.as_path()) {
+            records.extend_from_slice(sub_records);
+            subbed = true;
+        } else {
+            records.extend(specs::read_jsonl(&f)?);
+        }
     }
+    if sub_is_spec && !subbed {
+        records.extend_from_slice(sub_records);
+    }
+
+    // The project's plan (transient; read from disk unless substituted).
+    let sub_is_plan = sub_path == Some(plan_path.as_path());
+    if sub_is_plan || plan_path.exists() {
+        if sub_is_plan {
+            records.extend_from_slice(sub_records);
+        } else {
+            records.extend(specs::read_jsonl(&plan_path)?);
+        }
+    }
+
+    // Committed note ledgers.
     for f in specs::jsonl_files(&apg_root.join("notes")) {
-        records.extend(specs::read_jsonl(&f)?);
+        if sub_path == Some(f.as_path()) {
+            records.extend_from_slice(sub_records);
+        } else {
+            records.extend(specs::read_jsonl(&f)?);
+        }
     }
-    db.merge_records(&records)?;
-    Ok(())
+    Ok(records)
 }
 
 /// The next free `feedback-<n>` / `note-<n>` number for a project, scanning
@@ -610,6 +720,340 @@ pub fn next_free_annotation(records: &[Record], stem: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::{Graph, Location, Node, NodeKind};
+    use crate::load;
+
+    /// A temp `apg/` layout with a real `apg/.trans/db.lbug` holding a code
+    /// graph (mirrors the spec_cmd fixture).
+    fn fixture(name: &str) -> (PathBuf, PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("apg-artifacts-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        db_at(&dir);
+        (dir.join("apg"), dir)
+    }
+
+    /// Builds a real DB + load files under `dir/apg` (used by `fixture` and by
+    /// the git-aware staleness tests, which init a repo around the same
+    /// layout first).
+    fn db_at(dir: &Path) {
+        std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
+        std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "github.com/x/y".to_string(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(
+            "/abs/store.go".to_string(),
+            Node {
+                kind: NodeKind::File,
+                location: Some(Location {
+                    path: "/abs/store.go".into(),
+                    start: 0,
+                    end: 0,
+                    start_line: 1,
+                    end_line: 100,
+                }),
+                code_type: "src".to_string(),
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(
+            "github.com/x/y.Store".to_string(),
+            Node {
+                kind: NodeKind::Struct,
+                location: Some(Location {
+                    path: "/abs/store.go".into(),
+                    start: 0,
+                    end: 40,
+                    start_line: 1,
+                    end_line: 40,
+                }),
+                code_type: "src".to_string(),
+                ..Node::default()
+            },
+        );
+        g.contains
+            .insert(("github.com/x/y".to_string(), "/abs/store.go".to_string()));
+        g.contains.insert((
+            "/abs/store.go".to_string(),
+            "github.com/x/y.Store".to_string(),
+        ));
+        let ldir = dir.join("apg").join(specs::TRANS).join("load");
+        std::fs::create_dir_all(&ldir).unwrap();
+        load::build_load_files(&g, &ldir).unwrap();
+        let db = Database::new(
+            dir.join("apg").join(specs::TRANS).join("db.lbug"),
+            Default::default(),
+        )
+        .unwrap();
+        let conn = Connection::new(&db).unwrap();
+        load::create_schema(&conn).unwrap();
+        load::copy_from(&conn, &ldir).unwrap();
+        drop(conn);
+        drop(db);
+    }
+
+    /// A temp dir with a real DB fixture inside a fresh git repo whose
+    /// `apg/.trans/` is gitignored (so building the DB and writing graph.jsonl
+    /// does not dirty the tree). Returns `(apg_root, dir, head_sha)`.
+    fn git_fixture(name: &str) -> (PathBuf, PathBuf, String) {
+        let dir =
+            std::env::temp_dir().join(format!("apg-artifacts-git-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git_ok = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .expect("git spawn");
+            assert!(
+                out.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git_ok(&["init", "-q"]);
+        git_ok(&["config", "user.email", "apg-test@example.com"]);
+        git_ok(&["config", "user.name", "apg test"]);
+        std::fs::write(dir.join(".gitignore"), "apg/.trans/\n").unwrap();
+        git_ok(&["add", ".gitignore"]);
+        git_ok(&["commit", "-q", "-m", "init"]);
+        let sha = String::from_utf8_lossy(
+            &std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        db_at(&dir);
+        (dir.join("apg"), dir, sha)
+    }
+
+    /// Writes a graph.jsonl whose line 1 records a scan at `sha`/`clean`
+    /// (via the real export writer).
+    fn write_scan_meta(apg_root: &Path, sha: &str, clean: bool) {
+        let mut g = Graph::default();
+        g.nodes.insert(
+            crate::schema::SCAN_HEAD.to_string(),
+            Node {
+                kind: NodeKind::Scan,
+                git_sha: Some(sha.to_string()),
+                git_clean: Some(clean),
+                scanned_at: Some("2026-09-07T00:00:00Z".to_string()),
+                ..Node::default()
+            },
+        );
+        load::write_graph_jsonl(&g, &apg_root.join(specs::TRANS).join("graph.jsonl")).unwrap();
+    }
+
+    /// The committed baseline records for the `foo` project: a spec with one
+    /// requirement and one healthy note (Details → Spec).
+    fn baseline_records() -> Vec<Record> {
+        vec![
+            Record::Spec {
+                fqn: "future/foo/spec".into(),
+                title: "Foo".into(),
+                goal: "G".into(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.R1".into(),
+                id: "R1".into(),
+                title: "Timer".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Contains {
+                from: "future/foo/spec".into(),
+                to: "future/foo/spec.R1".into(),
+            },
+            Record::Note {
+                fqn: "future/foo/note-1".into(),
+                body: "first".into(),
+                kind: "background".into(),
+            },
+            Record::Details {
+                from: "future/foo/note-1".into(),
+                to: "future/foo/spec".into(),
+            },
+        ]
+    }
+
+    /// Note nodes with no incident `Details` edge — the orphan residue a failed
+    /// write-through used to leave behind.
+    fn orphan_notes(db: &ArtifactDb) -> i64 {
+        let total = count(&db.db, "MATCH (n:Note) RETURN count(*)");
+        let with_edge = count(
+            &db.db,
+            "MATCH (n:Note)-[:Details]->() RETURN count(DISTINCT n)",
+        );
+        total - with_edge
+    }
+
+    #[test]
+    fn write_through_is_atomic_on_reingest_failure() {
+        let (apg_root, dir) = fixture("orphan");
+        let path = specs::spec_jsonl_path(&apg_root, "foo");
+        let baseline = baseline_records();
+
+        // A healthy committed state, write-through.
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(db.has_node("future/foo/spec"));
+            assert!(db.has_node("future/foo/note-1"));
+            assert_eq!(orphan_notes(&db), 0);
+        }
+
+        // A note whose Details edge targets another Note — not an allowable
+        // Details target in the DB schema, so merge_edge throws a binder error
+        // mid-merge (the exact class of failure that used to orphan nodes).
+        let mut mutated = baseline.clone();
+        mutated.push(Record::Note {
+            fqn: "future/foo/note-2".into(),
+            body: "poison".into(),
+            kind: "background".into(),
+        });
+        mutated.push(Record::Details {
+            from: "future/foo/note-2".into(),
+            to: "future/foo/note-1".into(),
+        });
+        let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("Binder"),
+            "expected the Details binder error, got: {err:#}"
+        );
+
+        // (a) The committed JSONL still holds the OLD records.
+        assert_eq!(specs::read_jsonl(&path).unwrap(), baseline);
+        // The temp file was removed — no residue next to the committed JSONL.
+        let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join("specs"))
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
+
+        // (b) The failed mutation left no residue in the live DB.
+        let db = ArtifactDb::open(&apg_root).unwrap();
+        assert!(!db.has_node("future/foo/note-2"));
+        assert_eq!(orphan_notes(&db), 0);
+        // The prior committed state is intact.
+        assert!(db.has_node("future/foo/spec"));
+        assert!(db.has_node("future/foo/note-1"));
+        drop(db);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_through_commits_jsonl_and_db() {
+        let (apg_root, dir) = fixture("commit");
+        let path = specs::spec_jsonl_path(&apg_root, "foo");
+        let recs = baseline_records();
+
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
+
+        // The JSONL matches the new records (a first write lands in the DB too,
+        // even though the file did not exist before this call).
+        assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
+        let db = ArtifactDb::open(&apg_root).unwrap();
+        assert!(db.has_node("future/foo/spec"));
+        assert!(db.has_node("future/foo/spec.R1"));
+        assert!(db.has_node("future/foo/note-1"));
+        assert_eq!(orphan_notes(&db), 0);
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Note)-[:Details]->(s:Spec) RETURN s.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/foo/spec"), "details edge: {out}");
+        drop(db);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_through_without_db_writes_jsonl() {
+        let (apg_root, dir) = fixture("nodb");
+        std::fs::remove_file(apg_root.join(specs::TRANS).join("db.lbug")).unwrap();
+        let path = specs::spec_jsonl_path(&apg_root, "foo");
+        let recs = baseline_records();
+
+        // No scan yet: the JSONL is the durable form; no re-ingest is attempted.
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
+        assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
+        assert!(!path.as_os_str().to_string_lossy().ends_with(".tmp"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stale_db_refuses_mutation_before_any_jsonl_write() {
+        let (apg_root, dir, sha0) = git_fixture("stale");
+        // The DB records a clean scan at the *first* commit...
+        write_scan_meta(&apg_root, &sha0, true);
+        // ...but the tree has since moved on to a second commit: stale.
+        let git_ok = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        };
+        git_ok(&["commit", "-q", "--allow-empty", "-m", "second"]);
+        assert!(git::is_stale(&apg_root));
+
+        let path = specs::spec_jsonl_path(&apg_root, "foo");
+        let recs = baseline_records();
+        let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("graph is stale"), "refusal message: {msg}");
+        assert!(msg.contains("run `apg scan` before mutating"), "{msg}");
+
+        // The durable JSONL was never written (no partial mutation), and no
+        // temp residue sits next to where it would have gone.
+        assert!(!path.exists(), "refused mutation must not write JSONL");
+        let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join("specs"))
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fresh_git_db_allows_write_through() {
+        let (apg_root, dir, sha) = git_fixture("fresh");
+        // The recorded scan matches the current tree exactly → fresh.
+        write_scan_meta(&apg_root, &sha, true);
+        assert!(!git::is_stale(&apg_root));
+
+        let path = specs::spec_jsonl_path(&apg_root, "foo");
+        let recs = baseline_records();
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
+
+        // The write-through landed in both the durable JSONL and the live DB.
+        assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
+        let db = ArtifactDb::open(&apg_root).unwrap();
+        assert!(db.has_node("future/foo/spec"));
+        assert!(db.has_node("future/foo/note-1"));
+        assert_eq!(orphan_notes(&db), 0);
+        drop(db);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn annotation_fqns_are_per_ledger_namespaced() {

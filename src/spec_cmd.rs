@@ -4,9 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::artifacts::{
-    self, node_fqn, parse_args, remove_node, ParsedArgs,
-};
+use crate::artifacts::{self, ParsedArgs, node_fqn, parse_args, remove_node};
 use crate::schema::Record;
 use crate::specs;
 
@@ -20,17 +18,24 @@ fn require_apg_root() -> anyhow::Result<PathBuf> {
 pub(crate) fn load_project(apg_root: &Path, project: &str) -> anyhow::Result<Vec<Record>> {
     let path = specs::spec_jsonl_path(apg_root, project);
     if !path.exists() {
-        anyhow::bail!(
-            "no spec for project `{project}` — run `apg spec init {project}` first"
-        );
+        anyhow::bail!("no spec for project `{project}` — run `apg spec init {project}` first");
     }
     specs::read_jsonl(&path)
 }
 
 /// Writes a project's spec JSONL and re-ingests it into the live DB (R5). A
 /// missing DB (no scan yet) is not an error — the JSONL is the durable form.
-pub(crate) fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Result<()> {
-    artifacts::write_jsonl_and_reingest(apg_root, &specs::spec_jsonl_path(apg_root, project), project, records)
+pub(crate) fn write_through(
+    apg_root: &Path,
+    project: &str,
+    records: &[Record],
+) -> anyhow::Result<()> {
+    artifacts::write_jsonl_and_reingest(
+        apg_root,
+        &specs::spec_jsonl_path(apg_root, project),
+        project,
+        records,
+    )
 }
 
 /// The project of a `future/<project>/…` fqn.
@@ -79,7 +84,10 @@ fn spec_init(args: &[String]) -> anyhow::Result<()> {
     artifacts::acquire_spec_lock(&apg_root)?;
     let path = specs::spec_jsonl_path(&apg_root, project);
     if path.exists() {
-        anyhow::bail!("spec for project `{project}` already exists at {}", path.display());
+        anyhow::bail!(
+            "spec for project `{project}` already exists at {}",
+            path.display()
+        );
     }
     let title = p.get("title").unwrap_or_else(|| project.clone());
     let goal = p.get("goal").unwrap_or_default();
@@ -97,7 +105,9 @@ fn spec_init(args: &[String]) -> anyhow::Result<()> {
 fn spec_add(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(project) = p.positional.first() else {
-        anyhow::bail!("usage: apg spec add <project> <requirement|future|phase|decision|non-goal|acceptance-criterion|verification|note> …");
+        anyhow::bail!(
+            "usage: apg spec add <project> <requirement|future|phase|decision|non-goal|acceptance-criterion|verification|note> …"
+        );
     };
     let Some(kind) = p.positional.get(1).map(|s| s.as_str()) else {
         anyhow::bail!("usage: apg spec add <project> <kind> …");
@@ -110,7 +120,9 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
     match kind {
         "requirement" => {
             let Some(id) = p.positional.get(2) else {
-                anyhow::bail!("usage: apg spec add <project> requirement <id> [--title …] [--body …] [--feature …] [--depends-on <id>]* [--anchor <fqn>]*");
+                anyhow::bail!(
+                    "usage: apg spec add <project> requirement <id> [--title …] [--body …] [--feature …] [--depends-on <id>]* [--anchor <fqn>]*"
+                );
             };
             let fqn = format!("future/{project}/spec.{id}");
             let mut recs = vec![Record::Requirement {
@@ -164,7 +176,9 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
         }
         "future" => {
             let Some(name) = p.positional.get(2) else {
-                anyhow::bail!("usage: apg spec add <project> future <name> --kind <function|struct|service|rpc|endpoint|other> [--target <fqn>]");
+                anyhow::bail!(
+                    "usage: apg spec add <project> future <name> --kind <function|struct|service|rpc|endpoint|other> [--target <fqn>]"
+                );
             };
             let Some(kind) = p.get("kind") else {
                 anyhow::bail!("future requires --kind");
@@ -193,7 +207,9 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
         }
         "phase" => {
             let Some(n) = p.positional.get(2).and_then(|s| s.parse::<u32>().ok()) else {
-                anyhow::bail!("usage: apg spec add <project> phase <n> --title … [--gate <phase-n>]*");
+                anyhow::bail!(
+                    "usage: apg spec add <project> phase <n> --title … [--gate <phase-n>]*"
+                );
             };
             let Some(title) = p.get("title") else {
                 anyhow::bail!("phase requires --title");
@@ -209,7 +225,9 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
                 to: fqn.clone(),
             });
             for g in p.all("gate") {
-                let gate_n = g.parse::<u32>().map_err(|_| anyhow::anyhow!("bad phase number `{g}`"))?;
+                let gate_n = g
+                    .parse::<u32>()
+                    .map_err(|_| anyhow::anyhow!("bad phase number `{g}`"))?;
                 if gate_n == n {
                     anyhow::bail!("a phase cannot gate on itself");
                 }
@@ -246,11 +264,19 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
             println!("Added decision `{id}` to {project}");
         }
         "non-goal" => {
-            let body = p.get("body").ok_or_else(|| anyhow::anyhow!("non-goal requires --body"))?;
+            let body = p
+                .get("body")
+                .ok_or_else(|| anyhow::anyhow!("non-goal requires --body"))?;
             let n = next_spec_counter(&records, "ng");
             let fqn = format!("future/{project}/spec.ng-{n}");
-            records.push(Record::NonGoal { fqn: fqn.clone(), body });
-            records.push(Record::Contains { from: spec_fqn.clone(), to: fqn });
+            records.push(Record::NonGoal {
+                fqn: fqn.clone(),
+                body,
+            });
+            records.push(Record::Contains {
+                from: spec_fqn.clone(),
+                to: fqn,
+            });
             write_through(&apg_root, project, &records)?;
             println!("Added non-goal to {project}");
         }
@@ -260,8 +286,14 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("acceptance-criterion requires --body"))?;
             let n = next_spec_counter(&records, "ac");
             let fqn = format!("future/{project}/spec.ac-{n}");
-            records.push(Record::AcceptanceCriterion { fqn: fqn.clone(), body });
-            records.push(Record::Contains { from: spec_fqn.clone(), to: fqn });
+            records.push(Record::AcceptanceCriterion {
+                fqn: fqn.clone(),
+                body,
+            });
+            records.push(Record::Contains {
+                from: spec_fqn.clone(),
+                to: fqn,
+            });
             write_through(&apg_root, project, &records)?;
             println!("Added acceptance criterion to {project}");
         }
@@ -271,8 +303,14 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("verification requires --body"))?;
             let n = next_spec_counter(&records, "vi");
             let fqn = format!("future/{project}/spec.vi-{n}");
-            records.push(Record::VerificationItem { fqn: fqn.clone(), body });
-            records.push(Record::Contains { from: spec_fqn.clone(), to: fqn });
+            records.push(Record::VerificationItem {
+                fqn: fqn.clone(),
+                body,
+            });
+            records.push(Record::Contains {
+                from: spec_fqn.clone(),
+                to: fqn,
+            });
             write_through(&apg_root, project, &records)?;
             println!("Added verification item to {project}");
         }
@@ -409,9 +447,7 @@ const NOTE_KIND_HELP: &str = "known kinds: note (any target), background (spec),
 
 fn validate_note_kind(kind: &str, category: &str) -> anyhow::Result<()> {
     if !note_kind_allows(kind, category) {
-        anyhow::bail!(
-            "invalid note kind `{kind}` for a {category} note — {NOTE_KIND_HELP}"
-        );
+        anyhow::bail!("invalid note kind `{kind}` for a {category} note — {NOTE_KIND_HELP}");
     }
     Ok(())
 }
@@ -472,7 +508,13 @@ fn spec_link(args: &[String]) -> anyhow::Result<()> {
     if req_id == "spec" {
         link_spec_depends(&apg_root, project, &p.all("depends-on"), &mut records)?;
     } else {
-        link_depends_on(&apg_root, project, req_id, &p.all("depends-on"), &mut records)?;
+        link_depends_on(
+            &apg_root,
+            project,
+            req_id,
+            &p.all("depends-on"),
+            &mut records,
+        )?;
     }
     write_through(&apg_root, project, &records)?;
     println!("Linked {project}.{req_id} depends-on");
@@ -499,15 +541,19 @@ fn requirement_exists(apg_root: &Path, proj: &str, id: &str) -> anyhow::Result<b
         return Ok(false);
     }
     let fqn = format!("future/{proj}/spec.{id}");
-    Ok(specs::read_jsonl(&path)?.iter().any(|r| {
-        matches!(r, Record::Requirement { fqn: f, .. } if *f == fqn)
-    }))
+    Ok(specs::read_jsonl(&path)?
+        .iter()
+        .any(|r| matches!(r, Record::Requirement { fqn: f, .. } if *f == fqn)))
 }
 
 /// Every spec project's records merged into one list — the cross-project
 /// view used for cycle detection (a DependsOn/SpecDependsOn edge may route
 /// through other projects' records back into this one).
-fn all_spec_records(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Result<Vec<Record>> {
+fn all_spec_records(
+    apg_root: &Path,
+    project: &str,
+    records: &[Record],
+) -> anyhow::Result<Vec<Record>> {
     let mut all = records.to_vec();
     for f in specs::jsonl_files(&apg_root.join("specs")) {
         if f.file_stem().and_then(|s| s.to_str()) == Some(project) {
@@ -593,7 +639,9 @@ fn link_depends_on(
         // Same-project targets validate against the in-memory records (they are
         // the loaded file); cross-project targets against the target spec file.
         let exists = if dep_proj == project {
-            records.iter().any(|r| matches!(r, Record::Requirement { fqn, .. } if fqn == &dep_fqn))
+            records
+                .iter()
+                .any(|r| matches!(r, Record::Requirement { fqn, .. } if fqn == &dep_fqn))
         } else {
             requirement_exists(apg_root, &dep_proj, &dep_id)?
         };
@@ -672,7 +720,10 @@ fn spec_render(args: &[String]) -> anyhow::Result<()> {
             println!("Rendered spec {project} to {path}");
         }
         None => {
-            let out = apg_root.join(specs::TRANS).join("specs").join(format!("{project}.md"));
+            let out = apg_root
+                .join(specs::TRANS)
+                .join("specs")
+                .join(format!("{project}.md"));
             std::fs::create_dir_all(out.parent().unwrap())?;
             std::fs::write(&out, &md)?;
             println!("Rendered spec {project} to {}", out.display());
@@ -731,14 +782,21 @@ fn render_spec(records: &[Record], db: &artifacts::ArtifactDb) -> anyhow::Result
     for (feature, items) in &by_feature {
         feature_lines.push_str(&format!("### {feature}\n"));
         for r in items {
-            let Record::Requirement { fqn, id, title, body, .. } = r else { unreachable!() };
+            let Record::Requirement {
+                fqn,
+                id,
+                title,
+                body,
+                ..
+            } = r
+            else {
+                unreachable!()
+            };
             feature_lines.push_str(&format!("**{id} — {title}.** {body}\n"));
             let consumes: Vec<String> = records
                 .iter()
                 .filter_map(|e| match e {
-                    Record::DependsOn { from, to } if from == fqn => {
-                        Some(short_req(to, &project))
-                    }
+                    Record::DependsOn { from, to } if from == fqn => Some(short_req(to, &project)),
                     _ => None,
                 })
                 .collect();
@@ -786,14 +844,20 @@ fn render_spec(records: &[Record], db: &artifacts::ArtifactDb) -> anyhow::Result
         .collect();
     out.push_str(&format!(
         "## Non-Goals\n{}\n",
-        nongoals.iter().map(|b| format!("- {b}\n")).collect::<String>()
+        nongoals
+            .iter()
+            .map(|b| format!("- {b}\n"))
+            .collect::<String>()
     ));
 
     let design = notes("design");
     if !design.is_empty() {
         out.push_str(&format!(
             "## Design\n{}\n",
-            design.iter().map(|b| format!("- {b}\n")).collect::<String>()
+            design
+                .iter()
+                .map(|b| format!("- {b}\n"))
+                .collect::<String>()
         ));
     }
     let err = notes("error-handling");
@@ -825,7 +889,9 @@ fn render_spec(records: &[Record], db: &artifacts::ArtifactDb) -> anyhow::Result
         .collect();
     out.push_str(&format!(
         "## Acceptance Criteria\n{}\n",
-        acs.iter().map(|b| format!("- [ ] {b}\n")).collect::<String>()
+        acs.iter()
+            .map(|b| format!("- [ ] {b}\n"))
+            .collect::<String>()
     ));
 
     let oq = notes("open-question");
@@ -885,16 +951,17 @@ fn render_spec(records: &[Record], db: &artifacts::ArtifactDb) -> anyhow::Result
     let decisions: Vec<String> = records
         .iter()
         .filter_map(|r| match r {
-            Record::Decision { id, summary, .. } => {
-                Some(format!("**Decision `{id}`.** {summary}"))
-            }
+            Record::Decision { id, summary, .. } => Some(format!("**Decision `{id}`.** {summary}")),
             _ => None,
         })
         .collect();
     if !decisions.is_empty() {
         out.push_str(&format!(
             "## Decisions\n{}\n",
-            decisions.iter().map(|d| format!("- {d}\n")).collect::<String>()
+            decisions
+                .iter()
+                .map(|d| format!("- {d}\n"))
+                .collect::<String>()
         ));
     }
 
@@ -1113,10 +1180,7 @@ mod tests {
     /// graph (`github.com/x/y.Store` struct + file + module), plus an empty
     /// `apg/specs/`. Returns (apg_root, temp_dir).
     fn fixture_layout(name: &str) -> (PathBuf, PathBuf) {
-        let dir = std::env::temp_dir().join(format!(
-            "apg-cli-test-{}-{name}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("apg-cli-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
         std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
@@ -1162,8 +1226,10 @@ mod tests {
         );
         g.contains
             .insert(("github.com/x/y".to_string(), "/abs/store.go".to_string()));
-        g.contains
-            .insert(("/abs/store.go".to_string(), "github.com/x/y.Store".to_string()));
+        g.contains.insert((
+            "/abs/store.go".to_string(),
+            "github.com/x/y.Store".to_string(),
+        ));
 
         let ldir = dir.join("apg").join(specs::TRANS).join("load");
         std::fs::create_dir_all(&ldir).unwrap();
@@ -1210,22 +1276,11 @@ mod tests {
         // incident-edge removal used to run inside the loop, dropping earlier
         // edges so only the last dep survived).
         let apg = Path::new("/nonexistent");
-        link_depends_on(
-            apg,
-            "foo",
-            "R1",
-            &["R2".into(), "R3".into()],
-            &mut records,
-        )
-        .unwrap();
+        link_depends_on(apg, "foo", "R1", &["R2".into(), "R3".into()], &mut records).unwrap();
         let deps: Vec<_> = records
             .iter()
             .filter_map(|r| match r {
-                Record::DependsOn { from, to }
-                    if from == "future/foo/spec.R1" =>
-                {
-                    Some(to.as_str())
-                }
+                Record::DependsOn { from, to } if from == "future/foo/spec.R1" => Some(to.as_str()),
                 _ => None,
             })
             .collect();
@@ -1236,11 +1291,7 @@ mod tests {
         let deps: Vec<_> = records
             .iter()
             .filter_map(|r| match r {
-                Record::DependsOn { from, to }
-                    if from == "future/foo/spec.R1" =>
-                {
-                    Some(to.as_str())
-                }
+                Record::DependsOn { from, to } if from == "future/foo/spec.R1" => Some(to.as_str()),
                 _ => None,
             })
             .collect();
@@ -1283,7 +1334,14 @@ mod tests {
                 to: "future/foo/spec.R2".into(),
             },
         ];
-        link_depends_on(Path::new("/nonexistent"), "foo", "R2", &["R1".into()], &mut records).unwrap();
+        link_depends_on(
+            Path::new("/nonexistent"),
+            "foo",
+            "R2",
+            &["R1".into()],
+            &mut records,
+        )
+        .unwrap();
         assert!(records.iter().any(|r| matches!(
             r,
             Record::DependsOn { from, to }
@@ -1307,8 +1365,14 @@ mod tests {
     fn note_kind_vocabulary_enforces_kind_and_target_category() {
         // Project notes: every known kind is valid; unknown kinds are rejected.
         for kind in [
-            "note", "background", "design", "decision", "error-handling",
-            "relationship-to-other-specs", "open-question", "materialization-fix",
+            "note",
+            "background",
+            "design",
+            "decision",
+            "error-handling",
+            "relationship-to-other-specs",
+            "open-question",
+            "materialization-fix",
         ] {
             validate_note_kind(kind, "project").unwrap();
         }
@@ -1359,18 +1423,39 @@ mod tests {
                 body: String::new(),
                 feature: String::new(),
             },
-Record::DependsOn {
+            Record::DependsOn {
                 from: "future/foo/spec.O6".into(),
                 to: "future/foo/spec.O7".into(),
             },
         ];
         // Longer cycle first: O6 → O7 exists, so O7 → O6 closes O7→O6→O7.
-        let err = link_depends_on(Path::new("/nonexistent"), "foo", "O7", &["O6".into()], &mut records).unwrap_err();
+        let err = link_depends_on(
+            Path::new("/nonexistent"),
+            "foo",
+            "O7",
+            &["O6".into()],
+            &mut records,
+        )
+        .unwrap_err();
         assert!(format!("{err:#}").contains("O7 → O6"));
         // O5 → O6 is fine on its own.
-        link_depends_on(Path::new("/nonexistent"), "foo", "O5", &["O6".into()], &mut records).unwrap();
+        link_depends_on(
+            Path::new("/nonexistent"),
+            "foo",
+            "O5",
+            &["O6".into()],
+            &mut records,
+        )
+        .unwrap();
         // O6 → O5 closes O5 → O6 → O5 — rejected.
-        let err = link_depends_on(Path::new("/nonexistent"), "foo", "O6", &["O5".into()], &mut records).unwrap_err();
+        let err = link_depends_on(
+            Path::new("/nonexistent"),
+            "foo",
+            "O6",
+            &["O5".into()],
+            &mut records,
+        )
+        .unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("would create a cycle"), "got: {msg}");
         assert!(msg.contains("O6 → O5"), "got: {msg}");
@@ -1465,7 +1550,10 @@ Record::DependsOn {
             .query("MATCH (:Struct)-[:Implements]->(r:Requirement) RETURN count(*)")
             .unwrap()
             .to_string();
-        assert!(out.lines().last() == Some("1"), "rebuild keeps Implements: {out}");
+        assert!(
+            out.lines().last() == Some("1"),
+            "rebuild keeps Implements: {out}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1665,7 +1753,8 @@ Record::DependsOn {
         let mut bar_records = bar.clone();
         link_depends_on(&apg_root, "bar", "R2", &["foo/R1".into()], &mut bar_records).unwrap();
         specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "bar"), &bar_records).unwrap();
-        let err = link_depends_on(&apg_root, "foo", "R1", &["bar/R2".into()], &mut records).unwrap_err();
+        let err =
+            link_depends_on(&apg_root, "foo", "R1", &["bar/R2".into()], &mut records).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("would create a cycle"), "got: {msg}");
         // The invalid edge was not persisted.
@@ -1690,12 +1779,24 @@ Record::DependsOn {
             }],
         )
         .unwrap();
-        assert_eq!(dep_target("R4", "foo", &apg_root), ("foo".to_string(), "R4".to_string()));
-        assert_eq!(dep_target("bar/R2", "foo", &apg_root), ("bar".to_string(), "R2".to_string()));
+        assert_eq!(
+            dep_target("R4", "foo", &apg_root),
+            ("foo".to_string(), "R4".to_string())
+        );
+        assert_eq!(
+            dep_target("bar/R2", "foo", &apg_root),
+            ("bar".to_string(), "R2".to_string())
+        );
         // An unknown project prefix is not a known spec — stays a same-project id.
-        assert_eq!(dep_target("baz/R2", "foo", &apg_root), ("foo".to_string(), "baz/R2".to_string()));
+        assert_eq!(
+            dep_target("baz/R2", "foo", &apg_root),
+            ("foo".to_string(), "baz/R2".to_string())
+        );
         // Explicit same-project prefix.
-        assert_eq!(dep_target("foo/R1", "foo", &apg_root), ("foo".to_string(), "R1".to_string()));
+        assert_eq!(
+            dep_target("foo/R1", "foo", &apg_root),
+            ("foo".to_string(), "R1".to_string())
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

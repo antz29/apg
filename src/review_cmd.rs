@@ -134,7 +134,12 @@ fn review_action(args: &[String]) -> anyhow::Result<()> {
     } else {
         anyhow::bail!("action requires --fix or --wont-fix");
     };
-    set_feedback(fqn, "actioned", Some(disposition.to_string()), p.get("note"))
+    set_feedback(
+        fqn,
+        "actioned",
+        Some(disposition.to_string()),
+        p.get("note"),
+    )
 }
 
 /// `apg review resolve <feedback-fqn>` / `reject <feedback-fqn>` — the
@@ -143,7 +148,14 @@ fn review_action(args: &[String]) -> anyhow::Result<()> {
 fn review_set(args: &[String], status: &str, disposition: Option<String>) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(fqn) = p.positional.first() else {
-        anyhow::bail!("usage: apg review {} <feedback-fqn>", if status == "resolved" { "resolve" } else { "reject" });
+        anyhow::bail!(
+            "usage: apg review {} <feedback-fqn>",
+            if status == "resolved" {
+                "resolve"
+            } else {
+                "reject"
+            }
+        );
     };
     set_feedback(fqn, status, disposition, None)
 }
@@ -168,7 +180,11 @@ fn set_feedback(
     ];
     let mut file: Option<PathBuf> = None;
     for c in &candidates {
-        if c.exists() && specs::read_jsonl(c)?.iter().any(|r| node_fqn(r) == Some(fqn)) {
+        if c.exists()
+            && specs::read_jsonl(c)?
+                .iter()
+                .any(|r| node_fqn(r) == Some(fqn))
+        {
             file = Some(c.clone());
             break;
         }
@@ -199,7 +215,10 @@ fn set_feedback(
         anyhow::bail!("feedback `{fqn}` not found");
     }
     artifacts::write_jsonl_and_reingest(&apg_root, &file, &project, &records)?;
-    println!("Feedback {fqn} → {status}{}", disposition.map(|d| format!(" ({d})")).unwrap_or_default());
+    println!(
+        "Feedback {fqn} → {status}{}",
+        disposition.map(|d| format!(" ({d})")).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -209,7 +228,8 @@ fn review_list(args: &[String]) -> anyhow::Result<()> {
     let apg_root = require_apg_root()?;
     let db = artifacts::ArtifactDb::open(&apg_root)?;
     let target = p.positional.first();
-    let mut q = "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn".to_string();
+    let mut q = "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn"
+        .to_string();
     if let Some(t) = target {
         q = format!(
             "MATCH (f:Feedback)-[:Reviews]->(n) WHERE n.fqn = {} RETURN f.fqn, f.status, f.disposition, n.fqn",

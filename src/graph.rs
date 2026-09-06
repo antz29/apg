@@ -58,6 +58,9 @@ pub enum NodeKind {
     Plan,
     PlanPhase,
     Task,
+    /// The scan-time git-state node (fqn `scan/HEAD`, one per DB; rewritten at
+    /// every scan). Standalone — it carries no rel tables.
+    Scan,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,6 +108,15 @@ pub struct Node {
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disposition: Option<String>,
+    /// Scan-node properties (SPEC agent-loop hardening): the git state the
+    /// scan ran under. `git_sha`/`git_clean` are `None` when the scanned dir
+    /// is not a git repo; only the `Scan` kind sets them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_clean: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scanned_at: Option<String>,
 }
 
 impl Default for Node {
@@ -128,6 +140,9 @@ impl Default for Node {
             tier: None,
             status: None,
             disposition: None,
+            git_sha: None,
+            git_clean: None,
+            scanned_at: None,
         }
     }
 }

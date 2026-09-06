@@ -153,11 +153,7 @@ pub fn owning_module(graph: &Graph, fqn: &str) -> Option<String> {
                 .contains
                 .iter()
                 .find(|(a, b)| {
-                    b == fqn
-                        && graph
-                            .nodes
-                            .get(a)
-                            .is_some_and(|n| n.kind == NodeKind::File)
+                    b == fqn && graph.nodes.get(a).is_some_and(|n| n.kind == NodeKind::File)
                 })
                 .map(|(a, _)| a.clone());
             file.and_then(|f| owning_module(graph, &f))
@@ -188,11 +184,7 @@ pub fn note_file(graph: &Graph, apg_root: &Path, target_fqn: &str) -> PathBuf {
 pub fn read_all(apg_root: &Path) -> Vec<Record> {
     let (specs, notes, plans) = scan_inputs(apg_root);
     let mut out = Vec::new();
-    for f in specs
-        .into_iter()
-        .chain(notes)
-        .chain(plans)
-    {
+    for f in specs.into_iter().chain(notes).chain(plans) {
         match read_jsonl(&f) {
             Ok(records) => out.extend(records),
             Err(e) => panic!("{e:#}"),
@@ -234,17 +226,23 @@ mod tests {
             },
         ];
         write_jsonl(&specs.join("foo.jsonl"), &recs).unwrap();
-        write_jsonl(&notes.join("_root.jsonl"), &[Record::Note {
-            fqn: "annotations/1".to_string(),
-            body: "note".to_string(),
-            kind: String::new(),
-        }])
+        write_jsonl(
+            &notes.join("_root.jsonl"),
+            &[Record::Note {
+                fqn: "annotations/1".to_string(),
+                body: "note".to_string(),
+                kind: String::new(),
+            }],
+        )
         .unwrap();
-        write_jsonl(&plans.join("foo.jsonl"), &[Record::Plan {
-            fqn: "future/foo/plan".to_string(),
-            title: "Plan".to_string(),
-            strategy: String::new(),
-        }])
+        write_jsonl(
+            &plans.join("foo.jsonl"),
+            &[Record::Plan {
+                fqn: "future/foo/plan".to_string(),
+                title: "Plan".to_string(),
+                strategy: String::new(),
+            }],
+        )
         .unwrap();
 
         let (s, n, p) = scan_inputs(&dir);
@@ -271,16 +269,21 @@ mod tests {
         };
         g.nodes.insert("mod".to_string(), node(NodeKind::Module));
         g.nodes.insert("/x/a.go".to_string(), node(NodeKind::File));
-        g.nodes
-            .insert("mod.A".to_string(), node(NodeKind::Struct));
+        g.nodes.insert("mod.A".to_string(), node(NodeKind::Struct));
         g.nodes
             .insert("mod.A.f".to_string(), node(NodeKind::Function));
-        g.nodes.insert("future/foo/spec".to_string(), node(NodeKind::Spec));
         g.nodes
-            .insert("future/foo/spec.R1".to_string(), node(NodeKind::Requirement));
-        g.contains.insert(("mod".to_string(), "/x/a.go".to_string()));
-        g.contains.insert(("/x/a.go".to_string(), "mod.A".to_string()));
-        g.contains.insert(("/x/a.go".to_string(), "mod.A.f".to_string()));
+            .insert("future/foo/spec".to_string(), node(NodeKind::Spec));
+        g.nodes.insert(
+            "future/foo/spec.R1".to_string(),
+            node(NodeKind::Requirement),
+        );
+        g.contains
+            .insert(("mod".to_string(), "/x/a.go".to_string()));
+        g.contains
+            .insert(("/x/a.go".to_string(), "mod.A".to_string()));
+        g.contains
+            .insert(("/x/a.go".to_string(), "mod.A.f".to_string()));
 
         // A Struct's owning module resolves through its file.
         assert_eq!(owning_module(&g, "mod.A"), Some("mod".to_string()));

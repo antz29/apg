@@ -7,6 +7,10 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The FQN of the DB's `Scan` node (the git state of the scan that built the
+/// live DB). One per database — every scan replaces it.
+pub const SCAN_HEAD: &str = "scan/HEAD";
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Record {
@@ -69,6 +73,22 @@ pub enum Record {
         language: String,
     },
 
+    /// Pipeline-internal control record, emitted by `apg scan` at the front of
+    /// the merged stream and as **line 1 of `graph.jsonl`**:
+    /// `{"type":"scan_meta","git_sha":"...","git_clean":true,"scanned_at":"..."}`.
+    /// Carries the git state the scan ran under — HEAD sha plus whether
+    /// `git status --porcelain` was empty — so a later mutation gate can tell
+    /// whether the live DB matches the tree. The git fields are absent when the
+    /// scanned dir is not a git repo. The ingestor records it as the DB's
+    /// `Scan` node (fqn [`SCAN_HEAD`]).
+    ScanMeta {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        git_sha: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        git_clean: Option<bool>,
+        scanned_at: String,
+    },
+
     Contains {
         from: String,
         to: String,
@@ -94,7 +114,6 @@ pub enum Record {
     },
 
     // --- Spec/plan graph records (SPEC R1/R20; canonical FQNs, no ids) ---
-
     /// `{"type":"spec","fqn":"future/<project>/spec","title":"...","goal":"..."}`
     Spec {
         fqn: String,
@@ -246,6 +265,40 @@ mod tests {
     }
 
     #[test]
+    fn scan_meta_control_record_parses_and_serializes() {
+        // The scan_meta control record as `apg scan` emits it (line 1 of
+        // graph.jsonl): git fields present in a git repo...
+        let r: Record = serde_json::from_str(
+            r#"{"type":"scan_meta","git_sha":"abc123","git_clean":true,"scanned_at":"2026-09-07T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(r, Record::ScanMeta { ref git_sha, ref git_clean, ref scanned_at }
+                if git_sha.as_deref() == Some("abc123")
+                    && *git_clean == Some(true)
+                    && scanned_at == "2026-09-07T00:00:00Z")
+        );
+        // ...and omitted when the scanned dir is not a git repo.
+        let r: Record =
+            serde_json::from_str(r#"{"type":"scan_meta","scanned_at":"2026-09-07T00:00:00Z"}"#)
+                .unwrap();
+        assert!(matches!(
+            r,
+            Record::ScanMeta {
+                git_sha: None,
+                git_clean: None,
+                ..
+            }
+        ));
+        // Serialization omits the absent git fields (round-trips the input).
+        let s = serde_json::to_string(&r).unwrap();
+        assert_eq!(
+            s,
+            r#"{"type":"scan_meta","scanned_at":"2026-09-07T00:00:00Z"}"#
+        );
+    }
+
+    #[test]
     fn spec_node_records_parse() {
         // Fixture lines in the unified-JSONL style of the SPEC serialization
         // section (canonical fqns, type-tagged).
@@ -310,26 +363,25 @@ mod tests {
         assert!(
             matches!(parse(lines[4]), Record::Gates { from, to } if from == "future/foo/spec.phase-2" && to == "future/foo/spec.phase-1")
         );
-        assert!(
-            matches!(parse(lines[9]), Record::Builds { to, .. } if to == "future/foo/gateway")
-        );
+        assert!(matches!(parse(lines[9]), Record::Builds { to, .. } if to == "future/foo/gateway"));
     }
 
     #[test]
     fn missing_optional_fields_default() {
         // Edge and optional-field records tolerate absent optional props.
-        let r: Record = serde_json::from_str(
-            r#"{"type":"unresolved_call","from":"x","to":"fmt.Errorf"}"#,
-        )
-        .unwrap();
-        assert!(matches!(r, Record::UnresolvedCall { ref target_type, .. } if target_type.is_empty()));
-        let r: Record = serde_json::from_str(
-            r#"{"type":"future","fqn":"future/foo/g","kind":"function"}"#,
-        )
-        .unwrap();
+        let r: Record =
+            serde_json::from_str(r#"{"type":"unresolved_call","from":"x","to":"fmt.Errorf"}"#)
+                .unwrap();
+        assert!(
+            matches!(r, Record::UnresolvedCall { ref target_type, .. } if target_type.is_empty())
+        );
+        let r: Record =
+            serde_json::from_str(r#"{"type":"future","fqn":"future/foo/g","kind":"function"}"#)
+                .unwrap();
         assert!(matches!(r, Record::Future { ref target, .. } if target.is_empty()));
-        let r: Record = serde_json::from_str(r#"{"type":"requirement","fqn":"f","id":"R1","title":"t"}"#)
-            .unwrap();
+        let r: Record =
+            serde_json::from_str(r#"{"type":"requirement","fqn":"f","id":"R1","title":"t"}"#)
+                .unwrap();
         assert!(matches!(r, Record::Requirement { ref feature, .. } if feature.is_empty()));
     }
 }
