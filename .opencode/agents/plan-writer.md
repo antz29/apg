@@ -96,7 +96,30 @@ A plan lives at `future/<project>/plan`:
   carries variants considered, test-tier routing, repo-gate facts, and execution
   method (as `PLAN.md` does for the platform).
 - **PlanPhase** (`apg_plan_add <project> phase <n> --title … --deliverable … --prereq <n> --satisfies <req-id>`) — one row of the phase table: fqn `future/<project>/plan.phase-<n>`, `--satisfies` names the spec requirements the phase delivers (`Satisfies`), `--prereq` adds a `Gates` edge.
-- **Task** (`apg_plan_add <project> task <phase> <k> --title … --tier <tier> --builds <future-name> --anchor <fqn>`) — a phase deliverable: fqn `future/<project>/plan.phase-<n>.task-<k>`, `--tier` routes the owning writer (`source`/`unit`/`int`/`e2e`/`gate`/`human`), `--builds` names the spec `Future` the task creates (`Builds(Task→Future)`), `--anchor` lists files touched.
+- **Task** (`apg_plan_add <project> task <phase> <k> --title … --kind <kind> [--tier <tier>] --builds <future-name> --anchor <fqn>`) — a phase deliverable: fqn `future/<project>/plan.phase-<n>.task-<k>`, `--kind` names the owning role, `--tier` the verification depth (test tasks only), `--builds` names the spec `Future` the task creates (`Builds(Task→Future)`), `--anchor` lists files touched.
+
+### Task classification (two-axis: kind + tier)
+
+`kind` is the owning role — orthogonal, never ranked; every task carries exactly
+one:
+
+| kind | owning role | notes |
+|---|---|---|
+| `source` | code-writer | produce the deliverable (code, manifests, config). **default** |
+| `test` | test-writers | **must** carry a `tier` |
+| `gate` | CI / repo gate | aggregate green-check (lint+build+all tiers) |
+| `docs` | docs-writer | the write-up (SPEC render, README, handoff) |
+| `human` | the human | step only a person can do (judgment/decision/review) |
+
+`tier` ∈ `{unit, int, e2e}` — meaningful only for `kind = test`. These three
+**are** a hierarchy (in-process/fakes → real I/O boundaries (`-short` guarded)
+→ full-stack).
+
+**Split, don't shoehorn** — a task has one kind: "implement + unit-test X" is
+two tasks (`source` + `test`/`unit`); "build the e2e harness" is `source`;
+"author/run the e2e tests" is `test`/`e2e`. A `human` task can only be completed
+by the person — don't mark it done on their behalf, and don't close a phase
+around it.
 - **Linking** (`apg_plan_link <project> <phase-n> --satisfies <req-id> --prereq <n>`) — add `Satisfies`/`Gates` edges later.
 
 The plan is the bridge that carries the spec (`future`) into code (`present`):

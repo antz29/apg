@@ -3,7 +3,7 @@ import { runCypher, lit, csvToRows } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "List a plan's tasks with phase, tier, status, the Future each task Builds, and its Anchors (files/code touched). The implementation checklist view.",
+    "List a plan's tasks with phase, kind (owning role), tier (verification depth, test only), status, the Future each task Builds, and its Anchors (files/code touched). The implementation checklist view.",
   args: {
     project: tool.schema.string().describe("Plan project (required)."),
     status: tool.schema
@@ -21,7 +21,7 @@ export default tool({
     const tasks = csvToRows(
       await runCypher(
         context,
-        `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.title, t.tier, t.status ORDER BY t.fqn LIMIT ${limit}`,
+        `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.title, t.kind, t.tier, t.status ORDER BY t.fqn LIMIT ${limit}`,
       ),
     )
     if (tasks.length <= 1) return `No tasks in plan \`${project}\`.`
@@ -39,8 +39,8 @@ export default tool({
       anchors.set(t, [...(anchors.get(t) ?? []), x])
     }
 
-    const lines = ["task,phase,title,tier,status,builds,anchors"]
-    for (const [phase, fqn, title, tier, status] of tasks.slice(1)) {
+    const lines = ["task,phase,title,kind,tier,status,builds,anchors"]
+    for (const [phase, fqn, title, kind, tier, status] of tasks.slice(1)) {
       if (args.status && status !== args.status) continue
       const short = fqn.replace(`future/${project}/`, "")
       const phaseShort = phase.replace(`future/${project}/`, "")
@@ -49,6 +49,7 @@ export default tool({
           short,
           phaseShort,
           `"${title.replace(/"/g, '""')}"`,
+          kind,
           tier,
           status,
           (builds.get(fqn) ?? "").replace(`future/${project}/`, ""),

@@ -3,7 +3,7 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Add a phase or task to a plan (`apg plan add <project> phase|task …`). Phase: number, title, deliverable, prereq (phase numbers), satisfies (requirement ids the phase delivers). Task: phase number, task number, title, tier (source/unit/int/e2e/gate/human), builds (future name the task creates), anchor (code FQNs touched).",
+    "Add a phase or task to a plan (`apg plan add <project> phase|task …`). Phase: number, title, deliverable, prereq (phase numbers), satisfies (requirement ids the phase delivers). Task: phase number, task number, title, kind (source/test/gate/docs/human — owning role), tier (unit/int/e2e — required for test tasks only), builds (future name the task creates), anchor (code FQNs touched).",
   args: {
     project: tool.schema.string().describe("Plan project (required)."),
     kind: tool.schema.string().describe('"phase" or "task" (required).'),
@@ -14,10 +14,14 @@ export default tool({
     deliverable: tool.schema.string().optional().describe("For phase: one-line deliverable."),
     prereq: tool.schema.array(tool.schema.string()).optional().describe("For phase: phase numbers this phase is gated on (prereqs)."),
     satisfies: tool.schema.array(tool.schema.string()).optional().describe("For phase: requirement ids this phase delivers (Satisfies)."),
+    taskKind: tool.schema
+      .string()
+      .optional()
+      .describe("For task: the owning role — source (default), test, gate, docs, or human."),
     tier: tool.schema
       .string()
       .optional()
-      .describe("For task: source, unit, int, e2e, gate, or human (routes the owning writer)."),
+      .describe("For task: verification depth — unit, int, or e2e. Only valid with taskKind=test (required then)."),
     builds: tool.schema.string().optional().describe("For task: the future name this task builds."),
     anchor: tool.schema.array(tool.schema.string()).optional().describe("For task: code FQNs this task touches."),
   },
@@ -37,6 +41,7 @@ export default tool({
       if (!args.phaseNumber || !args.taskNumber) return "Error: task requires phaseNumber and taskNumber"
       if (!args.title) return "Error: task requires title"
       cli.push(args.phaseNumber, args.taskNumber, "--title", args.title)
+      if (args.taskKind) cli.push("--kind", args.taskKind)
       if (args.tier) cli.push("--tier", args.tier)
       if (args.builds) cli.push("--builds", args.builds)
       for (const a of args.anchor ?? []) cli.push("--anchor", a)
