@@ -235,9 +235,32 @@ fn link_phase_edges(
     records.retain(|r| !matches!(r, Record::Gates { from, .. } if from.as_str() == phase_fqn));
     for g in prereqs {
         let g = g.parse::<u32>().map_err(|_| anyhow::anyhow!("bad phase number `{g}`"))?;
+        let target = format!("future/{project}/plan.phase-{g:02}");
+        let phase_n = phase_fqn
+            .rsplit("phase-")
+            .next()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        if let Some(path) = artifacts::cycle_closing_path(records, phase_fqn, &target, |r| match r {
+            Record::Gates { from, to } => Some((from.as_str(), to.as_str())),
+            _ => None,
+        }) {
+            let short: Vec<String> = path
+                .iter()
+                .map(|f| {
+                    f.strip_prefix(&format!("future/{project}/plan.phase-"))
+                        .unwrap_or(f)
+                        .to_string()
+                })
+                .collect();
+            anyhow::bail!(
+                "adding gate phase-{phase_n:02} → phase-{g:02} would create a cycle: {}",
+                short.join(" → ")
+            );
+        }
         records.push(Record::Gates {
             from: phase_fqn.to_string(),
-            to: format!("future/{project}/plan.phase-{g:02}"),
+            to: target,
         });
     }
     Ok(())
@@ -611,7 +634,7 @@ mod tests {
         link_phase_edges(
             "future/foo/plan.phase-01",
             &["R1".into(), "R2".into(), "R3".into()],
-            &["2".into()],
+            &["3".into()],
             &mut records,
         )
         .unwrap();
@@ -638,13 +661,22 @@ mod tests {
         assert!(records.iter().any(|r| matches!(
             r,
             Record::Gates { from, to }
-                if from == "future/foo/plan.phase-01" && to == "future/foo/plan.phase-02"
+                if from == "future/foo/plan.phase-01" && to == "future/foo/plan.phase-03"
         )));
         assert!(records.iter().any(|r| matches!(
             r,
             Record::Gates { from, to }
                 if from == "future/foo/plan.phase-02" && to == "future/foo/plan.phase-01"
         )));
+        // Linking phase-01 to gate phase-02 would close the incoming
+        // phase-02 → phase-01 gate into a cycle — rejected.
+        assert!(link_phase_edges(
+            "future/foo/plan.phase-01",
+            &[],
+            &["2".into()],
+            &mut records,
+        )
+        .is_err());
         // Re-linking replaces, never duplicates.
         link_phase_edges("future/foo/plan.phase-01", &["R9".into()], &[], &mut records).unwrap();
         let satisfies: Vec<&str> = records

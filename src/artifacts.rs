@@ -500,6 +500,49 @@ pub fn remove_node(records: &mut Vec<Record>, fqn: &str) {
     });
 }
 
+/// The path `to → … → from` that would close a dependency cycle if the edge
+/// `from → to` were added over the edges selected by `is_edge`, or `None` if
+/// the graph stays acyclic. Used to reject requirement DependsOn and phase
+/// Gates cycles at write time — a requirement that (transitively) depends on
+/// itself makes "delivered when its dependencies are delivered" circular.
+pub fn cycle_closing_path(
+    records: &[Record],
+    from: &str,
+    to: &str,
+    mut is_edge: impl FnMut(&Record) -> Option<(&str, &str)>,
+) -> Option<Vec<String>> {
+    if from == to {
+        return Some(vec![from.to_string()]);
+    }
+    // BFS from `to`, following selected edges, looking for `from`.
+    let mut parent: HashMap<&str, &str> = HashMap::new();
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(to);
+    while let Some(cur) = queue.pop_front() {
+        for r in records {
+            if let Some((a, b)) = is_edge(r) {
+                if a == cur && !parent.contains_key(b) {
+                    parent.insert(b, cur);
+                    queue.push_back(b);
+                }
+            }
+        }
+    }
+    if !parent.contains_key(from) {
+        return None;
+    }
+    // Reconstruct `from → … → to`, then reverse to `to → … → from`.
+    let mut path = vec![from.to_string()];
+    let mut cur = from;
+    while cur != to {
+        let Some(prev) = parent.get(cur) else { return None };
+        path.push(prev.to_string());
+        cur = prev;
+    }
+    path.reverse();
+    Some(path)
+}
+
 /// Re-ingests a project's spec + plan records (and all committed notes) into
 /// the live DB after a write-through mutation (R5). The project's `future/…`
 /// state is detached and rebuilt from its JSONL; code nodes are untouched.

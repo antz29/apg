@@ -444,6 +444,23 @@ fn link_depends_on(
         {
             anyhow::bail!("depends-on target `{dep}` is not an existing requirement");
         }
+        if let Some(path) = artifacts::cycle_closing_path(&records, &req_fqn, &dep_fqn, |r| match r {
+            Record::DependsOn { from, to } => Some((from.as_str(), to.as_str())),
+            _ => None,
+        }) {
+            let short: Vec<String> = path
+                .iter()
+                .map(|f| {
+                    f.strip_prefix(&format!("future/{project}/spec."))
+                        .unwrap_or(f)
+                        .to_string()
+                })
+                .collect();
+            anyhow::bail!(
+                "adding dependency {req_id} → {dep} would create a cycle: {}",
+                short.join(" → ")
+            );
+        }
         records.push(Record::DependsOn {
             from: req_fqn.clone(),
             to: dep_fqn,
@@ -1106,6 +1123,56 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn link_depends_on_rejects_cycles() {
+        // The platform dogfood case: O5↔O6 mutual dependence. Once O5→O6
+        // exists, linking O6 → O5 must be rejected — "delivered when its
+        // dependencies are delivered" is circular otherwise.
+        let mut records = vec![
+            Record::Requirement {
+                fqn: "future/foo/spec.O5".into(),
+                id: "O5".into(),
+                title: "token exchange".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.O6".into(),
+                id: "O6".into(),
+                title: "token store".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.O7".into(),
+                id: "O7".into(),
+                title: "sharding".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+Record::DependsOn {
+                from: "future/foo/spec.O6".into(),
+                to: "future/foo/spec.O7".into(),
+            },
+        ];
+        // Longer cycle first: O6 → O7 exists, so O7 → O6 closes O7→O6→O7.
+        let err = link_depends_on("foo", "O7", &["O6".into()], &mut records).unwrap_err();
+        assert!(format!("{err:#}").contains("O7 → O6"));
+        // O5 → O6 is fine on its own.
+        link_depends_on("foo", "O5", &["O6".into()], &mut records).unwrap();
+        // O6 → O5 closes O5 → O6 → O5 — rejected.
+        let err = link_depends_on("foo", "O6", &["O5".into()], &mut records).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("would create a cycle"), "got: {msg}");
+        assert!(msg.contains("O6 → O5"), "got: {msg}");
+        // The invalid edge was not persisted.
+        assert!(!records.iter().any(|r| matches!(
+            r,
+            Record::DependsOn { from, to }
+                if from == "future/foo/spec.O6" && to == "future/foo/spec.O5"
+        )));
     }
 
     #[test]
