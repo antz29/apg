@@ -292,6 +292,26 @@ impl Log {
         eprintln!("{msg}");
         let _ = writeln!(self.f, "{msg}");
     }
+
+    /// Appends a spooled file's contents to the log only (no terminal echo),
+    /// used to fold a frontend's captured stderr into `apg-frontend.log`.
+    fn append_file(&mut self, path: &Path) {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let _ = write!(self.f, "{content}");
+        }
+    }
+}
+
+/// Last `n` non-empty-ish lines of a file, oldest first (a short tail for
+/// reporting why a frontend failed).
+fn tail_of(path: &Path, n: usize) -> Vec<String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].iter().map(|s| s.to_string()).collect()
 }
 
 /// Directory holding the built scanner frontends. Resolution order:
@@ -951,25 +971,30 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     let config = classify::ApgConfig::load(&project_dir);
 
-    // The scanners' stderr (progress + compiler diagnostics) goes to the log
-    // file so their streaming output never floods the terminal.
-    let frontend_err = |log: &mut Log| Stdio::from(log.f.try_clone().expect("clone log file"));
+    // Each frontend's stderr (progress + compiler diagnostics) is spooled to a
+    // per-language temp file, then folded into the log file. On a non-zero
+    // exit the tail is also reported to the terminal (SPEC 0.9.1 R1).
     log.ln("Frontend progress -> apg-frontend.log");
 
     // Drain each frontend's stdout to a temp file (spooled to disk, never
     // buffered in memory), then ingest the merged streams. Running them
     // sequentially avoids pipe-backpressure deadlock and matches the old
-    // single-frontend behavior.
+    // single-frontend behavior. A failing frontend is reported and skipped, not
+    // fatal: the remaining languages still produce a graph, and a non-zero exit
+    // is aggregated at the end of the run.
     let tmp = temp_dir();
     std::fs::create_dir_all(&tmp).unwrap();
     let multi = languages.len() > 1;
     let mut spools: Vec<(String, PathBuf)> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
     for lang in &languages {
         let cmd = frontend_cmd(lang).unwrap_or_else(|| {
             panic!("frontend for language '{lang}' is not installed");
         });
         let spool = tmp.join(format!("{lang}.jsonl"));
         let spool_file = std::fs::File::create(&spool).unwrap();
+        let stderr_spool = tmp.join(format!("{lang}.stderr"));
+        let stderr_file = std::fs::File::create(&stderr_spool).unwrap();
         // `cmd` is a full command line (e.g. "node /path/scanner.mjs" or the
         // java wrapper); split it into argv so every frontend spawns the same
         // way.
@@ -990,15 +1015,23 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             .args(&path_excludes)
             .stdin(Stdio::null())
             .stdout(Stdio::from(spool_file.try_clone().unwrap()))
-            .stderr(frontend_err(&mut log));
+            .stderr(Stdio::from(stderr_file.try_clone().unwrap()));
         log.ln(&format!("[scan] running {lang} frontend..."));
         let mut frontend_output = child.spawn().expect("Failed to run frontend");
-        if !frontend_output
+        let ok = frontend_output
             .wait()
             .expect("couldn't wait for frontend")
-            .success()
-        {
-            panic!("{lang} frontend failed");
+            .success();
+        log.append_file(&stderr_spool);
+        if !ok {
+            log.ln(&format!(
+                "[scan] {lang} frontend failed; skipping this language"
+            ));
+            for line in tail_of(&stderr_spool, 10) {
+                log.ln(&format!("  [{lang}] {line}"));
+            }
+            failed.push(lang.clone());
+            continue;
         }
         log.ln(&format!("[scan] {lang} frontend exited"));
         spools.push((lang.clone(), spool));
@@ -1064,6 +1097,13 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     );
     let _ = std::fs::remove_dir_all(&tmp);
     log.ln("[scan] spool temp dir removed");
+    if !failed.is_empty() {
+        anyhow::bail!(
+            "{} frontend(s) failed to scan (partial graph written): {}",
+            failed.len(),
+            failed.join(", ")
+        );
+    }
     Ok(())
 }
 

@@ -1043,6 +1043,38 @@ static bool dir_has_sources(const fs::path &dir) {
     return false;
 }
 
+struct CppModule {
+    std::string name;
+    fs::path dir;
+};
+
+// Recursively finds the shallowest directories that directly contain C++
+// source files, skipping vendored/build noise dirs. Used as a fallback when the
+// top-level scan finds nothing, so a repo whose C++ code lives below the first
+// level (e.g. src/cpplib) still resolves a module (SPEC 0.9.1).
+static void find_modules_deep(const fs::path &dir, std::vector<CppModule> &modules,
+    int depth) {
+    if (depth <= 0) return;
+    if (dir_has_sources(dir)) {
+        std::string name = dir.filename().string();
+        if (name.empty()) name = "root";
+        modules.push_back({name, dir});
+        return;
+    }
+    for (const auto &entry : fs::directory_iterator(dir)) {
+        if (!entry.is_directory()) continue;
+        std::string name = entry.path().filename().string();
+        if (name[0] == '.') continue;
+        if (name == "vendor" || name == "third_party" || name == "external" ||
+            name == "node_modules" || name == "target" || name == "build" ||
+            name == "out" || name == "cmake-build-debug" ||
+            name == "cmake-build-release") {
+            continue;
+        }
+        find_modules_deep(entry.path(), modules, depth - 1);
+    }
+}
+
 static void get_cpp_files(fs::path dir, std::vector<fs::path> &files,
     const std::vector<std::string> &excludes, bool recursive)
 {
@@ -1118,11 +1150,7 @@ int main(int argc, char **argv) {
 
     // Discover modules: explicit --module dirs, or top-level dirs under root
     // that contain source files. The root itself is a module if it has sources.
-    struct Module {
-        std::string name;
-        fs::path dir;
-    };
-    std::vector<Module> modules;
+    std::vector<CppModule> modules;
     if (!module_dirs.empty()) {
         for (const auto &d : module_dirs) {
             fs::path dir = d == "." ? root : fs::absolute(d);
@@ -1145,6 +1173,11 @@ int main(int argc, char **argv) {
             if (dir_has_sources(entry.path())) {
                 modules.push_back({name, entry.path()});
             }
+        }
+        // No shallow module (sources nested below the first level) — search
+        // deeper rather than declaring nothing to scan (SPEC 0.9.1).
+        if (modules.empty()) {
+            find_modules_deep(root, modules, /*depth=*/6);
         }
     }
     if (modules.empty()) {

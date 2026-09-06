@@ -8,6 +8,7 @@ import (
 	"go/printer"
 	"go/token"
 	"go/types"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -134,29 +135,31 @@ func main() {
 	// Discover modules under root (or restricted to --module dirs).
 	mods := discoverModules(root, moduleDirs)
 	if len(mods) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no modules discovered under %s\n", root)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "No Go modules found under %s; nothing to scan\n", root)
+		return
 	}
 	modSet := map[string]bool{}
 	for _, m := range mods {
 		modSet[m.Path] = true
 	}
 
-	// Load all project modules in one go. Dir=root uses the root go.work,
-	// which sidesteps nested-workspace go-version mismatches.
-	patterns := make([]string, 0, len(mods))
+	// Load each project module separately. Dir is the module's own directory,
+	// so a module nested below the workspace root (e.g. src/golib without a
+	// root go.work) resolves its own go.mod, while a root go.work/module is
+	// found by walking up.
+	var pkgs []*packages.Package
 	for _, m := range mods {
-		patterns = append(patterns, m.Path+"/...")
-	}
-	cfg := &packages.Config{
-		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule,
-		Dir:   root,
-		Tests: true,
-	}
-	pkgs, err := packages.Load(cfg, patterns...)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		cfg := &packages.Config{
+			Mode:  packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule,
+			Dir:   m.Dir,
+			Tests: true,
+		}
+		loaded, err := packages.Load(cfg, m.Path+"/...")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading %s: %v\n", m.Path, err)
+			continue
+		}
+		pkgs = append(pkgs, loaded...)
 	}
 	if packages.PrintErrors(pkgs) > 0 {
 		fmt.Fprintf(os.Stderr, "Warning: some packages had errors\n")
@@ -256,9 +259,21 @@ func main() {
 	fmt.Fprintln(os.Stderr)
 }
 
-// discoverModules runs `go list -m -json all` in root and returns the modules
-// whose Dir is under root (or under one of the --module dirs, if given).
+// discoverModules finds the Go modules under root: via `go list -m -json all`
+// when a workspace/module sits at root, else by walking the tree for nested
+// go.mod files (SPEC 0.9.1 R2 — a repo whose Go code is not at the workspace
+// root). Returns modules whose Dir is under root (or under a --module dir).
 func discoverModules(root string, moduleDirs []string) []moduleInfo {
+	mods := discoverModulesViaGoList(root, moduleDirs)
+	if len(mods) == 0 {
+		mods = discoverNestedModules(root, moduleDirs)
+	}
+	return mods
+}
+
+// discoverModulesViaGoList runs `go list -m -json all` in root and returns the
+// modules whose Dir is under root (or under one of the --module dirs).
+func discoverModulesViaGoList(root string, moduleDirs []string) []moduleInfo {
 	cmd := exec.Command("go", "list", "-m", "-json", "all")
 	cmd.Dir = root
 	out, err := cmd.Output()
@@ -267,15 +282,7 @@ func discoverModules(root string, moduleDirs []string) []moduleInfo {
 		return nil
 	}
 
-	// Restrict to the given module dirs if any were provided.
-	restrict := make([]string, 0, len(moduleDirs))
-	for _, d := range moduleDirs {
-		abs, err := filepath.Abs(d)
-		if err != nil {
-			continue
-		}
-		restrict = append(restrict, abs)
-	}
+	restrict := absRestrict(moduleDirs)
 
 	var mods []moduleInfo
 	dec := json.NewDecoder(strings.NewReader(string(out)))
@@ -294,25 +301,83 @@ func discoverModules(root string, moduleDirs []string) []moduleInfo {
 		if err != nil {
 			continue
 		}
-		if !strings.HasPrefix(absDir, root) {
+		if !strings.HasPrefix(absDir, root) || !dirAllowed(absDir, restrict) {
 			continue
-		}
-		if len(restrict) > 0 {
-			ok := false
-			for _, r := range restrict {
-				if absDir == r || strings.HasPrefix(absDir, r+string(filepath.Separator)) {
-					ok = true
-					break
-				}
-			}
-			if !ok {
-				continue
-			}
 		}
 		mods = append(mods, moduleInfo{Path: m.Path, Dir: absDir})
 	}
 	sort.Slice(mods, func(i, j int) bool { return mods[i].Path < mods[j].Path })
 	return mods
+}
+
+// discoverNestedModules walks root for go.mod files (skipping vendor,
+// node_modules, target, and dot dirs) and resolves each module's path with
+// `go list -m` from its own directory.
+func discoverNestedModules(root string, moduleDirs []string) []moduleInfo {
+	restrict := absRestrict(moduleDirs)
+	var mods []moduleInfo
+	seen := map[string]bool{}
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == "vendor" || name == "node_modules" || name == "target" ||
+				name == ".git" || strings.HasPrefix(name, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		if !dirAllowed(dir, restrict) || seen[dir] {
+			return nil
+		}
+		cmd := exec.Command("go", "list", "-m")
+		cmd.Dir = dir
+		out, err := cmd.Output()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: go list -m failed in %s: %v\n", dir, err)
+			return nil
+		}
+		modPath := strings.TrimSpace(string(out))
+		if modPath == "" {
+			return nil
+		}
+		seen[dir] = true
+		mods = append(mods, moduleInfo{Path: modPath, Dir: dir})
+		return nil
+	})
+	sort.Slice(mods, func(i, j int) bool { return mods[i].Path < mods[j].Path })
+	return mods
+}
+
+// absRestrict resolves --module dirs to absolute paths.
+func absRestrict(moduleDirs []string) []string {
+	restrict := make([]string, 0, len(moduleDirs))
+	for _, d := range moduleDirs {
+		if abs, err := filepath.Abs(d); err == nil {
+			restrict = append(restrict, abs)
+		}
+	}
+	return restrict
+}
+
+// dirAllowed reports whether absDir falls under one of the restrict dirs (all
+// allowed when restrict is empty).
+func dirAllowed(absDir string, restrict []string) bool {
+	if len(restrict) == 0 {
+		return true
+	}
+	for _, r := range restrict {
+		if absDir == r || strings.HasPrefix(absDir, r+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // moduleForPkg returns the module path that owns pkgPath (longest prefix match).
@@ -383,15 +448,15 @@ func collectDecls(file *ast.File, filePath string, p *packages.Package) []fileDe
 							parent := pkgFqn + "." + typeName
 							funcID[funcKey(parent, name.Name, filePath)] = mid
 							decls = append(decls, fileDecl{
-								kind:   "function",
-								id:     mid,
-								parent: parent,
-								name:   name.Name,
-								params: interfaceMethodParams(m, ti),
-								file:   filePath,
-								path:   filePath,
-								start:  p.Fset.Position(m.Pos()).Offset,
-								end:    p.Fset.Position(m.End()).Offset,
+								kind:    "function",
+								id:      mid,
+								parent:  parent,
+								name:    name.Name,
+								params:  interfaceMethodParams(m, ti),
+								file:    filePath,
+								path:    filePath,
+								start:   p.Fset.Position(m.Pos()).Offset,
+								end:     p.Fset.Position(m.End()).Offset,
 								astNode: m,
 							})
 						}
