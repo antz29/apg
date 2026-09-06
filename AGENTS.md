@@ -79,7 +79,7 @@ abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
 `apg_unresolved`, `apg_hunk` — and the spec/plan/review suite: `apg_spec`
-(+ requirements/phases/deps/anchors/trace/unresolved/init/add/anchor/link/rm/
+(+ requirements/phases/deps/anchors/trace/unresolved/fixes/init/add/anchor/link/rm/
 render/promote/archive), `apg_plan` (+ phases/tasks/complete/render/init/add/
 link/done/undone), `apg_review` (+ add/action/resolve/reject). Shared plumbing
 lives in `~/.opencode/lib/apg.ts`
@@ -223,21 +223,32 @@ live DB).
 Additional node labels: `Spec`, `Requirement`, `Phase`, `Decision`, `Future`,
 `NonGoal`, `AcceptanceCriterion`, `VerificationItem`, `Note`, `Feedback`,
 `Plan`, `PlanPhase`, `Task`. Additional edges: `Details` (Note→any),
-`Reviews` (Feedback→any), `DependsOn` (Requirement→Requirement), `Gates`
-(Phase→Phase, PlanPhase→PlanPhase), `SpecDependsOn` (Spec→Spec), `Anchors`
+`Reviews` (Feedback→any), `DependsOn` (Requirement→Requirement — same-project,
+or cross-project `future/<other-proj>/spec.<id>` via `--depends-on
+<other-proj>/<id>`), `Gates`
+(Phase→Phase, PlanPhase→PlanPhase), `SpecDependsOn` (Spec→Spec — whole-spec
+antecedents, authored with `apg spec link <project> spec --depends-on
+<other-project>`), `Anchors`
 (Requirement/Task→code or Future), `Implements` (code→Requirement),
-`Satisfies` (PlanPhase→Requirement), `Builds` (Task→Future).
+`Satisfies` (PlanPhase→Requirement), `Builds` (Task→Future). Dependency and
+cross-spec cycles are detected across **all** spec projects' edges and rejected
+at write time.
 
 - `Future {fqn, kind, target}` is a placeholder for not-yet-built code
   (`kind` ∈ function/struct/service/rpc/endpoint/other, `target` = intended
   real FQN); a pending anchor is `Anchors(req→Future)`.
+- `Task {fqn, title, kind, tier, status}` carries a two-axis classification:
+  `kind` ∈ source/test/gate/docs/human is the **owning role** (orthogonal,
+  `source` default); `tier` ∈ unit/int/e2e is the verification depth,
+  required iff `kind = test`, rejected otherwise. `apg plan complete` refuses
+  to close a phase while a `human` task in it is not `done`.
 - Requirement state is **derived**: `delivered` (an `Implements` edge exists)
   vs `planned`; a spec is `implemented` when every requirement is delivered.
 - `Feedback {fqn, body, status, disposition}` is a review item;
   `status` ∈ open/actioned/resolved. An artifact is done only when every
   `Feedback` on it is `resolved` — `apg spec archive` and
   `apg plan complete` refuse otherwise.
-- Query patterns: pending anchors `MATCH (r:Requirement)-[:Anchors]->(f:Future) RETURN r.fqn, f.fqn`; what's left in a spec `MATCH (p:Phase)-[:Contains]->(r:Requirement) WHERE NOT (r)<-[:Implements]-(:Struct)` — or use the suite tools (`apg_spec`, `apg_spec_requirements`, `apg_spec_phases`, `apg_spec_anchors`, `apg_spec_trace`, `apg_spec_unresolved`, `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
+- Query patterns: pending anchors `MATCH (r:Requirement)-[:Anchors]->(f:Future) RETURN r.fqn, f.fqn`; what's left in a spec `MATCH (p:Phase)-[:Contains]->(r:Requirement) WHERE NOT (r)<-[:Implements]-(:Struct)` — or use the suite tools (`apg_spec`, `apg_spec_requirements`, `apg_spec_phases`, `apg_spec_anchors`, `apg_spec_trace`, `apg_spec_unresolved`, `apg_spec_fixes`, `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
 - The six distributed agents (installed by `apg init`): `codebase-navigator`
   (delegates spec/plan authoring to the writers via `task`), `spec-writer` /
   `plan-writer` (author through the `apg_spec_*`/`apg_plan_*` tools, **no file
