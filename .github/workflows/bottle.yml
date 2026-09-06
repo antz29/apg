@@ -49,14 +49,14 @@ jobs:
             scanner apg-go apg-java apg-cpp apg-rust apg-ts apg-csharp
 
       - name: Upload bottle artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bottles-${{ matrix.arch }}
           path: ${{ runner.temp }}/*.bottle*.tar.gz
           if-no-files-found: error
 
       - name: Upload bottle JSON
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bottles-json-${{ matrix.arch }}
           path: ${{ runner.temp }}/*.bottle*.json
@@ -67,12 +67,12 @@ jobs:
     needs: bottle
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
 
       - name: Download bottle artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: bottles-*
           merge-multiple: true
