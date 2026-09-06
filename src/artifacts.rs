@@ -549,13 +549,19 @@ pub fn cycle_closing_path(
 /// Re-ingests a project's spec + plan records (and all committed notes) into
 /// the live DB after a write-through mutation (R5). The project's `future/…`
 /// state is detached and rebuilt from its JSONL; code nodes are untouched.
+///
+/// Every spec project's records are merged, not just `project`'s: spec graphs
+/// form one merged space, and a cross-project `DependsOn`/`SpecDependsOn` edge
+/// targets a node living in another project's JSONL — re-ingesting only this
+/// project's records would leave that endpoint out of `known` and the edge
+/// silently skipped. Node merges are idempotent upserts, so the extra projects
+/// are a no-op cost.
 pub fn reingest_project(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     let db = ArtifactDb::open(apg_root)?;
     db.detach_delete_project(project)?;
     let mut records: Vec<Record> = Vec::new();
-    let spec_path = specs::spec_jsonl_path(apg_root, project);
-    if spec_path.exists() {
-        records.extend(specs::read_jsonl(&spec_path)?);
+    for f in specs::jsonl_files(&apg_root.join("specs")) {
+        records.extend(specs::read_jsonl(&f)?);
     }
     let plan_path = specs::plan_jsonl_path(apg_root, project);
     if plan_path.exists() {

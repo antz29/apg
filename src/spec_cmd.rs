@@ -125,16 +125,21 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
                 to: fqn.clone(),
             });
             for dep in p.all("depends-on") {
-                let dep_fqn = format!("future/{project}/spec.{dep}");
-                if dep == *id {
+                let (dep_proj, dep_id) = dep_target(dep.as_str(), project.as_str(), &apg_root);
+                if dep_proj == project.as_str() && dep_id == id.as_str() {
                     anyhow::bail!("requirement `{id}` cannot depend on itself");
                 }
-                if !records
-                    .iter()
-                    .any(|r| matches!(r, Record::Requirement { fqn, .. } if fqn == &dep_fqn))
-                {
+                let dep_fqn = format!("future/{dep_proj}/spec.{dep_id}");
+                let exists = if dep_proj == project.as_str() {
+                    records
+                        .iter()
+                        .any(|r| matches!(r, Record::Requirement { fqn, .. } if fqn == &dep_fqn))
+                } else {
+                    requirement_exists(&apg_root, &dep_proj, &dep_id)?
+                };
+                if !exists {
                     anyhow::bail!(
-                        "depends-on target `{dep}` is not an existing requirement in `{project}`"
+                        "depends-on target `{dep}` is not an existing requirement in `{dep_proj}`"
                     );
                 }
                 recs.push(Record::DependsOn {
@@ -452,25 +457,116 @@ fn anchor_upsert(req_fqn: &str, fqn: &str, records: &mut Vec<Record>) {
     });
 }
 
-/// `apg spec link <project> <req-id> [--depends-on <id>]*` (R8).
+/// `apg spec link <project> <req-id|spec> [--depends-on <id|proj/id>]*` (R8).
+/// Requirement targets are same-project ids (`R4`) or cross-project
+/// `<project>/<id>`; `spec` links the spec node itself to other specs
+/// (`--depends-on <project>`, a SpecDependsOn antecedent).
 fn spec_link(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let (Some(project), Some(req_id)) = (p.positional.first(), p.positional.get(1)) else {
-        anyhow::bail!("usage: apg spec link <project> <req-id> [--depends-on <id>]*");
+        anyhow::bail!("usage: apg spec link <project> <req-id|spec> [--depends-on <id|proj/id>]*");
     };
     let apg_root = require_apg_root()?;
     artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_project(&apg_root, project)?;
-    link_depends_on(project, req_id, &p.all("depends-on"), &mut records)?;
+    if req_id == "spec" {
+        link_spec_depends(&apg_root, project, &p.all("depends-on"), &mut records)?;
+    } else {
+        link_depends_on(&apg_root, project, req_id, &p.all("depends-on"), &mut records)?;
+    }
     write_through(&apg_root, project, &records)?;
     println!("Linked {project}.{req_id} depends-on");
     Ok(())
 }
 
+/// The (project, id) pair a `--depends-on` target names. A bare `R4` is a
+/// same-project requirement; `<project>/R4` is cross-project when the prefix
+/// names a spec that exists (or the current project). The syntax is
+/// unambiguous in practice: requirement ids are `/`-free.
+fn dep_target(dep: &str, project: &str, apg_root: &Path) -> (String, String) {
+    if let Some((proj, id)) = dep.split_once('/')
+        && (proj == project || specs::spec_jsonl_path(apg_root, proj).exists())
+    {
+        return (proj.to_string(), id.to_string());
+    }
+    (project.to_string(), dep.to_string())
+}
+
+/// Whether `id` is a declared requirement of spec project `proj`.
+fn requirement_exists(apg_root: &Path, proj: &str, id: &str) -> anyhow::Result<bool> {
+    let path = specs::spec_jsonl_path(apg_root, proj);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let fqn = format!("future/{proj}/spec.{id}");
+    Ok(specs::read_jsonl(&path)?.iter().any(|r| {
+        matches!(r, Record::Requirement { fqn: f, .. } if *f == fqn)
+    }))
+}
+
+/// Every spec project's records merged into one list — the cross-project
+/// view used for cycle detection (a DependsOn/SpecDependsOn edge may route
+/// through other projects' records back into this one).
+fn all_spec_records(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Result<Vec<Record>> {
+    let mut all = records.to_vec();
+    for f in specs::jsonl_files(&apg_root.join("specs")) {
+        if f.file_stem().and_then(|s| s.to_str()) == Some(project) {
+            continue;
+        }
+        all.extend(specs::read_jsonl(&f)?);
+    }
+    Ok(all)
+}
+
+/// Applies `SpecDependsOn(spec → spec)` edges for `project`: removes its
+/// existing outgoing edges once, then adds every antecedent project. The
+/// target must be a declared spec; self-deps and SpecDependsOn cycles (across
+/// all spec projects) are write-time errors.
+fn link_spec_depends(
+    apg_root: &Path,
+    project: &str,
+    deps: &[String],
+    records: &mut Vec<Record>,
+) -> anyhow::Result<()> {
+    let spec_fqn = format!("future/{project}/spec");
+    records.retain(|r| !matches!(r, Record::SpecDepends { from, .. } if from == &spec_fqn));
+    for dep in deps {
+        if dep == project {
+            anyhow::bail!("spec `{project}` cannot depend on itself");
+        }
+        if !specs::spec_jsonl_path(apg_root, dep).exists() {
+            anyhow::bail!("spec `{dep}` does not exist — declare it with `apg spec init {dep}`");
+        }
+        let dep_fqn = format!("future/{dep}/spec");
+        let all = all_spec_records(apg_root, project, records)?;
+        if let Some(path) = artifacts::cycle_closing_path(&all, &spec_fqn, &dep_fqn, |r| match r {
+            Record::SpecDepends { from, to } => Some((from.as_str(), to.as_str())),
+            _ => None,
+        }) {
+            let short: Vec<String> = path
+                .iter()
+                .map(|f| f.strip_prefix("future/").unwrap_or(f).to_string())
+                .collect();
+            anyhow::bail!(
+                "adding spec dependency {project} → {dep} would create a cycle: {}",
+                short.join(" → ")
+            );
+        }
+        records.push(Record::SpecDepends {
+            from: spec_fqn.clone(),
+            to: dep_fqn,
+        });
+    }
+    Ok(())
+}
+
 /// Applies the depends-on edges for `req_id`: removes its existing edges once,
 /// then adds every dep (R8). A dep may repeat across calls (idempotent upsert);
-/// self-deps and undeclared targets are write-time errors.
+/// self-deps and undeclared targets are write-time errors. Targets may be
+/// same-project ids (`R4`) or cross-project `<project>/<id>`; cycle detection
+/// runs over every spec project's DependsOn edges.
 fn link_depends_on(
+    apg_root: &Path,
     project: &str,
     req_id: &str,
     deps: &[String],
@@ -489,26 +585,36 @@ fn link_depends_on(
     // the rest of the dependency graph when a requirement is re-linked.
     records.retain(|r| !matches!(r, Record::DependsOn { from, .. } if from.as_str() == req_fqn));
     for dep in deps {
-        let dep_fqn = format!("future/{project}/spec.{dep}");
-        if dep.as_str() == req_id {
+        let (dep_proj, dep_id) = dep_target(dep, project, apg_root);
+        if dep_proj == project && dep_id == req_id {
             anyhow::bail!("requirement `{req_id}` cannot depend on itself");
         }
-        if !records
-            .iter()
-            .any(|r| matches!(r, Record::Requirement { fqn, .. } if fqn == &dep_fqn))
-        {
-            anyhow::bail!("depends-on target `{dep}` is not an existing requirement");
+        let dep_fqn = format!("future/{dep_proj}/spec.{dep_id}");
+        // Same-project targets validate against the in-memory records (they are
+        // the loaded file); cross-project targets against the target spec file.
+        let exists = if dep_proj == project {
+            records.iter().any(|r| matches!(r, Record::Requirement { fqn, .. } if fqn == &dep_fqn))
+        } else {
+            requirement_exists(apg_root, &dep_proj, &dep_id)?
+        };
+        if !exists {
+            anyhow::bail!(
+                "depends-on target `{dep}` is not an existing requirement (in `{dep_proj}`)"
+            );
         }
-        if let Some(path) = artifacts::cycle_closing_path(records, &req_fqn, &dep_fqn, |r| match r {
+        let all = all_spec_records(apg_root, project, records)?;
+        if let Some(path) = artifacts::cycle_closing_path(&all, &req_fqn, &dep_fqn, |r| match r {
             Record::DependsOn { from, to } => Some((from.as_str(), to.as_str())),
             _ => None,
         }) {
             let short: Vec<String> = path
                 .iter()
                 .map(|f| {
-                    f.strip_prefix(&format!("future/{project}/spec."))
-                        .unwrap_or(f)
-                        .to_string()
+                    if let Some(id) = f.strip_prefix(&format!("future/{project}/spec.")) {
+                        id.to_string()
+                    } else {
+                        f.strip_prefix("future/").unwrap_or(f).to_string()
+                    }
                 })
                 .collect();
             anyhow::bail!(
@@ -631,7 +737,7 @@ fn render_spec(records: &[Record], db: &artifacts::ArtifactDb) -> anyhow::Result
                 .iter()
                 .filter_map(|e| match e {
                     Record::DependsOn { from, to } if from == fqn => {
-                        Some(dep_id_of(to, &project))
+                        Some(short_req(to, &project))
                     }
                     _ => None,
                 })
@@ -810,6 +916,21 @@ fn render_spec(records: &[Record], db: &artifacts::ArtifactDb) -> anyhow::Result
 fn dep_id_of(fqn: &str, project: &str) -> String {
     let prefix = format!("future/{project}/spec.");
     fqn.strip_prefix(&prefix).unwrap_or(fqn).to_string()
+}
+
+/// Renders a DependsOn target compactly: the bare id for same-project deps,
+/// `<project>/<id>` for cross-project ones.
+fn short_req(fqn: &str, project: &str) -> String {
+    let prefix = format!("future/{project}/spec.");
+    if let Some(id) = fqn.strip_prefix(&prefix) {
+        return id.to_string();
+    }
+    if let Some(rest) = fqn.strip_prefix("future/")
+        && let Some((proj, id)) = rest.split_once("/spec.")
+    {
+        return format!("{proj}/{id}");
+    }
+    fqn.to_string()
 }
 
 /// Resolves an anchor target's `path:start_line` from the live graph.
@@ -1088,7 +1209,9 @@ mod tests {
         // Multiple --depends-on in one call must all land (regression: the
         // incident-edge removal used to run inside the loop, dropping earlier
         // edges so only the last dep survived).
+        let apg = Path::new("/nonexistent");
         link_depends_on(
+            apg,
             "foo",
             "R1",
             &["R2".into(), "R3".into()],
@@ -1109,7 +1232,7 @@ mod tests {
         assert_eq!(deps, vec!["future/foo/spec.R2", "future/foo/spec.R3"]);
 
         // Re-linking replaces, never duplicates.
-        link_depends_on("foo", "R1", &["R3".into()], &mut records).unwrap();
+        link_depends_on(apg, "foo", "R1", &["R3".into()], &mut records).unwrap();
         let deps: Vec<_> = records
             .iter()
             .filter_map(|r| match r {
@@ -1124,8 +1247,8 @@ mod tests {
         assert_eq!(deps, vec!["future/foo/spec.R3"]);
 
         // Self-deps and undeclared targets are write-time errors.
-        assert!(link_depends_on("foo", "R1", &["R1".into()], &mut records).is_err());
-        assert!(link_depends_on("foo", "R1", &["R9".into()], &mut records).is_err());
+        assert!(link_depends_on(apg, "foo", "R1", &["R1".into()], &mut records).is_err());
+        assert!(link_depends_on(apg, "foo", "R1", &["R9".into()], &mut records).is_err());
     }
 
     #[test]
@@ -1160,7 +1283,7 @@ mod tests {
                 to: "future/foo/spec.R2".into(),
             },
         ];
-        link_depends_on("foo", "R2", &["R1".into()], &mut records).unwrap();
+        link_depends_on(Path::new("/nonexistent"), "foo", "R2", &["R1".into()], &mut records).unwrap();
         assert!(records.iter().any(|r| matches!(
             r,
             Record::DependsOn { from, to }
@@ -1242,12 +1365,12 @@ Record::DependsOn {
             },
         ];
         // Longer cycle first: O6 → O7 exists, so O7 → O6 closes O7→O6→O7.
-        let err = link_depends_on("foo", "O7", &["O6".into()], &mut records).unwrap_err();
+        let err = link_depends_on(Path::new("/nonexistent"), "foo", "O7", &["O6".into()], &mut records).unwrap_err();
         assert!(format!("{err:#}").contains("O7 → O6"));
         // O5 → O6 is fine on its own.
-        link_depends_on("foo", "O5", &["O6".into()], &mut records).unwrap();
+        link_depends_on(Path::new("/nonexistent"), "foo", "O5", &["O6".into()], &mut records).unwrap();
         // O6 → O5 closes O5 → O6 → O5 — rejected.
-        let err = link_depends_on("foo", "O6", &["O5".into()], &mut records).unwrap_err();
+        let err = link_depends_on(Path::new("/nonexistent"), "foo", "O6", &["O5".into()], &mut records).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("would create a cycle"), "got: {msg}");
         assert!(msg.contains("O6 → O5"), "got: {msg}");
@@ -1422,5 +1545,157 @@ Record::DependsOn {
         // Re-adding an existing (from, to) pair is an idempotent no-op.
         anchor_upsert("future/foo/spec.R1", "github.com/x/y.Store", &mut records);
         assert_eq!(records.len(), 3);
+    }
+
+    #[test]
+    fn spec_depends_links_cross_project_specs() {
+        let (apg_root, dir) = fixture_layout("xspec");
+        let foo = vec![Record::Spec {
+            fqn: "future/foo/spec".into(),
+            title: "Foo".into(),
+            goal: String::new(),
+        }];
+        let bar = vec![Record::Spec {
+            fqn: "future/bar/spec".into(),
+            title: "Bar".into(),
+            goal: String::new(),
+        }];
+        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &foo).unwrap();
+        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "bar"), &bar).unwrap();
+
+        // foo depends on bar (SpecDependsOn).
+        let mut records = foo.clone();
+        link_spec_depends(&apg_root, "foo", &["bar".into()], &mut records).unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::SpecDepends { from, to }
+                if from == "future/foo/spec" && to == "future/bar/spec"
+        )));
+
+        // Self-dep and undeclared-spec targets are write-time errors.
+        assert!(link_spec_depends(&apg_root, "foo", &["foo".into()], &mut records).is_err());
+        assert!(link_spec_depends(&apg_root, "foo", &["baz".into()], &mut records).is_err());
+
+        // Re-linking replaces, never duplicates.
+        link_spec_depends(&apg_root, "foo", &["bar".into()], &mut records).unwrap();
+        let deps: Vec<&str> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::SpecDepends { from, to } if from == "future/foo/spec" => Some(to.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deps, vec!["future/bar/spec"]);
+
+        // Cycle across projects: once bar → foo exists (in bar's file), foo →
+        // bar would close bar → foo → bar.
+        let mut bar_records = bar.clone();
+        link_spec_depends(&apg_root, "bar", &["foo".into()], &mut bar_records).unwrap();
+        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "bar"), &bar_records).unwrap();
+        let err = link_spec_depends(&apg_root, "foo", &["bar".into()], &mut records).unwrap_err();
+        assert!(format!("{err:#}").contains("would create a cycle"));
+        // The invalid edge was not persisted.
+        assert!(!records.iter().any(|r| matches!(
+            r,
+            Record::SpecDepends { from, to }
+                if from == "future/foo/spec" && to == "future/bar/spec"
+        )));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn depends_on_crosses_projects() {
+        let (apg_root, dir) = fixture_layout("xreq");
+        let foo = vec![
+            Record::Spec {
+                fqn: "future/foo/spec".into(),
+                title: "Foo".into(),
+                goal: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.R1".into(),
+                id: "R1".into(),
+                title: "t".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Contains {
+                from: "future/foo/spec".into(),
+                to: "future/foo/spec.R1".into(),
+            },
+        ];
+        let bar = vec![
+            Record::Spec {
+                fqn: "future/bar/spec".into(),
+                title: "Bar".into(),
+                goal: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/bar/spec.R2".into(),
+                id: "R2".into(),
+                title: "t".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Contains {
+                from: "future/bar/spec".into(),
+                to: "future/bar/spec.R2".into(),
+            },
+        ];
+        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &foo).unwrap();
+        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "bar"), &bar).unwrap();
+
+        // foo.R1 depends on bar.R2 (cross-project DependsOn).
+        let mut records = foo.clone();
+        link_depends_on(&apg_root, "foo", "R1", &["bar/R2".into()], &mut records).unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::DependsOn { from, to }
+                if from == "future/foo/spec.R1" && to == "future/bar/spec.R2"
+        )));
+
+        // Unknown cross-project target rejected; unknown project prefix is
+        // treated as a (rejected) same-project id.
+        assert!(link_depends_on(&apg_root, "foo", "R1", &["bar/R9".into()], &mut records).is_err());
+        assert!(link_depends_on(&apg_root, "foo", "R1", &["baz/R2".into()], &mut records).is_err());
+
+        // Cross-project cycle: bar.R2 → foo.R1 (persisted), then foo.R1 →
+        // bar.R2 would close foo.R1 → bar.R2 → foo.R1.
+        let mut bar_records = bar.clone();
+        link_depends_on(&apg_root, "bar", "R2", &["foo/R1".into()], &mut bar_records).unwrap();
+        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "bar"), &bar_records).unwrap();
+        let err = link_depends_on(&apg_root, "foo", "R1", &["bar/R2".into()], &mut records).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("would create a cycle"), "got: {msg}");
+        // The invalid edge was not persisted.
+        assert!(!records.iter().any(|r| matches!(
+            r,
+            Record::DependsOn { from, to }
+                if from == "future/foo/spec.R1" && to == "future/bar/spec.R2"
+        )));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dep_target_parses_cross_project() {
+        let (apg_root, dir) = fixture_layout("dparse");
+        specs::write_jsonl(
+            &specs::spec_jsonl_path(&apg_root, "bar"),
+            &[Record::Spec {
+                fqn: "future/bar/spec".into(),
+                title: "Bar".into(),
+                goal: String::new(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(dep_target("R4", "foo", &apg_root), ("foo".to_string(), "R4".to_string()));
+        assert_eq!(dep_target("bar/R2", "foo", &apg_root), ("bar".to_string(), "R2".to_string()));
+        // An unknown project prefix is not a known spec — stays a same-project id.
+        assert_eq!(dep_target("baz/R2", "foo", &apg_root), ("foo".to_string(), "baz/R2".to_string()));
+        // Explicit same-project prefix.
+        assert_eq!(dep_target("foo/R1", "foo", &apg_root), ("foo".to_string(), "R1".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
