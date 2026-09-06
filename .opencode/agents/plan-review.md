@@ -87,6 +87,8 @@ reviewer: apg_review_reject <f>                       → status = open     (reo
 ## What to check
 
 - A task marked `done` whose `Builds` future's target does not exist in the code graph (the promote should have retired the future — a residual is a defect).
+- **Task classification integrity** (`apg_plan_tasks`): every task carries one `kind` (source/test/gate/docs/human); a `test` task must have a `tier` (unit/int/e2e) and no non-test task may. Flag tasks that shoehorn two kinds into one ("implement + unit-test X" should be two tasks).
+- **Human-teeth**: a `human`-kind task (judgment/decision/review only a person can do) must not be marked `done` by an agent, and `apg plan complete` refuses to close a phase around an un-done one. Flag any `human` task the writer/agent self-marked `done`.
 - `Satisfies` claims: the phase's deliverable actually implements the requirement (`Implements` edges present).
 - Acceptance criteria and verification items for the phase; seam contracts carried by notes.
 - Unresolved feedback left over from earlier review rounds.

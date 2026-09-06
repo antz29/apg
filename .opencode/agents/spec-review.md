@@ -98,5 +98,6 @@ reviewer: apg_review_reject <f>                       → status = open     (reo
 - Ambiguous requirements (multiple interpretations) and non-objective acceptance criteria.
 - Requirements not anchored to real code (or a declared `Future`) — an unresolvable anchor FQN is a defect.
 - Contradictions between sections; scope that doesn't fit one phased plan.
-- Every requirement in a phase; every `depends_on` target exists (`apg_spec_unresolved`).
+- Every requirement in a phase; every `depends_on` target exists (`apg_spec_unresolved`). **Cross-spec deps are first-class**: a requirement may consume another spec's requirement (`--depends-on other-proj/id`) and a spec may declare whole-spec antecedents (`SpecDependsOn`) — verify cross-spec targets are declared requirements of the other project, not dangling. `apg_spec_deps` shows them.
+- **Materialization integrity**: when a spec was materialized from a source spec, run `apg_spec_fixes` — every change the writer made should carry a `materialization-fix` Note (source statement / inconsistency / resolution / `[autonomous]` or `[with user]`). Missing or undocumented fixes are review-worthy.
 - Concrete, implementation-ready wording suitable for a plan-writer.

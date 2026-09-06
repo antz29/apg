@@ -277,8 +277,10 @@ propose/author a spec graph, **delegate to the `spec-writer` subagent** via the
 `task` tool. You never author a spec inline — the spec-writer has the
 `apg_spec_*` authoring tools and the closed review cycle; you have read access
 only. Give the subagent the project name (or ask the user for it), the idea,
-and any constraints. Report the resulting spec fqn
-(`future/<project>/spec`) when it returns.
+and any constraints — including **cross-spec relationships** when the new spec
+builds on an existing one (the spec-writer can declare whole-spec antecedents
+`SpecDependsOn` and cross-project requirement `DependsOn`). Report the
+resulting spec fqn (`future/<project>/spec`) when it returns.
 
 ### Plan authoring (delegate — never author inline)
 

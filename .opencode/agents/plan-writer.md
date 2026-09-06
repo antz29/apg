@@ -118,8 +118,10 @@ one:
 **Split, don't shoehorn** — a task has one kind: "implement + unit-test X" is
 two tasks (`source` + `test`/`unit`); "build the e2e harness" is `source`;
 "author/run the e2e tests" is `test`/`e2e`. A `human` task can only be completed
-by the person — don't mark it done on their behalf, and don't close a phase
-around it.
+by the person — don't mark it done on their behalf. **`apg plan complete`
+refuses to close a phase (or retire the final-phase plan) while a `human` task
+in it is not `done`**, so authoring a `human` step means the phase waits on the
+person.
 - **Linking** (`apg_plan_link <project> <phase-n> --satisfies <req-id> --prereq <n>`) — add `Satisfies`/`Gates` edges later.
 
 The plan is the bridge that carries the spec (`future`) into code (`present`):
