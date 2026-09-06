@@ -8,7 +8,7 @@ class ApgCsharp < Formula
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
       tag:      "v0.9.2",
-      revision: "41932ceac9ab75bcebd230cb6214a85e9095b607"
+      revision: "dda990c8b2b5baedc4ffedd959c8aabf8d6cf1b9"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
