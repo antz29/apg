@@ -520,11 +520,12 @@ pub fn cycle_closing_path(
     queue.push_back(to);
     while let Some(cur) = queue.pop_front() {
         for r in records {
-            if let Some((a, b)) = is_edge(r) {
-                if a == cur && !parent.contains_key(b) {
-                    parent.insert(b, cur);
-                    queue.push_back(b);
-                }
+            if let Some((a, b)) = is_edge(r)
+                && a == cur
+                && !parent.contains_key(b)
+            {
+                parent.insert(b, cur);
+                queue.push_back(b);
             }
         }
     }
@@ -535,7 +536,7 @@ pub fn cycle_closing_path(
     let mut path = vec![from.to_string()];
     let mut cur = from;
     while cur != to {
-        let Some(prev) = parent.get(cur) else { return None };
+        let prev = parent.get(cur)?;
         path.push(prev.to_string());
         cur = prev;
     }

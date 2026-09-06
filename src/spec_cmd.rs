@@ -292,15 +292,16 @@ fn add_note(
     let Some(body) = p.get("body") else {
         anyhow::bail!("note requires --body");
     };
-    let kind = p.get("kind").unwrap_or_default();
+    let kind = p.get("kind").unwrap_or_else(|| "note".to_string());
     let ons = p.all("on");
     if ons.is_empty() {
+        validate_note_kind(&kind, "project")?;
         let n = artifacts::next_free(records, "note");
         let fqn = format!("future/{project}/note-{n}");
         records.push(Record::Note {
             fqn: fqn.clone(),
             body: body.clone(),
-            kind: kind.clone(),
+            kind: kind.to_string(),
         });
         write_through(apg_root, project, records)?;
         println!("Added project note to {project}");
@@ -311,9 +312,15 @@ fn add_note(
         if !db.has_node(target) {
             anyhow::bail!("note target `{target}` does not exist in the graph");
         }
+        let category = if db.code_label(target).is_some() {
+            "code"
+        } else {
+            "spec"
+        };
+        validate_note_kind(&kind, category)?;
         // A code FQN routes to the per-module note ledger; a spec/Future FQN
         // (anything not in the code graph) to the project's spec JSONL.
-        if db.code_label(target).is_some() {
+        if category == "code" {
             let file = db.note_file(apg_root, target);
             let mut ledger = if file.exists() {
                 specs::read_jsonl(&file)?
@@ -353,6 +360,46 @@ fn add_note(
     // written above; `write_through` re-ingests the project spec/plan and
     // every note ledger (MERGE upserts the annotations nodes).
     write_through(apg_root, project, records)?;
+    Ok(())
+}
+
+/// Whether `kind` may be attached to a node of `category` ("project" = no
+/// target, "spec" = a `future/…` graph node, "code" = Struct/Function/File).
+/// A closed vocabulary so `WHERE n.kind = '…'` queries cannot silently miss
+/// records written with a drifted/typo'd kind.
+fn note_kind_allows(kind: &str, category: &str) -> bool {
+    matches!(
+        (kind, category),
+        // Generic annotation: attach anywhere.
+        ("note", "project" | "spec" | "code")
+            // Spec-context notes.
+            | ("background", "project" | "spec")
+            | ("error-handling", "project" | "spec")
+            | ("relationship-to-other-specs", "project" | "spec")
+            | ("open-question", "project" | "spec")
+            | ("materialization-fix", "project" | "spec")
+            // Universal: rationale applies to either context.
+            | ("design", "project" | "spec" | "code")
+            | ("decision", "project" | "spec" | "code")
+            | ("rationale", "spec" | "code")
+            // Code-context notes.
+            | ("warning", "code")
+            | ("gotcha", "code")
+    )
+}
+
+const NOTE_KIND_HELP: &str = "known kinds: note (any target), background (spec), \
+    design (any), decision (any), error-handling (spec), \
+    relationship-to-other-specs (spec), open-question (spec), \
+    materialization-fix (spec), rationale (spec or code), warning (code), \
+    gotcha (code)";
+
+fn validate_note_kind(kind: &str, category: &str) -> anyhow::Result<()> {
+    if !note_kind_allows(kind, category) {
+        anyhow::bail!(
+            "invalid note kind `{kind}` for a {category} note — {NOTE_KIND_HELP}"
+        );
+    }
     Ok(())
 }
 
@@ -444,7 +491,7 @@ fn link_depends_on(
         {
             anyhow::bail!("depends-on target `{dep}` is not an existing requirement");
         }
-        if let Some(path) = artifacts::cycle_closing_path(&records, &req_fqn, &dep_fqn, |r| match r {
+        if let Some(path) = artifacts::cycle_closing_path(records, &req_fqn, &dep_fqn, |r| match r {
             Record::DependsOn { from, to } => Some((from.as_str(), to.as_str())),
             _ => None,
         }) {
@@ -1123,6 +1170,35 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn note_kind_vocabulary_enforces_kind_and_target_category() {
+        // Project notes: every known kind is valid; unknown kinds are rejected.
+        for kind in [
+            "note", "background", "design", "decision", "error-handling",
+            "relationship-to-other-specs", "open-question", "materialization-fix",
+        ] {
+            validate_note_kind(kind, "project").unwrap();
+        }
+        assert!(validate_note_kind("backgroud", "project").is_err());
+        assert!(validate_note_kind("", "project").is_err());
+
+        // materialization-fix: spec nodes only, never code.
+        validate_note_kind("materialization-fix", "spec").unwrap();
+        assert!(validate_note_kind("materialization-fix", "code").is_err());
+        // warning/gotcha: code nodes only.
+        validate_note_kind("warning", "code").unwrap();
+        assert!(validate_note_kind("warning", "spec").is_err());
+        // rationale: spec or code, not a bare project note.
+        validate_note_kind("rationale", "spec").unwrap();
+        validate_note_kind("rationale", "code").unwrap();
+        assert!(validate_note_kind("rationale", "project").is_err());
+        // decision/design: anywhere.
+        validate_note_kind("decision", "spec").unwrap();
+        validate_note_kind("decision", "code").unwrap();
+        // generic note: anywhere.
+        validate_note_kind("note", "code").unwrap();
     }
 
     #[test]
