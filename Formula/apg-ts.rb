@@ -14,7 +14,7 @@ class ApgTs < Formula
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/main"
+    root_url "https://github.com/antz29/apg/releases/download/v0.9.1"
     rebuild 4
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "36c642535467629853121fc51063147eaa6fe62612fe7a8e0e8ac0980971ce1c"
   end

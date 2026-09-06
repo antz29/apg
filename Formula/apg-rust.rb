@@ -13,7 +13,7 @@ class ApgRust < Formula
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/main"
+    root_url "https://github.com/antz29/apg/releases/download/v0.9.1"
     rebuild 9
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "d1b740b60640553e45aa88480fa74b470b8fa9eee28de6799316d698e5222f65"
   end

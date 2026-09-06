@@ -13,7 +13,7 @@ class ApgCsharp < Formula
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/main"
+    root_url "https://github.com/antz29/apg/releases/download/v0.9.1"
     rebuild 4
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "55a744b88ffd891d5bc8a59a206b45ff4ff9ea1e542c55504f389a61adbced53"
   end

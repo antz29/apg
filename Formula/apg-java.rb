@@ -11,7 +11,7 @@ class ApgJava < Formula
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/main"
+    root_url "https://github.com/antz29/apg/releases/download/v0.9.1"
     rebuild 10
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "15232a5e030424ca8592e206ddd54c01f7401cff129750f63cf92e9e7332259f"
   end

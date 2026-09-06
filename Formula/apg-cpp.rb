@@ -12,7 +12,7 @@ class ApgCpp < Formula
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/main"
+    root_url "https://github.com/antz29/apg/releases/download/v0.9.1"
     rebuild 10
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "e99c1568409b84f7755ae33942b830451ce17dc4eb96c4440117a78a3cc562bc"
   end
