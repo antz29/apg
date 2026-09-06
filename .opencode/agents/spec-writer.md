@@ -114,7 +114,7 @@ A spec lives at `future/<project>/spec` with:
   - `rationale` — spec or code
   - `warning`, `gotcha` — code only
 - **Anchors** (`apg_spec_anchor <project> <req-id> <fqn>`) — a requirement points at real code (`Anchors(req→code)`) or at a `Future` (`Anchors(req→Future)`) for not-yet-built code.
-- **Dependencies** (`apg_spec_link <project> <req-id> --depends-on <id>`) — "consumes R4".
+- **Dependencies** (`apg_spec_link <project> <req-id> --depends-on <id|proj/id>`) — "consumes R4"; a cross-project requirement is `<project>/<id>` (e.g. `--depends-on identity/RA-1`). Whole-spec antecedents link the spec node itself: `apg_spec_link <project> spec --depends-on <other-project>` (SpecDependsOn). Cycles are detected across **all** spec projects, so mutual spec dependencies and requirement-level cycles spanning specs are rejected at write time.
 
 FQN rules: spec = `future/<project>/spec`, requirements = `future/<project>/spec.<id>`,
 phases = `future/<project>/spec.phase-<n>`, future code = `future/<project>/<name>`.

@@ -26,6 +26,7 @@ export default tool({
     const satRows = csvToRows(await runCypher(context, "MATCH (p:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN p.fqn, r.fqn"))
     const depRows = csvToRows(await runCypher(context, "MATCH (a:Requirement)-[:DependsOn]->(b:Requirement) RETURN a.fqn, b.fqn"))
     const gateRows = csvToRows(await runCypher(context, "MATCH (a:Phase)-[:Gates]->(b:Phase) RETURN a.fqn, b.fqn"))
+    const phaseRows = csvToRows(await runCypher(context, "MATCH (p:Phase) RETURN p.fqn"))
     const fbRows = csvToRows(
       await runCypher(context, "MATCH (f:Feedback) RETURN f.fqn, f.status, f.disposition"),
     )
@@ -78,13 +79,18 @@ export default tool({
         }
       }
 
-      // Dangling depends_on/gates: target fqn not a live node of the project.
+      // Dangling depends_on: the target must be a requirement *somewhere* —
+      // spec graphs merge into one space, so a cross-project target (another
+      // spec's requirement) is not dangling. A gate target must be a phase
+      // node (phases live under the spec's own `spec.phase-<n>` root).
+      const allReqSet = new Set(reqRows.map((r) => r[0]))
+      const allPhaseSet = new Set(phaseRows.map((r) => r[0]))
       const dangling = [
         ...depRows
-          .filter((r) => r[0].startsWith(pfx) && !reqSet.has(r[1]))
+          .filter((r) => r[0].startsWith(pfx) && !allReqSet.has(r[1]))
           .map((r) => `  depends_on ${r[0]} -> ${r[1]}`),
         ...gateRows
-          .filter((r) => r[0].startsWith(pfx) && !reqSet.has(r[1]))
+          .filter((r) => r[0].startsWith(pfx) && !allPhaseSet.has(r[1]))
           .map((r) => `  gates ${r[0]} -> ${r[1]}`),
       ]
 

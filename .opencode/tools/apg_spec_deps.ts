@@ -15,14 +15,20 @@ export default tool({
     const reqDeps = csvToRows(
       await runCypher(
         context,
-        `MATCH (a:Requirement)-[:DependsOn]->(b:Requirement) WHERE a.fqn STARTS WITH ${lit(`future/${project}/spec.`)} RETURN a.id, b.id ORDER BY a.id`,
+        `MATCH (a:Requirement)-[:DependsOn]->(b:Requirement) WHERE a.fqn STARTS WITH ${lit(`future/${project}/spec.`)} RETURN a.fqn, b.fqn ORDER BY a.fqn`,
       ),
     )
     lines.push("Requirement DependsOn (consumes)")
     if (reqDeps.length <= 1) {
       lines.push("  (none)")
     } else {
-      for (const [from, to] of reqDeps.slice(1)) lines.push(`  ${from} -> ${to}`)
+      for (const [from, to] of reqDeps.slice(1)) {
+        const fromId = from.replace(`future/${project}/spec.`, "")
+        const toId = to.startsWith(`future/${project}/`)
+          ? to.replace(`future/${project}/spec.`, "")
+          : to.replace("future/", "").replace("/spec.", "/")
+        lines.push(`  ${fromId} -> ${toId}`)
+      }
     }
 
     const specDeps = csvToRows(
@@ -35,7 +41,9 @@ export default tool({
     if (specDeps.length <= 1) {
       lines.push("  (none)")
     } else {
-      for (const [, to] of specDeps.slice(1)) lines.push(`  ${project} -> ${to.replace("/spec", "")}`)
+      for (const [, to] of specDeps.slice(1)) {
+        lines.push(`  ${project} -> ${to.replace("future/", "").replace("/spec", "")}`)
+      }
     }
     return lines.join("\n")
   },

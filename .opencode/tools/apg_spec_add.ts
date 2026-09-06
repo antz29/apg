@@ -18,7 +18,7 @@ export default tool({
     dependsOn: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("For requirement: requirement ids this one consumes."),
+      .describe("For requirement: requirement ids this one consumes (`R4` same-project, or `other-proj/R9` cross-project)."),
     anchor: tool.schema
       .array(tool.schema.string())
       .optional()
