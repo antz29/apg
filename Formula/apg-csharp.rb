@@ -14,8 +14,8 @@ class ApgCsharp < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.9.2"
-    rebuild 4
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "55a744b88ffd891d5bc8a59a206b45ff4ff9ea1e542c55504f389a61adbced53"
+    rebuild 5
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "f7c4567f042c304b86c59d11b8f073cd6aa87a79ff5e7634cdd2e15bd2118d29"
   end
 
   depends_on "dotnet" => :build
