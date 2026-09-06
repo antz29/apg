@@ -26,7 +26,9 @@ export default tool({
     const satRows = csvToRows(await runCypher(context, "MATCH (p:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN p.fqn, r.fqn"))
     const depRows = csvToRows(await runCypher(context, "MATCH (a:Requirement)-[:DependsOn]->(b:Requirement) RETURN a.fqn, b.fqn"))
     const gateRows = csvToRows(await runCypher(context, "MATCH (a:Phase)-[:Gates]->(b:Phase) RETURN a.fqn, b.fqn"))
-    const fbRows = csvToRows(await runCypher(context, "MATCH (f:Feedback) RETURN f.fqn, f.status"))
+    const fbRows = csvToRows(
+      await runCypher(context, "MATCH (f:Feedback) RETURN f.fqn, f.status, f.disposition"),
+    )
     const acRows = csvToRows(
       await runCypher(context, "MATCH (c)-[:Contains]->(ac:AcceptanceCriterion) RETURN c.fqn, ac.fqn"),
     )
@@ -88,6 +90,19 @@ export default tool({
 
       const feedback = fbRows.filter((r) => r[0].startsWith(pfx) && r[1] !== "resolved")
 
+      // Drift lint: agents can't write these values (the CLI sets them), so a
+      // value outside the closed vocabulary means hand-edited JSONL that would
+      // silently break `WHERE f.status = 'resolved'` and the archive/complete
+      // gates.
+      const drift = fbRows
+        .filter(
+          (r) =>
+            r[0].startsWith(pfx) &&
+            (!["open", "actioned", "resolved"].includes(r[1]) ||
+              !["", "fixed", "wont-fix", "rejected"].includes(r[2] ?? "")),
+        )
+        .map((r) => `  ${r[0]} (status: ${r[1]}, disposition: ${r[2]})`)
+
       const sections: string[] = []
       if (pendingAnchors.length) {
         sections.push(`pending anchors (expected — future code, ${pendingAnchors.length}):`)
@@ -120,6 +135,10 @@ export default tool({
       if (feedback.length) {
         sections.push(`feedback under review — must be resolved before archive/complete (${feedback.length}):`)
         for (const [fqn, status] of feedback) sections.push(`  ${fqn} (${status})`)
+      }
+      if (drift.length) {
+        sections.push(`feedback status/disposition drift — hand-edited JSONL, breaks the resolved gate (${drift.length}):`)
+        sections.push(...drift)
       }
 
       if (sections.length) {
