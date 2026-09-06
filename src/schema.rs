@@ -184,10 +184,15 @@ pub enum Record {
         deliverable: String,
     },
 
-    /// `{"type":"task","fqn":"future/<project>/plan.phase-<n>.task-<k>","title":"...","tier":"source","status":"pending"}`
+    /// `{"type":"task","fqn":"future/<project>/plan.phase-<n>.task-<k>","title":"...","kind":"source","tier":"","status":"pending"}`
+    /// `kind` is the owning role (source/test/gate/docs/human); `tier`
+    /// (unit/int/e2e) is the verification depth, meaningful only for
+    /// `kind = test`.
     Task {
         fqn: String,
         title: String,
+        #[serde(default)]
+        kind: String,
         #[serde(default)]
         tier: String,
         #[serde(default)]
@@ -257,7 +262,7 @@ mod tests {
             r#"{"type":"feedback","fqn":"future/workitem-timer/feedback-1","body":"Split R1","status":"open"}"#,
             r#"{"type":"plan","fqn":"future/workitem-timer/plan","title":"Plan","strategy":"Layer-first"}"#,
             r#"{"type":"plan_phase","fqn":"future/workitem-timer/plan.phase-01","number":1,"title":"P1","deliverable":"Schema"}"#,
-            r#"{"type":"task","fqn":"future/workitem-timer/plan.phase-01.task-1","title":"Add RootStore","tier":"source","status":"pending"}"#,
+            r#"{"type":"task","fqn":"future/workitem-timer/plan.phase-01.task-1","title":"Add RootStore","kind":"source","tier":"","status":"pending"}"#,
         ];
         for l in lines {
             let _ = parse(l);

@@ -421,6 +421,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
         Record::Task {
             fqn,
             title,
+            kind,
             tier,
             status,
         } => Some((
@@ -428,6 +429,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             fqn,
             vec![
                 ("title", title.clone()),
+                ("kind", kind.clone()),
                 ("tier", tier.clone()),
                 ("status", status.clone()),
             ],

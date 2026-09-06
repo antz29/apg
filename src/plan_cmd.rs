@@ -135,16 +135,20 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 p.positional.get(2).and_then(|s| s.parse::<u32>().ok()),
                 p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
             ) else {
-                anyhow::bail!("usage: apg plan add <project> task <phase> <k> --title … [--tier …] [--builds <future-name>] [--anchor <fqn>]*");
+                anyhow::bail!("usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs|human>] [--tier <unit|int|e2e>] [--builds <future-name>] [--anchor <fqn>]*");
             };
             let Some(title) = p.get("title") else {
                 anyhow::bail!("task requires --title");
             };
             let fqn = format!("future/{project}/plan.phase-{phase:02}.task-{k}");
+            let kind = p.get("kind").unwrap_or_else(|| "source".to_string());
+            let tier = p.get("tier").unwrap_or_default();
+            validate_task_kind_tier(&kind, &tier)?;
             let mut recs = vec![Record::Task {
                 fqn: fqn.clone(),
                 title,
-                tier: p.get("tier").unwrap_or_else(|| "source".to_string()),
+                kind: kind.clone(),
+                tier,
                 status: "pending".to_string(),
             }];
             recs.push(Record::Contains {
@@ -178,6 +182,26 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
             println!("Added task {k} to plan.phase-{phase} of {project}");
         }
         other => anyhow::bail!("unknown plan add kind `{other}` — phase|task"),
+    }
+    Ok(())
+}
+
+/// Validate the two-axis task classification: `kind` is the owning role
+/// (orthogonal), `tier` the verification depth (a hierarchy, meaningful only
+/// for `kind = test`). Mirrors the `Future.kind` / `Note.kind` validation
+/// pattern in `spec_cmd`.
+fn validate_task_kind_tier(kind: &str, tier: &str) -> anyhow::Result<()> {
+    if !["source", "test", "gate", "docs", "human"].contains(&kind) {
+        anyhow::bail!("invalid task kind `{kind}` — one of source/test/gate/docs/human");
+    }
+    if kind == "test" && tier.is_empty() {
+        anyhow::bail!("test task requires --tier (unit|int|e2e)");
+    }
+    if kind != "test" && !tier.is_empty() {
+        anyhow::bail!("tier is only valid for test tasks");
+    }
+    if !tier.is_empty() && !["unit", "int", "e2e"].contains(&tier) {
+        anyhow::bail!("invalid tier `{tier}` — one of unit/int/e2e");
     }
     Ok(())
 }
@@ -358,6 +382,18 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
         })
         .filter(|t| records.iter().any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t)))
         .collect();
+
+    // Human-teeth (R…): a `human`-kind task is owned by the person — an agent
+    // must not close the phase (or retire the final-phase plan) around an
+    // unperformed human step. Refuse with a targeted message.
+    let human_not_done = human_tasks_not_done(&records, &phase_fqn);
+    if !human_not_done.is_empty() {
+        anyhow::bail!(
+            "phase {phase} has human tasks not done: {} — a human step cannot be closed by an agent; complete them first",
+            human_not_done.join(", ")
+        );
+    }
+
     let mut not_done = Vec::new();
     for t in &tasks {
         let status = records
@@ -443,6 +479,32 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
         println!("Completed phase {phase} of plan {project}");
     }
     Ok(())
+}
+
+/// The `human`-kind tasks directly contained in a phase that are not `done` —
+/// the teeth that keep an agent from closing a phase around an unperformed
+/// human step.
+fn human_tasks_not_done(records: &[Record], phase_fqn: &str) -> Vec<String> {
+    records
+        .iter()
+        .filter_map(|e| match e {
+            Record::Contains { from, to } if from == phase_fqn => Some(to.clone()),
+            _ => None,
+        })
+        .filter_map(|t| {
+            records.iter().find_map(|r| match r {
+                Record::Task {
+                    fqn,
+                    kind,
+                    status,
+                    ..
+                } if fqn == &t => Some((t.clone(), kind, status)),
+                _ => None,
+            })
+        })
+        .filter(|(_, kind, status)| kind.as_str() == "human" && status.as_str() != "done")
+        .map(|(t, _, _)| t)
+        .collect()
 }
 
 /// The built code nodes of a phase: the unique set of its tasks' `Anchors`
@@ -537,29 +599,7 @@ fn plan_render(args: &[String]) -> anyhow::Result<()> {
     for n in &phases {
         let pfqn = format!("future/{project}/plan.phase-{n:02}");
         out.push_str(&format!("## Phase {n}\n\n"));
-        let tasks: Vec<String> = records
-            .iter()
-            .filter_map(|e| match e {
-                Record::Contains { from, to } if from == &pfqn => Some(to.clone()),
-                _ => None,
-            })
-            .filter(|t| records.iter().any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t)))
-            .collect();
-        for t in tasks {
-            let (title, tier, status) = records
-                .iter()
-                .find_map(|r| match r {
-                    Record::Task { fqn, title, tier, status } if fqn == &t => {
-                        Some((title.clone(), tier.clone(), status.clone()))
-                    }
-                    _ => None,
-                })
-                .unwrap_or_default();
-            let check = if status == "done" { "[x]" } else { "[ ]" };
-            out.push_str(&format!(
-                "- {check} `{t}` — {title} (tier: {tier})\n"
-            ));
-        }
+        out.push_str(&render_phase_tasks(&records, &pfqn));
         out.push('\n');
     }
     match p.get("out").as_deref() {
@@ -575,6 +615,56 @@ fn plan_render(args: &[String]) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The markdown task list for one phase, grouped by owning kind. Verification
+/// depth renders as `test/<tier>` for test tasks, plain kind otherwise.
+fn render_phase_tasks(records: &[Record], pfqn: &str) -> String {
+    let tasks: Vec<String> = records
+        .iter()
+        .filter_map(|e| match e {
+            Record::Contains { from, to } if from == pfqn => Some(to.clone()),
+            _ => None,
+        })
+        .filter(|t| records.iter().any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t)))
+        .collect();
+    const KIND_ORDER: [&str; 5] = ["source", "test", "gate", "docs", "human"];
+    type TaskLine = (String, String, String, String);
+    let mut by_kind: Vec<(String, Vec<TaskLine>)> = Vec::new();
+    for t in tasks {
+        let (title, kind, tier, status) = records
+            .iter()
+            .find_map(|r| match r {
+                Record::Task {
+                    fqn,
+                    title,
+                    kind,
+                    tier,
+                    status,
+                } if fqn == &t => Some((title.clone(), kind.clone(), tier.clone(), status.clone())),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let depth = if kind == "test" && !tier.is_empty() {
+            format!("test/{tier}")
+        } else {
+            kind.clone()
+        };
+        match by_kind.iter_mut().find(|(k, _)| *k == kind) {
+            Some((_, items)) => items.push((t, title, depth, status)),
+            None => by_kind.push((kind, vec![(t, title, depth, status)])),
+        }
+    }
+    by_kind.sort_by_key(|(k, _)| KIND_ORDER.iter().position(|x| x == k).unwrap_or(usize::MAX));
+    let mut out = String::new();
+    for (kind, items) in by_kind {
+        out.push_str(&format!("**{kind}**\n"));
+        for (t, title, depth, status) in items {
+            let check = if status == "done" { "[x]" } else { "[ ]" };
+            out.push_str(&format!("- {check} `{t}` — {title} ({depth})\n"));
+        }
+    }
+    out
 }
 
 fn short_id(fqn: &str, project: &str) -> String {
@@ -707,7 +797,8 @@ mod tests {
             Record::Task {
                 fqn: "future/foo/plan.phase-01.task-1".into(),
                 title: "T".into(),
-                tier: "source".into(),
+                kind: "source".into(),
+                tier: String::new(),
                 status: "done".into(),
             },
             Record::Contains {
@@ -777,5 +868,110 @@ mod tests {
             if from == "future/foo/spec.R1" && to == "future/foo/spec.R2")));
         assert!(spec_records.iter().any(|r| matches!(r, Record::Anchors { from, to }
             if from == "future/foo/spec.R1" && to == "code/one")));
+    }
+
+    #[test]
+    fn task_kind_tier_validation() {
+        // Default kind is source.
+        assert!(validate_task_kind_tier("source", "").is_ok());
+        // All five kinds accepted.
+        for k in ["source", "test", "gate", "docs", "human"] {
+            let tier = if k == "test" { "unit" } else { "" };
+            assert!(validate_task_kind_tier(k, tier).is_ok(), "kind {k}");
+        }
+        // Unknown kind rejected.
+        assert!(validate_task_kind_tier("qa", "").is_err());
+        // tier required for test, rejected for non-test.
+        assert!(validate_task_kind_tier("test", "").is_err());
+        assert!(validate_task_kind_tier("source", "unit").is_err());
+        assert!(validate_task_kind_tier("human", "e2e").is_err());
+        // Unknown tier rejected.
+        assert!(validate_task_kind_tier("test", "smoke").is_err());
+        // All three tiers accepted for test.
+        for t in ["unit", "int", "e2e"] {
+            assert!(validate_task_kind_tier("test", t).is_ok(), "tier {t}");
+        }
+    }
+
+    #[test]
+    fn plan_complete_refuses_undone_human_task() {
+        let records = vec![
+            Record::Task {
+                fqn: "future/foo/plan.phase-01.task-1".into(),
+                title: "sign off".into(),
+                kind: "human".into(),
+                tier: String::new(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "future/foo/plan.phase-01".into(),
+                to: "future/foo/plan.phase-01.task-1".into(),
+            },
+        ];
+        let undone = human_tasks_not_done(&records, "future/foo/plan.phase-01");
+        assert_eq!(undone, vec!["future/foo/plan.phase-01.task-1"]);
+        // A done human task passes the gate.
+        let mut records = records;
+        for r in &mut records {
+            if let Record::Task { status, .. } = r {
+                *status = "done".to_string();
+            }
+        }
+        assert!(human_tasks_not_done(&records, "future/foo/plan.phase-01").is_empty());
+    }
+
+    #[test]
+    fn render_groups_tasks_by_kind_and_shows_test_tier() {
+        let records = vec![
+            Record::PlanPhase {
+                fqn: "future/foo/plan.phase-01".into(),
+                number: 1,
+                title: "P".into(),
+                deliverable: "D".into(),
+            },
+            Record::Task {
+                fqn: "future/foo/plan.phase-01.task-1".into(),
+                title: "Implement".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "done".into(),
+            },
+            Record::Task {
+                fqn: "future/foo/plan.phase-01.task-2".into(),
+                title: "Unit tests".into(),
+                kind: "test".into(),
+                tier: "unit".into(),
+                status: "pending".into(),
+            },
+            Record::Task {
+                fqn: "future/foo/plan.phase-01.task-3".into(),
+                title: "Doc".into(),
+                kind: "docs".into(),
+                tier: String::new(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "future/foo/plan.phase-01".into(),
+                to: "future/foo/plan.phase-01.task-1".into(),
+            },
+            Record::Contains {
+                from: "future/foo/plan.phase-01".into(),
+                to: "future/foo/plan.phase-01.task-2".into(),
+            },
+            Record::Contains {
+                from: "future/foo/plan.phase-01".into(),
+                to: "future/foo/plan.phase-01.task-3".into(),
+            },
+        ];
+        let out = render_phase_tasks(&records, "future/foo/plan.phase-01");
+        // Grouped by kind in canonical order (source before test before docs).
+        let source_pos = out.find("**source**").unwrap();
+        let test_pos = out.find("**test**").unwrap();
+        let docs_pos = out.find("**docs**").unwrap();
+        assert!(source_pos < test_pos && test_pos < docs_pos, "order: {out}");
+        // Test depth renders as test/unit.
+        assert!(out.contains("- [ ] `future/foo/plan.phase-01.task-2` — Unit tests (test/unit)"), "{out}");
+        // Done checkbox preserved.
+        assert!(out.contains("- [x] `future/foo/plan.phase-01.task-1` — Implement (source)"), "{out}");
     }
 }

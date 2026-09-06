@@ -192,6 +192,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut planphase_deliverable = Vec::new();
     let mut task_fqn = Vec::new();
     let mut task_title = Vec::new();
+    let mut task_kind = Vec::new();
     let mut task_tier = Vec::new();
     let mut task_status = Vec::new();
 
@@ -295,6 +296,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             NodeKind::Task => {
                 task_fqn.push(fqn.clone());
                 task_title.push(node.title.clone().unwrap_or_default());
+                task_kind.push(node.sub_kind.clone().unwrap_or_default());
                 task_tier.push(node.tier.clone().unwrap_or_default());
                 task_status.push(node.status.clone().unwrap_or_default());
             }
@@ -438,6 +440,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         &[
             ("fqn", Col::Str(task_fqn)),
             ("title", Col::Str(task_title)),
+            ("kind", Col::Str(task_kind)),
             ("tier", Col::Str(task_tier)),
             ("status", Col::Str(task_status)),
         ],
@@ -820,7 +823,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE NODE TABLE PlanPhase(fqn STRING PRIMARY KEY, number INT64, title STRING, deliverable STRING)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, tier STRING, status STRING)",
+        "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, kind STRING, tier STRING, status STRING)",
     )?;
     conn.query(
         "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Spec TO Requirement, FROM Spec TO Phase, FROM Phase TO Requirement, FROM Spec TO Decision, FROM Spec TO NonGoal, FROM Spec TO AcceptanceCriterion, FROM Spec TO VerificationItem, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM PlanPhase TO AcceptanceCriterion, FROM PlanPhase TO VerificationItem)",
@@ -1107,6 +1110,8 @@ enum Export {
         fqn: String,
         title: String,
         #[serde(skip_serializing_if = "String::is_empty")]
+        kind: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
         tier: String,
         #[serde(skip_serializing_if = "String::is_empty")]
         status: String,
@@ -1267,6 +1272,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             NodeKind::Task => Export::Task {
                 fqn: fqn.clone(),
                 title: node.title.clone().unwrap_or_default(),
+                kind: node.sub_kind.clone().unwrap_or_default(),
                 tier: node.tier.clone().unwrap_or_default(),
                 status: node.status.clone().unwrap_or_default(),
             },
@@ -1714,7 +1720,8 @@ mod tests {
             "future/foo/plan.phase-1.task-1",
             Node {
                 title: Some("Add RootStore".to_string()),
-                tier: Some("source".to_string()),
+                sub_kind: Some("source".to_string()),
+                tier: Some("".to_string()),
                 status: Some("pending".to_string()),
                 ..sp(NodeKind::Task)
             },
@@ -1792,7 +1799,7 @@ mod tests {
             .to_string();
         assert!(out.contains("1") && out.contains("Core"), "plan phase rows: {out}");
         let out = conn
-            .query("MATCH (t:Task) RETURN t.tier, t.status")
+            .query("MATCH (t:Task) RETURN t.kind, t.tier, t.status")
             .unwrap()
             .to_string();
         assert!(out.contains("source") && out.contains("pending"), "task rows: {out}");

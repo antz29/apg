@@ -443,6 +443,7 @@ pub fn ingest(
                 Record::Task {
                     fqn,
                     title,
+                    kind,
                     tier,
                     status,
                 } => insert_node(
@@ -450,6 +451,7 @@ pub fn ingest(
                     fqn,
                     Node {
                         title: Some(title),
+                        sub_kind: opt(kind),
                         tier: opt(tier),
                         status: opt(status),
                         ..spec_node(NodeKind::Task)
@@ -1519,6 +1521,7 @@ mod tests {
             Record::Task {
                 fqn: "future/foo/plan.phase-1.task-1".to_string(),
                 title: "t".to_string(),
+                kind: String::new(),
                 tier: String::new(),
                 status: String::new(),
             },
