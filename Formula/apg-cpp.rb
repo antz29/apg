@@ -7,7 +7,7 @@ class ApgCpp < Formula
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
       tag:      "v0.9.0",
-      revision: "939efde7e92a581dd00a27df8dcc07a0e6a5437e"
+      revision: "b34aae57e140106e437e3d6baa5a2d5b5ca26ace"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
