@@ -24,6 +24,12 @@ class ApgJava < Formula
     system "javac",
            "-d", "java-classes",
            "-proc:none",
+           # Target Java 17 bytecode so the compiled frontend runs on any JVM
+           # >= 17 regardless of the JDK that compiled it (the formula builds
+           # with brew's latest openjdk, but users run it with `java` on PATH).
+           # `--release` is incompatible with --add-exports on jdk.compiler, so
+           # -source/-target is used instead.
+           "-source", "17", "-target", "17",
            "--add-exports", "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
            "--add-exports", "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
            "--add-exports", "jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",

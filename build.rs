@@ -253,6 +253,14 @@ fn main() {
                 "-d",
                 java_classes.to_str().unwrap(),
                 "-proc:none",
+                // Target Java 17 bytecode so the frontend runs on any JVM >= 17
+                // regardless of the JDK that compiled it. `--release` conflicts
+                // with the --add-exports below (system-module export), so
+                // -source/-target is used instead.
+                "-source",
+                "17",
+                "-target",
+                "17",
                 "--add-exports",
                 "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
                 "--add-exports",
