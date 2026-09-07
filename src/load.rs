@@ -802,6 +802,70 @@ fn kind_slug(k: NodeKind) -> &'static str {
     }
 }
 
+/// Every `(rel_table, from_label, to_label)` triple the DB schema declares —
+/// derived from the same pair enumerations that write the load files
+/// (`build_load_files`) and the `CREATE REL TABLE` statements
+/// (`create_schema`), so the write-through merge guard in `artifacts.rs`
+/// (R3/R4: skip an undeclared pair instead of feeding LadybugDB a Cypher MERGE
+/// that throws a binder exception) cannot drift from the schema.
+pub fn rel_table_pairs() -> &'static [(&'static str, &'static str, &'static str)] {
+    static PAIRS: std::sync::OnceLock<Vec<(&'static str, &'static str, &'static str)>> =
+        std::sync::OnceLock::new();
+    PAIRS.get_or_init(|| {
+        let mut v = Vec::new();
+        for (from, to) in contains_pairs() {
+            v.push(("Contains", label_of(from), label_of(to)));
+        }
+        for (table, from, to) in spec_rel_pairs() {
+            v.push((table, label_of(from), label_of(to)));
+        }
+        v
+    })
+}
+
+/// The node labels a Note may attach to via a `Details` edge — the `FROM Note
+/// TO …` targets of the Details rel table (SPEC R2/R21). The single source of
+/// truth for the `add_note --on` allow-list: Note/Future/Feedback are excluded
+/// by construction (a note cannot attach to another note, a not-yet-built
+/// future, or a review item — the DB has no rel-table pair for it).
+pub fn details_target_labels() -> &'static [&'static str] {
+    static LABELS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    LABELS.get_or_init(|| {
+        spec_rel_pairs()
+            .into_iter()
+            .filter(|(t, from, _)| *t == "Details" && *from == NodeKind::Note)
+            .map(|(_, _, to)| label_of(to))
+            .collect()
+    })
+}
+
+/// Every node-table label, in schema creation order. Used for DB label lookups
+/// (`ArtifactDb::node_label`) — the label of a `--on` target decides whether
+/// it is an allowable `Details` target.
+pub fn node_labels() -> &'static [&'static str] {
+    &[
+        "Module",
+        "Scan",
+        "Struct",
+        "Function",
+        "File",
+        "UnresolvedTarget",
+        "Spec",
+        "Requirement",
+        "Phase",
+        "Decision",
+        "Future",
+        "NonGoal",
+        "AcceptanceCriterion",
+        "VerificationItem",
+        "Note",
+        "Feedback",
+        "Plan",
+        "PlanPhase",
+        "Task",
+    ]
+}
+
 /// The exact node-table label used in `CREATE REL TABLE` and COPY overrides.
 fn label_of(k: NodeKind) -> &'static str {
     match k {

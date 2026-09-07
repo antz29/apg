@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::artifacts::{self, ParsedArgs, node_fqn, parse_args, remove_node};
+use crate::load;
 use crate::schema::Record;
 use crate::specs;
 
@@ -326,6 +327,13 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
 /// A `--on` target that is a code FQN routes the note to the committed
 /// `apg/notes/<module>.jsonl` ledger; a spec/Future FQN (or no target) to the
 /// project's spec JSONL.
+///
+/// R2: every `--on` target is validated against the DB's Details rel-table
+/// allow-list (`load::details_target_labels`, mirroring `spec_rel_pairs`)
+/// BEFORE any record is pushed or any write happens. A Note/Future/Feedback
+/// target (or any label outside the allow-list) is rejected with a clear CLI
+/// message instead of reaching the re-ingest, where LadybugDB would throw an
+/// opaque binder exception for the undeclared edge pair (R3).
 fn add_note(
     p: &ParsedArgs,
     apg_root: &Path,
@@ -351,10 +359,25 @@ fn add_note(
         return Ok(());
     }
     let db = artifacts::ArtifactDb::open(apg_root)?;
+    // R2: validate every `--on` target BEFORE any record is pushed or any
+    // write happens (the loop below only mutates the in-memory `records`; the
+    // JSONL + live DB are untouched until `write_through`). A target whose
+    // node label is not an allowable Details target — Note, Future, Feedback,
+    // or anything outside the DB's Details rel-table pairs — is rejected here
+    // with a clear CLI message instead of an opaque LadybugDB binder exception
+    // from the re-ingest.
     for target in &ons {
-        if !db.has_node(target) {
+        let Some(label) = db.node_label(target) else {
             anyhow::bail!("note target `{target}` does not exist in the graph");
+        };
+        if !load::details_target_labels().contains(&label) {
+            anyhow::bail!(
+                "note target `{target}` is a `{label}` node — a note may only attach to an allowable Details target ({})",
+                load::details_target_labels().join(", ")
+            );
         }
+    }
+    for target in &ons {
         let category = if db.code_label(target).is_some() {
             "code"
         } else {
@@ -1797,6 +1820,207 @@ mod tests {
             dep_target("foo/R1", "foo", &apg_root),
             ("foo".to_string(), "R1".to_string())
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn add_note_rejects_note_and_future_targets_before_any_write() {
+        // R2 (task 2.2): `--on` a Note or a Future target must be rejected
+        // with a clear CLI message BEFORE any JSONL write or DB re-ingest —
+        // both are excluded from the DB's Details rel-table targets.
+        let (apg_root, dir) = fixture_layout("r2-validation");
+        let recs = vec![
+            Record::Spec {
+                fqn: "future/foo/spec".into(),
+                title: "Foo".into(),
+                goal: String::new(),
+            },
+            Record::Requirement {
+                fqn: "future/foo/spec.R1".into(),
+                id: "R1".into(),
+                title: "t".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Contains {
+                from: "future/foo/spec".into(),
+                to: "future/foo/spec.R1".into(),
+            },
+            Record::Note {
+                fqn: "future/foo/note-1".into(),
+                body: "existing".into(),
+                kind: "background".into(),
+            },
+            Record::Details {
+                from: "future/foo/note-1".into(),
+                to: "future/foo/spec".into(),
+            },
+            Record::Future {
+                fqn: "future/foo/gateway".into(),
+                kind: "rpc".into(),
+                target: String::new(),
+            },
+        ];
+        let path = specs::spec_jsonl_path(&apg_root, "foo");
+        specs::write_jsonl(&path, &recs).unwrap();
+        artifacts::reingest_project(&apg_root, "foo").unwrap();
+
+        // --on a Note target: clear CLI rejection, no write.
+        let mut records = load_project(&apg_root, "foo").unwrap();
+        let p = parse_args(&[
+            "--body".into(),
+            "n".into(),
+            "--on".into(),
+            "future/foo/note-1".into(),
+        ]);
+        let err = add_note(&p, &apg_root, "foo", &mut records).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("note target `future/foo/note-1` is a `Note` node"),
+            "{msg}"
+        );
+        assert!(msg.contains("may only attach"), "{msg}");
+
+        // --on a Future target: rejected too (Future is not a Details target).
+        let mut records = load_project(&apg_root, "foo").unwrap();
+        let p = parse_args(&[
+            "--body".into(),
+            "n".into(),
+            "--on".into(),
+            "future/foo/gateway".into(),
+        ]);
+        let err = add_note(&p, &apg_root, "foo", &mut records).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("note target `future/foo/gateway` is a `Future` node"),
+            "{msg}"
+        );
+
+        // JSONL unchanged and the live DB carries no new Note nodes.
+        assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (n:Note) RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert!(out.lines().last() == Some("1"), "no new note: {out}");
+        drop(db);
+
+        // An allowable target (Spec) still writes through.
+        let mut records = load_project(&apg_root, "foo").unwrap();
+        let p = parse_args(&[
+            "--body".into(),
+            "ok".into(),
+            "--on".into(),
+            "future/foo/spec".into(),
+        ]);
+        add_note(&p, &apg_root, "foo", &mut records).unwrap();
+        let after = specs::read_jsonl(&path).unwrap();
+        assert!(after.iter().any(|r| {
+            matches!(r, Record::Details { from, to }
+                if to == "future/foo/spec" && from != "future/foo/note-1")
+        }));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn add_note_attaches_to_spec_and_decision_in_any_project() {
+        // R4 (task 2.6): the mystery commands — `--on` a Spec and a Decision
+        // target — succeed without a binder error, in any project.
+        let (apg_root, dir) = fixture_layout("r4-binder");
+        let mk = |project: &str, decisions: &[&str]| -> Vec<Record> {
+            let mut v = vec![Record::Spec {
+                fqn: format!("future/{project}/spec"),
+                title: project.into(),
+                goal: String::new(),
+            }];
+            for d in decisions {
+                let fqn = format!("future/{project}/spec.decision-{d}");
+                v.push(Record::Decision {
+                    fqn: fqn.clone(),
+                    id: (*d).into(),
+                    summary: "s".into(),
+                });
+                v.push(Record::Contains {
+                    from: format!("future/{project}/spec"),
+                    to: fqn,
+                });
+            }
+            v
+        };
+        for (project, decisions) in [
+            ("cosanima-rename", &["D1"][..]),
+            ("cosanima-mcp", &[][..]),
+            ("cosanima-1.0", &["D5"][..]),
+        ] {
+            let recs = mk(project, decisions);
+            let path = specs::spec_jsonl_path(&apg_root, project);
+            specs::write_jsonl(&path, &recs).unwrap();
+            artifacts::reingest_project(&apg_root, project).unwrap();
+        }
+
+        // A note attaches to each project's Spec node.
+        for (i, project) in ["cosanima-rename", "cosanima-mcp", "cosanima-1.0"]
+            .into_iter()
+            .enumerate()
+        {
+            let target = format!("future/{project}/spec");
+            let mut records = load_project(&apg_root, project).unwrap();
+            let p = parse_args(&[
+                "--body".into(),
+                format!("note-{i}"),
+                "--on".into(),
+                target.clone(),
+            ]);
+            add_note(&p, &apg_root, project, &mut records).unwrap();
+            let after = specs::read_jsonl(&specs::spec_jsonl_path(&apg_root, project)).unwrap();
+            assert!(after.iter().any(|r| {
+                matches!(r, Record::Details { from, to }
+                    if to == &target
+                        && from.starts_with(&format!("future/{project}/note-")))
+            }));
+            let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+            let out = db
+                .conn()
+                .unwrap()
+                .query(&format!(
+                    "MATCH (:Note)-[:Details]->(s {{fqn: {}}}) RETURN count(*)",
+                    artifacts::lit(&target)
+                ))
+                .unwrap()
+                .to_string();
+            assert!(
+                out.lines().last() == Some("1"),
+                "{project} spec note must land: {out}"
+            );
+            drop(db);
+        }
+
+        // The exact rename Decision target from the mystery.
+        let mut records = load_project(&apg_root, "cosanima-rename").unwrap();
+        let p = parse_args(&[
+            "--body".into(),
+            "on-d1".into(),
+            "--on".into(),
+            "future/cosanima-rename/spec.decision-D1".into(),
+        ]);
+        add_note(&p, &apg_root, "cosanima-rename", &mut records).unwrap();
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Note)-[:Details]->(:Decision {fqn: 'future/cosanima-rename/spec.decision-D1'}) RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.lines().last() == Some("1"),
+            "rename D1 note must land: {out}"
+        );
+        drop(db);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

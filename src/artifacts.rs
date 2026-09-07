@@ -13,6 +13,7 @@ use std::sync::{Mutex, OnceLock};
 use lbug::{Connection, Database, SystemConfig};
 
 use crate::git;
+use crate::load;
 use crate::schema::Record;
 use crate::specs;
 
@@ -214,6 +215,19 @@ impl ArtifactDb {
         None
     }
 
+    /// The DB label of any node — code or spec/plan — or `None` when `fqn`
+    /// does not resolve. Unlike [`code_label`](Self::code_label) (code tables
+    /// only), this covers every node table; `add_note` uses it to decide
+    /// whether a `--on` target is an allowable `Details` target (R2).
+    pub fn node_label(&self, fqn: &str) -> Option<&'static str> {
+        load::node_labels().iter().copied().find(|l| {
+            count(
+                &self.db,
+                &format!("MATCH (n:{l} {{fqn: {}}}) RETURN count(*)", lit(fqn)),
+            ) > 0
+        })
+    }
+
     /// True when `fqn` is a `Future` node (an explicit, author-declared
     /// placeholder; never auto-created at authoring time).
     pub fn is_future(&self, fqn: &str) -> bool {
@@ -312,6 +326,21 @@ impl ArtifactDb {
     /// Re-merges one edge record. Endpoint labels come from `known` (nodes in
     /// this record set) or the code graph. A dangling endpoint is skipped.
     /// Runs on `conn` so the write shares the caller's transaction.
+    ///
+    /// The schema-pair guard (R3/R4): the Cypher MERGE is issued only when the
+    /// rel table actually declares this `(from, to)` label pair. LadybugDB
+    /// throws a binder exception (`Query node b violates schema …`) for an
+    /// undeclared pair — and because a re-ingest merges every project's
+    /// records in ONE transaction, a single illegal pair anywhere (a legacy
+    /// Note→Future / Note→Note Details edge, the R2 class) used to abort every
+    /// write-through with an opaque binder error, even a perfectly legal
+    /// note-add to another project (the cosanima-rename Spec/Decision mystery,
+    /// R3). The scan load path already projects such pairs away
+    /// (`build_load_files` buckets only declared pairs); the merge guard does
+    /// the same, so the DB projection stays consistent with a fresh scan and a
+    /// legal write-through is never hostage to unrelated poison records. The
+    /// CLI-side `add_note` validation (R2) keeps new illegal pairs from being
+    /// authored in the first place.
     fn merge_edge(
         &self,
         conn: &Connection,
@@ -323,6 +352,9 @@ impl ArtifactDb {
         let la = known.get(from).copied().or_else(|| self.code_label(from));
         let lb = known.get(to).copied().or_else(|| self.code_label(to));
         if let (Some(a), Some(b)) = (la, lb) {
+            if !rel_pair_allowed(rel_table, a, b) {
+                return Ok(());
+            }
             // Two-variable MATCH + MERGE rel: the endpoints already exist (node
             // records merged above, or code nodes in the graph). The one-shot
             // pattern MERGE `(a:.. {fqn})-[:R]->(b:.. {fqn})` fails when the
@@ -482,6 +514,18 @@ fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str)> {
         Record::Builds { from, to } => Some(("Builds", from, to)),
         _ => None,
     }
+}
+
+/// Whether the schema's rel table `table` declares an edge between the two
+/// node labels. Consults [`load::rel_table_pairs`] — the same pair
+/// enumeration that writes the load files and the `CREATE REL TABLE`
+/// statements — so the merge guard cannot drift from the schema. An
+/// undeclared pair is skipped (see `merge_edge`), never fed to LadybugDB as a
+/// MERGE that would throw a binder exception.
+fn rel_pair_allowed(table: &str, from: &str, to: &str) -> bool {
+    load::rel_table_pairs()
+        .iter()
+        .any(|(t, a, b)| *t == table && *a == from && *b == to)
 }
 
 /// The fqn of a node record, if it is one.
@@ -900,7 +944,7 @@ mod tests {
     }
 
     #[test]
-    fn write_through_is_atomic_on_reingest_failure() {
+    fn illegal_details_pair_is_projected_away_not_a_binder_error() {
         let (apg_root, dir) = fixture("orphan");
         let path = specs::spec_jsonl_path(&apg_root, "foo");
         let baseline = baseline_records();
@@ -914,9 +958,17 @@ mod tests {
             assert_eq!(orphan_notes(&db), 0);
         }
 
-        // A note whose Details edge targets another Note — not an allowable
-        // Details target in the DB schema, so merge_edge throws a binder error
-        // mid-merge (the exact class of failure that used to orphan nodes).
+        // A note whose Details edge targets another Note — a pair the Details
+        // rel table does NOT declare. Pre-R4 this made merge_edge throw a
+        // LadybugDB binder exception mid-merge ("Query node b violates
+        // schema"), which aborted the whole write-through and is the exact
+        // failure class behind the cosanima-rename Spec/Decision mystery (R3).
+        // The R4 schema-pair guard projects the illegal pair away — the same
+        // bucketing the scan load path applies — so the write-through
+        // succeeds, the JSONL is committed, and the DB projection matches what
+        // a fresh scan would produce (the note node lands, the impossible edge
+        // never materializes). The CLI-side add_note validation (R2) is what
+        // keeps such records from being authored in the first place.
         let mut mutated = baseline.clone();
         mutated.push(Record::Note {
             fqn: "future/foo/note-2".into(),
@@ -927,15 +979,80 @@ mod tests {
             from: "future/foo/note-2".into(),
             to: "future/foo/note-1".into(),
         });
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap();
+
+        // The JSONL committed (the note record is durable truth).
+        assert_eq!(specs::read_jsonl(&path).unwrap(), mutated);
+        // No temp residue next to the committed JSONL.
+        let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join("specs"))
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
+
+        // The DB projection: the note node lands, the undeclared Details edge
+        // does not (identical to the scan load path's pair bucketing).
+        let db = ArtifactDb::open(&apg_root).unwrap();
+        assert!(db.has_node("future/foo/note-2"));
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Note {fqn: 'future/foo/note-2'})-[:Details]->() RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.lines().last() == Some("0"),
+            "illegal pair must be projected away: {out}"
+        );
+        // The prior healthy edge survived the re-merge.
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Note {fqn: 'future/foo/note-1'})-[:Details]->(s:Spec) RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert!(out.lines().last() == Some("1"), "healthy edge: {out}");
+        drop(db);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_through_is_atomic_when_reingest_fails_on_malformed_peer_file() {
+        // The Phase-1 atomicity guarantee, with a genuine re-ingest failure
+        // (the R2/R4 guards removed the binder-error injector): a malformed
+        // peer spec file makes the re-ingest fail BEFORE any DB write, so the
+        // committed JSONL and the live DB must both stay on the old state.
+        let (apg_root, dir) = fixture("orphan-peer");
+        let path = specs::spec_jsonl_path(&apg_root, "foo");
+        let baseline = baseline_records();
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+
+        // A peer project's spec file goes malformed (a line that is not a
+        // Record). Every re-ingest merges all projects' files, so this poisons
+        // the assembled record set with a read error.
+        let peer = specs::spec_jsonl_path(&apg_root, "peer");
+        std::fs::write(&peer, "{\"type\":\"spec\",\"fqn\":").unwrap();
+
+        // A legal note-add to foo now fails at the re-ingest read step.
+        let mut mutated = baseline.clone();
+        mutated.push(Record::Note {
+            fqn: "future/foo/note-2".into(),
+            body: "n".into(),
+            kind: "background".into(),
+        });
+        mutated.push(Record::Details {
+            from: "future/foo/note-2".into(),
+            to: "future/foo/spec".into(),
+        });
         let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap_err();
         assert!(
-            format!("{err:#}").contains("Binder"),
-            "expected the Details binder error, got: {err:#}"
+            format!("{err:#}").contains("bad record"),
+            "expected the peer-file read error, got: {err:#}"
         );
 
-        // (a) The committed JSONL still holds the OLD records.
+        // (a) The committed JSONL still holds the OLD records; no temp residue.
         assert_eq!(specs::read_jsonl(&path).unwrap(), baseline);
-        // The temp file was removed — no residue next to the committed JSONL.
         let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join("specs"))
             .into_iter()
             .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
@@ -946,9 +1063,195 @@ mod tests {
         let db = ArtifactDb::open(&apg_root).unwrap();
         assert!(!db.has_node("future/foo/note-2"));
         assert_eq!(orphan_notes(&db), 0);
-        // The prior committed state is intact.
         assert!(db.has_node("future/foo/spec"));
         assert!(db.has_node("future/foo/note-1"));
+        drop(db);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn poison_details_edge_in_one_project_aborts_legal_write_through_elsewhere() {
+        // R3 controlled reproduction (task 2.3). The mystery: adding a note
+        // targeting `future/cosanima-rename/spec` (Spec) and
+        // `future/cosanima-rename/spec.decision-D1` (Decision) threw a
+        // LadybugDB binder exception, while IDENTICAL-label targets in other
+        // projects (cosanima-mcp spec, cosanima-1.0 decision-D5) succeeded.
+        //
+        // The trigger is NOT the target label — Spec/Decision are legal
+        // `Details` targets, and the `MATCH … MERGE` for them binds fine. The
+        // re-ingest merges EVERY spec project's records in ONE transaction
+        // (assembled_records + merge_records), so a single illegal edge pair
+        // anywhere in the merged set — a Note → Future / Note → Note Details
+        // edge, the R2 class — makes the binder throw and aborts the WHOLE
+        // write-through, including perfectly legal note-adds to other projects.
+        // PRE-FIX this test fails with the binder exception on the `docs`
+        // write-through below; POST-FIX the illegal pair is skipped exactly
+        // like the scan load path projects it away, and the legal note lands.
+        let (apg_root, dir) = fixture("poison");
+
+        // Project "rename" carries the legal targets from the mystery.
+        let rename = vec![
+            Record::Spec {
+                fqn: "future/rename/spec".into(),
+                title: "Rename".into(),
+                goal: String::new(),
+            },
+            Record::Decision {
+                fqn: "future/rename/spec.decision-D1".into(),
+                id: "D1".into(),
+                summary: "rename now".into(),
+            },
+            Record::Contains {
+                from: "future/rename/spec".into(),
+                to: "future/rename/spec.decision-D1".into(),
+            },
+        ];
+        let rename_path = specs::spec_jsonl_path(&apg_root, "rename");
+        write_jsonl_and_reingest(&apg_root, &rename_path, "rename", &rename).unwrap();
+
+        // Project "docs" carries a POISON record: a Details edge whose
+        // (Note, Future) pair the Details rel table does not declare. Such a
+        // record cannot exist in the DB schema, so the merge_edge MERGE throws
+        // a binder exception. The scan load path buckets the pair away
+        // silently; the write-through re-ingest fed it to the DB.
+        let docs = vec![
+            Record::Spec {
+                fqn: "future/docs/spec".into(),
+                title: "Docs".into(),
+                goal: String::new(),
+            },
+            Record::Future {
+                fqn: "future/docs/migration-note".into(),
+                kind: "other".into(),
+                target: String::new(),
+            },
+            Record::Note {
+                fqn: "future/docs/note-1".into(),
+                body: "poison".into(),
+                kind: "background".into(),
+            },
+            Record::Details {
+                from: "future/docs/note-1".into(),
+                to: "future/docs/migration-note".into(),
+            },
+        ];
+        let docs_path = specs::spec_jsonl_path(&apg_root, "docs");
+        // PRE-FIX (the R3 reproduction): this throws
+        // `Binder exception: …` and, because the docs record set rides along
+        // in every re-ingest, it poisoned note-adds to ANY project.
+        write_jsonl_and_reingest(&apg_root, &docs_path, "docs", &docs).unwrap();
+
+        // The legal note-add to rename must not be hostage to docs' poison:
+        // `apg spec add rename note --on future/rename/spec`.
+        let mut mutated = rename.clone();
+        mutated.push(Record::Note {
+            fqn: "future/rename/note-1".into(),
+            body: "legal note".into(),
+            kind: "background".into(),
+        });
+        mutated.push(Record::Details {
+            from: "future/rename/note-1".into(),
+            to: "future/rename/spec".into(),
+        });
+        write_jsonl_and_reingest(&apg_root, &rename_path, "rename", &mutated).unwrap();
+
+        // The legal note landed in the JSONL and the live DB with its edge.
+        assert!(specs::read_jsonl(&rename_path).unwrap().iter().any(|r| {
+            matches!(r, Record::Details { from, to }
+                if from == "future/rename/note-1" && to == "future/rename/spec")
+        }));
+        let db = ArtifactDb::open(&apg_root).unwrap();
+        assert!(db.has_node("future/rename/note-1"));
+        let out = db
+            .conn()
+            .unwrap()
+            .query(
+                "MATCH (:Note {fqn: 'future/rename/note-1'})-[:Details]->(s:Spec) RETURN count(*)",
+            )
+            .unwrap()
+            .to_string();
+        assert!(
+            out.lines().last() == Some("1"),
+            "legal details edge must land: {out}"
+        );
+
+        // The poison edge is projected away (the scan load path does the same
+        // bucketing), so no binder error ever escapes — but the poison note's
+        // edge must NOT be fabricated into the DB either.
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Note {fqn: 'future/docs/note-1'})-[:Details]->() RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.lines().last() == Some("0"),
+            "poison edge must not materialize: {out}"
+        );
+        drop(db);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn current_committed_state_attaches_notes_to_rename_spec_and_decision() {
+        // R3 "why it now succeeds": the current committed spec JSONLs are
+        // clean — the poison records that polluted the merged record set
+        // during the 1.0 authoring loop were removed from the durable files
+        // (their residues still sit in the live DB as edge-less orphans:
+        // future/cosanima-1.0/note-7 and future/cosanima-docs/note-6). Run the
+        // exact mystery commands against the committed state on a scratch
+        // root: a note on `future/cosanima-rename/spec` (Spec) and on
+        // `future/cosanima-rename/spec.decision-D1` (Decision) writes through
+        // without a binder error.
+        let (apg_root, dir) = fixture("rename-current");
+
+        // Copy the repo's committed spec JSONLs into the scratch root. cargo
+        // test runs from the crate root, where `apg/specs/` lives.
+        let repo_specs = Path::new("apg/specs");
+        assert!(repo_specs.is_dir(), "committed apg/specs must exist");
+        for f in specs::jsonl_files(repo_specs) {
+            let recs = specs::read_jsonl(&f).unwrap();
+            let name = f.file_name().unwrap().to_owned();
+            specs::write_jsonl(&apg_root.join("specs").join(name), &recs).unwrap();
+        }
+
+        // Establish the merged spec state in the scratch DB (one re-ingest
+        // merges every project's files, like any write-through would).
+        reingest_project(&apg_root, "cosanima-rename").unwrap();
+
+        // The mystery command: add a note on the Spec AND the Decision.
+        let path = specs::spec_jsonl_path(&apg_root, "cosanima-rename");
+        let mut records = specs::read_jsonl(&path).unwrap();
+        records.push(Record::Note {
+            fqn: "future/cosanima-rename/note-11".into(),
+            body: "repro".into(),
+            kind: "background".into(),
+        });
+        records.push(Record::Details {
+            from: "future/cosanima-rename/note-11".into(),
+            to: "future/cosanima-rename/spec".into(),
+        });
+        records.push(Record::Details {
+            from: "future/cosanima-rename/note-11".into(),
+            to: "future/cosanima-rename/spec.decision-D1".into(),
+        });
+        write_jsonl_and_reingest(&apg_root, &path, "cosanima-rename", &records).unwrap();
+
+        let db = ArtifactDb::open(&apg_root).unwrap();
+        assert!(db.has_node("future/cosanima-rename/note-11"));
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Note {fqn: 'future/cosanima-rename/note-11'})-[:Details]->(t) RETURN t.fqn")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("future/cosanima-rename/spec"), "{out}");
+        assert!(
+            out.contains("future/cosanima-rename/spec.decision-D1"),
+            "{out}"
+        );
         drop(db);
 
         let _ = std::fs::remove_dir_all(&dir);
