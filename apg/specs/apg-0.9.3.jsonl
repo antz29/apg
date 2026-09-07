@@ -77,3 +77,4 @@
 {"type":"details","from":"future/apg-0.9.3/note-5","to":"future/apg-0.9.3/spec"}
 {"type":"anchors","from":"future/apg-0.9.3/spec.R1","to":"apg.artifacts.write_jsonl_and_reingest"}
 {"type":"implements","from":"apg.artifacts.write_jsonl_and_reingest","to":"future/apg-0.9.3/spec.R1"}
+{"type":"implements","from":"apg.artifacts.reingest_project","to":"future/apg-0.9.3/spec.R1"}
