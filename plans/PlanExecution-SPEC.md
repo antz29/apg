@@ -34,7 +34,8 @@ the outcome — ready for the apply act (PlanCompletion-SPEC.md).
    arose during implementation.
 3. **Phase review (branch scan = proposed reality)** — when all tasks in a phase are done, the
    phase review starts with a **scan of the branch**; that graph shows the proposed reality's
-   code taking shape. The implementation-phase-reviewer reviews the phase against the spec, the
+   code taking shape — and the scan **replaces realized planned nodes** (a scanned node at a
+   planned FQN supersedes the planned one and re-points its incident edges). The implementation-phase-reviewer reviews the phase against the spec, the
    invariants, etc., attaches `Feedback`, and routes back to the implementer to fix. **When all
    feedback is resolved** (the reviewer approves or rejects every disposition — see rules), the
    phase is marked complete and execution proceeds to the next phase. **Nothing is applied to
@@ -50,17 +51,18 @@ the outcome — ready for the apply act (PlanCompletion-SPEC.md).
    **deviations still present** (reviewer-approved wont-fix items and task notes), inviting the
    human to raise issues (which route back into fixes). **Assuming the human is happy**:
 6. **Apply (agent-operated; push/tag human)** — the merge of the branch into `main`, the fresh
-   scan on `main`, and the coherence-gate verification (every `Builds` target resolves; all
+   scan on `main`, and the coherence-gate verification (every planned node realized; all
    feedback resolved; human gate passed) are the **apply act**, covered by
    **PlanCompletion-SPEC.md**. The merge is agent-operated; push/tag remain human.
 7. **Push/tag** — human-owned, never an agent.
 
 ## Rules
 
-- **`apg plan done` is assertion-only** — decoupled from `Builds` promotion and graph
-  verification. The "a task cannot be done until its code exists" property **moves into the
-  apply gate** (PlanCompletion-SPEC.md), which verifies every `Builds` target against the
-  merged graph before applying.
+- **`apg plan done` is assertion-only** — decoupled from promotion and graph verification
+  (nothing is promoted by `plan done`; **branch scans replace planned nodes**, which is the
+  promotion mechanism). The "a task cannot be done until its code exists" property **moves
+  into the apply gate** (PlanCompletion-SPEC.md), which verifies every planned node was
+  realized against the merged graph before applying.
 - **`apg plan complete` is a milestone only** — decoupled from `Implements` and plan
   retirement. The plan **survives until apply**, which materializes all delivery records in
   one act (this also resolves non-code deliverables cleanly: delivery is recorded consciously
@@ -112,11 +114,11 @@ the outcome — ready for the apply act (PlanCompletion-SPEC.md).
 
 ## Implementation surface (when approved)
 
-- `apg plan done`: drop Builds promotion + graph verification (assertion only; keep `undone`).
+- `apg plan done`: drop promotion + graph verification (assertion only; keep `undone`).
 - `apg plan complete`: drop `Implements` materialization and plan retirement; keep the
   all-tasks-done + all-feedback-resolved gate.
 - The apply act (merge + rebuild + coherence gate) is PlanCompletion-SPEC.md's surface; the
-  "Builds targets resolve" verification moves to its gate.
+  planned-node realization verification moves to its gate.
 - Implementer: task-note capability + grant (`Task` is already an allowable `Details` target).
 - A merge-capable agent grant (`git merge` of the project branch into `main`, exercised at
   apply; push/tag remain denied).
@@ -124,6 +126,6 @@ the outcome — ready for the apply act (PlanCompletion-SPEC.md).
 - Agent-prose updates: implementer, implementation-phase-reviewer, spec-writer (reconciliation
   mode), codebase-navigator (branch context — the worktree exists from project start — gate
   summary, apply handoff); AGENTS.md.
-- Tests: apply-gate rejects unresolved Builds targets; plan survives until apply;
+- Tests: apply-gate rejects a branch with unrealized planned nodes; plan survives until apply;
   phase-complete milestone without Implements; wont-fix approval-only lifecycle; task-note
   round-trip.

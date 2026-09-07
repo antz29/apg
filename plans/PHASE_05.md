@@ -8,7 +8,8 @@ the whole loop once.
 ## Deliverable
 
 The full spec → plan → execute → apply flow works end to end, agent-orchestrated, on a project
-branch: spec-writer authors tiers 1–3; plan-writer plans the tier-4 delta (breakdown →
+branch: spec-writer authors tiers 1–3; plan-writer authors the planned Implementation nodes and
+plans the tier-4 delta (breakdown →
 structural review → parallel per-phase write/review → final holistic review); implementers build
 in the branch; the final implementation review discovers divergence (fix or reconcile the
 spec); the human gate approves; apply merges + rebuilds. One dogfooded project lands on `main`.
@@ -21,7 +22,7 @@ spec); the human gate approves; apply merges + rebuilds. One dogfooded project l
    review to tie the spec back to the implementation).
 2. **spec-review**: reviews the spec against the branch graph + `GuardedBy` invariants; cites
    `Checks` where relevant; resolves/rejects; never authors.
-3. **plan-writer**: the tier-4 delta plan; breakdown stage → structural holistic review →
+3. **plan-writer**: the tier-4 delta — authors the `planned` Implementation nodes + the plan; breakdown stage → structural holistic review →
    parallel per-phase writing → parallel per-phase review → final holistic review (two holistic
    gates, PHASE_02/03 tooling).
 4. **plan-review**: per-phase, structural, and holistic scopes; approval-only wont-fix.

@@ -15,8 +15,9 @@ the single delivery moment; implementers can attach task notes.
 
 ## Work items
 
-1. **`apg plan done` → assertion-only**: drop `Builds` promotion and code-graph verification
-   (keep `apg plan undone` for reversals). Marking a task done is the implementer's assertion.
+1. **`apg plan done` → assertion-only**: drop promotion and code-graph verification (keep
+   `apg plan undone` for reversals). Marking a task done is the implementer's assertion; the
+   scanner replacing a planned node is the promotion.
 2. **`apg plan complete` → milestone-only**: drop `Implements` materialization and plan
    retirement; keep the all-tasks-done + all-feedback-resolved gate. The plan survives until
    apply.
@@ -24,11 +25,15 @@ the single delivery moment; implementers can attach task notes.
    `Details` target) — wire the write path + grant + procedure.
 4. **Branch lifecycle**: `git worktree add -b <project>` off `main` at project start; build the
    branch's LadybugDB by scanning + ingesting the branch's committed state (code + committed
-   `apg/specs/*.jsonl` + `apg/notes/*.jsonl`); tool write-throughs commit to the branch; the
-   plan JSONL stays transient and branch-local (gitignored).
+   `apg/specs/*.jsonl` + `apg/notes/*.jsonl`); tool write-throughs serialize into the branch's
+   JSONLs (the commit to the branch is agent-operated — implementer/navigator at phase
+   boundaries); the plan JSONL stays transient and branch-local (gitignored). Each branch scan
+   **replaces realized planned nodes** (a scanned node at a planned FQN supersedes the planned
+   node; see PHASE_01).
 5. **Apply act** (the single delivery moment):
-   - **Coherence gate**: every `Builds` target resolves in the branch's graph; all `Feedback`
-     resolved; human gate passed (navigator summary of work/gotchas/deviations).
+   - **Coherence gate**: every `planned` Implementation node in the branch is realized (a scan
+     found real code at its FQN); all `Feedback` resolved; human gate passed (navigator summary
+     of work/gotchas/deviations).
    - **Merge**: agent-operated `git merge <project-branch>` into `main` (new agent grant;
      push/tag remain denied).
    - **Rebuild**: fresh scan + ingest on `main`; verify delivered descriptions' `Implements`/
@@ -36,14 +41,19 @@ the single delivery moment; implementers can attach task notes.
 6. **Dependency model**: branch off `main` always; squash-merge an in-flight dependency into the
    branch; rebase onto `main` after the dependency lands (navigator procedure; cross-project
    FQN stability is exercised here).
+7. **Planned-node authoring (plan-writer)**: the plan tools can author `planned` Implementation
+   nodes (a planned `Struct`/`Function`/… at its intended FQN) and `Builds(Task → planned node)`
+   edges; the spec tools never create planned nodes (requirements anchor to real code or a
+   proposed Solution node).
 
 ## Deliverables / done gate
 
 - `cargo test` green, including:
   - assertion-only `plan done` (no promotion side effects; `undone` still works);
   - milestone-only `plan complete` (gate enforced, no `Implements`, plan file survives);
-  - apply gate rejects a branch whose `Builds` target does not resolve;
+  - apply gate rejects a branch with an unrealized planned node;
   - task-note round-trip;
+  - plan-writer authors a planned node + `Builds` edge; a branch scan replaces it;
   - wont-fix approval-only lifecycle (a `--wont-fix` action is not terminal until the reviewer
     resolves it).
 

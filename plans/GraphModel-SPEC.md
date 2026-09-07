@@ -23,11 +23,13 @@ the "future") and no archive (the graph always represents current reality; git h
 | 1 | **Requirements** | Why the system exists; needs / obligations it must satisfy | spec-writer |
 | 2 | **Domain** | What business reality exists: concepts, processes, rules, events, contexts | spec-writer |
 | 3 | **Solution** | How we have chosen to solve the problem: architecture and design | spec-writer |
-| 4 | **Implementation** | The codebase (database + infrastructure out of scope for now) | implementers (built), not authored |
+| 4 | **Implementation** | The codebase (database + infrastructure out of scope for now) | scanned (present); plan-writer authors `planned` nodes |
 
 The spec-writer works **across tiers 1–3** — the spec *is* the proposed reality. The
 plan-writer operates separately: the plan is the **delta from current reality to proposed
-reality** — what to create/modify in tier 4 to make the proposed reality actual.
+reality** — what to create/modify in tier 4 to make the proposed reality actual. The plan-writer
+declares the tier-4 additions as **planned Implementation nodes** (marked `planned`) and plans
+the work that makes them real.
 
 ## Node taxonomy
 
@@ -64,7 +66,6 @@ detailed specification structured rather than prose-heavy.
 | `Container` | new | deployable unit: app / service / db / queue |
 | `Component` | new | logical building block within a container |
 | `Decision` | existing | design decisions |
-| `Future` | existing | the proposed solution/implementation shape (a diff's additions) |
 
 ### Tier 4 — Implementation (Code)
 | Node | Status | Notes |
@@ -74,6 +75,13 @@ detailed specification structured rather than prose-heavy.
 | `Struct` | existing | class / struct / interface / type |
 | `Function` | existing | |
 | `UnresolvedTarget` | existing | |
+
+**Planned nodes.** Any Implementation-tier node (`Module`/`File`/`Struct`/`Function`) can carry
+`status: planned` — a proposed tier-4 addition authored by the **plan-writer**
+(PlanCreation-SPEC.md) at the FQN where the code will land. The scanner emits unmarked (present)
+nodes only; a scan that finds real code at a planned FQN **replaces** the planned node and
+re-points its incident edges (`Anchors`, `ImplementedBy`, `Builds`, `Details`, `Contains`).
+Planned nodes never survive on `main`.
 
 Database (`Table`/`Column`) and infrastructure (`Infrastructure`) nodes are **out of scope for
 now** — noted only for completeness.
@@ -88,13 +96,20 @@ now** — noted only for completeness.
 ```
 Requirement --Drives/Requires--> Domain --Realises/Represents--> Solution --ImplementedBy--> Implementation
 ```
-Today `Implements(code → requirement)` jumps tiers 4→1 directly; the full model threads the
+The spine resolves in two phases. **Before the code is built** (the branch's proposed reality)
+there is no direct Solution→Implementation edge: **the plan is the bridge** — a phase
+`Satisfies` the requirement that `Drives` the Solution, and a task `Builds` the planned
+Implementation node. **After the code is built** (apply, `main`), the direct `ImplementedBy`
+edge takes over and the plan is gone: a Solution node's `ImplementedBy` target is a planned node
+(pending) until a scan replaces it with the real node (resolved). The direct `Implements`
+(code → requirement) edge remains as the terminal link in the chain; the full model threads the
 Domain and Solution tiers through the middle so any requirement traces down to the code that
-implements it and any code traces up to the why — through architecture and domain. The direct
-`Implements` edge remains as the terminal link in the chain.
+implements it and any code traces up to the why.
 
 **Other existing edges** carry over unchanged: `Anchors`, `Details`, `DependsOn`, `Gates`,
-`Contains`, `Reviews`, `Satisfies`, `Builds`, plus `GuardedBy`/`Checks` (Invariants-SPEC.md).
+`Contains`, `Reviews`, `Satisfies`, plus `GuardedBy`/`Checks` (Invariants-SPEC.md).
+**`Builds`** (Task → planned Implementation node) is the plan's side of the bridge; it resolves
+when a scan replaces the planned node.
 
 ## Versioning — the change-set is a git branch
 
@@ -103,15 +118,18 @@ implements it and any code traces up to the why — through architecture and dom
 - **A project = a change-set = a worktree + branch off `main`, created at project start** (not
   at implementation). All authoring, planning, implementation, and review happen against the
   branch's graph: a fresh per-worktree LadybugDB built by scanning + ingesting the branch's
-  state. Tool write-throughs serialize into the branch's JSONLs and are **committed to the
-  branch**.
+  state. Tool write-throughs serialize into the branch's JSONLs; **the commit to the branch is
+  agent-operated** — the implementer commits code, the navigator commits JSONL changes at phase
+  boundaries and operates the apply merge (the CLI never auto-commits: its staleness gate
+  refuses a mutation against a tree that moved on, so a committed branch is re-scanned before
+  further authoring).
 - **No `future/` namespace.** The branch *is* the "future". A node's present-ness is a branch
   property, not an FQN property: nodes only on a branch = proposed; nodes on `main` = present.
   FQNs are stable and project-scoped; the merge determines reality.
 - **Durability**: code + `apg/specs/*.jsonl` + `apg/notes/*.jsonl` are committed and merge;
   `db.lbug`, `graph.jsonl`, and plan JSONLs are derived/transient and stay gitignored.
 - **Apply-the-diff = `git merge` branch → `main` + rebuild `main`'s graph.** The coherence gate
-  (Builds targets resolve, all feedback resolved, human gate) runs before the merge; the merge
+  (every planned node realized, all feedback resolved, human gate) runs before the merge; the merge
   itself is agent-operated as part of the apply act; **push/tag remain human**.
 - **No archive.** The graph always represents current reality — delivered spec JSONLs stay on
   `main` as accumulated understanding; nothing in the present is dead. **Git holds history**:
@@ -134,7 +152,7 @@ implements it and any code traces up to the why — through architecture and dom
 | Tier | Owned by | Artifact |
 |---|---|---|
 | 1–3 (proposed reality) | spec-writer | the spec graph |
-| tier-4 delta (proposed → current) | plan-writer | the plan graph |
+| tier-4 delta (proposed → current) | plan-writer | the plan graph + `planned` Implementation nodes |
 | tier-4 (build) | implementers | code in the worktree |
 | all (review) | spec-review / plan-review / implementation-phase-reviewer | feedback |
 | apply-the-diff | navigator (agent-operated), human gate | merge + rebuild |

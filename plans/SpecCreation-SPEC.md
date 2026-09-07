@@ -8,10 +8,13 @@ Invariants: **Invariants-SPEC.md** (graph-wide invariant mechanism, used by this
 
 The end-to-end process by which an idea or prose becomes an **approved, review-clean spec
 graph** — the project's proposed reality across **tiers 1–3** (Requirements, Domain, Solution).
-The spec-writer works across tiers 1–3; the plan-writer (PlanCreation-SPEC.md) separately plans
-the tier-4 delta. Spec authoring happens **in the project's worktree + branch** (created at
+The spec-writer works across tiers 1–3 — the spec declares the proposed Solution shape but
+never concrete planned code; the plan-writer (PlanCreation-SPEC.md) separately plans the tier-4
+delta and authors its `planned` Implementation nodes. Spec authoring happens **in the project's worktree + branch** (created at
 project start per GraphModel-SPEC.md); the branch graph is built by scanning + ingesting the
-branch's state, and tool write-throughs commit to the branch. This spec covers **capturing +
+branch's state, and tool write-throughs serialize into the branch's JSONLs (the commit to the
+branch is agent-operated — the navigator/implementer commits at phase boundaries; the CLI never
+auto-commits). This spec covers **capturing +
 writing specs only** — plan creation, execution, and code review are out of scope (separate
 specs in the family).
 
@@ -33,7 +36,7 @@ review-clean** (reviewer-loop-enforced) — with recurring rules becoming explic
      handling, constraints, acceptance criteria);
    - propose 2–3 approaches with trade-offs; the user picks;
    - present the full design (goal, requirements grouped by feature, domain concepts, phases
-     with gates, decisions, non-goals, future code, ACs, VIs, open questions) and wait for
+     with gates, decisions, non-goals, ACs, VIs, open questions) and wait for
      **user approval**;
    - author via `apg spec init <project> --title --goal` then `apg spec add` / `anchor` /
      `link` — producing the tiers 1–3 proposed reality (Requirements, Domain, Solution nodes);
@@ -52,7 +55,9 @@ review-clean** (reviewer-loop-enforced) — with recurring rules becoming explic
 
 **Role separation (strict):** spec-writer authors + actions, never resolves; spec-review
 attaches/resolves/rejects, never authors; the navigator routes and decides when resolution has
-terminated the loop.
+terminated the loop. **The spec-writer never authors tier-4 nodes** — planned Implementation
+nodes (the concrete code shape) are created by the plan-writer at plan time
+(PlanCreation-SPEC.md); requirements anchor to real code or a proposed Solution node.
 
 **Namespacing:** there is no `future/` prefix — the branch is the "future". Spec FQNs are
 project-scoped (`<project>/spec.<id>`), stable, and present-ness is branch membership
@@ -61,7 +66,7 @@ project-scoped (`<project>/spec.<id>`), stable, and present-ness is branch membe
 ## 2. Correctness layers (three; no invariant dependency)
 
 - **CLI envelope validation** at write time: valid node kinds, note-kind vs target-category
-  rules, resolvable anchors (a real code FQN or a *declared* Future — never invented),
+  rules, resolvable anchors (a real code FQN or a proposed Solution node — never invented),
   acyclic DependsOn/Gates, orphan/coverage lint.
 - **User design approval** before authoring (the semantic gate: content matches intent).
 - **Reviewer loop** as the semantic backstop (internal consistency, ambiguity, coverage,

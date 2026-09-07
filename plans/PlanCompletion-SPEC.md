@@ -29,6 +29,8 @@ the current reality. After apply:
   code (via `Implements`/`Anchors`/`Details`), with the project name retained as an **origin
   label** on the annotation nodes for traceability.
 - **The plan is transient and gone** (it never survives; git history is its only trace).
+- **Planned nodes are gone** — the code that realizes them is present on `main`; nothing stays
+  marked `planned`.
 - **Nothing is archived.** The graph always represents current reality; delivered descriptions
   stay on `main` as accumulated understanding. Past reality is git history — checkout a commit
   and rebuild the graph to see it.
@@ -36,8 +38,8 @@ the current reality. After apply:
 ## The apply-the-diff sequence
 
 1. **Change-set coherence gate** (runs before the merge):
-   - every `Builds` future's target resolves in the branch's graph (a claimed-done task whose
-     code is missing blocks apply);
+   - every `planned` Implementation node in the branch is **realized** — a scan found real code
+     at its FQN and replaced it (a planned node with no code blocks apply);
    - every phase and the whole-plan implementation review are green — all `Feedback` resolved;
    - the **human gate** has passed: the navigator summarised the work, gotchas, and deviations
      still present (reviewer-approved wont-fix items and task notes), the human raised no
@@ -84,11 +86,11 @@ discovered during execution were already materialized before the gate.
   rebase` procedure in the navigator, plus the existing scan + ingest to rebuild `main`'s
   graph.
 - `apg plan promote` (or its replacement) reduces to: coherence-gate check + merge + rebuild —
-  the "Builds targets resolve" verification moves to the gate.
+  the planned-node realization verification moves to the gate.
 - Namespace migration: drop the `future/<project>/` FQN prefix across the existing specs and
   tooling, per GraphModel-SPEC.md (present-ness = branch membership).
 - Drop `apg spec archive` (the graph always represents current reality).
 - Agent-prose updates: codebase-navigator (branch lifecycle, apply procedure), the writers/
   reviewers (branch context, stable FQNs); AGENTS.md.
-- Tests: coherence gate rejects unresolved Builds targets; apply rebuilds a graph whose
+- Tests: coherence gate rejects a branch with unrealized planned nodes; apply rebuilds a graph whose
   delivered descriptions resolve; cross-project FQN stability through squash/rebase.

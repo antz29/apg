@@ -18,6 +18,12 @@ worktree + branch (created at project start, GraphModel-SPEC.md); the plan JSONL
 and branch-local. This spec covers **plan authoring only** — execution and apply are other
 specs in the family.
 
+**The plan-writer authors the planned Implementation nodes** (`Module`/`File`/`Struct`/
+`Function`, marked `planned` at the FQN where the code will land — GraphModel-SPEC.md): they are
+the concrete tier-4 shape of the diff's additions, the far side of the bridge the plan
+represents. `Builds(Task → planned node)` ties each task to the code it creates; a scan that
+finds real code at the planned FQN replaces the node.
+
 ## Goal
 
 An approved plan whose **structure is valid** (CLI-enforced), whose **breakdown is sound**
@@ -38,7 +44,7 @@ never merges — the plan is the roadmap, not the record).*
    ordering/dependencies coherent, phase set matches the spec. **Structural feedback routes
    back to the breakdown writer** → fix → re-review → until the breakdown is structurally green.
 3. **Parallel per-phase writing** (N plan-writers): one per phase, authoring only that phase's
-   `Task` nodes (title, kind/tier, `Builds` futures, `Anchors`). Phases write disjoint FQNs;
+   `Task` nodes (title, kind/tier, `Builds` planned nodes, `Anchors`). Phases write disjoint FQNs;
    writes serialize on the spec flock (process-wide, spanning load→modify→write — no lost edges).
 4. **Parallel per-phase review** (N plan-review, cycled): one per phase. Attach Feedback → route
    to that phase's writer → fix **through the authoring path** (`apg plan add task` is
@@ -46,7 +52,7 @@ never merges — the plan is the roadmap, not the record).*
    until each phase is individually green (zero feedback).
 5. **Final holistic review** (single plan-review, cycled): across the whole plan — cross-phase
    consistency the per-phase reviews cannot see (requirement coverage, Gates cycles, phase
-   ordering, consistent kind/tier classification, Builds targets declared in the spec, anchors
+   ordering, consistent kind/tier classification, Builds targets are planned Implementation nodes, anchors
    resolve). If it flags phase X → **phase X's writer** fixes → which **triggers a single
    per-phase review of phase X** to verify → then the final holistic review again → until the
    entire plan is green.
@@ -74,8 +80,9 @@ never merges — the plan is the roadmap, not the record).*
 ## Correctness layers (unchanged)
 
 - **CLI envelope validation** at write time: phase `--satisfies` targets are real
-  requirements; task kind/tier rules; `--builds` targets are declared futures; anchors resolve
-  (real code FQN or declared Future).
+  requirements; task kind/tier rules; `--builds` targets are planned Implementation nodes
+  (authored by the plan-writer — never auto-created); anchors resolve (real code FQN or planned
+  Implementation node).
 - **Structural + reviewer loops** as the semantic backstop (breakdown soundness, per-phase and
   cross-phase consistency).
 - The flow works identically with zero invariants.
