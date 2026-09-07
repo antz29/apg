@@ -1,63 +1,68 @@
-# PHASE_03 — Execution + apply model
+# PHASE_03 — Close the open spec divergences
 
-References: **GraphModel-SPEC.md**, **PlanExecution-SPEC.md**, **PlanCompletion-SPEC.md**,
-**0.10.0-PLAN.md**.
-Scope: change the execution/apply lifecycle — a project is a branch change-set; `plan done` is
-an implementer assertion, `plan complete` is a milestone, and the diff is applied by
-merge + rebuild after a coherence gate.
+References: **REVIEW.md** (the `[ ]` items), **PlanCreation-SPEC.md**, **PlanExecution-SPEC.md**,
+**PlanCompletion-SPEC.md**, **Invariants-SPEC.md**, **0.10.0-PLAN.md**.
+Scope: every unchecked REVIEW.md item is either implemented or explicitly reconciled — zero open
+divergences between the code and the spec family.
 
 ## Deliverable
 
-Execution happens entirely in a project branch (worktree + branch off `main`, created at
-project start); the plan survives until apply; nothing is promoted by `plan done`/`plan
-complete`; the apply act (coherence gate → agent-operated merge → rebuild of `main`'s graph) is
-the single delivery moment; implementers can attach task notes.
+REVIEW.md is all `[x]` (fixed) or `[~]` (reconciled, with the spec prose updated to match); no
+`[ ]` item remains.
 
 ## Work items
 
-1. **`apg plan done` → assertion-only**: drop promotion and code-graph verification (keep
-   `apg plan undone` for reversals). Marking a task done is the implementer's assertion; the
-   scanner replacing a planned node is the promotion.
-2. **`apg plan complete` → milestone-only**: drop `Implements` materialization and plan
-   retirement; keep the all-tasks-done + all-feedback-resolved gate. The plan survives until
-   apply.
-3. **Task notes**: implementer attaches notes to tasks (`Task` is already an allowable
-   `Details` target) — wire the write path + grant + procedure.
-4. **Branch lifecycle**: `git worktree add -b <project>` off `main` at project start; build the
-   branch's LadybugDB by scanning + ingesting the branch's committed state (code + committed
-   `apg/specs/*.jsonl` + `apg/notes/*.jsonl`); tool write-throughs serialize into the branch's
-   JSONLs (the commit to the branch is agent-operated — implementer/navigator at phase
-   boundaries); the plan JSONL stays transient and branch-local (gitignored). Each branch scan
-   **replaces realized planned nodes** (a scanned node at a planned FQN supersedes the planned
-   node; see PHASE_01).
-5. **Apply act** (the single delivery moment):
-   - **Coherence gate**: every `planned` Implementation node in the branch is realized (a scan
-     found real code at its FQN); all `Feedback` resolved; human gate passed (navigator summary
-     of work/gotchas/deviations).
-   - **Merge**: agent-operated `git merge <project-branch>` into `main` (new agent grant;
-     push/tag remain denied).
-   - **Rebuild**: fresh scan + ingest on `main`; verify delivered descriptions' `Implements`/
-     `Anchors` resolve against the rebuilt graph.
-6. **Dependency model**: branch off `main` always; squash-merge an in-flight dependency into the
-   branch; rebase onto `main` after the dependency lands (navigator procedure; cross-project
-   FQN stability is exercised here).
-7. **Planned-node authoring (plan-writer)**: the plan tools can author `planned` Implementation
-   nodes (a planned `Struct`/`Function`/… at its intended FQN) and `Builds(Task → planned node)`
-   edges; the spec tools never create planned nodes (requirements anchor to real code or a
-   proposed Solution node).
+1. **Plan CLI / tooling**:
+   - `apg_plan_add.ts` description drops the retired `human` task kind ({source, test, gate,
+     docs}).
+   - `apg plan add phase --prereq` runs the same Gates-cycle check `apg plan link` uses
+     (self-gate + transitive cycle) before any write.
+   - `apg plan add task` and `apg plan link` verify the target phase exists
+     (`plan.phase-NN` must resolve) — CLI-envelope hole closed.
+   - Exactly-one-phase Satisfies detection: `apg plan phases` (or the unresolved lint) reports
+     a requirement Satisfied by more than one phase.
+   - Durable phase milestone: `Record::PlanPhase` gains `status` (pending | done);
+     `apg plan complete` writes it — a completed phase is distinguishable from tasks-done +
+     feedback-resolved.
+2. **Apply / coherence gate**:
+   - Invariant evaluation: `apg plan apply` checks `GuardedBy` invariants on the branch's
+     plan/spec/code nodes (an invariant the merge would violate blocks apply). Confirm scope
+     (which node kinds the gate walks) at kickoff.
+   - Plan JSONL consumption: decide implement-vs-reconcile — explicitly drop the plan JSONL
+     after a successful apply, or record the gitignored/branch-local transience as the design
+     (PlanCompletion-SPEC "the plan is transient and gone").
+   - Human-gate leg: reconcile as navigator-prose-only (per PlanCompletion-SPEC the human gate
+     is the navigator's job; the CLI gate is planned-node realization + feedback + invariants).
+3. **Agent prose (plan creation)**:
+   - plan-writer breakdown stage = **skeleton only, no tasks** (remove the tasks-in-breakdown
+     and proposal-step prose).
+   - codebase-navigator plan-creation orchestration: stage sequence, parallel per-phase
+     spawning, routing-by-scope (structural → breakdown writer; phase-level → phase writer),
+     and the termination decision.
+   - Re-entry rule (a holistic-flagged phase re-enters its per-phase review before the next
+     holistic pass) in the navigator/plan-review prose.
+   - plan-writer + plan-review invariant awareness: `apg_invariants` grant + awareness prose
+     (mirror spec-writer/spec-review; writers/reviewers never materialize).
+4. **Data / docs residue** (items not already swept in PHASE_02):
+   - Any remaining `future/` literal in spec-data prose (apg-0.9.3.jsonl) and stale
+     archive/complete prose in `apg_spec_unresolved.ts`, `apg_review_resolve.ts`, and
+     `cosanima-mcp/spec.R6`'s body tool-list.
+5. **Missing tests**:
+   - apply → merge → rebuild with delivered descriptions resolving (the apply path beyond the
+     promote round-trip).
+   - cross-project FQN stability through squash/rebase.
+   - PHASE_04 migration round-trip (spec JSONL → project-scoped FQNs with incident edges
+     re-pointed).
+   - scoped-review routing test (structural vs phase).
 
 ## Deliverables / done gate
 
-- `cargo test` green, including:
-  - assertion-only `plan done` (no promotion side effects; `undone` still works);
-  - milestone-only `plan complete` (gate enforced, no `Implements`, plan file survives);
-  - apply gate rejects a branch with an unrealized planned node;
-  - task-note round-trip;
-  - plan-writer authors a planned node + `Builds` edge; a branch scan replaces it;
-  - wont-fix approval-only lifecycle (a `--wont-fix` action is not terminal until the reviewer
-    resolves it).
+- `cargo test` green + clippy clean.
+- REVIEW.md has no `[ ]` line: every item is `[x]` or `[~]` with the reconciliation recorded
+  in the spec/agent prose.
+- `rg -i 'future/' src/ .opencode/ apg/specs/` clean (no `future/` literal anywhere).
 
 ## Out of scope (later phases)
 
-- The `future/` namespace migration (PHASE_04) — plan/spec FQNs still carry it here.
-- Agent flow orchestration + dogfooding (PHASE_05).
+- Docs/agents/dogfood under the finalized model (PHASE_04).
+- Release (PHASE_05).

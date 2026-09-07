@@ -1,49 +1,41 @@
-# PHASE_01 — Graph model foundation
+# PHASE_01 — Land the working-tree baseline
 
-References: **GraphModel-SPEC.md**, **0.10.0-PLAN.md**.
-Scope: extend the graph to represent all four tiers of active knowledge and the spine.
+References: **HANDOVER.md**, **REVIEW.md**, **0.10.0-PLAN.md**.
+Scope: commit the working-tree PHASE_01–05 implementation (built under the **pre-finalization
+model** — `Future` with tier-aligned `kind`, invariants, assertion/milestone plan lifecycle,
+`future/`-namespace migration, archive/retag removal) as a green, self-contained checkpoint
+before the planned-node reconciliation.
 
 ## Deliverable
 
-The graph can represent the full 4-tier taxonomy — Requirements, Domain (DDD), Solution (C4),
-Implementation (code) — with the spine edges linking them, and `apg query` works against the
-new labels. Everything else in the plan builds on this substrate.
+The entire working-tree implementation is committed on `main`: the 4-tier node taxonomy + the
+five spine edges, the invariant mechanism, the assertion-only/milestone-only plan lifecycle,
+project-scoped FQNs (no `future/` prefix in FQNs), the removal of `apg spec archive` and
+`apg plan retag`, docs, and the `invariant-mechanism` dogfood project. `cargo test` green and
+clippy clean. Session checkpoint docs (`HANDOVER.md`, `REVIEW.md`, `HANDOFF.md`) stay untracked.
 
 ## Work items
 
-1. **New node kinds** in schema.rs + labels/load/merge:
-   - Tier 1: `Stakeholder`
-   - Tier 2 (DDD): `Domain`/`BoundedContext`, `Subdomain`, `Entity`, `ValueObject`,
-     `Aggregate`, `DomainEvent`, `DomainProcess`, `DomainRule`, `Actor`
-   - Tier 3 (C4): `System`, `Container`, `Component`
-   - Tier 4: Module/File/Struct/Function/UnresolvedTarget, gaining a `planned` status (see
-     work item 3); DB/infra out of scope.
-2. **Spine edges**: `Drives`/`Requires` (Requirement → Domain),
-   `Realises`/`Represents` (Domain → Solution), `ImplementedBy` (Solution → Implementation).
-   Schema + edges + merge; keep direct `Implements` (code → requirement) as the terminal link
-   in the chain.
-3. **`planned` status on Implementation nodes**: schema + load/merge support for a
-   `status: planned` marker on `Module`/`File`/`Struct`/`Function` (the scanner emits unmarked,
-   present nodes only). A scan that finds real code at a planned FQN **replaces** the planned
-   node and re-points its incident edges (`Anchors`, `ImplementedBy`, `Builds`, `Details`,
-   `Contains`). Planned nodes are authored by the plan-writer at plan time (PHASE_03), never by
-   the spec tools.
-4. **Serialization**: record variants, label registry, rel-tables, JSONL round-trip for every
-   new node/edge kind; `labels(n)` returns the new labels.
+1. **Verify the baseline**: `cargo test` + clippy clean at the current working tree; the
+   dogfood `invariant-mechanism` spec resolves against a rebuilt graph (spine + `Invariant` +
+   delivered requirements); `apg --version` = 0.10.0 (already bumped in the tree).
+2. **Commit the checkpoint** (single commit, repo style). Include: `src/*` (all modules incl.
+   `invariant_cmd.rs`), `.opencode/` tools + lib + agents, `apg/specs/*.jsonl` (migrated
+   project-scoped FQNs + `_invariants.jsonl`), README/AGENTS. **Exclude** the session docs
+   (HANDOVER/REVIEW/HANDOFF) from the commit.
+3. **Record the known divergence in the commit message**: the baseline implements the
+   pre-finalization `Future.kind` re-alignment; the committed specs (`169959d`) mandate planned
+   Implementation nodes — reconciled in PHASE_02.
 
 ## Deliverables / done gate
 
-- `cargo test` green, including:
-  - schema parse for every new node/edge kind;
-  - JSONL → DB → JSONL round-trip for each;
-  - a sample 4-tier spine (Requirement → Domain → Solution → Implementation) resolving via
-    `apg_query`;
-  - a scanned node at a planned FQN replaces the planned node (edges re-pointed; status
-    unmarked).
-- `apg_find_symbol`/`apg_query` surface the new labels with no regressions on existing labels.
+- `git log` shows the baseline commit; the tree is clean except the untracked session docs.
+- `cargo test` green + clippy clean at the checkpoint.
+- `apg scan` on the repo rebuilds a graph where the `invariant-mechanism` dogfood spec resolves
+  (spine, `Invariant` via `domain-rule`, delivered requirements).
 
 ## Out of scope (later phases)
 
-- The invariant mechanism (PHASE_02).
-- The branch-as-change-set execution model (PHASE_03).
-- The `future/` namespace removal (PHASE_04).
+- The planned-node reconciliation (PHASE_02).
+- Closing the REVIEW.md open items (PHASE_03).
+- Docs/agents/dogfood re-run under the finalized model (PHASE_04).
