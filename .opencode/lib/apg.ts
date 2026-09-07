@@ -15,6 +15,11 @@ export interface ToolContext {
   worktree: string
 }
 
+/** The apg binary to spawn: APG_BINARY env override, default "apg" on PATH. */
+export function apgBinary(): string {
+  return process.env.APG_BINARY || "apg"
+}
+
 /** Walks up from the session dirs looking for the project's `apg/.trans/db.lbug`. */
 export function findApgRoot(context: ToolContext): string | null {
   const starts = [context.directory, process.cwd(), context.worktree]
@@ -40,7 +45,7 @@ export async function runCypher(context: ToolContext, cypher: string): Promise<s
   if (!root) {
     return "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
   }
-  const result = await Bun.$`apg query ${cypher}`.cwd(root).quiet().nothrow()
+  const result = await Bun.$`${apgBinary()} query ${cypher}`.cwd(root).quiet().nothrow()
   if (result.exitCode !== 0) {
     return `apg query failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
   }
@@ -89,9 +94,9 @@ export async function runCli(context: ToolContext, args: string[]): Promise<stri
   if (!root) {
     return "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
   }
-  const result = await Bun.$`apg ${args}`.cwd(root).quiet().nothrow()
+  const result = await Bun.$`${apgBinary()} ${args}`.cwd(root).quiet().nothrow()
   if (result.exitCode !== 0) {
-    const cmd = ["apg", ...args].join(" ")
+    const cmd = [apgBinary(), ...args].join(" ")
     return `${cmd} failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
   }
   return result.stdout.toString().trim()

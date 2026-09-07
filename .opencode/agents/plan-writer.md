@@ -12,7 +12,9 @@ permission:
     "*": allow
   grep:
     "*": allow
-  external_directory: ask
+  external_directory:
+    "*": deny
+    "/tmp/**": allow
   apg_query: allow
   apg_find_symbol: allow
   apg_modules: allow

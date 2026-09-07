@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { tool } from "@opencode-ai/plugin"
+import { apgBinary } from "../lib/apg.ts"
 
 function findProjectRoot(context: { directory: string; worktree: string }): string | null {
   const candidates = [context.directory, process.cwd(), context.worktree]
@@ -42,7 +43,7 @@ export default tool({
     const root = findProjectRoot(context) ?? context.directory
     const dir = args.directory ?? root
 
-    const spawnArgs: string[] = ["apg", "scan", dir]
+    const spawnArgs: string[] = [apgBinary(), "scan", dir]
 
     if (args.language) {
       spawnArgs.push("--language", args.language)
