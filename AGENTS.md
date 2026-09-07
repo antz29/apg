@@ -68,7 +68,7 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   specs" below).
 - `apg plan <sub> …` — the phased execution plan (transient, serialized to
   `apg/.trans/plans/<project>.jsonl`): `init`, `add` (phase/task), `link`,
-  `done`/`undone`, `complete`, `render`.
+  `done`/`undone`, `complete`, `render`, `retag`.
 - `apg review <sub> …` — the closed writer↔reviewer feedback cycle: `add`,
   `action`, `resolve`, `reject`, `list`.
 - `apg --version`, `apg --help`.
@@ -82,7 +82,7 @@ abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_unresolved`, `apg_hunk` — and the spec/plan/review suite: `apg_spec`
 (+ requirements/phases/deps/anchors/trace/unresolved/fixes/init/add/anchor/link/rm/
 render/promote/archive), `apg_plan` (+ phases/tasks/complete/render/init/add/
-link/done/undone), `apg_review` (+ add/action/resolve/reject). Shared plumbing
+link/done/undone/retag), `apg_review` (+ add/action/resolve/reject). Shared plumbing
 lives in `~/.opencode/lib/apg.ts`
 (root discovery, `apg query`/`apg spec`/`apg plan`/`apg review` subprocess,
 Cypher literal escaping). All suite
@@ -239,10 +239,11 @@ at write time.
   (`kind` ∈ function/struct/service/rpc/endpoint/other, `target` = intended
   real FQN); a pending anchor is `Anchors(req→Future)`.
 - `Task {fqn, title, kind, tier, status}` carries a two-axis classification:
-  `kind` ∈ source/test/gate/docs/human is the **owning role** (orthogonal,
+  `kind` ∈ source/test/gate/docs is the **owning role** (orthogonal,
   `source` default); `tier` ∈ unit/int/e2e is the verification depth,
-  required iff `kind = test`, rejected otherwise. `apg plan complete` refuses
-  to close a phase while a `human` task in it is not `done`.
+  required iff `kind = test`, rejected otherwise. Every task is
+  implementer-workable — the human's decision point is plan end: completing
+  the final phase retires the plan and prints an explicit handoff line.
 - Requirement state is **derived**: `delivered` (an `Implements` edge exists)
   vs `planned`; a spec is `implemented` when every requirement is delivered.
 - `Feedback {fqn, body, status, disposition}` is a review item;

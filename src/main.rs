@@ -209,6 +209,10 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         "apg_plan_undone.ts",
         include_str!("../.opencode/tools/apg_plan_undone.ts"),
     ),
+    (
+        "apg_plan_retag.ts",
+        include_str!("../.opencode/tools/apg_plan_retag.ts"),
+    ),
 ];
 
 /// Shared helper module used by the suite tools (`lib/apg.ts`), installed by
@@ -505,7 +509,7 @@ USAGE:
   apg spec <sub> …            Author + lifecycle a graph-native spec:
                               init/add/anchor/link/rm/render/promote/archive
   apg plan <sub> …            The phased execution plan (transient):
-                              init/add/link/done/undone/complete/render
+                              init/add/link/done/undone/complete/render/retag
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
   apg --version               Print version

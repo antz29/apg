@@ -36,7 +36,7 @@ fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::
 
 pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg plan <init|add|link|done|undone|complete|render> …");
+        anyhow::bail!("usage: apg plan <init|add|link|done|undone|complete|render|retag> …");
     };
     match sub {
         "init" => plan_init(&args[1..]),
@@ -46,6 +46,7 @@ pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
         "undone" => plan_undone(&args[1..]),
         "complete" => plan_complete(&args[1..]),
         "render" => plan_render(&args[1..]),
+        "retag" => plan_retag(&args[1..]),
         other => anyhow::bail!("unknown apg plan subcommand: {other}"),
     }
 }
@@ -143,7 +144,7 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
             ) else {
                 anyhow::bail!(
-                    "usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs|human>] [--tier <unit|int|e2e>] [--builds <future-name>] [--anchor <fqn>]*"
+                    "usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs>] [--tier <unit|int|e2e>] [--builds <future-name>] [--anchor <fqn>]*"
                 );
             };
             let Some(title) = p.get("title") else {
@@ -201,10 +202,12 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
 /// Validate the two-axis task classification: `kind` is the owning role
 /// (orthogonal), `tier` the verification depth (a hierarchy, meaningful only
 /// for `kind = test`). Mirrors the `Future.kind` / `Note.kind` validation
-/// pattern in `spec_cmd`.
+/// pattern in `spec_cmd`. Tasks are implementer-workable by design (`source`/
+/// `test`/`gate`/`docs`) — the human's decision point is plan end, never a
+/// phase task.
 fn validate_task_kind_tier(kind: &str, tier: &str) -> anyhow::Result<()> {
-    if !["source", "test", "gate", "docs", "human"].contains(&kind) {
-        anyhow::bail!("invalid task kind `{kind}` — one of source/test/gate/docs/human");
+    if !["source", "test", "gate", "docs"].contains(&kind) {
+        anyhow::bail!("invalid task kind `{kind}` — one of source/test/gate/docs");
     }
     if kind == "test" && tier.is_empty() {
         anyhow::bail!("test task requires --tier (unit|int|e2e)");
@@ -382,6 +385,58 @@ fn plan_undone(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `apg plan retag <project> <task-fqn> --kind <k> [--tier <t>]` — correct a
+/// mis-set task classification (write-through). Re-validates the two-axis
+/// kind/tier pair; `test` requires a `tier`, non-test rejects one.
+fn plan_retag(args: &[String]) -> anyhow::Result<()> {
+    let p = parse_args(args);
+    let (Some(project), Some(task_fqn)) = (p.positional.first(), p.positional.get(1)) else {
+        anyhow::bail!(
+            "usage: apg plan retag <project> <task-fqn> --kind <source|test|gate|docs> [--tier <unit|int|e2e>]"
+        );
+    };
+    let kind = p
+        .get("kind")
+        .ok_or_else(|| anyhow::anyhow!("retag requires --kind <source|test|gate|docs>"))?;
+    let tier = p.get("tier").unwrap_or_default();
+    let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
+    let mut records = load_plan(&apg_root, project)?;
+    retag_task(&mut records, task_fqn, &kind, &tier)?;
+    write_through(&apg_root, project, &records)?;
+    println!("Retagged {task_fqn} as {kind}");
+    Ok(())
+}
+
+/// Set a task's kind/tier in place, validating the new pair first.
+fn retag_task(
+    records: &mut [Record],
+    task_fqn: &str,
+    kind: &str,
+    tier: &str,
+) -> anyhow::Result<()> {
+    validate_task_kind_tier(kind, tier)?;
+    let mut found = false;
+    for r in records {
+        if let Record::Task {
+            fqn,
+            kind: k,
+            tier: t,
+            ..
+        } = r
+            && fqn == task_fqn
+        {
+            *k = kind.to_string();
+            *t = tier.to_string();
+            found = true;
+        }
+    }
+    if !found {
+        anyhow::bail!("task `{task_fqn}` not found in plan");
+    }
+    Ok(())
+}
+
 /// `apg plan complete <project> <phase-n>` (R23/R27). Requires every phase
 /// task `done` and no unresolved feedback on the phase or its tasks; adds
 /// `Implements` from the phase's built code (its done tasks' anchors) to each
@@ -412,17 +467,6 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
                 .any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t))
         })
         .collect();
-
-    // Human-teeth (R…): a `human`-kind task is owned by the person — an agent
-    // must not close the phase (or retire the final-phase plan) around an
-    // unperformed human step. Refuse with a targeted message.
-    let human_not_done = human_tasks_not_done(&records, &phase_fqn);
-    if !human_not_done.is_empty() {
-        anyhow::bail!(
-            "phase {phase} has human tasks not done: {} — a human step cannot be closed by an agent; complete them first",
-            human_not_done.join(", ")
-        );
-    }
 
     let mut not_done = Vec::new();
     for t in &tasks {
@@ -505,33 +549,13 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
             reingest_project(&apg_root, project)?;
         }
         println!("Completed final phase {phase} — plan {project} retired (JSONL dropped)");
+        println!(
+            "Handoff: plan {project} is done — human review/decision next (push/release/approve)"
+        );
     } else {
         println!("Completed phase {phase} of plan {project}");
     }
     Ok(())
-}
-
-/// The `human`-kind tasks directly contained in a phase that are not `done` —
-/// the teeth that keep an agent from closing a phase around an unperformed
-/// human step.
-fn human_tasks_not_done(records: &[Record], phase_fqn: &str) -> Vec<String> {
-    records
-        .iter()
-        .filter_map(|e| match e {
-            Record::Contains { from, to } if from == phase_fqn => Some(to.clone()),
-            _ => None,
-        })
-        .filter_map(|t| {
-            records.iter().find_map(|r| match r {
-                Record::Task {
-                    fqn, kind, status, ..
-                } if fqn == &t => Some((t.clone(), kind, status)),
-                _ => None,
-            })
-        })
-        .filter(|(_, kind, status)| kind.as_str() == "human" && status.as_str() != "done")
-        .map(|(t, _, _)| t)
-        .collect()
 }
 
 /// The built code nodes of a phase: the unique set of its tasks' `Anchors`
@@ -664,7 +688,7 @@ fn render_phase_tasks(records: &[Record], pfqn: &str) -> String {
                 .any(|r| matches!(r, Record::Task { fqn, .. } if fqn == t))
         })
         .collect();
-    const KIND_ORDER: [&str; 5] = ["source", "test", "gate", "docs", "human"];
+    const KIND_ORDER: [&str; 4] = ["source", "test", "gate", "docs"];
     type TaskLine = (String, String, String, String);
     let mut by_kind: Vec<(String, Vec<TaskLine>)> = Vec::new();
     for t in tasks {
@@ -918,17 +942,17 @@ mod tests {
     fn task_kind_tier_validation() {
         // Default kind is source.
         assert!(validate_task_kind_tier("source", "").is_ok());
-        // All five kinds accepted.
-        for k in ["source", "test", "gate", "docs", "human"] {
+        // All four implementer-workable kinds accepted.
+        for k in ["source", "test", "gate", "docs"] {
             let tier = if k == "test" { "unit" } else { "" };
             assert!(validate_task_kind_tier(k, tier).is_ok(), "kind {k}");
         }
-        // Unknown kind rejected.
+        // Unknown kinds rejected — the retired `human` kind included.
         assert!(validate_task_kind_tier("qa", "").is_err());
+        assert!(validate_task_kind_tier("human", "").is_err());
         // tier required for test, rejected for non-test.
         assert!(validate_task_kind_tier("test", "").is_err());
         assert!(validate_task_kind_tier("source", "unit").is_err());
-        assert!(validate_task_kind_tier("human", "e2e").is_err());
         // Unknown tier rejected.
         assert!(validate_task_kind_tier("test", "smoke").is_err());
         // All three tiers accepted for test.
@@ -938,30 +962,50 @@ mod tests {
     }
 
     #[test]
-    fn plan_complete_refuses_undone_human_task() {
-        let records = vec![
-            Record::Task {
-                fqn: "future/foo/plan.phase-01.task-1".into(),
-                title: "sign off".into(),
-                kind: "human".into(),
-                tier: String::new(),
-                status: "pending".into(),
-            },
-            Record::Contains {
-                from: "future/foo/plan.phase-01".into(),
-                to: "future/foo/plan.phase-01.task-1".into(),
-            },
-        ];
-        let undone = human_tasks_not_done(&records, "future/foo/plan.phase-01");
-        assert_eq!(undone, vec!["future/foo/plan.phase-01.task-1"]);
-        // A done human task passes the gate.
-        let mut records = records;
-        for r in &mut records {
-            if let Record::Task { status, .. } = r {
-                *status = "done".to_string();
-            }
-        }
-        assert!(human_tasks_not_done(&records, "future/foo/plan.phase-01").is_empty());
+    fn retag_task_reclassifies_and_validates() {
+        // A mis-set `human` task (the retired kind) is reclassified to an
+        // implementer-workable role.
+        let mut records = vec![Record::Task {
+            fqn: "future/foo/plan.phase-01.task-1".into(),
+            title: "Cut the tag".into(),
+            kind: "human".into(),
+            tier: String::new(),
+            status: "pending".into(),
+        }];
+        // Reclassify to source: clears the bogus kind/tier.
+        retag_task(
+            &mut records,
+            "future/foo/plan.phase-01.task-1",
+            "source",
+            "",
+        )
+        .unwrap();
+        assert!(records.iter().any(
+            |r| matches!(r, Record::Task { kind, tier, .. } if kind == "source" && tier.is_empty())
+        ));
+        // The two-axis rules re-validate: test needs a tier, non-test rejects one.
+        assert!(retag_task(&mut records, "future/foo/plan.phase-01.task-1", "test", "").is_err());
+        assert!(
+            retag_task(
+                &mut records,
+                "future/foo/plan.phase-01.task-1",
+                "source",
+                "unit"
+            )
+            .is_err()
+        );
+        // Unknown kind rejected.
+        assert!(retag_task(&mut records, "future/foo/plan.phase-01.task-1", "qa", "").is_err());
+        // Unknown task rejected.
+        assert!(
+            retag_task(
+                &mut records,
+                "future/foo/plan.phase-01.task-9",
+                "source",
+                ""
+            )
+            .is_err()
+        );
     }
 
     #[test]
