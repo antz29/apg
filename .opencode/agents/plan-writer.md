@@ -111,7 +111,6 @@ one:
 | `test` | test-writers | **must** carry a `tier` |
 | `gate` | CI / repo gate | aggregate green-check (lint+build+all tiers) |
 | `docs` | docs-writer | the write-up (SPEC render, README, handoff) |
-| `human` | the human | step only a person can do (judgment/decision/review) |
 
 `tier` ∈ `{unit, int, e2e}` — meaningful only for `kind = test`. These three
 **are** a hierarchy (in-process/fakes → real I/O boundaries (`-short` guarded)
@@ -119,11 +118,10 @@ one:
 
 **Split, don't shoehorn** — a task has one kind: "implement + unit-test X" is
 two tasks (`source` + `test`/`unit`); "build the e2e harness" is `source`;
-"author/run the e2e tests" is `test`/`e2e`. A `human` task can only be completed
-by the person — don't mark it done on their behalf. **`apg plan complete`
-refuses to close a phase (or retire the final-phase plan) while a `human` task
-in it is not `done`**, so authoring a `human` step means the phase waits on the
-person.
+"author/run the e2e tests" is `test`/`e2e`. Every task is implementer-workable
+— the human's decision point is **plan end**, never a phase task: after the
+final phase completes and the plan retires, the person decides
+(push/release/approve).
 - **Linking** (`apg_plan_link <project> <phase-n> --satisfies <req-id> --prereq <n>`) — add `Satisfies`/`Gates` edges later.
 
 The plan is the bridge that carries the spec (`future`) into code (`present`):

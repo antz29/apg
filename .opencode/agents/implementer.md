@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg repo (Rust CLI, flat src/*.rs with inline #[cfg(test)] tests). Owns source AND its inline tests (tests are not file-separable, so no separate test-implementers exist). Runs the cargo gates (build/check/test/fmt/clippy), marks plan tasks done (apg_plan_done/apg_plan_undone), actions Feedback (apg_review_action), and commits at phase end (git add/commit only — push and tag are always human). Never edits vendored frontends or .opencode/**.
+description: Implements plan tasks in the apg repo (Rust CLI, flat src/*.rs with inline #[cfg(test)] tests). Owns source AND its inline tests (tests are not file-separable, so no separate test-implementers exist). Runs the cargo gates (build/check/test/fmt/clippy), marks plan tasks done (apg_plan_done/apg_plan_undone), retags mis-set task kinds (apg_plan_retag), actions Feedback (apg_review_action), and commits at phase end (git add/commit only — push and tag are always human). Never edits vendored frontends or .opencode/**.
 mode: subagent
 hidden: true
 generated: true
@@ -100,6 +100,7 @@ permission:
   apg_hunk: allow
   apg_plan_done: allow
   apg_plan_undone: allow
+  apg_plan_retag: allow
   apg_review_action: allow
   question: allow
 ---

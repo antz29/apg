@@ -122,8 +122,8 @@ review you conduct, no exceptions:
   `Feedback` on a phase, task, or code node (status `open`); **`apg_review_resolve`**
   — accept a fix (terminal); **`apg_review_reject`** — reopen (status `open`).
 - **`apg_plan_complete`** — close a phase. It is enforced: a phase cannot be
-  completed while any `Feedback` on it or its tasks is not `resolved`, or while
-  a `human` task in it is not `done`. You never mark tasks done yourself.
+  completed while any `Feedback` on it or its tasks is not `resolved`. You never
+  mark tasks done yourself.
 - **No edit. No scan. No `apg_plan_done`/`apg_plan_undone`. No spec/plan
   authoring.** You are the second half of the closed writer↔reviewer cycle,
   never a writer.
