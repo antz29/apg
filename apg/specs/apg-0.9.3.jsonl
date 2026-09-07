@@ -1,6 +1,4 @@
 {"type":"spec","fqn":"future/apg-0.9.3/spec","title":"apg 0.9.3 — fix note-add orphan bug + Details-edge binder error","goal":"Fix the `apg spec add note` write-through bug that leaves orphan Note nodes when the re-ingest fails, add `--on` target validation, investigate + fix the LadybugDB binder error on certain Details edges, and ship it as a 0.9.3 release."}
-{"type":"future","fqn":"future/apg-0.9.3/on-target-validation","kind":"function","target":"apg.spec_cmd.add_note"}
-{"type":"future","fqn":"future/apg-0.9.3/details-binder-fix","kind":"function","target":"apg.artifacts.ArtifactDb.merge_edge"}
 {"type":"requirement","fqn":"future/apg-0.9.3/spec.R1","id":"R1","title":"Atomic write-through — no orphan nodes on re-ingest failure","body":"Make write_jsonl_and_reingest atomic so a re-ingest failure never leaves the JSONL committed with orphan Note nodes in the live DB. `add_note` pushes a Note + Details record, then write_through writes the JSONL FIRST and re-ingests afterwards; if the re-ingest's merge_edge throws a LadybugDB binder error on a Details edge, the JSONL is already committed and the DB is left with orphan Notes (5 such orphans were found and removed). Fix: write the JSONL to a temp file and rename into place only after a successful re-ingest, or roll the JSONL back to its prior content on re-ingest failure, so a failed mutation never leaves orphans.","feature":"write-through"}
 {"type":"contains","from":"future/apg-0.9.3/spec","to":"future/apg-0.9.3/spec.R1"}
 {"type":"requirement","fqn":"future/apg-0.9.3/spec.R2","id":"R2","title":"add_note rejects non-Details --on targets before any write","body":"In add_note, reject --on targets whose node label is not an allowable Details target (Note/Future/Feedback excluded) with a clear CLI message, before writing any JSONL or re-ingesting. Today --on accepts targets like future/cosanima-rename/note-2 (a Note); the DB's Details rel-table only allows target labels {Module, AcceptanceCriterion, Spec, Function, Struct, VerificationItem, Requirement, PlanPhase, Plan, Decision, File, Task, NonGoal, Phase}, so the invalid target fails at the DB layer with a confusing binder error instead of a clear CLI validation.","feature":"validation"}
@@ -21,12 +19,10 @@
 {"type":"anchors","from":"future/apg-0.9.3/spec.R1","to":"apg.artifacts.write_jsonl_and_reingest"}
 {"type":"anchors","from":"future/apg-0.9.3/spec.R1","to":"apg.artifacts.reingest_project"}
 {"type":"anchors","from":"future/apg-0.9.3/spec.R2","to":"apg.spec_cmd.add_note"}
-{"type":"anchors","from":"future/apg-0.9.3/spec.R2","to":"future/apg-0.9.3/on-target-validation"}
 {"type":"anchors","from":"future/apg-0.9.3/spec.R3","to":"apg.artifacts.ArtifactDb.merge_edge"}
 {"type":"anchors","from":"future/apg-0.9.3/spec.R3","to":"apg.artifacts.ArtifactDb.merge_records"}
 {"type":"anchors","from":"future/apg-0.9.3/spec.R4","to":"apg.artifacts.ArtifactDb.merge_edge"}
 {"type":"anchors","from":"future/apg-0.9.3/spec.R4","to":"apg.artifacts.ArtifactDb.merge_records"}
-{"type":"anchors","from":"future/apg-0.9.3/spec.R4","to":"future/apg-0.9.3/details-binder-fix"}
 {"type":"phase","fqn":"future/apg-0.9.3/spec.phase-1","number":1,"title":"Atomic write-through"}
 {"type":"contains","from":"future/apg-0.9.3/spec","to":"future/apg-0.9.3/spec.phase-1"}
 {"type":"phase","fqn":"future/apg-0.9.3/spec.phase-2","number":2,"title":"Validation + binder investigation"}
@@ -78,3 +74,14 @@
 {"type":"anchors","from":"future/apg-0.9.3/spec.R1","to":"apg.artifacts.write_jsonl_and_reingest"}
 {"type":"implements","from":"apg.artifacts.write_jsonl_and_reingest","to":"future/apg-0.9.3/spec.R1"}
 {"type":"implements","from":"apg.artifacts.reingest_project","to":"future/apg-0.9.3/spec.R1"}
+{"type":"anchors","from":"future/apg-0.9.3/spec.R2","to":"apg.spec_cmd.add_note"}
+{"type":"anchors","from":"future/apg-0.9.3/spec.R4","to":"apg.artifacts.ArtifactDb.merge_edge"}
+{"type":"implements","from":"apg.spec_cmd.add_note","to":"future/apg-0.9.3/spec.R2"}
+{"type":"implements","from":"apg.artifacts.ArtifactDb.merge_edge","to":"future/apg-0.9.3/spec.R2"}
+{"type":"implements","from":"apg.artifacts.ArtifactDb.merge_records","to":"future/apg-0.9.3/spec.R2"}
+{"type":"implements","from":"apg.spec_cmd.add_note","to":"future/apg-0.9.3/spec.R3"}
+{"type":"implements","from":"apg.artifacts.ArtifactDb.merge_edge","to":"future/apg-0.9.3/spec.R3"}
+{"type":"implements","from":"apg.artifacts.ArtifactDb.merge_records","to":"future/apg-0.9.3/spec.R3"}
+{"type":"implements","from":"apg.spec_cmd.add_note","to":"future/apg-0.9.3/spec.R4"}
+{"type":"implements","from":"apg.artifacts.ArtifactDb.merge_edge","to":"future/apg-0.9.3/spec.R4"}
+{"type":"implements","from":"apg.artifacts.ArtifactDb.merge_records","to":"future/apg-0.9.3/spec.R4"}

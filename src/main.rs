@@ -594,10 +594,10 @@ fn duplicate_install_files(project_opencode: &Path, user_opencode: &Path) -> Vec
             let p = e.path();
             if p.is_dir() {
                 walk(&p, project, user, out);
-            } else if let Ok(rel) = p.strip_prefix(project) {
-                if user.join(rel).is_file() {
-                    out.push(p);
-                }
+            } else if let Ok(rel) = p.strip_prefix(project)
+                && user.join(rel).is_file()
+            {
+                out.push(p);
             }
         }
     }
@@ -705,7 +705,7 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
             opencode_dir.display()
         );
         for p in &dupes {
-            eprintln!("     {}", p.strip_prefix(&dir).unwrap_or(&p).display());
+            eprintln!("     {}", p.strip_prefix(&dir).unwrap_or(p).display());
         }
         eprintln!(
             "   The project .opencode should hold only project-specific agents (installed by \
