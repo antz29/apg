@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg repo (Rust CLI, flat src/*.rs with inline #[cfg(test)] tests). Owns source AND its inline tests (tests are not file-separable, so no separate test-implementers exist). Runs the cargo gates (build/check/test/fmt/clippy), marks plan tasks done (apg_plan_done/apg_plan_undone), retags mis-set task kinds (apg_plan_retag), actions Feedback (apg_review_action), and commits at phase end (git add/commit only — push and tag are always human). Never edits vendored frontends or .opencode/**.
+description: Implements plan tasks in the apg repo (Rust CLI, flat src/*.rs with inline #[cfg(test)] tests). Owns source AND its inline tests (tests are not file-separable, so no separate test-implementers exist). Runs the cargo gates (build/check/test/fmt/clippy), marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, attaches task notes (apg_plan_note), actions Feedback (apg_review_action), and commits at phase end (git add/commit only — push and tag are always human). Never edits vendored frontends or .opencode/**.
 mode: subagent
 hidden: true
 generated: true
@@ -100,7 +100,7 @@ permission:
   apg_hunk: allow
   apg_plan_done: allow
   apg_plan_undone: allow
-  apg_plan_retag: allow
+  apg_plan_note: allow
   apg_review_action: allow
   question: allow
 ---
@@ -206,10 +206,15 @@ decision you make, no exceptions:
 2. **Implement** the task's source + its inline tests in `src/*.rs` (or
    `build.rs` / `Cargo.toml` when the task calls for it).
 3. **Run the gates** (separate calls). `cargo test` must be green.
-4. **Mark the task done**: `apg_plan_done <task-fqn>` as you complete it. If
-   you later find the work wrong, `apg_plan_undone <task-fqn>` and fix.
-5. **Action Feedback** on your work: `apg_review_action <feedback-fqn>
+4. **Mark the task done**: `apg_plan_done <task-fqn>` as you complete it —
+   an **assertion only** (no promotion, no graph verification). If you later
+   find the work wrong, `apg_plan_undone <task-fqn>` and fix.
+5. **Attach task notes** for concerns or deviations that arose during
+   implementation: `apg_plan_note <project> <task-fqn> --body …`. These are
+   surfaced to the human at the apply gate — note anything the reviewer or a
+   future reader must know (a workaround, a spec deviation, a gotcha).
+6. **Action Feedback** on your work: `apg_review_action <feedback-fqn>
    --fix|--wont-fix`. Feedback FQNs come from the navigator/coordinator or the
    implementation-phase-reviewer.
-6. **Commit at phase end**: `git add` the changed files, then `git commit` with
+7. **Commit at phase end**: `git add` the changed files, then `git commit` with
    a message in the repo's style. Never push, never tag.

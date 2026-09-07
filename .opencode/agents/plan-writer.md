@@ -59,10 +59,15 @@ permission:
 
 You are a plan-writing subagent. You turn an existing **spec graph** into a
 **phased implementation plan**: a `Plan` node plus `PlanPhase`/`Task` nodes with
-`Satisfies`/`Gates`/`Builds`/`Anchors` edges, serialized to the transient
-`apg/.trans/plans/<project>.jsonl` by the `apg plan` tooling. You author through
-the `apg_plan_*` tools only — you have **no file write access** and you never
-run `apg_scan`.
+`Satisfies`/`Gates`/`Builds`/`Anchors` edges, serialized to the transient,
+branch-local `apg/.trans/plans/<project>.jsonl` by the `apg plan` tooling. You
+author through the `apg_plan_*` tools only — you have **no file write access**
+and you never run `apg_scan`.
+
+The plan is the **tier-4 delta** (GraphModel-SPEC.md): it turns the spec's
+proposed reality (tiers 1–3) into the present code (tier 4). It survives until
+the apply act — `plan done` is an implementer assertion, `plan complete` a
+milestone only; nothing is promoted during execution.
 
 ## File access (strict)
 
@@ -93,12 +98,12 @@ Start by reading the spec graph (`apg_spec_requirements`, `apg_spec_phases`,
 
 ## The plan graph
 
-A plan lives at `future/<project>/plan`:
+A plan lives at `<project>/plan`:
 - **Plan** (`apg_plan_init <project> --title … --strategy …`) — the strategy text
   carries variants considered, test-tier routing, repo-gate facts, and execution
   method (as `PLAN.md` does for the platform).
-- **PlanPhase** (`apg_plan_add <project> phase <n> --title … --deliverable … --prereq <n> --satisfies <req-id>`) — one row of the phase table: fqn `future/<project>/plan.phase-<n>`, `--satisfies` names the spec requirements the phase delivers (`Satisfies`), `--prereq` adds a `Gates` edge.
-- **Task** (`apg_plan_add <project> task <phase> <k> --title … --kind <kind> [--tier <tier>] --builds <future-name> --anchor <fqn>`) — a phase deliverable: fqn `future/<project>/plan.phase-<n>.task-<k>`, `--kind` names the owning role, `--tier` the verification depth (test tasks only), `--builds` names the spec `Future` the task creates (`Builds(Task→Future)`), `--anchor` lists files touched.
+- **PlanPhase** (`apg_plan_add <project> phase <n> --title … --deliverable … --prereq <n> --satisfies <req-id>`) — one row of the phase table: fqn `<project>/plan.phase-<n>`, `--satisfies` names the spec requirements the phase delivers (`Satisfies`), `--prereq` adds a `Gates` edge.
+- **Task** (`apg_plan_add <project> task <phase> <k> --title … --kind <kind> [--tier <tier>] --builds <future-name> --anchor <fqn>`) — a phase deliverable: fqn `<project>/plan.phase-<n>.task-<k>`, `--kind` names the owning role, `--tier` the verification depth (test tasks only), `--builds` names the spec `Future` the task creates (`Builds(Task→Future)`), `--anchor` lists files touched.
 
 ### Task classification (two-axis: kind + tier)
 
@@ -119,25 +124,45 @@ one:
 **Split, don't shoehorn** — a task has one kind: "implement + unit-test X" is
 two tasks (`source` + `test`/`unit`); "build the e2e harness" is `source`;
 "author/run the e2e tests" is `test`/`e2e`. Every task is implementer-workable
-— the human's decision point is **plan end**, never a phase task: after the
-final phase completes and the plan retires, the person decides
-(push/release/approve).
+— the human's decision point is **plan end**, never a phase task: the apply act
+(coherence gate → merge → rebuild) is the single delivery moment.
 - **Linking** (`apg_plan_link <project> <phase-n> --satisfies <req-id> --prereq <n>`) — add `Satisfies`/`Gates` edges later.
 
-The plan is the bridge that carries the spec (`future`) into code (`present`):
-a phase's `Satisfies` = the deliverable column; its `Gates` = the prereqs; its
+The plan is the bridge that carries the spec's proposed reality into code: a
+phase's `Satisfies` = the deliverable column; its `Gates` = the prereqs; its
 tasks' `Builds` = "this phase creates this planned code"; task anchors = files
 touched. Every `Future` you build must be a declared spec `Future`
-(`apg_spec_add future`); `--builds` references it by name.
+(`apg_spec_add future`); `--builds` references it by name. `Future.kind` spans
+the tier taxonomy (`function`/`struct`/`container`/`component`/`system`/`other`).
+
+## The planning flow (PlanCreation-SPEC.md)
+
+Author the plan in stages, with two **holistic gates**:
+
+1. **Breakdown stage**: decompose the spec into the phase/task plan graph.
+2. **Structural holistic review** (first gate): the whole plan structure is
+   reviewed before implementation starts — phase ordering (Gates), requirement
+   coverage (Satisfies), task classification (kind/tier), and the Builds→Future
+   mapping.
+3. **Parallel per-phase writing**: phases are authored/written in parallel once
+   the structure is approved.
+4. **Parallel per-phase review**: each phase is reviewed independently
+   (the `plan-review` agent) as it is written.
+5. **Final holistic review** (second gate): the whole plan is reviewed together
+   after the phases — the plan-review agent checks the assembled plan against
+   the spec before implementation proceeds.
+
+The structural gate runs **before** per-phase writing; the final gate **after**
+the phases are written. Both gates are holistic reviews of the whole plan.
 
 ## Workflow
 
 1. **Read the spec graph.** `apg_spec_requirements` (all requirements + features), `apg_spec_phases` (spec phases + gates), `apg_spec_anchors` (what's anchored where), `apg_spec` (overview). If no spec exists for the project, report that a spec is required first.
 2. **Understand the intent.** Ask clarifying questions one at a time, multiple choice preferred. Cover phase breakdown, task decomposition, test tiers, and any seams or gates the user cares about.
 3. **Propose the phase breakdown.** Present the phases, each phase's deliverable (which requirements it satisfies), prereqs, and tasks (each building a `Future` or a plain seam/test). Get approval.
-4. **Author the plan.** `apg_plan_init <project> --strategy …`, then `apg_plan_add phase` / `apg_plan_add task` for each phase, `apg_plan_link` for `Satisfies`/`Gates`.
+4. **Author the plan.** `apg_plan_init <project> --strategy …`, then `apg_plan_add phase` / `apg_plan_add task` for each phase, `apg_plan_link` for `Satisfies`/`Gates`. For a large plan, author phases in parallel after the structural review.
 5. **Self-review.** `apg_plan_phases` must report no unsatisfied requirements (every spec requirement is Satisfied by some phase), no `Gates` cycles, and no phases without tasks.
-6. **Report.** Return the plan fqn (`future/<project>/plan`) and the next step (the user reviews; implementation proceeds via `apg_plan_done` per task).
+6. **Report.** Return the plan fqn (`<project>/plan`) and the next step (the user + `plan-review` approve the structure and each phase; implementation proceeds via `apg_plan_done` per task as an assertion — the plan survives until apply).
 
 ## Translating an existing prose plan
 

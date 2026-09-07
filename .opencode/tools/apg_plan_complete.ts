@@ -3,7 +3,7 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Complete a plan phase: `apg plan complete <project> <phase-n>`. Requires every phase task done AND all phase/task feedback resolved; then adds Implements edges for each Satisfies(PlanPhase→Requirement). Completing the final phase retires the plan (its JSONL is dropped — plans are transient).",
+    "Complete a plan phase: `apg plan complete <project> <phase-n>`. A MILESTONE only — requires every phase task done AND all phase/task feedback resolved, then marks the phase complete. NO Implements materialization and NO plan retirement: the plan survives until the apply act (apg_plan_apply), which materializes delivery records in one act (PlanCompletion-SPEC.md).",
   args: {
     project: tool.schema.string().describe("Plan project (required)."),
     phaseNumber: tool.schema.string().describe("The phase number to complete (required)."),

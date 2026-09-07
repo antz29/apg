@@ -102,9 +102,12 @@ export async function runCli(context: ToolContext, args: string[]): Promise<stri
   return result.stdout.toString().trim()
 }
 
-/** Extracts the project name from a `future/<project>/…` FQN, or null. */
+/** Extracts the project name from a project-scoped spec/plan/review FQN
+ * (`<project>/spec.R1`, `<project>/plan.phase-01`, `<project>/feedback-1`).
+ * Callers must already know the FQN is spec-family (spec/plan/review nodes,
+ * never code nodes) — for arbitrary FQNs use a code-node check first. */
 export function projectOf(fqn: string): string | null {
-  const m = /^future\/([^/]+)\//.exec(fqn)
+  const m = /^([^/]+)\//.exec(fqn)
   return m ? m[1] : null
 }
 
@@ -159,4 +162,14 @@ export async function resolvesInCode(context: ToolContext, fqn: string): Promise
     if (out.split("\n").filter((l) => l.length > 0).length > 1) return true
   }
   return false
+}
+
+/**
+ * True when `fqn` is a `Future` node (an author-declared placeholder for
+ * not-yet-built code). The `future/` namespace is gone (PHASE_04) — "pending"
+ * anchors are detected by label, not prefix.
+ */
+export async function isFutureNode(context: ToolContext, fqn: string): Promise<boolean> {
+  const out = await runCypher(context, `MATCH (n:Future {fqn: ${lit(fqn)}}) RETURN n.fqn`)
+  return out.split("\n").filter((l) => l.length > 0).length > 1
 }

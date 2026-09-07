@@ -11,7 +11,7 @@ export default tool({
       .describe("Spec project to lint (default: all projects)."),
   },
   async execute(args, context) {
-    const where = args.project ? ` WHERE s.fqn = ${lit(`future/${args.project}/spec`)}` : ""
+    const where = args.project ? ` WHERE s.fqn = ${lit(`${args.project}/spec`)}` : ""
     const specs = csvToRows(await runCypher(context, `MATCH (s:Spec)${where} RETURN s.fqn`))
     if (specs.length <= 1) {
       return "No specs found — nothing to lint."
@@ -37,7 +37,7 @@ export default tool({
     const out: string[] = []
     for (const [specFqn] of specs.slice(1)) {
       const p = projectOf(specFqn) ?? specFqn
-      const pfx = `future/${p}/`
+      const pfx = `${p}/`
       const inP = (rows: string[][], col = 0) => rows.filter((r) => (r[col] ?? "").startsWith(pfx))
 
       const reqs = inP(reqRows)
@@ -60,7 +60,10 @@ export default tool({
         }
       }
       // Anchors to future nodes = pending anchors (expected for future code).
-      const pendingAnchors = ancRows.filter((r) => r[0].startsWith(pfx) && r[1].startsWith("future/"))
+      // A future fqn is `<project>/<name>`; a code anchor is a code FQN. Use
+      // Future-node membership (the `future/` prefix is gone — PHASE_04).
+      const futureSet = new Set(futRows.map((r) => r[0]))
+      const pendingAnchors = ancRows.filter((r) => r[0].startsWith(pfx) && futureSet.has(r[1]))
 
       const orphans = reqs.filter(
         (r) => !impl.has(r[0]) && !satisfied.has(r[0]),

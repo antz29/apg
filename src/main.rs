@@ -4,6 +4,7 @@ mod cleanup;
 mod git;
 mod graph;
 mod ingest;
+mod invariant_cmd;
 mod load;
 mod plan_cmd;
 mod review_cmd;
@@ -134,6 +135,10 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         include_str!("../.opencode/tools/apg_spec_link.ts"),
     ),
     (
+        "apg_spec_spine.ts",
+        include_str!("../.opencode/tools/apg_spec_spine.ts"),
+    ),
+    (
         "apg_spec_rm.ts",
         include_str!("../.opencode/tools/apg_spec_rm.ts"),
     ),
@@ -144,10 +149,6 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
     (
         "apg_spec_promote.ts",
         include_str!("../.opencode/tools/apg_spec_promote.ts"),
-    ),
-    (
-        "apg_spec_archive.ts",
-        include_str!("../.opencode/tools/apg_spec_archive.ts"),
     ),
     (
         "apg_review.ts",
@@ -168,6 +169,14 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
     (
         "apg_review_reject.ts",
         include_str!("../.opencode/tools/apg_review_reject.ts"),
+    ),
+    (
+        "apg_invariant_add.ts",
+        include_str!("../.opencode/tools/apg_invariant_add.ts"),
+    ),
+    (
+        "apg_invariants.ts",
+        include_str!("../.opencode/tools/apg_invariants.ts"),
     ),
     (
         "apg_plan.ts",
@@ -210,8 +219,12 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         include_str!("../.opencode/tools/apg_plan_undone.ts"),
     ),
     (
-        "apg_plan_retag.ts",
-        include_str!("../.opencode/tools/apg_plan_retag.ts"),
+        "apg_plan_note.ts",
+        include_str!("../.opencode/tools/apg_plan_note.ts"),
+    ),
+    (
+        "apg_plan_apply.ts",
+        include_str!("../.opencode/tools/apg_plan_apply.ts"),
     ),
 ];
 
@@ -507,11 +520,20 @@ USAGE:
   apg query \"<cypher>\"        Run a read-only Cypher query against
                               apg/.trans/db.lbug (found by walking up from cwd)
   apg spec <sub> …            Author + lifecycle a graph-native spec:
-                              init/add/anchor/link/rm/render/promote/archive
-  apg plan <sub> …            The phased execution plan (transient):
-                              init/add/link/done/undone/complete/render/retag
+                              init/add/anchor/link/spine/rm/render/promote
+                              (add authors the 4-tier taxonomy: requirement,
+                              future, phase, decision, non-goal, AC, VI, note,
+                              stakeholder, domain, subdomain, entity,
+                              value-object, aggregate, domain-event,
+                              domain-process, domain-rule, actor, system,
+                              container, component)
+  apg plan <sub> …            The phased execution plan (transient, branch-local):
+                              init/add/link/done/undone/note/complete/render/apply
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
+  apg invariant add …         Materialize a graph-wide invariant (universal or
+                              project-scoped), optionally guarding artifacts
+  apg invariants              List invariants (filter by --scope/--project)
   apg --version               Print version
   apg --help                  Show this help
 
@@ -541,6 +563,8 @@ fn main() {
         "spec" => spec_cmd::cmd_spec(&raw[2..]),
         "plan" => plan_cmd::cmd_plan(&raw[2..]),
         "review" => review_cmd::cmd_review(&raw[2..]),
+        "invariant" => invariant_cmd::cmd_invariant(&raw[2..]),
+        "invariants" => invariant_cmd::cmd_invariants(&raw[2..]),
         "--version" | "-V" => {
             println!("apg {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -1213,7 +1237,7 @@ mod tests {
     /// the `[package] version` line on every release: the assertions below fail
     /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
     /// advertised release), so a bump commit cannot silently skip it.
-    const RELEASE_VERSION: &str = "0.9.3";
+    const RELEASE_VERSION: &str = "0.10.0";
 
     /// The `version = "..."` declared directly under a Cargo.toml `[package]`
     /// header.
@@ -1242,10 +1266,10 @@ mod tests {
             }
             if let Some(n) = t.strip_prefix("name = ") {
                 pkg = n.trim_matches('"').to_string();
-            } else if let Some(v) = t.strip_prefix("version = ") {
-                if pkg == name {
-                    return Some(v.trim_matches('"'));
-                }
+            } else if let Some(v) = t.strip_prefix("version = ")
+                && pkg == name
+            {
+                return Some(v.trim_matches('"'));
             }
         }
         None
@@ -1271,13 +1295,13 @@ mod tests {
     fn readme_documents_release_version() {
         let readme =
             std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
-        assert!(readme.contains("apg 0.9.3"), "README --version examples");
-        assert!(readme.contains("v0.9.3"), "README tagged-release prose");
+        assert!(readme.contains("apg 0.10.0"), "README --version examples");
+        assert!(readme.contains("v0.10.0"), "README tagged-release prose");
         assert!(
-            readme.contains("--version 0.9.3"),
+            readme.contains("--version 0.10.0"),
             "README Linux installer pin option"
         );
         // No stale release records: the previous version must be fully replaced.
-        assert!(!readme.contains("0.9.2"), "README must not reference 0.9.2");
+        assert!(!readme.contains("0.9.3"), "README must not reference 0.9.3");
     }
 }

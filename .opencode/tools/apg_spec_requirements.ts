@@ -21,7 +21,7 @@ export default tool({
     const reqs = csvToRows(
       await runCypher(
         context,
-        `MATCH (r:Requirement) WHERE r.fqn STARTS WITH ${lit(`future/${project}/spec.`)} RETURN r.fqn, r.id, r.title, r.body, r.feature ORDER BY r.fqn LIMIT ${limit}`,
+        `MATCH (r:Requirement) WHERE r.fqn STARTS WITH ${lit(`${project}/spec.`)} RETURN r.fqn, r.id, r.title, r.body, r.feature ORDER BY r.fqn LIMIT ${limit}`,
       ),
     )
     if (reqs.length <= 1) return `No requirements for spec \`${project}\`. Add one with \`apg spec add ${project} requirement R1 --title ...\` (or the apg_spec_add tool).`
@@ -30,7 +30,7 @@ export default tool({
       csvToRows(
         await runCypher(
           context,
-          `MATCH (c)-[:Implements]->(r:Requirement) WHERE r.fqn STARTS WITH ${lit(`future/${project}/spec.`)} RETURN DISTINCT r.fqn`,
+          `MATCH (c)-[:Implements]->(r:Requirement) WHERE r.fqn STARTS WITH ${lit(`${project}/spec.`)} RETURN DISTINCT r.fqn`,
         ),
       ).map((r) => r[0]),
     )

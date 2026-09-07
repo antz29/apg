@@ -2,7 +2,7 @@
 //! `apg plan` / `apg review` CLIs share: opening the live `apg/.trans/db.lbug`
 //! read-write, resolving FQNs against the code graph, and re-ingesting a
 //! project's spec/plan/note records via Cypher MERGE. Mutations never rebuild
-//! the DB — the code graph is untouched; only the project's `future/…` nodes
+//! the DB — the code graph is untouched; only the project's `…` nodes
 //! are detached and re-merged from its JSONL files.
 
 use std::collections::HashMap;
@@ -238,13 +238,13 @@ impl ArtifactDb {
     }
 
     /// Resolves an anchor target (R7/R8): a resolved code FQN or an existing
-    /// `future/…` FQN. Anything else is an error.
+    /// `…` FQN. Anything else is an error.
     pub fn resolve_anchor(&self, fqn: &str) -> anyhow::Result<()> {
         if self.code_label(fqn).is_some() || self.is_future(fqn) {
             Ok(())
         } else {
             anyhow::bail!(
-                "anchor target `{fqn}` is neither a resolved code node nor an existing `future/…` FQN (declare future code with `apg spec add future` first)"
+                "anchor target `{fqn}` is neither a resolved code node nor an existing `…` FQN (declare future code with `apg spec add future` first)"
             )
         }
     }
@@ -282,14 +282,14 @@ impl ArtifactDb {
         apg_root.join("notes").join(format!("{stem}.jsonl"))
     }
 
-    /// Deletes every node with fqn `future/<project>/…` and its incident
+    /// Deletes every node with fqn `<project>/…` and its incident
     /// edges. Used to reset a project's spec/plan/feedback state before
     /// re-merging its JSONL (code nodes are untouched). Runs on `conn` so the
     /// deletion shares the caller's transaction.
     pub fn detach_delete_project(&self, conn: &Connection, project: &str) -> anyhow::Result<()> {
         conn.query(&format!(
             "MATCH (n) WHERE n.fqn STARTS WITH {} DETACH DELETE n",
-            lit(&format!("future/{project}/"))
+            lit(&format!("{project}/"))
         ))?;
         Ok(())
     }
@@ -495,6 +495,116 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("status", status.clone()),
             ],
         )),
+        Record::Stakeholder { fqn, name, body } => Some((
+            "Stakeholder",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Domain { fqn, name, body } => Some((
+            "Domain",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Subdomain {
+            fqn,
+            name,
+            kind,
+            body,
+        } => Some((
+            "Subdomain",
+            fqn,
+            vec![
+                ("name", name.clone()),
+                ("kind", kind.clone()),
+                ("body", body.clone()),
+            ],
+        )),
+        Record::Entity { fqn, name, body } => Some((
+            "Entity",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::ValueObject { fqn, name, body } => Some((
+            "ValueObject",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Aggregate {
+            fqn,
+            name,
+            root,
+            body,
+        } => Some((
+            "Aggregate",
+            fqn,
+            vec![
+                ("name", name.clone()),
+                ("root", root.clone()),
+                ("body", body.clone()),
+            ],
+        )),
+        Record::DomainEvent { fqn, name, body } => Some((
+            "DomainEvent",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::DomainProcess { fqn, name, body } => Some((
+            "DomainProcess",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::DomainRule { fqn, name, body } => Some((
+            "DomainRule",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Actor { fqn, name, body } => Some((
+            "Actor",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::System { fqn, name, body } => Some((
+            "System",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Container {
+            fqn,
+            name,
+            kind,
+            body,
+        } => Some((
+            "Container",
+            fqn,
+            vec![
+                ("name", name.clone()),
+                ("kind", kind.clone()),
+                ("body", body.clone()),
+            ],
+        )),
+        Record::Component { fqn, name, body } => Some((
+            "Component",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Invariant {
+            fqn,
+            title,
+            body,
+            category,
+            scope,
+            status,
+        } => Some((
+            "Invariant",
+            fqn,
+            vec![
+                ("title", title.clone()),
+                ("body", body.clone()),
+                ("category", category.clone()),
+                ("scope", scope.clone()),
+                ("status", status.clone()),
+            ],
+        )),
         _ => None,
     }
 }
@@ -512,6 +622,13 @@ fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str)> {
         Record::Implements { from, to } => Some(("Implements", from, to)),
         Record::Satisfies { from, to } => Some(("Satisfies", from, to)),
         Record::Builds { from, to } => Some(("Builds", from, to)),
+        Record::Drives { from, to } => Some(("Drives", from, to)),
+        Record::Requires { from, to } => Some(("Requires", from, to)),
+        Record::Realises { from, to } => Some(("Realises", from, to)),
+        Record::Represents { from, to } => Some(("Represents", from, to)),
+        Record::ImplementedBy { from, to } => Some(("ImplementedBy", from, to)),
+        Record::GuardedBy { from, to } => Some(("GuardedBy", from, to)),
+        Record::Checks { from, to } => Some(("Checks", from, to)),
         _ => None,
     }
 }
@@ -543,7 +660,21 @@ pub fn node_fqn(r: &Record) -> Option<&str> {
         | Record::Feedback { fqn, .. }
         | Record::Plan { fqn, .. }
         | Record::PlanPhase { fqn, .. }
-        | Record::Task { fqn, .. } => Some(fqn),
+        | Record::Task { fqn, .. }
+        | Record::Stakeholder { fqn, .. }
+        | Record::Domain { fqn, .. }
+        | Record::Subdomain { fqn, .. }
+        | Record::Entity { fqn, .. }
+        | Record::ValueObject { fqn, .. }
+        | Record::Aggregate { fqn, .. }
+        | Record::DomainEvent { fqn, .. }
+        | Record::DomainProcess { fqn, .. }
+        | Record::DomainRule { fqn, .. }
+        | Record::Actor { fqn, .. }
+        | Record::System { fqn, .. }
+        | Record::Container { fqn, .. }
+        | Record::Component { fqn, .. }
+        | Record::Invariant { fqn, .. } => Some(fqn),
         _ => None,
     }
 }
@@ -560,7 +691,14 @@ pub fn edge_endpoints(r: &Record) -> Option<(&str, &str)> {
         | Record::Anchors { from, to }
         | Record::Implements { from, to }
         | Record::Satisfies { from, to }
-        | Record::Builds { from, to } => Some((from, to)),
+        | Record::Builds { from, to }
+        | Record::Drives { from, to }
+        | Record::Requires { from, to }
+        | Record::Realises { from, to }
+        | Record::Represents { from, to }
+        | Record::ImplementedBy { from, to }
+        | Record::GuardedBy { from, to }
+        | Record::Checks { from, to } => Some((from, to)),
         _ => None,
     }
 }
@@ -620,7 +758,7 @@ pub fn cycle_closing_path(
 }
 
 /// Re-ingests a project's spec + plan records (and all committed notes) into
-/// the live DB after a write-through mutation (R5). The project's `future/…`
+/// the live DB after a write-through mutation (R5). The project's `…`
 /// state is detached and rebuilt from its JSONL; code nodes are untouched.
 ///
 /// Every spec project's records are merged, not just `project`'s: spec graphs
@@ -633,6 +771,7 @@ pub fn cycle_closing_path(
 /// The detach + merge runs inside one transaction: a failed edge merge aborts
 /// it, so the DB is never left partially re-merged (no orphan nodes) — the
 /// prior committed state is preserved.
+#[cfg(test)]
 pub fn reingest_project(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     reingest_project_with(apg_root, project, None)
 }
@@ -736,8 +875,7 @@ pub fn next_free(records: &[Record], kind: &str) -> u64 {
         .iter()
         .filter_map(|r| node_fqn(r))
         .filter_map(|f| {
-            let (_, tail) = f.split_once("future/")?;
-            let (_, suffix) = tail.split_once(&format!("/{prefix}"))?;
+            let (_, suffix) = f.split_once(&format!("/{prefix}"))?;
             suffix.parse::<u64>().ok()
         })
         .max()
@@ -905,29 +1043,29 @@ mod tests {
     fn baseline_records() -> Vec<Record> {
         vec![
             Record::Spec {
-                fqn: "future/foo/spec".into(),
+                fqn: "foo/spec".into(),
                 title: "Foo".into(),
                 goal: "G".into(),
             },
             Record::Requirement {
-                fqn: "future/foo/spec.R1".into(),
+                fqn: "foo/spec.R1".into(),
                 id: "R1".into(),
                 title: "Timer".into(),
                 body: String::new(),
                 feature: String::new(),
             },
             Record::Contains {
-                from: "future/foo/spec".into(),
-                to: "future/foo/spec.R1".into(),
+                from: "foo/spec".into(),
+                to: "foo/spec.R1".into(),
             },
             Record::Note {
-                fqn: "future/foo/note-1".into(),
+                fqn: "foo/note-1".into(),
                 body: "first".into(),
                 kind: "background".into(),
             },
             Record::Details {
-                from: "future/foo/note-1".into(),
-                to: "future/foo/spec".into(),
+                from: "foo/note-1".into(),
+                to: "foo/spec".into(),
             },
         ]
     }
@@ -953,8 +1091,8 @@ mod tests {
         write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
         {
             let db = ArtifactDb::open(&apg_root).unwrap();
-            assert!(db.has_node("future/foo/spec"));
-            assert!(db.has_node("future/foo/note-1"));
+            assert!(db.has_node("foo/spec"));
+            assert!(db.has_node("foo/note-1"));
             assert_eq!(orphan_notes(&db), 0);
         }
 
@@ -971,13 +1109,13 @@ mod tests {
         // keeps such records from being authored in the first place.
         let mut mutated = baseline.clone();
         mutated.push(Record::Note {
-            fqn: "future/foo/note-2".into(),
+            fqn: "foo/note-2".into(),
             body: "poison".into(),
             kind: "background".into(),
         });
         mutated.push(Record::Details {
-            from: "future/foo/note-2".into(),
-            to: "future/foo/note-1".into(),
+            from: "foo/note-2".into(),
+            to: "foo/note-1".into(),
         });
         write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap();
 
@@ -993,11 +1131,11 @@ mod tests {
         // The DB projection: the note node lands, the undeclared Details edge
         // does not (identical to the scan load path's pair bucketing).
         let db = ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("future/foo/note-2"));
+        assert!(db.has_node("foo/note-2"));
         let out = db
             .conn()
             .unwrap()
-            .query("MATCH (:Note {fqn: 'future/foo/note-2'})-[:Details]->() RETURN count(*)")
+            .query("MATCH (:Note {fqn: 'foo/note-2'})-[:Details]->() RETURN count(*)")
             .unwrap()
             .to_string();
         assert!(
@@ -1008,7 +1146,7 @@ mod tests {
         let out = db
             .conn()
             .unwrap()
-            .query("MATCH (:Note {fqn: 'future/foo/note-1'})-[:Details]->(s:Spec) RETURN count(*)")
+            .query("MATCH (:Note {fqn: 'foo/note-1'})-[:Details]->(s:Spec) RETURN count(*)")
             .unwrap()
             .to_string();
         assert!(out.lines().last() == Some("1"), "healthy edge: {out}");
@@ -1037,13 +1175,13 @@ mod tests {
         // A legal note-add to foo now fails at the re-ingest read step.
         let mut mutated = baseline.clone();
         mutated.push(Record::Note {
-            fqn: "future/foo/note-2".into(),
+            fqn: "foo/note-2".into(),
             body: "n".into(),
             kind: "background".into(),
         });
         mutated.push(Record::Details {
-            from: "future/foo/note-2".into(),
-            to: "future/foo/spec".into(),
+            from: "foo/note-2".into(),
+            to: "foo/spec".into(),
         });
         let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap_err();
         assert!(
@@ -1061,10 +1199,10 @@ mod tests {
 
         // (b) The failed mutation left no residue in the live DB.
         let db = ArtifactDb::open(&apg_root).unwrap();
-        assert!(!db.has_node("future/foo/note-2"));
+        assert!(!db.has_node("foo/note-2"));
         assert_eq!(orphan_notes(&db), 0);
-        assert!(db.has_node("future/foo/spec"));
-        assert!(db.has_node("future/foo/note-1"));
+        assert!(db.has_node("foo/spec"));
+        assert!(db.has_node("foo/note-1"));
         drop(db);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1073,8 +1211,8 @@ mod tests {
     #[test]
     fn poison_details_edge_in_one_project_aborts_legal_write_through_elsewhere() {
         // R3 controlled reproduction (task 2.3). The mystery: adding a note
-        // targeting `future/cosanima-rename/spec` (Spec) and
-        // `future/cosanima-rename/spec.decision-D1` (Decision) threw a
+        // targeting `cosanima-rename/spec` (Spec) and
+        // `cosanima-rename/spec.decision-D1` (Decision) threw a
         // LadybugDB binder exception, while IDENTICAL-label targets in other
         // projects (cosanima-mcp spec, cosanima-1.0 decision-D5) succeeded.
         //
@@ -1093,18 +1231,18 @@ mod tests {
         // Project "rename" carries the legal targets from the mystery.
         let rename = vec![
             Record::Spec {
-                fqn: "future/rename/spec".into(),
+                fqn: "rename/spec".into(),
                 title: "Rename".into(),
                 goal: String::new(),
             },
             Record::Decision {
-                fqn: "future/rename/spec.decision-D1".into(),
+                fqn: "rename/spec.decision-D1".into(),
                 id: "D1".into(),
                 summary: "rename now".into(),
             },
             Record::Contains {
-                from: "future/rename/spec".into(),
-                to: "future/rename/spec.decision-D1".into(),
+                from: "rename/spec".into(),
+                to: "rename/spec.decision-D1".into(),
             },
         ];
         let rename_path = specs::spec_jsonl_path(&apg_root, "rename");
@@ -1117,23 +1255,23 @@ mod tests {
         // silently; the write-through re-ingest fed it to the DB.
         let docs = vec![
             Record::Spec {
-                fqn: "future/docs/spec".into(),
+                fqn: "docs/spec".into(),
                 title: "Docs".into(),
                 goal: String::new(),
             },
             Record::Future {
-                fqn: "future/docs/migration-note".into(),
+                fqn: "docs/migration-note".into(),
                 kind: "other".into(),
                 target: String::new(),
             },
             Record::Note {
-                fqn: "future/docs/note-1".into(),
+                fqn: "docs/note-1".into(),
                 body: "poison".into(),
                 kind: "background".into(),
             },
             Record::Details {
-                from: "future/docs/note-1".into(),
-                to: "future/docs/migration-note".into(),
+                from: "docs/note-1".into(),
+                to: "docs/migration-note".into(),
             },
         ];
         let docs_path = specs::spec_jsonl_path(&apg_root, "docs");
@@ -1143,31 +1281,31 @@ mod tests {
         write_jsonl_and_reingest(&apg_root, &docs_path, "docs", &docs).unwrap();
 
         // The legal note-add to rename must not be hostage to docs' poison:
-        // `apg spec add rename note --on future/rename/spec`.
+        // `apg spec add rename note --on rename/spec`.
         let mut mutated = rename.clone();
         mutated.push(Record::Note {
-            fqn: "future/rename/note-1".into(),
+            fqn: "rename/note-1".into(),
             body: "legal note".into(),
             kind: "background".into(),
         });
         mutated.push(Record::Details {
-            from: "future/rename/note-1".into(),
-            to: "future/rename/spec".into(),
+            from: "rename/note-1".into(),
+            to: "rename/spec".into(),
         });
         write_jsonl_and_reingest(&apg_root, &rename_path, "rename", &mutated).unwrap();
 
         // The legal note landed in the JSONL and the live DB with its edge.
         assert!(specs::read_jsonl(&rename_path).unwrap().iter().any(|r| {
             matches!(r, Record::Details { from, to }
-                if from == "future/rename/note-1" && to == "future/rename/spec")
+                if from == "rename/note-1" && to == "rename/spec")
         }));
         let db = ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("future/rename/note-1"));
+        assert!(db.has_node("rename/note-1"));
         let out = db
             .conn()
             .unwrap()
             .query(
-                "MATCH (:Note {fqn: 'future/rename/note-1'})-[:Details]->(s:Spec) RETURN count(*)",
+                "MATCH (:Note {fqn: 'rename/note-1'})-[:Details]->(s:Spec) RETURN count(*)",
             )
             .unwrap()
             .to_string();
@@ -1182,7 +1320,7 @@ mod tests {
         let out = db
             .conn()
             .unwrap()
-            .query("MATCH (:Note {fqn: 'future/docs/note-1'})-[:Details]->() RETURN count(*)")
+            .query("MATCH (:Note {fqn: 'docs/note-1'})-[:Details]->() RETURN count(*)")
             .unwrap()
             .to_string();
         assert!(
@@ -1200,10 +1338,10 @@ mod tests {
         // clean — the poison records that polluted the merged record set
         // during the 1.0 authoring loop were removed from the durable files
         // (their residues still sit in the live DB as edge-less orphans:
-        // future/cosanima-1.0/note-7 and future/cosanima-docs/note-6). Run the
+        // cosanima-1.0/note-7 and cosanima-docs/note-6). Run the
         // exact mystery commands against the committed state on a scratch
-        // root: a note on `future/cosanima-rename/spec` (Spec) and on
-        // `future/cosanima-rename/spec.decision-D1` (Decision) writes through
+        // root: a note on `cosanima-rename/spec` (Spec) and on
+        // `cosanima-rename/spec.decision-D1` (Decision) writes through
         // without a binder error.
         let (apg_root, dir) = fixture("rename-current");
 
@@ -1225,31 +1363,31 @@ mod tests {
         let path = specs::spec_jsonl_path(&apg_root, "cosanima-rename");
         let mut records = specs::read_jsonl(&path).unwrap();
         records.push(Record::Note {
-            fqn: "future/cosanima-rename/note-11".into(),
+            fqn: "cosanima-rename/note-11".into(),
             body: "repro".into(),
             kind: "background".into(),
         });
         records.push(Record::Details {
-            from: "future/cosanima-rename/note-11".into(),
-            to: "future/cosanima-rename/spec".into(),
+            from: "cosanima-rename/note-11".into(),
+            to: "cosanima-rename/spec".into(),
         });
         records.push(Record::Details {
-            from: "future/cosanima-rename/note-11".into(),
-            to: "future/cosanima-rename/spec.decision-D1".into(),
+            from: "cosanima-rename/note-11".into(),
+            to: "cosanima-rename/spec.decision-D1".into(),
         });
         write_jsonl_and_reingest(&apg_root, &path, "cosanima-rename", &records).unwrap();
 
         let db = ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("future/cosanima-rename/note-11"));
+        assert!(db.has_node("cosanima-rename/note-11"));
         let out = db
             .conn()
             .unwrap()
-            .query("MATCH (:Note {fqn: 'future/cosanima-rename/note-11'})-[:Details]->(t) RETURN t.fqn")
+            .query("MATCH (:Note {fqn: 'cosanima-rename/note-11'})-[:Details]->(t) RETURN t.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/cosanima-rename/spec"), "{out}");
+        assert!(out.contains("cosanima-rename/spec"), "{out}");
         assert!(
-            out.contains("future/cosanima-rename/spec.decision-D1"),
+            out.contains("cosanima-rename/spec.decision-D1"),
             "{out}"
         );
         drop(db);
@@ -1269,9 +1407,9 @@ mod tests {
         // even though the file did not exist before this call).
         assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
         let db = ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("future/foo/spec"));
-        assert!(db.has_node("future/foo/spec.R1"));
-        assert!(db.has_node("future/foo/note-1"));
+        assert!(db.has_node("foo/spec"));
+        assert!(db.has_node("foo/spec.R1"));
+        assert!(db.has_node("foo/note-1"));
         assert_eq!(orphan_notes(&db), 0);
         let out = db
             .conn()
@@ -1279,7 +1417,7 @@ mod tests {
             .query("MATCH (:Note)-[:Details]->(s:Spec) RETURN s.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/foo/spec"), "details edge: {out}");
+        assert!(out.contains("foo/spec"), "details edge: {out}");
         drop(db);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1350,8 +1488,8 @@ mod tests {
         // The write-through landed in both the durable JSONL and the live DB.
         assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
         let db = ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("future/foo/spec"));
-        assert!(db.has_node("future/foo/note-1"));
+        assert!(db.has_node("foo/spec"));
+        assert!(db.has_node("foo/note-1"));
         assert_eq!(orphan_notes(&db), 0);
         drop(db);
 

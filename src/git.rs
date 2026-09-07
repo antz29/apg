@@ -7,7 +7,7 @@
 //! spec/plan/review mutation that would re-ingest into a stale DB is refused
 //! *before* any JSONL write: if the tree moved on (new sha, or the same sha
 //! now dirty), the code graph no longer matches what the authoring agents are
-//! reasoning about, so writing more `future/…` state against it would be
+//! reasoning about, so writing more `<project>/…` state against it would be
 //! building on sand.
 
 use std::io::BufRead;
@@ -334,7 +334,7 @@ mod tests {
         let mut gi = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         gi.push_str("# dirty after scan\n");
         std::fs::write(root.join(".gitignore"), gi).unwrap();
-        assert_eq!(git_state(&apg).clean, false);
+        assert!(!git_state(&apg).clean);
         assert!(
             is_stale(&apg),
             "a dirty tree at the same sha must be stale (recorded clean=true)"
@@ -355,7 +355,7 @@ mod tests {
         // DB stays fresh until the tree changes again.
         let (apg, root, sha) = git_fixture("dirtyrec");
         std::fs::write(root.join("dirty.txt"), "x").unwrap();
-        assert_eq!(git_state(&apg).clean, false);
+        assert!(!git_state(&apg).clean);
         write_scan_meta(&apg, Some(&sha), false, "2026-09-07T00:00:00Z");
         assert!(!is_stale(&apg));
         let _ = std::fs::remove_dir_all(&root);

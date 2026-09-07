@@ -407,6 +407,165 @@ pub fn ingest(
                         ..spec_node(NodeKind::VerificationItem)
                     },
                 ),
+                // Tier-1/2/3 spec nodes (GraphModel-SPEC.md; PHASE_01): authored
+                // via the spec tools, never scanned. All carry `name` (+ `body`);
+                // Subdomain/Container carry a `kind`, Aggregate a `root`.
+                Record::Stakeholder { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Stakeholder)
+                    },
+                ),
+                Record::Domain { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Domain)
+                    },
+                ),
+                Record::Subdomain {
+                    fqn,
+                    name,
+                    kind,
+                    body,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        sub_kind: opt(kind),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Subdomain)
+                    },
+                ),
+                Record::Entity { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Entity)
+                    },
+                ),
+                Record::ValueObject { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::ValueObject)
+                    },
+                ),
+                Record::Aggregate {
+                    fqn,
+                    name,
+                    root,
+                    body,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        root: opt(root),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Aggregate)
+                    },
+                ),
+                Record::DomainEvent { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::DomainEvent)
+                    },
+                ),
+                Record::DomainProcess { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::DomainProcess)
+                    },
+                ),
+                Record::DomainRule { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::DomainRule)
+                    },
+                ),
+                Record::Actor { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Actor)
+                    },
+                ),
+                Record::System { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::System)
+                    },
+                ),
+                Record::Container {
+                    fqn,
+                    name,
+                    kind,
+                    body,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        sub_kind: opt(kind),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Container)
+                    },
+                ),
+                Record::Component { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Component)
+                    },
+                ),
+                // The invariant mechanism (Invariants-SPEC.md; PHASE_02): a
+                // graph-wide rule; `title`/`body`/`category`/`scope`/`status`.
+                Record::Invariant {
+                    fqn,
+                    title,
+                    body,
+                    category,
+                    scope,
+                    status,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        title: opt(title),
+                        body: opt(body),
+                        category: opt(category),
+                        scope: opt(scope),
+                        status: opt(status),
+                        ..spec_node(NodeKind::Invariant)
+                    },
+                ),
                 Record::Note { fqn, body, kind } => insert_node(
                     &mut graph,
                     fqn,
@@ -734,6 +893,63 @@ pub fn ingest(
                     }
                     graph.builds.insert((a, b));
                 }
+                // Spine edges (GraphModel-SPEC.md; PHASE_01).
+                Record::Drives { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.drives.insert((a, b));
+                }
+                Record::Requires { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.requires.insert((a, b));
+                }
+                Record::Realises { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.realises.insert((a, b));
+                }
+                Record::Represents { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.represents.insert((a, b));
+                }
+                Record::ImplementedBy { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.implemented_by.insert((a, b));
+                }
+                Record::GuardedBy { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.guarded_by.insert((a, b));
+                }
+                Record::Checks { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.checks.insert((a, b));
+                }
                 _ => unreachable!("non-edge record reached the edge pass"),
             }
         }
@@ -822,6 +1038,75 @@ pub fn ingest(
         kind_is(g, a, NodeKind::Task) && kind_is(g, b, NodeKind::Future)
     });
 
+    // Spine edges (GraphModel-SPEC.md; PHASE_01). Drives/Requires run
+    // Requirement → Domain; Realises/Represents run Domain → Solution
+    // (System/Container/Component); ImplementedBy runs Solution → Implementation
+    // (the code tier). Both endpoints must exist and carry the tier kinds.
+    graph.drives = filter_edges(&graph, &graph.drives, |g, a, b| {
+        kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Domain)
+    });
+    graph.requires = filter_edges(&graph, &graph.requires, |g, a, b| {
+        kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Domain)
+    });
+    graph.realises = filter_edges(&graph, &graph.realises, |g, a, b| {
+        kind_is(g, a, NodeKind::Domain) && is_solution_kind(g, b)
+    });
+    graph.represents = filter_edges(&graph, &graph.represents, |g, a, b| {
+        kind_is(g, a, NodeKind::Domain) && is_solution_kind(g, b)
+    });
+    graph.implemented_by = filter_edges(&graph, &graph.implemented_by, |g, a, b| {
+        is_solution_kind(g, a)
+            && matches!(
+                g.nodes[b].kind,
+                NodeKind::Module
+                    | NodeKind::File
+                    | NodeKind::Struct
+                    | NodeKind::Function
+            )
+    });
+
+    // Invariant edges (Invariants-SPEC.md; PHASE_02). GuardedBy runs any
+    // guardable artifact → Invariant: code, spec/plan, and domain/solution
+    // nodes. Checks runs Feedback → Invariant.
+    graph.guarded_by = filter_edges(&graph, &graph.guarded_by, |g, a, b| {
+        g.nodes.contains_key(a)
+            && g.nodes[b].kind == NodeKind::Invariant
+            && matches!(
+                g.nodes[a].kind,
+                NodeKind::Module
+                    | NodeKind::File
+                    | NodeKind::Struct
+                    | NodeKind::Function
+                    | NodeKind::Spec
+                    | NodeKind::Requirement
+                    | NodeKind::Phase
+                    | NodeKind::Decision
+                    | NodeKind::Future
+                    | NodeKind::NonGoal
+                    | NodeKind::AcceptanceCriterion
+                    | NodeKind::VerificationItem
+                    | NodeKind::Plan
+                    | NodeKind::PlanPhase
+                    | NodeKind::Task
+                    | NodeKind::Stakeholder
+                    | NodeKind::Domain
+                    | NodeKind::Subdomain
+                    | NodeKind::Entity
+                    | NodeKind::ValueObject
+                    | NodeKind::Aggregate
+                    | NodeKind::DomainEvent
+                    | NodeKind::DomainProcess
+                    | NodeKind::DomainRule
+                    | NodeKind::Actor
+                    | NodeKind::System
+                    | NodeKind::Container
+                    | NodeKind::Component
+            )
+    });
+    graph.checks = filter_edges(&graph, &graph.checks, |g, a, b| {
+        kind_is(g, a, NodeKind::Feedback) && g.nodes[b].kind == NodeKind::Invariant
+    });
+
     (
         graph,
         IngestReport {
@@ -833,7 +1118,13 @@ pub fn ingest(
 }
 
 /// Whether a `(from, to)` kind pair is a valid `Contains` edge (SPEC §7, R2,
-/// R21): the six code pairs, seven spec pairs, and four plan pairs.
+/// R21): the six code pairs, seven spec pairs, four plan pairs, plus the
+/// tier-1/2/3 hierarchy (GraphModel-SPEC.md; PHASE_01):
+/// `Domain ⊃ Subdomain ⊃ Aggregate ⊃ Entity/ValueObject` — a strict chain, an
+/// Aggregate hangs under a Subdomain, never directly under a Domain —
+/// `Domain ⊃ DomainEvent/DomainProcess/DomainRule/Actor`,
+/// `System ⊃ Container ⊃ Component`, and Spec ⊃ Stakeholder/Domain/System
+/// (the Spec root is the top of the proposed-reality tree).
 fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
     matches!(
         (a, b),
@@ -854,17 +1145,39 @@ fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
             | (NodeKind::PlanPhase, NodeKind::Task)
             | (NodeKind::PlanPhase, NodeKind::AcceptanceCriterion)
             | (NodeKind::PlanPhase, NodeKind::VerificationItem)
+            | (NodeKind::Spec, NodeKind::Stakeholder)
+            | (NodeKind::Spec, NodeKind::Domain)
+            | (NodeKind::Spec, NodeKind::System)
+            | (NodeKind::Domain, NodeKind::Subdomain)
+            | (NodeKind::Domain, NodeKind::DomainEvent)
+            | (NodeKind::Domain, NodeKind::DomainProcess)
+            | (NodeKind::Domain, NodeKind::DomainRule)
+            | (NodeKind::Domain, NodeKind::Actor)
+            | (NodeKind::Subdomain, NodeKind::Aggregate)
+            | (NodeKind::Aggregate, NodeKind::Entity)
+            | (NodeKind::Aggregate, NodeKind::ValueObject)
+            | (NodeKind::System, NodeKind::Container)
+            | (NodeKind::Container, NodeKind::Component)
     )
 }
 
-/// The project a `future/<project>/…` FQN belongs to.
+/// The project a `<project>/spec…` FQN belongs to.
 fn project_of(fqn: &str) -> Option<String> {
-    let rest = fqn.strip_prefix("future/")?;
-    rest.split("/spec").next().map(|s| s.to_string())
+    fqn.split("/spec").next().map(|s| s.to_string())
 }
 
 fn kind_is(graph: &Graph, fqn: &str, k: NodeKind) -> bool {
     graph.nodes.get(fqn).is_some_and(|n| n.kind == k)
+}
+
+/// The Solution-tier (C4) node kinds: System, Container, Component.
+fn is_solution_kind(graph: &Graph, fqn: &str) -> bool {
+    graph.nodes.get(fqn).is_some_and(|n| {
+        matches!(
+            n.kind,
+            NodeKind::System | NodeKind::Container | NodeKind::Component
+        )
+    })
 }
 
 /// Returns the edges of `edges` that pass `keep`. A free function so each call
@@ -903,7 +1216,7 @@ fn reconcile_pending_anchors(graph: &mut Graph) {
             continue;
         };
         let name = b.rsplit(['.', '/']).next().unwrap_or(&b).to_string();
-        let future_fqn = format!("future/{project}/{name}");
+        let future_fqn = format!("{project}/{name}");
         match graph.nodes.get(&future_fqn) {
             None => {
                 graph.nodes.insert(
@@ -929,8 +1242,10 @@ fn reconcile_pending_anchors(graph: &mut Graph) {
 /// Binary spool format for edge records: one u8 tag (0 contains, 1 calls,
 /// 2 uses, 3 unresolved_call, 4 unresolved_use, 5 details, 6 reviews,
 /// 7 depends_on, 8 gates, 9 spec_depends, 10 anchors, 11 implements,
-/// 12 satisfies, 13 builds) followed by three length-prefixed UTF-8 strings
-/// (from, to, target_type; the last empty for most).
+/// 12 satisfies, 13 builds, 14 drives, 15 requires, 16 realises,
+/// 17 represents, 18 implemented_by, 19 guarded_by, 20 checks) followed by
+/// three length-prefixed UTF-8 strings (from, to, target_type; the last empty
+/// for most).
 fn write_edge(w: &mut impl Write, r: Record) {
     match r {
         Record::Contains { from, to } => write_edge_fields(w, 0, &from, &to, ""),
@@ -951,6 +1266,13 @@ fn write_edge(w: &mut impl Write, r: Record) {
         Record::Implements { from, to } => write_edge_fields(w, 11, &from, &to, ""),
         Record::Satisfies { from, to } => write_edge_fields(w, 12, &from, &to, ""),
         Record::Builds { from, to } => write_edge_fields(w, 13, &from, &to, ""),
+        Record::Drives { from, to } => write_edge_fields(w, 14, &from, &to, ""),
+        Record::Requires { from, to } => write_edge_fields(w, 15, &from, &to, ""),
+        Record::Realises { from, to } => write_edge_fields(w, 16, &from, &to, ""),
+        Record::Represents { from, to } => write_edge_fields(w, 17, &from, &to, ""),
+        Record::ImplementedBy { from, to } => write_edge_fields(w, 18, &from, &to, ""),
+        Record::GuardedBy { from, to } => write_edge_fields(w, 19, &from, &to, ""),
+        Record::Checks { from, to } => write_edge_fields(w, 20, &from, &to, ""),
         other => unreachable!("non-edge record reached the edge spool: {other:?}"),
     }
 }
@@ -995,6 +1317,13 @@ impl<R: BufRead> EdgeReader<R> {
             11 => Record::Implements { from: a, to: b },
             12 => Record::Satisfies { from: a, to: b },
             13 => Record::Builds { from: a, to: b },
+            14 => Record::Drives { from: a, to: b },
+            15 => Record::Requires { from: a, to: b },
+            16 => Record::Realises { from: a, to: b },
+            17 => Record::Represents { from: a, to: b },
+            18 => Record::ImplementedBy { from: a, to: b },
+            19 => Record::GuardedBy { from: a, to: b },
+            20 => Record::Checks { from: a, to: b },
             t => panic!("bad edge spool tag: {t}"),
         })
     }
@@ -1580,58 +1909,58 @@ mod tests {
         // (now reconciled) Future survives.
         let records = vec![
             Record::Spec {
-                fqn: "future/foo/spec".to_string(),
+                fqn: "foo/spec".to_string(),
                 title: "T".to_string(),
                 goal: String::new(),
             },
             Record::Requirement {
-                fqn: "future/foo/spec.R1".to_string(),
+                fqn: "foo/spec.R1".to_string(),
                 id: "R1".to_string(),
                 title: "Timer".to_string(),
                 body: String::new(),
                 feature: String::new(),
             },
             Record::Contains {
-                from: "future/foo/spec".to_string(),
-                to: "future/foo/spec.R1".to_string(),
+                from: "foo/spec".to_string(),
+                to: "foo/spec.R1".to_string(),
             },
             Record::Anchors {
-                from: "future/foo/spec.R1".to_string(),
+                from: "foo/spec.R1".to_string(),
                 to: "github.com/x/gateway".to_string(),
             },
             Record::Plan {
-                fqn: "future/foo/plan".to_string(),
+                fqn: "foo/plan".to_string(),
                 title: "P".to_string(),
                 strategy: String::new(),
             },
             Record::PlanPhase {
-                fqn: "future/foo/plan.phase-1".to_string(),
+                fqn: "foo/plan.phase-1".to_string(),
                 number: 1,
                 title: "P1".to_string(),
                 deliverable: String::new(),
             },
             Record::Task {
-                fqn: "future/foo/plan.phase-1.task-1".to_string(),
+                fqn: "foo/plan.phase-1.task-1".to_string(),
                 title: "t".to_string(),
                 kind: String::new(),
                 tier: String::new(),
                 status: String::new(),
             },
             Record::Contains {
-                from: "future/foo/plan".to_string(),
-                to: "future/foo/plan.phase-1".to_string(),
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-1".to_string(),
             },
             Record::Contains {
-                from: "future/foo/plan.phase-1".to_string(),
-                to: "future/foo/plan.phase-1.task-1".to_string(),
+                from: "foo/plan.phase-1".to_string(),
+                to: "foo/plan.phase-1.task-1".to_string(),
             },
             Record::Anchors {
-                from: "future/foo/plan.phase-1.task-1".to_string(),
+                from: "foo/plan.phase-1.task-1".to_string(),
                 to: "/missing/file.go".to_string(),
             },
             Record::Builds {
-                from: "future/foo/plan.phase-1.task-1".to_string(),
-                to: "future/foo/gateway".to_string(),
+                from: "foo/plan.phase-1.task-1".to_string(),
+                to: "foo/gateway".to_string(),
             },
         ];
         let (graph, _) = ingest(
@@ -1643,7 +1972,7 @@ mod tests {
             },
         );
         // The dangling requirement anchor reconciled to a Future node.
-        let future_fqn = "future/foo/gateway".to_string();
+        let future_fqn = "foo/gateway".to_string();
         assert!(graph.nodes.contains_key(&future_fqn));
         assert_eq!(graph.nodes[&future_fqn].kind, NodeKind::Future);
         assert_eq!(
@@ -1653,18 +1982,18 @@ mod tests {
         assert!(
             graph
                 .anchors
-                .contains(&("future/foo/spec.R1".to_string(), future_fqn.clone()))
+                .contains(&("foo/spec.R1".to_string(), future_fqn.clone()))
         );
         // The Task anchor to a missing file is dropped; its Builds edge to the
         // reconciled Future survives.
         assert!(!graph.anchors.contains(&(
-            "future/foo/plan.phase-1.task-1".to_string(),
+            "foo/plan.phase-1.task-1".to_string(),
             "/missing/file.go".to_string()
         )));
         assert!(
             graph
                 .builds
-                .contains(&("future/foo/plan.phase-1.task-1".to_string(), future_fqn))
+                .contains(&("foo/plan.phase-1.task-1".to_string(), future_fqn))
         );
     }
 
@@ -1679,23 +2008,23 @@ mod tests {
             srec("n1", "github.com/x/y", "Store", "/abs/store.go"),
             file_rec("/abs/store.go", "github.com/x/y", 10),
             Record::Spec {
-                fqn: "future/foo/spec".to_string(),
+                fqn: "foo/spec".to_string(),
                 title: "T".to_string(),
                 goal: String::new(),
             },
             Record::Requirement {
-                fqn: "future/foo/spec.R1".to_string(),
+                fqn: "foo/spec.R1".to_string(),
                 id: "R1".to_string(),
                 title: "Timer".to_string(),
                 body: String::new(),
                 feature: String::new(),
             },
             Record::Contains {
-                from: "future/foo/spec".to_string(),
-                to: "future/foo/spec.R1".to_string(),
+                from: "foo/spec".to_string(),
+                to: "foo/spec.R1".to_string(),
             },
             Record::Anchors {
-                from: "future/foo/spec.R1".to_string(),
+                from: "foo/spec.R1".to_string(),
                 to: "github.com/x/y.Store".to_string(),
             },
         ];
@@ -1708,12 +2037,12 @@ mod tests {
             },
         );
         assert!(graph.anchors.contains(&(
-            "future/foo/spec.R1".to_string(),
+            "foo/spec.R1".to_string(),
             "github.com/x/y.Store".to_string()
         )));
         assert!(graph.contains.contains(&(
-            "future/foo/spec".to_string(),
-            "future/foo/spec.R1".to_string()
+            "foo/spec".to_string(),
+            "foo/spec.R1".to_string()
         )));
     }
 

@@ -15,7 +15,7 @@ export default tool({
   async execute(args, context) {
     const project = args.project
     if (!project) return "Error: project is required"
-    const pfx = `future/${project}/plan.`
+    const pfx = `${project}/plan.`
     const limit = args.limit ? Math.max(1, Math.min(1000, Number(args.limit))) : 500
 
     const tasks = csvToRows(
@@ -42,8 +42,8 @@ export default tool({
     const lines = ["task,phase,title,kind,tier,status,builds,anchors"]
     for (const [phase, fqn, title, kind, tier, status] of tasks.slice(1)) {
       if (args.status && status !== args.status) continue
-      const short = fqn.replace(`future/${project}/`, "")
-      const phaseShort = phase.replace(`future/${project}/`, "")
+      const short = fqn.replace(`${project}/`, "")
+      const phaseShort = phase.replace(`${project}/`, "")
       lines.push(
         [
           short,
@@ -52,7 +52,7 @@ export default tool({
           kind,
           tier,
           status,
-          (builds.get(fqn) ?? "").replace(`future/${project}/`, ""),
+          (builds.get(fqn) ?? "").replace(`${project}/`, ""),
           (anchors.get(fqn) ?? []).join(";"),
         ].join(","),
       )

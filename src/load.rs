@@ -200,6 +200,56 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut task_tier = Vec::new();
     let mut task_status = Vec::new();
 
+    // Tier-1/2/3 node tables (GraphModel-SPEC.md; PHASE_01).
+    let mut stakeholder_fqn = Vec::new();
+    let mut stakeholder_name = Vec::new();
+    let mut stakeholder_body = Vec::new();
+    let mut domain_fqn = Vec::new();
+    let mut domain_name = Vec::new();
+    let mut domain_body = Vec::new();
+    let mut subdomain_fqn = Vec::new();
+    let mut subdomain_name = Vec::new();
+    let mut subdomain_kind = Vec::new();
+    let mut subdomain_body = Vec::new();
+    let mut entity_fqn = Vec::new();
+    let mut entity_name = Vec::new();
+    let mut entity_body = Vec::new();
+    let mut value_object_fqn = Vec::new();
+    let mut value_object_name = Vec::new();
+    let mut value_object_body = Vec::new();
+    let mut aggregate_fqn = Vec::new();
+    let mut aggregate_name = Vec::new();
+    let mut aggregate_root = Vec::new();
+    let mut aggregate_body = Vec::new();
+    let mut domain_event_fqn = Vec::new();
+    let mut domain_event_name = Vec::new();
+    let mut domain_event_body = Vec::new();
+    let mut domain_process_fqn = Vec::new();
+    let mut domain_process_name = Vec::new();
+    let mut domain_process_body = Vec::new();
+    let mut domain_rule_fqn = Vec::new();
+    let mut domain_rule_name = Vec::new();
+    let mut domain_rule_body = Vec::new();
+    let mut actor_fqn = Vec::new();
+    let mut actor_name = Vec::new();
+    let mut actor_body = Vec::new();
+    let mut system_fqn = Vec::new();
+    let mut system_name = Vec::new();
+    let mut system_body = Vec::new();
+    let mut container_fqn = Vec::new();
+    let mut container_name = Vec::new();
+    let mut container_kind = Vec::new();
+    let mut container_body = Vec::new();
+    let mut component_fqn = Vec::new();
+    let mut component_name = Vec::new();
+    let mut component_body = Vec::new();
+    let mut invariant_fqn = Vec::new();
+    let mut invariant_title = Vec::new();
+    let mut invariant_body = Vec::new();
+    let mut invariant_category = Vec::new();
+    let mut invariant_scope = Vec::new();
+    let mut invariant_status = Vec::new();
+
     for (fqn, node) in &graph.nodes {
         match node.kind {
             NodeKind::Module => module_fqn.push(fqn.clone()),
@@ -312,6 +362,82 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 task_kind.push(node.sub_kind.clone().unwrap_or_default());
                 task_tier.push(node.tier.clone().unwrap_or_default());
                 task_status.push(node.status.clone().unwrap_or_default());
+            }
+            NodeKind::Stakeholder => {
+                stakeholder_fqn.push(fqn.clone());
+                stakeholder_name.push(node.name.clone().unwrap_or_default());
+                stakeholder_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Domain => {
+                domain_fqn.push(fqn.clone());
+                domain_name.push(node.name.clone().unwrap_or_default());
+                domain_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Subdomain => {
+                subdomain_fqn.push(fqn.clone());
+                subdomain_name.push(node.name.clone().unwrap_or_default());
+                subdomain_kind.push(node.sub_kind.clone().unwrap_or_default());
+                subdomain_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Entity => {
+                entity_fqn.push(fqn.clone());
+                entity_name.push(node.name.clone().unwrap_or_default());
+                entity_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::ValueObject => {
+                value_object_fqn.push(fqn.clone());
+                value_object_name.push(node.name.clone().unwrap_or_default());
+                value_object_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Aggregate => {
+                aggregate_fqn.push(fqn.clone());
+                aggregate_name.push(node.name.clone().unwrap_or_default());
+                aggregate_root.push(node.root.clone().unwrap_or_default());
+                aggregate_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::DomainEvent => {
+                domain_event_fqn.push(fqn.clone());
+                domain_event_name.push(node.name.clone().unwrap_or_default());
+                domain_event_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::DomainProcess => {
+                domain_process_fqn.push(fqn.clone());
+                domain_process_name.push(node.name.clone().unwrap_or_default());
+                domain_process_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::DomainRule => {
+                domain_rule_fqn.push(fqn.clone());
+                domain_rule_name.push(node.name.clone().unwrap_or_default());
+                domain_rule_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Actor => {
+                actor_fqn.push(fqn.clone());
+                actor_name.push(node.name.clone().unwrap_or_default());
+                actor_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::System => {
+                system_fqn.push(fqn.clone());
+                system_name.push(node.name.clone().unwrap_or_default());
+                system_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Container => {
+                container_fqn.push(fqn.clone());
+                container_name.push(node.name.clone().unwrap_or_default());
+                container_kind.push(node.sub_kind.clone().unwrap_or_default());
+                container_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Component => {
+                component_fqn.push(fqn.clone());
+                component_name.push(node.name.clone().unwrap_or_default());
+                component_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Invariant => {
+                invariant_fqn.push(fqn.clone());
+                invariant_title.push(node.title.clone().unwrap_or_default());
+                invariant_body.push(node.body.clone().unwrap_or_default());
+                invariant_category.push(node.category.clone().unwrap_or_default());
+                invariant_scope.push(node.scope.clone().unwrap_or_default());
+                invariant_status.push(node.status.clone().unwrap_or_default());
             }
         }
     }
@@ -468,6 +594,124 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("kind", Col::Str(task_kind)),
             ("tier", Col::Str(task_tier)),
             ("status", Col::Str(task_status)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("stakeholder.parquet"),
+        &[
+            ("fqn", Col::Str(stakeholder_fqn)),
+            ("name", Col::Str(stakeholder_name)),
+            ("body", Col::Str(stakeholder_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("domain.parquet"),
+        &[
+            ("fqn", Col::Str(domain_fqn)),
+            ("name", Col::Str(domain_name)),
+            ("body", Col::Str(domain_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("subdomain.parquet"),
+        &[
+            ("fqn", Col::Str(subdomain_fqn)),
+            ("name", Col::Str(subdomain_name)),
+            ("kind", Col::Str(subdomain_kind)),
+            ("body", Col::Str(subdomain_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("entity.parquet"),
+        &[
+            ("fqn", Col::Str(entity_fqn)),
+            ("name", Col::Str(entity_name)),
+            ("body", Col::Str(entity_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("value_object.parquet"),
+        &[
+            ("fqn", Col::Str(value_object_fqn)),
+            ("name", Col::Str(value_object_name)),
+            ("body", Col::Str(value_object_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("aggregate.parquet"),
+        &[
+            ("fqn", Col::Str(aggregate_fqn)),
+            ("name", Col::Str(aggregate_name)),
+            ("root", Col::Str(aggregate_root)),
+            ("body", Col::Str(aggregate_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("domain_event.parquet"),
+        &[
+            ("fqn", Col::Str(domain_event_fqn)),
+            ("name", Col::Str(domain_event_name)),
+            ("body", Col::Str(domain_event_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("domain_process.parquet"),
+        &[
+            ("fqn", Col::Str(domain_process_fqn)),
+            ("name", Col::Str(domain_process_name)),
+            ("body", Col::Str(domain_process_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("domain_rule.parquet"),
+        &[
+            ("fqn", Col::Str(domain_rule_fqn)),
+            ("name", Col::Str(domain_rule_name)),
+            ("body", Col::Str(domain_rule_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("actor.parquet"),
+        &[
+            ("fqn", Col::Str(actor_fqn)),
+            ("name", Col::Str(actor_name)),
+            ("body", Col::Str(actor_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("system.parquet"),
+        &[
+            ("fqn", Col::Str(system_fqn)),
+            ("name", Col::Str(system_name)),
+            ("body", Col::Str(system_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("container.parquet"),
+        &[
+            ("fqn", Col::Str(container_fqn)),
+            ("name", Col::Str(container_name)),
+            ("kind", Col::Str(container_kind)),
+            ("body", Col::Str(container_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("component.parquet"),
+        &[
+            ("fqn", Col::Str(component_fqn)),
+            ("name", Col::Str(component_name)),
+            ("body", Col::Str(component_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("invariant.parquet"),
+        &[
+            ("fqn", Col::Str(invariant_fqn)),
+            ("title", Col::Str(invariant_title)),
+            ("body", Col::Str(invariant_body)),
+            ("category", Col::Str(invariant_category)),
+            ("scope", Col::Str(invariant_scope)),
+            ("status", Col::Str(invariant_status)),
         ],
     )?;
 
@@ -669,6 +913,62 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                     }
                 }
             }
+            "Drives" => {
+                for (a, b) in &graph.drives {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Requires" => {
+                for (a, b) in &graph.requires {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Realises" => {
+                for (a, b) in &graph.realises {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Represents" => {
+                for (a, b) in &graph.represents {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "ImplementedBy" => {
+                for (a, b) in &graph.implemented_by {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "GuardedBy" => {
+                for (a, b) in &graph.guarded_by {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Checks" => {
+                for (a, b) in &graph.checks {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
             _ => unreachable!("unknown spec rel table: {table}"),
         }
         rel(&pair_file(table, from, to), fa, fb)?;
@@ -699,6 +999,24 @@ fn contains_pairs() -> Vec<(NodeKind, NodeKind)> {
         (PlanPhase, Task),
         (PlanPhase, AcceptanceCriterion),
         (PlanPhase, VerificationItem),
+        // Tier-1/2/3 hierarchy (GraphModel-SPEC.md; PHASE_01). The DDD chain is
+        // strict: `Domain ⊃ Subdomain ⊃ Aggregate ⊃ Entity/ValueObject` — an
+        // Aggregate belongs under a Subdomain, never directly under a Domain.
+        // Stakeholder/Domain/System hang under the Spec root (the top of the
+        // proposed-reality tree).
+        (Spec, Stakeholder),
+        (Spec, Domain),
+        (Spec, System),
+        (Domain, Subdomain),
+        (Domain, DomainEvent),
+        (Domain, DomainProcess),
+        (Domain, DomainRule),
+        (Domain, Actor),
+        (Subdomain, Aggregate),
+        (Aggregate, Entity),
+        (Aggregate, ValueObject),
+        (System, Container),
+        (Container, Component),
     ]
 }
 
@@ -708,6 +1026,14 @@ fn contains_pair_name(a: NodeKind, b: NodeKind) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Whether the `Contains` rel table declares an edge between the two node
+/// kinds — the single source of truth (via [`contains_pairs`]) for the
+/// `spec add <tier> --parent` allow-list. A pair outside it is rejected at
+/// write time (`add_tier_node`), never silently projected away at re-ingest.
+pub fn contains_pair_allowed(a: NodeKind, b: NodeKind) -> bool {
+    contains_pairs().contains(&(a, b))
 }
 
 /// The `(from, to)` kind pairs of the spec/plan rel tables (SPEC R2/R21), with
@@ -731,6 +1057,19 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
         Plan,
         PlanPhase,
         Task,
+        Stakeholder,
+        Domain,
+        Subdomain,
+        Entity,
+        ValueObject,
+        Aggregate,
+        DomainEvent,
+        DomainProcess,
+        DomainRule,
+        Actor,
+        System,
+        Container,
+        Component,
     ] {
         v.push(("Details", Note, to));
     }
@@ -750,6 +1089,19 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
         Plan,
         PlanPhase,
         Task,
+        Stakeholder,
+        Domain,
+        Subdomain,
+        Entity,
+        ValueObject,
+        Aggregate,
+        DomainEvent,
+        DomainProcess,
+        DomainRule,
+        Actor,
+        System,
+        Container,
+        Component,
     ] {
         v.push(("Reviews", Feedback, to));
     }
@@ -768,6 +1120,52 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     v.push(("SpecDependsOn", Spec, Spec));
     v.push(("Satisfies", PlanPhase, Requirement));
     v.push(("Builds", Task, Future));
+    // Spine edges (GraphModel-SPEC.md; PHASE_01).
+    v.push(("Drives", Requirement, Domain));
+    v.push(("Requires", Requirement, Domain));
+    for to in [System, Container, Component] {
+        v.push(("Realises", Domain, to));
+        v.push(("Represents", Domain, to));
+        v.push(("ImplementedBy", to, Module));
+        v.push(("ImplementedBy", to, File));
+        v.push(("ImplementedBy", to, Struct));
+        v.push(("ImplementedBy", to, Function));
+    }
+    // Invariant edges (Invariants-SPEC.md; PHASE_02): GuardedBy artifact →
+    // Invariant (every guardable kind), Checks Feedback → Invariant.
+    for from in [
+        Module,
+        File,
+        Struct,
+        Function,
+        Spec,
+        Requirement,
+        Phase,
+        Decision,
+        Future,
+        NonGoal,
+        AcceptanceCriterion,
+        VerificationItem,
+        Plan,
+        PlanPhase,
+        Task,
+        Stakeholder,
+        Domain,
+        Subdomain,
+        Entity,
+        ValueObject,
+        Aggregate,
+        DomainEvent,
+        DomainProcess,
+        DomainRule,
+        Actor,
+        System,
+        Container,
+        Component,
+    ] {
+        v.push(("GuardedBy", from, Invariant));
+    }
+    v.push(("Checks", Feedback, Invariant));
     v
 }
 
@@ -799,6 +1197,20 @@ fn kind_slug(k: NodeKind) -> &'static str {
         NodeKind::PlanPhase => "plan_phase",
         NodeKind::Task => "task",
         NodeKind::Scan => "scan",
+        NodeKind::Stakeholder => "stakeholder",
+        NodeKind::Domain => "domain",
+        NodeKind::Subdomain => "subdomain",
+        NodeKind::Entity => "entity",
+        NodeKind::ValueObject => "value_object",
+        NodeKind::Aggregate => "aggregate",
+        NodeKind::DomainEvent => "domain_event",
+        NodeKind::DomainProcess => "domain_process",
+        NodeKind::DomainRule => "domain_rule",
+        NodeKind::Actor => "actor",
+        NodeKind::System => "system",
+        NodeKind::Container => "container",
+        NodeKind::Component => "component",
+        NodeKind::Invariant => "invariant",
     }
 }
 
@@ -839,6 +1251,41 @@ pub fn details_target_labels() -> &'static [&'static str] {
     })
 }
 
+/// The node labels an artifact may be guarded onto an Invariant via a
+/// `GuardedBy` edge — the `FROM … TO Invariant` targets of the GuardedBy rel
+/// table (Invariants-SPEC.md). The single source of truth for the
+/// `invariant add --guard` allow-list: Note/Feedback/UnresolvedTarget/Scan/
+/// Invariant are excluded by construction (a guard must be an artifact the
+/// invariant constrains — not a note, review item, unresolved reference, scan
+/// record, or another invariant — and the DB has no rel-table pair for it).
+pub fn guarded_by_from_labels() -> &'static [&'static str] {
+    static LABELS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    LABELS.get_or_init(|| {
+        spec_rel_pairs()
+            .into_iter()
+            .filter(|(t, _, to)| *t == "GuardedBy" && *to == NodeKind::Invariant)
+            .map(|(_, from, _)| label_of(from))
+            .collect()
+    })
+}
+
+/// The node labels a `--implemented-by` target may carry — the `FROM … TO …`
+/// targets of the ImplementedBy rel table (Solution → Implementation,
+/// GraphModel-SPEC.md). The single source of truth for the `spine
+/// --implemented-by` target allow-list: UnresolvedTarget and every spec/plan
+/// label are excluded by construction (an edge can only land on implementation
+/// code, and the DB has no rel-table pair for the rest).
+pub fn implemented_by_to_labels() -> &'static [&'static str] {
+    static LABELS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    LABELS.get_or_init(|| {
+        spec_rel_pairs()
+            .into_iter()
+            .filter(|(t, _, _)| *t == "ImplementedBy")
+            .map(|(_, _, to)| label_of(to))
+            .collect()
+    })
+}
+
 /// Every node-table label, in schema creation order. Used for DB label lookups
 /// (`ArtifactDb::node_label`) — the label of a `--on` target decides whether
 /// it is an allowable `Details` target.
@@ -863,11 +1310,36 @@ pub fn node_labels() -> &'static [&'static str] {
         "Plan",
         "PlanPhase",
         "Task",
+        "Stakeholder",
+        "Domain",
+        "Subdomain",
+        "Entity",
+        "ValueObject",
+        "Aggregate",
+        "DomainEvent",
+        "DomainProcess",
+        "DomainRule",
+        "Actor",
+        "System",
+        "Container",
+        "Component",
+        "Invariant",
     ]
 }
 
+/// Whether a DB node label is a *code* label (Module/Struct/Function/File/
+/// UnresolvedTarget). The `future/` namespace is gone (PHASE_04) — code vs
+/// spec-family discrimination now uses the node label: `review_add` and other
+/// FQN routers check `is_code_label` before deriving a project from the FQN.
+pub fn is_code_label(label: &str) -> bool {
+    matches!(
+        label,
+        "Module" | "Struct" | "Function" | "File" | "UnresolvedTarget"
+    )
+}
+
 /// The exact node-table label used in `CREATE REL TABLE` and COPY overrides.
-fn label_of(k: NodeKind) -> &'static str {
+pub fn label_of(k: NodeKind) -> &'static str {
     match k {
         NodeKind::Module => "Module",
         NodeKind::Struct => "Struct",
@@ -888,6 +1360,20 @@ fn label_of(k: NodeKind) -> &'static str {
         NodeKind::PlanPhase => "PlanPhase",
         NodeKind::Task => "Task",
         NodeKind::Scan => "Scan",
+        NodeKind::Stakeholder => "Stakeholder",
+        NodeKind::Domain => "Domain",
+        NodeKind::Subdomain => "Subdomain",
+        NodeKind::Entity => "Entity",
+        NodeKind::ValueObject => "ValueObject",
+        NodeKind::Aggregate => "Aggregate",
+        NodeKind::DomainEvent => "DomainEvent",
+        NodeKind::DomainProcess => "DomainProcess",
+        NodeKind::DomainRule => "DomainRule",
+        NodeKind::Actor => "Actor",
+        NodeKind::System => "System",
+        NodeKind::Container => "Container",
+        NodeKind::Component => "Component",
+        NodeKind::Invariant => "Invariant",
     }
 }
 
@@ -931,7 +1417,49 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, kind STRING, tier STRING, status STRING)",
     )?;
     conn.query(
-        "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Spec TO Requirement, FROM Spec TO Phase, FROM Phase TO Requirement, FROM Spec TO Decision, FROM Spec TO NonGoal, FROM Spec TO AcceptanceCriterion, FROM Spec TO VerificationItem, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM PlanPhase TO AcceptanceCriterion, FROM PlanPhase TO VerificationItem)",
+        "CREATE NODE TABLE Stakeholder(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Domain(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Subdomain(fqn STRING PRIMARY KEY, name STRING, kind STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Entity(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE ValueObject(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Aggregate(fqn STRING PRIMARY KEY, name STRING, root STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE DomainEvent(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE DomainProcess(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE DomainRule(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Actor(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE System(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Container(fqn STRING PRIMARY KEY, name STRING, kind STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Component(fqn STRING PRIMARY KEY, name STRING, body STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Invariant(fqn STRING PRIMARY KEY, title STRING, body STRING, category STRING, scope STRING, status STRING)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Spec TO Requirement, FROM Spec TO Phase, FROM Phase TO Requirement, FROM Spec TO Decision, FROM Spec TO NonGoal, FROM Spec TO AcceptanceCriterion, FROM Spec TO VerificationItem, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM PlanPhase TO AcceptanceCriterion, FROM PlanPhase TO VerificationItem, FROM Spec TO Stakeholder, FROM Spec TO Domain, FROM Spec TO System, FROM Domain TO Subdomain, FROM Domain TO DomainEvent, FROM Domain TO DomainProcess, FROM Domain TO DomainRule, FROM Domain TO Actor, FROM Subdomain TO Aggregate, FROM Aggregate TO Entity, FROM Aggregate TO ValueObject, FROM System TO Container, FROM Container TO Component)",
     )?;
     conn.query("CREATE REL TABLE Calls(FROM Function TO Function)")?;
     conn.query("CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct)")?;
@@ -942,10 +1470,10 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE UnresolvedUse(FROM Function TO UnresolvedTarget, FROM Struct TO UnresolvedTarget)",
     )?;
     conn.query(
-        "CREATE REL TABLE Details(FROM Note TO Module, FROM Note TO Function, FROM Note TO Struct, FROM Note TO File, FROM Note TO Spec, FROM Note TO Requirement, FROM Note TO Phase, FROM Note TO Decision, FROM Note TO NonGoal, FROM Note TO AcceptanceCriterion, FROM Note TO VerificationItem, FROM Note TO Plan, FROM Note TO PlanPhase, FROM Note TO Task)",
+        "CREATE REL TABLE Details(FROM Note TO Module, FROM Note TO Function, FROM Note TO Struct, FROM Note TO File, FROM Note TO Spec, FROM Note TO Requirement, FROM Note TO Phase, FROM Note TO Decision, FROM Note TO NonGoal, FROM Note TO AcceptanceCriterion, FROM Note TO VerificationItem, FROM Note TO Plan, FROM Note TO PlanPhase, FROM Note TO Task, FROM Note TO Stakeholder, FROM Note TO Domain, FROM Note TO Subdomain, FROM Note TO Entity, FROM Note TO ValueObject, FROM Note TO Aggregate, FROM Note TO DomainEvent, FROM Note TO DomainProcess, FROM Note TO DomainRule, FROM Note TO Actor, FROM Note TO System, FROM Note TO Container, FROM Note TO Component)",
     )?;
     conn.query(
-        "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Spec, FROM Feedback TO Requirement, FROM Feedback TO Phase, FROM Feedback TO Decision, FROM Feedback TO NonGoal, FROM Feedback TO AcceptanceCriterion, FROM Feedback TO VerificationItem, FROM Feedback TO Future, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task)",
+        "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Spec, FROM Feedback TO Requirement, FROM Feedback TO Phase, FROM Feedback TO Decision, FROM Feedback TO NonGoal, FROM Feedback TO AcceptanceCriterion, FROM Feedback TO VerificationItem, FROM Feedback TO Future, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task, FROM Feedback TO Stakeholder, FROM Feedback TO Domain, FROM Feedback TO Subdomain, FROM Feedback TO Entity, FROM Feedback TO ValueObject, FROM Feedback TO Aggregate, FROM Feedback TO DomainEvent, FROM Feedback TO DomainProcess, FROM Feedback TO DomainRule, FROM Feedback TO Actor, FROM Feedback TO System, FROM Feedback TO Container, FROM Feedback TO Component)",
     )?;
     conn.query("CREATE REL TABLE DependsOn(FROM Requirement TO Requirement)")?;
     conn.query("CREATE REL TABLE Gates(FROM Phase TO Phase, FROM PlanPhase TO PlanPhase)")?;
@@ -958,6 +1486,25 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     )?;
     conn.query("CREATE REL TABLE Satisfies(FROM PlanPhase TO Requirement)")?;
     conn.query("CREATE REL TABLE Builds(FROM Task TO Future)")?;
+    conn.query(
+        "CREATE REL TABLE Drives(FROM Requirement TO Domain)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Requires(FROM Requirement TO Domain)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Realises(FROM Domain TO System, FROM Domain TO Container, FROM Domain TO Component)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Represents(FROM Domain TO System, FROM Domain TO Container, FROM Domain TO Component)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE ImplementedBy(FROM System TO Module, FROM System TO File, FROM System TO Struct, FROM System TO Function, FROM Container TO Module, FROM Container TO File, FROM Container TO Struct, FROM Container TO Function, FROM Component TO Module, FROM Component TO File, FROM Component TO Struct, FROM Component TO Function)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE GuardedBy(FROM Module TO Invariant, FROM File TO Invariant, FROM Struct TO Invariant, FROM Function TO Invariant, FROM Spec TO Invariant, FROM Requirement TO Invariant, FROM Phase TO Invariant, FROM Decision TO Invariant, FROM Future TO Invariant, FROM NonGoal TO Invariant, FROM AcceptanceCriterion TO Invariant, FROM VerificationItem TO Invariant, FROM Plan TO Invariant, FROM PlanPhase TO Invariant, FROM Task TO Invariant, FROM Stakeholder TO Invariant, FROM Domain TO Invariant, FROM Subdomain TO Invariant, FROM Entity TO Invariant, FROM ValueObject TO Invariant, FROM Aggregate TO Invariant, FROM DomainEvent TO Invariant, FROM DomainProcess TO Invariant, FROM DomainRule TO Invariant, FROM Actor TO Invariant, FROM System TO Invariant, FROM Container TO Invariant, FROM Component TO Invariant)",
+    )?;
+    conn.query("CREATE REL TABLE Checks(FROM Feedback TO Invariant)")?;
     Ok(())
 }
 
@@ -994,6 +1541,35 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         format!(r#"COPY Plan FROM "{}""#, p("plan.parquet")),
         format!(r#"COPY PlanPhase FROM "{}""#, p("plan_phase.parquet")),
         format!(r#"COPY Task FROM "{}""#, p("task.parquet")),
+        format!(
+            r#"COPY Stakeholder FROM "{}""#,
+            p("stakeholder.parquet")
+        ),
+        format!(r#"COPY Domain FROM "{}""#, p("domain.parquet")),
+        format!(r#"COPY Subdomain FROM "{}""#, p("subdomain.parquet")),
+        format!(r#"COPY Entity FROM "{}""#, p("entity.parquet")),
+        format!(
+            r#"COPY ValueObject FROM "{}""#,
+            p("value_object.parquet")
+        ),
+        format!(r#"COPY Aggregate FROM "{}""#, p("aggregate.parquet")),
+        format!(
+            r#"COPY DomainEvent FROM "{}""#,
+            p("domain_event.parquet")
+        ),
+        format!(
+            r#"COPY DomainProcess FROM "{}""#,
+            p("domain_process.parquet")
+        ),
+        format!(
+            r#"COPY DomainRule FROM "{}""#,
+            p("domain_rule.parquet")
+        ),
+        format!(r#"COPY Actor FROM "{}""#, p("actor.parquet")),
+        format!(r#"COPY System FROM "{}""#, p("system.parquet")),
+        format!(r#"COPY Container FROM "{}""#, p("container.parquet")),
+        format!(r#"COPY Component FROM "{}""#, p("component.parquet")),
+        format!(r#"COPY Invariant FROM "{}""#, p("invariant.parquet")),
         format!(
             r#"COPY Contains FROM "{}" (from="Module", to="Module")"#,
             p("contains_mod_mod.parquet")
@@ -1230,6 +1806,116 @@ enum Export {
         #[serde(skip_serializing_if = "String::is_empty")]
         status: String,
     },
+    Stakeholder {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Domain {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Subdomain {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        kind: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Entity {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    ValueObject {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Aggregate {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        root: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    DomainEvent {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    DomainProcess {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    DomainRule {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Actor {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    System {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Container {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        kind: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Component {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Invariant {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        title: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        category: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        scope: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        status: String,
+    },
     Details {
         from: String,
         to: String,
@@ -1263,6 +1949,34 @@ enum Export {
         to: String,
     },
     Builds {
+        from: String,
+        to: String,
+    },
+    Drives {
+        from: String,
+        to: String,
+    },
+    Requires {
+        from: String,
+        to: String,
+    },
+    Realises {
+        from: String,
+        to: String,
+    },
+    Represents {
+        from: String,
+        to: String,
+    },
+    ImplementedBy {
+        from: String,
+        to: String,
+    },
+    GuardedBy {
+        from: String,
+        to: String,
+    },
+    Checks {
         from: String,
         to: String,
     },
@@ -1406,6 +2120,82 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                 tier: node.tier.clone().unwrap_or_default(),
                 status: node.status.clone().unwrap_or_default(),
             },
+            NodeKind::Stakeholder => Export::Stakeholder {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Domain => Export::Domain {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Subdomain => Export::Subdomain {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                kind: node.sub_kind.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Entity => Export::Entity {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::ValueObject => Export::ValueObject {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Aggregate => Export::Aggregate {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                root: node.root.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::DomainEvent => Export::DomainEvent {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::DomainProcess => Export::DomainProcess {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::DomainRule => Export::DomainRule {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Actor => Export::Actor {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::System => Export::System {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Container => Export::Container {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                kind: node.sub_kind.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Component => Export::Component {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Invariant => Export::Invariant {
+                fqn: fqn.clone(),
+                title: node.title.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+                category: node.category.clone().unwrap_or_default(),
+                scope: node.scope.clone().unwrap_or_default(),
+                status: node.status.clone().unwrap_or_default(),
+            },
         };
         write_line(&mut w, &rec)?;
     }
@@ -1536,6 +2326,69 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             },
         )?;
     }
+    for (a, b) in &graph.drives {
+        write_line(
+            &mut w,
+            &Export::Drives {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.requires {
+        write_line(
+            &mut w,
+            &Export::Requires {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.realises {
+        write_line(
+            &mut w,
+            &Export::Realises {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.represents {
+        write_line(
+            &mut w,
+            &Export::Represents {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.implemented_by {
+        write_line(
+            &mut w,
+            &Export::ImplementedBy {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.guarded_by {
+        write_line(
+            &mut w,
+            &Export::GuardedBy {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.checks {
+        write_line(
+            &mut w,
+            &Export::Checks {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
     w.flush()?;
     Ok(())
 }
@@ -1543,6 +2396,483 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reads `graph.jsonl` back into a [`Graph`] — the re-ingest leg of the
+    /// export round-trip (PHASE_01 done gate: "JSONL → DB → JSONL round-trip for
+    /// each" node/edge kind). Mirror of [`write_graph_jsonl`]: every `Export`
+    /// record line is mapped back to the graph node or edge it came from. A
+    /// `scan_meta` control record on line 1 reconstructs the `Scan` node at
+    /// `SCAN_HEAD` (it is never emitted as a node line). Unknown `type`s are an
+    /// error so a new export kind cannot silently vanish on the way back in.
+    pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
+        let text = std::fs::read_to_string(path)?;
+        let mut g = Graph::default();
+
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line)?;
+            let t = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+            let o = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+            let u = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+            let located = || {
+                Some(Location {
+                    path: s("path").into(),
+                    start: u("start"),
+                    end: u("end"),
+                    start_line: u("start_line"),
+                    end_line: u("end_line"),
+                })
+            };
+            match t {
+                "scan_meta" => {
+                    let mut n = Node {
+                        kind: NodeKind::Scan,
+                        ..Node::default()
+                    };
+                    n.git_sha = o("git_sha");
+                    n.git_clean = v.get("git_clean").and_then(|x| x.as_bool());
+                    n.scanned_at = o("scanned_at");
+                    g.nodes.insert(crate::schema::SCAN_HEAD.to_string(), n);
+                }
+                "module" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Module,
+                            ..Node::default()
+                        },
+                    );
+                }
+                "struct" => {
+                    let fqn = s("fqn");
+                    g.nodes.insert(
+                        fqn,
+                        Node {
+                            kind: NodeKind::Struct,
+                            location: located(),
+                            code_type: s("code_type"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "function" => {
+                    let fqn = s("fqn");
+                    g.nodes.insert(
+                        fqn,
+                        Node {
+                            kind: NodeKind::Function,
+                            location: located(),
+                            code_type: s("code_type"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "file" => {
+                    // A File node's fqn IS its absolute path (no separate path
+                    // field is exported); the line range rides as the span.
+                    let fqn = s("fqn");
+                    g.nodes.insert(
+                        fqn.clone(),
+                        Node {
+                            kind: NodeKind::File,
+                            location: Some(Location {
+                                path: fqn.into(),
+                                start: 0,
+                                end: 0,
+                                start_line: u("start_line"),
+                                end_line: u("end_line"),
+                            }),
+                            code_type: s("code_type"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "unresolved" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::UnresolvedTarget,
+                            category: o("category"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "spec" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Spec,
+                            title: o("title"),
+                            goal: o("goal"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "requirement" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Requirement,
+                            id: o("id"),
+                            title: o("title"),
+                            body: o("body"),
+                            feature: o("feature"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "phase" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Phase,
+                            number: v.get("number").and_then(|x| x.as_u64()).map(|x| x as u32),
+                            title: o("title"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "decision" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Decision,
+                            id: o("id"),
+                            summary: o("summary"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "future" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Future,
+                            sub_kind: o("kind"),
+                            target: o("target"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "non_goal" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::NonGoal,
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "acceptance_criterion" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::AcceptanceCriterion,
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "verification_item" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::VerificationItem,
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "note" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Note,
+                            body: o("body"),
+                            sub_kind: o("kind"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "feedback" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Feedback,
+                            body: o("body"),
+                            status: o("status"),
+                            disposition: o("disposition"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "plan" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Plan,
+                            title: o("title"),
+                            strategy: o("strategy"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "plan_phase" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::PlanPhase,
+                            number: v.get("number").and_then(|x| x.as_u64()).map(|x| x as u32),
+                            title: o("title"),
+                            deliverable: o("deliverable"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "task" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Task,
+                            title: o("title"),
+                            sub_kind: o("kind"),
+                            tier: o("tier"),
+                            status: o("status"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "stakeholder" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Stakeholder,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "domain" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Domain,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "subdomain" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Subdomain,
+                            name: o("name"),
+                            sub_kind: o("kind"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "entity" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Entity,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "value_object" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::ValueObject,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "aggregate" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Aggregate,
+                            name: o("name"),
+                            root: o("root"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "domain_event" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::DomainEvent,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "domain_process" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::DomainProcess,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "domain_rule" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::DomainRule,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "actor" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Actor,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "system" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::System,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "container" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Container,
+                            name: o("name"),
+                            sub_kind: o("kind"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "component" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Component,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "invariant" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Invariant,
+                            title: o("title"),
+                            body: o("body"),
+                            category: o("category"),
+                            scope: o("scope"),
+                            status: o("status"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "contains" => {
+                    g.contains.insert((s("from"), s("to")));
+                }
+                "calls" => {
+                    g.calls.insert((s("from"), s("to")));
+                }
+                "uses" => {
+                    g.uses.insert((s("from"), s("to")));
+                }
+                "unresolved_call" => {
+                    g.unresolved_calls.insert((s("from"), s("to"), s("target_type")));
+                }
+                "unresolved_use" => {
+                    g.unresolved_uses.insert((s("from"), s("to")));
+                }
+                "details" => {
+                    g.details.insert((s("from"), s("to")));
+                }
+                "reviews" => {
+                    g.reviews.insert((s("from"), s("to")));
+                }
+                "depends_on" => {
+                    g.depends_on.insert((s("from"), s("to")));
+                }
+                "gates" => {
+                    g.gates.insert((s("from"), s("to")));
+                }
+                "spec_depends" => {
+                    g.spec_depends.insert((s("from"), s("to")));
+                }
+                "anchors" => {
+                    g.anchors.insert((s("from"), s("to")));
+                }
+                "implements" => {
+                    g.implements.insert((s("from"), s("to")));
+                }
+                "satisfies" => {
+                    g.satisfies.insert((s("from"), s("to")));
+                }
+                "builds" => {
+                    g.builds.insert((s("from"), s("to")));
+                }
+                "drives" => {
+                    g.drives.insert((s("from"), s("to")));
+                }
+                "requires" => {
+                    g.requires.insert((s("from"), s("to")));
+                }
+                "realises" => {
+                    g.realises.insert((s("from"), s("to")));
+                }
+                "represents" => {
+                    g.represents.insert((s("from"), s("to")));
+                }
+                "implemented_by" => {
+                    g.implemented_by.insert((s("from"), s("to")));
+                }
+                "guarded_by" => {
+                    g.guarded_by.insert((s("from"), s("to")));
+                }
+                "checks" => {
+                    g.checks.insert((s("from"), s("to")));
+                }
+                other => {
+                    anyhow::bail!("graph.jsonl record with unknown type `{other}`");
+                }
+            }
+        }
+        Ok(g)
+    }
     use crate::graph::{Graph, Location, Node};
     use lbug::{Database, SystemConfig};
 
@@ -1729,7 +3059,7 @@ mod tests {
             g.nodes.insert(fqn.to_string(), node);
         };
         n(
-            "future/foo/spec",
+            "foo/spec",
             Node {
                 title: Some("Widget timer".to_string()),
                 goal: Some("Let widgets time out".to_string()),
@@ -1737,7 +3067,7 @@ mod tests {
             },
         );
         n(
-            "future/foo/spec.R1",
+            "foo/spec.R1",
             Node {
                 id: Some("R1".to_string()),
                 title: Some("Timer".to_string()),
@@ -1746,7 +3076,7 @@ mod tests {
             },
         );
         n(
-            "future/foo/spec.R2",
+            "foo/spec.R2",
             Node {
                 id: Some("R2".to_string()),
                 title: Some("Expiry".to_string()),
@@ -1754,7 +3084,7 @@ mod tests {
             },
         );
         n(
-            "future/foo/spec.phase-1",
+            "foo/spec.phase-1",
             Node {
                 number: Some(1),
                 title: Some("Core".to_string()),
@@ -1762,7 +3092,7 @@ mod tests {
             },
         );
         n(
-            "future/foo/spec.phase-2",
+            "foo/spec.phase-2",
             Node {
                 number: Some(2),
                 title: Some("Polish".to_string()),
@@ -1770,7 +3100,7 @@ mod tests {
             },
         );
         n(
-            "future/foo/spec.decision-d1",
+            "foo/spec.decision-d1",
             Node {
                 id: Some("d1".to_string()),
                 summary: Some("Timeout in wall clock".to_string()),
@@ -1778,28 +3108,28 @@ mod tests {
             },
         );
         n(
-            "future/foo/spec.ng1",
+            "foo/spec.ng1",
             Node {
                 body: Some("No daemon".to_string()),
                 ..sp(NodeKind::NonGoal)
             },
         );
         n(
-            "future/foo/spec.ac1",
+            "foo/spec.ac1",
             Node {
                 body: Some("Timer fires once".to_string()),
                 ..sp(NodeKind::AcceptanceCriterion)
             },
         );
         n(
-            "future/foo/spec.vi1",
+            "foo/spec.vi1",
             Node {
                 body: Some("cargo test green".to_string()),
                 ..sp(NodeKind::VerificationItem)
             },
         );
         n(
-            "future/foo/gateway",
+            "foo/gateway",
             Node {
                 sub_kind: Some("rpc".to_string()),
                 target: Some("github.com/x/gateway".to_string()),
@@ -1807,7 +3137,7 @@ mod tests {
             },
         );
         n(
-            "future/foo/note-1",
+            "foo/note-1",
             Node {
                 body: Some("Background prose".to_string()),
                 sub_kind: Some("background".to_string()),
@@ -1815,14 +3145,14 @@ mod tests {
             },
         );
         n(
-            "future/other/spec",
+            "other/spec",
             Node {
                 title: Some("Other".to_string()),
                 ..sp(NodeKind::Spec)
             },
         );
         n(
-            "future/foo/feedback-1",
+            "foo/feedback-1",
             Node {
                 body: Some("Split R1".to_string()),
                 status: Some("open".to_string()),
@@ -1830,7 +3160,7 @@ mod tests {
             },
         );
         n(
-            "future/foo/plan",
+            "foo/plan",
             Node {
                 title: Some("Plan".to_string()),
                 strategy: Some("Layer-first".to_string()),
@@ -1838,7 +3168,7 @@ mod tests {
             },
         );
         n(
-            "future/foo/plan.phase-1",
+            "foo/plan.phase-1",
             Node {
                 number: Some(1),
                 title: Some("P1".to_string()),
@@ -1847,7 +3177,7 @@ mod tests {
             },
         );
         n(
-            "future/foo/plan.phase-1.task-1",
+            "foo/plan.phase-1.task-1",
             Node {
                 title: Some("Add RootStore".to_string()),
                 sub_kind: Some("source".to_string()),
@@ -1858,47 +3188,47 @@ mod tests {
         );
 
         g.contains.extend([
-            ("future/foo/spec".into(), "future/foo/spec.R1".into()),
-            ("future/foo/spec".into(), "future/foo/spec.phase-1".into()),
-            ("future/foo/spec".into(), "future/foo/spec.phase-2".into()),
+            ("foo/spec".into(), "foo/spec.R1".into()),
+            ("foo/spec".into(), "foo/spec.phase-1".into()),
+            ("foo/spec".into(), "foo/spec.phase-2".into()),
             (
-                "future/foo/spec".into(),
-                "future/foo/spec.decision-d1".into(),
+                "foo/spec".into(),
+                "foo/spec.decision-d1".into(),
             ),
-            ("future/foo/spec".into(), "future/foo/spec.ng1".into()),
-            ("future/foo/spec".into(), "future/foo/spec.ac1".into()),
-            ("future/foo/spec".into(), "future/foo/spec.vi1".into()),
+            ("foo/spec".into(), "foo/spec.ng1".into()),
+            ("foo/spec".into(), "foo/spec.ac1".into()),
+            ("foo/spec".into(), "foo/spec.vi1".into()),
             (
-                "future/foo/spec.phase-1".into(),
-                "future/foo/spec.R1".into(),
+                "foo/spec.phase-1".into(),
+                "foo/spec.R1".into(),
             ),
-            ("future/foo/plan".into(), "future/foo/plan.phase-1".into()),
+            ("foo/plan".into(), "foo/plan.phase-1".into()),
             (
-                "future/foo/plan.phase-1".into(),
-                "future/foo/plan.phase-1.task-1".into(),
+                "foo/plan.phase-1".into(),
+                "foo/plan.phase-1.task-1".into(),
             ),
         ]);
         g.details
-            .insert(("future/foo/note-1".into(), "future/foo/spec".into()));
+            .insert(("foo/note-1".into(), "foo/spec".into()));
         g.reviews
-            .insert(("future/foo/feedback-1".into(), "future/foo/spec.R1".into()));
+            .insert(("foo/feedback-1".into(), "foo/spec.R1".into()));
         g.depends_on
-            .insert(("future/foo/spec.R2".into(), "future/foo/spec.R1".into()));
+            .insert(("foo/spec.R2".into(), "foo/spec.R1".into()));
         g.gates.insert((
-            "future/foo/spec.phase-2".into(),
-            "future/foo/spec.phase-1".into(),
+            "foo/spec.phase-2".into(),
+            "foo/spec.phase-1".into(),
         ));
         g.spec_depends
-            .insert(("future/foo/spec".into(), "future/other/spec".into()));
+            .insert(("foo/spec".into(), "other/spec".into()));
         g.anchors
-            .insert(("future/foo/spec.R1".into(), "future/foo/gateway".into()));
+            .insert(("foo/spec.R1".into(), "foo/gateway".into()));
         g.satisfies.insert((
-            "future/foo/plan.phase-1".into(),
-            "future/foo/spec.R1".into(),
+            "foo/plan.phase-1".into(),
+            "foo/spec.R1".into(),
         ));
         g.builds.insert((
-            "future/foo/plan.phase-1.task-1".into(),
-            "future/foo/gateway".into(),
+            "foo/plan.phase-1.task-1".into(),
+            "foo/gateway".into(),
         ));
 
         let dir = std::env::temp_dir().join(format!("apg-test-spec-{}", std::process::id()));
@@ -1917,7 +3247,7 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(
-            out.contains("future/foo/spec") && out.contains("Widget timer"),
+            out.contains("foo/spec") && out.contains("Widget timer"),
             "spec rows: {out}"
         );
         let out = conn
@@ -1959,7 +3289,7 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(
-            out.contains("future/foo/spec.R1"),
+            out.contains("foo/spec.R1"),
             "contains spec->req: {out}"
         );
         let out = conn
@@ -1967,7 +3297,7 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(
-            out.contains("future/foo/spec.phase-1"),
+            out.contains("foo/spec.phase-1"),
             "contains spec->phase: {out}"
         );
 
@@ -1976,37 +3306,37 @@ mod tests {
             .query("MATCH (:Note)-[:Details]->(s:Spec) RETURN s.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/foo/spec"), "details: {out}");
+        assert!(out.contains("foo/spec"), "details: {out}");
         let out = conn
             .query("MATCH (:Feedback)-[:Reviews]->(r:Requirement) RETURN r.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/foo/spec.R1"), "reviews: {out}");
+        assert!(out.contains("foo/spec.R1"), "reviews: {out}");
         let out = conn
             .query("MATCH (a:Requirement)-[:DependsOn]->(b:Requirement) RETURN b.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/foo/spec.R1"), "depends_on: {out}");
+        assert!(out.contains("foo/spec.R1"), "depends_on: {out}");
         let out = conn
             .query("MATCH (a:Phase)-[:Gates]->(b:Phase) RETURN b.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/foo/spec.phase-1"), "gates: {out}");
+        assert!(out.contains("foo/spec.phase-1"), "gates: {out}");
         let out = conn
             .query("MATCH (a:Requirement)-[:Anchors]->(f:Future) RETURN f.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/foo/gateway"), "anchors: {out}");
+        assert!(out.contains("foo/gateway"), "anchors: {out}");
         let out = conn
             .query("MATCH (:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/foo/spec.R1"), "satisfies: {out}");
+        assert!(out.contains("foo/spec.R1"), "satisfies: {out}");
         let out = conn
             .query("MATCH (:Task)-[:Builds]->(f:Future) RETURN f.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("future/foo/gateway"), "builds: {out}");
+        assert!(out.contains("foo/gateway"), "builds: {out}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2100,6 +3430,275 @@ mod tests {
     }
 
     #[test]
+    fn graph_jsonl_roundtrips_tier_nodes_and_spine() {
+        // REVIEW.md item: no export-then-reingest test covered the new tier
+        // nodes and spine edges — PHASE_01's done gate ("JSONL → DB → JSONL
+        // round-trip for each") had the write leg (`write_graph_jsonl`) and the
+        // DB-query leg (`four_tier_spine_resolves_via_query`) tested separately,
+        // but not the closed loop *through graph.jsonl*. Now the export is
+        // genuinely round-trippable: write_graph_jsonl → read_graph_jsonl →
+        // fresh DB, and every tier node + spine edge must survive. A real
+        // `Scan` node round-trips too (scan_meta control record on line 1).
+        let dir = std::env::temp_dir().join(format!("apg-test-spine-roundtrip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut g = fixture_graph_with_scan();
+        let sp = |kind: NodeKind| Node {
+            kind,
+            code_type: String::new(),
+            ..Node::default()
+        };
+        let mut n = |fqn: &str, node: Node| {
+            g.nodes.insert(fqn.to_string(), node);
+        };
+        // Tier 1 + a requirement to anchor the spine.
+        n(
+            "foo/spec",
+            Node {
+                title: Some("Foo".to_string()),
+                ..sp(NodeKind::Spec)
+            },
+        );
+        n(
+            "foo/spec.R1",
+            Node {
+                id: Some("R1".to_string()),
+                title: Some("Users authenticate".to_string()),
+                ..sp(NodeKind::Requirement)
+            },
+        );
+        n(
+            "foo/stakeholder.Ops",
+            Node {
+                name: Some("Ops".to_string()),
+                ..sp(NodeKind::Stakeholder)
+            },
+        );
+        // Tier 2 (DDD).
+        n(
+            "foo/domain.Auth",
+            Node {
+                name: Some("Auth".to_string()),
+                ..sp(NodeKind::Domain)
+            },
+        );
+        n(
+            "foo/subdomain.Access",
+            Node {
+                name: Some("Access".to_string()),
+                sub_kind: Some("core".to_string()),
+                ..sp(NodeKind::Subdomain)
+            },
+        );
+        n(
+            "foo/aggregate.Session",
+            Node {
+                name: Some("Session".to_string()),
+                root: Some("Session".to_string()),
+                ..sp(NodeKind::Aggregate)
+            },
+        );
+        n(
+            "foo/entity.User",
+            Node {
+                name: Some("User".to_string()),
+                ..sp(NodeKind::Entity)
+            },
+        );
+        n(
+            "foo/value-object.Email",
+            Node {
+                name: Some("Email".to_string()),
+                ..sp(NodeKind::ValueObject)
+            },
+        );
+        n(
+            "foo/domain-rule.NoNegativeBalance",
+            Node {
+                name: Some("NoNegativeBalance".to_string()),
+                ..sp(NodeKind::DomainRule)
+            },
+        );
+        n(
+            "foo/actor.Customer",
+            Node {
+                name: Some("Customer".to_string()),
+                ..sp(NodeKind::Actor)
+            },
+        );
+        // Tier 3 (C4).
+        n(
+            "foo/system.Platform",
+            Node {
+                name: Some("Platform".to_string()),
+                ..sp(NodeKind::System)
+            },
+        );
+        n(
+            "foo/container.Api",
+            Node {
+                name: Some("Api".to_string()),
+                sub_kind: Some("app".to_string()),
+                ..sp(NodeKind::Container)
+            },
+        );
+        n(
+            "foo/component.Gateway",
+            Node {
+                name: Some("Gateway".to_string()),
+                ..sp(NodeKind::Component)
+            },
+        );
+        // Tier 4: the code the component is implemented by.
+        n(
+            "mod.Gateway",
+            Node {
+                kind: NodeKind::Struct,
+                code_type: "src".to_string(),
+                ..Node::default()
+            },
+        );
+        // The DDD/C4 hierarchy.
+        g.contains.extend([
+            ("foo/spec".into(), "foo/spec.R1".into()),
+            ("foo/spec".into(), "foo/stakeholder.Ops".into()),
+            ("foo/spec".into(), "foo/domain.Auth".into()),
+            ("foo/spec".into(), "foo/system.Platform".into()),
+            (
+                "foo/domain.Auth".into(),
+                "foo/subdomain.Access".into(),
+            ),
+            (
+                "foo/domain.Auth".into(),
+                "foo/domain-rule.NoNegativeBalance".into(),
+            ),
+            (
+                "foo/domain.Auth".into(),
+                "foo/actor.Customer".into(),
+            ),
+            (
+                "foo/subdomain.Access".into(),
+                "foo/aggregate.Session".into(),
+            ),
+            (
+                "foo/aggregate.Session".into(),
+                "foo/entity.User".into(),
+            ),
+            (
+                "foo/aggregate.Session".into(),
+                "foo/value-object.Email".into(),
+            ),
+            (
+                "foo/system.Platform".into(),
+                "foo/container.Api".into(),
+            ),
+            (
+                "foo/container.Api".into(),
+                "foo/component.Gateway".into(),
+            ),
+        ]);
+        // The full five-edge spine.
+        g.drives.insert((
+            "foo/spec.R1".to_string(),
+            "foo/domain.Auth".to_string(),
+        ));
+        g.requires.insert((
+            "foo/spec.R1".to_string(),
+            "foo/domain.Auth".to_string(),
+        ));
+        g.realises.insert((
+            "foo/domain.Auth".to_string(),
+            "foo/system.Platform".to_string(),
+        ));
+        g.represents.insert((
+            "foo/domain.Auth".to_string(),
+            "foo/system.Platform".to_string(),
+        ));
+        g.implemented_by.insert((
+            "foo/component.Gateway".to_string(),
+            "mod.Gateway".to_string(),
+        ));
+
+        let out_path = dir.join("graph.jsonl");
+        write_graph_jsonl(&g, &out_path).unwrap();
+
+        // Re-ingest the export: read_graph_jsonl rebuilds the graph (scan_meta
+        // line 1 → the Scan node, tier nodes, Contains + every spine edge).
+        let back = read_graph_jsonl(&out_path).unwrap();
+
+        // Every node survives with its kind (a located code node keeps its span;
+        // a location-less code node reads back without one).
+        for (fqn, node) in &g.nodes {
+            let seen = back.nodes.get(fqn).unwrap_or_else(|| panic!("{fqn} lost in round-trip"));
+            assert_eq!(seen.kind, node.kind, "{fqn} kind");
+        }
+        assert_eq!(back.nodes.len(), g.nodes.len(), "node count");
+        // Edge sets are identical — nothing projected away.
+        assert_eq!(back.contains, g.contains, "contains edges");
+        for (name, a, b) in [
+            ("drives", &back.drives, &g.drives),
+            ("requires", &back.requires, &g.requires),
+            ("realises", &back.realises, &g.realises),
+            ("represents", &back.represents, &g.represents),
+            ("implemented_by", &back.implemented_by, &g.implemented_by),
+            ("calls", &back.calls, &g.calls),
+            ("uses", &back.uses, &g.uses),
+            ("unresolved_uses", &back.unresolved_uses, &g.unresolved_uses),
+        ] {
+            assert_eq!(a, b, "{name} edges");
+        }
+        assert_eq!(back.unresolved_calls, g.unresolved_calls, "unresolved_calls edges");
+
+        // The closed loop lands in a queryable DB: load the re-ingested graph
+        // into a fresh DB and resolve every tier label + the spine end to end.
+        let ldir = dir.join("load");
+        std::fs::create_dir_all(&ldir).unwrap();
+        build_load_files(&back, &ldir).unwrap();
+        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        create_schema(&conn).unwrap();
+        copy_from(&conn, &ldir).unwrap();
+
+        for (label, fqn) in [
+            ("Stakeholder", "foo/stakeholder.Ops"),
+            ("Domain", "foo/domain.Auth"),
+            ("Subdomain", "foo/subdomain.Access"),
+            ("Aggregate", "foo/aggregate.Session"),
+            ("Entity", "foo/entity.User"),
+            ("ValueObject", "foo/value-object.Email"),
+            ("DomainRule", "foo/domain-rule.NoNegativeBalance"),
+            ("Actor", "foo/actor.Customer"),
+            ("System", "foo/system.Platform"),
+            ("Container", "foo/container.Api"),
+            ("Component", "foo/component.Gateway"),
+        ] {
+            let out = conn
+                .query(&format!("MATCH (n:{label} {{fqn: '{fqn}'}}) RETURN n.name"))
+                .unwrap()
+                .to_string();
+            assert!(!out.contains("(empty)"), "{label} {fqn} missing after round-trip: {out}");
+        }
+        let out = conn
+            .query(
+                "MATCH (r:Requirement)-[:Drives]->(d:Domain)-[:Realises]->(s:System)-[:Contains]->(:Container)-[:Contains]->(c:Component)-[:ImplementedBy]->(impl) RETURN impl.fqn",
+            )
+            .unwrap()
+            .to_string();
+        assert!(out.contains("mod.Gateway"), "spine to code after round-trip: {out}");
+        let out = conn
+            .query("MATCH (s:Scan) RETURN s.git_sha, s.git_clean")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("abc123") && out.contains("true"),
+            "scan survived round-trip: {out}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn scan_node_loads_into_db() {
         let dir = std::env::temp_dir().join(format!("apg-test-scandb-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2143,5 +3742,278 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    #[test]
+    fn four_tier_spine_resolves_via_query() {
+        // PHASE_01 done gate: a sample 4-tier spine
+        // (Requirement → Domain → Solution → Implementation) survives the load
+        // path and resolves via apg_query. Requirement Drives/Requires a Domain;
+        // the Domain Realises/Represents a System; the System is ImplementedBy
+        // code. The tier hierarchy (Spec ⊃ Stakeholder/Domain/System,
+        // Domain ⊃ Subdomain/Events/…, System ⊃ Container ⊃ Component)
+        // loads through the extended Contains table.
+        let mut g = Graph::default();
+        let sp = |kind: NodeKind| Node {
+            kind,
+            code_type: String::new(),
+            ..Node::default()
+        };
+        let mut n = |fqn: &str, node: Node| {
+            g.nodes.insert(fqn.to_string(), node);
+        };
+        // Tier 1.
+        n(
+            "foo/spec",
+            Node {
+                title: Some("Foo".to_string()),
+                ..sp(NodeKind::Spec)
+            },
+        );
+        n(
+            "foo/spec.R1",
+            Node {
+                id: Some("R1".to_string()),
+                title: Some("Users authenticate".to_string()),
+                ..sp(NodeKind::Requirement)
+            },
+        );
+        n(
+            "foo/stakeholder.Ops",
+            Node {
+                name: Some("Ops".to_string()),
+                ..sp(NodeKind::Stakeholder)
+            },
+        );
+        // Tier 2 (DDD).
+        n(
+            "foo/domain.Auth",
+            Node {
+                name: Some("Auth".to_string()),
+                ..sp(NodeKind::Domain)
+            },
+        );
+        n(
+            "foo/subdomain.Access",
+            Node {
+                name: Some("Access".to_string()),
+                sub_kind: Some("core".to_string()),
+                ..sp(NodeKind::Subdomain)
+            },
+        );
+        n(
+            "foo/aggregate.Session",
+            Node {
+                name: Some("Session".to_string()),
+                root: Some("Session".to_string()),
+                ..sp(NodeKind::Aggregate)
+            },
+        );
+        n(
+            "foo/entity.User",
+            Node {
+                name: Some("User".to_string()),
+                ..sp(NodeKind::Entity)
+            },
+        );
+        n(
+            "foo/value-object.Email",
+            Node {
+                name: Some("Email".to_string()),
+                ..sp(NodeKind::ValueObject)
+            },
+        );
+        n(
+            "foo/domain-event.UserLoggedIn",
+            Node {
+                name: Some("UserLoggedIn".to_string()),
+                ..sp(NodeKind::DomainEvent)
+            },
+        );
+        n(
+            "foo/domain-process.Checkout",
+            Node {
+                name: Some("Checkout".to_string()),
+                ..sp(NodeKind::DomainProcess)
+            },
+        );
+        n(
+            "foo/domain-rule.NoNegativeBalance",
+            Node {
+                name: Some("NoNegativeBalance".to_string()),
+                ..sp(NodeKind::DomainRule)
+            },
+        );
+        n(
+            "foo/actor.Customer",
+            Node {
+                name: Some("Customer".to_string()),
+                ..sp(NodeKind::Actor)
+            },
+        );
+        // Tier 3 (C4).
+        n(
+            "foo/system.Platform",
+            Node {
+                name: Some("Platform".to_string()),
+                ..sp(NodeKind::System)
+            },
+        );
+        n(
+            "foo/container.Api",
+            Node {
+                name: Some("Api".to_string()),
+                sub_kind: Some("app".to_string()),
+                ..sp(NodeKind::Container)
+            },
+        );
+        n(
+            "foo/component.Gateway",
+            Node {
+                name: Some("Gateway".to_string()),
+                ..sp(NodeKind::Component)
+            },
+        );
+        // Tier 4 (code, from a fixture scan).
+        n("mod", sp(NodeKind::Module));
+        n("mod.Gateway", sp(NodeKind::Struct));
+
+        // Hierarchy.
+        g.contains.extend([
+            ("foo/spec".into(), "foo/spec.R1".into()),
+            (
+                "foo/spec".into(),
+                "foo/stakeholder.Ops".into(),
+            ),
+            ("foo/spec".into(), "foo/domain.Auth".into()),
+            ("foo/spec".into(), "foo/system.Platform".into()),
+            (
+                "foo/domain.Auth".into(),
+                "foo/subdomain.Access".into(),
+            ),
+            (
+                "foo/domain.Auth".into(),
+                "foo/domain-event.UserLoggedIn".into(),
+            ),
+            (
+                "foo/domain.Auth".into(),
+                "foo/domain-process.Checkout".into(),
+            ),
+            (
+                "foo/domain.Auth".into(),
+                "foo/domain-rule.NoNegativeBalance".into(),
+            ),
+            (
+                "foo/domain.Auth".into(),
+                "foo/actor.Customer".into(),
+            ),
+            (
+                "foo/subdomain.Access".into(),
+                "foo/aggregate.Session".into(),
+            ),
+            (
+                "foo/aggregate.Session".into(),
+                "foo/entity.User".into(),
+            ),
+            (
+                "foo/aggregate.Session".into(),
+                "foo/value-object.Email".into(),
+            ),
+            (
+                "foo/system.Platform".into(),
+                "foo/container.Api".into(),
+            ),
+            (
+                "foo/container.Api".into(),
+                "foo/component.Gateway".into(),
+            ),
+        ]);
+        // The spine.
+        g.drives.insert((
+            "foo/spec.R1".to_string(),
+            "foo/domain.Auth".to_string(),
+        ));
+        g.realises.insert((
+            "foo/domain.Auth".to_string(),
+            "foo/system.Platform".to_string(),
+        ));
+        g.implemented_by.insert((
+            "foo/component.Gateway".to_string(),
+            "mod.Gateway".to_string(),
+        ));
+
+        let dir = std::env::temp_dir().join(format!("apg-test-spine-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        build_load_files(&g, &dir).unwrap();
+
+        let db = Database::in_memory(SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        create_schema(&conn).unwrap();
+        copy_from(&conn, &dir).unwrap();
+
+        // Every tier node is queryable by its label.
+        for (label, fqn) in [
+            ("Stakeholder", "foo/stakeholder.Ops"),
+            ("Domain", "foo/domain.Auth"),
+            ("Subdomain", "foo/subdomain.Access"),
+            ("Aggregate", "foo/aggregate.Session"),
+            ("Entity", "foo/entity.User"),
+            ("ValueObject", "foo/value-object.Email"),
+            ("DomainEvent", "foo/domain-event.UserLoggedIn"),
+            ("DomainProcess", "foo/domain-process.Checkout"),
+            ("DomainRule", "foo/domain-rule.NoNegativeBalance"),
+            ("Actor", "foo/actor.Customer"),
+            ("System", "foo/system.Platform"),
+            ("Container", "foo/container.Api"),
+            ("Component", "foo/component.Gateway"),
+        ] {
+            let out = conn
+                .query(&format!(
+                    "MATCH (n:{label} {{fqn: '{fqn}'}}) RETURN n.name"
+                ))
+                .unwrap()
+                .to_string();
+            assert!(!out.contains("(empty)"), "{label} {fqn} missing: {out}");
+        }
+        // Kind-specific columns.
+        let out = conn
+            .query("MATCH (s:Subdomain {fqn: 'foo/subdomain.Access'}) RETURN s.kind")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("core"), "subdomain kind: {out}");
+        let out = conn
+            .query("MATCH (a:Aggregate {fqn: 'foo/aggregate.Session'}) RETURN a.root")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("Session"), "aggregate root: {out}");
+        let out = conn
+            .query("MATCH (c:Container {fqn: 'foo/container.Api'}) RETURN c.kind")
+            .unwrap()
+            .to_string();
+        assert!(out.contains("app"), "container kind: {out}");
+
+        // The spine resolves end to end: requirement → domain → system → code.
+        let out = conn
+            .query(
+                "MATCH (r:Requirement)-[:Drives]->(d:Domain)-[:Realises]->(s:System)-[:Contains]->(:Container)-[:Contains]->(c:Component)-[:ImplementedBy]->(impl) RETURN impl.fqn",
+            )
+            .unwrap()
+            .to_string();
+        assert!(out.contains("mod.Gateway"), "spine to code: {out}");
+
+        // The DDD hierarchy loads through the extended Contains table.
+        let out = conn
+            .query(
+                "MATCH (d:Domain)-[:Contains]->(sd:Subdomain)-[:Contains]->(ag:Aggregate)-[:Contains]->(e:Entity) RETURN e.fqn",
+            )
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("foo/entity.User"),
+            "domain hierarchy: {out}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

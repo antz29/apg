@@ -10,7 +10,7 @@ export default tool({
   async execute(args, context) {
     const project = args.project
     if (!project) return "Error: project is required"
-    const pfx = `future/${project}/plan.phase-`
+    const pfx = `${project}/plan.phase-`
 
     const phases = csvToRows(
       await runCypher(context, `MATCH (pp:PlanPhase) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, pp.number, pp.title ORDER BY pp.number`),
@@ -18,7 +18,7 @@ export default tool({
     if (phases.length <= 1) return `No plan for \`${project}\`.`
 
     const reqs = csvToRows(
-      await runCypher(context, `MATCH (r:Requirement) WHERE r.fqn STARTS WITH ${lit(`future/${project}/spec.`)} RETURN r.fqn, r.id`),
+      await runCypher(context, `MATCH (r:Requirement) WHERE r.fqn STARTS WITH ${lit(`${project}/spec.`)} RETURN r.fqn, r.id`),
     )
     const sat = new Set(
       csvToRows(await runCypher(context, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn")).map((r) => r[0]),

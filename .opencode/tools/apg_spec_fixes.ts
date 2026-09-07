@@ -12,7 +12,7 @@ export default tool({
   },
   async execute(args, context) {
     const where = args.project
-      ? ` WHERE t.fqn STARTS WITH ${lit(`future/${args.project}/`)}`
+      ? ` WHERE t.fqn STARTS WITH ${lit(`${args.project}/`)}`
       : ""
     const rows = csvToRows(
       await runCypher(

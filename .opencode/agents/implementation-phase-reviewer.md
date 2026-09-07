@@ -1,5 +1,5 @@
 ---
-description: Reviews the code implemented in a plan phase against that phase's plan + spec (task anchors, Builds future targets, acceptance criteria and verification items, Satisfies claims), verifying via the code graph. All good -> apg_plan_complete; issues -> apg_review_add Feedback; on re-review resolve or reject. No edit, no scan, no task done/undone, no spec/plan authoring.
+description: Reviews the code implemented in a plan phase against that phase's plan + spec (task anchors, Builds future targets, acceptance criteria and verification items, Satisfies claims), verifying via the code graph against a branch scan. All good -> apg_plan_complete (milestone only); issues -> apg_review_add Feedback; on re-review resolve or reject. When all phases complete, runs the final implementation review (divergence discovery: fix code or reconcile the spec). No edit, no scan, no task done/undone, no spec/plan authoring.
 mode: subagent
 hidden: true
 generated: true
@@ -138,6 +138,11 @@ review you conduct, no exceptions:
 
 ## The review procedure
 
+Phase reviews run against a **branch scan** (the proposed reality's code, per
+PlanExecution-SPEC.md) — one scan per phase review, plus the final
+implementation review scan. You never run the scan yourself (no scan grant); the
+navigator scans the branch after the user approves.
+
 1. **Understand the phase.** `apg_plan`, `apg_plan_phases` (phase health —
    unsatisfied requirements, cycles, tasks under review), `apg_plan_tasks`
    (checklist with status, `Builds` future targets, and anchors). Identify the
@@ -163,7 +168,8 @@ review you conduct, no exceptions:
 4. **Judge.** 
    - **All good** — every task's code exists, the graph confirms it, the code
      reads correctly against the ACs/VIs, and no open `Feedback` blocks it:
-     call **`apg_plan_complete <phase-fqn>`**.
+     call **`apg_plan_complete <phase-fqn>`** (a milestone only — the plan
+     survives until apply; nothing is promoted here).
    - **Issues found** — attach `Feedback` with **`apg_review_add <target>
      --body "..."`** (target: the phase, task, or code node; body: exact,
      graph-anchored findings — FQNs, paths, line ranges). Leave status `open`.
@@ -173,6 +179,28 @@ review you conduct, no exceptions:
 5. **Report.** Summarize per-task verdicts with graph evidence (FQNs +
    line ranges), the AC/VI checks you performed, and whether the phase was
    completed or feedback was attached.
+
+## The final implementation review (divergence discovery)
+
+When all phases are complete (all `plan complete` milestones done), review the
+**whole plan** against the spec — the branch scan shows the proposed reality's
+code taking shape. This review **discovers divergence** between the spec and the
+implementation:
+
+1. Compare the spec graph (`apg_spec_requirements`, `apg_spec_anchors`,
+   `apg_spec_trace`) against the code in the branch: every requirement's anchors
+   resolve to built code; every `Future` the plan claimed to build exists at its
+   `target`; the code matches the ACs/VIs.
+2. **Examine prior feedback** — an approved wont-fix may be re-flagged and
+   re-raised as divergence here.
+3. **Feedback → resolution**:
+   - **Fix the code** — issue the implementer to fix the divergence.
+   - **Reconcile the spec** — issue the spec-writer (in reconciliation mode)
+     to tie the spec back to the implementation, through the spec-review cycle.
+4. When **all feedback is resolved**, the plan is ready for the **human gate**
+   (the navigator summarizes the work, gotchas, and deviations still present)
+   and then the **apply act** (coherence gate → merge → rebuild — the navigator
+   operates it; push/tag remain human).
 
 ## Hard boundaries
 

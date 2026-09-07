@@ -7,7 +7,7 @@ export default tool({
   args: {
     feedback: tool.schema
       .string()
-      .describe("Feedback FQN, e.g. future/<project>/feedback-1 (required)."),
+      .describe("Feedback FQN, e.g. <project>/feedback-1 (required)."),
   },
   async execute(args, context) {
     const { feedback } = args

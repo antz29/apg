@@ -63,14 +63,19 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
 - `apg query "<cypher>"` — read-only Cypher over `apg/.trans/db.lbug` (found by walking
   up from cwd), CSV output with header row.
 - `apg spec <sub> …` — author + lifecycle a graph-native spec: `init`, `add`
-  (requirement/future/phase/decision/non-goal/acceptance-criterion/verification/note),
-  `anchor`, `link`, `rm`, `render`, `promote`, `archive` (see "Graph-native
+  (requirement, future, phase, decision, non-goal, AC, VI, note, stakeholder,
+  domain, subdomain, entity, value-object, aggregate, domain-event,
+  domain-process, domain-rule, actor, system, container, component),
+  `anchor`, `link`, `spine` (Drives/Requires/Realises/Represents/ImplementedBy),
+  `rm`, `render`, `promote`, `unresolved` (read-only orphan/coverage lint; see "Graph-native
   specs" below).
 - `apg plan <sub> …` — the phased execution plan (transient, serialized to
-  `apg/.trans/plans/<project>.jsonl`): `init`, `add` (phase/task), `link`,
-  `done`/`undone`, `complete`, `render`, `retag`.
+  `apg/.trans/plans/<project>.jsonl`, branch-local): `init`, `add` (phase/task),
+  `link`, `done`/`undone` (assertion-only), `note` (task notes), `complete`
+  (milestone-only), `render`, `apply` (coherence gate → merge + rebuild handoff).
 - `apg review <sub> …` — the closed writer↔reviewer feedback cycle: `add`,
   `action`, `resolve`, `reject`, `list`.
+- `apg invariant add [<project>] <name> --title … --body … --category … --scope … [--guard <fqn>]*` — materialize a graph-wide invariant (universal or project-scoped), optionally guarding artifacts; `apg invariant rm [<project>] <name>` retires one (status flip to `retired`, node + edges preserved for traceability); `apg invariants [--scope …] [--project …]` lists them. A `domain-rule` also materializes a project-scoped `Invariant` (`category=product`).
 - `apg --version`, `apg --help`.
 
 `apg init` also installs the **apg opencode tool suite** into the user-level
@@ -81,8 +86,8 @@ abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
 `apg_unresolved`, `apg_hunk` — and the spec/plan/review suite: `apg_spec`
 (+ requirements/phases/deps/anchors/trace/unresolved/fixes/init/add/anchor/link/rm/
-render/promote/archive), `apg_plan` (+ phases/tasks/complete/render/init/add/
-link/done/undone/retag), `apg_review` (+ add/action/resolve/reject). Shared plumbing
+render/promote), `apg_plan` (+ phases/tasks/complete/render/init/add/
+link/done/undone/note/apply), `apg_review` (+ add/action/resolve/reject). Shared plumbing
 lives in `~/.opencode/lib/apg.ts`
 (root discovery, `apg query`/`apg spec`/`apg plan`/`apg review` subprocess,
 Cypher literal escaping). All suite
@@ -211,13 +216,14 @@ Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are ro
 
 A repo can carry a **graph-native spec** (SPEC.md in this repo) authored via
 `apg spec`/`apg plan`/`apg review`, living in the same `apg/.trans/db.lbug`:
-spec/plan nodes live under the `future/` FQN root (`future/<project>/spec`,
-`future/<project>/plan`, `future/<project>/<future-code>`). Durable
+spec/plan nodes live under the project-scoped FQNs (`<project>/spec`,
+`<project>/plan`, `<project>/<future-code>`). Durable
 serialization is committed `apg/specs/<project>.jsonl` (specs + spec notes +
 spec-review feedback), `apg/notes/<module>.jsonl` (notes on code nodes, one
 file per owning module, `_root.jsonl` fallback); the plans themselves are
-**transient** (`apg/.trans/plans/<project>.jsonl`, retired on final-phase
-complete). `apg scan` auto-discovers all three after code and re-ingests them;
+**transient** (`apg/.trans/plans/<project>.jsonl`, branch-local; it survives
+until the apply act — `plan done`/`plan complete` never retire it). `apg scan`
+auto-discovers all three after code and re-ingests them;
 `apg spec` mutations are write-through (JSONL first, then re-merge into the
 live DB).
 
@@ -225,7 +231,7 @@ Additional node labels: `Spec`, `Requirement`, `Phase`, `Decision`, `Future`,
 `NonGoal`, `AcceptanceCriterion`, `VerificationItem`, `Note`, `Feedback`,
 `Plan`, `PlanPhase`, `Task`. Additional edges: `Details` (Note→any),
 `Reviews` (Feedback→any), `DependsOn` (Requirement→Requirement — same-project,
-or cross-project `future/<other-proj>/spec.<id>` via `--depends-on
+or cross-project `<other-proj>/spec.<id>` via `--depends-on
 <other-proj>/<id>`), `Gates`
 (Phase→Phase, PlanPhase→PlanPhase), `SpecDependsOn` (Spec→Spec — whole-spec
 antecedents, authored with `apg spec link <project> spec --depends-on
@@ -235,6 +241,29 @@ antecedents, authored with `apg spec link <project> spec --depends-on
 cross-spec cycles are detected across **all** spec projects' edges and rejected
 at write time.
 
+### The 4-tier taxonomy + spine (GraphModel-SPEC.md)
+
+The spec is a **4-tier active-knowledge graph**: tier 1 Requirements
+(`Requirement`, `Stakeholder`), tier 2 Domain (DDD: `Domain`, `Subdomain`,
+`Entity`, `ValueObject`, `Aggregate`, `DomainEvent`, `DomainProcess`,
+`DomainRule`, `Actor`), tier 3 Solution (C4: `System`, `Container`,
+`Component`), tier 4 Implementation (scanner code nodes). The **spine** links
+tiers end to end: `Requirement --Drives/Requires--> Domain
+--Realises/Represents--> Solution --ImplementedBy--> code` (authored with
+`apg spec add` for the nodes and `apg spec spine <project> <from>
+--drives/--requires/--realises/--represents/--implemented-by <to>` for the
+edges). Any requirement traces down to the code that implements it; any code
+traces up to the why. FQNs are project-scoped and stable; a project is a git
+branch and a node's present-ness is branch membership (no `future/` namespace).
+
+### Invariants (Invariants-SPEC.md)
+
+`Invariant` nodes (fqn `invariant/<name>` universal, `<project>/invariant/<name>`
+project-scoped; `title`/`body`/`category`/`scope`/`status`) guard artifacts via
+`GuardedBy` (artifact→Invariant); reviewers cite them via `Checks`
+(Feedback→Invariant). A `domain-rule` also materializes a project-scoped
+`Invariant` (`category=product`).
+
 - `Future {fqn, kind, target}` is a placeholder for not-yet-built code
   (`kind` ∈ function/struct/service/rpc/endpoint/other, `target` = intended
   real FQN); a pending anchor is `Anchors(req→Future)`.
@@ -242,21 +271,30 @@ at write time.
   `kind` ∈ source/test/gate/docs is the **owning role** (orthogonal,
   `source` default); `tier` ∈ unit/int/e2e is the verification depth,
   required iff `kind = test`, rejected otherwise. Every task is
-  implementer-workable — the human's decision point is plan end: completing
-  the final phase retires the plan and prints an explicit handoff line.
+  implementer-workable — the human's decision point is plan end: the apply act
+  (coherence gate → merge → rebuild) is the single delivery moment.
 - Requirement state is **derived**: `delivered` (an `Implements` edge exists)
   vs `planned`; a spec is `implemented` when every requirement is delivered.
 - `Feedback {fqn, body, status, disposition}` is a review item;
   `status` ∈ open/actioned/resolved. An artifact is done only when every
-  `Feedback` on it is `resolved` — `apg spec archive` and
-  `apg plan complete` refuse otherwise.
+  `Feedback` on it is `resolved` — `apg plan complete` and the apply gate
+  refuse otherwise.
 - Query patterns: pending anchors `MATCH (r:Requirement)-[:Anchors]->(f:Future) RETURN r.fqn, f.fqn`; what's left in a spec `MATCH (p:Phase)-[:Contains]->(r:Requirement) WHERE NOT (r)<-[:Implements]-(:Struct)` — or use the suite tools (`apg_spec`, `apg_spec_requirements`, `apg_spec_phases`, `apg_spec_anchors`, `apg_spec_trace`, `apg_spec_unresolved`, `apg_spec_fixes`, `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
 - The six distributed agents (installed by `apg init`): `codebase-navigator`
-  (delegates spec/plan authoring to the writers via `task`), `spec-writer` /
-  `plan-writer` (author through the `apg_spec_*`/`apg_plan_*` tools, **no file
-  writes**), `spec-review` / `plan-review` (attach/resolve/reject feedback,
-  **no authoring tools**), and `agent-builder` (`mode: primary`, the only write
-  grant `.opencode/agents/**`, scaffolds a repo's code-writer agents).
+  (orchestrates the flow — branch lifecycle at project start, per-branch DB
+  build, feedback routing, human-gate summary, and the apply act (coherence
+  gate → merge → rebuild) on approval), `spec-writer` / `plan-writer` (author
+  through the `apg_spec_*`/`apg_plan_*` tools, **no file writes**; the
+  spec-writer authors the 4-tier taxonomy + spine + reconciliation mode, the
+  plan-writer the tier-4 delta with structural/holistic gates), `spec-review` /
+  `plan-review` (attach/resolve/reject feedback, **no authoring tools**;
+  approval-only wont-fix — a `--wont-fix` action is a proposal only the
+  reviewer makes terminal), and `agent-builder` (`mode: primary`, the only
+  write grant `.opencode/agents/**`, scaffolds a repo's code-writer agents).
+  Repo-defined implementer / implementation-phase-reviewer agents are generated
+  by `agent-builder` (assertion-only `plan done`, task notes, branch commits;
+  phase review on branch scans + the final implementation review discovering
+  divergence — fix code or reconcile the spec).
 
 ### `Struct.code_type` / `Function.code_type`
 

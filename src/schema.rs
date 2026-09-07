@@ -114,7 +114,7 @@ pub enum Record {
     },
 
     // --- Spec/plan graph records (SPEC R1/R20; canonical FQNs, no ids) ---
-    /// `{"type":"spec","fqn":"future/<project>/spec","title":"...","goal":"..."}`
+    /// `{"type":"spec","fqn":"<project>/spec","title":"...","goal":"..."}`
     Spec {
         fqn: String,
         title: String,
@@ -122,7 +122,7 @@ pub enum Record {
         goal: String,
     },
 
-    /// `{"type":"requirement","fqn":"future/<project>/spec.<id>","id":"R1","title":"...","body":"...","feature":"..."}`
+    /// `{"type":"requirement","fqn":"<project>/spec.<id>","id":"R1","title":"...","body":"...","feature":"..."}`
     Requirement {
         fqn: String,
         id: String,
@@ -133,21 +133,21 @@ pub enum Record {
         feature: String,
     },
 
-    /// `{"type":"phase","fqn":"future/<project>/spec.phase-<n>","number":1,"title":"..."}`
+    /// `{"type":"phase","fqn":"<project>/spec.phase-<n>","number":1,"title":"..."}`
     Phase {
         fqn: String,
         number: u32,
         title: String,
     },
 
-    /// `{"type":"decision","fqn":"future/<project>/spec.decision-<id>","id":"...","summary":"..."}`
+    /// `{"type":"decision","fqn":"<project>/spec.decision-<id>","id":"...","summary":"..."}`
     Decision {
         fqn: String,
         id: String,
         summary: String,
     },
 
-    /// `{"type":"future","fqn":"future/<project>/<name>","kind":"function","target":"..."}`
+    /// `{"type":"future","fqn":"<project>/<name>","kind":"function","target":"..."}`
     Future {
         fqn: String,
         kind: String,
@@ -168,7 +168,150 @@ pub enum Record {
         body: String,
     },
 
-    /// `{"type":"note","fqn":"future/<project>/note-<n>","body":"...","kind":"background"}`
+    // --- Tier-1/2/3 graph-native spec nodes (GraphModel-SPEC.md; PHASE_01) ---
+    // The 4-tier taxonomy: tier 1 Requirements (Stakeholder), tier 2 Domain
+    // (DDD), tier 3 Solution (C4), tier 4 Implementation (scanner code nodes).
+    // These are authored via the spec tools, never scanned. FQNs are
+    // project-scoped (`<project>/<slug>.<name>` — PHASE_04 dropped the
+    // prefix). `name` is the concept's short name; `body` its description.
+
+    /// `{"type":"stakeholder","fqn":"<project>/stakeholder.<name>","name":"...","body":"..."}`
+    Stakeholder {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"domain","fqn":"<project>/domain.<name>","name":"...","body":"..."}`
+    /// The domain area (a bounded context); `bounded-context` is an authoring
+    /// alias that produces a Domain node.
+    Domain {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"subdomain","fqn":"<project>/subdomain.<name>","name":"...","kind":"core","body":"..."}`
+    /// `kind` ∈ core|supporting|generic (the DDD subdomain partitioning).
+    Subdomain {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        kind: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"entity","fqn":"<project>/entity.<name>","name":"...","body":"..."}`
+    Entity {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"value_object","fqn":"<project>/value-object.<name>","name":"...","body":"..."}`
+    ValueObject {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"aggregate","fqn":"<project>/aggregate.<name>","name":"...","root":"Order","body":"..."}`
+    /// `root` names the aggregate root entity.
+    Aggregate {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        root: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"domain_event","fqn":"<project>/domain-event.<name>","name":"...","body":"..."}`
+    DomainEvent {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"domain_process","fqn":"<project>/domain-process.<name>","name":"...","body":"..."}`
+    DomainProcess {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"domain_rule","fqn":"<project>/domain-rule.<name>","name":"...","body":"..."}`
+    /// The invariant mechanism at the domain tier (Invariants-SPEC.md).
+    DomainRule {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"actor","fqn":"<project>/actor.<name>","name":"...","body":"..."}`
+    Actor {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"system","fqn":"<project>/system.<name>","name":"...","body":"..."}`
+    /// The C4 system-context root of the solution.
+    System {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"container","fqn":"<project>/container.<name>","name":"...","kind":"app","body":"..."}`
+    /// `kind` ∈ app|service|db|queue (the C4 deployable-unit kinds).
+    Container {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        kind: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"component","fqn":"<project>/component.<name>","name":"...","body":"..."}`
+    Component {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"invariant","fqn":"invariant/<name>","title":"...","body":"...","category":"process","scope":"spec","status":"active"}`
+    /// Graph-wide rules artifacts must respect (Invariants-SPEC.md). Roots:
+    /// `invariant/<name>` for universal rules, `<project>/invariant/<name>`
+    /// for repo/project-specific ones. `category` ∈ process|product|
+    /// graph-integrity; `status` ∈ active|retired.
+    Invariant {
+        fqn: String,
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        body: String,
+        #[serde(default)]
+        category: String,
+        #[serde(default)]
+        scope: String,
+        #[serde(default)]
+        status: String,
+    },
+
+    /// `{"type":"note","fqn":"<project>/note-<n>","body":"...","kind":"background"}`
     Note {
         fqn: String,
         body: String,
@@ -176,7 +319,7 @@ pub enum Record {
         kind: String,
     },
 
-    /// `{"type":"feedback","fqn":"future/<project>/feedback-<n>","body":"...","status":"open","disposition":""}`
+    /// `{"type":"feedback","fqn":"<project>/feedback-<n>","body":"...","status":"open","disposition":""}`
     Feedback {
         fqn: String,
         body: String,
@@ -186,7 +329,7 @@ pub enum Record {
         disposition: String,
     },
 
-    /// `{"type":"plan","fqn":"future/<project>/plan","title":"...","strategy":"..."}`
+    /// `{"type":"plan","fqn":"<project>/plan","title":"...","strategy":"..."}`
     Plan {
         fqn: String,
         title: String,
@@ -194,7 +337,7 @@ pub enum Record {
         strategy: String,
     },
 
-    /// `{"type":"plan_phase","fqn":"future/<project>/plan.phase-<n>","number":1,"title":"...","deliverable":"..."}`
+    /// `{"type":"plan_phase","fqn":"<project>/plan.phase-<n>","number":1,"title":"...","deliverable":"..."}`
     PlanPhase {
         fqn: String,
         number: u32,
@@ -203,7 +346,7 @@ pub enum Record {
         deliverable: String,
     },
 
-    /// `{"type":"task","fqn":"future/<project>/plan.phase-<n>.task-<k>","title":"...","kind":"source","tier":"","status":"pending"}`
+    /// `{"type":"task","fqn":"<project>/plan.phase-<n>.task-<k>","title":"...","kind":"source","tier":"","status":"pending"}`
     /// `kind` is the owning role (source/test/gate/docs); `tier`
     /// (unit/int/e2e) is the verification depth, meaningful only for
     /// `kind = test`.
@@ -251,6 +394,46 @@ pub enum Record {
         to: String,
     },
     Builds {
+        from: String,
+        to: String,
+    },
+
+    // --- Spine edges (GraphModel-SPEC.md; PHASE_01) ---
+    // End-to-end traceability from why to code:
+    //   Requirement --Drives/Requires--> Domain --Realises/Represents--> Solution
+    //   --ImplementedBy--> Implementation (code).
+    // `Drives`/`Requires` are Requirement → Domain; `Realises`/`Represents`
+    // Domain → Solution; `ImplementedBy` Solution → Implementation.
+    Drives {
+        from: String,
+        to: String,
+    },
+    Requires {
+        from: String,
+        to: String,
+    },
+    Realises {
+        from: String,
+        to: String,
+    },
+    Represents {
+        from: String,
+        to: String,
+    },
+    ImplementedBy {
+        from: String,
+        to: String,
+    },
+    /// `GuardedBy` (artifact → Invariant) — an artifact (Spec, Plan,
+    /// Requirement, Task, or a code/domain node) is guarded by the invariants
+    /// it must respect (Invariants-SPEC.md).
+    GuardedBy {
+        from: String,
+        to: String,
+    },
+    /// `Checks` (Feedback → Invariant) — a review comment cites the rule it
+    /// enforces (optional; most feedback is not an invariant violation).
+    Checks {
         from: String,
         to: String,
     },
@@ -303,19 +486,19 @@ mod tests {
         // Fixture lines in the unified-JSONL style of the SPEC serialization
         // section (canonical fqns, type-tagged).
         let lines = [
-            r#"{"type":"spec","fqn":"future/workitem-timer/spec","title":"Workitem Timer","goal":"Let workitems time out"}"#,
-            r#"{"type":"requirement","fqn":"future/workitem-timer/spec.R1","id":"R1","title":"Timer","body":"A workitem can be started","feature":"feature-a"}"#,
-            r#"{"type":"phase","fqn":"future/workitem-timer/spec.phase-1","number":1,"title":"Core"}"#,
-            r#"{"type":"decision","fqn":"future/workitem-timer/spec.decision-d1","id":"d1","summary":"Wall-clock"}"#,
-            r#"{"type":"future","fqn":"future/workitem-timer/gateway","kind":"rpc","target":"github.com/foundry/flow.Gateway"}"#,
-            r#"{"type":"non_goal","fqn":"future/workitem-timer/spec.ng1","body":"No daemon"}"#,
-            r#"{"type":"acceptance_criterion","fqn":"future/workitem-timer/spec.ac1","body":"Fires once"}"#,
-            r#"{"type":"verification_item","fqn":"future/workitem-timer/spec.vi1","body":"cargo test green"}"#,
-            r#"{"type":"note","fqn":"future/workitem-timer/note-1","body":"Prose","kind":"background"}"#,
-            r#"{"type":"feedback","fqn":"future/workitem-timer/feedback-1","body":"Split R1","status":"open"}"#,
-            r#"{"type":"plan","fqn":"future/workitem-timer/plan","title":"Plan","strategy":"Layer-first"}"#,
-            r#"{"type":"plan_phase","fqn":"future/workitem-timer/plan.phase-01","number":1,"title":"P1","deliverable":"Schema"}"#,
-            r#"{"type":"task","fqn":"future/workitem-timer/plan.phase-01.task-1","title":"Add RootStore","kind":"source","tier":"","status":"pending"}"#,
+            r#"{"type":"spec","fqn":"workitem-timer/spec","title":"Workitem Timer","goal":"Let workitems time out"}"#,
+            r#"{"type":"requirement","fqn":"workitem-timer/spec.R1","id":"R1","title":"Timer","body":"A workitem can be started","feature":"feature-a"}"#,
+            r#"{"type":"phase","fqn":"workitem-timer/spec.phase-1","number":1,"title":"Core"}"#,
+            r#"{"type":"decision","fqn":"workitem-timer/spec.decision-d1","id":"d1","summary":"Wall-clock"}"#,
+            r#"{"type":"future","fqn":"workitem-timer/gateway","kind":"rpc","target":"github.com/foundry/flow.Gateway"}"#,
+            r#"{"type":"non_goal","fqn":"workitem-timer/spec.ng1","body":"No daemon"}"#,
+            r#"{"type":"acceptance_criterion","fqn":"workitem-timer/spec.ac1","body":"Fires once"}"#,
+            r#"{"type":"verification_item","fqn":"workitem-timer/spec.vi1","body":"cargo test green"}"#,
+            r#"{"type":"note","fqn":"workitem-timer/note-1","body":"Prose","kind":"background"}"#,
+            r#"{"type":"feedback","fqn":"workitem-timer/feedback-1","body":"Split R1","status":"open"}"#,
+            r#"{"type":"plan","fqn":"workitem-timer/plan","title":"Plan","strategy":"Layer-first"}"#,
+            r#"{"type":"plan_phase","fqn":"workitem-timer/plan.phase-01","number":1,"title":"P1","deliverable":"Schema"}"#,
+            r#"{"type":"task","fqn":"workitem-timer/plan.phase-01.task-1","title":"Add RootStore","kind":"source","tier":"","status":"pending"}"#,
         ];
         for l in lines {
             let _ = parse(l);
@@ -326,7 +509,7 @@ mod tests {
             Record::Requirement {
                 fqn, id, feature, ..
             } => {
-                assert_eq!(fqn, "future/workitem-timer/spec.R1");
+                assert_eq!(fqn, "workitem-timer/spec.R1");
                 assert_eq!(id, "R1");
                 assert_eq!(feature, "feature-a");
             }
@@ -335,7 +518,7 @@ mod tests {
         let r = parse(lines[4]);
         match r {
             Record::Future { fqn, kind, target } => {
-                assert_eq!(fqn, "future/workitem-timer/gateway");
+                assert_eq!(fqn, "workitem-timer/gateway");
                 assert_eq!(kind, "rpc");
                 assert_eq!(target, "github.com/foundry/flow.Gateway");
             }
@@ -346,24 +529,24 @@ mod tests {
     #[test]
     fn spec_edge_records_parse() {
         let lines = [
-            r#"{"type":"contains","from":"future/foo/spec","to":"future/foo/spec.R1"}"#,
-            r#"{"type":"details","from":"future/foo/note-1","to":"future/foo/spec"}"#,
-            r#"{"type":"reviews","from":"future/foo/feedback-1","to":"future/foo/spec.R1"}"#,
-            r#"{"type":"depends_on","from":"future/foo/spec.R2","to":"future/foo/spec.R1"}"#,
-            r#"{"type":"gates","from":"future/foo/spec.phase-2","to":"future/foo/spec.phase-1"}"#,
-            r#"{"type":"spec_depends","from":"future/foo/spec","to":"future/bar/spec"}"#,
-            r#"{"type":"anchors","from":"future/foo/spec.R1","to":"github.com/x/impl"}"#,
-            r#"{"type":"implements","from":"github.com/x/impl","to":"future/foo/spec.R1"}"#,
-            r#"{"type":"satisfies","from":"future/foo/plan.phase-01","to":"future/foo/spec.R1"}"#,
-            r#"{"type":"builds","from":"future/foo/plan.phase-01.task-1","to":"future/foo/gateway"}"#,
+            r#"{"type":"contains","from":"foo/spec","to":"foo/spec.R1"}"#,
+            r#"{"type":"details","from":"foo/note-1","to":"foo/spec"}"#,
+            r#"{"type":"reviews","from":"foo/feedback-1","to":"foo/spec.R1"}"#,
+            r#"{"type":"depends_on","from":"foo/spec.R2","to":"foo/spec.R1"}"#,
+            r#"{"type":"gates","from":"foo/spec.phase-2","to":"foo/spec.phase-1"}"#,
+            r#"{"type":"spec_depends","from":"foo/spec","to":"bar/spec"}"#,
+            r#"{"type":"anchors","from":"foo/spec.R1","to":"github.com/x/impl"}"#,
+            r#"{"type":"implements","from":"github.com/x/impl","to":"foo/spec.R1"}"#,
+            r#"{"type":"satisfies","from":"foo/plan.phase-01","to":"foo/spec.R1"}"#,
+            r#"{"type":"builds","from":"foo/plan.phase-01.task-1","to":"foo/gateway"}"#,
         ];
         for l in lines {
             let _ = parse(l);
         }
         assert!(
-            matches!(parse(lines[4]), Record::Gates { from, to } if from == "future/foo/spec.phase-2" && to == "future/foo/spec.phase-1")
+            matches!(parse(lines[4]), Record::Gates { from, to } if from == "foo/spec.phase-2" && to == "foo/spec.phase-1")
         );
-        assert!(matches!(parse(lines[9]), Record::Builds { to, .. } if to == "future/foo/gateway"));
+        assert!(matches!(parse(lines[9]), Record::Builds { to, .. } if to == "foo/gateway"));
     }
 
     #[test]
@@ -376,12 +559,114 @@ mod tests {
             matches!(r, Record::UnresolvedCall { ref target_type, .. } if target_type.is_empty())
         );
         let r: Record =
-            serde_json::from_str(r#"{"type":"future","fqn":"future/foo/g","kind":"function"}"#)
+            serde_json::from_str(r#"{"type":"future","fqn":"foo/g","kind":"function"}"#)
                 .unwrap();
         assert!(matches!(r, Record::Future { ref target, .. } if target.is_empty()));
         let r: Record =
             serde_json::from_str(r#"{"type":"requirement","fqn":"f","id":"R1","title":"t"}"#)
                 .unwrap();
         assert!(matches!(r, Record::Requirement { ref feature, .. } if feature.is_empty()));
+    }
+
+    #[test]
+    fn tier_1_2_3_node_records_parse() {
+        let lines = [
+            r#"{"type":"stakeholder","fqn":"foo/stakeholder.Ops","name":"Ops","body":"runs it"}"#,
+            r#"{"type":"domain","fqn":"foo/domain.Auth","name":"Auth","body":"the auth area"}"#,
+            r#"{"type":"subdomain","fqn":"foo/subdomain.Access","name":"Access","kind":"core","body":"..."}"#,
+            r#"{"type":"entity","fqn":"foo/entity.User","name":"User","body":"an identity"}"#,
+            r#"{"type":"value_object","fqn":"foo/value-object.Email","name":"Email","body":"..."}"#,
+            r#"{"type":"aggregate","fqn":"foo/aggregate.Order","name":"Order","root":"Order","body":"..."}"#,
+            r#"{"type":"domain_event","fqn":"foo/domain-event.UserLoggedIn","name":"UserLoggedIn","body":"..."}"#,
+            r#"{"type":"domain_process","fqn":"foo/domain-process.Checkout","name":"Checkout","body":"..."}"#,
+            r#"{"type":"domain_rule","fqn":"foo/domain-rule.NoNegativeBalance","name":"NoNegativeBalance","body":"..."}"#,
+            r#"{"type":"actor","fqn":"foo/actor.Customer","name":"Customer","body":"..."}"#,
+            r#"{"type":"system","fqn":"foo/system.Platform","name":"Platform","body":"..."}"#,
+            r#"{"type":"container","fqn":"foo/container.Api","name":"Api","kind":"app","body":"..."}"#,
+            r#"{"type":"component","fqn":"foo/component.Gateway","name":"Gateway","body":"..."}"#,
+        ];
+        for l in lines {
+            let _ = parse(l);
+        }
+        match parse(lines[1]) {
+            Record::Domain { fqn, name, body } => {
+                assert_eq!(fqn, "foo/domain.Auth");
+                assert_eq!(name, "Auth");
+                assert_eq!(body, "the auth area");
+            }
+            other => panic!("expected domain, got {other:?}"),
+        }
+        match parse(lines[2]) {
+            Record::Subdomain { kind, .. } => assert_eq!(kind, "core"),
+            other => panic!("expected subdomain, got {other:?}"),
+        }
+        match parse(lines[5]) {
+            Record::Aggregate { root, .. } => assert_eq!(root, "Order"),
+            other => panic!("expected aggregate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spine_edge_records_parse() {
+        let lines = [
+            r#"{"type":"drives","from":"foo/spec.R1","to":"foo/domain.Auth"}"#,
+            r#"{"type":"requires","from":"foo/spec.R2","to":"foo/domain.Auth"}"#,
+            r#"{"type":"realises","from":"foo/domain.Auth","to":"foo/system.Platform"}"#,
+            r#"{"type":"represents","from":"foo/domain.Auth","to":"foo/container.Api"}"#,
+            r#"{"type":"implemented_by","from":"foo/component.Gateway","to":"github.com/x/impl.Gateway"}"#,
+        ];
+        for l in lines {
+            let _ = parse(l);
+        }
+        assert!(
+            matches!(parse(lines[0]), Record::Drives { from, to }
+                if from == "foo/spec.R1" && to == "foo/domain.Auth")
+        );
+        assert!(
+            matches!(parse(lines[4]), Record::ImplementedBy { from, to }
+                if from == "foo/component.Gateway" && to == "github.com/x/impl.Gateway")
+        );
+    }
+
+    #[test]
+    fn invariant_and_guard_checks_records_parse() {
+        let i = parse(
+            r#"{"type":"invariant","fqn":"invariant/plan.task-kind-in-set","title":"Task kind","body":"Every task carries one kind","category":"process","scope":"plan","status":"active"}"#,
+        );
+        match i {
+            Record::Invariant {
+                fqn, title, category, status, ..
+            } => {
+                assert_eq!(fqn, "invariant/plan.task-kind-in-set");
+                assert_eq!(title, "Task kind");
+                assert_eq!(category, "process");
+                assert_eq!(status, "active");
+            }
+            other => panic!("expected invariant, got {other:?}"),
+        }
+        // A project-scoped invariant (a domain rule materialized as an
+        // Invariant with category=product).
+        let i = parse(
+            r#"{"type":"invariant","fqn":"foo/invariant/NoNegativeBalance","title":"No negative balance","category":"product","scope":"code","status":"active"}"#,
+        );
+        assert!(
+            matches!(i, Record::Invariant { ref fqn, ref category, .. }
+                if fqn == "foo/invariant/NoNegativeBalance" && category == "product")
+        );
+        // GuardedBy and Checks edges.
+        let g = parse(
+            r#"{"type":"guarded_by","from":"foo/spec","to":"invariant/plan.task-kind-in-set"}"#,
+        );
+        assert!(
+            matches!(g, Record::GuardedBy { from, to }
+                if from == "foo/spec" && to == "invariant/plan.task-kind-in-set")
+        );
+        let c = parse(
+            r#"{"type":"checks","from":"foo/feedback-1","to":"invariant/plan.task-kind-in-set"}"#,
+        );
+        assert!(
+            matches!(c, Record::Checks { from, to }
+                if from == "foo/feedback-1" && to == "invariant/plan.task-kind-in-set")
+        );
     }
 }

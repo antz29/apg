@@ -209,20 +209,20 @@ mod tests {
 
         let recs = vec![
             Record::Spec {
-                fqn: "future/foo/spec".to_string(),
+                fqn: "foo/spec".to_string(),
                 title: "T".to_string(),
                 goal: "G".to_string(),
             },
             Record::Requirement {
-                fqn: "future/foo/spec.R1".to_string(),
+                fqn: "foo/spec.R1".to_string(),
                 id: "R1".to_string(),
                 title: "Timer".to_string(),
                 body: String::new(),
                 feature: String::new(),
             },
             Record::Contains {
-                from: "future/foo/spec".to_string(),
-                to: "future/foo/spec.R1".to_string(),
+                from: "foo/spec".to_string(),
+                to: "foo/spec.R1".to_string(),
             },
         ];
         write_jsonl(&specs.join("foo.jsonl"), &recs).unwrap();
@@ -238,7 +238,7 @@ mod tests {
         write_jsonl(
             &plans.join("foo.jsonl"),
             &[Record::Plan {
-                fqn: "future/foo/plan".to_string(),
+                fqn: "foo/plan".to_string(),
                 title: "Plan".to_string(),
                 strategy: String::new(),
             }],
@@ -273,9 +273,9 @@ mod tests {
         g.nodes
             .insert("mod.A.f".to_string(), node(NodeKind::Function));
         g.nodes
-            .insert("future/foo/spec".to_string(), node(NodeKind::Spec));
+            .insert("foo/spec".to_string(), node(NodeKind::Spec));
         g.nodes.insert(
-            "future/foo/spec.R1".to_string(),
+            "foo/spec.R1".to_string(),
             node(NodeKind::Requirement),
         );
         g.contains
@@ -291,7 +291,7 @@ mod tests {
         assert_eq!(owning_module(&g, "/x/a.go"), Some("mod".to_string()));
         // A module is its own owner; spec/Future/code-less nodes are _root.
         assert_eq!(owning_module(&g, "mod"), Some("mod".to_string()));
-        assert_eq!(owning_module(&g, "future/foo/spec"), None);
+        assert_eq!(owning_module(&g, "foo/spec"), None);
         assert_eq!(owning_module(&g, "nowhere"), None);
         assert_eq!(note_ledger_stem(&g, "nowhere"), "_root");
 
@@ -301,7 +301,7 @@ mod tests {
             apg.join("notes").join("mod.jsonl")
         );
         assert_eq!(
-            note_file(&g, apg, "future/foo/spec.R1"),
+            note_file(&g, apg, "foo/spec.R1"),
             apg.join("notes").join("_root.jsonl")
         );
     }

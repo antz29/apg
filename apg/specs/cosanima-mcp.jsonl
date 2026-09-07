@@ -1,116 +1,116 @@
-{"type":"spec","fqn":"future/cosanima-mcp/spec","title":"Cosanima MCP server + cross-harness agents (local agent tool substrate)","goal":"Deliver the 1.0 agent-facing tool substrate: a local-only MCP server (`cosanima mcp`) over stdio exposing cosanima's capabilities as MCP tools and the graph/spec/plan data as MCP resources — replacing the retired 46-tool opencode suite + lib/apg.ts — plus six agents authored once in canonical markdown + YAML frontmatter with a per-harness adapter, all part of the 1.0 flag-day."}
-{"type":"phase","fqn":"future/cosanima-mcp/spec.phase-1","number":1,"title":"MCP server mode + local-only substrate"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.phase-1"}
-{"type":"phase","fqn":"future/cosanima-mcp/spec.phase-2","number":2,"title":"Tool + resource surface"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.phase-2"}
-{"type":"gates","from":"future/cosanima-mcp/spec.phase-2","to":"future/cosanima-mcp/spec.phase-1"}
-{"type":"phase","fqn":"future/cosanima-mcp/spec.phase-3","number":3,"title":"Cross-harness agents"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.phase-3"}
-{"type":"gates","from":"future/cosanima-mcp/spec.phase-3","to":"future/cosanima-mcp/spec.phase-2"}
-{"type":"phase","fqn":"future/cosanima-mcp/spec.phase-4","number":4,"title":"Distribution, retirement + verification"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.phase-4"}
-{"type":"gates","from":"future/cosanima-mcp/spec.phase-4","to":"future/cosanima-mcp/spec.phase-3"}
-{"type":"future","fqn":"future/cosanima-mcp/mcp-server","kind":"service","target":"cosanima.mcp.Server"}
-{"type":"future","fqn":"future/cosanima-mcp/per-tool-schemas","kind":"other","target":"cosanima.mcp.tool_schemas"}
-{"type":"future","fqn":"future/cosanima-mcp/canonical-agents","kind":"other","target":"cosanima.agents"}
-{"type":"future","fqn":"future/cosanima-mcp/frontmatter-adapter","kind":"function","target":"cosanima.agents.render_harness"}
-{"type":"future","fqn":"future/cosanima-mcp/init-install","kind":"other","target":"cosanima.init.mcp_install"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R1","id":"R1","title":"Local MCP server over stdio (`cosanima mcp`)","body":"`cosanima mcp` runs a local MCP (Model Context Protocol) server over stdio transport — a runnable server mode of the binary, dispatched from main alongside init/scan/query/spec/plan/review. The server exposes cosanima's capabilities as MCP tools and the graph/spec/plan data as MCP resources, so any MCP-capable harness can drive cosanima. This is the agent-facing tool substrate for 1.0.","feature":"server"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R1"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R1","to":"future/cosanima-mcp/mcp-server"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R1","to":"apg.main"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R2","id":"R2","title":"Local-only / private: no data leaves the host","body":"The MCP server is private by construction: it binds no network sockets, speaks only stdio between the harness process and the server process on the same machine, and never transmits graph/spec/plan data off the host. There is no remote or network mode in 1.0 — local-only is a hard property, not a deployment choice.","feature":"server"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R2"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R2","to":"future/cosanima-mcp/mcp-server"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R3","id":"R3","title":"MCP tools wrap the existing CLI + graph operations","body":"Each MCP tool implements the same operation the corresponding CLI command does, dispatching through the same code paths (main dispatch → cmd_query / cmd_scan / spec_cmd::cmd_spec / plan_cmd::cmd_plan / review_cmd::cmd_review). The MCP surface is a protocol binding over the existing CLI + graph — not a parallel implementation — so behaviour cannot diverge between the CLI and the MCP tools.","feature":"server"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R3"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R3","to":"apg.cmd_query"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R3","to":"apg.cmd_scan"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R3","to":"apg.spec_cmd.cmd_spec"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R3","to":"apg.plan_cmd.cmd_plan"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R3","to":"apg.review_cmd.cmd_review"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R4","id":"R4","title":"Graph-query MCP tool set","body":"MCP tools covering the graph lookups the retired tool suite provided: `query` (Cypher MATCH/RETURN over db.lbug, CSV result with header — the cmd_query surface), `find_symbol`, `modules`, `module_files`, `module_structs`, `file_units`, `file_path`, `methods`, `struct`, `callers`, `callees`, `uses`, `unresolved`, `hunk`. Each wraps the same graph surface the apg_* query tools did — the MCP tool set is the successor of the 46 opencode tool scripts.","feature":"tools"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R4"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R4","to":"apg.cmd_query"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R4","to":"future/cosanima-mcp/per-tool-schemas"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R5","id":"R5","title":"Scan tool","body":"An MCP tool wrapping `cosanima scan` end-to-end: language auto-detect (or --language/--module/--exclude-path), blacklist prefixes, the scanner + ingestor pipeline, and the .trans outputs (db.lbug + graph.jsonl + cosanima-frontend.log) — the full cmd_scan surface.","feature":"tools"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R5"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R5","to":"apg.cmd_scan"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R6","id":"R6","title":"Spec/plan/review CRUD tools","body":"MCP tools for the intent graph, mapping onto spec_cmd / plan_cmd / review_cmd: spec init/add/anchor/link/rm/render/promote/archive; plan init/add/link/done/undone/complete/render; review add/action/resolve/reject/list. Write-through semantics (JSONL first, then DB re-merge), cycle detection, and dangling-ref validation are preserved exactly.","feature":"tools"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R6"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R6","to":"apg.spec_cmd.cmd_spec"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R6","to":"apg.plan_cmd.cmd_plan"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R6","to":"apg.review_cmd.cmd_review"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R7","id":"R7","title":"MCP-native tool schemas (name + description + inputSchema + output)","body":"Every tool is registered as an MCP tool schema: stable name, human-readable description, JSON input schema, and output format — declared once in the server's tool registry so harnesses discover and validate calls against the same contract. The 46 ad-hoc .ts tool definitions (and their shared lib plumbing) are replaced by these schemas.","feature":"tools"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R7"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R7","to":"future/cosanima-mcp/per-tool-schemas"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R8","id":"R8","title":"Graph + spec/plan/note data as MCP resources","body":"The graph and the intent graph are readable as MCP resources: graph data (db.lbug via query, or graph.jsonl) and the committed spec/note/plan JSONL (apg/specs/*.jsonl, apg/notes/<module>.jsonl, transient plans) are exposed under stable resource URIs so agents read them without shelling out. Resources mirror the on-disk layout (post-rename .cosanima/ roots).","feature":"resources"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R8"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R8","to":"apg.graph.Graph"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R8","to":"future/cosanima-mcp/mcp-server"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R9","id":"R9","title":"Six agents authored once in canonical markdown + YAML frontmatter","body":"The six agents (codebase-navigator, spec-writer, plan-writer, spec-review, plan-review, agent-builder) are authored ONCE in a canonical markdown + YAML-frontmatter form whose instructions body is harness-portable: the frontmatter carries harness-independent metadata, the body carries the full instructions. They supersede the opencode-only .opencode/agents/*.md (currently embedded via include_str! in src/main.rs ~222-247). Agent names carry the cosanima_ prefix per the rename's sweep (consumes cosanima-rename R9).","feature":"agents"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R9"}
-{"type":"depends_on","from":"future/cosanima-mcp/spec.R9","to":"future/cosanima-rename/spec.R9"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R9","to":"future/cosanima-mcp/canonical-agents"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R10","id":"R10","title":"Per-harness frontmatter adapter (opencode / Claude Code / Codex)","body":"A small per-harness frontmatter adapter renders the single canonical source into each harness's format: opencode (.opencode/agents/*.md), Claude Code (.claude/agents/*.md), Codex (.codex/agents/*.md). Only the frontmatter/format differs — the instructions body is identical in every harness.","feature":"agents"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R10"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R10","to":"future/cosanima-mcp/frontmatter-adapter"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R11","id":"R11","title":"Same MCP tool names across all harnesses","body":"All six agents reference the SAME MCP tool names in every harness. Because the tools are MCP (harness-agnostic), no per-harness tool-syntax rewriting exists — the tool-syntax portability barrier that forced per-harness agent variants is removed.","feature":"agents"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R11"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R11","to":"future/cosanima-mcp/canonical-agents"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R12","id":"R12","title":"Server + agents ship via the core repo; embedded tool lists removed","body":"The MCP server and the cross-harness agent artifacts are 1.0 deliverables of the core repo (really-knows-ai/cosanima). The embedded include_str! tool lists in src/main.rs (lines ~28-215 — the 46 tools + lib/apg.ts) are removed/repurposed: the retired opencode tool suite is not renamed, it is gone. The agents' embedding (lines ~222-247) moves to the canonical markdown+frontmatter form.","feature":"distribution"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R12"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R12","to":"apg.main"}
-{"type":"requirement","fqn":"future/cosanima-mcp/spec.R13","id":"R13","title":"`cosanima init` installs the MCP server + cross-harness agents","body":"`cosanima init` installs the MCP server (registered for harness use) and the cross-harness agent artifacts instead of the opencode tool suite; the legacy-cleanup behavior (purge apg_*-named artifacts, remove pre-~/.opencode project-local installs, existing remove_legacy_project_install logic) still applies. Init converges on the cosanima layout first (consumes cosanima-rename R10).","feature":"distribution"}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.R13"}
-{"type":"depends_on","from":"future/cosanima-mcp/spec.R13","to":"future/cosanima-rename/spec.R10"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R13","to":"future/cosanima-mcp/init-install"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R13","to":"apg.cmd_init"}
-{"type":"anchors","from":"future/cosanima-mcp/spec.R13","to":"apg.remove_legacy_project_install"}
-{"type":"decision","fqn":"future/cosanima-mcp/spec.decision-D1","id":"D1","summary":"Use a Rust MCP server library (the official Rust MCP SDK or the `rmcp` crate) rather than hand-rolling the JSON-RPC/MCP protocol: the server inherits protocol correctness, transport handling, and versioning from a maintained implementation, leaving cosanima to define only its tool/resource surface."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.decision-D1"}
-{"type":"decision","fqn":"future/cosanima-mcp/spec.decision-D2","id":"D2","summary":"Retire the bespoke tool layer: the 46 opencode tool scripts (apg_*.ts → would-be cosanima_*.ts) and the lib/apg.ts shared plumbing are RETIRED, not renamed — the local MCP server replaces them. This supersedes the rename's tool-suite prefix sweep (cosanima-rename R8)."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.decision-D2"}
-{"type":"decision","fqn":"future/cosanima-mcp/spec.decision-D3","id":"D3","summary":"Canonical-source + adapter model for agents: the six agents are authored once in canonical markdown + YAML frontmatter (harness-portable instructions body), and a small per-harness adapter emits each harness's format (opencode / Claude Code / Codex). MCP tools are harness-agnostic, so the agents reference the same tool names everywhere — markdown+frontmatter is the cross-harness agent mechanism, MCP is the cross-harness tool mechanism."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.decision-D3"}
-{"type":"decision","fqn":"future/cosanima-mcp/spec.decision-D4","id":"D4","summary":"The MCP server + cross-harness agents are 1.0 deliverables: they land as part of the coordinated flag-day (parent cosanima-1.0 gates this spec), not as a post-1.0 follow-up. The tool-layer replacement is in the 1.0 cut."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.decision-D4"}
-{"type":"decision","fqn":"future/cosanima-mcp/spec.decision-D5","id":"D5","summary":"Local-only stdio transport is the only server mode for 1.0: the MCP server binds no network sockets and connects to harnesses over stdio on the same machine; no data leaves the host. Privacy is a property of the design, not a deployment option."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.decision-D5"}
-{"type":"non_goal","fqn":"future/cosanima-mcp/spec.ng-1","body":"No hosted or remote MCP service: the server is local-only stdio; there is no network deployment, no shared/cloud server, and no multi-tenant hosting of the cosanima MCP server for 1.0."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.ng-1"}
-{"type":"non_goal","fqn":"future/cosanima-mcp/spec.ng-2","body":"No general-purpose MCP broker: the server exposes only cosanima's capabilities (graph query, scan, spec/plan/review) as MCP tools + resources — there is no plugin surface for arbitrary third-party MCP tools."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.ng-2"}
-{"type":"non_goal","fqn":"future/cosanima-mcp/spec.ng-3","body":"The CLI is not replaced: the MCP server wraps the same operations the CLI exposes (a protocol binding, cosanima-mcp R3); the CLI remains the primary human interface, and the MCP surface introduces no separate feature set."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.ng-3"}
-{"type":"acceptance_criterion","fqn":"future/cosanima-mcp/spec.ac-1","body":"`cosanima mcp` starts an MCP server on stdio: an MCP client can connect, complete the initialize handshake, and list the server's tools and resources; no network socket is opened by the server process."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.ac-1"}
-{"type":"acceptance_criterion","fqn":"future/cosanima-mcp/spec.ac-2","body":"Every planned MCP tool (graph lookups incl. query/find_symbol/callers/callees/uses/hunk, scan, and the spec/plan/review CRUD) is registered with a stable name, description, JSON input schema, and output, and returns results equivalent to the corresponding CLI command — e.g. the query tool returns the same CSV rows as `cosanima query` on the same database."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.ac-2"}
-{"type":"acceptance_criterion","fqn":"future/cosanima-mcp/spec.ac-3","body":"The graph and spec/plan/note data are readable as MCP resources: a resource read returns the same content as the underlying artifact (the committed spec JSONL, notes, or the queried graph), under stable resource URIs."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.ac-3"}
-{"type":"acceptance_criterion","fqn":"future/cosanima-mcp/spec.ac-4","body":"The six agents render from the single canonical markdown+frontmatter source into at least opencode, Claude Code, and Codex formats via the adapter, with identical instruction bodies and identical MCP tool references in every harness."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.ac-4"}
-{"type":"acceptance_criterion","fqn":"future/cosanima-mcp/spec.ac-5","body":"`cosanima init` installs the MCP server + cross-harness agent artifacts and no longer installs the opencode tool-suite scripts or lib/apg.ts: a fresh init in a clean temp repo produces zero apg_* / cosanima_* opencode tool files, and legacy apg artifacts are cleaned."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.ac-5"}
-{"type":"verification_item","fqn":"future/cosanima-mcp/spec.vi-1","body":"Launch `cosanima mcp` and complete an MCP initialize + tools/list + resources/list exchange over a pipe with a minimal MCP client (or the MCP inspector); the server responds with the full tool and resource sets and exits cleanly on EOF."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.vi-1"}
-{"type":"verification_item","fqn":"future/cosanima-mcp/spec.vi-2","body":"For each MCP tool, invoke it against a fixture repo (scan it first) and diff the result against the equivalent CLI command: the query tool's CSV equals `cosanima query` output, the find_symbol/callers/callees/uses/hunk results match their CLI-backed counterparts, and spec/plan/review write tools produce the same JSONL/DB state as the corresponding CLI subcommands."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.vi-2"}
-{"type":"verification_item","fqn":"future/cosanima-mcp/spec.vi-3","body":"Read each resource URI through the MCP server and diff against the on-disk artifact (`.cosanima/specs/<project>.jsonl`, notes, graph query) — content matches byte-for-byte where the underlying data is deterministic."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.vi-3"}
-{"type":"verification_item","fqn":"future/cosanima-mcp/spec.vi-4","body":"Adapter smoke test: render the six canonical agents for the opencode, Claude Code, and Codex harness dirs and diff — the instruction bodies and every MCP tool reference are identical across harnesses; only frontmatter/format differs."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.vi-4"}
-{"type":"verification_item","fqn":"future/cosanima-mcp/spec.vi-5","body":"Fresh `cosanima init` in a temp repo: assert the MCP server is registered/installed and the cross-harness agent artifacts are present, and that no apg_* or cosanima_* opencode tool scripts or lib files are written; run the legacy-cleanup path against a simulated apg install and confirm apg-named artifacts are purged."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.vi-5"}
-{"type":"verification_item","fqn":"future/cosanima-mcp/spec.vi-6","body":"Privacy check: while the server runs with a client attached, confirm the process holds no listening sockets (lsof/netstat shows no LISTEN entries for it) and makes no outbound connections — stdio-only verified end-to-end."}
-{"type":"contains","from":"future/cosanima-mcp/spec","to":"future/cosanima-mcp/spec.vi-6"}
-{"type":"note","fqn":"future/cosanima-mcp/note-1","body":"Design rationale: MCP is the cross-harness TOOL mechanism; markdown+frontmatter is the cross-harness AGENT mechanism. Because cosanima's capabilities are exposed as MCP tools (harness-agnostic protocol), the six agents reference the same MCP tool names in every harness — the tool-syntax portability barrier (which forced per-harness tool wrappers) is gone. Because the agents are authored once in canonical markdown + YAML frontmatter, only a small per-harness adapter is needed to emit opencode / Claude Code / Codex formats, and the instructions body is identical everywhere. The two decisions are complementary: MCP removes tool syntax drift, the canonical source removes instruction drift.","kind":"design"}
-{"type":"details","from":"future/cosanima-mcp/note-1","to":"future/cosanima-mcp/spec"}
-{"type":"note","fqn":"future/cosanima-mcp/note-2","body":"Background — what this replaces: the current agent-facing tool layer is 46 `.opencode/tools/apg_*.ts` scripts (apg_query/scan/find_symbol/modules/module_files/module_structs/file_units/file_path/methods/struct/callers/callees/uses/unresolved/hunk + the spec/plan/review suites) plus the shared plumbing `.opencode/lib/apg.ts`, all embedded into the binary via include_str! in src/main.rs (lines ~28-215) and installed by `apg init` into ~/.opencode/, with the six agents embedded at lines ~222-247. The MCP server (cosanima-mcp) replaces the tool layer; the agents move to the canonical markdown+frontmatter form. The 46 tools are retired, not renamed (Decision D2).","kind":"background"}
-{"type":"details","from":"future/cosanima-mcp/note-2","to":"future/cosanima-mcp/spec"}
-{"type":"note","fqn":"future/cosanima-mcp/note-3","body":"Cross-spec wiring: cosanima-mcp is a child of the 1.0 flag-day (parent cosanima-1.0 SpecDependsOn cosanima-mcp — the MCP server + cross-harness agents are 1.0 deliverables, Decision D4). It SpecDependsOn cosanima-rename (it supersedes the tool-suite rename R8/R9 and rides on the init rename R10), cosanima-repo-split (the server + agents live in the core repo really-knows-ai/cosanima), and cosanima-docs (the docs must document the MCP server + cross-harness agents and stop documenting the retired tool suite as current). Requirement-level: R9 consumes cosanima-rename/R9 (agent prefix sweep), R13 consumes cosanima-rename/R10 (init convergence).","kind":"relationship-to-other-specs"}
-{"type":"details","from":"future/cosanima-mcp/note-3","to":"future/cosanima-mcp/spec"}
-{"type":"spec_depends","from":"future/cosanima-mcp/spec","to":"future/cosanima-rename/spec"}
-{"type":"spec_depends","from":"future/cosanima-mcp/spec","to":"future/cosanima-repo-split/spec"}
-{"type":"spec_depends","from":"future/cosanima-mcp/spec","to":"future/cosanima-docs/spec"}
+{"type":"spec","fqn":"cosanima-mcp/spec","title":"Cosanima MCP server + cross-harness agents (local agent tool substrate)","goal":"Deliver the 1.0 agent-facing tool substrate: a local-only MCP server (`cosanima mcp`) over stdio exposing cosanima's capabilities as MCP tools and the graph/spec/plan data as MCP resources — replacing the retired 46-tool opencode suite + lib/apg.ts — plus six agents authored once in canonical markdown + YAML frontmatter with a per-harness adapter, all part of the 1.0 flag-day."}
+{"type":"phase","fqn":"cosanima-mcp/spec.phase-1","number":1,"title":"MCP server mode + local-only substrate"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.phase-1"}
+{"type":"phase","fqn":"cosanima-mcp/spec.phase-2","number":2,"title":"Tool + resource surface"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.phase-2"}
+{"type":"gates","from":"cosanima-mcp/spec.phase-2","to":"cosanima-mcp/spec.phase-1"}
+{"type":"phase","fqn":"cosanima-mcp/spec.phase-3","number":3,"title":"Cross-harness agents"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.phase-3"}
+{"type":"gates","from":"cosanima-mcp/spec.phase-3","to":"cosanima-mcp/spec.phase-2"}
+{"type":"phase","fqn":"cosanima-mcp/spec.phase-4","number":4,"title":"Distribution, retirement + verification"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.phase-4"}
+{"type":"gates","from":"cosanima-mcp/spec.phase-4","to":"cosanima-mcp/spec.phase-3"}
+{"type":"future","fqn":"cosanima-mcp/mcp-server","kind":"service","target":"cosanima.mcp.Server"}
+{"type":"future","fqn":"cosanima-mcp/per-tool-schemas","kind":"other","target":"cosanima.mcp.tool_schemas"}
+{"type":"future","fqn":"cosanima-mcp/canonical-agents","kind":"other","target":"cosanima.agents"}
+{"type":"future","fqn":"cosanima-mcp/frontmatter-adapter","kind":"function","target":"cosanima.agents.render_harness"}
+{"type":"future","fqn":"cosanima-mcp/init-install","kind":"other","target":"cosanima.init.mcp_install"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R1","id":"R1","title":"Local MCP server over stdio (`cosanima mcp`)","body":"`cosanima mcp` runs a local MCP (Model Context Protocol) server over stdio transport — a runnable server mode of the binary, dispatched from main alongside init/scan/query/spec/plan/review. The server exposes cosanima's capabilities as MCP tools and the graph/spec/plan data as MCP resources, so any MCP-capable harness can drive cosanima. This is the agent-facing tool substrate for 1.0.","feature":"server"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R1"}
+{"type":"anchors","from":"cosanima-mcp/spec.R1","to":"cosanima-mcp/mcp-server"}
+{"type":"anchors","from":"cosanima-mcp/spec.R1","to":"apg.main"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R2","id":"R2","title":"Local-only / private: no data leaves the host","body":"The MCP server is private by construction: it binds no network sockets, speaks only stdio between the harness process and the server process on the same machine, and never transmits graph/spec/plan data off the host. There is no remote or network mode in 1.0 — local-only is a hard property, not a deployment choice.","feature":"server"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R2"}
+{"type":"anchors","from":"cosanima-mcp/spec.R2","to":"cosanima-mcp/mcp-server"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R3","id":"R3","title":"MCP tools wrap the existing CLI + graph operations","body":"Each MCP tool implements the same operation the corresponding CLI command does, dispatching through the same code paths (main dispatch → cmd_query / cmd_scan / spec_cmd::cmd_spec / plan_cmd::cmd_plan / review_cmd::cmd_review). The MCP surface is a protocol binding over the existing CLI + graph — not a parallel implementation — so behaviour cannot diverge between the CLI and the MCP tools.","feature":"server"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R3"}
+{"type":"anchors","from":"cosanima-mcp/spec.R3","to":"apg.cmd_query"}
+{"type":"anchors","from":"cosanima-mcp/spec.R3","to":"apg.cmd_scan"}
+{"type":"anchors","from":"cosanima-mcp/spec.R3","to":"apg.spec_cmd.cmd_spec"}
+{"type":"anchors","from":"cosanima-mcp/spec.R3","to":"apg.plan_cmd.cmd_plan"}
+{"type":"anchors","from":"cosanima-mcp/spec.R3","to":"apg.review_cmd.cmd_review"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R4","id":"R4","title":"Graph-query MCP tool set","body":"MCP tools covering the graph lookups the retired tool suite provided: `query` (Cypher MATCH/RETURN over db.lbug, CSV result with header — the cmd_query surface), `find_symbol`, `modules`, `module_files`, `module_structs`, `file_units`, `file_path`, `methods`, `struct`, `callers`, `callees`, `uses`, `unresolved`, `hunk`. Each wraps the same graph surface the apg_* query tools did — the MCP tool set is the successor of the 46 opencode tool scripts.","feature":"tools"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R4"}
+{"type":"anchors","from":"cosanima-mcp/spec.R4","to":"apg.cmd_query"}
+{"type":"anchors","from":"cosanima-mcp/spec.R4","to":"cosanima-mcp/per-tool-schemas"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R5","id":"R5","title":"Scan tool","body":"An MCP tool wrapping `cosanima scan` end-to-end: language auto-detect (or --language/--module/--exclude-path), blacklist prefixes, the scanner + ingestor pipeline, and the .trans outputs (db.lbug + graph.jsonl + cosanima-frontend.log) — the full cmd_scan surface.","feature":"tools"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R5"}
+{"type":"anchors","from":"cosanima-mcp/spec.R5","to":"apg.cmd_scan"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R6","id":"R6","title":"Spec/plan/review CRUD tools","body":"MCP tools for the intent graph, mapping onto spec_cmd / plan_cmd / review_cmd: spec init/add/anchor/link/rm/render/promote/archive; plan init/add/link/done/undone/complete/render; review add/action/resolve/reject/list. Write-through semantics (JSONL first, then DB re-merge), cycle detection, and dangling-ref validation are preserved exactly.","feature":"tools"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R6"}
+{"type":"anchors","from":"cosanima-mcp/spec.R6","to":"apg.spec_cmd.cmd_spec"}
+{"type":"anchors","from":"cosanima-mcp/spec.R6","to":"apg.plan_cmd.cmd_plan"}
+{"type":"anchors","from":"cosanima-mcp/spec.R6","to":"apg.review_cmd.cmd_review"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R7","id":"R7","title":"MCP-native tool schemas (name + description + inputSchema + output)","body":"Every tool is registered as an MCP tool schema: stable name, human-readable description, JSON input schema, and output format — declared once in the server's tool registry so harnesses discover and validate calls against the same contract. The 46 ad-hoc .ts tool definitions (and their shared lib plumbing) are replaced by these schemas.","feature":"tools"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R7"}
+{"type":"anchors","from":"cosanima-mcp/spec.R7","to":"cosanima-mcp/per-tool-schemas"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R8","id":"R8","title":"Graph + spec/plan/note data as MCP resources","body":"The graph and the intent graph are readable as MCP resources: graph data (db.lbug via query, or graph.jsonl) and the committed spec/note/plan JSONL (apg/specs/*.jsonl, apg/notes/<module>.jsonl, transient plans) are exposed under stable resource URIs so agents read them without shelling out. Resources mirror the on-disk layout (post-rename .cosanima/ roots).","feature":"resources"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R8"}
+{"type":"anchors","from":"cosanima-mcp/spec.R8","to":"apg.graph.Graph"}
+{"type":"anchors","from":"cosanima-mcp/spec.R8","to":"cosanima-mcp/mcp-server"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R9","id":"R9","title":"Six agents authored once in canonical markdown + YAML frontmatter","body":"The six agents (codebase-navigator, spec-writer, plan-writer, spec-review, plan-review, agent-builder) are authored ONCE in a canonical markdown + YAML-frontmatter form whose instructions body is harness-portable: the frontmatter carries harness-independent metadata, the body carries the full instructions. They supersede the opencode-only .opencode/agents/*.md (currently embedded via include_str! in src/main.rs ~222-247). Agent names carry the cosanima_ prefix per the rename's sweep (consumes cosanima-rename R9).","feature":"agents"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R9"}
+{"type":"depends_on","from":"cosanima-mcp/spec.R9","to":"cosanima-rename/spec.R9"}
+{"type":"anchors","from":"cosanima-mcp/spec.R9","to":"cosanima-mcp/canonical-agents"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R10","id":"R10","title":"Per-harness frontmatter adapter (opencode / Claude Code / Codex)","body":"A small per-harness frontmatter adapter renders the single canonical source into each harness's format: opencode (.opencode/agents/*.md), Claude Code (.claude/agents/*.md), Codex (.codex/agents/*.md). Only the frontmatter/format differs — the instructions body is identical in every harness.","feature":"agents"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R10"}
+{"type":"anchors","from":"cosanima-mcp/spec.R10","to":"cosanima-mcp/frontmatter-adapter"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R11","id":"R11","title":"Same MCP tool names across all harnesses","body":"All six agents reference the SAME MCP tool names in every harness. Because the tools are MCP (harness-agnostic), no per-harness tool-syntax rewriting exists — the tool-syntax portability barrier that forced per-harness agent variants is removed.","feature":"agents"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R11"}
+{"type":"anchors","from":"cosanima-mcp/spec.R11","to":"cosanima-mcp/canonical-agents"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R12","id":"R12","title":"Server + agents ship via the core repo; embedded tool lists removed","body":"The MCP server and the cross-harness agent artifacts are 1.0 deliverables of the core repo (really-knows-ai/cosanima). The embedded include_str! tool lists in src/main.rs (lines ~28-215 — the 46 tools + lib/apg.ts) are removed/repurposed: the retired opencode tool suite is not renamed, it is gone. The agents' embedding (lines ~222-247) moves to the canonical markdown+frontmatter form.","feature":"distribution"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R12"}
+{"type":"anchors","from":"cosanima-mcp/spec.R12","to":"apg.main"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R13","id":"R13","title":"`cosanima init` installs the MCP server + cross-harness agents","body":"`cosanima init` installs the MCP server (registered for harness use) and the cross-harness agent artifacts instead of the opencode tool suite; the legacy-cleanup behavior (purge apg_*-named artifacts, remove pre-~/.opencode project-local installs, existing remove_legacy_project_install logic) still applies. Init converges on the cosanima layout first (consumes cosanima-rename R10).","feature":"distribution"}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R13"}
+{"type":"depends_on","from":"cosanima-mcp/spec.R13","to":"cosanima-rename/spec.R10"}
+{"type":"anchors","from":"cosanima-mcp/spec.R13","to":"cosanima-mcp/init-install"}
+{"type":"anchors","from":"cosanima-mcp/spec.R13","to":"apg.cmd_init"}
+{"type":"anchors","from":"cosanima-mcp/spec.R13","to":"apg.remove_legacy_project_install"}
+{"type":"decision","fqn":"cosanima-mcp/spec.decision-D1","id":"D1","summary":"Use a Rust MCP server library (the official Rust MCP SDK or the `rmcp` crate) rather than hand-rolling the JSON-RPC/MCP protocol: the server inherits protocol correctness, transport handling, and versioning from a maintained implementation, leaving cosanima to define only its tool/resource surface."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.decision-D1"}
+{"type":"decision","fqn":"cosanima-mcp/spec.decision-D2","id":"D2","summary":"Retire the bespoke tool layer: the 46 opencode tool scripts (apg_*.ts → would-be cosanima_*.ts) and the lib/apg.ts shared plumbing are RETIRED, not renamed — the local MCP server replaces them. This supersedes the rename's tool-suite prefix sweep (cosanima-rename R8)."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.decision-D2"}
+{"type":"decision","fqn":"cosanima-mcp/spec.decision-D3","id":"D3","summary":"Canonical-source + adapter model for agents: the six agents are authored once in canonical markdown + YAML frontmatter (harness-portable instructions body), and a small per-harness adapter emits each harness's format (opencode / Claude Code / Codex). MCP tools are harness-agnostic, so the agents reference the same tool names everywhere — markdown+frontmatter is the cross-harness agent mechanism, MCP is the cross-harness tool mechanism."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.decision-D3"}
+{"type":"decision","fqn":"cosanima-mcp/spec.decision-D4","id":"D4","summary":"The MCP server + cross-harness agents are 1.0 deliverables: they land as part of the coordinated flag-day (parent cosanima-1.0 gates this spec), not as a post-1.0 follow-up. The tool-layer replacement is in the 1.0 cut."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.decision-D4"}
+{"type":"decision","fqn":"cosanima-mcp/spec.decision-D5","id":"D5","summary":"Local-only stdio transport is the only server mode for 1.0: the MCP server binds no network sockets and connects to harnesses over stdio on the same machine; no data leaves the host. Privacy is a property of the design, not a deployment option."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.decision-D5"}
+{"type":"non_goal","fqn":"cosanima-mcp/spec.ng-1","body":"No hosted or remote MCP service: the server is local-only stdio; there is no network deployment, no shared/cloud server, and no multi-tenant hosting of the cosanima MCP server for 1.0."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.ng-1"}
+{"type":"non_goal","fqn":"cosanima-mcp/spec.ng-2","body":"No general-purpose MCP broker: the server exposes only cosanima's capabilities (graph query, scan, spec/plan/review) as MCP tools + resources — there is no plugin surface for arbitrary third-party MCP tools."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.ng-2"}
+{"type":"non_goal","fqn":"cosanima-mcp/spec.ng-3","body":"The CLI is not replaced: the MCP server wraps the same operations the CLI exposes (a protocol binding, cosanima-mcp R3); the CLI remains the primary human interface, and the MCP surface introduces no separate feature set."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.ng-3"}
+{"type":"acceptance_criterion","fqn":"cosanima-mcp/spec.ac-1","body":"`cosanima mcp` starts an MCP server on stdio: an MCP client can connect, complete the initialize handshake, and list the server's tools and resources; no network socket is opened by the server process."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.ac-1"}
+{"type":"acceptance_criterion","fqn":"cosanima-mcp/spec.ac-2","body":"Every planned MCP tool (graph lookups incl. query/find_symbol/callers/callees/uses/hunk, scan, and the spec/plan/review CRUD) is registered with a stable name, description, JSON input schema, and output, and returns results equivalent to the corresponding CLI command — e.g. the query tool returns the same CSV rows as `cosanima query` on the same database."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.ac-2"}
+{"type":"acceptance_criterion","fqn":"cosanima-mcp/spec.ac-3","body":"The graph and spec/plan/note data are readable as MCP resources: a resource read returns the same content as the underlying artifact (the committed spec JSONL, notes, or the queried graph), under stable resource URIs."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.ac-3"}
+{"type":"acceptance_criterion","fqn":"cosanima-mcp/spec.ac-4","body":"The six agents render from the single canonical markdown+frontmatter source into at least opencode, Claude Code, and Codex formats via the adapter, with identical instruction bodies and identical MCP tool references in every harness."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.ac-4"}
+{"type":"acceptance_criterion","fqn":"cosanima-mcp/spec.ac-5","body":"`cosanima init` installs the MCP server + cross-harness agent artifacts and no longer installs the opencode tool-suite scripts or lib/apg.ts: a fresh init in a clean temp repo produces zero apg_* / cosanima_* opencode tool files, and legacy apg artifacts are cleaned."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.ac-5"}
+{"type":"verification_item","fqn":"cosanima-mcp/spec.vi-1","body":"Launch `cosanima mcp` and complete an MCP initialize + tools/list + resources/list exchange over a pipe with a minimal MCP client (or the MCP inspector); the server responds with the full tool and resource sets and exits cleanly on EOF."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.vi-1"}
+{"type":"verification_item","fqn":"cosanima-mcp/spec.vi-2","body":"For each MCP tool, invoke it against a fixture repo (scan it first) and diff the result against the equivalent CLI command: the query tool's CSV equals `cosanima query` output, the find_symbol/callers/callees/uses/hunk results match their CLI-backed counterparts, and spec/plan/review write tools produce the same JSONL/DB state as the corresponding CLI subcommands."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.vi-2"}
+{"type":"verification_item","fqn":"cosanima-mcp/spec.vi-3","body":"Read each resource URI through the MCP server and diff against the on-disk artifact (`.cosanima/specs/<project>.jsonl`, notes, graph query) — content matches byte-for-byte where the underlying data is deterministic."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.vi-3"}
+{"type":"verification_item","fqn":"cosanima-mcp/spec.vi-4","body":"Adapter smoke test: render the six canonical agents for the opencode, Claude Code, and Codex harness dirs and diff — the instruction bodies and every MCP tool reference are identical across harnesses; only frontmatter/format differs."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.vi-4"}
+{"type":"verification_item","fqn":"cosanima-mcp/spec.vi-5","body":"Fresh `cosanima init` in a temp repo: assert the MCP server is registered/installed and the cross-harness agent artifacts are present, and that no apg_* or cosanima_* opencode tool scripts or lib files are written; run the legacy-cleanup path against a simulated apg install and confirm apg-named artifacts are purged."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.vi-5"}
+{"type":"verification_item","fqn":"cosanima-mcp/spec.vi-6","body":"Privacy check: while the server runs with a client attached, confirm the process holds no listening sockets (lsof/netstat shows no LISTEN entries for it) and makes no outbound connections — stdio-only verified end-to-end."}
+{"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.vi-6"}
+{"type":"note","fqn":"cosanima-mcp/note-1","body":"Design rationale: MCP is the cross-harness TOOL mechanism; markdown+frontmatter is the cross-harness AGENT mechanism. Because cosanima's capabilities are exposed as MCP tools (harness-agnostic protocol), the six agents reference the same MCP tool names in every harness — the tool-syntax portability barrier (which forced per-harness tool wrappers) is gone. Because the agents are authored once in canonical markdown + YAML frontmatter, only a small per-harness adapter is needed to emit opencode / Claude Code / Codex formats, and the instructions body is identical everywhere. The two decisions are complementary: MCP removes tool syntax drift, the canonical source removes instruction drift.","kind":"design"}
+{"type":"details","from":"cosanima-mcp/note-1","to":"cosanima-mcp/spec"}
+{"type":"note","fqn":"cosanima-mcp/note-2","body":"Background — what this replaces: the current agent-facing tool layer is 46 `.opencode/tools/apg_*.ts` scripts (apg_query/scan/find_symbol/modules/module_files/module_structs/file_units/file_path/methods/struct/callers/callees/uses/unresolved/hunk + the spec/plan/review suites) plus the shared plumbing `.opencode/lib/apg.ts`, all embedded into the binary via include_str! in src/main.rs (lines ~28-215) and installed by `apg init` into ~/.opencode/, with the six agents embedded at lines ~222-247. The MCP server (cosanima-mcp) replaces the tool layer; the agents move to the canonical markdown+frontmatter form. The 46 tools are retired, not renamed (Decision D2).","kind":"background"}
+{"type":"details","from":"cosanima-mcp/note-2","to":"cosanima-mcp/spec"}
+{"type":"note","fqn":"cosanima-mcp/note-3","body":"Cross-spec wiring: cosanima-mcp is a child of the 1.0 flag-day (parent cosanima-1.0 SpecDependsOn cosanima-mcp — the MCP server + cross-harness agents are 1.0 deliverables, Decision D4). It SpecDependsOn cosanima-rename (it supersedes the tool-suite rename R8/R9 and rides on the init rename R10), cosanima-repo-split (the server + agents live in the core repo really-knows-ai/cosanima), and cosanima-docs (the docs must document the MCP server + cross-harness agents and stop documenting the retired tool suite as current). Requirement-level: R9 consumes cosanima-rename/R9 (agent prefix sweep), R13 consumes cosanima-rename/R10 (init convergence).","kind":"relationship-to-other-specs"}
+{"type":"details","from":"cosanima-mcp/note-3","to":"cosanima-mcp/spec"}
+{"type":"spec_depends","from":"cosanima-mcp/spec","to":"cosanima-rename/spec"}
+{"type":"spec_depends","from":"cosanima-mcp/spec","to":"cosanima-repo-split/spec"}
+{"type":"spec_depends","from":"cosanima-mcp/spec","to":"cosanima-docs/spec"}

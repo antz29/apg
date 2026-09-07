@@ -23,6 +23,17 @@ pub struct Graph {
     pub implements: HashSet<(String, String)>,
     pub satisfies: HashSet<(String, String)>,
     pub builds: HashSet<(String, String)>,
+    /// Spine edges (GraphModel-SPEC.md; PHASE_01): end-to-end why-to-code
+    /// traceability through the Domain and Solution tiers.
+    pub drives: HashSet<(String, String)>,
+    pub requires: HashSet<(String, String)>,
+    pub realises: HashSet<(String, String)>,
+    pub represents: HashSet<(String, String)>,
+    pub implemented_by: HashSet<(String, String)>,
+    /// Invariant edges (Invariants-SPEC.md; PHASE_02): artifact → Invariant
+    /// (`GuardedBy`) and Feedback → Invariant (`Checks`).
+    pub guarded_by: HashSet<(String, String)>,
+    pub checks: HashSet<(String, String)>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -58,6 +69,27 @@ pub enum NodeKind {
     Plan,
     PlanPhase,
     Task,
+    // Tier-1/2/3 graph-native spec nodes (GraphModel-SPEC.md; PHASE_01).
+    // Tier 1: Stakeholder. Tier 2 (DDD): Domain, Subdomain, Entity,
+    // ValueObject, Aggregate, DomainEvent, DomainProcess, DomainRule, Actor.
+    // Tier 3 (C4): System, Container, Component.
+    Stakeholder,
+    Domain,
+    Subdomain,
+    Entity,
+    ValueObject,
+    Aggregate,
+    DomainEvent,
+    DomainProcess,
+    DomainRule,
+    Actor,
+    System,
+    Container,
+    Component,
+    /// The graph-wide invariant mechanism (Invariants-SPEC.md; PHASE_02): a
+    /// rule artifacts must respect, guardable onto them (`GuardedBy`) and
+    /// citable from review feedback (`Checks`).
+    Invariant,
     /// The scan-time git-state node (fqn `scan/HEAD`, one per DB; rewritten at
     /// every scan). Standalone — it carries no rel tables.
     Scan,
@@ -84,6 +116,18 @@ pub struct Node {
     pub goal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// The short name of a tier-1/2/3 spec node (Stakeholder/Domain/Entity/…).
+    /// Distinct from the FQN's final segment only by spelling (e.g. a
+    /// `value-object.Email` node's `name` is `Email`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The aggregate-root entity name of an `Aggregate` node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+    /// The `scope` of an `Invariant` node (the artifact kind it applies to:
+    /// spec/plan/review/code/…).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feature: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,6 +173,9 @@ impl Default for Node {
             title: None,
             goal: None,
             id: None,
+            name: None,
+            root: None,
+            scope: None,
             feature: None,
             body: None,
             summary: None,
