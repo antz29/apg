@@ -204,7 +204,7 @@ pub enum Record {
     },
 
     /// `{"type":"task","fqn":"future/<project>/plan.phase-<n>.task-<k>","title":"...","kind":"source","tier":"","status":"pending"}`
-    /// `kind` is the owning role (source/test/gate/docs/human); `tier`
+    /// `kind` is the owning role (source/test/gate/docs); `tier`
     /// (unit/int/e2e) is the verification depth, meaningful only for
     /// `kind = test`.
     Task {
