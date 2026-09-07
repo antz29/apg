@@ -1204,4 +1204,76 @@ mod tests {
         assert_eq!(once, twice);
         let _ = std::fs::remove_dir_all(&d);
     }
+
+    /// The version this release gate guards. Bump this literal in lockstep with
+    /// the `[package] version` line on every release: the assertions below fail
+    /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
+    /// advertised release), so a bump commit cannot silently skip it.
+    const RELEASE_VERSION: &str = "0.9.3";
+
+    /// The `version = "..."` declared directly under a Cargo.toml `[package]`
+    /// header.
+    fn cargo_manifest_version(manifest: &str) -> Option<&str> {
+        let in_package = manifest
+            .lines()
+            .position(|l| l.trim() == "[package]")
+            .map(|i| i + 1)?;
+        manifest.lines().skip(in_package).find_map(|l| {
+            l.trim()
+                .strip_prefix("version = ")
+                .map(|v| v.trim_matches('"'))
+        })
+    }
+
+    /// The `version = "..."` of the named `[[package]]` entry in a Cargo.lock.
+    fn cargo_lock_package_version<'a>(lock: &'a str, name: &str) -> Option<&'a str> {
+        let lines: Vec<&str> = lock.lines().collect();
+        let start = lines.iter().position(|l| l.trim() == "[[package]]")?;
+        let mut pkg = String::new();
+        for l in lines.iter().skip(start) {
+            let t = l.trim();
+            if t == "[[package]]" {
+                pkg.clear();
+                continue;
+            }
+            if let Some(n) = t.strip_prefix("name = ") {
+                pkg = n.trim_matches('"').to_string();
+            } else if let Some(v) = t.strip_prefix("version = ") {
+                if pkg == name {
+                    return Some(v.trim_matches('"'));
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn cargo_manifest_and_lockfile_declare_release_version() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let manifest = std::fs::read_to_string(format!("{root}/Cargo.toml")).unwrap();
+        let lock = std::fs::read_to_string(format!("{root}/Cargo.lock")).unwrap();
+        // The version the crate was actually compiled at must be the release
+        // this test guards (env! comes from the same Cargo.toml, so this also
+        // catches a test that drifted ahead of the bump).
+        assert_eq!(env!("CARGO_PKG_VERSION"), RELEASE_VERSION);
+        assert_eq!(cargo_manifest_version(&manifest), Some(RELEASE_VERSION));
+        assert_eq!(
+            cargo_lock_package_version(&lock, "apg"),
+            Some(RELEASE_VERSION)
+        );
+    }
+
+    #[test]
+    fn readme_documents_release_version() {
+        let readme =
+            std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        assert!(readme.contains("apg 0.9.3"), "README --version examples");
+        assert!(readme.contains("v0.9.3"), "README tagged-release prose");
+        assert!(
+            readme.contains("--version 0.9.3"),
+            "README Linux installer pin option"
+        );
+        // No stale release records: the previous version must be fully replaced.
+        assert!(!readme.contains("0.9.2"), "README must not reference 0.9.2");
+    }
 }
