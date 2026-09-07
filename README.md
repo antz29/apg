@@ -158,12 +158,13 @@ re-written only when their contents change), so running `apg init` again after
 upgrading `apg` updates the tools and agents where required.
 
 Installing to `~/.opencode/` makes the tools and agents available to every
-project's opencode session (not just this one). As part of that move, `apg init`
-also removes any legacy project-local `.opencode/` apg install left by older
-versions — apg-owned tools/agent/lib files only; your own agents/tools and any
-hand-written `package.json` are left alone. The plugin and agents are
-auto-discovered by opencode. **Restart opencode** after running `apg init` so
-the tools and agents are available in chat.
+project's opencode session (not just this one). Project-specific implementer and
+reviewer agents are installed into the project's `.opencode/agents/` by the
+`agent-builder` agent, never by init. If the project's `.opencode/` holds files
+that duplicate the installed suite, `apg init` prints a loud warning listing
+them — it never deletes anything. The plugin and agents are auto-discovered by
+opencode. **Restart opencode** after running `apg init` so the tools and agents
+are available in chat.
 
 ### 2. `apg scan [dir] [options]`
 

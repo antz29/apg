@@ -118,9 +118,10 @@ the codebase-navigator delegates to you to build or update them.
    narrower, never broader).** A scaffolded agent with an `ask` permission or a
    broader `external_directory` is a regression; regenerate it deny-first.
 7. **`generated: true` marker.** Every agent you generate carries
-   `generated: true` in its frontmatter — apg treats generated agents as
-   apg-owned for its own-source purity checks, so a repo can host them beside
-   the six distributed agents without being flagged impure.
+   `generated: true` in its frontmatter — the marker distinguishes agent-builder
+   generated agents from user content and from the distributed core agents
+   (`apg init` never deletes anything, and warns loudly when a project's
+   `.opencode/` duplicates the installed suite in `~/.opencode/`).
 8. **Register into the navigator.** After scaffolding, **update
    `codebase-navigator.md`'s `task` allowlist** to include every agent you
    generated (codebase-navigator.md lives under `.opencode/agents/**`, so it is

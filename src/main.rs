@@ -249,16 +249,6 @@ const AGENTS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Every agent name apg owns, for source-dir purity and legacy cleanup.
-const AGENT_FILES: &[&str] = &[
-    "codebase-navigator.md",
-    "spec-writer.md",
-    "plan-writer.md",
-    "spec-review.md",
-    "plan-review.md",
-    "agent-builder.md",
-];
-
 /// The `package.json` written by `apg init` into `~/.opencode/` when none
 /// exists, so the tool files' `@opencode-ai/plugin` import resolves.
 const OPENCODE_PACKAGE_JSON: &str = r#"{
@@ -506,8 +496,8 @@ USAGE:
   apg init [dir]              Set up apg/ (config.json + .trans/), scaffold the
                               repo .gitignore for apg/.trans/, install/update the
                               opencode apg tool suite + six distributed agents in
-                              ~/.opencode/, and remove any legacy project-local
-                              .opencode/ install
+                              ~/.opencode/, and warn loudly about project .opencode/
+                              files that duplicate the installed suite (never deletes)
   apg scan [dir] [options]    Scan a project; writes apg/.trans/db.lbug and
                               apg/.trans/graph.jsonl
   apg query \"<cypher>\"        Run a read-only Cypher query against
@@ -590,115 +580,41 @@ fn write_if_changed(path: &Path, content: &str) -> std::io::Result<bool> {
     }
 }
 
-#[allow(clippy::type_complexity)]
-fn dir_entries_only(dir: &Path, names: &[&str]) -> bool {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return true,
-    };
-    entries
-        .flatten()
-        .all(|e| names.contains(&e.file_name().to_string_lossy().as_ref()))
-}
-
-/// True when `opencode_dir` is the apg repo's own single-sourced `.opencode/`
-/// (the in-tree dir the installed files are compiled from): it carries a
-/// `.gitignore` that legacy project installs had no reason to contain, and it
-/// is apg-pure — `tools/`, `lib/`, and `agents/` hold only apg-owned files and
-/// there is no `skills/` or other user content. A project like `~/platform`
-/// that mixes user agents/skills with a stray `.gitignore` is *not* the source
-/// dir and its apg files *are* cleaned.
-fn is_apg_source_dir(opencode_dir: &Path) -> bool {
-    if !opencode_dir.join(".gitignore").is_file() || opencode_dir.join("skills").exists() {
-        return false;
-    }
-    let tool_names: Vec<&str> = SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
-    dir_entries_only(&opencode_dir.join("tools"), &tool_names)
-        && dir_entries_only(&opencode_dir.join("lib"), &["apg.ts"])
-        && dir_entries_only(&opencode_dir.join("agents"), AGENT_FILES)
-}
-
-/// Removes a legacy project-local `.opencode/` apg install written by older
-/// `apg init` versions (before the suite moved to `~/.opencode/`). Only
-/// apg-owned files are removed: the suite tools (`tools/apg_*.ts`), the shared
-/// plumbing (`lib/apg.ts`), the `codebase-navigator` agent, and — only when the
-/// `package.json` is byte-identical to the one `apg init` wrote — the
-/// apg-generated `package.json`/`package-lock.json`/`bun.lock`/`node_modules`.
-/// User-owned agents/tools/skills and modified `package.json` files are left
-/// alone (so user content stays when it shares the directory with an old apg
-/// install). Returns `(files_removed, dirs_removed)`; `Ok((0, 0))` when there
-/// is nothing to clean. The apg repo's own apg-pure `.opencode/` is skipped.
-fn remove_legacy_project_install(dir: &Path) -> std::io::Result<(usize, usize)> {
-    let opencode_dir = dir.join(".opencode");
-    if !opencode_dir.is_dir() || is_apg_source_dir(&opencode_dir) {
-        return Ok((0, 0));
-    }
-
-    let mut files_removed = 0usize;
-    let mut dirs_removed = 0usize;
-
-    let tools_dir = opencode_dir.join("tools");
-    for (name, _) in SUITE_TOOLS {
-        let p = tools_dir.join(name);
-        if p.is_file() && std::fs::remove_file(&p).is_ok() {
-            files_removed += 1;
-        }
-    }
-    let lib_dir = opencode_dir.join("lib");
-    let lib_apg = lib_dir.join("apg.ts");
-    if lib_apg.is_file() && std::fs::remove_file(&lib_apg).is_ok() {
-        files_removed += 1;
-    }
-    let agents_dir = opencode_dir.join("agents");
-    for name in AGENT_FILES {
-        let p = agents_dir.join(name);
-        if p.is_file() && std::fs::remove_file(&p).is_ok() {
-            files_removed += 1;
-        }
-    }
-
-    for d in [&tools_dir, &lib_dir, &agents_dir] {
-        if d.is_dir() && std::fs::read_dir(d)?.next().is_none() {
-            std::fs::remove_dir(d)?;
-            dirs_removed += 1;
-        }
-    }
-
-    let pkg_path = opencode_dir.join("package.json");
-    let apg_owned_pkg = pkg_path.is_file()
-        && std::fs::read(&pkg_path)
-            .map(|b| b == OPENCODE_PACKAGE_JSON.as_bytes())
-            .unwrap_or(false);
-    if apg_owned_pkg {
-        for f in ["package.json", "package-lock.json", "bun.lock"] {
-            let p = opencode_dir.join(f);
-            if p.is_file() && std::fs::remove_file(&p).is_ok() {
-                files_removed += 1;
+/// Files in a project's local `.opencode/` that duplicate the user-level
+/// install (`~/.opencode/`): the same relative path exists in both. A project
+/// `.opencode/` should hold only project-specific agents (agent-builder
+/// generated); a copy of a suite tool or core agent there shadows the installed
+/// version, so `apg init` warns loudly about it — it never deletes anything.
+fn duplicate_install_files(project_opencode: &Path, user_opencode: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, project: &Path, user: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, project, user, out);
+            } else if let Ok(rel) = p.strip_prefix(project) {
+                if user.join(rel).is_file() {
+                    out.push(p);
+                }
             }
         }
-        let nm = opencode_dir.join("node_modules");
-        if nm.is_dir() {
-            std::fs::remove_dir_all(&nm)?;
-            dirs_removed += 1;
-        }
     }
-
-    if apg_owned_pkg
-        && std::fs::read_dir(&opencode_dir)
-            .map(|mut it| it.next().is_none())
-            .unwrap_or(false)
-    {
-        std::fs::remove_dir(&opencode_dir)?;
-        dirs_removed += 1;
+    let mut out = Vec::new();
+    if project_opencode.is_dir() {
+        walk(project_opencode, project_opencode, user_opencode, &mut out);
     }
-
-    Ok((files_removed, dirs_removed))
+    out
 }
 
 /// `apg init [dir]`: create the committed `apg/` layout (config.json +
 /// `.trans/`), install (or update) the opencode apg tool suite + the six
 /// distributed agents into `~/.opencode/`, scaffold the repo `.gitignore` for
-/// `apg/.trans/`, and remove any legacy project-local `.opencode/` install.
+/// `apg/.trans/`, and warn loudly about any project-local `.opencode/` files
+/// that duplicate the installed suite (never deletes anything). Project-specific
+/// implementer/reviewer agents are installed into the project `.opencode/` by
+/// the agent-builder, not by init.
 fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     let dir = if args.is_empty() {
         std::env::current_dir()?
@@ -779,13 +695,21 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
 
     scaffold_gitignore(&dir)?;
 
-    let (cleaned_files, cleaned_dirs) = remove_legacy_project_install(&dir)?;
-    if cleaned_files > 0 || cleaned_dirs > 0 {
-        println!(
-            "Removed legacy project-local .opencode/ apg install from {} ({} files, {} dirs)",
-            dir.join(".opencode").display(),
-            cleaned_files,
-            cleaned_dirs
+    let project_opencode = dir.join(".opencode");
+    let dupes = duplicate_install_files(&project_opencode, &opencode_dir);
+    if !dupes.is_empty() {
+        eprintln!(
+            "!! WARNING: {} file(s) in {} duplicate the installed apg suite in {}:",
+            dupes.len(),
+            project_opencode.display(),
+            opencode_dir.display()
+        );
+        for p in &dupes {
+            eprintln!("     {}", p.strip_prefix(&dir).unwrap_or(&p).display());
+        }
+        eprintln!(
+            "   The project .opencode should hold only project-specific agents (installed by \
+             agent-builder); these shadow the installed versions. Remove them if unintended."
         );
     }
     Ok(())
@@ -1228,47 +1152,41 @@ fn run_pipeline(
 mod tests {
     use super::*;
 
-    /// Builds a `.opencode/` dir shaped like the apg repo's own single-sourced
-    /// dir: `.gitignore` + apg-pure `tools/` + `lib/` + all six `agents/`, no
-    /// `skills/`. Returns the `.opencode` path.
-    fn source_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("apg-src-dir-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(d.join("tools")).unwrap();
-        std::fs::create_dir_all(d.join("lib")).unwrap();
-        std::fs::create_dir_all(d.join("agents")).unwrap();
-        std::fs::write(d.join(".gitignore"), "").unwrap();
-        for (name, _) in SUITE_TOOLS {
-            std::fs::write(d.join("tools").join(name), "").unwrap();
-        }
-        std::fs::write(d.join("lib").join("apg.ts"), "").unwrap();
-        for name in AGENT_FILES {
-            std::fs::write(d.join("agents").join(name), "").unwrap();
-        }
-        d
+    #[test]
+    fn duplicate_install_files_detects_overlap() {
+        let proj = std::env::temp_dir().join(format!("apg-proj-oc-{}", std::process::id()));
+        let user = std::env::temp_dir().join(format!("apg-user-oc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&proj);
+        let _ = std::fs::remove_dir_all(&user);
+        std::fs::create_dir_all(proj.join("agents")).unwrap();
+        std::fs::create_dir_all(proj.join("tools")).unwrap();
+        std::fs::create_dir_all(user.join("tools")).unwrap();
+        std::fs::create_dir_all(user.join("agents")).unwrap();
+        // Duplicate: same relative path exists in both.
+        std::fs::write(proj.join("tools").join("apg_query.ts"), "x").unwrap();
+        std::fs::write(user.join("tools").join("apg_query.ts"), "x").unwrap();
+        // Project-only (a generated agent): not a duplicate.
+        std::fs::write(proj.join("agents").join("implementer.md"), "x").unwrap();
+        // User-only (a core agent): not a duplicate.
+        std::fs::write(user.join("agents").join("spec-writer.md"), "x").unwrap();
+        let dupes = duplicate_install_files(&proj, &user);
+        assert_eq!(dupes.len(), 1);
+        assert!(dupes.contains(&proj.join("tools").join("apg_query.ts")));
+        let _ = std::fs::remove_dir_all(&proj);
+        let _ = std::fs::remove_dir_all(&user);
     }
 
     #[test]
-    fn source_dir_with_all_six_agents_is_pure() {
-        let d = source_dir("six");
-        assert!(is_apg_source_dir(&d));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn source_dir_with_foreign_agent_is_not_pure() {
-        let d = source_dir("foreign");
-        std::fs::write(d.join("agents").join("my-custom-agent.md"), "").unwrap();
-        assert!(!is_apg_source_dir(&d));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn source_dir_with_skills_or_user_content_is_not_pure() {
-        let d = source_dir("skills");
-        std::fs::create_dir_all(d.join("skills")).unwrap();
-        assert!(!is_apg_source_dir(&d));
-        let _ = std::fs::remove_dir_all(&d);
+    fn duplicate_install_files_absent_when_no_project_opencode() {
+        let proj = std::env::temp_dir().join(format!("apg-no-oc-{}", std::process::id()));
+        let user = std::env::temp_dir().join(format!("apg-no-oc-user-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&proj);
+        let _ = std::fs::remove_dir_all(&user);
+        std::fs::create_dir_all(&user).unwrap();
+        let dupes = duplicate_install_files(&proj, &user);
+        assert!(dupes.is_empty());
+        let _ = std::fs::remove_dir_all(&proj);
+        let _ = std::fs::remove_dir_all(&user);
     }
 
     #[test]

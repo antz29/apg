@@ -41,10 +41,11 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   differ) the opencode apg tool suite into `~/.opencode/tools/` +
   `~/.opencode/lib/` plus the **six distributed agents** — `codebase-navigator`,
   `spec-writer`, `plan-writer`, `spec-review`, `plan-review`, `agent-builder` —
-  into `~/.opencode/agents/`. Also removes any apg-owned files under
-  `<dir>/.opencode/` left by pre-`~/.opencode` installs (user
-  tools/agents and non-apg `package.json` files are left alone; the apg repo's
-  own `.opencode/` is never touched).
+  into `~/.opencode/agents/`. Project-specific implementer/reviewer agents are
+  installed into the project's `.opencode/agents/` by the **`agent-builder`**
+  agent, never by init. If the project's `.opencode/` holds files that duplicate
+  the installed suite (`~/.opencode/`), init prints a **loud warning** listing
+  them — it never deletes anything.
 - `apg scan [dir] [--language L[,L...]] [--exclude-path G]* [--module M]* [--no-build-scripts]
   [blacklist...]`
   — run the pipeline; writes `apg/.trans/db.lbug`, `apg/.trans/graph.jsonl`,
