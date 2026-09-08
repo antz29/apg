@@ -3,7 +3,7 @@ import { runCypher, lit, csvToRows } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Plan-phase health for a project: unsatisfied requirements (declared but no PlanPhase Satisfies them), Gates cycles (a phase transitively gated on itself), phases with no tasks, and tasks under review (done but with unresolved Feedback on the phase or its tasks).",
+    "Plan-phase health for a project: unsatisfied requirements (declared but no PlanPhase Satisfies them), requirements Satisfied by more than one phase (violating the exactly-one-phase rule), Gates cycles (a phase transitively gated on itself), phases with no tasks, and tasks under review (done but with unresolved Feedback on the phase or its tasks).",
   args: {
     project: tool.schema.string().describe("Plan project (required)."),
   },
@@ -20,9 +20,15 @@ export default tool({
     const reqs = csvToRows(
       await runCypher(context, `MATCH (r:Requirement) WHERE r.fqn STARTS WITH ${lit(`${project}/spec.`)} RETURN r.fqn, r.id`),
     )
-    const sat = new Set(
-      csvToRows(await runCypher(context, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn")).map((r) => r[0]),
-    )
+    // Satisfying phase per requirement — count, not membership: the spec
+    // requires every requirement Satisfied by EXACTLY one phase, so >1 is a
+    // finding too (not just 0).
+    const satBy = new Map<string, string[]>()
+    for (const [r, p] of csvToRows(
+      await runCypher(context, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn, pp.fqn"),
+    ).slice(1)) {
+      satBy.set(r, [...(satBy.get(r) ?? []), p])
+    }
     const gates: Array<[string, string]> = csvToRows(
       await runCypher(context, `MATCH (a:PlanPhase)-[:Gates]->(b:PlanPhase) WHERE a.fqn STARTS WITH ${lit(pfx)} RETURN a.fqn, b.fqn`),
     ).slice(1) as Array<[string, string]>
@@ -51,9 +57,19 @@ export default tool({
     const cycle = detectCycle(gates)
     if (cycle) lines.push(`!! Gates cycle detected: ${cycle.join(" -> ")}`)
 
-    const unsatisfied = reqs.slice(1).filter((r) => !sat.has(r[0]))
+    const unsatisfied = reqs.slice(1).filter((r) => !satBy.has(r[0]))
     if (unsatisfied.length) {
       lines.push(`!! unsatisfied requirements (no PlanPhase Satisfies them): ${unsatisfied.map((r) => r[1]).join(", ")}`)
+    }
+    const overSatisfied = reqs
+      .slice(1)
+      .map((r) => [r, satBy.get(r[0]) ?? []] as const)
+      .filter(([, ps]) => ps.length > 1)
+    if (overSatisfied.length) {
+      for (const [r, ps] of overSatisfied) {
+        const phases = ps.map((p) => p.replace(pfx, "")).join(", ")
+        lines.push(`!! ${r[1]} Satisfied by more than one phase (${phases}) — every requirement must be Satisfied by exactly one phase`)
+      }
     }
     return lines.join("\n")
   },

@@ -640,6 +640,7 @@ pub fn ingest(
                     number,
                     title,
                     deliverable,
+                    status,
                 } => insert_node(
                     &mut graph,
                     fqn,
@@ -647,6 +648,7 @@ pub fn ingest(
                         number: Some(number),
                         title: Some(title),
                         deliverable: opt(deliverable),
+                        status: opt(status),
                         ..spec_node(NodeKind::PlanPhase)
                     },
                 ),
@@ -1067,6 +1069,7 @@ pub fn ingest(
     });
     graph.builds = filter_edges(&graph, &graph.builds, |g, a, b| {
         kind_is(g, a, NodeKind::Task)
+            && g.nodes.contains_key(b)
             && matches!(
                 g.nodes[b].kind,
                 NodeKind::Module | NodeKind::File | NodeKind::Struct | NodeKind::Function
@@ -1091,6 +1094,7 @@ pub fn ingest(
     });
     graph.implemented_by = filter_edges(&graph, &graph.implemented_by, |g, a, b| {
         is_solution_kind(g, a)
+            && g.nodes.contains_key(b)
             && matches!(
                 g.nodes[b].kind,
                 NodeKind::Module
@@ -1105,6 +1109,7 @@ pub fn ingest(
     // nodes. Checks runs Feedback → Invariant.
     graph.guarded_by = filter_edges(&graph, &graph.guarded_by, |g, a, b| {
         g.nodes.contains_key(a)
+            && g.nodes.contains_key(b)
             && g.nodes[b].kind == NodeKind::Invariant
             && matches!(
                 g.nodes[a].kind,
@@ -1138,7 +1143,9 @@ pub fn ingest(
             )
     });
     graph.checks = filter_edges(&graph, &graph.checks, |g, a, b| {
-        kind_is(g, a, NodeKind::Feedback) && g.nodes[b].kind == NodeKind::Invariant
+        kind_is(g, a, NodeKind::Feedback)
+            && g.nodes.contains_key(b)
+            && g.nodes[b].kind == NodeKind::Invariant
     });
 
     (
@@ -1924,6 +1931,7 @@ mod tests {
                 number: 1,
                 title: "P1".to_string(),
                 deliverable: String::new(),
+                status: String::new(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-1.task-1".to_string(),
@@ -2044,6 +2052,7 @@ mod tests {
                 number: 1,
                 title: "P1".to_string(),
                 deliverable: String::new(),
+                status: String::new(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-1.task-1".to_string(),

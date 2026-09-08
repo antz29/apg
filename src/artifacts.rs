@@ -5,7 +5,7 @@
 //! the DB — the code graph is untouched; only the project's `…` nodes
 //! are detached and re-merged from its JSONL files.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -222,6 +222,27 @@ pub fn has_node(&self, fqn: &str) -> bool {
         None
     }
 
+    /// The **Implementation** label of `fqn` — one of the four Implementation
+    /// tier labels (Module/File/Struct/Function), or `None`. Unlike
+    /// [`code_label`](Self::code_label) this deliberately EXCLUDES
+    /// `UnresolvedTarget`: an unresolved reference is not real code. Used by
+    /// the apply gate's planned-node realization check — a planned node is
+    /// realized only when a scanned Implementation node occupies its FQN
+    /// (PlanCompletion-SPEC.md; a planned FQN that happens to match an
+    /// UnresolvedTarget is not code).
+    pub fn impl_label(&self, fqn: &str) -> Option<&'static str> {
+        for l in ["Function", "Struct", "File", "Module"] {
+            if count(
+                &self.db,
+                &format!("MATCH (n:{l} {{fqn: {}}}) RETURN count(*)", lit(fqn)),
+            ) > 0
+            {
+                return Some(l);
+            }
+        }
+        None
+    }
+
     /// The DB label of any node — code or spec/plan — or `None` when `fqn`
     /// does not resolve. Unlike [`code_label`](Self::code_label) (code tables
     /// only), this covers every node table; `add_note` uses it to decide
@@ -397,9 +418,37 @@ pub fn resolve_anchor(&self, fqn: &str) -> anyhow::Result<()> {
     /// caller can run the merge inside a single transaction — a failed edge
     /// merge then rolls back the node merges instead of leaving orphans.
     pub fn merge_records(&self, conn: &Connection, records: &[Record]) -> anyhow::Result<()> {
+        // A PlannedNode record must never overwrite a **present** (realized)
+        // Implementation node: the plan JSONL keeps its planned records until
+        // apply, so a write-through AFTER a realization scan (a feedback
+        // resolve, a plan note, a `plan done`) would otherwise re-mark the
+        // scanned code `planned` and break the apply gate's realization
+        // check. This mirrors the scanner-replace rule (ingest.rs): a present
+        // node supersedes the planned record; the planned record is skipped.
+        let realized: HashSet<String> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::PlannedNode { fqn, .. } => Some(fqn.clone()),
+                _ => None,
+            })
+            .filter(|fqn| {
+                ["Function", "Struct", "File", "Module"].iter().any(|l| {
+                    count(
+                        &self.db,
+                        &format!(
+                            "MATCH (n:{l} {{fqn: {}}}) WHERE n.status IS NULL OR n.status <> 'planned' RETURN count(*)",
+                            lit(fqn)
+                        ),
+                    ) > 0
+                })
+            })
+            .collect();
         let mut known: HashMap<String, &'static str> = HashMap::new();
         for r in records {
             if let Some((label, fqn, props)) = node_merge(r) {
+                if matches!(r, Record::PlannedNode { .. }) && realized.contains(fqn) {
+                    continue;
+                }
                 known.insert(fqn.to_string(), label);
                 self.merge_node(conn, label, fqn, &props)?;
             }
@@ -501,6 +550,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             number,
             title,
             deliverable,
+            status,
         } => Some((
             "PlanPhase",
             fqn,
@@ -508,6 +558,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("number", number.to_string()),
                 ("title", title.clone()),
                 ("deliverable", deliverable.clone()),
+                ("status", status.clone()),
             ],
         )),
         Record::Task {

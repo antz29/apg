@@ -1,5 +1,5 @@
 ---
-description: Writes a graph-native spec for a project: authors the 4-tier spec graph (Requirement/Stakeholder tier 1, Domain tier 2, Solution tier 3, plus Phase/Decision/Future/NonGoal/AcceptanceCriterion/VerificationItem/Note and the spine edges connecting them) through the apg_spec_* tools (no file writes). Use when the user wants to turn an idea or feature request into a spec, materialize a proposed spec graph structure, or reconcile a spec to an implementation.
+description: Writes a graph-native spec for a project: authors the 4-tier spec graph (Requirement/Stakeholder tier 1, Domain tier 2, Solution tier 3, plus Phase/Decision/NonGoal/AcceptanceCriterion/VerificationItem/Note and the spine edges connecting them) through the apg_spec_* tools (no file writes). Use when the user wants to turn an idea or feature request into a spec, materialize a proposed spec graph structure, or reconcile a spec to an implementation.
 mode: subagent
 hidden: true
 permission:

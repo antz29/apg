@@ -84,7 +84,7 @@ fn apply_review_add(apg_root: &Path, p: &ParsedArgs) -> anyhow::Result<()> {
     }
 
     // Discriminate a spec-family target from a code target by its DB node
-    // label (the `future/` prefix is gone — PHASE_04): code nodes
+    // label (the placeholder prefix is gone — PHASE_02): code nodes
     // (Module/Struct/Function/File/UnresolvedTarget) need an explicit
     // `--project`; spec/plan/review nodes derive the project from their FQN's
     // first path segment.

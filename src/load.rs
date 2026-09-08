@@ -195,6 +195,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut planphase_number = Vec::new();
     let mut planphase_title = Vec::new();
     let mut planphase_deliverable = Vec::new();
+    let mut planphase_status = Vec::new();
     let mut task_fqn = Vec::new();
     let mut task_title = Vec::new();
     let mut task_kind = Vec::new();
@@ -357,6 +358,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 planphase_number.push(node.number.map(|n| n as i64).unwrap_or_default());
                 planphase_title.push(node.title.clone().unwrap_or_default());
                 planphase_deliverable.push(node.deliverable.clone().unwrap_or_default());
+                planphase_status.push(node.status.clone().unwrap_or_default());
             }
             NodeKind::Task => {
                 task_fqn.push(fqn.clone());
@@ -584,6 +586,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("number", Col::I64(planphase_number)),
             ("title", Col::Str(planphase_title)),
             ("deliverable", Col::Str(planphase_deliverable)),
+            ("status", Col::Str(planphase_status)),
         ],
     )?;
     write_parquet(
@@ -1332,7 +1335,7 @@ pub fn node_labels() -> &'static [&'static str] {
 }
 
 /// Whether a DB node label is a *code* label (Module/Struct/Function/File/
-/// UnresolvedTarget). The `future/` namespace is gone (PHASE_04) and so is the
+/// UnresolvedTarget). The placeholder namespace is gone (PHASE_02) and so is
 /// placeholder node (PHASE_02) — code vs spec-family discrimination now uses
 /// the node label: `review_add` and other FQN routers check `is_code_label`
 /// before deriving a project from the FQN.
@@ -1414,7 +1417,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     )?;
     conn.query("CREATE NODE TABLE Plan(fqn STRING PRIMARY KEY, title STRING, strategy STRING)")?;
     conn.query(
-        "CREATE NODE TABLE PlanPhase(fqn STRING PRIMARY KEY, number INT64, title STRING, deliverable STRING)",
+        "CREATE NODE TABLE PlanPhase(fqn STRING PRIMARY KEY, number INT64, title STRING, deliverable STRING, status STRING)",
     )?;
     conn.query(
         "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, kind STRING, tier STRING, status STRING)",
@@ -1800,6 +1803,8 @@ enum Export {
         title: String,
         #[serde(skip_serializing_if = "String::is_empty")]
         deliverable: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        status: String,
     },
     Task {
         fqn: String,
@@ -2118,6 +2123,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                 number: node.number.unwrap_or_default(),
                 title: node.title.clone().unwrap_or_default(),
                 deliverable: node.deliverable.clone().unwrap_or_default(),
+                status: node.status.clone().unwrap_or_default(),
             },
             NodeKind::Task => Export::Task {
                 fqn: fqn.clone(),
@@ -2625,6 +2631,7 @@ mod tests {
                             number: v.get("number").and_then(|x| x.as_u64()).map(|x| x as u32),
                             title: o("title"),
                             deliverable: o("deliverable"),
+                            status: o("status"),
                             ..Node::default()
                         },
                     );

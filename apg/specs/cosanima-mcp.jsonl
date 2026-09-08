@@ -31,7 +31,7 @@
 {"type":"requirement","fqn":"cosanima-mcp/spec.R5","id":"R5","title":"Scan tool","body":"An MCP tool wrapping `cosanima scan` end-to-end: language auto-detect (or --language/--module/--exclude-path), blacklist prefixes, the scanner + ingestor pipeline, and the .trans outputs (db.lbug + graph.jsonl + cosanima-frontend.log) — the full cmd_scan surface.","feature":"tools"}
 {"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R5"}
 {"type":"anchors","from":"cosanima-mcp/spec.R5","to":"apg.cmd_scan"}
-{"type":"requirement","fqn":"cosanima-mcp/spec.R6","id":"R6","title":"Spec/plan/review CRUD tools","body":"MCP tools for the intent graph, mapping onto spec_cmd / plan_cmd / review_cmd: spec init/add/anchor/link/rm/render/promote/archive; plan init/add/link/done/undone/complete/render; review add/action/resolve/reject/list. Write-through semantics (JSONL first, then DB re-merge), cycle detection, and dangling-ref validation are preserved exactly.","feature":"tools"}
+{"type":"requirement","fqn":"cosanima-mcp/spec.R6","id":"R6","title":"Spec/plan/review CRUD tools","body":"MCP tools for the intent graph, mapping onto spec_cmd / plan_cmd / review_cmd: spec init/add/anchor/link/spine/rm/render; plan init/add (phase/task/planned)/link/done/undone/note/complete/render/apply; review add/action/resolve/reject/list. Write-through semantics (JSONL first, then DB re-merge), cycle detection, and dangling-ref validation are preserved exactly.","feature":"tools"}
 {"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R6"}
 {"type":"anchors","from":"cosanima-mcp/spec.R6","to":"apg.spec_cmd.cmd_spec"}
 {"type":"anchors","from":"cosanima-mcp/spec.R6","to":"apg.plan_cmd.cmd_plan"}

@@ -2436,6 +2436,7 @@ mod tests {
                 number: 1,
                 title: "P1".to_string(),
                 deliverable: "D".to_string(),
+                status: "pending".to_string(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
@@ -2445,9 +2446,9 @@ mod tests {
                 status: "pending".to_string(),
             },
             Record::PlannedNode {
-                fqn: "github.com/x/y.Store".to_string(),
+                fqn: "github.com/x/y.Gateway".to_string(),
                 kind: "struct".to_string(),
-                name: "Store".to_string(),
+                name: "Gateway".to_string(),
                 parent: String::new(),
             },
             Record::Contains {
@@ -2460,7 +2461,7 @@ mod tests {
             },
             Record::Builds {
                 from: "foo/plan.phase-01.task-1".to_string(),
-                to: "github.com/x/y.Store".to_string(),
+                to: "github.com/x/y.Gateway".to_string(),
             },
         ];
         specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &plan).unwrap();
@@ -2468,13 +2469,16 @@ mod tests {
 
         // The planned node lands as a Struct with status=planned; the pending
         // anchor to the proposed Solution node lands; the Builds edge lands.
+        // (The fixture's real Store is untouched — a planned record never
+        // overwrites present code, scanner-replace.)
         {
             let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
-            assert!(db.is_planned("github.com/x/y.Store"));
+            assert!(db.is_planned("github.com/x/y.Gateway"));
+            assert!(!db.is_planned("github.com/x/y.Store"));
             let out = db
                 .conn()
                 .unwrap()
-                .query("MATCH (s:Struct {fqn: 'github.com/x/y.Store'}) RETURN s.status")
+                .query("MATCH (s:Struct {fqn: 'github.com/x/y.Gateway'}) RETURN s.status")
                 .unwrap()
                 .to_string();
             assert!(out.contains("planned"), "planned status: {out}");
@@ -2492,7 +2496,7 @@ mod tests {
                 .unwrap()
                 .to_string();
             assert!(
-                out.contains("github.com/x/y.Store"),
+                out.contains("github.com/x/y.Gateway"),
                 "planned build: {out}"
             );
         }
@@ -2501,7 +2505,8 @@ mod tests {
         // committed JSONLs.
         artifacts::reingest_project(&apg_root, "foo").unwrap();
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.is_planned("github.com/x/y.Store"));
+        assert!(db.is_planned("github.com/x/y.Gateway"));
+        assert!(!db.is_planned("github.com/x/y.Store"));
         assert!(db.has_node("foo/system.Gateway"));
         let out = db
             .conn()
@@ -3984,7 +3989,7 @@ mod tests {
         std::fs::create_dir_all(&plan_dir).unwrap();
         let plan = vec![
             Record::Plan { fqn: "foo/plan".into(), title: "P".into(), strategy: String::new() },
-            Record::PlanPhase { fqn: "foo/plan.phase-01".into(), number: 1, title: "P1".into(), deliverable: String::new() },
+            Record::PlanPhase { fqn: "foo/plan.phase-01".into(), number: 1, title: "P1".into(), deliverable: String::new(), status: String::new() },
             Record::Task { fqn: "foo/plan.phase-01.task-1".into(), title: "t".into(), kind: "source".into(), tier: String::new(), status: "pending".into() },
             Record::PlannedNode { fqn: "github.com/x/y.Store".into(), kind: "struct".into(), name: "Store".into(), parent: String::new() },
             Record::PlannedNode { fqn: "github.com/x/y.Gateway".into(), kind: "struct".into(), name: "Gateway".into(), parent: String::new() },
@@ -4032,7 +4037,7 @@ mod tests {
         std::fs::create_dir_all(&plan_dir).unwrap();
         let plan = vec![
             Record::Plan { fqn: "foo/plan".into(), title: "P".into(), strategy: String::new() },
-            Record::PlanPhase { fqn: "foo/plan.phase-01".into(), number: 1, title: "P1".into(), deliverable: String::new() },
+            Record::PlanPhase { fqn: "foo/plan.phase-01".into(), number: 1, title: "P1".into(), deliverable: String::new(), status: String::new() },
             Record::Task { fqn: "foo/plan.phase-01.task-1".into(), title: "t".into(), kind: "source".into(), tier: String::new(), status: "pending".into() },
             Record::PlannedNode { fqn: "github.com/x/y.Store".into(), kind: "struct".into(), name: "Store".into(), parent: String::new() },
             Record::Contains { from: "foo/plan".into(), to: "foo/plan.phase-01".into() },

@@ -347,13 +347,19 @@ pub enum Record {
         strategy: String,
     },
 
-    /// `{"type":"plan_phase","fqn":"<project>/plan.phase-<n>","number":1,"title":"...","deliverable":"..."}`
+    /// `{"type":"plan_phase","fqn":"<project>/plan.phase-<n>","number":1,"title":"...","deliverable":"...","status":"pending|done"}`
+    /// `status` is the durable phase milestone: `pending` until `apg plan
+    /// complete` marks the phase `done` (PlanExecution-SPEC.md) — a completed
+    /// phase is distinguishable from an uncompleted one whose tasks are all
+    /// done and feedback resolved.
     PlanPhase {
         fqn: String,
         number: u32,
         title: String,
         #[serde(default)]
         deliverable: String,
+        #[serde(default)]
+        status: String,
     },
 
     /// `{"type":"task","fqn":"<project>/plan.phase-<n>.task-<k>","title":"...","kind":"source","tier":"","status":"pending"}`

@@ -3,7 +3,7 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "A reviewer resolves an actioned review item (`apg review resolve <feedback-fqn>`): terminal — status becomes resolved and the item no longer blocks archive/complete. Only the reviewer side does this; writers cannot resolve their own feedback.",
+    "A reviewer resolves an actioned review item (`apg review resolve <feedback-fqn>`): terminal — status becomes resolved and the item no longer blocks the phase-complete milestone or the apply gate. Only the reviewer side does this; writers cannot resolve their own feedback.",
   args: {
     feedback: tool.schema
       .string()

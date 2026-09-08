@@ -68,10 +68,16 @@ FQNs keep cross-project references intact through the rebase.
 
 ## Invariants
 
-The invariant set (Invariants-SPEC.md) guards the apply act like any artifact: product
-invariants (e.g. "release records' version equals the tag") are checked by the coherence gate;
-a `GuardedBy` invariant that would be violated by the merge blocks apply. Emergent invariants
-discovered during execution were already materialized before the gate.
+The invariant set (Invariants-SPEC.md) applies to the apply act like any
+artifact. An invariant's body is **free prose**, so the coherence gate does not
+mechanically evaluate it — instead the navigator verifies the `GuardedBy`
+invariant set in scope (`apg invariants`) as part of the human gate: a
+`GuardedBy` invariant the merge would violate is raised there and blocks apply
+via the human's no-blocking-issues approval. This is consistent with
+Invariants-SPEC's "Correctness never depends on them" (the CLI envelope + the
+human gate carry the load; invariants make the in-scope rules visible, never
+mechanically enforced). Emergent invariants discovered during execution were
+already materialized before the gate.
 
 ## Out of scope
 

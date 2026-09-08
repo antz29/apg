@@ -174,7 +174,6 @@ under the project-scoped FQNs (`<project>/spec`, `<project>/plan`,
 | Requirement       | fqn, id, title, body, feature           | `<project>/spec.<id>`; grouped by feature |
 | Phase             | fqn, number, title                      | Spec phase ordering (`<project>/spec.phase-<n>`) |
 | Decision / NonGoal / AcceptanceCriterion / VerificationItem | fqn, (id/summary\|body) | Spec sections |
-| Future            | fqn, kind, target                       | Placeholder for not-yet-built code; `target` = intended real FQN |
 | Note              | fqn, body, kind                         | Prose narrative (background/design/…); `details` edges target what it annotates |
 | Feedback          | fqn, body, status, disposition          | A review item (open/actioned/resolved) |
 | Plan / PlanPhase / Task | fqn, title/strategy/number/deliverable, tier/status | The phased plan (`<project>/plan…`) |
@@ -186,15 +185,17 @@ under the project-scoped FQNs (`<project>/spec`, `<project>/plan`,
 | DependsOn       | Requirement → Requirement     | "consumes R4"                         |
 | Gates           | Phase → Phase, PlanPhase → PlanPhase | phase ordering / gating        |
 | SpecDependsOn   | Spec → Spec                   | cross-spec antecedents                |
-| Anchors         | Requirement/Task → code or Future | resolved (code) vs pending (Future) anchors |
+| Anchors         | Requirement/Task → code or Solution node | resolved (code) vs pending (planned/Solution) anchors |
 | Implements      | code → Requirement            | code delivers the requirement         |
 | Satisfies       | PlanPhase → Requirement       | a phase delivers a requirement        |
-| Builds          | Task → Future                 | a task creates planned code           |
+| Builds          | Task → planned Implementation node | a task creates planned code           |
 
 Authoring is via the `apg spec` / `apg plan` / `apg review` CLI (or the suite
 tools). A requirement is `delivered` when an `Implements` edge exists, else
 `planned`; a spec is `implemented` when every requirement is delivered. Pending
-anchors point at `Future` nodes — planned code, expected, never an error.
+anchors point at a proposed Solution node (tier 3) or a `planned`
+Implementation node (tier 4) — expected, never an error; a scan that finds real
+code at a planned FQN replaces it.
 
 ### Fidelity
 
@@ -317,13 +318,41 @@ with a `<project>` arg) — it enters the active set writers/reviewers query. Yo
 hold the `apg_invariant_add` grant; the writers/reviewers are awareness-only and
 never materialize.
 
-### Plan authoring (delegate — never author inline)
+### Plan authoring (delegate — never author inline; orchestrate)
 
 When the user asks to turn an existing spec into a phased implementation plan,
-**delegate to the `plan-writer` subagent** via the `task` tool. You never author
-a plan inline. The plan-writer reads the spec graph (`apg_spec_requirements`,
-`apg_spec_phases`, …) and authors the `Plan`/`PlanPhase`/`Task` graph. Report
-the plan fqn (`<project>/plan`) when it returns.
+**orchestrate plan creation** (PlanCreation-SPEC.md) and **delegate the
+authoring to `plan-writer` subagents** via the `task` tool — you never author a
+plan inline. The flow has two holistic gates, with a stage sequence, parallel
+spawning, scoped routing, and a termination decision:
+
+1. **Breakdown** (single `plan-writer`): `apg plan init` + every `PlanPhase`
+   (title, deliverable) + `Satisfies` + `Gates`/prereq + the **planned
+   Implementation nodes** the delta adds. **Skeleton only — no tasks yet.**
+2. **Structural holistic review #1** (single `plan-review`): the breakdown
+   itself. Structural feedback routes to the breakdown writer → fix →
+   re-review → until structurally green.
+3. **Parallel per-phase writing** (one `plan-writer` per phase): each authors
+   only that phase's `Task` nodes (disjoint FQNs), `Builds` referencing the
+   declared planned nodes.
+4. **Parallel per-phase review** (one `plan-review` per phase, cycled):
+   feedback routes to that phase's writer, fixed through the authoring path,
+   resolved/rejected until each phase is individually green.
+5. **Final holistic review** (single `plan-review`, cycled): cross-phase
+   consistency. A phase it flags re-enters **its per-phase review** after its
+   writer's fix, then the holistic review runs again.
+6. **Termination**: when the final holistic review is green (zero feedback),
+   resolution has terminated — the plan is approved and execution proceeds.
+
+**Routing by scope**: structural issues (phase set, ordering, gates,
+requirement coverage) → the **breakdown writer**; phase-level issues → **that
+phase's writer**. **Re-entry rule**: a phase touched by the final holistic
+review re-enters its per-phase review before the next holistic pass.
+
+**Invariant injection (PlanCreation-SPEC §Invariant usage):** before
+delegating, query `apg_invariants` and pass the active set (fqn + title) into
+the plan-writer/plan-review prompts (the writers also query it themselves).
+Report the plan fqn (`<project>/plan`) when it returns.
 
 ### Codebase agents (delegate — never scaffold or implement yourself)
 
@@ -370,8 +399,11 @@ branch. `main` is untouched during execution.
 - **Nothing is promoted during execution**: `apg_plan_done` is an implementer
   assertion, `apg_plan_complete` a milestone. The plan survives until apply.
 - **The apply act** (single delivery moment, PlanCompletion-SPEC.md): run
-  `apg_plan_apply` for the coherence gate (every `Builds` target resolves in
-  the branch's graph, all `Feedback` resolved); produce the **human-gate
+  `apg_plan_apply` for the coherence gate (every planned node **realized** in
+  the branch's graph, all `Feedback` resolved); verify the active `GuardedBy`
+  invariants in scope (`apg_invariants` — a rule the merge would violate
+  blocks apply here; the CLI never mechanically evaluates prose, Invariants-
+  SPEC "Correctness never depends on them"); produce the **human-gate
   summary** (work, gotchas, deviations still present — task notes + approved
   wont-fix items) and get human approval; then operate `git merge <project>`
   into `main`, rebuild `main`'s graph with `apg scan`, and verify the delivered
@@ -385,9 +417,11 @@ template style, or any requirements description — read it (via `read` and/or
 `apg_query`) and **propose a spec graph structure** that represents it: the
 decomposition into `Requirement` ids grouped by `feature`, `Phase` ordering with
 `Gates`, `Decision`s, `NonGoal`s, `AcceptanceCriterion`s, `VerificationItem`s,
-`Future` nodes for code that doesn't exist yet, `Note`s (with `kind`) for the
-prose narrative, `DependsOn`/`Anchors` edges, and `SpecDependsOn` for
-cross-spec references.
+`Note`s (with `kind`) for the prose narrative, `DependsOn`/`Anchors` edges, and
+`SpecDependsOn` for cross-spec references. Not-yet-built code is not a spec
+placeholder: the spec anchors to proposed tier-3 Solution nodes, and the
+tier-4 additions are declared as **planned Implementation nodes by the
+plan-writer at plan time** (GraphModel-SPEC.md).
 
 This is **agent prose** — you reason about the source spec and present the
 proposed structure, then **delegate authoring of that structure to the

@@ -124,7 +124,8 @@ fn apply_invariant_add(
     let (fqn, file, project_name): (String, PathBuf, &str) = match project {
         Some(proj) => {
             // Project-scoped: `<project>/invariant/<name>` (the FQN is
-            // project-scoped and stable; PHASE_04 dropped the `future/` prefix).
+            // project-scoped and stable; present-ness is branch membership, not an FQN
+// prefix).
             (
                 format!("{proj}/invariant/{name}"),
                 specs::spec_jsonl_path(apg_root, proj),
