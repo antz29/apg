@@ -3,7 +3,7 @@
 //!
 //! Layout (a committed `apg/` dir at the repo root, gitignored `apg/.trans/`):
 //! - `apg/specs/<project>.jsonl` — one spec's durable, write-through records
-//!   (committed; also holds notes + review feedback on spec/Future nodes).
+//!   (committed; also holds notes + review feedback on spec nodes).
 //! - `apg/notes/<module>.jsonl` — the committed annotation ledger, split one
 //!   file per owning module (module fqn slugged; fallback `_root.jsonl`).
 //! - `apg/.trans/plans/<project>.jsonl` — the transient plan (gitignored).
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(owning_module(&g, "mod.A"), Some("mod".to_string()));
         assert_eq!(owning_module(&g, "mod.A.f"), Some("mod".to_string()));
         assert_eq!(owning_module(&g, "/x/a.go"), Some("mod".to_string()));
-        // A module is its own owner; spec/Future/code-less nodes are _root.
+        // A module is its own owner; spec/code-less nodes are _root.
         assert_eq!(owning_module(&g, "mod"), Some("mod".to_string()));
         assert_eq!(owning_module(&g, "foo/spec"), None);
         assert_eq!(owning_module(&g, "nowhere"), None);

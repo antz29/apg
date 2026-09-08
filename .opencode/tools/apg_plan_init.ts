@@ -3,7 +3,7 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Create a plan: `apg plan init <project> [--title T] [--strategy S]`. The plan is the bridge from the spec's future nodes to present code; it serializes to the transient apg/.trans/plans/<project>.jsonl. Requires a spec to exist first.",
+    "Create a plan: `apg plan init <project> [--title T] [--strategy S]`. The plan is the bridge from the spec's proposed reality to present code (the plan-writer authors the planned Implementation nodes); it serializes to the transient apg/.trans/plans/<project>.jsonl. Requires a spec to exist first.",
   args: {
     project: tool.schema.string().describe("Plan project (must match a spec project) (required)."),
     title: tool.schema.string().optional().describe("Plan title (defaults to the project name)."),

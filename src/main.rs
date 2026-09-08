@@ -147,10 +147,6 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         include_str!("../.opencode/tools/apg_spec_render.ts"),
     ),
     (
-        "apg_spec_promote.ts",
-        include_str!("../.opencode/tools/apg_spec_promote.ts"),
-    ),
-    (
         "apg_review.ts",
         include_str!("../.opencode/tools/apg_review.ts"),
     ),
@@ -520,15 +516,18 @@ USAGE:
   apg query \"<cypher>\"        Run a read-only Cypher query against
                               apg/.trans/db.lbug (found by walking up from cwd)
   apg spec <sub> …            Author + lifecycle a graph-native spec:
-                              init/add/anchor/link/spine/rm/render/promote
+                              init/add/anchor/link/spine/rm/render/unresolved
                               (add authors the 4-tier taxonomy: requirement,
-                              future, phase, decision, non-goal, AC, VI, note,
+                              phase, decision, non-goal, AC, VI, note,
                               stakeholder, domain, subdomain, entity,
                               value-object, aggregate, domain-event,
                               domain-process, domain-rule, actor, system,
                               container, component)
   apg plan <sub> …            The phased execution plan (transient, branch-local):
                               init/add/link/done/undone/note/complete/render/apply
+                              (add authors phases, tasks, and planned
+                              Implementation nodes — module/file/struct/function
+                              marked planned at the FQN where the code lands)
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
   apg invariant add …         Materialize a graph-wide invariant (universal or

@@ -1,8 +1,4 @@
 {"type":"spec","fqn":"cosanima-docs/spec","title":"Cosanima 1.0 documentation","goal":"Deliver the Cosanima 1.0 documentation set for the flag-day: user docs (graph concept, quickstart/tutorial, CLI reference for cosanima scan + query), the published versioned frontend-contract reference, the committed-docs policy (SPEC.md + CHANGELOG), an apg → cosanima migration note, and consistent README/docs across the seven really-knows-ai repos."}
-{"type":"future","fqn":"cosanima-docs/user-guide","kind":"other","target":"user-facing guide in the core repo at v1.0.0: graph concept ('a map you navigate'), quickstart, tutorial, worked examples — committed markdown"}
-{"type":"future","fqn":"cosanima-docs/cli-reference","kind":"other","target":"CLI reference for cosanima scan + cosanima query (flags, args, output) matching the shipped v1.0.0 binary — committed markdown in the core repo"}
-{"type":"future","fqn":"cosanima-docs/contract-reference","kind":"other","target":"published versioned JSONL-schema + FQN-rules contract reference document (the promoted cross-repo contract), revisioned by the schema revision, committed in the core repo at v1.0.0"}
-{"type":"future","fqn":"cosanima-docs/migration-note","kind":"other","target":"apg → cosanima migration note (manual guidance only, no tooling/back-compat shims) for the pre-1.0 apg install base, committed at v1.0.0"}
 {"type":"phase","fqn":"cosanima-docs/spec.phase-1","number":1,"title":"Docs scope, placement & ownership decided"}
 {"type":"contains","from":"cosanima-docs/spec","to":"cosanima-docs/spec.phase-1"}
 {"type":"phase","fqn":"cosanima-docs/spec.phase-2","number":2,"title":"User docs authored"}

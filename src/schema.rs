@@ -147,12 +147,22 @@ pub enum Record {
         summary: String,
     },
 
-    /// `{"type":"future","fqn":"<project>/<name>","kind":"function","target":"..."}`
-    Future {
+    /// `{"type":"planned_node","fqn":"github.com/x/y.Store","kind":"struct","name":"Store","parent":"github.com/x/y"}`
+    /// A plan-writer-authored tier-4 addition (GraphModel-SPEC.md): an
+    /// Implementation node (module/file/struct/function) marked
+    /// `status: planned` at the FQN where the code will land. The scanner never
+    /// emits planned nodes; a scan that finds real code at a planned FQN
+    /// **replaces** the planned node and re-points its incident edges (the
+    /// scanner-replace, PlanExecution-SPEC.md). `name` is the simple name,
+    /// `parent` the containing node FQN (both optional — the FQN is the
+    /// identity).
+    PlannedNode {
         fqn: String,
         kind: String,
         #[serde(default)]
-        target: String,
+        name: String,
+        #[serde(default)]
+        parent: String,
     },
 
     NonGoal {
@@ -490,7 +500,7 @@ mod tests {
             r#"{"type":"requirement","fqn":"workitem-timer/spec.R1","id":"R1","title":"Timer","body":"A workitem can be started","feature":"feature-a"}"#,
             r#"{"type":"phase","fqn":"workitem-timer/spec.phase-1","number":1,"title":"Core"}"#,
             r#"{"type":"decision","fqn":"workitem-timer/spec.decision-d1","id":"d1","summary":"Wall-clock"}"#,
-            r#"{"type":"future","fqn":"workitem-timer/gateway","kind":"rpc","target":"github.com/foundry/flow.Gateway"}"#,
+            r#"{"type":"planned_node","fqn":"github.com/foundry/flow.Store","kind":"struct","name":"Store","parent":"github.com/foundry/flow"}"#,
             r#"{"type":"non_goal","fqn":"workitem-timer/spec.ng1","body":"No daemon"}"#,
             r#"{"type":"acceptance_criterion","fqn":"workitem-timer/spec.ac1","body":"Fires once"}"#,
             r#"{"type":"verification_item","fqn":"workitem-timer/spec.vi1","body":"cargo test green"}"#,
@@ -517,12 +527,18 @@ mod tests {
         }
         let r = parse(lines[4]);
         match r {
-            Record::Future { fqn, kind, target } => {
-                assert_eq!(fqn, "workitem-timer/gateway");
-                assert_eq!(kind, "rpc");
-                assert_eq!(target, "github.com/foundry/flow.Gateway");
+            Record::PlannedNode {
+                fqn,
+                kind,
+                name,
+                parent,
+            } => {
+                assert_eq!(fqn, "github.com/foundry/flow.Store");
+                assert_eq!(kind, "struct");
+                assert_eq!(name, "Store");
+                assert_eq!(parent, "github.com/foundry/flow");
             }
-            other => panic!("expected future, got {other:?}"),
+            other => panic!("expected planned_node, got {other:?}"),
         }
     }
 
@@ -538,7 +554,7 @@ mod tests {
             r#"{"type":"anchors","from":"foo/spec.R1","to":"github.com/x/impl"}"#,
             r#"{"type":"implements","from":"github.com/x/impl","to":"foo/spec.R1"}"#,
             r#"{"type":"satisfies","from":"foo/plan.phase-01","to":"foo/spec.R1"}"#,
-            r#"{"type":"builds","from":"foo/plan.phase-01.task-1","to":"foo/gateway"}"#,
+            r#"{"type":"builds","from":"foo/plan.phase-01.task-1","to":"github.com/x/y.Store"}"#,
         ];
         for l in lines {
             let _ = parse(l);
@@ -546,7 +562,7 @@ mod tests {
         assert!(
             matches!(parse(lines[4]), Record::Gates { from, to } if from == "foo/spec.phase-2" && to == "foo/spec.phase-1")
         );
-        assert!(matches!(parse(lines[9]), Record::Builds { to, .. } if to == "foo/gateway"));
+        assert!(matches!(parse(lines[9]), Record::Builds { to, .. } if to == "github.com/x/y.Store"));
     }
 
     #[test]
@@ -559,9 +575,16 @@ mod tests {
             matches!(r, Record::UnresolvedCall { ref target_type, .. } if target_type.is_empty())
         );
         let r: Record =
-            serde_json::from_str(r#"{"type":"future","fqn":"foo/g","kind":"function"}"#)
+            serde_json::from_str(r#"{"type":"planned_node","fqn":"github.com/x/y.Store","kind":"struct"}"#)
                 .unwrap();
-        assert!(matches!(r, Record::Future { ref target, .. } if target.is_empty()));
+        assert!(matches!(
+            r,
+            Record::PlannedNode {
+                ref name,
+                ref parent,
+                ..
+            } if name.is_empty() && parent.is_empty()
+        ));
         let r: Record =
             serde_json::from_str(r#"{"type":"requirement","fqn":"f","id":"R1","title":"t"}"#)
                 .unwrap();

@@ -65,7 +65,7 @@ fn next_spec_counter(records: &[Record], prefix: &str) -> u64 {
 
 pub fn cmd_spec(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg spec <init|add|anchor|link|spine|rm|render|promote|unresolved> …");
+        anyhow::bail!("usage: apg spec <init|add|anchor|link|spine|rm|render|unresolved> …");
     };
     match sub {
         "init" => spec_init(&args[1..]),
@@ -75,7 +75,6 @@ pub fn cmd_spec(args: &[String]) -> anyhow::Result<()> {
         "spine" => spec_spine(&args[1..]),
         "rm" => spec_rm(&args[1..]),
         "render" => spec_render(&args[1..]),
-        "promote" => spec_promote(&args[1..]),
         "unresolved" => spec_unresolved(&args[1..]),
         other => anyhow::bail!("unknown apg spec subcommand: {other}"),
     }
@@ -113,7 +112,7 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(project) = p.positional.first() else {
         anyhow::bail!(
-            "usage: apg spec add <project> <requirement|future|phase|decision|non-goal|acceptance-criterion|verification|note|stakeholder|domain|subdomain|entity|value-object|aggregate|domain-event|domain-process|domain-rule|actor|system|container|component> …"
+            "usage: apg spec add <project> <requirement|phase|decision|non-goal|acceptance-criterion|verification|note|stakeholder|domain|subdomain|entity|value-object|aggregate|domain-event|domain-process|domain-rule|actor|system|container|component> …"
         );
     };
     let Some(kind) = p.positional.get(1).map(|s| s.as_str()) else {
@@ -126,51 +125,6 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
     let spec_fqn = format!("{project}/spec");
     match kind {
         "requirement" => add_requirement(&p, &apg_root, project, &mut records)?,
-        "future" => {
-let Some(name) = p.positional.get(2) else {
-                anyhow::bail!(
-                    "usage: apg spec add <project> domain-rule <name> --body … [--parent <domain-fqn>]"
-                );
-            };
-            let Some(kind) = p.get("kind") else {
-                anyhow::bail!("future requires --kind");
-            };
-            // PHASE_01: the proposed-code vocabulary is re-aligned onto the
-            // tier kinds (GraphModel-SPEC.md) so a diff's additions declare
-            // which tier node they become. Legacy values (service/rpc/endpoint)
-            // stay accepted for back-compat until PHASE_04 migrates them.
-            if ![
-                "function",
-                "struct",
-                "container",
-                "component",
-                "system",
-                "service",
-                "rpc",
-                "endpoint",
-                "other",
-            ]
-            .contains(&kind.as_str())
-            {
-                anyhow::bail!(
-                    "invalid future kind `{kind}` — one of function/struct/container/component/system/service/rpc/endpoint/other"
-                );
-            }
-            let fqn = format!("{project}/{name}");
-            if records
-                .iter()
-                .any(|r| matches!(r, Record::Future { fqn: f, .. } if f == &fqn))
-            {
-                anyhow::bail!("future `{name}` already exists in `{project}`");
-            }
-            records.push(Record::Future {
-                fqn,
-                kind,
-                target: p.get("target").unwrap_or_default(),
-            });
-            write_through(&apg_root, project, &records)?;
-            println!("Added future `{name}` to {project}");
-        }
         "phase" => {
             let Some(n) = p.positional.get(2).and_then(|s| s.parse::<u32>().ok()) else {
                 anyhow::bail!(
@@ -378,7 +332,7 @@ let Some(name) = p.positional.get(2) else {
             println!("Added component to {project}");
         }
         other => anyhow::bail!(
-            "unknown spec add kind `{other}` — requirement|future|phase|decision|non-goal|acceptance-criterion|verification|note|stakeholder|domain|subdomain|entity|value-object|aggregate|domain-event|domain-process|domain-rule|actor|system|container|component"
+            "unknown spec add kind `{other}` — requirement|phase|decision|non-goal|acceptance-criterion|verification|note|stakeholder|domain|subdomain|entity|value-object|aggregate|domain-event|domain-process|domain-rule|actor|system|container|component"
         ),
     }
     Ok(())
@@ -576,7 +530,6 @@ fn spec_node_kind(r: &Record) -> Option<NodeKind> {
         Requirement { .. } => Some(NodeKind::Requirement),
         Phase { .. } => Some(NodeKind::Phase),
         Decision { .. } => Some(NodeKind::Decision),
-        Future { .. } => Some(NodeKind::Future),
         NonGoal { .. } => Some(NodeKind::NonGoal),
         AcceptanceCriterion { .. } => Some(NodeKind::AcceptanceCriterion),
         VerificationItem { .. } => Some(NodeKind::VerificationItem),
@@ -611,12 +564,12 @@ fn spec_node_kind(r: &Record) -> Option<NodeKind> {
 
 /// `apg spec add <project> note --body … [--kind …] [--on <fqn>]*` (R7).
 /// A `--on` target that is a code FQN routes the note to the committed
-/// `apg/notes/<module>.jsonl` ledger; a spec/Future FQN (or no target) to the
+/// `apg/notes/<module>.jsonl` ledger; a spec FQN (or no target) to the
 /// project's spec JSONL.
 ///
 /// R2: every `--on` target is validated against the DB's Details rel-table
 /// allow-list (`load::details_target_labels`, mirroring `spec_rel_pairs`)
-/// BEFORE any record is pushed or any write happens. A Note/Future/Feedback
+/// BEFORE any record is pushed or any write happens. A Note/Feedback
 /// target (or any label outside the allow-list) is rejected with a clear CLI
 /// message instead of reaching the re-ingest, where LadybugDB would throw an
 /// opaque binder exception for the undeclared edge pair (R3).
@@ -648,7 +601,7 @@ fn add_note(
     // R2: validate every `--on` target BEFORE any record is pushed or any
     // write happens (the loop below only mutates the in-memory `records`; the
     // JSONL + live DB are untouched until `write_through`). A target whose
-    // node label is not an allowable Details target — Note, Future, Feedback,
+    // node label is not an allowable Details target — Note, Feedback,
     // or anything outside the DB's Details rel-table pairs — is rejected here
     // with a clear CLI message instead of an opaque LadybugDB binder exception
     // from the re-ingest.
@@ -670,7 +623,7 @@ fn add_note(
             "spec"
         };
         validate_note_kind(&kind, category)?;
-        // A code FQN routes to the per-module note ledger; a spec/Future FQN
+        // A code FQN routes to the per-module note ledger; a spec FQN
         // (anything not in the code graph) to the project's spec JSONL.
         if category == "code" {
             let file = db.note_file(apg_root, target);
@@ -1684,127 +1637,23 @@ fn db_anchor_loc(db: &artifacts::ArtifactDb, fqn: &str) -> Option<(String, Strin
     let mut parts = row.split('|');
     let path = parts.next()?.to_string();
     let line = parts.next()?.to_string();
-    // A Future (pending anchor) or module carries no path — no loc to show.
+    // A planned node (no location yet) or module carries no path — no loc to
+    // show.
     if path.is_empty() {
         return None;
     }
     Some((path, line))
 }
 
-/// `apg spec promote <project> <future-name>|--all` (R17). For each
-/// `Anchors(req→Future f)` whose `f.target` resolves in the code graph:
-/// re-point the anchor to the real node, add `Implements(f.target→req)`, and
-/// retire the Future (removed from the project JSONL, write-through).
-fn spec_promote(args: &[String]) -> anyhow::Result<()> {
-    let p = parse_args(args);
-    let Some(project) = p.positional.first() else {
-        anyhow::bail!("usage: apg spec promote <project> <future-name>|--all");
-    };
-    let all = p.has("all");
-    let target: Option<&str> = if all {
-        None
-    } else {
-        p.positional.get(1).map(|s| s.as_str())
-    };
-    if !all && target.is_none() {
-        anyhow::bail!("usage: apg spec promote <project> <future-name>|--all");
-    }
-
-    let apg_root = require_apg_root()?;
-    artifacts::acquire_spec_lock(&apg_root)?;
-    let records = load_project(&apg_root, project)?;
-
-    // The futures to consider: all in the project, or the named one.
-    let futures: Vec<String> = records
-        .iter()
-        .filter_map(|r| match r {
-            Record::Future { fqn, .. }
-                if all || fqn == &format!("{project}/{}", target.unwrap()) =>
-            {
-                Some(fqn.clone())
-            }
-            _ => None,
-        })
-        .collect();
-    if futures.is_empty() {
-        anyhow::bail!(
-            "no future{} to promote in `{project}`",
-            if all { "s" } else { " named as given" }
-        );
-    }
-    let mut promoted = 0;
-    for fqn in &futures {
-        promote_future(&apg_root, project, fqn)?;
-        promoted += 1;
-    }
-    println!("Promoted {promoted} future(s) in {project} → present");
-    Ok(())
-}
-
-/// Promotes a single future (R17), shared by `apg spec promote` and `apg plan
-/// done`. Re-points every `Anchors(req→f)` to `f.target`, adds
-/// `Implements(f.target→req)`, and retires `f` from the project JSONL
-/// (write-through). Errors if `f.target` does not resolve in the code graph.
-pub fn promote_future(apg_root: &Path, project: &str, future_fqn: &str) -> anyhow::Result<()> {
-    let mut records = load_project(apg_root, project)?;
-    let target = {
-        let db = artifacts::ArtifactDb::open(apg_root)?;
-        let Some(target) = records.iter().find_map(|r| match r {
-            Record::Future { fqn, target, .. } if fqn == future_fqn => Some(target.clone()),
-            _ => None,
-        }) else {
-            anyhow::bail!("future `{future_fqn}` not found in `{project}`");
-        };
-        if target.is_empty() {
-            anyhow::bail!(
-                "future `{future_fqn}` has no target — declare it with `apg spec add future`"
-            );
-        }
-        if !db.has_node(&target) {
-            anyhow::bail!(
-                "future `{future_fqn}` target `{target}` does not resolve in the code graph — run `apg scan` and retry (a stale graph or target mismatch is never guessed)"
-            );
-        }
-        target
-    };
-    let anchors: Vec<String> = records
-        .iter()
-        .filter_map(|e| match e {
-            Record::Anchors { from, to } if to == future_fqn => Some(from.clone()),
-            _ => None,
-        })
-        .collect();
-    for req in anchors {
-        // Re-point only this requirement's anchor to the promoted future. The
-        // incident-edge removal used by `rm` must not be used here — it would
-        // also sever the requirement's DependsOn edges and every other edge
-        // that touches it.
-        records.retain(|r| {
-            !matches!(r, Record::Anchors { from, to } if from.as_str() == req && to.as_str() == future_fqn)
-        });
-        records.push(Record::Anchors {
-            from: req.clone(),
-            to: target.clone(),
-        });
-        records.push(Record::Implements {
-            from: target.clone(),
-            to: req,
-        });
-    }
-    // Retire the future: drop its record and its incident edges.
-    remove_node(&mut records, future_fqn);
-    write_through(apg_root, project, &records)?;
-    Ok(())
-}
-
 /// `apg spec unresolved [project]` (SpecCreation-SPEC §1 self-lint, §2
-/// orphan/coverage lint) — a read-only lint over the spec/plan graph, mirroring
+    /// orphan/coverage lint) — a read-only lint over the spec/plan graph, mirroring
 /// the `apg_spec_unresolved.ts` suite tool. It reads the durable JSONL directly
 /// (the graph's source of truth — so it works on the committed records a write
-/// would re-ingest) and consults the live DB only to decide whether a Future's
-/// target code exists (satisfiable futures). Reports, per project: pending
-/// anchors, satisfiable/unsatisfied/unreferenced futures, orphan requirements
-/// (no Satisfies, no Implements), ACs without a covering requirement, dangling
+/// would re-ingest) and consults the live DB only to decide whether a planned
+/// Implementation node has been realized (a scan replaced it). Reports, per
+/// project: pending anchors (to a planned node or proposed Solution node),
+/// realized/unbuilt/unreferenced planned nodes, orphan requirements (no
+/// Satisfies, no Implements), ACs without a covering requirement, dangling
 /// depends_on/gates refs, and open/actioned or drift feedback.
 ///
 /// Orphan/coverage are whole-spec, post-hoc properties (a freshly added
@@ -1857,13 +1706,47 @@ fn spec_unresolved_report(apg_root: &Path, filter: Option<&str>) -> anyhow::Resu
             _ => None,
         })
         .collect();
-    let all_futures: HashSet<&str> = records
+    // Planned Implementation nodes (plan-writer-authored tier-4 additions) and
+    // proposed Solution nodes — the pending-anchor targets of the finalized
+    // model (GraphModel-SPEC.md). The placeholder node is gone.
+    let planned_nodes: HashSet<&str> = records
         .iter()
         .filter_map(|r| match r {
-            Record::Future { fqn, .. } => Some(fqn.as_str()),
+            Record::PlannedNode { fqn, .. } => Some(fqn.as_str()),
             _ => None,
         })
         .collect();
+    let solution_nodes: HashSet<&str> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::System { fqn, .. }
+            | Record::Container { fqn, .. }
+            | Record::Component { fqn, .. } => Some(fqn.as_str()),
+            _ => None,
+        })
+        .collect();
+    // Planned nodes grouped by their owning project. A planned node's FQN is
+    // the real code FQN it will land at (not project-scoped), so its project
+    // is the plan that authored it — read from each plan file directly.
+    let mut planned_by_project: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    for f in specs::jsonl_files(&apg_root.join(specs::TRANS).join("plans")) {
+        let recs = specs::read_jsonl(&f).unwrap_or_default();
+        let Some(proj) = recs.iter().find_map(|r| match r {
+            Record::Plan { fqn, .. } => fqn.split('/').next().map(|s| s.to_string()),
+            _ => None,
+        }) else {
+            continue;
+        };
+        planned_by_project.entry(proj).or_default().extend(
+            recs.iter()
+                .filter_map(|r| match r {
+                    Record::PlannedNode { fqn, kind, .. } => {
+                        Some((fqn.clone(), kind.clone()))
+                    }
+                    _ => None,
+                }),
+        );
+    }
 
     let satisfies = edges_of(&records, |r| match r {
         Record::Satisfies { from, to } => Some((from.as_str(), to.as_str())),
@@ -1889,6 +1772,10 @@ fn spec_unresolved_report(apg_root: &Path, filter: Option<&str>) -> anyhow::Resu
         Record::Contains { from, to } => Some((from.as_str(), to.as_str())),
         _ => None,
     });
+    let builds = edges_of(&records, |r| match r {
+        Record::Builds { from, to } => Some((from.as_str(), to.as_str())),
+        _ => None,
+    });
 
     let mut out: Vec<String> = Vec::new();
     for proj in &projects {
@@ -1910,48 +1797,37 @@ fn spec_unresolved_report(apg_root: &Path, filter: Option<&str>) -> anyhow::Resu
             .map(|(_, to)| *to)
             .collect();
 
-        // Futures.
+        // Planned code (the plan's tier-4 additions).
         let mut pending: Vec<String> = Vec::new();
-        let mut satisfiable: Vec<String> = Vec::new();
+        let mut realized: Vec<String> = Vec::new();
         let mut unsatisfied: Vec<String> = Vec::new();
-        for r in records
-            .iter()
-            .filter(|r| matches!(r, Record::Future { .. }) && node_fqn(r).is_some_and(in_p))
-        {
-            let (fqn, kind, target) = match r {
-                Record::Future { fqn, kind, target } => {
-                    (fqn.as_str(), kind.as_str(), target.as_str())
-                }
-                _ => unreachable!(),
-            };
-            let anchored = anchors.iter().any(|(_, to)| *to == fqn);
-            if target.is_empty() {
-                unsatisfied.push(format!("  {fqn} ({kind}) — no target declared"));
-            } else if let Some(db) = &db {
-                if db.code_label(target).is_some() {
-                    satisfiable.push(format!(
-                        "  {fqn} ({kind}) — target {target} now exists → `apg spec promote {proj} {}`",
-                        fqn.trim_start_matches(&pfx)
+        for (fqn, kind) in planned_by_project.get(proj).into_iter().flatten() {
+            let built = builds.iter().any(|(_, to)| *to == fqn.as_str());
+            if let Some(db) = &db {
+                if db.code_label(fqn).is_some() && !db.is_planned(fqn) {
+                    realized.push(format!(
+                        "  {fqn} ({kind}) — a scan realized it (present code, no `planned` status)"
                     ));
                 } else {
                     unsatisfied.push(format!(
-                        "  {fqn} ({kind}) — target {target} not in the code graph"
+                        "  {fqn} ({kind}) — planned code not yet built (no real node at the FQN)"
                     ));
                 }
             } else {
                 unsatisfied.push(format!(
-                    "  {fqn} ({kind}) — target {target} not verifiable without a scan"
+                    "  {fqn} ({kind}) — realization not verifiable without a scan"
                 ));
             }
-            if !anchored {
-                pending.push(format!("  {fqn} ({kind}) — no requirement anchors to it"));
+            if !built {
+                pending.push(format!("  {fqn} ({kind}) — no task Builds it"));
             }
         }
 
-        // Pending anchors: an Anchors edge whose target is a Future node.
+        // Pending anchors: an Anchors edge whose target is a planned
+        // Implementation node or a proposed Solution node.
         let pending_anchors: Vec<&str> = anchors
             .iter()
-            .filter(|(from, to)| in_p(from) && all_futures.contains(to))
+            .filter(|(from, to)| in_p(from) && (planned_nodes.contains(to) || solution_nodes.contains(to)))
             .map(|(_, to)| *to)
             .collect();
 
@@ -2022,77 +1898,82 @@ fn spec_unresolved_report(apg_root: &Path, filter: Option<&str>) -> anyhow::Resu
             }
         }
 
-        let mut sections: Vec<String> = Vec::new();
+        let mut info: Vec<String> = Vec::new();
+        let mut findings: Vec<String> = Vec::new();
+        // Informational (expected / already-resolved) — shown only alongside
+        // actual findings, never blocking "Lint clean".
         if !pending_anchors.is_empty() {
-            sections.push(format!(
-                "pending anchors (expected — future code, {}):",
+            info.push(format!(
+                "pending anchors (expected — proposed code, {}):",
                 pending_anchors.len()
             ));
             for t in &pending_anchors {
-                sections.push(format!("  {t}"));
+                info.push(format!("  {t}"));
             }
         }
-        if !satisfiable.is_empty() {
-            sections.push(format!(
-                "satisfiable futures — target code now exists, run `apg spec promote` ({}):",
-                satisfiable.len()
+        if !realized.is_empty() {
+            info.push(format!(
+                "realized planned nodes — a branch scan replaced them with present code ({}):",
+                realized.len()
             ));
-            sections.extend(satisfiable);
+            info.extend(realized);
         }
+        // Findings (unresolved work that blocks delivery).
         if !unsatisfied.is_empty() {
-            sections.push(format!(
-                "unsatisfied futures — planned code not yet built ({}):",
+            findings.push(format!(
+                "unbuilt planned code — planned nodes not yet realized ({}):",
                 unsatisfied.len()
             ));
-            sections.extend(unsatisfied);
+            findings.extend(unsatisfied);
         }
         if !pending.is_empty() {
-            sections.push(format!(
-                "unreferenced futures — no requirement anchors to them ({}):",
+            findings.push(format!(
+                "unreferenced planned nodes — no task Builds them ({}):",
                 pending.len()
             ));
-            sections.extend(pending);
+            findings.extend(pending);
         }
         if !orphans.is_empty() {
-            sections.push(format!(
+            findings.push(format!(
                 "orphan requirements — no Satisfies, no Implements ({}):",
                 orphans.len()
             ));
             for (id, title) in &orphans {
-                sections.push(format!("  {id} — {title}"));
+                findings.push(format!("  {id} — {title}"));
             }
         }
         if !uncovered_ac.is_empty() {
-            sections.push(format!(
+            findings.push(format!(
                 "acceptance criteria without a covering requirement ({}):",
                 uncovered_ac.len()
             ));
-            sections.extend(uncovered_ac);
+            findings.extend(uncovered_ac);
         }
         if !dangling.is_empty() {
-            sections.push(format!("dangling refs ({}):", dangling.len()));
-            sections.extend(dangling);
+            findings.push(format!("dangling refs ({}):", dangling.len()));
+            findings.extend(dangling);
         }
         if !feedback.is_empty() {
-            sections.push(format!(
+            findings.push(format!(
                 "feedback under review — must be resolved before apply ({}):",
                 feedback.len()
             ));
             for (fqn, status) in &feedback {
-                sections.push(format!("  {fqn} ({status})"));
+                findings.push(format!("  {fqn} ({status})"));
             }
         }
         if !drift.is_empty() {
-            sections.push(format!(
+            findings.push(format!(
                 "feedback status/disposition drift — hand-edited JSONL, breaks the resolved gate ({}):",
                 drift.len()
             ));
-            sections.extend(drift);
+            findings.extend(drift);
         }
 
-        if !sections.is_empty() {
+        if !findings.is_empty() {
             out.push(format!("## {proj}"));
-            out.extend(sections.iter().map(|s| format!("- {s}")));
+            out.extend(info.iter().map(|s| format!("- {s}")));
+            out.extend(findings.iter().map(|s| format!("- {s}")));
         }
     }
 
@@ -2506,10 +2387,12 @@ mod tests {
     }
 
     #[test]
-    fn write_through_and_promote_roundtrip() {
+    fn write_through_and_planned_node_roundtrip() {
         let (apg_root, dir) = fixture_layout("roundtrip");
 
-        // Author a spec with a requirement anchored to a not-yet-built future.
+        // Author a spec with a requirement anchored to a proposed Solution
+        // node (the pending tier-3 anchor of the finalized model), plus a plan
+        // that carries a planned Implementation node and a task that Builds it.
         let recs = vec![
             Record::Spec {
                 fqn: "foo/spec".to_string(),
@@ -2527,97 +2410,152 @@ mod tests {
                 from: "foo/spec".to_string(),
                 to: "foo/spec.R1".to_string(),
             },
-            Record::Future {
-                fqn: "foo/gateway".to_string(),
-                kind: "rpc".to_string(),
-                target: "github.com/x/y.Store".to_string(),
+            Record::System {
+                fqn: "foo/system.Gateway".to_string(),
+                name: "Gateway".to_string(),
+                body: String::new(),
+            },
+            Record::Contains {
+                from: "foo/spec".to_string(),
+                to: "foo/system.Gateway".to_string(),
             },
             Record::Anchors {
                 from: "foo/spec.R1".to_string(),
-                to: "foo/gateway".to_string(),
+                to: "foo/system.Gateway".to_string(),
             },
         ];
         specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
+        let plan = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
+                title: "T".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Store".to_string(),
+                kind: "struct".to_string(),
+                name: "Store".to_string(),
+                parent: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
+            },
+            Record::Builds {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "github.com/x/y.Store".to_string(),
+            },
+        ];
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &plan).unwrap();
         artifacts::reingest_project(&apg_root, "foo").unwrap();
 
-        // The pending anchor materializes in the live DB.
+        // The planned node lands as a Struct with status=planned; the pending
+        // anchor to the proposed Solution node lands; the Builds edge lands.
         {
             let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
-            assert!(db.is_future("foo/gateway"));
-            assert!(db.has_node("github.com/x/y.Store"));
-        } // drop the handle before promote reopens the file DB
+            assert!(db.is_planned("github.com/x/y.Store"));
+            let out = db
+                .conn()
+                .unwrap()
+                .query("MATCH (s:Struct {fqn: 'github.com/x/y.Store'}) RETURN s.status")
+                .unwrap()
+                .to_string();
+            assert!(out.contains("planned"), "planned status: {out}");
+            let out = db
+                .conn()
+                .unwrap()
+                .query("MATCH (:Requirement)-[:Anchors]->(s:System) RETURN s.fqn")
+                .unwrap()
+                .to_string();
+            assert!(out.contains("foo/system.Gateway"), "pending anchor: {out}");
+            let out = db
+                .conn()
+                .unwrap()
+                .query("MATCH (:Task)-[:Builds]->(s:Struct) RETURN s.fqn")
+                .unwrap()
+                .to_string();
+            assert!(
+                out.contains("github.com/x/y.Store"),
+                "planned build: {out}"
+            );
+        }
 
-        // Promote: re-anchor to the code node, add Implements, retire the
-        // future — in the JSONL and the DB.
-        promote_future(&apg_root, "foo", "foo/gateway").unwrap();
-        let records = load_project(&apg_root, "foo").unwrap();
-        assert!(records.iter().all(|r| !matches!(r, Record::Future { .. })));
-        assert!(records.iter().any(|r| {
-            matches!(r, Record::Anchors { from, to }
-                if from == "foo/spec.R1" && to == "github.com/x/y.Store")
-        }));
-        assert!(records.iter().any(|r| {
-            matches!(r, Record::Implements { from, to }
-                if from == "github.com/x/y.Store" && to == "foo/spec.R1")
-        }));
-
-        // The DB reflects the transition after the write-through re-ingest.
-        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
-        assert!(!db.is_future("foo/gateway"));
-        let out = db
-            .conn()
-            .unwrap()
-            .query("MATCH (s:Struct)-[:Implements]->(r:Requirement) RETURN r.fqn")
-            .unwrap()
-            .to_string();
-        assert!(out.contains("foo/spec.R1"), "implements: {out}");
-        let out = db
-            .conn()
-            .unwrap()
-            .query("MATCH (:Requirement)-[:Anchors]->(s:Struct) RETURN s.fqn")
-            .unwrap()
-            .to_string();
-        assert!(out.contains("github.com/x/y.Store"), "re-anchor: {out}");
-
-        // A rebuild from the committed JSONL reproduces the same state.
+        // The write-through re-ingest reproduces the same state from the
+        // committed JSONLs.
         artifacts::reingest_project(&apg_root, "foo").unwrap();
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        assert!(db.is_planned("github.com/x/y.Store"));
+        assert!(db.has_node("foo/system.Gateway"));
         let out = db
             .conn()
             .unwrap()
-            .query("MATCH (:Struct)-[:Implements]->(r:Requirement) RETURN count(*)")
+            .query("MATCH (:Task)-[:Builds]->(s:Struct) RETURN count(*)")
             .unwrap()
             .to_string();
-        assert!(
-            out.lines().last() == Some("1"),
-            "rebuild keeps Implements: {out}"
-        );
+        assert!(out.lines().last() == Some("1"), "rebuild keeps Builds: {out}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn promote_unbuilt_future_errors() {
-        let (apg_root, dir) = fixture_layout("unbuilt");
+    fn dangling_requirement_anchor_is_dropped_not_synthesized() {
+        let (apg_root, dir) = fixture_layout("dangling-anchor");
+        // A requirement anchored to code that is not in the graph: the anchor
+        // is dropped at re-ingest (the placeholder node is gone — a pending
+        // anchor must name a proposed Solution node or a planned node, both
+        // authored, never auto-created).
         let recs = vec![
             Record::Spec {
                 fqn: "foo/spec".to_string(),
                 title: "Foo".to_string(),
                 goal: String::new(),
             },
-            Record::Future {
-                fqn: "foo/gateway".to_string(),
-                kind: "rpc".to_string(),
-                target: "github.com/x/y.DoesNotExist".to_string(),
+            Record::Requirement {
+                fqn: "foo/spec.R1".to_string(),
+                id: "R1".to_string(),
+                title: "Timer".to_string(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Contains {
+                from: "foo/spec".to_string(),
+                to: "foo/spec.R1".to_string(),
+            },
+            Record::Anchors {
+                from: "foo/spec.R1".to_string(),
+                to: "github.com/x/y.DoesNotExist".to_string(),
             },
         ];
         specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
         artifacts::reingest_project(&apg_root, "foo").unwrap();
-        // A stale target is never guessed: promote errors.
-        let err = promote_future(&apg_root, "foo", "foo/gateway")
-            .unwrap_err()
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Requirement)-[:Anchors]->() RETURN count(*)")
+            .unwrap()
             .to_string();
-        assert!(err.contains("does not resolve"), "{err}");
+        assert!(
+            out.lines().last() == Some("0"),
+            "no placeholder may be synthesized: {out}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3613,8 +3551,8 @@ mod tests {
     }
 
     #[test]
-    fn add_note_rejects_note_and_future_targets_before_any_write() {
-        // R2 (task 2.2): `--on` a Note or a Future target must be rejected
+    fn add_note_rejects_note_and_feedback_targets_before_any_write() {
+        // R2 (task 2.2): `--on` a Note or a Feedback target must be rejected
         // with a clear CLI message BEFORE any JSONL write or DB re-ingest —
         // both are excluded from the DB's Details rel-table targets.
         let (apg_root, dir) = fixture_layout("r2-validation");
@@ -3644,10 +3582,11 @@ mod tests {
                 from: "foo/note-1".into(),
                 to: "foo/spec".into(),
             },
-            Record::Future {
-                fqn: "foo/gateway".into(),
-                kind: "rpc".into(),
-                target: String::new(),
+            Record::Feedback {
+                fqn: "foo/feedback-1".into(),
+                body: "review".into(),
+                status: "open".into(),
+                disposition: String::new(),
             },
         ];
         let path = specs::spec_jsonl_path(&apg_root, "foo");
@@ -3670,18 +3609,18 @@ mod tests {
         );
         assert!(msg.contains("may only attach"), "{msg}");
 
-        // --on a Future target: rejected too (Future is not a Details target).
+        // --on a Feedback target: rejected too (Feedback is not a Details target).
         let mut records = load_project(&apg_root, "foo").unwrap();
         let p = parse_args(&[
             "--body".into(),
             "n".into(),
             "--on".into(),
-            "foo/gateway".into(),
+            "foo/feedback-1".into(),
         ]);
         let err = add_note(&p, &apg_root, "foo", &mut records).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("note target `foo/gateway` is a `Future` node"),
+            msg.contains("note target `foo/feedback-1` is a `Feedback` node"),
             "{msg}"
         );
 
@@ -4024,7 +3963,7 @@ mod tests {
     }
 
     #[test]
-    fn spec_unresolved_lints_orphans_and_satisfiable_futures() {
+    fn spec_unresolved_lints_orphans_and_planned_nodes() {
         // A spec with an orphan requirement (no Satisfies/Implements), a
         // satisfiable future (target code `github.com/x/y.Store` exists in the
         // fixture DB), an unsatisfiable future, and an open feedback — the
@@ -4034,27 +3973,42 @@ mod tests {
             Record::Spec { fqn: "foo/spec".into(), title: "T".into(), goal: String::new() },
             Record::Requirement { fqn: "foo/spec.R1".into(), id: "R1".into(), title: "Timer".into(), body: String::new(), feature: String::new() },
             Record::Requirement { fqn: "foo/spec.R2".into(), id: "R2".into(), title: "Delivered".into(), body: String::new(), feature: String::new() },
-            Record::Future { fqn: "foo/gateway".into(), kind: "service".into(), target: "github.com/x/y.Store".into() },
-            Record::Future { fqn: "foo/notbuilt".into(), kind: "function".into(), target: "github.com/x/y.Missing".into() },
-            Record::Anchors { from: "foo/spec.R1".into(), to: "foo/gateway".into() },
+            Record::Anchors { from: "foo/spec.R1".into(), to: "github.com/x/y.Gateway".into() },
             Record::Implements { from: "github.com/x/y.Store".into(), to: "foo/spec.R2".into() },
             Record::Feedback { fqn: "foo/feedback-1".into(), body: "b".into(), status: "open".into(), disposition: String::new() },
         ];
         specs::write_jsonl(&apg_root.join("specs").join("foo.jsonl"), &records).unwrap();
+        // The plan carries the planned tier-4 additions: one that the DB has
+        // realized (Store is real code) and one still unbuilt (Gateway).
+        let plan_dir = apg_root.join(specs::TRANS).join("plans");
+        std::fs::create_dir_all(&plan_dir).unwrap();
+        let plan = vec![
+            Record::Plan { fqn: "foo/plan".into(), title: "P".into(), strategy: String::new() },
+            Record::PlanPhase { fqn: "foo/plan.phase-01".into(), number: 1, title: "P1".into(), deliverable: String::new() },
+            Record::Task { fqn: "foo/plan.phase-01.task-1".into(), title: "t".into(), kind: "source".into(), tier: String::new(), status: "pending".into() },
+            Record::PlannedNode { fqn: "github.com/x/y.Store".into(), kind: "struct".into(), name: "Store".into(), parent: String::new() },
+            Record::PlannedNode { fqn: "github.com/x/y.Gateway".into(), kind: "struct".into(), name: "Gateway".into(), parent: String::new() },
+            Record::Contains { from: "foo/plan".into(), to: "foo/plan.phase-01".into() },
+            Record::Contains { from: "foo/plan.phase-01".into(), to: "foo/plan.phase-01.task-1".into() },
+            Record::Builds { from: "foo/plan.phase-01.task-1".into(), to: "github.com/x/y.Store".into() },
+        ];
+        specs::write_jsonl(&plan_dir.join("foo.jsonl"), &plan).unwrap();
 
         let out = spec_unresolved_report(&apg_root, Some("foo")).unwrap();
         // Orphan R1 (no Satisfies, no Implements); R2 is delivered, not orphan.
         assert!(out.contains("orphan requirements — no Satisfies, no Implements (1):"), "orphan: {out}");
         assert!(out.contains("  R1 — Timer"), "orphan line: {out}");
         assert!(!out.contains("R2"), "delivered requirement must not be an orphan: {out}");
-        // Satisfiable future promotes; unsatisfiable listed.
-        assert!(out.contains("satisfiable futures"), "satisfiable: {out}");
-        assert!(out.contains("target github.com/x/y.Store now exists"), "promote hint: {out}");
-        assert!(out.contains("unsatisfied futures"), "unsatisfied: {out}");
-        assert!(out.contains("github.com/x/y.Missing"), "missing target: {out}");
-        // Pending anchor to the gateway future is expected.
+        // Store is realized (a scan replaced it); Gateway is still planned.
+        assert!(out.contains("realized planned nodes"), "realized: {out}");
+        assert!(out.contains("github.com/x/y.Store"), "realized line: {out}");
+        assert!(out.contains("unbuilt planned code"), "unbuilt: {out}");
+        assert!(out.contains("github.com/x/y.Gateway"), "unbuilt line: {out}");
+        // Gateway is unreferenced (no task Builds it).
+        assert!(out.contains("unreferenced planned nodes"), "unreferenced: {out}");
+        // Pending anchor to the planned Gateway node is expected.
         assert!(out.contains("pending anchors"), "pending anchor: {out}");
-        assert!(out.contains("foo/gateway"), "pending anchor line: {out}");
+        assert!(out.contains("github.com/x/y.Gateway"), "pending anchor line: {out}");
         // Open feedback surfaced.
         assert!(out.contains("feedback under review"), "feedback: {out}");
         assert!(out.contains("foo/feedback-1 (open)"), "feedback line: {out}");
@@ -4065,22 +4019,39 @@ mod tests {
     fn spec_unresolved_clean_and_filter_and_missing_db() {
         // A delivered-only spec (every requirement Satisfied/Implements'd) lints
         // clean; filtering to an unknown project reports nothing; a DB-less
-        // layout still lints (futures unverifiable, not a crash).
+        // layout still lints (planned-node realization unverifiable, not a
+        // crash).
         let (apg_root, dir) = fixture_layout("unresolved-clean");
         let records = vec![
             Record::Spec { fqn: "foo/spec".into(), title: "T".into(), goal: String::new() },
             Record::Requirement { fqn: "foo/spec.R1".into(), id: "R1".into(), title: "A".into(), body: String::new(), feature: String::new() },
-            Record::Future { fqn: "foo/gateway".into(), kind: "service".into(), target: "github.com/x/y.Store".into() },
-            Record::Anchors { from: "foo/spec.R1".into(), to: "foo/gateway".into() },
             Record::Satisfies { from: "foo/plan.phase-01".into(), to: "foo/spec.R1".into() },
         ];
         specs::write_jsonl(&apg_root.join("specs").join("foo.jsonl"), &records).unwrap();
+        let plan_dir = apg_root.join(specs::TRANS).join("plans");
+        std::fs::create_dir_all(&plan_dir).unwrap();
+        let plan = vec![
+            Record::Plan { fqn: "foo/plan".into(), title: "P".into(), strategy: String::new() },
+            Record::PlanPhase { fqn: "foo/plan.phase-01".into(), number: 1, title: "P1".into(), deliverable: String::new() },
+            Record::Task { fqn: "foo/plan.phase-01.task-1".into(), title: "t".into(), kind: "source".into(), tier: String::new(), status: "pending".into() },
+            Record::PlannedNode { fqn: "github.com/x/y.Store".into(), kind: "struct".into(), name: "Store".into(), parent: String::new() },
+            Record::Contains { from: "foo/plan".into(), to: "foo/plan.phase-01".into() },
+            Record::Contains { from: "foo/plan.phase-01".into(), to: "foo/plan.phase-01.task-1".into() },
+            Record::Builds { from: "foo/plan.phase-01.task-1".into(), to: "github.com/x/y.Store".into() },
+        ];
+        specs::write_jsonl(&plan_dir.join("foo.jsonl"), &plan).unwrap();
 
-        // All projects — every requirement covered, no orphans; satisfiable
-        // future promoted target exists in the DB.
+        // All projects — every requirement covered, no orphans; the planned
+        // Store is realized (its FQN is real code in the DB) and Builds'd, so
+        // the lint is clean (no findings).
         let out = spec_unresolved_report(&apg_root, None).unwrap();
-        assert!(out.contains("satisfiable futures"), "satisfiable with DB: {out}");
+        assert!(
+            out.contains("Lint clean"),
+            "realized Store leaves nothing unresolved: {out}"
+        );
         assert!(!out.contains("orphan requirements"), "clean must not report orphans: {out}");
+        assert!(!out.contains("unbuilt planned code"), "store realized, nothing unbuilt: {out}");
+        assert!(!out.contains("unreferenced planned nodes"), "store is Builds'd, nothing unreferenced: {out}");
 
         // Filtering to a project that does not exist reports nothing.
         let filtered = spec_unresolved_report(&apg_root, Some("nope")).unwrap();

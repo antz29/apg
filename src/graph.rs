@@ -60,7 +60,6 @@ pub enum NodeKind {
     Requirement,
     Phase,
     Decision,
-    Future,
     NonGoal,
     AcceptanceCriterion,
     VerificationItem,
@@ -136,8 +135,9 @@ pub struct Node {
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub number: Option<u32>,
-    /// `Future.kind` / `Note.kind` string (function/struct/service/... and
-    /// background/design/...); distinct from the `NodeKind` enum.
+    /// `Note.kind` string (background/design/...); distinct from the
+    /// `NodeKind` enum. (The placeholder `kind`-alignment is gone — planned
+    /// Implementation nodes carry their kind as a DB label, not a string.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +148,11 @@ pub struct Node {
     pub strategy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tier: Option<String>,
+    /// The node's lifecycle status. For the four Implementation node kinds a
+    /// `Some("planned")` marks a plan-writer-authored placeholder (the code
+    /// does not exist yet; the scanner replaces it on realization); the
+    /// scanner never emits a planned node. Feedback/Task/Invariant carry their
+    /// own statuses (open/resolved, pending/done, active/retired).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

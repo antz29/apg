@@ -133,6 +133,7 @@ fn lines(graph: &Graph, fqn: &str) -> (i64, i64) {
 pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     // --- Node tables ---
     let mut module_fqn = Vec::new();
+    let mut module_status = Vec::new();
     let mut scan_fqn = Vec::new();
     let mut scan_git_sha = Vec::new();
     let mut scan_git_clean = Vec::new();
@@ -144,6 +145,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut struct_start_line = Vec::new();
     let mut struct_end_line = Vec::new();
     let mut struct_ct = Vec::new();
+    let mut struct_status = Vec::new();
     let mut fn_fqn = Vec::new();
     let mut fn_path = Vec::new();
     let mut fn_start = Vec::new();
@@ -151,10 +153,12 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut fn_start_line = Vec::new();
     let mut fn_end_line = Vec::new();
     let mut fn_ct = Vec::new();
+    let mut fn_status = Vec::new();
     let mut file_fqn = Vec::new();
     let mut file_start_line = Vec::new();
     let mut file_end_line = Vec::new();
     let mut file_ct = Vec::new();
+    let mut file_status = Vec::new();
     let mut unres_fqn = Vec::new();
     let mut unres_cat = Vec::new();
     let mut spec_fqn = Vec::new();
@@ -171,9 +175,6 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut decision_fqn = Vec::new();
     let mut decision_id = Vec::new();
     let mut decision_summary = Vec::new();
-    let mut future_fqn = Vec::new();
-    let mut future_kind = Vec::new();
-    let mut future_target = Vec::new();
     let mut nongoal_fqn = Vec::new();
     let mut nongoal_body = Vec::new();
     let mut ac_fqn = Vec::new();
@@ -252,7 +253,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
 
     for (fqn, node) in &graph.nodes {
         match node.kind {
-            NodeKind::Module => module_fqn.push(fqn.clone()),
+            NodeKind::Module => {
+                module_fqn.push(fqn.clone());
+                module_status.push(node.status.clone().unwrap_or_default());
+            }
             NodeKind::Scan => {
                 scan_fqn.push(fqn.clone());
                 scan_git_sha.push(node.git_sha.clone().unwrap_or_default());
@@ -272,6 +276,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 struct_start_line.push(sl);
                 struct_end_line.push(el);
                 struct_ct.push(node.code_type.clone());
+                struct_status.push(node.status.clone().unwrap_or_default());
             }
             NodeKind::Function => {
                 fn_fqn.push(fqn.clone());
@@ -283,6 +288,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 fn_start_line.push(sl);
                 fn_end_line.push(el);
                 fn_ct.push(node.code_type.clone());
+                fn_status.push(node.status.clone().unwrap_or_default());
             }
             NodeKind::File => {
                 file_fqn.push(fqn.clone());
@@ -290,6 +296,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 file_start_line.push(sl);
                 file_end_line.push(el);
                 file_ct.push(node.code_type.clone());
+                file_status.push(node.status.clone().unwrap_or_default());
             }
             NodeKind::UnresolvedTarget => {
                 unres_fqn.push(fqn.clone());
@@ -316,11 +323,6 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 decision_fqn.push(fqn.clone());
                 decision_id.push(node.id.clone().unwrap_or_default());
                 decision_summary.push(node.summary.clone().unwrap_or_default());
-            }
-            NodeKind::Future => {
-                future_fqn.push(fqn.clone());
-                future_kind.push(node.sub_kind.clone().unwrap_or_default());
-                future_target.push(node.target.clone().unwrap_or_default());
             }
             NodeKind::NonGoal => {
                 nongoal_fqn.push(fqn.clone());
@@ -444,7 +446,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
 
     write_parquet(
         &dir.join("module.parquet"),
-        &[("fqn", Col::Str(module_fqn))],
+        &[
+            ("fqn", Col::Str(module_fqn)),
+            ("status", Col::Str(module_status)),
+        ],
     )?;
     write_parquet(
         &dir.join("scan.parquet"),
@@ -465,6 +470,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("start_line", Col::I64(struct_start_line)),
             ("end_line", Col::I64(struct_end_line)),
             ("code_type", Col::Str(struct_ct)),
+            ("status", Col::Str(struct_status)),
         ],
     )?;
     write_parquet(
@@ -477,6 +483,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("start_line", Col::I64(fn_start_line)),
             ("end_line", Col::I64(fn_end_line)),
             ("code_type", Col::Str(fn_ct)),
+            ("status", Col::Str(fn_status)),
         ],
     )?;
     write_parquet(
@@ -486,6 +493,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("start_line", Col::I64(file_start_line)),
             ("end_line", Col::I64(file_end_line)),
             ("code_type", Col::Str(file_ct)),
+            ("status", Col::Str(file_status)),
         ],
     )?;
     write_parquet(
@@ -527,14 +535,6 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(decision_fqn)),
             ("id", Col::Str(decision_id)),
             ("summary", Col::Str(decision_summary)),
-        ],
-    )?;
-    write_parquet(
-        &dir.join("future.parquet"),
-        &[
-            ("fqn", Col::Str(future_fqn)),
-            ("kind", Col::Str(future_kind)),
-            ("target", Col::Str(future_target)),
         ],
     )?;
     write_parquet(
@@ -1085,7 +1085,6 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
         NonGoal,
         AcceptanceCriterion,
         VerificationItem,
-        Future,
         Plan,
         PlanPhase,
         Task,
@@ -1105,10 +1104,13 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     ] {
         v.push(("Reviews", Feedback, to));
     }
-    for to in [Function, Struct, File, Future] {
+    // Anchors: Requirement → real code (resolved) or a proposed Solution node
+    // (pending, the tier-3 placeholder of the plan bridge) — the placeholder
+    // node is gone (GraphModel-SPEC.md); Task → the real code it touches.
+    for to in [Function, Struct, File, Module, System, Container, Component] {
         v.push(("Anchors", Requirement, to));
     }
-    for to in [Function, Struct, File] {
+    for to in [Function, Struct, File, Module] {
         v.push(("Anchors", Task, to));
     }
     for from in [Function, Struct, File] {
@@ -1119,7 +1121,12 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     v.push(("DependsOn", Requirement, Requirement));
     v.push(("SpecDependsOn", Spec, Spec));
     v.push(("Satisfies", PlanPhase, Requirement));
-    v.push(("Builds", Task, Future));
+    // Builds: Task → the planned Implementation node it creates (was Task →
+    // the placeholder node). A scan that realizes the planned node keeps the
+    // edge pointing at the same FQN, now the real code.
+    for to in [Module, File, Struct, Function] {
+        v.push(("Builds", Task, to));
+    }
     // Spine edges (GraphModel-SPEC.md; PHASE_01).
     v.push(("Drives", Requirement, Domain));
     v.push(("Requires", Requirement, Domain));
@@ -1142,7 +1149,6 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
         Requirement,
         Phase,
         Decision,
-        Future,
         NonGoal,
         AcceptanceCriterion,
         VerificationItem,
@@ -1187,7 +1193,6 @@ fn kind_slug(k: NodeKind) -> &'static str {
         NodeKind::Requirement => "requirement",
         NodeKind::Phase => "phase",
         NodeKind::Decision => "decision",
-        NodeKind::Future => "future",
         NodeKind::NonGoal => "non_goal",
         NodeKind::AcceptanceCriterion => "acceptance_criterion",
         NodeKind::VerificationItem => "verification_item",
@@ -1237,9 +1242,9 @@ pub fn rel_table_pairs() -> &'static [(&'static str, &'static str, &'static str)
 
 /// The node labels a Note may attach to via a `Details` edge — the `FROM Note
 /// TO …` targets of the Details rel table (SPEC R2/R21). The single source of
-/// truth for the `add_note --on` allow-list: Note/Future/Feedback are excluded
-/// by construction (a note cannot attach to another note, a not-yet-built
-/// future, or a review item — the DB has no rel-table pair for it).
+/// truth for the `add_note --on` allow-list: Note/Feedback are excluded by
+/// construction (a note cannot attach to another note or a review item — the
+/// DB has no rel-table pair for it).
 pub fn details_target_labels() -> &'static [&'static str] {
     static LABELS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
     LABELS.get_or_init(|| {
@@ -1301,7 +1306,6 @@ pub fn node_labels() -> &'static [&'static str] {
         "Requirement",
         "Phase",
         "Decision",
-        "Future",
         "NonGoal",
         "AcceptanceCriterion",
         "VerificationItem",
@@ -1328,9 +1332,10 @@ pub fn node_labels() -> &'static [&'static str] {
 }
 
 /// Whether a DB node label is a *code* label (Module/Struct/Function/File/
-/// UnresolvedTarget). The `future/` namespace is gone (PHASE_04) — code vs
-/// spec-family discrimination now uses the node label: `review_add` and other
-/// FQN routers check `is_code_label` before deriving a project from the FQN.
+/// UnresolvedTarget). The `future/` namespace is gone (PHASE_04) and so is the
+/// placeholder node (PHASE_02) — code vs spec-family discrimination now uses
+/// the node label: `review_add` and other FQN routers check `is_code_label`
+/// before deriving a project from the FQN.
 pub fn is_code_label(label: &str) -> bool {
     matches!(
         label,
@@ -1350,7 +1355,6 @@ pub fn label_of(k: NodeKind) -> &'static str {
         NodeKind::Requirement => "Requirement",
         NodeKind::Phase => "Phase",
         NodeKind::Decision => "Decision",
-        NodeKind::Future => "Future",
         NodeKind::NonGoal => "NonGoal",
         NodeKind::AcceptanceCriterion => "AcceptanceCriterion",
         NodeKind::VerificationItem => "VerificationItem",
@@ -1381,18 +1385,18 @@ pub fn label_of(k: NodeKind) -> &'static str {
 /// tables, the thirteen spec/plan node tables, and the rel tables (Contains
 /// extended with spec/plan pairs, plus the nine spec/plan rel tables).
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
-    conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY)")?;
+    conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY, status STRING)")?;
     conn.query(
         "CREATE NODE TABLE Scan(fqn STRING PRIMARY KEY, git_sha STRING, git_clean STRING, scanned_at STRING)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Struct(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, start_line INT64, end_line INT64, code_type STRING)",
+        "CREATE NODE TABLE Struct(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, start_line INT64, end_line INT64, code_type STRING, status STRING)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Function(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, start_line INT64, end_line INT64, code_type STRING)",
+        "CREATE NODE TABLE Function(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, start_line INT64, end_line INT64, code_type STRING, status STRING)",
     )?;
     conn.query(
-        "CREATE NODE TABLE File(fqn STRING PRIMARY KEY, start_line INT64, end_line INT64, code_type STRING)",
+        "CREATE NODE TABLE File(fqn STRING PRIMARY KEY, start_line INT64, end_line INT64, code_type STRING, status STRING)",
     )?;
     conn.query("CREATE NODE TABLE UnresolvedTarget(fqn STRING PRIMARY KEY, category STRING)")?;
     conn.query("CREATE NODE TABLE Spec(fqn STRING PRIMARY KEY, title STRING, goal STRING)")?;
@@ -1401,7 +1405,6 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     )?;
     conn.query("CREATE NODE TABLE Phase(fqn STRING PRIMARY KEY, number INT64, title STRING)")?;
     conn.query("CREATE NODE TABLE Decision(fqn STRING PRIMARY KEY, id STRING, summary STRING)")?;
-    conn.query("CREATE NODE TABLE Future(fqn STRING PRIMARY KEY, kind STRING, target STRING)")?;
     conn.query("CREATE NODE TABLE NonGoal(fqn STRING PRIMARY KEY, body STRING)")?;
     conn.query("CREATE NODE TABLE AcceptanceCriterion(fqn STRING PRIMARY KEY, body STRING)")?;
     conn.query("CREATE NODE TABLE VerificationItem(fqn STRING PRIMARY KEY, body STRING)")?;
@@ -1473,19 +1476,21 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE Details(FROM Note TO Module, FROM Note TO Function, FROM Note TO Struct, FROM Note TO File, FROM Note TO Spec, FROM Note TO Requirement, FROM Note TO Phase, FROM Note TO Decision, FROM Note TO NonGoal, FROM Note TO AcceptanceCriterion, FROM Note TO VerificationItem, FROM Note TO Plan, FROM Note TO PlanPhase, FROM Note TO Task, FROM Note TO Stakeholder, FROM Note TO Domain, FROM Note TO Subdomain, FROM Note TO Entity, FROM Note TO ValueObject, FROM Note TO Aggregate, FROM Note TO DomainEvent, FROM Note TO DomainProcess, FROM Note TO DomainRule, FROM Note TO Actor, FROM Note TO System, FROM Note TO Container, FROM Note TO Component)",
     )?;
     conn.query(
-        "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Spec, FROM Feedback TO Requirement, FROM Feedback TO Phase, FROM Feedback TO Decision, FROM Feedback TO NonGoal, FROM Feedback TO AcceptanceCriterion, FROM Feedback TO VerificationItem, FROM Feedback TO Future, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task, FROM Feedback TO Stakeholder, FROM Feedback TO Domain, FROM Feedback TO Subdomain, FROM Feedback TO Entity, FROM Feedback TO ValueObject, FROM Feedback TO Aggregate, FROM Feedback TO DomainEvent, FROM Feedback TO DomainProcess, FROM Feedback TO DomainRule, FROM Feedback TO Actor, FROM Feedback TO System, FROM Feedback TO Container, FROM Feedback TO Component)",
+        "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Spec, FROM Feedback TO Requirement, FROM Feedback TO Phase, FROM Feedback TO Decision, FROM Feedback TO NonGoal, FROM Feedback TO AcceptanceCriterion, FROM Feedback TO VerificationItem, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task, FROM Feedback TO Stakeholder, FROM Feedback TO Domain, FROM Feedback TO Subdomain, FROM Feedback TO Entity, FROM Feedback TO ValueObject, FROM Feedback TO Aggregate, FROM Feedback TO DomainEvent, FROM Feedback TO DomainProcess, FROM Feedback TO DomainRule, FROM Feedback TO Actor, FROM Feedback TO System, FROM Feedback TO Container, FROM Feedback TO Component)",
     )?;
     conn.query("CREATE REL TABLE DependsOn(FROM Requirement TO Requirement)")?;
     conn.query("CREATE REL TABLE Gates(FROM Phase TO Phase, FROM PlanPhase TO PlanPhase)")?;
     conn.query("CREATE REL TABLE SpecDependsOn(FROM Spec TO Spec)")?;
     conn.query(
-        "CREATE REL TABLE Anchors(FROM Requirement TO Function, FROM Requirement TO Struct, FROM Requirement TO File, FROM Requirement TO Future, FROM Task TO Function, FROM Task TO Struct, FROM Task TO File)",
+        "CREATE REL TABLE Anchors(FROM Requirement TO Function, FROM Requirement TO Struct, FROM Requirement TO File, FROM Requirement TO Module, FROM Requirement TO System, FROM Requirement TO Container, FROM Requirement TO Component, FROM Task TO Function, FROM Task TO Struct, FROM Task TO File, FROM Task TO Module)",
     )?;
     conn.query(
         "CREATE REL TABLE Implements(FROM Function TO Requirement, FROM Struct TO Requirement, FROM File TO Requirement)",
     )?;
     conn.query("CREATE REL TABLE Satisfies(FROM PlanPhase TO Requirement)")?;
-    conn.query("CREATE REL TABLE Builds(FROM Task TO Future)")?;
+    conn.query(
+        "CREATE REL TABLE Builds(FROM Task TO Module, FROM Task TO File, FROM Task TO Struct, FROM Task TO Function)",
+    )?;
     conn.query(
         "CREATE REL TABLE Drives(FROM Requirement TO Domain)",
     )?;
@@ -1502,7 +1507,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE ImplementedBy(FROM System TO Module, FROM System TO File, FROM System TO Struct, FROM System TO Function, FROM Container TO Module, FROM Container TO File, FROM Container TO Struct, FROM Container TO Function, FROM Component TO Module, FROM Component TO File, FROM Component TO Struct, FROM Component TO Function)",
     )?;
     conn.query(
-        "CREATE REL TABLE GuardedBy(FROM Module TO Invariant, FROM File TO Invariant, FROM Struct TO Invariant, FROM Function TO Invariant, FROM Spec TO Invariant, FROM Requirement TO Invariant, FROM Phase TO Invariant, FROM Decision TO Invariant, FROM Future TO Invariant, FROM NonGoal TO Invariant, FROM AcceptanceCriterion TO Invariant, FROM VerificationItem TO Invariant, FROM Plan TO Invariant, FROM PlanPhase TO Invariant, FROM Task TO Invariant, FROM Stakeholder TO Invariant, FROM Domain TO Invariant, FROM Subdomain TO Invariant, FROM Entity TO Invariant, FROM ValueObject TO Invariant, FROM Aggregate TO Invariant, FROM DomainEvent TO Invariant, FROM DomainProcess TO Invariant, FROM DomainRule TO Invariant, FROM Actor TO Invariant, FROM System TO Invariant, FROM Container TO Invariant, FROM Component TO Invariant)",
+        "CREATE REL TABLE GuardedBy(FROM Module TO Invariant, FROM File TO Invariant, FROM Struct TO Invariant, FROM Function TO Invariant, FROM Spec TO Invariant, FROM Requirement TO Invariant, FROM Phase TO Invariant, FROM Decision TO Invariant, FROM NonGoal TO Invariant, FROM AcceptanceCriterion TO Invariant, FROM VerificationItem TO Invariant, FROM Plan TO Invariant, FROM PlanPhase TO Invariant, FROM Task TO Invariant, FROM Stakeholder TO Invariant, FROM Domain TO Invariant, FROM Subdomain TO Invariant, FROM Entity TO Invariant, FROM ValueObject TO Invariant, FROM Aggregate TO Invariant, FROM DomainEvent TO Invariant, FROM DomainProcess TO Invariant, FROM DomainRule TO Invariant, FROM Actor TO Invariant, FROM System TO Invariant, FROM Container TO Invariant, FROM Component TO Invariant)",
     )?;
     conn.query("CREATE REL TABLE Checks(FROM Feedback TO Invariant)")?;
     Ok(())
@@ -1526,7 +1531,6 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         format!(r#"COPY Requirement FROM "{}""#, p("requirement.parquet")),
         format!(r#"COPY Phase FROM "{}""#, p("phase.parquet")),
         format!(r#"COPY Decision FROM "{}""#, p("decision.parquet")),
-        format!(r#"COPY Future FROM "{}""#, p("future.parquet")),
         format!(r#"COPY NonGoal FROM "{}""#, p("non_goal.parquet")),
         format!(
             r#"COPY AcceptanceCriterion FROM "{}""#,
@@ -1673,6 +1677,8 @@ enum Export {
     },
     Module {
         fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        status: String,
     },
     Struct {
         fqn: String,
@@ -1682,6 +1688,8 @@ enum Export {
         start_line: u32,
         end_line: u32,
         code_type: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        status: String,
     },
     Function {
         fqn: String,
@@ -1691,12 +1699,16 @@ enum Export {
         start_line: u32,
         end_line: u32,
         code_type: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        status: String,
     },
     File {
         fqn: String,
         start_line: u32,
         end_line: u32,
         code_type: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        status: String,
     },
     Unresolved {
         fqn: String,
@@ -1749,13 +1761,6 @@ enum Export {
         #[serde(skip_serializing_if = "String::is_empty")]
         id: String,
         summary: String,
-    },
-    Future {
-        fqn: String,
-        #[serde(skip_serializing_if = "String::is_empty")]
-        kind: String,
-        #[serde(skip_serializing_if = "String::is_empty")]
-        target: String,
     },
     NonGoal {
         fqn: String,
@@ -2012,7 +2017,10 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
     for (fqn, node) in &graph.nodes {
         let rec = match node.kind {
             NodeKind::Scan => continue,
-            NodeKind::Module => Export::Module { fqn: fqn.clone() },
+            NodeKind::Module => Export::Module {
+                fqn: fqn.clone(),
+                status: node.status.clone().unwrap_or_default(),
+            },
             NodeKind::Struct => {
                 let (path, start, end) = loc(graph, fqn);
                 let (start_line, end_line) = lines(graph, fqn);
@@ -2024,6 +2032,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                     start_line: start_line as u32,
                     end_line: end_line as u32,
                     code_type: node.code_type.clone(),
+                    status: node.status.clone().unwrap_or_default(),
                 }
             }
             NodeKind::Function => {
@@ -2037,6 +2046,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                     start_line: start_line as u32,
                     end_line: end_line as u32,
                     code_type: node.code_type.clone(),
+                    status: node.status.clone().unwrap_or_default(),
                 }
             }
             NodeKind::File => {
@@ -2046,6 +2056,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                     start_line: start_line as u32,
                     end_line: end_line as u32,
                     code_type: node.code_type.clone(),
+                    status: node.status.clone().unwrap_or_default(),
                 }
             }
             NodeKind::UnresolvedTarget => Export::Unresolved {
@@ -2073,11 +2084,6 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                 fqn: fqn.clone(),
                 id: node.id.clone().unwrap_or_default(),
                 summary: node.summary.clone().unwrap_or_default(),
-            },
-            NodeKind::Future => Export::Future {
-                fqn: fqn.clone(),
-                kind: node.sub_kind.clone().unwrap_or_default(),
-                target: node.target.clone().unwrap_or_default(),
             },
             NodeKind::NonGoal => Export::NonGoal {
                 fqn: fqn.clone(),
@@ -2439,6 +2445,7 @@ mod tests {
                         s("fqn"),
                         Node {
                             kind: NodeKind::Module,
+                            status: o("status"),
                             ..Node::default()
                         },
                     );
@@ -2451,6 +2458,7 @@ mod tests {
                             kind: NodeKind::Struct,
                             location: located(),
                             code_type: s("code_type"),
+                            status: o("status"),
                             ..Node::default()
                         },
                     );
@@ -2463,6 +2471,7 @@ mod tests {
                             kind: NodeKind::Function,
                             location: located(),
                             code_type: s("code_type"),
+                            status: o("status"),
                             ..Node::default()
                         },
                     );
@@ -2483,6 +2492,7 @@ mod tests {
                                 end_line: u("end_line"),
                             }),
                             code_type: s("code_type"),
+                            status: o("status"),
                             ..Node::default()
                         },
                     );
@@ -2539,17 +2549,6 @@ mod tests {
                             kind: NodeKind::Decision,
                             id: o("id"),
                             summary: o("summary"),
-                            ..Node::default()
-                        },
-                    );
-                }
-                "future" => {
-                    g.nodes.insert(
-                        s("fqn"),
-                        Node {
-                            kind: NodeKind::Future,
-                            sub_kind: o("kind"),
-                            target: o("target"),
                             ..Node::default()
                         },
                     );
@@ -3131,9 +3130,9 @@ mod tests {
         n(
             "foo/gateway",
             Node {
-                sub_kind: Some("rpc".to_string()),
-                target: Some("github.com/x/gateway".to_string()),
-                ..sp(NodeKind::Future)
+                name: Some("Gateway".to_string()),
+                status: Some("planned".to_string()),
+                ..sp(NodeKind::Struct)
             },
         );
         n(
@@ -3275,12 +3274,12 @@ mod tests {
             "task rows: {out}"
         );
         let out = conn
-            .query("MATCH (f:Future) RETURN f.kind, f.target")
+            .query("MATCH (s:Struct {fqn: 'foo/gateway'}) RETURN s.status")
             .unwrap()
             .to_string();
         assert!(
-            out.contains("rpc") && out.contains("github.com/x/gateway"),
-            "future rows: {out}"
+            out.contains("planned"),
+            "planned struct row: {out}"
         );
 
         // Multi-pair Contains: Spec -> Requirement and Spec -> Phase.
@@ -3323,7 +3322,7 @@ mod tests {
             .to_string();
         assert!(out.contains("foo/spec.phase-1"), "gates: {out}");
         let out = conn
-            .query("MATCH (a:Requirement)-[:Anchors]->(f:Future) RETURN f.fqn")
+            .query("MATCH (a:Requirement)-[:Anchors]->(s:Struct) RETURN s.fqn")
             .unwrap()
             .to_string();
         assert!(out.contains("foo/gateway"), "anchors: {out}");
@@ -3333,7 +3332,7 @@ mod tests {
             .to_string();
         assert!(out.contains("foo/spec.R1"), "satisfies: {out}");
         let out = conn
-            .query("MATCH (:Task)-[:Builds]->(f:Future) RETURN f.fqn")
+            .query("MATCH (:Task)-[:Builds]->(s:Struct) RETURN s.fqn")
             .unwrap()
             .to_string();
         assert!(out.contains("foo/gateway"), "builds: {out}");

@@ -3,7 +3,7 @@ import { runCypher, lit, csvToRows } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "List a plan's tasks with phase, kind (owning role), tier (verification depth, test only), status, the Future each task Builds, and its Anchors (files/code touched). The implementation checklist view.",
+    "List a plan's tasks with phase, kind (owning role), tier (verification depth, test only), status, the planned Implementation node each task Builds, and its Anchors (files/code touched). The implementation checklist view.",
   args: {
     project: tool.schema.string().describe("Plan project (required)."),
     status: tool.schema
@@ -28,7 +28,7 @@ export default tool({
 
     const builds = new Map<string, string>()
     for (const [t, f] of csvToRows(
-      await runCypher(context, `MATCH (t:Task)-[:Builds]->(fut:Future) WHERE t.fqn STARTS WITH ${lit(pfx)} RETURN t.fqn, fut.fqn`),
+      await runCypher(context, `MATCH (t:Task)-[:Builds]->(p) WHERE t.fqn STARTS WITH ${lit(pfx)} RETURN t.fqn, p.fqn`),
     ).slice(1)) {
       builds.set(t, f)
     }

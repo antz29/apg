@@ -143,6 +143,20 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node) {
     match graph.nodes.get(&fqn) {
         None => {}
         Some(existing) if existing.kind == NodeKind::UnresolvedTarget => {}
+        // Scanner-replace (GraphModel-SPEC.md / PlanExecution-SPEC.md): a
+        // present (scanned) node at an FQN a `planned` node holds supersedes
+        // the planned placeholder. Edges are FQN-keyed, so incident edges
+        // (`Anchors`, `ImplementedBy`, `Builds`, `Details`, `Contains`) re-point
+        // to the real node automatically.
+        Some(existing)
+            if existing.status.as_deref() == Some("planned") && node.status.is_none() =>
+        {
+            graph.nodes.remove(&fqn);
+        }
+        // A planned node arriving at an FQN a present node already holds is
+        // superseded — a plan never overwrites real code (the plan-writer is
+        // rejected at authoring time; this is the ingest-side backstop).
+        Some(_) if node.status.as_deref() == Some("planned") => return,
         Some(_) => panic!("duplicate project node FQN: `{fqn}`"),
     }
     graph.nodes.insert(fqn, node);
@@ -374,15 +388,33 @@ pub fn ingest(
                         ..spec_node(NodeKind::Decision)
                     },
                 ),
-                Record::Future { fqn, kind, target } => insert_node(
-                    &mut graph,
+                Record::PlannedNode {
                     fqn,
-                    Node {
-                        sub_kind: opt(kind),
-                        target: opt(target),
-                        ..spec_node(NodeKind::Future)
-                    },
-                ),
+                    kind,
+                    name,
+                    parent,
+                } => {
+                    let kind = match kind.as_str() {
+                        "module" => NodeKind::Module,
+                        "file" => NodeKind::File,
+                        "struct" => NodeKind::Struct,
+                        "function" => NodeKind::Function,
+                        other => panic!("planned_node kind must be module/file/struct/function, got `{other}`"),
+                    };
+                    insert_node(
+                        &mut graph,
+                        fqn.clone(),
+                        Node {
+                            kind,
+                            name: opt(name),
+                            status: Some("planned".to_string()),
+                            ..spec_node(kind)
+                        },
+                    );
+                    if !parent.is_empty() {
+                        graph.contains.insert((parent, fqn));
+                    }
+                }
                 Record::NonGoal { fqn, body } => insert_node(
                     &mut graph,
                     fqn,
@@ -997,8 +1029,10 @@ pub fn ingest(
     // Spec/plan edge validation (SPEC R2/R21). Spec records carry no ids, so
     // dangling here means a JSONL referenced a node that isn't in the graph
     // (e.g. an anchor to code that was blacklisted, or a cross-file reference
-    // the author will fix in the JSONL). Pending anchors (to a Future) are
-    // valid; the R10 pending-anchor reconciliation runs here too.
+    // the author will fix in the JSONL). Pending anchors (to a planned
+    // Implementation node or a proposed Solution node) are valid — the target
+    // node exists in the graph; a truly dangling anchor (target in no graph)
+    // is dropped.
     graph.details = filter_edges(&graph, &graph.details, |g, a, b| {
         g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Note
     });
@@ -1015,14 +1049,11 @@ pub fn ingest(
     graph.spec_depends = filter_edges(&graph, &graph.spec_depends, |g, a, b| {
         kind_is(g, a, NodeKind::Spec) && kind_is(g, b, NodeKind::Spec)
     });
-    graph.anchors = filter_edges(&graph, &graph.anchors, |g, a, _| {
-        g.nodes.contains_key(a) && matches!(g.nodes[a].kind, NodeKind::Requirement | NodeKind::Task)
+    graph.anchors = filter_edges(&graph, &graph.anchors, |g, a, b| {
+        g.nodes.contains_key(a)
+            && matches!(g.nodes[a].kind, NodeKind::Requirement | NodeKind::Task)
+            && g.nodes.contains_key(b)
     });
-    // R10: an anchor whose target is not in the code graph is reconciled to a
-    // pending anchor on a Future node (the requirement references future
-    // code), unless it is a Task anchor (tasks anchor files touched — a stale
-    // file reference is dropped, not promoted to future work).
-    reconcile_pending_anchors(&mut graph);
     graph.implements = filter_edges(&graph, &graph.implements, |g, a, b| {
         g.nodes.contains_key(a)
             && kind_is(g, b, NodeKind::Requirement)
@@ -1035,7 +1066,11 @@ pub fn ingest(
         kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::Requirement)
     });
     graph.builds = filter_edges(&graph, &graph.builds, |g, a, b| {
-        kind_is(g, a, NodeKind::Task) && kind_is(g, b, NodeKind::Future)
+        kind_is(g, a, NodeKind::Task)
+            && matches!(
+                g.nodes[b].kind,
+                NodeKind::Module | NodeKind::File | NodeKind::Struct | NodeKind::Function
+            )
     });
 
     // Spine edges (GraphModel-SPEC.md; PHASE_01). Drives/Requires run
@@ -1081,7 +1116,6 @@ pub fn ingest(
                     | NodeKind::Requirement
                     | NodeKind::Phase
                     | NodeKind::Decision
-                    | NodeKind::Future
                     | NodeKind::NonGoal
                     | NodeKind::AcceptanceCriterion
                     | NodeKind::VerificationItem
@@ -1161,11 +1195,6 @@ fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
     )
 }
 
-/// The project a `<project>/spec…` FQN belongs to.
-fn project_of(fqn: &str) -> Option<String> {
-    fqn.split("/spec").next().map(|s| s.to_string())
-}
-
 fn kind_is(graph: &Graph, fqn: &str, k: NodeKind) -> bool {
     graph.nodes.get(fqn).is_some_and(|n| n.kind == k)
 }
@@ -1193,50 +1222,6 @@ fn filter_edges(
         .filter(|(a, b)| keep(graph, a, b))
         .cloned()
         .collect()
-}
-
-/// Reconciles dangling requirement anchors (SPEC R10): an `Anchors(req→X)`
-/// whose `X` is not a node in the code graph becomes a pending anchor on a
-/// `Future` node (created only by this reconciliation of an explicit
-/// requirement reference, never auto-created at authoring time). The Future's
-/// `target` keeps the intended FQN so drift/satisfaction is detectable. Task
-/// anchors to missing files are stale and dropped.
-fn reconcile_pending_anchors(graph: &mut Graph) {
-    let dangling: Vec<(String, String)> = graph
-        .anchors
-        .iter()
-        .filter(|(_, b)| !graph.nodes.contains_key(b))
-        .cloned()
-        .collect();
-    for (a, b) in dangling {
-        if graph.nodes[&a].kind != NodeKind::Requirement {
-            continue;
-        }
-        let Some(project) = project_of(&a) else {
-            continue;
-        };
-        let name = b.rsplit(['.', '/']).next().unwrap_or(&b).to_string();
-        let future_fqn = format!("{project}/{name}");
-        match graph.nodes.get(&future_fqn) {
-            None => {
-                graph.nodes.insert(
-                    future_fqn.clone(),
-                    Node {
-                        kind: NodeKind::Future,
-                        sub_kind: Some("other".to_string()),
-                        target: Some(b.clone()),
-                        ..Node::default()
-                    },
-                );
-            }
-            Some(existing) if existing.kind == NodeKind::Future => {}
-            Some(_) => panic!(
-                "FQN collision: pending anchor `{a}` target `{b}` wants `{future_fqn}`, already a non-Future node"
-            ),
-        }
-        graph.anchors.insert((a, future_fqn));
-    }
-    graph.anchors.retain(|(_, b)| graph.nodes.contains_key(b));
 }
 
 /// Binary spool format for edge records: one u8 tag (0 contains, 1 calls,
@@ -1901,12 +1886,13 @@ mod tests {
     }
 
     #[test]
-    fn pending_anchor_reconciles_to_future() {
-        // An anchor to a code FQN that isn't in the graph becomes a pending
-        // anchor on a synthesized Future node (R10); the Future carries the
-        // intended target so drift/satisfaction is detectable. A Task anchor
-        // to a missing file is stale and dropped; the Task's Builds edge to a
-        // (now reconciled) Future survives.
+    fn planned_node_lands_and_dangling_anchor_is_dropped() {
+        // The finalized model (GraphModel-SPEC.md): no placeholder node. A plan-side
+        // planned_node record lands as an Implementation node with
+        // `status: planned`; a dangling requirement anchor (target not in the
+        // graph) is dropped — no placeholder is synthesized. A Task anchor to a
+        // missing file is stale and dropped; the Task's Builds edge to the
+        // planned node survives.
         let records = vec![
             Record::Spec {
                 fqn: "foo/spec".to_string(),
@@ -1926,7 +1912,7 @@ mod tests {
             },
             Record::Anchors {
                 from: "foo/spec.R1".to_string(),
-                to: "github.com/x/gateway".to_string(),
+                to: "github.com/x/missing".to_string(),
             },
             Record::Plan {
                 fqn: "foo/plan".to_string(),
@@ -1958,9 +1944,21 @@ mod tests {
                 from: "foo/plan.phase-1.task-1".to_string(),
                 to: "/missing/file.go".to_string(),
             },
+            Record::PlannedNode {
+                fqn: "github.com/x/gateway".to_string(),
+                kind: "struct".to_string(),
+                name: "Gateway".to_string(),
+                parent: "/abs/gateway.go".to_string(),
+            },
+            Record::PlannedNode {
+                fqn: "/abs/gateway.go".to_string(),
+                kind: "file".to_string(),
+                name: "gateway.go".to_string(),
+                parent: String::new(),
+            },
             Record::Builds {
                 from: "foo/plan.phase-1.task-1".to_string(),
-                to: "foo/gateway".to_string(),
+                to: "github.com/x/gateway".to_string(),
             },
         ];
         let (graph, _) = ingest(
@@ -1971,36 +1969,132 @@ mod tests {
                 config: None,
             },
         );
-        // The dangling requirement anchor reconciled to a Future node.
-        let future_fqn = "foo/gateway".to_string();
-        assert!(graph.nodes.contains_key(&future_fqn));
-        assert_eq!(graph.nodes[&future_fqn].kind, NodeKind::Future);
-        assert_eq!(
-            graph.nodes[&future_fqn].target.as_deref(),
-            Some("github.com/x/gateway")
-        );
-        assert!(
-            graph
-                .anchors
-                .contains(&("foo/spec.R1".to_string(), future_fqn.clone()))
-        );
+        // The planned node lands as a Struct with status=planned (no location,
+        // no placeholder kind).
+        let fqn = "github.com/x/gateway".to_string();
+        assert_eq!(graph.nodes[&fqn].kind, NodeKind::Struct);
+        assert_eq!(graph.nodes[&fqn].status.as_deref(), Some("planned"));
+        assert!(graph.nodes[&fqn].location.is_none());
+        // The dangling requirement anchor (target in no graph) is dropped — no
+        // placeholder created.
+        assert!(!graph
+            .anchors
+            .contains(&("foo/spec.R1".to_string(), "github.com/x/missing".to_string())));
+        // The planned File→Struct containment lands (a valid Contains pair).
+        assert!(graph
+            .contains
+            .contains(&("/abs/gateway.go".to_string(), fqn.clone())));
         // The Task anchor to a missing file is dropped; its Builds edge to the
-        // reconciled Future survives.
+        // planned node survives.
         assert!(!graph.anchors.contains(&(
             "foo/plan.phase-1.task-1".to_string(),
             "/missing/file.go".to_string()
         )));
-        assert!(
-            graph
-                .builds
-                .contains(&("foo/plan.phase-1.task-1".to_string(), future_fqn))
+        assert!(graph
+            .builds
+            .contains(&("foo/plan.phase-1.task-1".to_string(), fqn)));
+    }
+
+    #[test]
+    fn scanner_replace_supersedes_planned_node_and_keeps_edges() {
+        // The scanner-replace (PlanExecution-SPEC.md): a real declaration at a
+        // planned FQN supersedes the planned node (status cleared, location
+        // filled), and FQN-keyed incident edges re-point to the real node
+        // automatically — the why-to-code chain resolves to real code.
+        let records = vec![
+            Record::Module {
+                fqn: "github.com/x/y".to_string(),
+            },
+            // The scanner's real declaration of the planned FQN.
+            srec("n1", "github.com/x/y", "Gateway", "/abs/gateway.go"),
+            file_rec("/abs/gateway.go", "github.com/x/y", 50),
+            Record::Spec {
+                fqn: "foo/spec".to_string(),
+                title: "T".to_string(),
+                goal: String::new(),
+            },
+            Record::Requirement {
+                fqn: "foo/spec.R1".to_string(),
+                id: "R1".to_string(),
+                title: "Timer".to_string(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Contains {
+                from: "foo/spec".to_string(),
+                to: "foo/spec.R1".to_string(),
+            },
+            Record::Anchors {
+                from: "foo/spec.R1".to_string(),
+                to: "github.com/x/y.Gateway".to_string(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Gateway".to_string(),
+                kind: "struct".to_string(),
+                name: "Gateway".to_string(),
+                parent: String::new(),
+            },
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-1".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: String::new(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-1.task-1".to_string(),
+                title: "t".to_string(),
+                kind: String::new(),
+                tier: String::new(),
+                status: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-1".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-1".to_string(),
+                to: "foo/plan.phase-1.task-1".to_string(),
+            },
+            Record::Builds {
+                from: "foo/plan.phase-1.task-1".to_string(),
+                to: "github.com/x/y.Gateway".to_string(),
+            },
+        ];
+        let (graph, _) = ingest(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "go",
+                config: None,
+            },
         );
+        let fqn = "github.com/x/y.Gateway".to_string();
+        let node = &graph.nodes[&fqn];
+        // The real (scanned) node won: present, located, not planned.
+        assert_eq!(node.kind, NodeKind::Struct);
+        assert!(node.status.is_none(), "scanner-replace clears status");
+        assert!(node.location.is_some(), "real node carries its location");
+        // Edges re-point to the realized node: the requirement anchor and the
+        // Builds edge both resolve.
+        assert!(graph
+            .anchors
+            .contains(&("foo/spec.R1".to_string(), fqn.clone())));
+        assert!(graph
+            .builds
+            .contains(&("foo/plan.phase-1.task-1".to_string(), fqn.clone())));
+        // The real File→Struct containment landed from the scanner.
+        assert!(graph.contains.contains(&("/abs/gateway.go".to_string(), fqn)));
     }
 
     #[test]
     fn spec_anchor_resolves_to_code_node() {
-        // An anchor to a real code node resolves directly; no Future is
-        // synthesized for it.
+        // An anchor to a real code node resolves directly; no planned
+        // placeholder exists for it.
         let records = vec![
             Record::Module {
                 fqn: "github.com/x/y".to_string(),

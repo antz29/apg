@@ -20,7 +20,7 @@ export default tool({
     const phases = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase) RETURN pp.fqn, pp.number, pp.title, pp.deliverable"))
     const sat = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.id"))
     const tasks = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.status"))
-    const builds = csvToRows(await runCypher(context, "MATCH (t:Task)-[:Builds]->(f:Future) RETURN t.fqn, f.fqn"))
+    const builds = csvToRows(await runCypher(context, "MATCH (t:Task)-[:Builds]->(p) RETURN t.fqn, p.fqn"))
 
     const out: string[] = []
     for (const [planFqn, title, strategy] of plans.slice(1)) {

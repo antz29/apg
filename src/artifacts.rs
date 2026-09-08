@@ -102,7 +102,10 @@ pub struct ArtifactDb {
     pub db: Database,
 }
 
-/// True when `fqn` resolves to a node in the live graph (any kind).
+/// True when `fqn` resolves to a node in the live graph (any kind). Used by
+/// the test suite and the tool surface; `#[allow(dead_code)]` because the
+/// shipping CLI paths test existence via label queries.
+#[allow(dead_code)]
 fn node_exists(db: &Database, fqn: &str) -> bool {
     count(
         db,
@@ -196,7 +199,11 @@ impl ArtifactDb {
         Ok(self.conn()?.query(query)?.to_string())
     }
 
-    pub fn has_node(&self, fqn: &str) -> bool {
+    /// Existence of any node at `fqn` in the live graph. Used by the test suite
+/// and the tool surface; `#[allow(dead_code)]` because the shipping CLI paths
+/// test existence via label queries.
+#[allow(dead_code)]
+pub fn has_node(&self, fqn: &str) -> bool {
         node_exists(&self.db, fqn)
     }
 
@@ -228,26 +235,42 @@ impl ArtifactDb {
         })
     }
 
-    /// True when `fqn` is a `Future` node (an explicit, author-declared
-    /// placeholder; never auto-created at authoring time).
-    pub fn is_future(&self, fqn: &str) -> bool {
-        count(
+    /// True when `fqn` is a `planned` Implementation node (a plan-writer-authored
+/// placeholder awaiting realization — GraphModel-SPEC.md). The placeholder
+/// node is gone (PHASE_02); pending anchors are detected by `status: planned`,
+/// never a separate kind.
+/// The label of a `planned` Implementation node at `fqn`, or `None`.
+pub fn is_planned(&self, fqn: &str) -> bool {
+    for l in ["Struct", "Function", "File", "Module"] {
+        if count(
             &self.db,
-            &format!("MATCH (n:Future {{fqn: {}}}) RETURN count(*)", lit(fqn)),
+            &format!(
+                "MATCH (n:{l} {{fqn: {}}}) WHERE n.status = 'planned' RETURN count(*)",
+                lit(fqn)
+            ),
         ) > 0
-    }
-
-    /// Resolves an anchor target (R7/R8): a resolved code FQN or an existing
-    /// `…` FQN. Anything else is an error.
-    pub fn resolve_anchor(&self, fqn: &str) -> anyhow::Result<()> {
-        if self.code_label(fqn).is_some() || self.is_future(fqn) {
-            Ok(())
-        } else {
-            anyhow::bail!(
-                "anchor target `{fqn}` is neither a resolved code node nor an existing `…` FQN (declare future code with `apg spec add future` first)"
-            )
+        {
+            return true;
         }
     }
+    false
+}
+
+/// Resolves an anchor target (R7/R8): real code (Module/Struct/Function/File)
+/// or a proposed Solution node (System/Container/Component — the pending
+/// tier-3 anchor of the plan bridge, GraphModel-SPEC.md). Anything else is an
+/// error.
+pub fn resolve_anchor(&self, fqn: &str) -> anyhow::Result<()> {
+    if self.code_label(fqn).is_some()
+        || matches!(self.node_label(fqn), Some("System" | "Container" | "Component"))
+    {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "anchor target `{fqn}` is neither resolved code nor a proposed Solution node (System/Container/Component)"
+        )
+    }
+}
 
     /// The owning module of a code node (via the Contains Module→File→node
     /// chain), for note-ledger routing.
@@ -332,7 +355,7 @@ impl ArtifactDb {
     /// throws a binder exception (`Query node b violates schema …`) for an
     /// undeclared pair — and because a re-ingest merges every project's
     /// records in ONE transaction, a single illegal pair anywhere (a legacy
-    /// Note→Future / Note→Note Details edge, the R2 class) used to abort every
+    /// Note→Note Details edge, the R2 class) used to abort every
     /// write-through with an opaque binder error, even a perfectly legal
     /// note-add to another project (the cosanima-rename Spec/Decision mystery,
     /// R3). The scan load path already projects such pairs away
@@ -425,10 +448,18 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             fqn,
             vec![("id", id.clone()), ("summary", summary.clone())],
         )),
-        Record::Future { fqn, kind, target } => Some((
-            "Future",
+        Record::PlannedNode {
+            fqn, kind, ..
+        } => Some((
+            match kind.as_str() {
+                "module" => "Module",
+                "file" => "File",
+                "struct" => "Struct",
+                "function" => "Function",
+                other => panic!("planned_node kind must be module/file/struct/function, got `{other}`"),
+            },
             fqn,
-            vec![("kind", kind.clone()), ("target", target.clone())],
+            vec![("status", "planned".to_string())],
         )),
         Record::NonGoal { fqn, body } => Some(("NonGoal", fqn, vec![("body", body.clone())])),
         Record::AcceptanceCriterion { fqn, body } => {
@@ -652,7 +683,7 @@ pub fn node_fqn(r: &Record) -> Option<&str> {
         | Record::Requirement { fqn, .. }
         | Record::Phase { fqn, .. }
         | Record::Decision { fqn, .. }
-        | Record::Future { fqn, .. }
+        | Record::PlannedNode { fqn, .. }
         | Record::NonGoal { fqn, .. }
         | Record::AcceptanceCriterion { fqn, .. }
         | Record::VerificationItem { fqn, .. }
@@ -1220,8 +1251,8 @@ mod tests {
         // `Details` targets, and the `MATCH … MERGE` for them binds fine. The
         // re-ingest merges EVERY spec project's records in ONE transaction
         // (assembled_records + merge_records), so a single illegal edge pair
-        // anywhere in the merged set — a Note → Future / Note → Note Details
-        // edge, the R2 class — makes the binder throw and aborts the WHOLE
+        // anywhere in the merged set — a Note → Note Details edge, the R2
+        // class — makes the binder throw and aborts the WHOLE
         // write-through, including perfectly legal note-adds to other projects.
         // PRE-FIX this test fails with the binder exception on the `docs`
         // write-through below; POST-FIX the illegal pair is skipped exactly
@@ -1249,7 +1280,7 @@ mod tests {
         write_jsonl_and_reingest(&apg_root, &rename_path, "rename", &rename).unwrap();
 
         // Project "docs" carries a POISON record: a Details edge whose
-        // (Note, Future) pair the Details rel table does not declare. Such a
+        // (Note, Note) pair the Details rel table does not declare. Such a
         // record cannot exist in the DB schema, so the merge_edge MERGE throws
         // a binder exception. The scan load path buckets the pair away
         // silently; the write-through re-ingest fed it to the DB.
@@ -1259,10 +1290,10 @@ mod tests {
                 title: "Docs".into(),
                 goal: String::new(),
             },
-            Record::Future {
-                fqn: "docs/migration-note".into(),
-                kind: "other".into(),
-                target: String::new(),
+            Record::Note {
+                fqn: "docs/note-2".into(),
+                body: "peer".into(),
+                kind: "background".into(),
             },
             Record::Note {
                 fqn: "docs/note-1".into(),
@@ -1271,7 +1302,7 @@ mod tests {
             },
             Record::Details {
                 from: "docs/note-1".into(),
-                to: "docs/migration-note".into(),
+                to: "docs/note-2".into(),
             },
         ];
         let docs_path = specs::spec_jsonl_path(&apg_root, "docs");

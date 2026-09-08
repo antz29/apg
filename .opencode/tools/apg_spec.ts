@@ -3,7 +3,7 @@ import { runCypher, lit, csvToRows, projectOf } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Spec overview: every spec project with its title, goal, and counts (requirements, phases, futures, tier nodes, notes, feedback, delivered requirements). Use to see which specs exist and their implementation state.",
+    "Spec overview: every spec project with its title, goal, and counts (requirements, phases, planned nodes, tier nodes, notes, feedback, delivered requirements). Use to see which specs exist and their implementation state.",
   args: {
     project: tool.schema
       .string()
@@ -21,7 +21,14 @@ export default tool({
 
     const reqRows = csvToRows(await runCypher(context, "MATCH (r:Requirement) RETURN r.fqn"))
     const phRows = csvToRows(await runCypher(context, "MATCH (p:Phase) RETURN p.fqn"))
-    const futRows = csvToRows(await runCypher(context, "MATCH (f:Future) RETURN f.fqn"))
+    const plannedRows: string[][] = []
+    for (const label of ["Struct", "Function", "File", "Module"]) {
+      plannedRows.push(
+        ...csvToRows(
+          await runCypher(context, `MATCH (n:${label}) WHERE n.status = 'planned' RETURN n.fqn`),
+        ).slice(1),
+      )
+    }
     const noteRows = csvToRows(await runCypher(context, "MATCH (n:Note) RETURN n.fqn"))
     const fbRows = csvToRows(await runCypher(context, "MATCH (f:Feedback) RETURN f.fqn, f.status"))
     const implRows = csvToRows(await runCypher(context, "MATCH (c)-[:Implements]->(r:Requirement) RETURN r.fqn"))
@@ -35,6 +42,8 @@ export default tool({
     const count = (rows: string[][], p: string) => rows.filter((r) => projectOf(r[0]) === p).length
 
     const out: string[] = []
+    const plannedTotal = Math.max(0, plannedRows.length)
+    if (plannedTotal > 0) out.push(`planned nodes across all plans: ${plannedTotal}`)
     for (const [fqn, title, goal] of specs) {
       const p = projectOf(fqn) ?? fqn
       const reqs = count(reqRows, p)
@@ -43,7 +52,7 @@ export default tool({
       out.push(`${fqn}\t${title}`)
       if (goal) out.push(`  goal: ${goal}`)
       out.push(
-        `  requirements: ${reqs} (${delivered} delivered, ${reqs - delivered} planned)  phases: ${count(phRows, p)}  futures: ${count(futRows, p)}  tier nodes: ${count(tierRows, p)}  notes: ${count(noteRows, p)}  feedback open: ${feedbackOpen}`,
+        `  requirements: ${reqs} (${delivered} delivered, ${reqs - delivered} planned)  phases: ${count(phRows, p)}  tier nodes: ${count(tierRows, p)}  notes: ${count(noteRows, p)}  feedback open: ${feedbackOpen}`,
       )
     }
     return out.join("\n")

@@ -1,10 +1,15 @@
 //! `apg plan` — the phased execution plan that bridges the spec to present
 //! code (PHASE_03 execution + apply model). The plan is transient by design
 //! (R22): it lives in the gitignored `apg/.trans/plans/<project>.jsonl` and is
-//! branch-local. Nothing is promoted by `plan done`/`plan complete` — those are
-//! assertion + milestone only. The plan survives until the apply act, whose
-//! coherence gate (Builds targets resolve, all feedback resolved) precedes the
-//! merge + rebuild of `main`'s graph (PlanCompletion-SPEC.md).
+//! branch-local. The plan-writer authors the tier-4 additions as **planned
+//! Implementation nodes** (`apg plan add <project> planned <kind> <fqn>` —
+//! Module/File/Struct/Function marked `status: planned` at the FQN where the
+//! code will land, GraphModel-SPEC.md); a task `Builds` the planned node it
+//! creates. Nothing is promoted by `plan done`/`plan complete` — those are
+//! assertion + milestone only; a branch scan **replaces realized planned
+//! nodes**. The plan survives until the apply act, whose coherence gate (every
+//! planned node realized, all feedback resolved) precedes the merge + rebuild
+//! of `main`'s graph (PlanCompletion-SPEC.md).
 
 use std::path::{Path, PathBuf};
 
@@ -82,20 +87,62 @@ fn plan_init(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `apg plan add <project> phase <n> …` / `task <phase> <k> …` (R23).
+/// `apg plan add <project> phase <n> …` / `task <phase> <k> …` /
+/// `planned <kind> <fqn> …` (R23, PHASE_02).
 fn plan_add(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(project) = p.positional.first() else {
-        anyhow::bail!("usage: apg plan add <project> <phase|task> …");
+        anyhow::bail!("usage: apg plan add <project> <phase|task|planned> …");
     };
     let Some(kind) = p.positional.get(1).map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg plan add <project> <phase|task> …");
+        anyhow::bail!("usage: apg plan add <project> <phase|task|planned> …");
     };
     let apg_root = require_apg_root()?;
     artifacts::acquire_spec_lock(&apg_root)?;
     let mut records = load_plan(&apg_root, project)?;
     let plan_fqn = format!("{project}/plan");
     match kind {
+        "planned" => {
+            let (Some(node_kind), Some(fqn)) = (
+                p.positional.get(2).map(|s| s.as_str()),
+                p.positional.get(3),
+            ) else {
+                anyhow::bail!(
+                    "usage: apg plan add <project> planned <kind> <fqn> [--name <name>] [--parent <parent-fqn>]"
+                );
+            };
+            if !["module", "file", "struct", "function"].contains(&node_kind) {
+                anyhow::bail!(
+                    "planned node kind must be module/file/struct/function, got `{node_kind}`"
+                );
+            }
+            // A plan never plans code that already exists: a present node at
+            // the FQN would make the planned placeholder incoherent (the
+            // scanner-replace only ever supersedes, never the reverse).
+            if let Ok(db) = artifacts::ArtifactDb::open(&apg_root)
+                && let Some(label) = db.code_label(fqn)
+            {
+                anyhow::bail!(
+                    "planned node `{fqn}` already resolves to a `{label}` code node — a plan never plans existing code (plan the delta, not the present)"
+                );
+            }
+            let rec = Record::PlannedNode {
+                fqn: fqn.clone(),
+                kind: node_kind.to_string(),
+                name: p.get("name").unwrap_or_default(),
+                parent: p.get("parent").unwrap_or_default(),
+            };
+            remove_node(&mut records, fqn);
+            records.push(rec);
+            if let Some(parent) = p.get("parent") {
+                records.push(Record::Contains {
+                    from: parent.clone(),
+                    to: fqn.clone(),
+                });
+            }
+            write_through(&apg_root, project, &records)?;
+            println!("Added planned {node_kind} `{fqn}` to plan {project}");
+        }
         "phase" => {
             let Some(n) = p.positional.get(2).and_then(|s| s.parse::<u32>().ok()) else {
                 anyhow::bail!(
@@ -146,7 +193,7 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
             ) else {
                 anyhow::bail!(
-                    "usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs>] [--tier <unit|int|e2e>] [--builds <future-name>] [--anchor <fqn>]*"
+                    "usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs>] [--tier <unit|int|e2e>] [--builds <planned-fqn>] [--anchor <fqn>]*"
                 );
             };
             let Some(title) = p.get("title") else {
@@ -167,16 +214,15 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 from: format!("{project}/plan.phase-{phase:02}"),
                 to: fqn.clone(),
             });
-            if let Some(future_name) = p.get("builds") {
-                let future_fqn = format!("{project}/{future_name}");
-                if !spec_has_future(&apg_root, project, &future_fqn)? {
+            if let Some(builds_fqn) = p.get("builds") {
+                if !plan_has_planned_node(&records, &builds_fqn) {
                     anyhow::bail!(
-                        "builds target `{future_name}` is not a declared future of `{project}` (declare it with `apg spec add future`)"
+                        "builds target `{builds_fqn}` is not a planned Implementation node of `{project}` (author it first with `apg plan add {project} planned <kind> <fqn>`)"
                     );
                 }
                 recs.push(Record::Builds {
                     from: fqn.clone(),
-                    to: future_fqn,
+                    to: builds_fqn,
                 });
             }
             {
@@ -203,7 +249,7 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
 
 /// Validate the two-axis task classification: `kind` is the owning role
 /// (orthogonal), `tier` the verification depth (a hierarchy, meaningful only
-/// for `kind = test`). Mirrors the `Future.kind` / `Note.kind` validation
+/// for `kind = test`). Mirrors the `Note.kind` validation
 /// pattern in `spec_cmd`. Tasks are implementer-workable by design (`source`/
 /// `test`/`gate`/`docs`) — the human's decision point is plan end, never a
 /// phase task.
@@ -320,10 +366,10 @@ fn link_phase_edges(
 
 /// `apg plan done <project> <task-fqn>` (PHASE_03) — the implementer's
 /// assertion. Marks a task done with NO promotion and NO code-graph
-/// verification: the plan's `Builds` futures stay declared until the apply act
-/// (PlanCompletion-SPEC.md), whose coherence gate verifies every `Builds`
-/// target resolves in the merged graph before applying. `apg plan undone`
-/// remains the reversal.
+/// verification: the plan's `Builds` planned nodes stay declared until the
+/// apply act (PlanCompletion-SPEC.md), whose coherence gate verifies every
+/// planned node is realized against the merged graph before applying.
+/// `apg plan undone` remains the reversal.
 fn plan_done(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let (Some(project), Some(task_fqn)) = (p.positional.first(), p.positional.get(1)) else {
@@ -357,7 +403,7 @@ fn plan_done_at(apg_root: &Path, project: &str, task_fqn: &str) -> anyhow::Resul
 }
 
 /// `apg plan undone <project> <task-fqn>` — a checklist correction; does not
-/// recreate retired Futures (the code is already in the present).
+/// recreate retired planned nodes (the code is already in the present).
 fn plan_undone(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let (Some(project), Some(task_fqn)) = (p.positional.first(), p.positional.get(1)) else {
@@ -550,8 +596,8 @@ fn plan_complete_at(apg_root: &Path, project: &str, phase: u32) -> anyhow::Resul
 /// (PlanCompletion-SPEC.md). Runs the change-set coherence gate against the
 /// branch's graph:
 ///
-/// - every `Builds` future's target resolves in the code graph (a claimed-done
-///   task whose code is missing blocks apply);
+/// - every planned Implementation node is realized in the code graph (a
+///   planned node with no real code at its FQN blocks apply);
 /// - every phase and the whole-plan review are green (all `Feedback` resolved);
 /// - the human gate has passed (the navigator's summary; outside the CLI).
 ///
@@ -569,47 +615,31 @@ fn plan_apply(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// Core of `plan_apply` — the coherence gate. Returns the apply handoff message
-/// on green, or errors listing every blocker (unresolved Builds target,
+/// on green, or errors listing every blocker (unrealized planned nodes,
 /// unresolved feedback).
 fn plan_apply_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     artifacts::acquire_spec_lock(apg_root)?;
     let records = load_plan(apg_root, project)?;
-    // Futures are declared in the spec JSONL (`apg spec add future`), while the
-    // plan's Builds edges reference them by fqn — the gate needs the spec
-    // records too to resolve each Builds future's target.
-    let spec_records = {
-        let p = specs::spec_jsonl_path(apg_root, project);
-        if p.exists() {
-            specs::read_jsonl(&p)?
-        } else {
-            Vec::new()
-        }
-    };
-    let all = records.iter().chain(spec_records.iter()).collect::<Vec<_>>();
     let db = artifacts::ArtifactDb::open(apg_root)?;
 
-    // 1. Every Builds future's target resolves in the branch's graph.
+    // 1. Every planned Implementation node in the branch is realized: a scan
+    // found real (present) code at its FQN and replaced the placeholder. A
+    // planned node still marked `planned`, or with no node at all, blocks
+    // apply (PlanCompletion-SPEC.md — the planned-node realization gate).
     let mut blocked: Vec<String> = Vec::new();
-    let builds: Vec<String> = records
+    let planned: Vec<(&str, &str)> = records
         .iter()
-        .filter_map(|e| match e {
-            Record::Builds { to, .. } => Some(to.clone()),
+        .filter_map(|r| match r {
+            Record::PlannedNode { fqn, kind, .. } => Some((fqn.as_str(), kind.as_str())),
             _ => None,
         })
         .collect();
-    for future_fqn in &builds {
-        let target = all.iter().find_map(|r| match r {
-            Record::Future { fqn, target, .. } if fqn == future_fqn => Some(target.clone()),
-            _ => None,
-        });
-        let target = target.filter(|t| !t.is_empty());
-        match target {
-            Some(t) if db.has_node(&t) => {}
-            _ => {
-                blocked.push(format!(
-                    "`{future_fqn}` is claimed-built by the plan but its target does not resolve in the branch's graph (missing code blocks apply)"
-                ));
-            }
+    for (fqn, kind) in planned {
+        let realized = db.code_label(fqn).is_some() && !db.is_planned(fqn);
+        if !realized {
+            blocked.push(format!(
+                "planned {kind} node `{fqn}` is not realized — a scan must find real code at its FQN before apply (missing code blocks apply)"
+            ));
         }
     }
 
@@ -648,7 +678,9 @@ fn plan_apply_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
             unresolved.join(", ")
         );
     }
-    println!("Apply gate passed for {project}: every Builds target resolves, all feedback resolved.");
+    println!(
+        "Apply gate passed for {project}: every planned node is realized, all feedback resolved."
+    );
     println!(
         "Merge: git merge {project} into main, then rebuild main's graph with `apg scan` (push/tag remain human)."
     );
@@ -844,15 +876,11 @@ fn spec_has_requirement(apg_root: &Path, project: &str, req_fqn: &str) -> anyhow
         .any(|r| matches!(r, Record::Requirement { fqn, .. } if fqn == req_fqn)))
 }
 
-/// Whether the spec project has a future with this fqn.
-fn spec_has_future(apg_root: &Path, project: &str, future_fqn: &str) -> anyhow::Result<bool> {
-    let path = specs::spec_jsonl_path(apg_root, project);
-    if !path.exists() {
-        return Ok(false);
-    }
-    Ok(specs::read_jsonl(&path)?
+/// Whether the plan has a planned Implementation node with this fqn.
+fn plan_has_planned_node(records: &[Record], fqn: &str) -> bool {
+    records
         .iter()
-        .any(|r| matches!(r, Record::Future { fqn, .. } if fqn == future_fqn)))
+        .any(|r| matches!(r, Record::PlannedNode { fqn: f, .. } if f == fqn))
 }
 #[cfg(test)]
 mod tests {
@@ -985,7 +1013,7 @@ mod tests {
             .unwrap();
         assert_eq!(status, "done");
 
-        // Assertion-only: no Futures were retired, no Implements appeared — the
+        // Assertion-only: no planned nodes were retired, no Implements appeared — the
         // plan carries no promotion side effects.
         assert!(
             recs.iter()
@@ -1088,11 +1116,11 @@ mod tests {
     }
 
     #[test]
-    fn apply_gate_rejects_unresolved_builds_target() {
+    fn apply_gate_rejects_unrealized_planned_node() {
         let (apg_root, dir) = fixture("apply-gate");
 
-        // A plan whose task Builds a Future whose target is NOT in the code
-        // graph (the code was claimed-done but is missing).
+        // A plan whose task Builds a planned node whose FQN has NO real code
+        // in the graph (the code was claimed-done but is missing).
         let path = specs::plan_jsonl_path(&apg_root, "foo");
         let records = vec![
             Record::Plan {
@@ -1113,31 +1141,32 @@ mod tests {
                 tier: String::new(),
                 status: "done".to_string(),
             },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Gateway".to_string(),
+                kind: "struct".to_string(),
+                name: "Gateway".to_string(),
+                parent: String::new(),
+            },
             Record::Builds {
                 from: "foo/plan.phase-01.task-1".to_string(),
-                to: "foo/gateway".to_string(),
-            },
-            Record::Future {
-                fqn: "foo/gateway".to_string(),
-                kind: "function".to_string(),
-                target: "github.com/x/y.Gateway".to_string(),
+                to: "github.com/x/y.Gateway".to_string(),
             },
         ];
         specs::write_jsonl(&path, &records).unwrap();
 
-        // The gate rejects: the Builds target does not resolve in the graph.
+        // The gate rejects: the planned node does not resolve to real code.
         let err = plan_apply_at(&apg_root, "foo").unwrap_err();
         assert!(err.to_string().contains("coherence gate blocked"), "{err}");
-        assert!(err.to_string().contains("foo/gateway"), "{err}");
+        assert!(err.to_string().contains("github.com/x/y.Gateway"), "{err}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn apply_gate_passes_when_builds_target_resolves_and_feedback_resolved() {
+    fn apply_gate_passes_when_planned_node_realized_and_feedback_resolved() {
         let (apg_root, dir) = fixture("apply-gate-ok");
 
-        // The Builds future's target resolves to the fixture Struct.
+        // The planned node's FQN resolves to the fixture's real Struct.
         let path = specs::plan_jsonl_path(&apg_root, "foo");
         let records = vec![
             Record::Plan {
@@ -1158,14 +1187,15 @@ mod tests {
                 tier: String::new(),
                 status: "done".to_string(),
             },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Store".to_string(),
+                kind: "struct".to_string(),
+                name: "Store".to_string(),
+                parent: String::new(),
+            },
             Record::Builds {
                 from: "foo/plan.phase-01.task-1".to_string(),
-                to: "foo/store".to_string(),
-            },
-            Record::Future {
-                fqn: "foo/store".to_string(),
-                kind: "struct".to_string(),
-                target: "github.com/x/y.Store".to_string(),
+                to: "github.com/x/y.Store".to_string(),
             },
             Record::Feedback {
                 fqn: "foo/feedback-1".to_string(),
@@ -1180,128 +1210,19 @@ mod tests {
         ];
         specs::write_jsonl(&path, &records).unwrap();
 
-        // Green: every Builds target resolves, all feedback resolved.
+        // Green: every planned node is realized, all feedback resolved.
         assert!(plan_apply_at(&apg_root, "foo").is_ok());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn apply_gate_resolves_builds_future_declared_in_spec_jsonl() {
-        let (apg_root, dir) = fixture("apply-gate-spec-future");
+    fn apply_gate_checks_every_planned_node_not_just_builds_targets() {
+        let (apg_root, dir) = fixture("apply-gate-all-planned");
 
-        // Real-world shape: `apg spec add future` declares the Future in the
-        // SPEC JSONL, and the plan carries only the Builds edge referencing it.
-        // The gate must merge spec records to resolve the target (regression:
-        // the dogfood apply once failed because it searched only the plan).
-        let plan = specs::plan_jsonl_path(&apg_root, "foo");
-        let plan_records = vec![
-            Record::Plan {
-                fqn: "foo/plan".to_string(),
-                title: "P".to_string(),
-                strategy: String::new(),
-            },
-            Record::PlanPhase {
-                fqn: "foo/plan.phase-01".to_string(),
-                number: 1,
-                title: "P1".to_string(),
-                deliverable: "D".to_string(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-1".to_string(),
-                title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
-                status: "done".to_string(),
-            },
-            Record::Builds {
-                from: "foo/plan.phase-01.task-1".to_string(),
-                to: "foo/store".to_string(),
-            },
-        ];
-        specs::write_jsonl(&plan, &plan_records).unwrap();
-
-        let spec = specs::spec_jsonl_path(&apg_root, "foo");
-        let spec_records = vec![
-            Record::Spec {
-                fqn: "foo/spec".to_string(),
-                title: "S".to_string(),
-                goal: String::new(),
-            },
-            Record::Future {
-                fqn: "foo/store".to_string(),
-                kind: "struct".to_string(),
-                target: "github.com/x/y.Store".to_string(),
-            },
-        ];
-        specs::write_jsonl(&spec, &spec_records).unwrap();
-
-        // Green: the spec-declared Future's target resolves in the graph.
-        assert!(plan_apply_at(&apg_root, "foo").is_ok());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn apply_gate_rejects_unresolved_spec_declared_builds_target() {
-        let (apg_root, dir) = fixture("apply-gate-spec-future-bad");
-
-        // Same shape, but the spec-declared Future targets code that does not
-        // resolve — the gate must still reject it.
-        let plan = specs::plan_jsonl_path(&apg_root, "foo");
-        let plan_records = vec![
-            Record::Plan {
-                fqn: "foo/plan".to_string(),
-                title: "P".to_string(),
-                strategy: String::new(),
-            },
-            Record::PlanPhase {
-                fqn: "foo/plan.phase-01".to_string(),
-                number: 1,
-                title: "P1".to_string(),
-                deliverable: "D".to_string(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-1".to_string(),
-                title: "T".to_string(),
-                kind: "source".to_string(),
-                tier: String::new(),
-                status: "done".to_string(),
-            },
-            Record::Builds {
-                from: "foo/plan.phase-01.task-1".to_string(),
-                to: "foo/store".to_string(),
-            },
-        ];
-        specs::write_jsonl(&plan, &plan_records).unwrap();
-
-        let spec = specs::spec_jsonl_path(&apg_root, "foo");
-        let spec_records = vec![
-            Record::Spec {
-                fqn: "foo/spec".to_string(),
-                title: "S".to_string(),
-                goal: String::new(),
-            },
-            Record::Future {
-                fqn: "foo/store".to_string(),
-                kind: "struct".to_string(),
-                target: "github.com/x/y.Missing".to_string(),
-            },
-        ];
-        specs::write_jsonl(&spec, &spec_records).unwrap();
-
-        let err = plan_apply_at(&apg_root, "foo").unwrap_err();
-        assert!(err.to_string().contains("coherence gate blocked"), "{err}");
-        assert!(err.to_string().contains("foo/store"), "{err}");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn apply_gate_rejects_unresolved_feedback() {
-        let (apg_root, dir) = fixture("apply-feedback");
-
-        // Builds target resolves, but an open Feedback reviews the phase.
+        // Two planned nodes, only one built: the gate must block on the
+        // unrealized one even though every Builds edge's target resolves (the
+        // per-plan realization check, not a Builds-target check).
         let path = specs::plan_jsonl_path(&apg_root, "foo");
         let records = vec![
             Record::Plan {
@@ -1322,14 +1243,65 @@ mod tests {
                 tier: String::new(),
                 status: "done".to_string(),
             },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Store".to_string(),
+                kind: "struct".to_string(),
+                name: "Store".to_string(),
+                parent: String::new(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Gateway".to_string(),
+                kind: "struct".to_string(),
+                name: "Gateway".to_string(),
+                parent: String::new(),
+            },
             Record::Builds {
                 from: "foo/plan.phase-01.task-1".to_string(),
-                to: "foo/store".to_string(),
+                to: "github.com/x/y.Store".to_string(),
             },
-            Record::Future {
-                fqn: "foo/store".to_string(),
+        ];
+        specs::write_jsonl(&path, &records).unwrap();
+
+        let err = plan_apply_at(&apg_root, "foo").unwrap_err();
+        assert!(err.to_string().contains("github.com/x/y.Gateway"), "{err}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_gate_rejects_unresolved_feedback() {
+        let (apg_root, dir) = fixture("apply-feedback");
+
+        // Planned node realizes, but an open Feedback reviews the phase.
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
+                title: "T".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "done".to_string(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Store".to_string(),
                 kind: "struct".to_string(),
-                target: "github.com/x/y.Store".to_string(),
+                name: "Store".to_string(),
+                parent: String::new(),
+            },
+            Record::Builds {
+                from: "foo/plan.phase-01.task-1".to_string(),
+                to: "github.com/x/y.Store".to_string(),
             },
             Record::Feedback {
                 fqn: "foo/feedback-1".to_string(),

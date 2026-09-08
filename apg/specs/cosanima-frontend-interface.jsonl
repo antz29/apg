@@ -1,8 +1,4 @@
 {"type":"spec","fqn":"cosanima-frontend-interface/spec","title":"Cosanima frontend contract (versioned handshake)","goal":"Define and implement the versioned frontend↔core handshake: `cosanima frontend validate` as the oracle, a SUPPORTED_COSANIMA range each frontend declares, runtime compatibility assessment in `cosanima scan`, and the bump policy governing both — all on the semver crate."}
-{"type":"future","fqn":"cosanima-frontend-interface/validate-cmd","kind":"function","target":"cosanima.cmd_frontend_validate"}
-{"type":"future","fqn":"cosanima-frontend-interface/compat-check","kind":"function","target":"cosanima.check_frontend_compat"}
-{"type":"future","fqn":"cosanima-frontend-interface/supported-cosanima","kind":"other","target":"SUPPORTED_COSANIMA constant in each of the six frontend repos"}
-{"type":"future","fqn":"cosanima-frontend-interface/schema-revision","kind":"other","target":"versioned JSONL-schema/FQN-rule contract revision, distinct from the cosanima CLI semver"}
 {"type":"requirement","fqn":"cosanima-frontend-interface/spec.R1","id":"R1","title":"cosanima frontend validate subcommand","body":"`cosanima frontend validate` is a test/validation mode in the published cosanima binary: it reads a frontend's JSONL output on stdin, validates every record against the unified schema + invariants (schema.rs), emits a record-by-record report, and returns a real non-zero exit code on any violation. Direction: 'make a new frontend, validate against the latest cosanima binary.'","feature":"validate-mode"}
 {"type":"contains","from":"cosanima-frontend-interface/spec","to":"cosanima-frontend-interface/spec.R1"}
 {"type":"depends_on","from":"cosanima-frontend-interface/spec.R1","to":"cosanima-repo-split/spec.R3"}

@@ -10,11 +10,6 @@
 {"type":"phase","fqn":"cosanima-mcp/spec.phase-4","number":4,"title":"Distribution, retirement + verification"}
 {"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.phase-4"}
 {"type":"gates","from":"cosanima-mcp/spec.phase-4","to":"cosanima-mcp/spec.phase-3"}
-{"type":"future","fqn":"cosanima-mcp/mcp-server","kind":"service","target":"cosanima.mcp.Server"}
-{"type":"future","fqn":"cosanima-mcp/per-tool-schemas","kind":"other","target":"cosanima.mcp.tool_schemas"}
-{"type":"future","fqn":"cosanima-mcp/canonical-agents","kind":"other","target":"cosanima.agents"}
-{"type":"future","fqn":"cosanima-mcp/frontmatter-adapter","kind":"function","target":"cosanima.agents.render_harness"}
-{"type":"future","fqn":"cosanima-mcp/init-install","kind":"other","target":"cosanima.init.mcp_install"}
 {"type":"requirement","fqn":"cosanima-mcp/spec.R1","id":"R1","title":"Local MCP server over stdio (`cosanima mcp`)","body":"`cosanima mcp` runs a local MCP (Model Context Protocol) server over stdio transport — a runnable server mode of the binary, dispatched from main alongside init/scan/query/spec/plan/review. The server exposes cosanima's capabilities as MCP tools and the graph/spec/plan data as MCP resources, so any MCP-capable harness can drive cosanima. This is the agent-facing tool substrate for 1.0.","feature":"server"}
 {"type":"contains","from":"cosanima-mcp/spec","to":"cosanima-mcp/spec.R1"}
 {"type":"anchors","from":"cosanima-mcp/spec.R1","to":"cosanima-mcp/mcp-server"}

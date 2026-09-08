@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
-import { runCypher, lit, csvToRows } from "../lib/apg.ts"
+import { runCypher, lit, csvToRows, isPendingAnchor } from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -50,13 +50,14 @@ const implements_: Map<string, string[]> = new Map()
     ).slice(1)) {
       implements_.set(req, [...(implements_.get(req) ?? []), code])
     }
-    // A future fqn (`<project>/<name>`) is a pending anchor; a code FQN is
-    // resolved (the `future/` prefix is gone — PHASE_04).
-    const futureSet = new Set(
-      csvToRows(await runCypher(context, "MATCH (f:Future) RETURN f.fqn"))
-        .slice(1)
-        .map((r) => r[0]),
-    )
+    // A planned Implementation node or proposed Solution node is a pending
+    // anchor; a real code node is resolved (PHASE_02).
+    const pending = new Set<string>()
+    for (const [_, to] of anchors) {
+      for (const x of to) {
+        if (await isPendingAnchor(context, x)) pending.add(x)
+      }
+    }
 
     const lines: string[] = []
     for (const [fqn, id, title, feature] of reqs.slice(1)) {
@@ -66,7 +67,7 @@ const implements_: Map<string, string[]> = new Map()
       const d = deps.get(id) ?? []
       lines.push(`  consumes: ${d.length ? d.join(", ") : "(none)"}`)
       const a = anchors.get(id) ?? []
-      lines.push(`  anchors: ${a.length ? a.map((x) => (futureSet.has(x) ? `${x} (pending)` : x)).join(", ") : "(none)"}`)
+      lines.push(`  anchors: ${a.length ? a.map((x) => (pending.has(x) ? `${x} (pending)` : x)).join(", ") : "(none)"}`)
       const i = implements_.get(id) ?? []
       lines.push(`  implemented by: ${i.length ? i.join(", ") : "(none — planned)"}`)
     }

@@ -3,7 +3,7 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Remove a node (and all its incident edges) from a spec project: `apg spec rm <project> <fqn|id>`. Accepts a requirement/phase/decision/future id or a full <project>/... FQN. Write-through — the JSONL is updated and the live DB re-ingested.",
+    "Remove a node (and all its incident edges) from a spec project: `apg spec rm <project> <fqn|id>`. Accepts a requirement/phase/decision id or a full <project>/... FQN. Write-through — the JSONL is updated and the live DB re-ingested.",
   args: {
     project: tool.schema.string().describe("Spec project (required)."),
     id: tool.schema

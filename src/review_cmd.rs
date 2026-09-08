@@ -33,7 +33,7 @@ pub fn cmd_review(args: &[String]) -> anyhow::Result<()> {
 
 /// `apg review add <target-fqn> --body … [--kind …] [--project <p>]
 /// [--checks <invariant-fqn>]*` — attach a `Feedback` (`open`) to any artifact
-/// node (spec, plan, task, or code). Routing (R1): a spec/Future target
+/// node (spec, plan, task, or code). Routing (R1): a spec target
 /// serializes in `apg/specs/<project>.jsonl`; a plan/task or code target in
 /// `apg/.trans/plans/<project>.jsonl`. `--checks` cites the invariants the
 /// comment enforces (a `Checks` Feedback → Invariant edge, PHASE_02); most

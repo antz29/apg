@@ -3,7 +3,7 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Flip a done plan task back to pending: `apg plan undone <project> <task-fqn>`. A checklist correction only — it does not recreate retired Futures (the code stays in the present).",
+    "Flip a done plan task back to pending: `apg plan undone <project> <task-fqn>`. A checklist correction only — it does not recreate retired planned nodes (the code stays in the present).",
   args: {
     project: tool.schema.string().describe("Plan project (required)."),
     task: tool.schema

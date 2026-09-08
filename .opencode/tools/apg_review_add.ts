@@ -3,7 +3,7 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Attach review feedback to an artifact node (`apg review add <target-fqn> --body ... [--checks <invariant-fqn>]*`): a spec/requirement/phase/future/plan/task node or a code node. Creates an open Feedback. The target must exist in the graph; a code target requires --project to route the feedback into the plan JSONL. --checks cites the invariants the comment enforces (a Checks Feedback→Invariant edge); most feedback has none.",
+    "Attach review feedback to an artifact node (`apg review add <target-fqn> --body ... [--checks <invariant-fqn>]*`): a spec/requirement/phase/plan/task node or a code node. Creates an open Feedback. The target must exist in the graph; a code target requires --project to route the feedback into the plan JSONL. --checks cites the invariants the comment enforces (a Checks Feedback→Invariant edge); most feedback has none.",
   args: {
     target: tool.schema
       .string()

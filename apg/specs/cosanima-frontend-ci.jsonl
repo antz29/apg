@@ -1,5 +1,4 @@
 {"type":"spec","fqn":"cosanima-frontend-ci/spec","title":"Cosanima per-frontend CI over the validate oracle","goal":"Per-frontend CI in each native toolkit that runs build → golden-fixture scan → `cosanima frontend validate`, catching schema drift in the frontend repo, with a golden-fixture diff mode."}
-{"type":"future","fqn":"cosanima-frontend-ci/golden-fixture","kind":"other","target":"per-frontend golden fixture corpus + expected JSONL"}
 {"type":"requirement","fqn":"cosanima-frontend-ci/spec.R1","id":"R1","title":"Per-frontend CI lane over the oracle","body":"Each of the six frontend repos runs a native-toolkit CI lane: build → run the frontend on a golden fixture → pipe stdout to `cosanima frontend validate`. Schema drift is caught in the frontend repo at CI time, not at the first real scan. The lane consumes the validate oracle built in cosanima-frontend-interface.","feature":"lanes"}
 {"type":"contains","from":"cosanima-frontend-ci/spec","to":"cosanima-frontend-ci/spec.R1"}
 {"type":"depends_on","from":"cosanima-frontend-ci/spec.R1","to":"cosanima-frontend-interface/spec.R1"}

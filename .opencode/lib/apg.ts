@@ -154,7 +154,7 @@ function parseCsvLine(line: string): string[] {
 /**
  * True when `fqn` exists as a code node (Function/Struct/File) in the graph.
  * Label-alternation/OR in WHERE is unsupported, so each label is checked
- * separately. Used by the lint tools for satisfiable-future and drift checks.
+ * separately. Used by the lint tools for planned-node realization and drift checks.
  */
 export async function resolvesInCode(context: ToolContext, fqn: string): Promise<boolean> {
   for (const label of ["Function", "Struct", "File"]) {
@@ -165,11 +165,23 @@ export async function resolvesInCode(context: ToolContext, fqn: string): Promise
 }
 
 /**
- * True when `fqn` is a `Future` node (an author-declared placeholder for
- * not-yet-built code). The `future/` namespace is gone (PHASE_04) — "pending"
- * anchors are detected by label, not prefix.
+ * True when `fqn` is a `planned` Implementation node (a plan-writer-authored
+ * placeholder awaiting realization) or a proposed Solution node — the pending
+ * anchors of the finalized model (GraphModel-SPEC.md). The placeholder node
+ * is gone (PHASE_02); "pending" anchors are detected by `status: planned` or a
+ * tier-3 Solution label.
  */
-export async function isFutureNode(context: ToolContext, fqn: string): Promise<boolean> {
-  const out = await runCypher(context, `MATCH (n:Future {fqn: ${lit(fqn)}}) RETURN n.fqn`)
-  return out.split("\n").filter((l) => l.length > 0).length > 1
+export async function isPendingAnchor(context: ToolContext, fqn: string): Promise<boolean> {
+  for (const label of ["Struct", "Function", "File", "Module"]) {
+    const out = await runCypher(
+      context,
+      `MATCH (n:${label} {fqn: ${lit(fqn)}}) WHERE n.status = 'planned' RETURN n.fqn`,
+    )
+    if (out.split("\n").filter((l) => l.length > 0).length > 1) return true
+  }
+  for (const label of ["System", "Container", "Component"]) {
+    const out = await runCypher(context, `MATCH (n:${label} {fqn: ${lit(fqn)}}) RETURN n.fqn`)
+    if (out.split("\n").filter((l) => l.length > 0).length > 1) return true
+  }
+  return false
 }
