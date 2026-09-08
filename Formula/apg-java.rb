@@ -12,8 +12,8 @@ class ApgJava < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.10.0"
-    rebuild 10
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "15232a5e030424ca8592e206ddd54c01f7401cff129750f63cf92e9e7332259f"
+    rebuild 11
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "e652bad0c3f1d5fc6002b1de86b21a5da67b5ff2df99c0f51db89b159d6e21c0"
   end
 
   depends_on "openjdk" # javac to build the frontend; java at runtime
