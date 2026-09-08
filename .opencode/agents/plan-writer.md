@@ -71,9 +71,10 @@ authors the delta's additions as **planned Implementation nodes**
 (`Module`/`File`/`Struct`/`Function`, marked `planned` at the FQN where the code
 will land — `apg plan add <project> planned <kind> <fqn>`); a task `Builds` the
 planned node it creates. The plan survives until the apply act — `plan done` is
-an implementer assertion, `plan complete` a milestone; nothing is promoted
-during execution (a branch scan **replaces realized planned nodes**, which is
-the promotion mechanism).
+an implementer assertion, `plan complete` a milestone; nothing advances
+automatically during execution (a branch scan simply **replaces realized
+planned nodes** with the real code nodes — scanner-replace, PlanExecution-
+SPEC.md).
 
 ## File access (strict)
 

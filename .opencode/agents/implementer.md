@@ -212,7 +212,7 @@ decision you make, no exceptions:
 5. **Attach task notes** for concerns or deviations that arose during
    implementation: `apg_plan_note <project> <task-fqn> --body …`. These are
    surfaced to the human at the apply gate — note anything the reviewer or a
-   future reader must know (a workaround, a spec deviation, a gotcha).
+   later reader must know (a workaround, a spec deviation, a gotcha).
 6. **Action Feedback** on your work: `apg_review_action <feedback-fqn>
    --fix|--wont-fix`. Feedback FQNs come from the navigator/coordinator or the
    implementation-phase-reviewer.

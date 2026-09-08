@@ -290,10 +290,23 @@ transient, branch-local `apg/.trans/plans/<project>.jsonl`).
 | 4 — Implementation | scanner code nodes (`Module`/`File`/`Struct`/`Function`) | what is |
 
 FQNs are **project-scoped and stable**: `<project>/spec`, `<project>/spec.R1`,
-`<project>/plan.phase-01`, `<project>/<tier>.<name>`, `<project>/<future-code>`.
-There is no `future/` namespace — a project is a **git branch**, and a node's
-present-ness is branch membership (nodes only on a branch = proposed; nodes on
-`main` = present).
+`<project>/plan.phase-01`, `<project>/<tier>.<name>`, and a tier-4 code FQN
+(`<project>/<module>.<name>`) for planned code. A project is a **git branch**,
+and a node's present-ness is branch membership (nodes only on a branch =
+proposed; nodes on `main` = present).
+
+### Planned Implementation nodes (the pre-build bridge)
+
+Code that a plan will build exists in the graph *before* it is written: the
+plan-writer declares it as a **planned Implementation node** — a
+`Module`/`File`/`Struct`/`Function` record at its **real code FQN** carrying
+`status: planned` (`apg plan add <project> planned <kind> <fqn>`). A planned
+node has no location (no `path`/`start`/`end`), anchors requirements
+(`Anchors(req→planned)`), and is the target of `Builds(Task→planned)`. When the
+code actually exists, the next **branch scan replaces the planned node**: the
+scanner finds the FQN, clears `status`, fills in the location, and re-points its
+incident edges. On `main` there are no planned nodes — every Implementation
+node is real code, and the spine resolves straight through to it.
 
 ### The spine (end-to-end traceability)
 
@@ -314,15 +327,18 @@ cite invariants with `apg review add --checks <invariant-fqn>` (`Checks`).
 
 ### The plan lifecycle (execution + apply)
 
-- `apg plan done` is an **implementer assertion** — no promotion, no graph
-  verification.
+- `apg plan add <project> planned <kind> <fqn>` authors a planned
+  Implementation node (the plan-writer's job); `apg plan add task --builds
+  <fqn>` links each task to the planned node it creates.
+- `apg plan done` is an **implementer assertion** — no graph verification.
 - `apg plan complete` is a **milestone only** — the plan survives until apply.
 - `apg plan note` attaches task notes (execution context, surfaced at the human
   gate).
-- `apg plan apply` runs the **apply-act coherence gate** (every `Builds` target
-  resolves; all feedback resolved) and hands off the merge + rebuild: the
-  navigator operates `git merge <project>` into `main` and rebuilds `main`'s
-  graph. Push/tag remain human.
+- `apg plan apply` runs the **apply-act coherence gate** (every planned node is
+  **realized** — a branch scan found real code at its FQN; all feedback
+  resolved) and hands off the merge + rebuild: the navigator operates
+  `git merge <project>` into `main` and rebuilds `main`'s graph. Push/tag
+  remain human.
 
 ## Configuration
 

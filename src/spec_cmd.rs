@@ -3970,9 +3970,9 @@ mod tests {
     #[test]
     fn spec_unresolved_lints_orphans_and_planned_nodes() {
         // A spec with an orphan requirement (no Satisfies/Implements), a
-        // satisfiable future (target code `github.com/x/y.Store` exists in the
-        // fixture DB), an unsatisfiable future, and an open feedback — the
-        // `apg spec unresolved` CLI subcommand should report each section.
+        // satisfiable planned node (target code `github.com/x/y.Store` exists
+        // in the fixture DB), an unrealized planned node, and an open feedback —
+        // the `apg spec unresolved` CLI subcommand should report each section.
         let (apg_root, dir) = fixture_layout("unresolved");
         let records = vec![
             Record::Spec { fqn: "foo/spec".into(), title: "T".into(), goal: String::new() },

@@ -63,15 +63,15 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
 - `apg query "<cypher>"` — read-only Cypher over `apg/.trans/db.lbug` (found by walking
   up from cwd), CSV output with header row.
 - `apg spec <sub> …` — author + lifecycle a graph-native spec: `init`, `add`
-  (requirement, future, phase, decision, non-goal, AC, VI, note, stakeholder,
+  (requirement, phase, decision, non-goal, AC, VI, note, stakeholder,
   domain, subdomain, entity, value-object, aggregate, domain-event,
   domain-process, domain-rule, actor, system, container, component),
   `anchor`, `link`, `spine` (Drives/Requires/Realises/Represents/ImplementedBy),
-  `rm`, `render`, `promote`, `unresolved` (read-only orphan/coverage lint; see "Graph-native
+  `rm`, `render`, `unresolved` (read-only orphan/coverage lint; see "Graph-native
   specs" below).
 - `apg plan <sub> …` — the phased execution plan (transient, serialized to
-  `apg/.trans/plans/<project>.jsonl`, branch-local): `init`, `add` (phase/task),
-  `link`, `done`/`undone` (assertion-only), `note` (task notes), `complete`
+  `apg/.trans/plans/<project>.jsonl`, branch-local): `init`, `add`
+  (phase/task/planned), `link`, `done`/`undone` (assertion-only), `note` (task notes), `complete`
   (milestone-only), `render`, `apply` (coherence gate → merge + rebuild handoff).
 - `apg review <sub> …` — the closed writer↔reviewer feedback cycle: `add`,
   `action`, `resolve`, `reject`, `list`.
@@ -86,7 +86,7 @@ abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
 `apg_unresolved`, `apg_hunk` — and the spec/plan/review suite: `apg_spec`
 (+ requirements/phases/deps/anchors/trace/unresolved/fixes/init/add/anchor/link/rm/
-render/promote), `apg_plan` (+ phases/tasks/complete/render/init/add/
+render), `apg_plan` (+ phases/tasks/complete/render/init/add/
 link/done/undone/note/apply), `apg_review` (+ add/action/resolve/reject). Shared plumbing
 lives in `~/.opencode/lib/apg.ts`
 (root discovery, `apg query`/`apg spec`/`apg plan`/`apg review` subprocess,
@@ -217,7 +217,7 @@ Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are ro
 A repo can carry a **graph-native spec** (SPEC.md in this repo) authored via
 `apg spec`/`apg plan`/`apg review`, living in the same `apg/.trans/db.lbug`:
 spec/plan nodes live under the project-scoped FQNs (`<project>/spec`,
-`<project>/plan`, `<project>/<future-code>`). Durable
+`<project>/plan`, and tier-4 planned code under its real FQN). Durable
 serialization is committed `apg/specs/<project>.jsonl` (specs + spec notes +
 spec-review feedback), `apg/notes/<module>.jsonl` (notes on code nodes, one
 file per owning module, `_root.jsonl` fallback); the plans themselves are
@@ -227,17 +227,19 @@ auto-discovers all three after code and re-ingests them;
 `apg spec` mutations are write-through (JSONL first, then re-merge into the
 live DB).
 
-Additional node labels: `Spec`, `Requirement`, `Phase`, `Decision`, `Future`,
+Additional node labels: `Spec`, `Requirement`, `Phase`, `Decision`,
 `NonGoal`, `AcceptanceCriterion`, `VerificationItem`, `Note`, `Feedback`,
-`Plan`, `PlanPhase`, `Task`. Additional edges: `Details` (Note→any),
+`Plan`, `PlanPhase`, `Task` — plus the four Implementation kinds
+(`Module`/`File`/`Struct`/`Function`), which may carry `status: planned` for
+not-yet-built code (see "Planned Implementation nodes" below). Additional edges: `Details` (Note→any),
 `Reviews` (Feedback→any), `DependsOn` (Requirement→Requirement — same-project,
 or cross-project `<other-proj>/spec.<id>` via `--depends-on
 <other-proj>/<id>`), `Gates`
 (Phase→Phase, PlanPhase→PlanPhase), `SpecDependsOn` (Spec→Spec — whole-spec
 antecedents, authored with `apg spec link <project> spec --depends-on
 <other-project>`), `Anchors`
-(Requirement/Task→code or Future), `Implements` (code→Requirement),
-`Satisfies` (PlanPhase→Requirement), `Builds` (Task→Future). Dependency and
+(Requirement/Task→code, Solution, or planned node), `Implements` (code→Requirement),
+`Satisfies` (PlanPhase→Requirement), `Builds` (Task→planned node). Dependency and
 cross-spec cycles are detected across **all** spec projects' edges and rejected
 at write time.
 
@@ -254,7 +256,25 @@ tiers end to end: `Requirement --Drives/Requires--> Domain
 --drives/--requires/--realises/--represents/--implemented-by <to>` for the
 edges). Any requirement traces down to the code that implements it; any code
 traces up to the why. FQNs are project-scoped and stable; a project is a git
-branch and a node's present-ness is branch membership (no `future/` namespace).
+branch and a node's present-ness is branch membership (branch-only nodes are
+proposed; `main` nodes are present).
+
+### Planned Implementation nodes (PlanCreation-SPEC.md)
+
+- Code a plan will build exists in the graph *before* it is written: the
+  plan-writer declares it as a **planned Implementation node** — a
+  `Module`/`File`/`Struct`/`Function` record at its **real code FQN** carrying
+  `status: planned` (`apg plan add <project> planned <kind> <fqn>`). A planned
+  node has no location, anchors requirements (`Anchors(req→planned)`), and is
+  the target of `Builds(Task→planned)`.
+- When the code actually exists, the next **branch scan replaces the planned
+  node**: the scanner finds the FQN, clears `status`, fills in the location,
+  and re-points incident edges. On `main` there are no planned nodes — every
+  Implementation node is real code and the spine resolves straight through to
+  it.
+- Pending anchors are `Anchors(Requirement→Solution)` (a proposed tier-3 node)
+  or `Anchors(Requirement→planned)`; the plan-writer never authors spec tiers
+  1–3 and the spec-writer never authors planned code.
 
 ### Invariants (Invariants-SPEC.md)
 
@@ -264,9 +284,6 @@ project-scoped; `title`/`body`/`category`/`scope`/`status`) guard artifacts via
 (Feedback→Invariant). A `domain-rule` also materializes a project-scoped
 `Invariant` (`category=product`).
 
-- `Future {fqn, kind, target}` is a placeholder for not-yet-built code
-  (`kind` ∈ function/struct/service/rpc/endpoint/other, `target` = intended
-  real FQN); a pending anchor is `Anchors(req→Future)`.
 - `Task {fqn, title, kind, tier, status}` carries a two-axis classification:
   `kind` ∈ source/test/gate/docs is the **owning role** (orthogonal,
   `source` default); `tier` ∈ unit/int/e2e is the verification depth,
@@ -279,7 +296,7 @@ project-scoped; `title`/`body`/`category`/`scope`/`status`) guard artifacts via
   `status` ∈ open/actioned/resolved. An artifact is done only when every
   `Feedback` on it is `resolved` — `apg plan complete` and the apply gate
   refuse otherwise.
-- Query patterns: pending anchors `MATCH (r:Requirement)-[:Anchors]->(f:Future) RETURN r.fqn, f.fqn`; what's left in a spec `MATCH (p:Phase)-[:Contains]->(r:Requirement) WHERE NOT (r)<-[:Implements]-(:Struct)` — or use the suite tools (`apg_spec`, `apg_spec_requirements`, `apg_spec_phases`, `apg_spec_anchors`, `apg_spec_trace`, `apg_spec_unresolved`, `apg_spec_fixes`, `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
+- Query patterns: pending anchors `MATCH (r:Requirement)-[:Anchors]->(n) WHERE n.status = 'planned' OR n:System OR n:Container OR n:Component RETURN r.fqn, n.fqn`; what's left in a spec `MATCH (p:Phase)-[:Contains]->(r:Requirement) WHERE NOT (r)<-[:Implements]-(:Struct)` — or use the suite tools (`apg_spec`, `apg_spec_requirements`, `apg_spec_phases`, `apg_spec_anchors`, `apg_spec_trace`, `apg_spec_unresolved`, `apg_spec_fixes`, `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
 - The six distributed agents (installed by `apg init`): `codebase-navigator`
   (orchestrates the flow — branch lifecycle at project start, per-branch DB
   build, feedback routing, human-gate summary, and the apply act (coherence

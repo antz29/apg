@@ -77,7 +77,7 @@ the codebase-navigator delegates to you to build or update them.
 
 ### implementation-phase-reviewer (always)
 - **Reviews the code implemented in a phase** against the plan + that phase's
-  related spec: task anchors, `Builds` future targets, acceptance criteria and
+  related spec: task anchors, `Builds` planned-node targets, acceptance criteria and
   verification items, `Satisfies` claims.
 - **Grants**: the read-only apg suite + `apg_review` / `apg_review_add` /
   `apg_review_resolve` / `apg_review_reject` + **`apg_plan_complete`** +

@@ -165,8 +165,8 @@ Go `init` functions are `pkg.init#<file.go>`. `start` and `end` are 0-based byte
 ### Spec/plan graph (graph-native specs)
 
 When a repo has a graph-native spec, the same DB also holds spec/plan nodes
-under the project-scoped FQNs (`<project>/spec`, `<project>/plan`,
-`<project>/<future-code>`). Labels and edges (R1/R2):
+under the project-scoped FQNs (`<project>/spec`, `<project>/plan`, and
+tier-4 planned code under its real code FQN). Labels and edges (R1/R2):
 
 | Label             | Key properties                          | Description                          |
 |-------------------|-----------------------------------------|--------------------------------------|
@@ -396,8 +396,9 @@ branch. `main` is untouched during execution.
   land as one squash commit); when A merges to `main`, `git rebase` this branch
   onto `main` — A's real history reconciles away and the diff is only this
   project's own change-set.
-- **Nothing is promoted during execution**: `apg_plan_done` is an implementer
-  assertion, `apg_plan_complete` a milestone. The plan survives until apply.
+- **No automatic advancement during execution**: `apg_plan_done` is an
+  implementer assertion, `apg_plan_complete` a milestone. The plan survives
+  until apply.
 - **The apply act** (single delivery moment, PlanCompletion-SPEC.md): run
   `apg_plan_apply` for the coherence gate (every planned node **realized** in
   the branch's graph, all `Feedback` resolved); verify the active `GuardedBy`

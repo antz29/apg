@@ -5,9 +5,9 @@
 //! Implementation nodes** (`apg plan add <project> planned <kind> <fqn>` —
 //! Module/File/Struct/Function marked `status: planned` at the FQN where the
 //! code will land, GraphModel-SPEC.md); a task `Builds` the planned node it
-//! creates. Nothing is promoted by `plan done`/`plan complete` — those are
-//! assertion + milestone only; a branch scan **replaces realized planned
-//! nodes**. The plan survives until the apply act, whose coherence gate (every
+//! creates. Nothing advances automatically with `plan done`/`plan complete` —
+//! those are assertion + milestone only; a branch scan **replaces realized
+//! planned nodes**. The plan survives until the apply act, whose coherence gate (every
 //! planned node realized, all feedback resolved) precedes the merge + rebuild
 //! of `main`'s graph (PlanCompletion-SPEC.md).
 

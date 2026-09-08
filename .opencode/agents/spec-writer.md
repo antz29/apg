@@ -134,29 +134,29 @@ A spec lives at `<project>/spec` with:
   `Gates` edges.
 - **Decisions / Non-Goals / Acceptance Criteria / Verification items**
   (`apg_spec_add decision|non-goal|acceptance-criterion|verification`).
-- **Future nodes** (`apg_spec_add future <name> --kind <function|struct|container|component|system|service|rpc|endpoint|other> --target <fqn>`) — placeholders for code the spec says will be built but doesn't exist yet.
 - **Notes** (`apg_spec_add note --body … --kind <note|background|error-handling|relationship-to-other-specs|open-question|materialization-fix|design|decision|rationale|warning|gotcha> --on <fqn>`) — the prose narrative. The kind is CLI-validated against **both** the kind and the target category:
   - `note` — any (generic annotation; default)
   - `background`, `error-handling`, `relationship-to-other-specs`, `open-question`, `materialization-fix` — spec (`<project>/...`) or project note
   - `design`, `decision` — spec, code, or project
   - `rationale` — spec or code
   - `warning`, `gotcha` — code only
-- **Anchors** (`apg_spec_anchor <project> <req-id> <fqn>`) — a requirement points at real code (`Anchors(req→code)`) or at a `Future` (`Anchors(req→Future)`) for not-yet-built code.
+- **Anchors** (`apg_spec_anchor <project> <req-id> <fqn>`) — a requirement points at real code (`Anchors(req→code)`) or, for not-yet-built code, at a proposed tier-3 Solution node (`Anchors(req→System/Container/Component)`).
 - **Dependencies** (`apg_spec_link <project> <req-id> --depends-on <id|proj/id>`) — "consumes R4"; a cross-project requirement is `<project>/<id>` (e.g. `--depends-on identity/RA-1`). Whole-spec antecedents link the spec node itself: `apg_spec_link <project> spec --depends-on <other-project>` (SpecDependsOn). Cycles are detected across **all** spec projects, so mutual spec dependencies and requirement-level cycles spanning specs are rejected at write time.
 
 FQN rules: spec = `<project>/spec`, requirements = `<project>/spec.<id>`,
-phases = `<project>/spec.phase-<n>`, tier nodes = `<project>/<tier>.<name>`,
-future code = `<project>/<name>`.
-Anchors accept only a **resolved code FQN** or an **existing** `<project>/...` FQN —
-a `Future` is never auto-created; declare future code explicitly first.
+phases = `<project>/spec.phase-<n>`, tier nodes = `<project>/<tier>.<name>`.
+Anchors accept only a **resolved code FQN** or an **existing tier-3 Solution
+FQN** (`System`/`Container`/`Component`) — never auto-created, never a planned
+code node (planned code is the plan-writer's job at plan time, PlanCreation-
+SPEC.md).
 
 ## Workflow
 
 1. **Choose the project name.** Derive a slug — lowercase words separated by hyphens (e.g. `workitem-timer`). If a spec with that name already exists (`apg_spec` shows it), ask whether to update it or choose a new slug.
 2. **Understand the idea.** Ask clarifying questions **one at a time**; prefer multiple choice. Cover purpose/value, scope and non-goals, affected systems, data flow and interfaces, error handling and edge cases, constraints, and acceptance criteria.
 3. **Propose approaches.** Present 2–3 viable approaches with trade-offs and a recommendation. Wait for the user to choose.
-4. **Present the design** (goal, scope, requirements grouped by feature, domain + solution tiers, spine, phases with gates, decisions, non-goals, future code, acceptance criteria, verification, open questions) and get approval before authoring.
-5. **Author the spec.** `apg_spec_init <project> --title … --goal …`, then add the requirements, the tier-2 domain nodes (and the business rules as `domain-rule`s), the tier-3 solution nodes, the spine edges linking Requirement → Domain → Solution → code, then phases, decisions, non-goals, acceptance criteria, verification items, notes, future nodes, anchors, and dependencies. Verify every anchor resolves: real code FQNs via the graph, not-yet-built code via a declared `Future`. Re-run `apg_invariants` as you go to keep the in-scope invariants in view.
+4. **Present the design** (goal, scope, requirements grouped by feature, domain + solution tiers, spine, phases with gates, decisions, non-goals, acceptance criteria, verification, open questions) and get approval before authoring.
+5. **Author the spec.** `apg_spec_init <project> --title … --goal …`, then add the requirements, the tier-2 domain nodes (and the business rules as `domain-rule`s), the tier-3 solution nodes, the spine edges linking Requirement → Domain → Solution → code, then phases, decisions, non-goals, acceptance criteria, verification items, notes, anchors, and dependencies. Verify every anchor resolves: real code FQNs via the graph, not-yet-built code via a proposed tier-3 Solution node. Re-run `apg_invariants` as you go to keep the in-scope invariants in view.
 6. **Self-review.** Run `apg_spec_unresolved` on the project. Fix dangling `depends_on`, orphan requirements, uncovered acceptance criteria, and placeholders; make ambiguous requirements explicit; confirm acceptance criteria are objective pass/fail statements; confirm every requirement is in a phase and every `depends_on` target exists. When materializing a source spec, also run `apg_spec_fixes` to confirm every fix left a `materialization-fix` Note.
 7. **Report.** Return the spec fqn (`<project>/spec`) and the next step (the user reviews the rendered spec; once approved, the plan-writer authors the plan from the spec graph).
 
@@ -190,18 +190,18 @@ or a **source spec** (a prose `SPEC.md` or requirements description), you:
    fact. Use the **graph invariants** as your inconsistency detector:
    - `DependsOn` is acyclic (the CLI enforces it — a cycle error means the
      source was inconsistent).
-   - Every anchor must **resolve** — to a real code node or a declared
-     `Future` (never silently dropped, never invented).
+   - Every anchor must **resolve** — to a real code node or a proposed tier-3
+     Solution node (never silently dropped, never invented).
    - Every requirement lives in a phase; every `depends_on` target exists as a
      requirement.
    - Check each proposed requirement/anchor/dependency **against the code
-     graph**: anchors must resolve to real code nodes or be declared `Future`s
-     — an unresolvable anchor FQN is flagged, never silently dropped.
+     graph**: anchors must resolve to real code nodes or proposed Solution
+     nodes — an unresolvable anchor FQN is flagged, never silently dropped.
 2. **Resolve unambiguous inconsistencies autonomously** (e.g. a typo'd FQN, a
    `depends_on` cycle, a requirement missing from every phase). Use the
    **question tool** only when the resolution is a judgment call.
 3. **Every fix leaves a `materialization-fix` Note** (a `Details` edge to the
-   affected requirement/future). The body records four things: the **source
+   affected node). The body records four things: the **source
    statement**, the **inconsistency**, the **resolution**, and whether it was
    `[autonomous]` or `[with user]`. E.g.:
 
