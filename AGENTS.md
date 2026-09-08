@@ -109,6 +109,53 @@ plus `sha256sums.txt` per tag.
 In the repo itself, run it via `cargo run -- scan <dir>` or
 `target/debug/apg scan <dir>`.
 
+## Deploying a release (cutting a tag)
+
+Releases are cut by pushing an annotated `vX.Y.Z` tag; `bottle.yml` (ARM bottle)
+and `linux-release.yml` (x86_64/aarch64 tarballs) build and publish on that tag
+push and create the GitHub release.
+
+**Order matters — get this wrong and the bottles are the previous version.**
+The Linux job checks out the tag and builds its source, so the tarballs are
+always correct. The **bottle** job does *not* build from the tag: it builds via
+the Homebrew tap formulae on `main`, so the formulae must already point at the
+new version *before* the tag is pushed. Tagging first (with the formulae still
+on the old version) ships stale `OLD-version` bottles — the v0.10.3 mistake.
+
+Forward release (the `scripts/release.sh <version>` helper automates steps 4–5):
+
+1. **Gate green**: `cargo check` (or `cargo test`) passes.
+2. **Bump the version** in `Cargo.toml` **and** `Cargo.lock`
+   (`version = "X.Y.Z"`).
+3. **Commit the release content** (the version bump + whatever ships in it).
+   This commit is the **release HEAD**.
+4. **Repoint all 7 formulae** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
+   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`): `tag:` → `vX.Y.Z`,
+   `revision:` → the release-HEAD SHA, `root_url` →
+   `releases/download/vX.Y.Z`, and bump each `rebuild N` by 1. Commit as
+   *"Point formula revisions at the vX.Y.Z release HEAD"*.
+5. **Annotated tag** pointing at the **release HEAD** (not the
+   formula-revision commit): `git tag -a vX.Y.Z -m "apg X.Y.Z" <release-sha>`.
+6. **Push (human-approved)**: `git push origin main` then
+   `git push origin vX.Y.Z`. CI builds + creates the release; the bottle bot
+   then auto-commits *"Update bottle sha256s for vX.Y.Z"* to `main`.
+7. **Verify the assets are the new version**: `gh release view vX.Y.Z` must list
+   `*-X.Y.Z.arm64_sonoma.bottle.*.tar.gz` (NOT the previous version) plus the
+   `apg-linux-*` tarballs. If the bottles show the old version, you tagged
+   before step 4.
+
+Repairing stale bottles (tag was pushed before the formula repoint — the 0.10.3
+case): after the formula-revision commit pointing at the released version lands
+on `main`, re-dispatch the bottle job — `gh workflow run bottle.yml --ref main`
+(or GitHub UI → Actions → "Build and publish bottles" → Run workflow) — then
+`brew bottle --merge` / the bot commits the new sha256s. The tag and release
+stay put; only the bottle assets get rebuilt/uploaded.
+
+`scripts/release.sh` automates steps 4–5: it verifies the version is already
+bumped and the tree is clean, rewrites every `Formula/*.rb`, commits the formula
+revisions, and creates the annotated tag at the release HEAD. It **never
+pushes** — push/tag remain human-approved acts (it prints the exact commands).
+
 ### Unified JSONL schema (abridged)
 
 Node records:
