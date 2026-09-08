@@ -846,8 +846,8 @@ mod tests {
         assert!(apg_bin.exists(), "apg binary missing at {}", apg_bin.display());
 
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let tool_add = manifest.join(".opencode").join("tools").join("apg_invariant_add.ts");
-        let tool_list = manifest.join(".opencode").join("tools").join("apg_invariants.ts");
+        let tool_add = manifest.join("opencode-suite").join("tools").join("apg_invariant_add.ts");
+        let tool_list = manifest.join("opencode-suite").join("tools").join("apg_invariants.ts");
         let entry = dir.join("suite_smoke.ts");
         std::fs::write(
             &entry,

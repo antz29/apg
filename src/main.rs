@@ -21,245 +21,257 @@ use lbug::{Connection, Database, SystemConfig};
 
 /// The opencode tool suite that `apg init` installs into `~/.opencode/`. Each
 /// entry is a file under `tools/` (auto-discovered by opencode from
-/// `~/.opencode/tools/*.ts`), single-sourced from this repo's own `.opencode`.
+/// `~/.opencode/tools/*.ts`), single-sourced from this repo's `opencode-suite/`.
 /// The files shell out to `apg query` / `apg scan` (on PATH) from the project
-/// root; see `.opencode/lib/apg.ts` for the shared plumbing.
+/// root; see `opencode-suite/lib/apg.ts` for the shared plumbing.
 const SUITE_TOOLS: &[(&str, &str)] = &[
     (
         "apg_query.ts",
-        include_str!("../.opencode/tools/apg_query.ts"),
+        include_str!("../opencode-suite/tools/apg_query.ts"),
     ),
     (
         "apg_scan.ts",
-        include_str!("../.opencode/tools/apg_scan.ts"),
+        include_str!("../opencode-suite/tools/apg_scan.ts"),
     ),
     (
         "apg_find_symbol.ts",
-        include_str!("../.opencode/tools/apg_find_symbol.ts"),
+        include_str!("../opencode-suite/tools/apg_find_symbol.ts"),
     ),
     (
         "apg_modules.ts",
-        include_str!("../.opencode/tools/apg_modules.ts"),
+        include_str!("../opencode-suite/tools/apg_modules.ts"),
     ),
     (
         "apg_module_files.ts",
-        include_str!("../.opencode/tools/apg_module_files.ts"),
+        include_str!("../opencode-suite/tools/apg_module_files.ts"),
     ),
     (
         "apg_module_structs.ts",
-        include_str!("../.opencode/tools/apg_module_structs.ts"),
+        include_str!("../opencode-suite/tools/apg_module_structs.ts"),
     ),
     (
         "apg_file_units.ts",
-        include_str!("../.opencode/tools/apg_file_units.ts"),
+        include_str!("../opencode-suite/tools/apg_file_units.ts"),
     ),
     (
         "apg_file_path.ts",
-        include_str!("../.opencode/tools/apg_file_path.ts"),
+        include_str!("../opencode-suite/tools/apg_file_path.ts"),
     ),
     (
         "apg_methods.ts",
-        include_str!("../.opencode/tools/apg_methods.ts"),
+        include_str!("../opencode-suite/tools/apg_methods.ts"),
     ),
     (
         "apg_struct.ts",
-        include_str!("../.opencode/tools/apg_struct.ts"),
+        include_str!("../opencode-suite/tools/apg_struct.ts"),
     ),
     (
         "apg_callers.ts",
-        include_str!("../.opencode/tools/apg_callers.ts"),
+        include_str!("../opencode-suite/tools/apg_callers.ts"),
     ),
     (
         "apg_callees.ts",
-        include_str!("../.opencode/tools/apg_callees.ts"),
+        include_str!("../opencode-suite/tools/apg_callees.ts"),
     ),
     (
         "apg_uses.ts",
-        include_str!("../.opencode/tools/apg_uses.ts"),
+        include_str!("../opencode-suite/tools/apg_uses.ts"),
     ),
     (
         "apg_unresolved.ts",
-        include_str!("../.opencode/tools/apg_unresolved.ts"),
+        include_str!("../opencode-suite/tools/apg_unresolved.ts"),
     ),
     (
         "apg_hunk.ts",
-        include_str!("../.opencode/tools/apg_hunk.ts"),
+        include_str!("../opencode-suite/tools/apg_hunk.ts"),
     ),
     // Spec/plan/review suite (SPEC R12).
     (
         "apg_spec.ts",
-        include_str!("../.opencode/tools/apg_spec.ts"),
+        include_str!("../opencode-suite/tools/apg_spec.ts"),
     ),
     (
         "apg_spec_requirements.ts",
-        include_str!("../.opencode/tools/apg_spec_requirements.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_requirements.ts"),
     ),
     (
         "apg_spec_phases.ts",
-        include_str!("../.opencode/tools/apg_spec_phases.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_phases.ts"),
     ),
     (
         "apg_spec_deps.ts",
-        include_str!("../.opencode/tools/apg_spec_deps.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_deps.ts"),
     ),
     (
         "apg_spec_anchors.ts",
-        include_str!("../.opencode/tools/apg_spec_anchors.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_anchors.ts"),
     ),
     (
         "apg_spec_trace.ts",
-        include_str!("../.opencode/tools/apg_spec_trace.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_trace.ts"),
     ),
     (
         "apg_spec_unresolved.ts",
-        include_str!("../.opencode/tools/apg_spec_unresolved.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_unresolved.ts"),
     ),
     (
         "apg_spec_fixes.ts",
-        include_str!("../.opencode/tools/apg_spec_fixes.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_fixes.ts"),
     ),
     (
         "apg_spec_init.ts",
-        include_str!("../.opencode/tools/apg_spec_init.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_init.ts"),
     ),
     (
         "apg_spec_add.ts",
-        include_str!("../.opencode/tools/apg_spec_add.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_add.ts"),
     ),
     (
         "apg_spec_anchor.ts",
-        include_str!("../.opencode/tools/apg_spec_anchor.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_anchor.ts"),
     ),
     (
         "apg_spec_link.ts",
-        include_str!("../.opencode/tools/apg_spec_link.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_link.ts"),
     ),
     (
         "apg_spec_spine.ts",
-        include_str!("../.opencode/tools/apg_spec_spine.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_spine.ts"),
     ),
     (
         "apg_spec_rm.ts",
-        include_str!("../.opencode/tools/apg_spec_rm.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_rm.ts"),
     ),
     (
         "apg_spec_render.ts",
-        include_str!("../.opencode/tools/apg_spec_render.ts"),
+        include_str!("../opencode-suite/tools/apg_spec_render.ts"),
     ),
     (
         "apg_review.ts",
-        include_str!("../.opencode/tools/apg_review.ts"),
+        include_str!("../opencode-suite/tools/apg_review.ts"),
     ),
     (
         "apg_review_add.ts",
-        include_str!("../.opencode/tools/apg_review_add.ts"),
+        include_str!("../opencode-suite/tools/apg_review_add.ts"),
     ),
     (
         "apg_review_action.ts",
-        include_str!("../.opencode/tools/apg_review_action.ts"),
+        include_str!("../opencode-suite/tools/apg_review_action.ts"),
     ),
     (
         "apg_review_resolve.ts",
-        include_str!("../.opencode/tools/apg_review_resolve.ts"),
+        include_str!("../opencode-suite/tools/apg_review_resolve.ts"),
     ),
     (
         "apg_review_reject.ts",
-        include_str!("../.opencode/tools/apg_review_reject.ts"),
+        include_str!("../opencode-suite/tools/apg_review_reject.ts"),
     ),
     (
         "apg_invariant_add.ts",
-        include_str!("../.opencode/tools/apg_invariant_add.ts"),
+        include_str!("../opencode-suite/tools/apg_invariant_add.ts"),
     ),
     (
         "apg_invariants.ts",
-        include_str!("../.opencode/tools/apg_invariants.ts"),
+        include_str!("../opencode-suite/tools/apg_invariants.ts"),
     ),
     (
         "apg_plan.ts",
-        include_str!("../.opencode/tools/apg_plan.ts"),
+        include_str!("../opencode-suite/tools/apg_plan.ts"),
     ),
     (
         "apg_plan_phases.ts",
-        include_str!("../.opencode/tools/apg_plan_phases.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_phases.ts"),
     ),
     (
         "apg_plan_tasks.ts",
-        include_str!("../.opencode/tools/apg_plan_tasks.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_tasks.ts"),
     ),
     (
         "apg_plan_complete.ts",
-        include_str!("../.opencode/tools/apg_plan_complete.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_complete.ts"),
     ),
     (
         "apg_plan_render.ts",
-        include_str!("../.opencode/tools/apg_plan_render.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_render.ts"),
     ),
     (
         "apg_plan_init.ts",
-        include_str!("../.opencode/tools/apg_plan_init.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_init.ts"),
     ),
     (
         "apg_plan_add.ts",
-        include_str!("../.opencode/tools/apg_plan_add.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_add.ts"),
     ),
     (
         "apg_plan_link.ts",
-        include_str!("../.opencode/tools/apg_plan_link.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_link.ts"),
     ),
     (
         "apg_plan_done.ts",
-        include_str!("../.opencode/tools/apg_plan_done.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_done.ts"),
     ),
     (
         "apg_plan_undone.ts",
-        include_str!("../.opencode/tools/apg_plan_undone.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_undone.ts"),
     ),
     (
         "apg_plan_note.ts",
-        include_str!("../.opencode/tools/apg_plan_note.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_note.ts"),
     ),
     (
         "apg_plan_apply.ts",
-        include_str!("../.opencode/tools/apg_plan_apply.ts"),
+        include_str!("../opencode-suite/tools/apg_plan_apply.ts"),
     ),
 ];
 
 /// Shared helper module used by the suite tools (`lib/apg.ts`), installed by
 /// `apg init` alongside the tools.
-const APG_LIB: &str = include_str!("../.opencode/lib/apg.ts");
+const APG_LIB: &str = include_str!("../opencode-suite/lib/apg.ts");
 
 /// The `codebase-navigator.md` agent file that `apg init` installs into
 /// `~/.opencode/`. Auto-discovered by opencode from `~/.opencode/agents/*.md`;
 /// configured to use the apg suite tools and to guide the user through running
 /// `apg scan` on the CLI (there is no in-chat scan tool). Single-sourced from
 /// the repo's own agent file.
-const CODEBASE_NAVIGATOR_AGENT: &str = include_str!("../.opencode/agents/codebase-navigator.md");
+const CODEBASE_NAVIGATOR_AGENT: &str = include_str!("../opencode-suite/agents/codebase-navigator.md");
 
 /// The six distributed agents that `apg init` installs into `~/.opencode/agents/`
 /// (SPEC R13/R15): the navigator plus the five spec/plan/review/builder agents,
-/// single-sourced from the repo's own `.opencode/agents/`.
+/// single-sourced from the repo's `opencode-suite/agents/`.
 const AGENTS: &[(&str, &str)] = &[
     ("codebase-navigator.md", CODEBASE_NAVIGATOR_AGENT),
     (
         "spec-writer.md",
-        include_str!("../.opencode/agents/spec-writer.md"),
+        include_str!("../opencode-suite/agents/spec-writer.md"),
     ),
     (
         "plan-writer.md",
-        include_str!("../.opencode/agents/plan-writer.md"),
+        include_str!("../opencode-suite/agents/plan-writer.md"),
     ),
     (
         "spec-review.md",
-        include_str!("../.opencode/agents/spec-review.md"),
+        include_str!("../opencode-suite/agents/spec-review.md"),
     ),
     (
         "plan-review.md",
-        include_str!("../.opencode/agents/plan-review.md"),
+        include_str!("../opencode-suite/agents/plan-review.md"),
     ),
     (
         "agent-builder.md",
-        include_str!("../.opencode/agents/agent-builder.md"),
+        include_str!("../opencode-suite/agents/agent-builder.md"),
     ),
+];
+
+/// The six distributed agent filenames — the apg-owned names in
+/// `~/.opencode/agents/`. `apg init` prunes any of these that a newer release
+/// dropped from the suite (a user's own same-named agent is the accepted edge).
+const KNOWN_AGENT_FILES: &[&str] = &[
+    "codebase-navigator.md",
+    "spec-writer.md",
+    "plan-writer.md",
+    "spec-review.md",
+    "plan-review.md",
+    "agent-builder.md",
 ];
 
 /// The `package.json` written by `apg init` into `~/.opencode/` when none
@@ -513,8 +525,9 @@ USAGE:
                               files that duplicate the installed suite (never deletes)
   apg scan [dir] [options]    Scan a project; writes apg/.trans/db.lbug and
                               apg/.trans/graph.jsonl
-  apg query \"<cypher>\"        Run a read-only Cypher query against
-                              apg/.trans/db.lbug (found by walking up from cwd)
+  apg query [--json] \"<cypher>\"  Run a read-only Cypher query against
+                               apg/.trans/db.lbug (found by walking up from
+                               cwd); CSV by default, --json for JSON rows
   apg spec <sub> …            Author + lifecycle a graph-native spec:
                               init/add/anchor/link/spine/rm/render/unresolved
                               (add authors the 4-tier taxonomy: requirement,
@@ -620,9 +633,14 @@ fn duplicate_install_files(project_opencode: &Path, user_opencode: &Path) -> Vec
         for e in entries.flatten() {
             let p = e.path();
             if p.is_dir() {
+                // Dependency trees are not part of the installed suite.
+                if p.file_name().is_some_and(|n| n == "node_modules") {
+                    continue;
+                }
                 walk(&p, project, user, out);
             } else if let Ok(rel) = p.strip_prefix(project)
                 && user.join(rel).is_file()
+                && !is_dep_manifest(p.file_name())
             {
                 out.push(p);
             }
@@ -633,6 +651,60 @@ fn duplicate_install_files(project_opencode: &Path, user_opencode: &Path) -> Vec
         walk(project_opencode, project_opencode, user_opencode, &mut out);
     }
     out
+}
+
+/// The per-project npm manifests that `apg init` also writes into `~/.opencode/`
+/// (`package.json` + lockfiles) are not suite files; a project's own copies are
+/// not shadows.
+fn is_dep_manifest(name: Option<&std::ffi::OsStr>) -> bool {
+    matches!(
+        name.and_then(|n| n.to_str()),
+        Some("package.json" | "package-lock.json" | "bun.lock")
+    )
+}
+
+/// Prune stale apg-managed files from the user-level install (`~/.opencode/`):
+/// `tools/apg_*.ts` (the `apg_` prefix is the apg namespace) and the known
+/// distributed agent names that a newer release removed from the suite. Anything
+/// not owned by apg (a user's own tools/agents) is preserved. `apg init` already
+/// overwrites edited suite files via `write_if_changed`, so removing the same
+/// owned set is consistent. Returns the number of files pruned.
+fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
+    let current_tools: std::collections::HashSet<&str> =
+        SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
+    let current_agents: std::collections::HashSet<&str> =
+        AGENTS.iter().map(|(n, _)| *n).collect();
+    let mut pruned = 0;
+
+    let tools_dir = opencode_dir.join("tools");
+    if let Ok(entries) = std::fs::read_dir(&tools_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if name.starts_with("apg_") && name.ends_with(".ts") && !current_tools.contains(name) {
+                std::fs::remove_file(&p)?;
+                pruned += 1;
+            }
+        }
+    }
+
+    let agents_dir = opencode_dir.join("agents");
+    if let Ok(entries) = std::fs::read_dir(&agents_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if KNOWN_AGENT_FILES.contains(&name) && !current_agents.contains(name) {
+                std::fs::remove_file(&p)?;
+                pruned += 1;
+            }
+        }
+    }
+
+    Ok(pruned)
 }
 
 /// `apg init [dir]`: create the committed `apg/` layout (config.json +
@@ -683,6 +755,7 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
             updated += 1;
         }
     }
+    let pruned = prune_stale_suite(&opencode_dir)?;
 
     if !opencode_dir
         .join("node_modules")
@@ -716,6 +789,13 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
             updated,
             SUITE_TOOLS.len() + 1,
             AGENTS.len(),
+            opencode_dir.display()
+        );
+    }
+    if pruned > 0 {
+        println!(
+            "pruned {} stale apg suite file(s) from {} (removed from the suite in a newer release)",
+            pruned,
             opencode_dir.display()
         );
     }
@@ -1274,6 +1354,35 @@ mod tests {
         std::fs::write(proj.join("agents").join("implementer.md"), "x").unwrap();
         // User-only (a core agent): not a duplicate.
         std::fs::write(user.join("agents").join("spec-writer.md"), "x").unwrap();
+        // node_modules trees + dep manifests exist in both but are not shadows.
+        let shared_dep = proj
+            .join("node_modules")
+            .join("@opencode-ai")
+            .join("plugin")
+            .join("dist")
+            .join("index.js");
+        std::fs::create_dir_all(shared_dep.parent().unwrap()).unwrap();
+        std::fs::write(&shared_dep, "x").unwrap();
+        std::fs::create_dir_all(
+            user.join("node_modules")
+                .join("@opencode-ai")
+                .join("plugin")
+                .join("dist"),
+        )
+        .unwrap();
+        std::fs::write(
+            user.join("node_modules")
+                .join("@opencode-ai")
+                .join("plugin")
+                .join("dist")
+                .join("index.js"),
+            "x",
+        )
+        .unwrap();
+        std::fs::write(proj.join("package.json"), "{}").unwrap();
+        std::fs::write(user.join("package.json"), "{}").unwrap();
+        std::fs::write(proj.join("package-lock.json"), "{}").unwrap();
+        std::fs::write(user.join("package-lock.json"), "{}").unwrap();
         let dupes = duplicate_install_files(&proj, &user);
         assert_eq!(dupes.len(), 1);
         assert!(dupes.contains(&proj.join("tools").join("apg_query.ts")));
@@ -1292,6 +1401,33 @@ mod tests {
         assert!(dupes.is_empty());
         let _ = std::fs::remove_dir_all(&proj);
         let _ = std::fs::remove_dir_all(&user);
+    }
+
+    #[test]
+    fn prune_stale_suite_removes_apg_files_preserves_others() {
+        let dir = std::env::temp_dir().join(format!("apg-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        std::fs::create_dir_all(dir.join("agents")).unwrap();
+        // Stale apg tool (no longer in the suite): pruned.
+        std::fs::write(dir.join("tools").join("apg_oldtool.ts"), "x").unwrap();
+        // Current apg tool: kept.
+        std::fs::write(dir.join("tools").join("apg_query.ts"), "x").unwrap();
+        // Non-apg tool: preserved.
+        std::fs::write(dir.join("tools").join("my_custom_tool.ts"), "x").unwrap();
+        // A current distributed agent: kept.
+        std::fs::write(dir.join("agents").join("codebase-navigator.md"), "x").unwrap();
+        // A user's own agent: preserved.
+        std::fs::write(dir.join("agents").join("my-reviewer.md"), "x").unwrap();
+
+        let pruned = prune_stale_suite(&dir).unwrap();
+        assert_eq!(pruned, 1);
+        assert!(!dir.join("tools").join("apg_oldtool.ts").exists());
+        assert!(dir.join("tools").join("apg_query.ts").exists());
+        assert!(dir.join("tools").join("my_custom_tool.ts").exists());
+        assert!(dir.join("agents").join("codebase-navigator.md").exists());
+        assert!(dir.join("agents").join("my-reviewer.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1314,7 +1450,7 @@ mod tests {
     /// the `[package] version` line on every release: the assertions below fail
     /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
     /// advertised release), so a bump commit cannot silently skip it.
-    const RELEASE_VERSION: &str = "0.10.0";
+    const RELEASE_VERSION: &str = "0.10.1";
 
     /// The `version = "..."` declared directly under a Cargo.toml `[package]`
     /// header.
@@ -1372,10 +1508,12 @@ mod tests {
     fn readme_documents_release_version() {
         let readme =
             std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
-        assert!(readme.contains("apg 0.10.0"), "README --version examples");
-        assert!(readme.contains("v0.10.0"), "README tagged-release prose");
+        // The README pins the 0.10.x line, not an exact patch, so patch releases
+        // don't require a README edit.
+        assert!(readme.contains("apg 0.10.x"), "README --version examples");
+        assert!(readme.contains("0.10.x"), "README tagged-release prose");
         assert!(
-            readme.contains("--version 0.10.0"),
+            readme.contains("--version 0.10.x"),
             "README Linux installer pin option"
         );
         // No stale release records: the previous version must be fully replaced.

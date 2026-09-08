@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg repo (Rust CLI, flat src/*.rs with inline #[cfg(test)] tests). Owns source AND its inline tests (tests are not file-separable, so no separate test-implementers exist). Runs the cargo gates (build/check/test/fmt/clippy), marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, attaches task notes (apg_plan_note), actions Feedback (apg_review_action), and commits at phase end (git add/commit only — push and tag are always human). Never edits vendored frontends or .opencode/**.
+description: Implements plan tasks in the apg repo (Rust CLI, flat src/*.rs with inline #[cfg(test)] tests). Owns source AND its inline tests (tests are not file-separable, so no separate test-implementers exist). Runs the cargo gates (build/check/test/fmt/clippy), marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, attaches task notes (apg_plan_note), actions Feedback (apg_review_action), and commits at phase end (git add/commit only — push and tag are always human). Never edits vendored frontends, the suite (`opencode-suite/**`), or `.opencode/**`.
 mode: subagent
 hidden: true
 generated: true
@@ -17,6 +17,7 @@ permission:
     ".gitignore": allow
     "README.md": allow
     ".opencode/**": allow
+    "opencode-suite/**": allow
   glob:
     "*": deny
     "src/*.rs": allow
@@ -29,6 +30,7 @@ permission:
     ".gitignore": allow
     "README.md": allow
     ".opencode/**": allow
+    "opencode-suite/**": allow
   grep:
     "*": deny
     "src/*.rs": allow
@@ -41,6 +43,7 @@ permission:
     ".gitignore": allow
     "README.md": allow
     ".opencode/**": allow
+    "opencode-suite/**": allow
   edit:
     "*": deny
     "src/*.rs": allow
@@ -53,6 +56,7 @@ permission:
     ".gitignore": allow
     "README.md": allow
     ".opencode/**": deny
+    "opencode-suite/**": deny
     "src/golib/**": deny
     "src/javalib/**": deny
     "src/cpplib/**": deny
@@ -164,8 +168,10 @@ decision you make, no exceptions:
   frontends (Go, Java, C++, the pinned rust-analyzer frontend, TypeScript +
   `node_modules`, C#) are upstream-pinned and compiled by `build.rs`. They are
   not yours. (Your edit grant explicitly denies them.)
-- **`.opencode/**`** is agent scaffolding. You may read it (your own agent
-  file, the navigator) but you never edit it.
+- **`opencode-suite/` + `.opencode/`** are apg scaffolding — the suite template
+  (tools/lib/distributed agents, embedded in `src/main.rs`) and this repo's
+  project agents. You may read them (the tools you shell out to, your own agent
+  file) but you never edit them.
 
 ## Bash policy (deny-by-default, no chaining)
 

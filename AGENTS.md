@@ -27,7 +27,7 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   tag, `npm ci` for the TypeScript frontend — `src/tslib`) and stages them to
   `target/<profile>/frontends`. Run a scan with `apg scan <dir>` (or the
   `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
-  (  `<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
+  (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
   `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
   `cpp`, `rust`, `ts`, `csharp`; `0` to skip) limits what build.rs compiles.
 
@@ -60,8 +60,9 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   requires a Cargo manifest (C++ tolerates bare dirs; Rust scans nothing
   without one; TS needs a `package.json`/`.ts`/`.tsx` sources, and `node_modules`
   is always skipped).
-- `apg query "<cypher>"` — read-only Cypher over `apg/.trans/db.lbug` (found by walking
-  up from cwd), CSV output with header row.
+- `apg query [--json] "<cypher>"` — read-only Cypher over `apg/.trans/db.lbug`
+  (found by walking up from cwd); CSV with header row by default, `--json` for
+  JSON rows.
 - `apg spec <sub> …` — author + lifecycle a graph-native spec: `init`, `add`
   (requirement, phase, decision, non-goal, AC, VI, note, stakeholder,
   domain, subdomain, entity, value-object, aggregate, domain-event,
@@ -79,15 +80,16 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
 - `apg --version`, `apg --help`.
 
 `apg init` also installs the **apg opencode tool suite** into the user-level
-`~/.opencode/` (single-sourced from this repo's own `.opencode/`, embedded in
+`~/.opencode/` (single-sourced from this repo's `opencode-suite/`, embedded in
 `src/main.rs` via `include_str!`): `apg_scan`, `apg_query`, plus curated
 abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
-`apg_unresolved`, `apg_hunk` — and the spec/plan/review suite: `apg_spec`
-(+ requirements/phases/deps/anchors/trace/unresolved/fixes/init/add/anchor/link/rm/
-render), `apg_plan` (+ phases/tasks/complete/render/init/add/
-link/done/undone/note/apply), `apg_review` (+ add/action/resolve/reject). Shared plumbing
+`apg_unresolved`, `apg_hunk` — and the spec/plan/review/invariant suite: `apg_spec`
+(+ requirements/phases/deps/anchors/trace/unresolved/fixes/init/add/anchor/link/spine/
+rm/render), `apg_plan` (+ phases/tasks/complete/render/init/add/
+link/done/undone/note/apply), `apg_review` (+ add/action/resolve/reject), plus
+`apg_invariants` / `apg_invariant_add`. Shared plumbing
 lives in `~/.opencode/lib/apg.ts`
 (root discovery, `apg query`/`apg spec`/`apg plan`/`apg review` subprocess,
 Cypher literal escaping). All suite
@@ -95,9 +97,10 @@ tools take an optional `codeType` (default: all code); exact-FQN tools hint
 when a lookup comes up empty (overloads carry `(params)` suffixes).
 
 The `apg` binary is brew-installable via split formulae (tap
-`https://github.com/antz29/apg.git`): `scanner` (the binary), plus `apg-go`,
-`apg-java`, `apg-cpp` frontends installed to `$(brew --prefix)/share/apg/frontends`
-(the `scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
+`https://github.com/antz29/apg.git`): `scanner` (the binary), plus six frontend
+formulae — `apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp` —
+each dropping its artifacts into `$(brew --prefix)/share/apg/frontends` (the
+`scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
 On Linux there's a `curl | sh` installer (`install.sh` — installs the base
 `apg` scanner binary and/or separate language frontends to `/usr/local` or `--user`'s
 `~/.local`, layout `bin/apg` + `libexec/apg/`); the linux-release workflow
@@ -346,10 +349,10 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
 
 ### Fidelity & noise
 
-- **Java, Go, Rust, and TypeScript edges are exact** — resolved via the
+- **Java, Go, Rust, TypeScript, and C# edges are exact** — resolved via the
   compiler's type checker (javac attribution / `types.Info`), rust-analyzer,
-  or the official TypeScript compiler API. A `Calls` edge always points at the
-  real declared method.
+  the official TypeScript compiler API, or Roslyn. A `Calls` edge always points
+  at the real declared method.
 - **C++ edges are heuristic** (tree-sitter + scope/type tracking). Unresolvable calls/types are recorded as `UnresolvedCall`/`UnresolvedUse` rather than guessed.
 - **The scanner never guesses**: if a call/type can't be resolved to a project symbol, it becomes an `UnresolvedTarget` edge, never a fabricated FQN.
 - **All code is included** — tests, generated, and vendored code are scanned like everything else (the only exclusions are user `--exclude-path` patterns, `node_modules`, and files the compiler/frontend can't process). Filter by `code_type` instead.
@@ -357,7 +360,7 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   workspaces, and npm workspaces are supported. Each module is a top-level
   `Module` node; FQNs are module-prefixed so they stay unique across modules.
   Pass `modules: "dir1,dir2"` to `apg_scan` to restrict scanning to specific
-  modules (Go/C++/Rust/TS).
+  modules (Go/C++/Rust/TS/C#).
 - **Multi-language repos** (a Go backend + TS frontend, say): `apg scan`
   auto-detects every language present and merges their graphs into one
   database. Opaque ids are namespaced per language (`--id-prefix`, `g1`/`t1`/…);

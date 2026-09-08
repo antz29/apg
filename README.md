@@ -75,12 +75,16 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.10.0
+apg --version   # apg 0.10.x
 apg --help
 ```
 
-`v0.10.0` will be tagged, so the stable install works as-is. If you want the latest
-unreleased code instead, pass `--HEAD`:
+The stable install tracks the current `0.10.x` release tag. If you want the
+latest unreleased code instead, pass `--HEAD`:
+
+```sh
+brew install antz29/apg/scanner --HEAD
+```
 
 ## Install (Linux, `curl | sh`)
 
@@ -112,7 +116,7 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 The installer verifies sha256 checksums for each component against `sha256sums.txt`.
 
 Options:
-- `--version 0.10.0`: pin a specific release tag
+- `--version 0.10.x`: pin a specific release tag
 - `--user`: install under `~/.local` (no root required)
 - `--prefix DIR`: choose a custom install location (default `/usr/local`)
 - `--frontends L,L...`: comma-separated list of frontends to install
@@ -125,7 +129,7 @@ The binary links OpenSSL dynamically, so `libssl.so.3` must be present (it is on
 Verify:
 
 ```sh
-apg --version   # apg 0.10.0
+apg --version   # apg 0.10.x
 apg --help
 ```
 
@@ -196,12 +200,14 @@ Outputs (all under the gitignored `apg/.trans/` directory; the committed
 ### 3. `apg query "<cypher>"`
 
 Runs a read-only Cypher query against `apg/.trans/db.lbug` (located by walking up
-from the current directory), printing CSV with a header row:
+from the current directory). Default output is CSV with a header row; pass
+`--json` for pretty-printed JSON objects:
 
 ```sh
 apg query "MATCH (s:Struct) RETURN s.fqn, s.code_type"
 apg query "MATCH (f:Function)-[:Calls]->(t:Function) RETURN f.fqn, t.fqn"
 apg query "MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20"
+apg query --json "MATCH (s:Struct) RETURN s.fqn, s.code_type LIMIT 5"
 ```
 
 Query syntax: `MATCH`/`RETURN` only (no raw SQL). `ORDER BY`, `LIMIT`,
@@ -229,6 +235,14 @@ agent to explore the graph directly — it will pick the right tool:
 | `apg_hunk` | units overlapping a line range (diff/review join) |
 | `apg_query` | ad-hoc read-only Cypher (power users) |
 | `apg_scan` | rebuild `apg/.trans/db.lbug` |
+| `apg_spec` / `apg_spec_*` | author + inspect the graph-native spec (requirements, tiers, spine) |
+| `apg_plan` / `apg_plan_*` | plan phases/tasks/planned nodes, task notes, apply gate |
+| `apg_review` / `apg_review_*` | writer↔reviewer feedback cycle |
+| `apg_invariants` / `apg_invariant_add` | list / materialize graph-wide invariants |
+
+The code-graph tools above return location data; the `apg_spec_*`/`apg_plan_*`/
+`apg_review_*`/`apg_invariant*` tools operate on the graph-native spec and plan
+(see [Graph-native specs, plans, and invariants](#graph-native-specs-plans-and-invariants)).
 
 Every row carries `fqn`, `path`, and `start_line`/`end_line` where relevant, so
 the agent can jump straight to source. All suite tools accept an optional
@@ -403,21 +417,30 @@ Run the test suite with `cargo test`.
 ## Project layout
 
 ```
-src/main.rs        apg CLI (init / scan / query) + pipeline driver
-src/ingest.rs      two-pass ingestion, canonical FQN rendering
-src/load.rs        PARQUET load files → db.lbug, graph.jsonl export
-src/classify.rs    code_type classification
-src/golib/         Go scanner
-src/javalib/       Java scanner (javac)
-src/cpplib/        C++ scanner (tree-sitter)
-src/rustlib/       Rust scanner (rust-analyzer engine; separate Cargo project)
-src/tslib/         TypeScript scanner (official TypeScript compiler, Node)
-install.sh         curl | sh installer for Linux (prebuilt release tarballs)
-Formula/scanner.rb    apg binary (ingestor + query CLI)
-Formula/apg-go.rb     Go scanner frontend
-Formula/apg-java.rb   Java scanner frontend
-Formula/apg-cpp.rb    C++ scanner frontend
-Formula/apg-rust.rb   Rust scanner frontend
+src/main.rs          apg CLI (init / scan / query / spec / plan / review / invariant) + pipeline driver
+src/ingest.rs        two-pass ingestion, canonical FQN rendering
+src/load.rs          PARQUET load files → db.lbug, graph.jsonl export
+src/classify.rs      code_type classification
+src/spec_cmd.rs      graph-native spec authoring (apg spec)
+src/plan_cmd.rs      phased execution plan (apg plan)
+src/review_cmd.rs    writer↔reviewer feedback cycle (apg review)
+src/invariant_cmd.rs graph-wide invariants (apg invariant / apg invariants)
+src/specs.rs         spec/plan JSONL serialization + re-ingest on scan
+src/golib/           Go scanner
+src/javalib/         Java scanner (javac)
+src/cpplib/          C++ scanner (tree-sitter)
+src/rustlib/         Rust scanner (rust-analyzer engine; separate Cargo project)
+src/tslib/           TypeScript scanner (official TypeScript compiler, Node)
+src/csharplib/       C# scanner (Roslyn; separate build)
+opencode-suite/      install template for `apg init` (tools/, lib/, agents/; embedded in src/main.rs)
+install.sh           curl | sh installer for Linux (prebuilt release tarballs)
+Formula/scanner.rb     apg binary (ingestor + query CLI)
+Formula/apg-go.rb      Go scanner frontend
+Formula/apg-java.rb    Java scanner frontend
+Formula/apg-cpp.rb     C++ scanner frontend
+Formula/apg-rust.rb    Rust scanner frontend
+Formula/apg-ts.rb      TypeScript scanner frontend
+Formula/apg-csharp.rb  C# scanner frontend
 ```
 
 ## License
