@@ -121,6 +121,25 @@ export function csvToRows(out: string): string[][] {
   return rows
 }
 
+/**
+ * True when a runCypher result is an error string (query failure or missing
+ * DB), not CSV data — checked before it is ever fed to csvToRows.
+ */
+export function isQueryError(out: string): boolean {
+  return out.startsWith("apg query failed") || out.startsWith("Error:")
+}
+
+/**
+ * Guards a runCypher result: throws with the raw message when the query
+ * failed, so the real `apg query failed` error surfaces instead of being
+ * misparsed as CSV (which previously crashed with "undefined is not an object
+ * (evaluating 'body.replace')"). Call before csvToRows(...).
+ */
+export function expectQueryOk(out: string): string {
+  if (isQueryError(out)) throw new Error(out)
+  return out
+}
+
 function parseCsvLine(line: string): string[] {
   const fields: string[] = []
   let cur = ""

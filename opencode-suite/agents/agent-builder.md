@@ -61,8 +61,8 @@ the codebase-navigator delegates to you to build or update them.
 - **`apg_plan_done` / `apg_plan_undone`** — marks plan tasks done as it
   completes them.
 - **`apg_review_action`** — actions Feedback on its work (`--fix|--wont-fix`).
-- **git: `add` + `commit` only** — never `push`, never `tag`. Pushing is always
-  a human act.
+- **git: `add` + `commit`**, with `push` and `tag` human-approved (`ask`) —
+  they prompt for explicit human approval before running.
 - **Build gates** as exact, verified bash patterns (the repo's real commands).
 - The full read-only apg suite + the codebase-navigator rules embedded in the body.
 
@@ -110,13 +110,14 @@ the codebase-navigator delegates to you to build or update them.
    pattern may contain `&&`, `|`, `;`, `$(`/`)`, or redirection** — a chained
    command must never match. Write bash is banned generally; the only write
    grants are the narrow, explicit ones the role needs (implementer:
-   `git add`/`git commit`, its verified build gates, plain `rm <path>` with no
-   flags inside its owned dirs). **`git push` and `git tag` are always denied —
-   pushing and tagging are always human.**
-   **Permission values are always `allow` or `deny`, never `ask` — and
-   `external_directory` is always `"*": deny` with `/tmp/**` allowed (or
-   narrower, never broader).** A scaffolded agent with an `ask` permission or a
-   broader `external_directory` is a regression; regenerate it deny-first.
+   `git add`/`git commit`, its verified build gates,    plain `rm <path>` with no
+   flags inside its owned dirs). **`git push` and `git tag` are human-approved —
+   scaffold them as `ask` so they prompt for explicit human approval.**
+   **Permission values are `allow`, `deny`, or — for the git push/tag
+   human-approval gates — `ask`; `external_directory` is always `"*": deny`
+   with `/tmp/**` allowed (or narrower, never broader).** A scaffolded agent
+   with an `ask` permission outside the push/tag gates, or a broader
+   `external_directory`, is a regression; regenerate it deny-first.
 7. **`generated: true` marker.** Every agent you generate carries
    `generated: true` in its frontmatter — the marker distinguishes agent-builder
    generated agents from user content and from the distributed core agents
@@ -139,8 +140,9 @@ the codebase-navigator delegates to you to build or update them.
    - Build/lint/typecheck/test **commands** and where they run.
    - **Test tiers**: unit/integration/e2e — where each lives and whether tests
      are file-separable (separate test files) or inline (Rust `#[cfg(test)]`).
-   - Git conventions: the default is commit-only; confirm whether the
-     implementer may commit, and that push is always human.
+    - Git conventions: the default is commit + human-approved push/tag (`ask`);
+      confirm whether the implementer may commit, and whether push/tag should be
+      human-approved (`ask`) or denied.
    - Whether they want a `coordinator`.
    - The writer agent's name style.
 3. **Plan the set.** Default: `implementer`, the test-implementers that match

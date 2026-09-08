@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
-import { runCypher, lit, csvToRows } from "../lib/apg.ts"
+import { runCypher, lit, csvToRows, expectQueryOk } from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -12,12 +12,14 @@ export default tool({
   },
   async execute(args, context) {
     const where = args.project
-      ? ` WHERE t.fqn STARTS WITH ${lit(`${args.project}/`)}`
+      ? ` AND t.fqn STARTS WITH ${lit(`${args.project}/`)}`
       : ""
     const rows = csvToRows(
-      await runCypher(
-        context,
-        `MATCH (n:Note)-[:Details]->(t) WHERE n.kind = 'materialization-fix'${where} RETURN n.fqn, n.body, t.fqn ORDER BY n.fqn`,
+      expectQueryOk(
+        await runCypher(
+          context,
+          `MATCH (n:Note)-[:Details]->(t) WHERE n.kind = 'materialization-fix'${where} RETURN n.fqn, n.body, t.fqn ORDER BY n.fqn`,
+        ),
       ),
     )
     if (rows.length <= 1) {
@@ -27,7 +29,7 @@ export default tool({
     }
     const lines = ["note,target,body"]
     for (const [fqn, body, target] of rows.slice(1)) {
-      lines.push(`${fqn},${target},"${body.replace(/"/g, '""')}"`)
+      lines.push(`${fqn},${target},"${(body ?? "").replace(/"/g, '""')}"`)
     }
     return lines.join("\n")
   },

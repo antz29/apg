@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg repo (Rust CLI, flat src/*.rs with inline #[cfg(test)] tests). Owns source AND its inline tests (tests are not file-separable, so no separate test-implementers exist). Runs the cargo gates (build/check/test/fmt/clippy), marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, attaches task notes (apg_plan_note), actions Feedback (apg_review_action), and commits at phase end (git add/commit only — push and tag are always human). Never edits vendored frontends, the suite (`opencode-suite/**`), or `.opencode/**`.
+description: Implements plan tasks in the apg repo (Rust CLI, flat src/*.rs with inline #[cfg(test)] tests). Owns source AND its inline tests (tests are not file-separable, so no separate test-implementers exist). Runs the cargo gates (build/check/test/fmt/clippy), marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, attaches task notes (apg_plan_note), actions Feedback (apg_review_action), and commits at phase end (git add/commit; push and tag are human-approved via ask). Never edits vendored frontends, the suite (`opencode-suite/**`), or `.opencode/**`.
 mode: subagent
 hidden: true
 generated: true
@@ -82,6 +82,8 @@ permission:
     "git show *": allow
     "git add *": allow
     "git commit *": allow
+    "git push *": ask
+    "git tag *": ask
     "cargo build": allow
     "cargo check": allow
     "cargo test": allow
@@ -181,9 +183,10 @@ decision you make, no exceptions:
   call. `cargo fmt && cargo test` is denied; run them as separate calls.
 - **Git (read)**: `git status`, `git diff`, `git log`, `git show` — inspect
   freely.
-- **Git (write)**: `git add` and `git commit` ONLY. **`git push` and `git tag`
-  are NEVER allowed — pushing and tagging are always human acts.** Commit at
-  phase end; follow the repo's existing commit message style (check `git log`).
+- **Git (write)**: `git add` and `git commit`. **`git push` and `git tag` are
+  human-approved — they prompt for explicit human approval before running.**
+  Commit at phase end; follow the repo's existing commit message style (check
+  `git log`).
 - **Gates**: the exact commands `cargo build`, `cargo check`, `cargo test`,
   `cargo fmt`, `cargo clippy`. No flags, no chaining, one per call.
 - **Deletion**: plain `rm src/*.rs` only (no flags) — for removing a source
