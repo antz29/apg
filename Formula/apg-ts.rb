@@ -8,15 +8,15 @@ class ApgTs < Formula
   desc "TypeScript scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.10.2",
-      revision: "c892b9326008c00c5292f19ea08049d67fc44c56"
+      tag:      "v0.10.4",
+      revision: "26040fd683655940e4d6e75bf0bd850d505fac00"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.10.3"
+    root_url "https://github.com/antz29/apg/releases/download/v0.10.4"
     rebuild 8
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "d131bf203f9a0daa2601501e36633b3119ed3dfb1c54ed6855153aae705402d8"
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "1a09b3a815d11364c2059ff4f6ad266d445b2a4c8cc03929d2a1b3066b456494"
   end
 
   depends_on "node" # npm ci to fetch typescript at build; node at scan time

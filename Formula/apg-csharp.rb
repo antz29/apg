@@ -7,15 +7,15 @@ class ApgCsharp < Formula
   desc "C# scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.10.2",
-      revision: "c892b9326008c00c5292f19ea08049d67fc44c56"
+      tag:      "v0.10.4",
+      revision: "26040fd683655940e4d6e75bf0bd850d505fac00"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.10.3"
+    root_url "https://github.com/antz29/apg/releases/download/v0.10.4"
     rebuild 8
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "97cc0298739cacd05417030549bd1d4ac5937a28b5cebc1332b8eb90975607c4"
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "02fc9e1c4342fb30808c38f5b26bbb1b1bac2cf5bcd68d4608a716a5f0b9f9fe"
   end
 
   depends_on "dotnet" => :build
