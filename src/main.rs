@@ -653,13 +653,13 @@ fn duplicate_install_files(project_opencode: &Path, user_opencode: &Path) -> Vec
     out
 }
 
-/// The per-project npm manifests that `apg init` also writes into `~/.opencode/`
-/// (`package.json` + lockfiles) are not suite files; a project's own copies are
-/// not shadows.
+/// The per-project npm manifests + git hygiene files that `apg init` also
+/// writes into `~/.opencode/` (`package.json`, lockfiles, `.gitignore`) are not
+/// suite files; a project's own copies are not shadows.
 fn is_dep_manifest(name: Option<&std::ffi::OsStr>) -> bool {
     matches!(
         name.and_then(|n| n.to_str()),
-        Some("package.json" | "package-lock.json" | "bun.lock")
+        Some("package.json" | "package-lock.json" | "bun.lock" | ".gitignore")
     )
 }
 
@@ -1383,6 +1383,9 @@ mod tests {
         std::fs::write(user.join("package.json"), "{}").unwrap();
         std::fs::write(proj.join("package-lock.json"), "{}").unwrap();
         std::fs::write(user.join("package-lock.json"), "{}").unwrap();
+        // A project .opencode/.gitignore is git hygiene, not a suite shadow.
+        std::fs::write(proj.join(".gitignore"), "node_modules\n").unwrap();
+        std::fs::write(user.join(".gitignore"), "node_modules\n").unwrap();
         let dupes = duplicate_install_files(&proj, &user);
         assert_eq!(dupes.len(), 1);
         assert!(dupes.contains(&proj.join("tools").join("apg_query.ts")));
@@ -1450,7 +1453,7 @@ mod tests {
     /// the `[package] version` line on every release: the assertions below fail
     /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
     /// advertised release), so a bump commit cannot silently skip it.
-    const RELEASE_VERSION: &str = "0.10.1";
+    const RELEASE_VERSION: &str = "0.10.2";
 
     /// The `version = "..."` declared directly under a Cargo.toml `[package]`
     /// header.
