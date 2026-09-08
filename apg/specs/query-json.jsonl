@@ -1,0 +1,31 @@
+{"type":"spec","fqn":"query-json/spec","title":"JSON query output","goal":"apg query gains a --json output mode: results as a JSON array of objects keyed by column name, CSV unchanged"}
+{"type":"requirement","fqn":"query-json/spec.R1","id":"R1","title":"","body":"apg query accepts a --json flag. When set, query results print as a JSON array of objects, one per row, keyed by column name (string-typed cell values, matching CSV semantics).","feature":"cli"}
+{"type":"contains","from":"query-json/spec","to":"query-json/spec.R1"}
+{"type":"requirement","fqn":"query-json/spec.R2","id":"R2","title":"CSV path unchanged","body":"Without --json, apg query prints the existing CSV output (header row + rows) exactly as before — no regression.","feature":"cli"}
+{"type":"contains","from":"query-json/spec","to":"query-json/spec.R2"}
+{"type":"domain","fqn":"query-json/domain.ResultPresentation","name":"ResultPresentation","body":"How query rows are presented to the caller: one row per result, cells as strings."}
+{"type":"contains","from":"query-json/spec","to":"query-json/domain.ResultPresentation"}
+{"type":"domain","fqn":"query-json/domain.Rendering","name":"Rendering","body":"The wire format the CLI renders: CSV (default) or JSON (--json)."}
+{"type":"contains","from":"query-json/spec","to":"query-json/domain.Rendering"}
+{"type":"system","fqn":"query-json/system.cli-system","name":"cli-system","body":"The apg CLI system: scan + query entrypoints."}
+{"type":"contains","from":"query-json/spec","to":"query-json/system.cli-system"}
+{"type":"container","fqn":"query-json/container.cli","name":"cli","kind":"app","body":"The apg command-line interface; the query subcommand lives here."}
+{"type":"contains","from":"query-json/system.cli-system","to":"query-json/container.cli"}
+{"type":"drives","from":"query-json/spec.R1","to":"query-json/domain.ResultPresentation"}
+{"type":"drives","from":"query-json/spec.R2","to":"query-json/domain.Rendering"}
+{"type":"realises","from":"query-json/domain.ResultPresentation","to":"query-json/container.cli"}
+{"type":"realises","from":"query-json/domain.Rendering","to":"query-json/container.cli"}
+{"type":"anchors","from":"query-json/spec.R1","to":"query-json/container.cli"}
+{"type":"anchors","from":"query-json/spec.R2","to":"apg.cmd_query"}
+{"type":"acceptance_criterion","fqn":"query-json/spec.ac-1","body":"apg query --json \"MATCH (m:Module) RETURN m.fqn\" prints a JSON array of objects, each with the key 'm.fqn', one per module, parseable by jq."}
+{"type":"contains","from":"query-json/spec","to":"query-json/spec.ac-1"}
+{"type":"verification_item","fqn":"query-json/spec.vi-1","body":"Run jq on the --json output; run the plain query and diff the header+rows against the pre-change output."}
+{"type":"contains","from":"query-json/spec","to":"query-json/spec.vi-1"}
+{"type":"non_goal","fqn":"query-json/spec.ng-1","body":"No type-aware JSON (numbers/bools as native types), no --jsonl streaming, no JSON input mode."}
+{"type":"contains","from":"query-json/spec","to":"query-json/spec.ng-1"}
+{"type":"implements","from":"apg.emit_json_rows","to":"query-json/spec.R1"}
+{"type":"implements","from":"apg.cmd_query","to":"query-json/spec.R1"}
+{"type":"implements","from":"apg.cmd_query","to":"query-json/spec.R2"}
+{"type":"implemented_by","from":"query-json/container.cli","to":"apg.emit_json_rows"}
+{"type":"implemented_by","from":"query-json/container.cli","to":"apg.cmd_query"}
+{"type":"anchors","from":"query-json/spec.R1","to":"apg.emit_json_rows"}

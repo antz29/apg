@@ -767,9 +767,10 @@ fn scaffold_gitignore(dir: &Path) -> anyhow::Result<()> {
 /// `apg query "<cypher>"`: open `apg/.trans/db.lbug` (found by walking up from
 /// cwd) read-only and print the result as CSV with a header row.
 fn cmd_query(args: &[String]) -> anyhow::Result<()> {
-    let query = args.join(" ");
+    let json = args.first().is_some_and(|a| a == "--json");
+    let query = if json { args[1..].join(" ") } else { args.join(" ") };
     if query.trim().is_empty() {
-        anyhow::bail!("usage: apg query \"<cypher>\"");
+        anyhow::bail!("usage: apg query [--json] \"<cypher>\"");
     }
     let start = std::env::current_dir()?;
     let apg_root = find_apg_root(&start)
@@ -790,14 +791,35 @@ fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     let db = Database::new(&db_path, SystemConfig::default().read_only(true))?;
     let conn = Connection::new(&db)?;
     let result = conn.query(&query)?;
-    let names = result.get_column_names();
-    let header: Vec<String> = names.iter().map(|n| csv_escape(n)).collect();
-    println!("{}", header.join(","));
-    for row in result {
-        let cells: Vec<String> = row.iter().map(|v| csv_escape(&v.to_string())).collect();
-        println!("{}", cells.join(","));
+    if json {
+        println!("{}", emit_json_rows(result));
+    } else {
+        let names = result.get_column_names();
+        let header: Vec<String> = names.iter().map(|n| csv_escape(n)).collect();
+        println!("{}", header.join(","));
+        for row in result {
+            let cells: Vec<String> = row.iter().map(|v| csv_escape(&v.to_string())).collect();
+            println!("{}", cells.join(","));
+        }
     }
     Ok(())
+}
+
+/// Renders a query result as a JSON array of objects, one per row, keyed by
+/// column name with string-typed values (matching CSV's cell semantics).
+fn emit_json_rows(result: lbug::QueryResult<'_>) -> String {
+    let names = result.get_column_names();
+    let rows: Vec<serde_json::Value> = result
+        .map(|row| {
+            let mut obj = serde_json::Map::new();
+            for (i, name) in names.iter().enumerate() {
+                let v = row.get(i).map(|v| v.to_string()).unwrap_or_default();
+                obj.insert(name.clone(), serde_json::Value::String(v));
+            }
+            serde_json::Value::Object(obj)
+        })
+        .collect();
+    serde_json::to_string_pretty(&serde_json::Value::Array(rows)).unwrap()
 }
 
 fn csv_escape(field: &str) -> String {
@@ -1178,6 +1200,62 @@ fn run_pipeline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn query_json_emits_rows() {
+        // `emit_json_rows` renders a query result as a JSON array of objects,
+        // one per row, keyed by column name with string-typed values. The DB
+        // is built through the real load pipeline (schema + copy_from).
+        use crate::graph::{Graph, Location, Node, NodeKind};
+
+        let dir = std::env::temp_dir().join(format!("apg-qj-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(specs::TRANS)).unwrap();
+
+        let mut graph = Graph::default();
+        graph.nodes.insert(
+            "github.com/x/y".to_string(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        graph.nodes.insert(
+            "github.com/x/y.Store".to_string(),
+            Node {
+                kind: NodeKind::Struct,
+                location: Some(Location {
+                    path: "/abs/store.go".into(),
+                    start: 0,
+                    end: 40,
+                    start_line: 1,
+                    end_line: 40,
+                }),
+                code_type: "src".to_string(),
+                ..Node::default()
+            },
+        );
+
+        let ldir = dir.join(specs::TRANS).join("load");
+        std::fs::create_dir_all(&ldir).unwrap();
+        load::build_load_files(&graph, &ldir).unwrap();
+        let db = Database::new(dir.join(specs::TRANS).join("db.lbug"), Default::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        load::create_schema(&conn).unwrap();
+        load::copy_from(&conn, &ldir).unwrap();
+
+        let result = conn.query("MATCH (n:Struct) RETURN n.fqn").unwrap();
+        let out = emit_json_rows(result);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let arr = parsed.as_array().expect("array of rows");
+        assert_eq!(arr.len(), 1, "one struct row: {out}");
+        assert_eq!(arr[0]["n.fqn"], "github.com/x/y.Store");
+        assert!(arr[0].get("n.fqn").is_some(), "keyed by column name");
+
+        drop(conn);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn duplicate_install_files_detects_overlap() {
