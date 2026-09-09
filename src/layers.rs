@@ -36,6 +36,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::git;
+
 /// The durable node-file root: `layers/` under the layout root (SPEC §4.1) —
 /// one file per node at `<layer>/<type>/<name>.json`, the file name IS the
 /// identity.
@@ -1156,6 +1158,145 @@ pub fn validate_code_refs(
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// SPEC §4.1 — atomic multi-file write-through (phase-3 task-11)
+// ---------------------------------------------------------------------------
+
+/// Write a SET of node files atomically (SPEC §4.1 "renames / deletions are
+/// atomic write-throughs"): one logical mutation updates ALL affected files —
+/// the moved/removed file plus every referencing file whose edges/FQNs change
+/// — and commits once. `writes` is the complete set of affected node files
+/// (full new content for each); each path is derived from its own
+/// layer/type/name, exactly as [`write_node`] derives it
+/// (`<apg_root>/layers/<layer>/<type>/<name>.json`).
+///
+/// The complete proposed change is validated BEFORE anything is written, and
+/// on any failure the previous state is restored — never leave mismatched
+/// endpoint files. The pre-check here is **structural**, not semantic:
+///
+/// - a plans-layer node is refused (plans is transient — `.trans/plans/` only
+///   — never a durable node-file layer);
+/// - an allowlist-violating name is refused (reuse [`valid_name`] — never
+///   sanitized);
+/// - two `writes` entries colliding on the same path/FQN are refused.
+///
+/// The FULL semantic validation — [`validate_node`] uniqueness against the
+/// whole store, [`check_edge_pairing`], the edge matrix ([`validate_edges`]) —
+/// is the caller's job: `write_project` (task-16) runs validate_node/
+/// validate_edges before this, and `ingest_tree` (task-15) runs pairing.
+///
+/// Atomicity: for every path, the pre-existing bytes are recorded
+/// (`None` when the file did not exist) BEFORE any write; then all files are
+/// written (parent dirs created). If ANY write fails, every path is restored —
+/// write back the recorded bytes, or delete the file if it did not previously
+/// exist — and the error is returned. After all writes succeed, the affected
+/// paths are committed in a single commit; a commit failure rolls the writes
+/// back too. Outside a git repo there is no commit — the mutation still lands
+/// on disk (keeps non-git temp-dir tests working; real mutations run in a
+/// project worktree).
+// (Unused until write_project, phase-3 task-16, calls it.)
+#[allow(dead_code)]
+pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()> {
+    // --- Structural pre-check (before any filesystem touch) ---
+    let mut paths: Vec<PathBuf> = Vec::with_capacity(writes.len());
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    for node in writes {
+        let layer = Layer::ALL
+            .iter()
+            .find(|l| l.layer_dir() == node.layer)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("unknown layer `{}`", node.layer))?;
+        if layer.storage() == StoragePolicy::TransientPlans {
+            anyhow::bail!(
+                "layer `plans` is transient (apg/.trans/plans/) — not a durable node-file layer"
+            );
+        }
+        if !valid_name(&node.name) {
+            anyhow::bail!(
+                "node name `{}` is invalid — the name allowlist is [a-z0-9][a-z0-9-]* (refused, never sanitized)",
+                node.name
+            );
+        }
+        let path = apg_root
+            .join(LAYERS_DIR)
+            .join(layer.layer_dir())
+            .join(&node.node_type)
+            .join(format!("{}.json", node.name));
+        if !seen.insert(path.clone()) {
+            anyhow::bail!(
+                "duplicate write: two entries target `{}` — one logical mutation touches each node file once",
+                path.display()
+            );
+        }
+        paths.push(path);
+    }
+
+    // Serialize every node file up front — a serialization failure is caught
+    // before anything is written, so no rollback is needed for it.
+    let serialized: Vec<String> = writes
+        .iter()
+        .map(serde_json::to_string_pretty)
+        .collect::<Result<_, _>>()
+        .map_err(|e| anyhow::anyhow!("serialize node file failed: {e}"))?;
+
+    // Record the pre-existing bytes of every path BEFORE any write (None = the
+    // file did not exist) — the snapshot a failure restores from.
+    let mut prior: Vec<Option<Vec<u8>>> = Vec::with_capacity(paths.len());
+    for path in &paths {
+        prior.push(std::fs::read(path).ok());
+    }
+
+    // Write every file; on the first failure restore the whole set and return.
+    for (i, path) in paths.iter().enumerate() {
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!(
+                "create_dir_all {} failed: {e}",
+                parent.display()
+            ));
+        }
+        if let Err(e) = std::fs::write(path, &serialized[i]) {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!("write {} failed: {e}", path.display()));
+        }
+    }
+
+    // Commit once — all affected paths together. Outside a git repo there is
+    // no commit (the mutation still lands on disk); a commit failure rolls the
+    // writes back so a failed mutation never leaves mismatched files.
+    if git::in_repo(apg_root) {
+        let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
+        let msg = git::graph_mutation_message(apg_root, &refs);
+        if let Err(e) = git::commit_files(apg_root, &refs, &msg) {
+            rollback(&paths, &prior);
+            return Err(e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Restore the previous state of every path after a failed write: write back
+/// the recorded bytes, or delete the file when it did not previously exist.
+/// Best-effort — the caller returns the primary failure; a rollback step that
+/// cannot be applied (e.g. a path blocked by a directory) is left as-is.
+// (Unused until write_project, phase-3 task-16, wires write_through.)
+#[allow(dead_code)]
+fn rollback(paths: &[PathBuf], prior: &[Option<Vec<u8>>]) {
+    for (path, prev) in paths.iter().zip(prior.iter()) {
+        match prev {
+            Some(bytes) => {
+                let _ = std::fs::write(path, bytes);
+            }
+            None => {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2737,5 +2878,125 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("spec drift"), "{msg}");
         assert!(msg.contains("apg.layers.gone"), "{msg}");
+    }
+
+    // --- Atomic multi-file write-through (phase-3 task-11) ---
+
+    /// A multi-file mutation writes every file at its derived path; all are
+    /// present and deserialize back to their original [`NodeFile`] afterward
+    /// (a non-git temp dir — the commit is skipped, the files still land).
+    #[test]
+    fn write_through_writes_all_files() {
+        let root = temp_root("multiwrite");
+        let mut a = node("requirements", "requirement", "place-order");
+        a.body = "A customer can place an order.".to_string();
+        a.out.push(out_edge("drives", "domain.service.checkout"));
+        let mut b = node("domain", "service", "checkout");
+        b.in_edges
+            .push(in_edge("drives", "requirements.requirement.place-order"));
+
+        write_through(&root, &[a.clone(), b.clone()]).unwrap();
+
+        let a_path = root
+            .join("layers")
+            .join("requirements")
+            .join("requirement")
+            .join("place-order.json");
+        let b_path = root
+            .join("layers")
+            .join("domain")
+            .join("service")
+            .join("checkout.json");
+        assert!(a_path.exists(), "{} must exist", a_path.display());
+        assert!(b_path.exists(), "{} must exist", b_path.display());
+        let back_a: NodeFile =
+            serde_json::from_str(&std::fs::read_to_string(&a_path).unwrap()).unwrap();
+        let back_b: NodeFile =
+            serde_json::from_str(&std::fs::read_to_string(&b_path).unwrap()).unwrap();
+        assert_eq!(back_a, a);
+        assert_eq!(back_b, b);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A pre-check failure — a plans-layer node, an allowlist-violating name,
+    /// or a duplicate path — writes NOTHING (no `layers/` tree is created).
+    #[test]
+    fn write_through_precheck_failure_writes_nothing() {
+        // Plans layer is transient — refused before anything is written.
+        let root = temp_root("precheck-plans");
+        let err = write_through(&root, &[node("plans", "task", "t1")]).unwrap_err();
+        assert!(err.to_string().contains("plans"), "{err}");
+        assert!(!root.join("layers").exists());
+
+        // Allowlist-violating name — refused (never sanitized).
+        let root = temp_root("precheck-name");
+        let err =
+            write_through(&root, &[node("requirements", "requirement", "Bad Name")]).unwrap_err();
+        assert!(err.to_string().contains("allowlist"), "{err}");
+        assert!(!root.join("layers").exists());
+
+        // Two entries colliding on the same path — refused.
+        let root = temp_root("precheck-dup");
+        let err = write_through(
+            &root,
+            &[
+                node("requirements", "requirement", "dup"),
+                node("requirements", "requirement", "dup"),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("duplicate"), "{err}");
+        assert!(!root.join("layers").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A mid-write failure restores the previous state all-or-nothing: an
+    /// existing file is restored byte-for-byte, a newly-created file is
+    /// removed, and the failure is surfaced.
+    #[test]
+    fn write_through_restores_prior_state_on_failure() {
+        let root = temp_root("rollback");
+        let mut existing = node("requirements", "requirement", "existing");
+        existing.body = "new".to_string();
+        let mut fresh = node("requirements", "requirement", "fresh");
+        fresh.body = "new".to_string();
+        // The third write's path is pre-created as a DIRECTORY, so writing it
+        // fails mid-set (after `existing` and `fresh` are already written).
+        let blocked = node("requirements", "requirement", "blocked");
+
+        let existing_path = root
+            .join("layers")
+            .join("requirements")
+            .join("requirement")
+            .join("existing.json");
+        std::fs::create_dir_all(existing_path.parent().unwrap()).unwrap();
+        std::fs::write(&existing_path, "OLD CONTENT").unwrap();
+        let fresh_path = root
+            .join("layers")
+            .join("requirements")
+            .join("requirement")
+            .join("fresh.json");
+        assert!(!fresh_path.exists());
+        let blocked_path = root
+            .join("layers")
+            .join("requirements")
+            .join("requirement")
+            .join("blocked.json");
+        std::fs::create_dir_all(&blocked_path).unwrap();
+
+        let err = write_through(&root, &[existing, fresh, blocked]).unwrap_err();
+        assert!(err.to_string().contains("blocked.json"), "{err}");
+        // The pre-existing file is restored byte-for-byte.
+        assert_eq!(
+            std::fs::read_to_string(&existing_path).unwrap(),
+            "OLD CONTENT"
+        );
+        // The newly-created file is removed.
+        assert!(
+            !fresh_path.exists(),
+            "a fresh file must be removed on rollback"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

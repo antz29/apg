@@ -473,31 +473,35 @@ fn repo_rel(apg_root: &Path, path: &Path) -> anyhow::Result<PathBuf> {
         })
 }
 
-/// Commits the single file `path` on the current branch of the checkout
+/// Commits all `paths` in one commit on the current branch of the checkout
 /// containing `apg_root` with a caller-supplied message (git2 only — the git
-/// CLI is never shelled out to).
+/// CLI is never shelled out to). The multi-file generalization of
+/// [`commit_file`]: every path is staged, the trees are compared, and a single
+/// commit is created when anything changed.
 ///
-/// Returns `Ok(Some(sha))` with the new HEAD sha when a commit was created,
-/// or `Ok(None)` when the file's content already matches HEAD (nothing to
-/// commit — e.g. an idempotent re-write). Errors when the file sits outside
-/// the checkout or git refuses the commit.
-pub fn commit_file(apg_root: &Path, path: &Path, msg: &str) -> anyhow::Result<Option<String>> {
+/// Returns `Ok(Some(sha))` with the new HEAD sha when a commit was created, or
+/// `Ok(None)` when the staged tree already matches HEAD (nothing to commit —
+/// e.g. an idempotent re-write). Errors when any path sits outside the
+/// checkout or git refuses the commit.
+pub fn commit_files(apg_root: &Path, paths: &[&Path], msg: &str) -> anyhow::Result<Option<String>> {
     let repo = discover_repo(apg_root)?;
-    let rel = repo_rel(apg_root, path)?;
-    let head = repo.head().map_err(|e| {
-        anyhow::anyhow!(
-            "cannot commit {}: no HEAD to commit on ({e})",
-            rel.display()
-        )
-    })?;
+    let rels: Vec<PathBuf> = paths
+        .iter()
+        .map(|p| repo_rel(apg_root, p))
+        .collect::<anyhow::Result<_>>()?;
+    let head = repo
+        .head()
+        .map_err(|e| anyhow::anyhow!("cannot commit: no HEAD to commit on ({e})"))?;
     let head_commit = head
         .peel_to_commit()
         .map_err(|e| anyhow::anyhow!("cannot commit: {e}"))?;
 
-    // Stage the file and compare trees: an unchanged tree means nothing to
+    // Stage every path and compare trees: an unchanged tree means nothing to
     // commit (an idempotent mutation re-wrote identical content).
     let mut index = repo.index()?;
-    index.add_path(&rel)?;
+    for rel in &rels {
+        index.add_path(rel)?;
+    }
     index.write()?;
     let tree_id = index.write_tree()?;
     if tree_id == head_commit.tree_id() {
@@ -511,15 +515,40 @@ pub fn commit_file(apg_root: &Path, path: &Path, msg: &str) -> anyhow::Result<Op
     Ok(Some(oid.to_string()))
 }
 
+/// `commit_files` for a single file — the single-file commit path.
+pub fn commit_file(apg_root: &Path, path: &Path, msg: &str) -> anyhow::Result<Option<String>> {
+    commit_files(apg_root, &[path], msg)
+}
+
+/// The standard graph-mutation commit message for a set of touched paths:
+/// [`auto_commit`]'s single-path format, joined for a multi-file mutation —
+/// `apg: graph mutation (rel1, rel2, ...)`. Paths render checkout-relative
+/// when possible (the same form [`auto_commit`] uses).
+pub fn graph_mutation_message(apg_root: &Path, paths: &[&Path]) -> String {
+    let rels: Vec<String> = paths
+        .iter()
+        .map(|p| {
+            repo_rel(apg_root, p)
+                .map(|r| r.display().to_string())
+                .unwrap_or_else(|_| p.display().to_string())
+        })
+        .collect();
+    format!("apg: graph mutation ({})", rels.join(", "))
+}
+
 /// `commit_file` with the standard graph-mutation message — the funnel's
 /// one-commit-per-mutation commit (R8).
 pub fn auto_commit(apg_root: &Path, path: &Path) -> anyhow::Result<Option<String>> {
-    let rel = repo_rel(apg_root, path)?;
-    commit_file(
-        apg_root,
-        path,
-        &format!("apg: graph mutation ({})", rel.display()),
-    )
+    commit_file(apg_root, path, &graph_mutation_message(apg_root, &[path]))
+}
+
+/// True when `apg_root` is inside a git repository (discoverable via git2).
+/// [`layers::write_through`] uses it to skip the commit outside a repo — no
+/// repo → no commit; the mutation still lands on disk.
+// (Unused until write_project, phase-3 task-16, wires write_through.)
+#[allow(dead_code)]
+pub fn in_repo(apg_root: &Path) -> bool {
+    discover_repo(apg_root).is_ok()
 }
 
 /// Re-anchors the staleness gate's recorded scan_meta after an auto-commit:
@@ -999,6 +1028,51 @@ mod tests {
             head.message().unwrap(),
             "apg: scaffold .gitignore entries",
             "commit_file must use the caller's message"
+        );
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn commit_files_commits_all_paths_in_one_commit() {
+        let repo = fixture_repo("commitfiles");
+        repo.start_project("foo");
+        let wt = repo.project_worktree_dir("foo");
+        let a = wt.join("apg/layers/requirements/requirement/a.json");
+        let b = wt.join("apg/layers/domain/entity/b.json");
+        std::fs::create_dir_all(a.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(b.parent().unwrap()).unwrap();
+        std::fs::write(&a, "a\n").unwrap();
+        std::fs::write(&b, "b\n").unwrap();
+        let sha0 = open_worktree_sha(&wt);
+        let Some(new_sha) = commit_files(
+            &wt.join("apg"),
+            &[a.as_path(), b.as_path()],
+            "apg: graph mutation (apg/layers/...)",
+        )
+        .unwrap() else {
+            panic!("expected a commit");
+        };
+        assert_ne!(sha0, new_sha);
+        // Exactly one commit ahead of the branch tip, whose tree diff is
+        // exactly the two files — one commit carrying all affected paths.
+        let main_repo = git2_repo(&repo);
+        let branch = main_repo
+            .find_branch("foo", git2::BranchType::Local)
+            .unwrap();
+        let branch_commit = branch.get().peel_to_commit().unwrap();
+        assert_eq!(branch_commit.id().to_string(), new_sha);
+        let parent = branch_commit.parent(0).unwrap();
+        let diff = main_repo
+            .diff_tree_to_tree(
+                Some(&parent.tree().unwrap()),
+                Some(&branch_commit.tree().unwrap()),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            diff.deltas().len(),
+            2,
+            "commit_files must commit all paths in one commit"
         );
         testutil::remove(&repo);
     }
