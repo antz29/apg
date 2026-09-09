@@ -399,7 +399,9 @@ pub fn ingest(
                         "file" => NodeKind::File,
                         "struct" => NodeKind::Struct,
                         "function" => NodeKind::Function,
-                        other => panic!("planned_node kind must be module/file/struct/function, got `{other}`"),
+                        other => panic!(
+                            "planned_node kind must be module/file/struct/function, got `{other}`"
+                        ),
                     };
                     insert_node(
                         &mut graph,
@@ -1097,10 +1099,7 @@ pub fn ingest(
             && g.nodes.contains_key(b)
             && matches!(
                 g.nodes[b].kind,
-                NodeKind::Module
-                    | NodeKind::File
-                    | NodeKind::Struct
-                    | NodeKind::Function
+                NodeKind::Module | NodeKind::File | NodeKind::Struct | NodeKind::Function
             )
     });
 
@@ -1985,22 +1984,27 @@ mod tests {
         assert!(graph.nodes[&fqn].location.is_none());
         // The dangling requirement anchor (target in no graph) is dropped — no
         // placeholder created.
-        assert!(!graph
-            .anchors
-            .contains(&("foo/spec.R1".to_string(), "github.com/x/missing".to_string())));
+        assert!(!graph.anchors.contains(&(
+            "foo/spec.R1".to_string(),
+            "github.com/x/missing".to_string()
+        )));
         // The planned File→Struct containment lands (a valid Contains pair).
-        assert!(graph
-            .contains
-            .contains(&("/abs/gateway.go".to_string(), fqn.clone())));
+        assert!(
+            graph
+                .contains
+                .contains(&("/abs/gateway.go".to_string(), fqn.clone()))
+        );
         // The Task anchor to a missing file is dropped; its Builds edge to the
         // planned node survives.
         assert!(!graph.anchors.contains(&(
             "foo/plan.phase-1.task-1".to_string(),
             "/missing/file.go".to_string()
         )));
-        assert!(graph
-            .builds
-            .contains(&("foo/plan.phase-1.task-1".to_string(), fqn)));
+        assert!(
+            graph
+                .builds
+                .contains(&("foo/plan.phase-1.task-1".to_string(), fqn))
+        );
     }
 
     #[test]
@@ -2090,14 +2094,22 @@ mod tests {
         assert!(node.location.is_some(), "real node carries its location");
         // Edges re-point to the realized node: the requirement anchor and the
         // Builds edge both resolve.
-        assert!(graph
-            .anchors
-            .contains(&("foo/spec.R1".to_string(), fqn.clone())));
-        assert!(graph
-            .builds
-            .contains(&("foo/plan.phase-1.task-1".to_string(), fqn.clone())));
+        assert!(
+            graph
+                .anchors
+                .contains(&("foo/spec.R1".to_string(), fqn.clone()))
+        );
+        assert!(
+            graph
+                .builds
+                .contains(&("foo/plan.phase-1.task-1".to_string(), fqn.clone()))
+        );
         // The real File→Struct containment landed from the scanner.
-        assert!(graph.contains.contains(&("/abs/gateway.go".to_string(), fqn)));
+        assert!(
+            graph
+                .contains
+                .contains(&("/abs/gateway.go".to_string(), fqn))
+        );
     }
 
     #[test]
@@ -2143,10 +2155,11 @@ mod tests {
             "foo/spec.R1".to_string(),
             "github.com/x/y.Store".to_string()
         )));
-        assert!(graph.contains.contains(&(
-            "foo/spec".to_string(),
-            "foo/spec.R1".to_string()
-        )));
+        assert!(
+            graph
+                .contains
+                .contains(&("foo/spec".to_string(), "foo/spec.R1".to_string()))
+        );
     }
 
     #[test]

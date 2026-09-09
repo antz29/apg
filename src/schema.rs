@@ -184,7 +184,6 @@ pub enum Record {
     // These are authored via the spec tools, never scanned. FQNs are
     // project-scoped (`<project>/<slug>.<name>` — PHASE_04 dropped the
     // prefix). `name` is the concept's short name; `body` its description.
-
     /// `{"type":"stakeholder","fqn":"<project>/stakeholder.<name>","name":"...","body":"..."}`
     Stakeholder {
         fqn: String,
@@ -568,7 +567,9 @@ mod tests {
         assert!(
             matches!(parse(lines[4]), Record::Gates { from, to } if from == "foo/spec.phase-2" && to == "foo/spec.phase-1")
         );
-        assert!(matches!(parse(lines[9]), Record::Builds { to, .. } if to == "github.com/x/y.Store"));
+        assert!(
+            matches!(parse(lines[9]), Record::Builds { to, .. } if to == "github.com/x/y.Store")
+        );
     }
 
     #[test]
@@ -580,9 +581,10 @@ mod tests {
         assert!(
             matches!(r, Record::UnresolvedCall { ref target_type, .. } if target_type.is_empty())
         );
-        let r: Record =
-            serde_json::from_str(r#"{"type":"planned_node","fqn":"github.com/x/y.Store","kind":"struct"}"#)
-                .unwrap();
+        let r: Record = serde_json::from_str(
+            r#"{"type":"planned_node","fqn":"github.com/x/y.Store","kind":"struct"}"#,
+        )
+        .unwrap();
         assert!(matches!(
             r,
             Record::PlannedNode {
@@ -647,14 +649,10 @@ mod tests {
         for l in lines {
             let _ = parse(l);
         }
-        assert!(
-            matches!(parse(lines[0]), Record::Drives { from, to }
-                if from == "foo/spec.R1" && to == "foo/domain.Auth")
-        );
-        assert!(
-            matches!(parse(lines[4]), Record::ImplementedBy { from, to }
-                if from == "foo/component.Gateway" && to == "github.com/x/impl.Gateway")
-        );
+        assert!(matches!(parse(lines[0]), Record::Drives { from, to }
+                if from == "foo/spec.R1" && to == "foo/domain.Auth"));
+        assert!(matches!(parse(lines[4]), Record::ImplementedBy { from, to }
+                if from == "foo/component.Gateway" && to == "github.com/x/impl.Gateway"));
     }
 
     #[test]
@@ -664,7 +662,11 @@ mod tests {
         );
         match i {
             Record::Invariant {
-                fqn, title, category, status, ..
+                fqn,
+                title,
+                category,
+                status,
+                ..
             } => {
                 assert_eq!(fqn, "invariant/plan.task-kind-in-set");
                 assert_eq!(title, "Task kind");
@@ -678,24 +680,18 @@ mod tests {
         let i = parse(
             r#"{"type":"invariant","fqn":"foo/invariant/NoNegativeBalance","title":"No negative balance","category":"product","scope":"code","status":"active"}"#,
         );
-        assert!(
-            matches!(i, Record::Invariant { ref fqn, ref category, .. }
-                if fqn == "foo/invariant/NoNegativeBalance" && category == "product")
-        );
+        assert!(matches!(i, Record::Invariant { ref fqn, ref category, .. }
+                if fqn == "foo/invariant/NoNegativeBalance" && category == "product"));
         // GuardedBy and Checks edges.
         let g = parse(
             r#"{"type":"guarded_by","from":"foo/spec","to":"invariant/plan.task-kind-in-set"}"#,
         );
-        assert!(
-            matches!(g, Record::GuardedBy { from, to }
-                if from == "foo/spec" && to == "invariant/plan.task-kind-in-set")
-        );
+        assert!(matches!(g, Record::GuardedBy { from, to }
+                if from == "foo/spec" && to == "invariant/plan.task-kind-in-set"));
         let c = parse(
             r#"{"type":"checks","from":"foo/feedback-1","to":"invariant/plan.task-kind-in-set"}"#,
         );
-        assert!(
-            matches!(c, Record::Checks { from, to }
-                if from == "foo/feedback-1" && to == "invariant/plan.task-kind-in-set")
-        );
+        assert!(matches!(c, Record::Checks { from, to }
+                if from == "foo/feedback-1" && to == "invariant/plan.task-kind-in-set"));
     }
 }

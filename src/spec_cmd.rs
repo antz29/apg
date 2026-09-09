@@ -240,42 +240,108 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
         // hierarchy (`Domain ⊃ Subdomain ⊃ Aggregate ⊃ Entity/ValueObject`,
         // `System ⊃ Container ⊃ Component`) is authorable.
         "stakeholder" => {
-            add_tier_node(&p, project, "stakeholder", &spec_fqn, &mut records, |fqn, name, body| Record::Stakeholder { fqn, name, body })?;
+            add_tier_node(
+                &p,
+                project,
+                "stakeholder",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::Stakeholder { fqn, name, body },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added stakeholder to {project}");
         }
         "domain" | "bounded-context" => {
-            add_tier_node(&p, project, "domain", &spec_fqn, &mut records, |fqn, name, body| Record::Domain { fqn, name, body })?;
+            add_tier_node(
+                &p,
+                project,
+                "domain",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::Domain { fqn, name, body },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added domain to {project}");
         }
         "subdomain" => {
-            add_tier_node(&p, project, "subdomain", &spec_fqn, &mut records, |fqn, name, body| Record::Subdomain { fqn, name, kind: p.get("kind").unwrap_or_default(), body })?;
+            add_tier_node(
+                &p,
+                project,
+                "subdomain",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::Subdomain {
+                    fqn,
+                    name,
+                    kind: p.get("kind").unwrap_or_default(),
+                    body,
+                },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added subdomain to {project}");
         }
         "entity" => {
-            add_tier_node(&p, project, "entity", &spec_fqn, &mut records, |fqn, name, body| Record::Entity { fqn, name, body })?;
+            add_tier_node(
+                &p,
+                project,
+                "entity",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::Entity { fqn, name, body },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added entity to {project}");
         }
         "value-object" => {
-            add_tier_node(&p, project, "value-object", &spec_fqn, &mut records, |fqn, name, body| Record::ValueObject { fqn, name, body })?;
+            add_tier_node(
+                &p,
+                project,
+                "value-object",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::ValueObject { fqn, name, body },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added value object to {project}");
         }
         "aggregate" => {
-            add_tier_node(&p, project, "aggregate", &spec_fqn, &mut records, |fqn, name, body| Record::Aggregate { fqn, name, root: p.get("root").unwrap_or_default(), body })?;
+            add_tier_node(
+                &p,
+                project,
+                "aggregate",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::Aggregate {
+                    fqn,
+                    name,
+                    root: p.get("root").unwrap_or_default(),
+                    body,
+                },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added aggregate to {project}");
         }
         "domain-event" => {
-            add_tier_node(&p, project, "domain-event", &spec_fqn, &mut records, |fqn, name, body| Record::DomainEvent { fqn, name, body })?;
+            add_tier_node(
+                &p,
+                project,
+                "domain-event",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::DomainEvent { fqn, name, body },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added domain event to {project}");
         }
         "domain-process" => {
-            add_tier_node(&p, project, "domain-process", &spec_fqn, &mut records, |fqn, name, body| Record::DomainProcess { fqn, name, body })?;
+            add_tier_node(
+                &p,
+                project,
+                "domain-process",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::DomainProcess { fqn, name, body },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added domain process to {project}");
         }
@@ -312,22 +378,55 @@ fn spec_add(args: &[String]) -> anyhow::Result<()> {
             println!("Added domain rule `{name}` to {project}");
         }
         "actor" => {
-            add_tier_node(&p, project, "actor", &spec_fqn, &mut records, |fqn, name, body| Record::Actor { fqn, name, body })?;
+            add_tier_node(
+                &p,
+                project,
+                "actor",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::Actor { fqn, name, body },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added actor to {project}");
         }
         "system" => {
-            add_tier_node(&p, project, "system", &spec_fqn, &mut records, |fqn, name, body| Record::System { fqn, name, body })?;
+            add_tier_node(
+                &p,
+                project,
+                "system",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::System { fqn, name, body },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added system to {project}");
         }
         "container" => {
-            add_tier_node(&p, project, "container", &spec_fqn, &mut records, |fqn, name, body| Record::Container { fqn, name, kind: p.get("kind").unwrap_or_default(), body })?;
+            add_tier_node(
+                &p,
+                project,
+                "container",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::Container {
+                    fqn,
+                    name,
+                    kind: p.get("kind").unwrap_or_default(),
+                    body,
+                },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added container to {project}");
         }
         "component" => {
-            add_tier_node(&p, project, "component", &spec_fqn, &mut records, |fqn, name, body| Record::Component { fqn, name, body })?;
+            add_tier_node(
+                &p,
+                project,
+                "component",
+                &spec_fqn,
+                &mut records,
+                |fqn, name, body| Record::Component { fqn, name, body },
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added component to {project}");
         }
@@ -961,12 +1060,7 @@ fn spec_spine(args: &[String]) -> anyhow::Result<()> {
 /// A bare `from` is a requirement id (`R1`); otherwise a full FQN. Each edge
 /// kind's outgoing set is replaced by the given targets. Shared with tests so
 /// they can drive the spine against a fixture root.
-fn apply_spine(
-    apg_root: &Path,
-    project: &str,
-    from: &str,
-    p: &ParsedArgs,
-) -> anyhow::Result<()> {
+fn apply_spine(apg_root: &Path, project: &str, from: &str, p: &ParsedArgs) -> anyhow::Result<()> {
     let mut records = load_project(apg_root, project)?;
 
     // Resolve the source fqn: a bare requirement id (`R1`) or a full fqn.
@@ -1013,9 +1107,7 @@ fn apply_spine(
             _ => unreachable!(),
         };
         if !src_ok {
-            anyhow::bail!(
-                "spine edge {table}({from_fqn} → …) has an invalid source kind"
-            );
+            anyhow::bail!("spine edge {table}({from_fqn} → …) has an invalid source kind");
         }
         // Replace only this kind's outgoing edges from the source.
         let tbl: &str = table;
@@ -1024,9 +1116,7 @@ fn apply_spine(
             Record::Requires { from, .. } => !(from == &from_fqn && tbl == "Requires"),
             Record::Realises { from, .. } => !(from == &from_fqn && tbl == "Realises"),
             Record::Represents { from, .. } => !(from == &from_fqn && tbl == "Represents"),
-            Record::ImplementedBy { from, .. } => {
-                !(from == &from_fqn && tbl == "ImplementedBy")
-            }
+            Record::ImplementedBy { from, .. } => !(from == &from_fqn && tbl == "ImplementedBy"),
             _ => true,
         });
         // The live DB is needed only for --implemented-by targets (code-FQN
@@ -1062,9 +1152,7 @@ fn apply_spine(
                 anyhow::bail!("spine target `{t}` is not a declared node of `{project}`");
             }
             if !valid(&records, &to_fqn) {
-                anyhow::bail!(
-                    "spine edge {table}({from_fqn} → {to_fqn}) has an invalid kind pair"
-                );
+                anyhow::bail!("spine edge {table}({from_fqn} → {to_fqn}) has an invalid kind pair");
             }
             let rec = match tbl {
                 "Drives" => Record::Drives {
@@ -1110,7 +1198,9 @@ fn req_is(records: &[Record], t: &str) -> bool {
 
 /// Whether `t` names a Domain node.
 fn domain_is(records: &[Record], t: &str) -> bool {
-    records.iter().any(|r| matches!(r, Record::Domain { fqn, .. } if fqn == t))
+    records
+        .iter()
+        .any(|r| matches!(r, Record::Domain { fqn, .. } if fqn == t))
 }
 
 /// Whether `t` names a Solution-tier node (System/Container/Component).
@@ -1509,29 +1599,72 @@ const TIER3_LABELS: [&str; 3] = ["System", "Container", "Component"];
 /// Aggregate, `kind: app` for a Container).
 fn tier_display(r: &Record) -> Option<(String, &'static str, &str, String, &str)> {
     match r {
-        Record::Stakeholder { fqn, name, body } => Some((fqn.clone(), "Stakeholder", name, String::new(), body)),
-        Record::Domain { fqn, name, body } => Some((fqn.clone(), "Domain", name, String::new(), body)),
-        Record::Subdomain { fqn, name, kind, body } => {
-            Some((fqn.clone(), "Subdomain", name, tier_meta("kind", kind), body))
+        Record::Stakeholder { fqn, name, body } => {
+            Some((fqn.clone(), "Stakeholder", name, String::new(), body))
         }
-        Record::Entity { fqn, name, body } => Some((fqn.clone(), "Entity", name, String::new(), body)),
-        Record::ValueObject { fqn, name, body } => Some((fqn.clone(), "ValueObject", name, String::new(), body)),
-        Record::Aggregate { fqn, name, root, body } => {
-            Some((fqn.clone(), "Aggregate", name, tier_meta("root", root), body))
+        Record::Domain { fqn, name, body } => {
+            Some((fqn.clone(), "Domain", name, String::new(), body))
         }
+        Record::Subdomain {
+            fqn,
+            name,
+            kind,
+            body,
+        } => Some((
+            fqn.clone(),
+            "Subdomain",
+            name,
+            tier_meta("kind", kind),
+            body,
+        )),
+        Record::Entity { fqn, name, body } => {
+            Some((fqn.clone(), "Entity", name, String::new(), body))
+        }
+        Record::ValueObject { fqn, name, body } => {
+            Some((fqn.clone(), "ValueObject", name, String::new(), body))
+        }
+        Record::Aggregate {
+            fqn,
+            name,
+            root,
+            body,
+        } => Some((
+            fqn.clone(),
+            "Aggregate",
+            name,
+            tier_meta("root", root),
+            body,
+        )),
         Record::DomainEvent { fqn, name, body } => {
             Some((fqn.clone(), "DomainEvent", name, String::new(), body))
         }
         Record::DomainProcess { fqn, name, body } => {
             Some((fqn.clone(), "DomainProcess", name, String::new(), body))
         }
-        Record::DomainRule { fqn, name, body } => Some((fqn.clone(), "DomainRule", name, String::new(), body)),
-        Record::Actor { fqn, name, body } => Some((fqn.clone(), "Actor", name, String::new(), body)),
-        Record::System { fqn, name, body } => Some((fqn.clone(), "System", name, String::new(), body)),
-        Record::Container { fqn, name, kind, body } => {
-            Some((fqn.clone(), "Container", name, tier_meta("kind", kind), body))
+        Record::DomainRule { fqn, name, body } => {
+            Some((fqn.clone(), "DomainRule", name, String::new(), body))
         }
-        Record::Component { fqn, name, body } => Some((fqn.clone(), "Component", name, String::new(), body)),
+        Record::Actor { fqn, name, body } => {
+            Some((fqn.clone(), "Actor", name, String::new(), body))
+        }
+        Record::System { fqn, name, body } => {
+            Some((fqn.clone(), "System", name, String::new(), body))
+        }
+        Record::Container {
+            fqn,
+            name,
+            kind,
+            body,
+        } => Some((
+            fqn.clone(),
+            "Container",
+            name,
+            tier_meta("kind", kind),
+            body,
+        )),
+        Record::Component { fqn, name, body } => {
+            Some((fqn.clone(), "Component", name, String::new(), body))
+        }
         _ => None,
     }
 }
@@ -1619,7 +1752,12 @@ fn spine_markdown(records: &[Record], project: &str) -> String {
             Record::ImplementedBy { from, to } => (from, "ImplementedBy", to),
             _ => continue,
         };
-        out.push_str(&format!("- `{}` --{}--> `{}`\n", short(from), edge, short(to)));
+        out.push_str(&format!(
+            "- `{}` --{}--> `{}`\n",
+            short(from),
+            edge,
+            short(to)
+        ));
     }
     out
 }
@@ -1646,7 +1784,7 @@ fn db_anchor_loc(db: &artifacts::ArtifactDb, fqn: &str) -> Option<(String, Strin
 }
 
 /// `apg spec unresolved [project]` (SpecCreation-SPEC §1 self-lint, §2
-    /// orphan/coverage lint) — a read-only lint over the spec/plan graph, mirroring
+/// orphan/coverage lint) — a read-only lint over the spec/plan graph, mirroring
 /// the `apg_spec_unresolved.ts` suite tool. It reads the durable JSONL directly
 /// (the graph's source of truth — so it works on the committed records a write
 /// would re-ingest) and consults the live DB only to decide whether a planned
@@ -1737,15 +1875,13 @@ fn spec_unresolved_report(apg_root: &Path, filter: Option<&str>) -> anyhow::Resu
         }) else {
             continue;
         };
-        planned_by_project.entry(proj).or_default().extend(
-            recs.iter()
-                .filter_map(|r| match r {
-                    Record::PlannedNode { fqn, kind, .. } => {
-                        Some((fqn.clone(), kind.clone()))
-                    }
-                    _ => None,
-                }),
-        );
+        planned_by_project
+            .entry(proj)
+            .or_default()
+            .extend(recs.iter().filter_map(|r| match r {
+                Record::PlannedNode { fqn, kind, .. } => Some((fqn.clone(), kind.clone())),
+                _ => None,
+            }));
     }
 
     let satisfies = edges_of(&records, |r| match r {
@@ -1827,7 +1963,9 @@ fn spec_unresolved_report(apg_root: &Path, filter: Option<&str>) -> anyhow::Resu
         // Implementation node or a proposed Solution node.
         let pending_anchors: Vec<&str> = anchors
             .iter()
-            .filter(|(from, to)| in_p(from) && (planned_nodes.contains(to) || solution_nodes.contains(to)))
+            .filter(|(from, to)| {
+                in_p(from) && (planned_nodes.contains(to) || solution_nodes.contains(to))
+            })
             .map(|(_, to)| *to)
             .collect();
 
@@ -1883,17 +2021,26 @@ fn spec_unresolved_report(apg_root: &Path, filter: Option<&str>) -> anyhow::Resu
         // that would silently break the resolved gate).
         let mut feedback: Vec<(String, String)> = Vec::new();
         let mut drift: Vec<String> = Vec::new();
-        for r in records.iter().filter(|r| {
-            matches!(r, Record::Feedback { .. }) && node_fqn(r).is_some_and(in_p)
-        }) {
-            if let Record::Feedback { fqn, status, disposition, .. } = r {
+        for r in records
+            .iter()
+            .filter(|r| matches!(r, Record::Feedback { .. }) && node_fqn(r).is_some_and(in_p))
+        {
+            if let Record::Feedback {
+                fqn,
+                status,
+                disposition,
+                ..
+            } = r
+            {
                 if status != "resolved" {
                     feedback.push((fqn.clone(), status.clone()));
                 }
                 if !["open", "actioned", "resolved"].contains(&status.as_str())
                     || !["", "fixed", "wont-fix", "rejected"].contains(&disposition.as_str())
                 {
-                    drift.push(format!("  {fqn} (status: {status}, disposition: {disposition})"));
+                    drift.push(format!(
+                        "  {fqn} (status: {status}, disposition: {disposition})"
+                    ));
                 }
             }
         }
@@ -1986,29 +2133,39 @@ fn spec_unresolved_report(apg_root: &Path, filter: Option<&str>) -> anyhow::Resu
 
 /// Collects the (from, to) pairs of a specific spec-family edge type across
 /// every project's records, in record order.
-fn edges_of(
-    records: &[Record],
-    f: impl Fn(&Record) -> Option<(&str, &str)>,
-) -> Vec<(&str, &str)> {
+fn edges_of(records: &[Record], f: impl Fn(&Record) -> Option<(&str, &str)>) -> Vec<(&str, &str)> {
     records.iter().filter_map(f).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git;
     use crate::graph::{Graph, Location, Node, NodeKind};
     use crate::load;
+    use crate::testutil::{self, Repo};
     use lbug::{Connection, Database};
 
-    /// A temp `apg/` layout with a real `apg/.trans/db.lbug` holding a code
-    /// graph (`github.com/x/y.Store` struct + file + module), plus an empty
-    /// `apg/specs/`. Returns (apg_root, temp_dir).
-    fn fixture_layout(name: &str) -> (PathBuf, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("apg-cli-test-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
-        std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
+    /// A temp repo with a real project context for `foo` (R4 — non-git
+    /// fixtures are gone): the worktree on branch `foo` carries a real DB
+    /// (code graph: `github.com/x/y.Store` struct + file + module + an
+    /// unresolved target) and a fresh scan_meta. Returns (wt_apg_root, repo,
+    /// wt_root).
+    fn fixture_layout(name: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = Repo::new(&format!("spec-{name}"));
+        let wt = repo.start_project("foo");
+        db_at(&wt);
+        testutil::write_scan_meta(
+            &wt.join(specs::LAYOUT),
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+        (wt.join(specs::LAYOUT), repo, wt)
+    }
 
+    /// Builds a real DB + load files under `dir/apg` (used by `fixture_layout`).
+    fn db_at(dir: &Path) {
         // Code graph → db.lbug.
         let mut g = Graph::default();
         g.nodes.insert(
@@ -2078,7 +2235,43 @@ mod tests {
         load::copy_from(&conn, &ldir).unwrap();
         drop(conn);
         drop(db);
-        (dir.join("apg"), dir)
+    }
+
+    /// Commits paths on the worktree's branch (git2) — for test setup that
+    /// deliberately writes durable files outside the funnel.
+    fn wt_commit_paths(wt: &Path, paths: &[&str], msg: &str) -> String {
+        let repo = git2::Repository::open(wt).unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(paths.iter().copied(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &[&head])
+            .unwrap()
+            .to_string()
+    }
+
+    /// Seeds a durable spec JSONL directly (outside the funnel) and commits it
+    /// on the branch + re-anchors the scan_meta — a hand-written durable file
+    /// would otherwise dirty the tree and trip the staleness gate on the next
+    /// funnel mutation.
+    fn seed_spec_file(apg_root: &Path, wt: &Path, project: &str, records: &[Record]) {
+        let path = specs::spec_jsonl_path(apg_root, project);
+        specs::write_jsonl(&path, records).unwrap();
+        let rel = format!("apg/specs/{project}.jsonl");
+        let sha = wt_commit_paths(wt, &[&rel], "seed spec");
+        git::reanchor_scan_meta(
+            apg_root,
+            &git::GitState {
+                sha: Some(sha),
+                clean: true,
+            },
+        )
+        .unwrap();
     }
 
     #[test]
@@ -2380,7 +2573,10 @@ mod tests {
         let g = phase_gate_edge("foo", 3, "foo/spec.phase-3", 4, &records, &recs).unwrap();
         match g {
             Record::Gates { from, to } => {
-                assert_eq!((from.as_str(), to.as_str()), ("foo/spec.phase-3", "foo/spec.phase-4"))
+                assert_eq!(
+                    (from.as_str(), to.as_str()),
+                    ("foo/spec.phase-3", "foo/spec.phase-4")
+                )
             }
             other => panic!("unexpected record: {other:?}"),
         }
@@ -2388,7 +2584,7 @@ mod tests {
 
     #[test]
     fn write_through_and_planned_node_roundtrip() {
-        let (apg_root, dir) = fixture_layout("roundtrip");
+        let (apg_root, repo, wt) = fixture_layout("roundtrip");
 
         // Author a spec with a requirement anchored to a proposed Solution
         // node (the pending tier-3 anchor of the finalized model), plus a plan
@@ -2424,7 +2620,7 @@ mod tests {
                 to: "foo/system.Gateway".to_string(),
             },
         ];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &recs);
         let plan = vec![
             Record::Plan {
                 fqn: "foo/plan".to_string(),
@@ -2514,14 +2710,17 @@ mod tests {
             .query("MATCH (:Task)-[:Builds]->(s:Struct) RETURN count(*)")
             .unwrap()
             .to_string();
-        assert!(out.lines().last() == Some("1"), "rebuild keeps Builds: {out}");
+        assert!(
+            out.lines().last() == Some("1"),
+            "rebuild keeps Builds: {out}"
+        );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn dangling_requirement_anchor_is_dropped_not_synthesized() {
-        let (apg_root, dir) = fixture_layout("dangling-anchor");
+        let (apg_root, repo, wt) = fixture_layout("dangling-anchor");
         // A requirement anchored to code that is not in the graph: the anchor
         // is dropped at re-ingest (the placeholder node is gone — a pending
         // anchor must name a proposed Solution node or a planned node, both
@@ -2548,7 +2747,7 @@ mod tests {
                 to: "github.com/x/y.DoesNotExist".to_string(),
             },
         ];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &recs);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
         let out = db
@@ -2561,7 +2760,7 @@ mod tests {
             out.lines().last() == Some("0"),
             "no placeholder may be synthesized: {out}"
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -2587,9 +2786,11 @@ mod tests {
         // R1's node and its anchor are gone; R2's anchor (same code target)
         // survives untouched.
         assert_eq!(records.len(), 1);
-        assert!(records.iter().any(|r| {
-            matches!(r, Record::Anchors { from, .. } if from == "foo/spec.R2")
-        }));
+        assert!(
+            records
+                .iter()
+                .any(|r| { matches!(r, Record::Anchors { from, .. } if from == "foo/spec.R2") })
+        );
     }
 
     #[test]
@@ -2618,36 +2819,49 @@ mod tests {
 
     #[test]
     fn add_requirement_works_with_no_db_and_zero_anchors() {
-        // A bare `apg/` layout with a specs dir but NO db.lbug — a fresh
-        // project before any scan. The documented write-through principle
+        // Project contexts with a specs dir but NO db.lbug — fresh projects
+        // before any scan. The documented write-through principle
         // (artifacts.rs) says a missing DB is not an error, and the other add
         // kinds work DB-less; requirement used to open `ArtifactDb`
         // unconditionally even with zero `--anchor` flags and fail
         // ("db.lbug does not exist"). Anchors resolve against the scanned
         // code graph, so they should be the ONLY thing that demands a scan.
-        let dir =
-            std::env::temp_dir().join(format!("apg-spec-test-{}-req-nodb", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
-        std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
-        let apg_root = dir.join("apg");
+        // Mutations still demand a project context (R3) — each project's adds
+        // run in its own worktree.
+        let repo = Repo::new("req-nodb");
+        let foo_wt = repo.start_project("foo");
+        let bar_wt = repo.start_project("bar");
+        let foo_apg = foo_wt.join(specs::LAYOUT);
+        let bar_apg = bar_wt.join(specs::LAYOUT);
+        std::fs::create_dir_all(foo_apg.join("specs")).unwrap();
+        std::fs::create_dir_all(bar_apg.join("specs")).unwrap();
         assert!(
-            !apg_root.join(specs::TRANS).join("db.lbug").exists(),
+            !foo_apg.join(specs::TRANS).join("db.lbug").exists(),
             "fixture must start DB-less"
         );
 
-        // Seed a project spec.
-        let path = specs::spec_jsonl_path(&apg_root, "foo");
-        specs::write_jsonl(
-            &path,
+        // Seed both projects' specs into foo's merged space (committed).
+        seed_spec_file(
+            &foo_apg,
+            &foo_wt,
+            "foo",
             &[Record::Spec {
                 fqn: "foo/spec".into(),
                 title: "Foo".into(),
                 goal: String::new(),
             }],
-        )
-        .unwrap();
-        let mut records = load_project(&apg_root, "foo").unwrap();
+        );
+        seed_spec_file(
+            &foo_apg,
+            &foo_wt,
+            "bar",
+            &[Record::Spec {
+                fqn: "bar/spec".into(),
+                title: "Bar".into(),
+                goal: String::new(),
+            }],
+        );
+        let mut records = load_project(&foo_apg, "foo").unwrap();
 
         // Zero-anchor requirement add must succeed DB-less (regression: this
         // used to fail on the unconditional ArtifactDb::open).
@@ -2662,11 +2876,12 @@ mod tests {
             "--feature".to_string(),
             "feature-a".to_string(),
         ]);
-        add_requirement(&p, &apg_root, "foo", &mut records).unwrap();
+        add_requirement(&p, &foo_apg, "foo", &mut records).unwrap();
         assert!(
-            !apg_root.join(specs::TRANS).join("db.lbug").exists(),
+            !foo_apg.join(specs::TRANS).join("db.lbug").exists(),
             "zero-anchor add must not create a DB"
         );
+        let path = specs::spec_jsonl_path(&foo_apg, "foo");
         let saved = specs::read_jsonl(&path).unwrap();
         assert!(saved.iter().any(|r| matches!(
             r,
@@ -2692,7 +2907,7 @@ mod tests {
             "--anchor".to_string(),
             "github.com/x/y.Store".to_string(),
         ]);
-        let err = add_requirement(&p, &apg_root, "foo", &mut records).unwrap_err();
+        let err = add_requirement(&p, &foo_apg, "foo", &mut records).unwrap_err();
         assert!(
             format!("{err:#}").contains("db.lbug"),
             "anchor must demand a scan: {err:#}"
@@ -2704,39 +2919,33 @@ mod tests {
         )));
 
         // A depends-on (cross-project) target also resolves from the JSONL,
-        // DB-less — the same way `spec link` does.
-        specs::write_jsonl(
-            &specs::spec_jsonl_path(&apg_root, "bar"),
+        // DB-less — the same way `spec link` does. bar's requirement is
+        // authored in bar's own context, then bar's updated records ride foo's
+        // branch (merged spec space), and foo's depends-on resolves from the
+        // JSONL.
+        seed_spec_file(
+            &bar_apg,
+            &bar_wt,
+            "bar",
             &[Record::Spec {
                 fqn: "bar/spec".into(),
                 title: "Bar".into(),
                 goal: String::new(),
             }],
-        )
-        .unwrap();
-        let mut records = load_project(&apg_root, "foo").unwrap();
-        let p = parse_args(&[
-            "foo".to_string(),
-            "requirement".to_string(),
-            "R3".to_string(),
-            "--depends-on".to_string(),
-            "bar/R9".to_string(),
-        ]);
-        // R9 doesn't exist yet in bar — a DB-less write-time error, not a
-        // DB-dependent one.
-        let err = add_requirement(&p, &apg_root, "foo", &mut records).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("not an existing requirement"),
-            "depends-on must resolve from JSONL: {err:#}"
         );
-        // Seed bar/R9 and retry — lands DB-less.
-        let mut bar = load_project(&apg_root, "bar").unwrap();
+        let mut bar = load_project(&bar_apg, "bar").unwrap();
         let p = parse_args(&[
             "bar".to_string(),
             "requirement".to_string(),
             "R9".to_string(),
         ]);
-        add_requirement(&p, &apg_root, "bar", &mut bar).unwrap();
+        add_requirement(&p, &bar_apg, "bar", &mut bar).unwrap();
+        // bar's updated records land in foo's checkout (as a merged branch
+        // would carry them), committed + re-anchored.
+        let bar_recs = specs::read_jsonl(&specs::spec_jsonl_path(&bar_apg, "bar")).unwrap();
+        seed_spec_file(&foo_apg, &foo_wt, "bar", &bar_recs);
+
+        let mut records = load_project(&foo_apg, "foo").unwrap();
         let p = parse_args(&[
             "foo".to_string(),
             "requirement".to_string(),
@@ -2744,31 +2953,32 @@ mod tests {
             "--depends-on".to_string(),
             "bar/R9".to_string(),
         ]);
-        add_requirement(&p, &apg_root, "foo", &mut records).unwrap();
+        add_requirement(&p, &foo_apg, "foo", &mut records).unwrap();
         let saved = specs::read_jsonl(&path).unwrap();
         assert!(saved.iter().any(|r| matches!(
             r,
             Record::DependsOn { from, to } if from == "foo/spec.R3" && to == "bar/spec.R9"
         )));
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn add_requirement_with_anchor_lands_on_scanned_db() {
         // The DB-ful path: with a real db.lbug, an --anchor resolves against
         // the code graph and the Anchors edge survives the write-through.
-        let (apg_root, dir) = fixture_layout("req-anchor");
+        let (apg_root, repo, wt) = fixture_layout("req-anchor");
         let path = specs::spec_jsonl_path(&apg_root, "foo");
-        specs::write_jsonl(
-            &path,
+        seed_spec_file(
+            &apg_root,
+            &wt,
+            "foo",
             &[Record::Spec {
                 fqn: "foo/spec".into(),
                 title: "Foo".into(),
                 goal: String::new(),
             }],
-        )
-        .unwrap();
+        );
         let mut records = load_project(&apg_root, "foo").unwrap();
 
         let p = parse_args(&[
@@ -2822,12 +3032,12 @@ mod tests {
             Record::Requirement { fqn, .. } if fqn == "foo/spec.R2"
         )));
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn spec_depends_links_cross_project_specs() {
-        let (apg_root, dir) = fixture_layout("xspec");
+        let (apg_root, repo, wt) = fixture_layout("xspec");
         let foo = vec![Record::Spec {
             fqn: "foo/spec".into(),
             title: "Foo".into(),
@@ -2838,8 +3048,8 @@ mod tests {
             title: "Bar".into(),
             goal: String::new(),
         }];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &foo).unwrap();
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "bar"), &bar).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &foo);
+        seed_spec_file(&apg_root, &wt, "bar", &bar);
 
         // foo depends on bar (SpecDependsOn).
         let mut records = foo.clone();
@@ -2869,7 +3079,7 @@ mod tests {
         // bar would close bar → foo → bar.
         let mut bar_records = bar.clone();
         link_spec_depends(&apg_root, "bar", &["foo".into()], &mut bar_records).unwrap();
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "bar"), &bar_records).unwrap();
+        seed_spec_file(&apg_root, &wt, "bar", &bar_records);
         let err = link_spec_depends(&apg_root, "foo", &["bar".into()], &mut records).unwrap_err();
         assert!(format!("{err:#}").contains("would create a cycle"));
         // The invalid edge was not persisted.
@@ -2879,12 +3089,12 @@ mod tests {
                 if from == "foo/spec" && to == "bar/spec"
         )));
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn spine_sets_replace_per_kind_and_validate_pairs() {
-        let (apg_root, dir) = fixture_layout("spine-cmd");
+        let (apg_root, repo, wt) = fixture_layout("spine-cmd");
         let recs = vec![
             Record::Spec {
                 fqn: "foo/spec".to_string(),
@@ -2921,7 +3131,7 @@ mod tests {
                 to: "foo/system.Platform".to_string(),
             },
         ];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &recs);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
 
         // A Requirement drives a Domain by bare id; re-calling replaces the
@@ -3004,12 +3214,12 @@ mod tests {
         )));
         drop(records);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn spine_implemented_by_rejects_non_implementation_targets() {
-        let (apg_root, dir) = fixture_layout("spine-implby");
+        let (apg_root, repo, wt) = fixture_layout("spine-implby");
         let recs = vec![
             Record::Spec {
                 fqn: "foo/spec".to_string(),
@@ -3026,7 +3236,7 @@ mod tests {
                 to: "foo/system.Platform".to_string(),
             },
         ];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &recs);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
 
         // An UnresolvedTarget is a code node (code_label resolves) but has no
@@ -3084,12 +3294,12 @@ mod tests {
                 if from == "foo/system.Platform" && to == "github.com/x/y.Store"
         )));
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn depends_on_crosses_projects() {
-        let (apg_root, dir) = fixture_layout("xreq");
+        let (apg_root, repo, wt) = fixture_layout("xreq");
         let foo = vec![
             Record::Spec {
                 fqn: "foo/spec".into(),
@@ -3126,8 +3336,8 @@ mod tests {
                 to: "bar/spec.R2".into(),
             },
         ];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &foo).unwrap();
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "bar"), &bar).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &foo);
+        seed_spec_file(&apg_root, &wt, "bar", &bar);
 
         // foo.R1 depends on bar.R2 (cross-project DependsOn).
         let mut records = foo.clone();
@@ -3147,7 +3357,7 @@ mod tests {
         // bar.R2 would close foo.R1 → bar.R2 → foo.R1.
         let mut bar_records = bar.clone();
         link_depends_on(&apg_root, "bar", "R2", &["foo/R1".into()], &mut bar_records).unwrap();
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "bar"), &bar_records).unwrap();
+        seed_spec_file(&apg_root, &wt, "bar", &bar_records);
         let err =
             link_depends_on(&apg_root, "foo", "R1", &["bar/R2".into()], &mut records).unwrap_err();
         let msg = format!("{err:#}");
@@ -3159,12 +3369,12 @@ mod tests {
                 if from == "foo/spec.R1" && to == "bar/spec.R2"
         )));
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn dep_target_parses_cross_project() {
-        let (apg_root, dir) = fixture_layout("dparse");
+        let (apg_root, repo, _wt) = fixture_layout("dparse");
         specs::write_jsonl(
             &specs::spec_jsonl_path(&apg_root, "bar"),
             &[Record::Spec {
@@ -3192,23 +3402,29 @@ mod tests {
             dep_target("foo/R1", "foo", &apg_root),
             ("foo".to_string(), "R1".to_string())
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn tier_nodes_and_spine_author_roundtrip() {
-        let (apg_root, dir) = fixture_layout("spine-author");
+        let (apg_root, repo, wt) = fixture_layout("spine-author");
         let recs = vec![Record::Spec {
             fqn: "foo/spec".to_string(),
             title: "Foo".to_string(),
             goal: String::new(),
         }];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &recs);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
 
         // Author a Domain node hanging under the spec root.
         let mut records = load_project(&apg_root, "foo").unwrap();
-        let p = parse_args(&["foo".into(), "domain".into(), "Auth".into(), "--body".into(), "the auth area".into()]);
+        let p = parse_args(&[
+            "foo".into(),
+            "domain".into(),
+            "Auth".into(),
+            "--body".into(),
+            "the auth area".into(),
+        ]);
         add_tier_node(
             &p,
             "foo",
@@ -3332,10 +3548,10 @@ mod tests {
             from: "foo/spec".to_string(),
             to: req_fqn.to_string(),
         });
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &records);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -3347,15 +3563,36 @@ mod tests {
         // rejects it up front instead of writing an edge that would silently
         // vanish at re-ingest. The Spec-root attachments the model requires
         // (Stakeholder/Domain/System) stay valid.
-        assert!(!load::contains_pair_allowed(NodeKind::Domain, NodeKind::Aggregate));
-        assert!(load::contains_pair_allowed(NodeKind::Subdomain, NodeKind::Aggregate));
-        assert!(load::contains_pair_allowed(NodeKind::Aggregate, NodeKind::Entity));
-        assert!(load::contains_pair_allowed(NodeKind::Aggregate, NodeKind::ValueObject));
-        assert!(load::contains_pair_allowed(NodeKind::Spec, NodeKind::Stakeholder));
-        assert!(load::contains_pair_allowed(NodeKind::Spec, NodeKind::Domain));
-        assert!(load::contains_pair_allowed(NodeKind::Spec, NodeKind::System));
+        assert!(!load::contains_pair_allowed(
+            NodeKind::Domain,
+            NodeKind::Aggregate
+        ));
+        assert!(load::contains_pair_allowed(
+            NodeKind::Subdomain,
+            NodeKind::Aggregate
+        ));
+        assert!(load::contains_pair_allowed(
+            NodeKind::Aggregate,
+            NodeKind::Entity
+        ));
+        assert!(load::contains_pair_allowed(
+            NodeKind::Aggregate,
+            NodeKind::ValueObject
+        ));
+        assert!(load::contains_pair_allowed(
+            NodeKind::Spec,
+            NodeKind::Stakeholder
+        ));
+        assert!(load::contains_pair_allowed(
+            NodeKind::Spec,
+            NodeKind::Domain
+        ));
+        assert!(load::contains_pair_allowed(
+            NodeKind::Spec,
+            NodeKind::System
+        ));
 
-        let (apg_root, dir) = fixture_layout("contains-hierarchy");
+        let (apg_root, repo, wt) = fixture_layout("contains-hierarchy");
         let recs = vec![
             Record::Spec {
                 fqn: "foo/spec".into(),
@@ -3372,7 +3609,7 @@ mod tests {
                 to: "foo/domain.Auth".into(),
             },
         ];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &recs);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
 
         // `aggregate Session --parent foo/domain.Auth` is rejected BEFORE any
@@ -3402,7 +3639,11 @@ mod tests {
         .unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("cannot hang under a `Domain` node"), "{msg}");
-        assert_eq!(records.len(), before, "rejected pair must not touch records");
+        assert_eq!(
+            records.len(),
+            before,
+            "rejected pair must not touch records"
+        );
 
         // The legal chain still authors: a Subdomain hangs under the Domain.
         let p = parse_args(&[
@@ -3444,7 +3685,7 @@ mod tests {
             from: "foo/domain.Auth".into(),
             to: "foo/aggregate.Session".into(),
         });
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &loose).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &loose);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
         let out = db
@@ -3461,18 +3702,18 @@ mod tests {
         );
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn domain_rule_materializes_product_invariant() {
-        let (apg_root, dir) = fixture_layout("domain-rule");
+        let (apg_root, repo, wt) = fixture_layout("domain-rule");
         let recs = vec![Record::Spec {
             fqn: "foo/spec".to_string(),
             title: "Foo".to_string(),
             goal: String::new(),
         }];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &recs).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &recs);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
 
         // Author a domain rule: the DomainRule node AND a project-scoped
@@ -3533,7 +3774,7 @@ mod tests {
         // Both land in the DB after a re-ingest, and the rule hangs under its
         // Domain (previously the `Spec ⊃ DomainRule` default parent was not a
         // valid Contains pair, so the edge was silently projected away).
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &records);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
         assert!(db.has_node("foo/domain-rule.NoNegativeBalance"));
@@ -3552,7 +3793,7 @@ mod tests {
         );
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -3560,7 +3801,7 @@ mod tests {
         // R2 (task 2.2): `--on` a Note or a Feedback target must be rejected
         // with a clear CLI message BEFORE any JSONL write or DB re-ingest —
         // both are excluded from the DB's Details rel-table targets.
-        let (apg_root, dir) = fixture_layout("r2-validation");
+        let (apg_root, repo, wt) = fixture_layout("r2-validation");
         let recs = vec![
             Record::Spec {
                 fqn: "foo/spec".into(),
@@ -3595,7 +3836,7 @@ mod tests {
             },
         ];
         let path = specs::spec_jsonl_path(&apg_root, "foo");
-        specs::write_jsonl(&path, &recs).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &recs);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
 
         // --on a Note target: clear CLI rejection, no write.
@@ -3656,14 +3897,22 @@ mod tests {
                 if to == "foo/spec" && from != "foo/note-1")
         }));
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn add_note_attaches_to_spec_and_decision_in_any_project() {
         // R4 (task 2.6): the mystery commands — `--on` a Spec and a Decision
-        // target — succeed without a binder error, in any project.
-        let (apg_root, dir) = fixture_layout("r4-binder");
+        // target — succeed without a binder error, in any project. Under the
+        // membership guard (R3) each project's mutations run in ITS OWN
+        // project context (worktree on the project's branch); the merged spec
+        // space of each checkout carries every project's files.
+        let repo = Repo::new("r4-binder");
+        let projects: [(&str, &[&str]); 3] = [
+            ("cosanima-rename", &["D1"][..]),
+            ("cosanima-mcp", &[][..]),
+            ("cosanima-1.0", &["D5"][..]),
+        ];
         let mk = |project: &str, decisions: &[&str]| -> Vec<Record> {
             let mut v = vec![Record::Spec {
                 fqn: format!("{project}/spec"),
@@ -3684,38 +3933,49 @@ mod tests {
             }
             v
         };
-        for (project, decisions) in [
-            ("cosanima-rename", &["D1"][..]),
-            ("cosanima-mcp", &[][..]),
-            ("cosanima-1.0", &["D5"][..]),
-        ] {
-            let recs = mk(project, decisions);
-            let path = specs::spec_jsonl_path(&apg_root, project);
-            specs::write_jsonl(&path, &recs).unwrap();
-            artifacts::reingest_project(&apg_root, project).unwrap();
+        // One project context per project; every context's checkout carries
+        // all three projects' spec files (the merged spec space).
+        let mut contexts: Vec<(PathBuf, PathBuf)> = Vec::new();
+        for (project, _) in projects {
+            let wt = repo.start_project(project);
+            let apg_root = wt.join(specs::LAYOUT);
+            db_at(&wt);
+            testutil::write_scan_meta(
+                &apg_root,
+                Some(&repo.head_sha()),
+                true,
+                "2026-09-07T00:00:00Z",
+            );
+            for (p, ds) in projects {
+                seed_spec_file(&apg_root, &wt, p, &mk(p, ds));
+            }
+            // Merge the seeded files into this context's DB (like a scan's
+            // spec re-ingest would).
+            for (p, _) in projects {
+                artifacts::reingest_project(&apg_root, p).unwrap();
+            }
+            contexts.push((apg_root, wt));
         }
 
-        // A note attaches to each project's Spec node.
-        for (i, project) in ["cosanima-rename", "cosanima-mcp", "cosanima-1.0"]
-            .into_iter()
-            .enumerate()
-        {
+        // A note attaches to each project's Spec node, from its own context.
+        for (i, (project, _)) in projects.iter().enumerate() {
+            let (apg_root, _wt) = &contexts[i];
             let target = format!("{project}/spec");
-            let mut records = load_project(&apg_root, project).unwrap();
+            let mut records = load_project(apg_root, project).unwrap();
             let p = parse_args(&[
                 "--body".into(),
                 format!("note-{i}"),
                 "--on".into(),
                 target.clone(),
             ]);
-            add_note(&p, &apg_root, project, &mut records).unwrap();
-            let after = specs::read_jsonl(&specs::spec_jsonl_path(&apg_root, project)).unwrap();
+            add_note(&p, apg_root, project, &mut records).unwrap();
+            let after = specs::read_jsonl(&specs::spec_jsonl_path(apg_root, project)).unwrap();
             assert!(after.iter().any(|r| {
                 matches!(r, Record::Details { from, to }
                     if to == &target
                         && from.starts_with(&format!("{project}/note-")))
             }));
-            let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+            let db = artifacts::ArtifactDb::open(apg_root).unwrap();
             let out = db
                 .conn()
                 .unwrap()
@@ -3732,16 +3992,18 @@ mod tests {
             drop(db);
         }
 
-        // The exact rename Decision target from the mystery.
-        let mut records = load_project(&apg_root, "cosanima-rename").unwrap();
+        // The exact rename Decision target from the mystery (rename's own
+        // context).
+        let (apg_root, _wt) = &contexts[0];
+        let mut records = load_project(apg_root, "cosanima-rename").unwrap();
         let p = parse_args(&[
             "--body".into(),
             "on-d1".into(),
             "--on".into(),
             "cosanima-rename/spec.decision-D1".into(),
         ]);
-        add_note(&p, &apg_root, "cosanima-rename", &mut records).unwrap();
-        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        add_note(&p, apg_root, "cosanima-rename", &mut records).unwrap();
+        let db = artifacts::ArtifactDb::open(apg_root).unwrap();
         let out = db
             .conn()
             .unwrap()
@@ -3754,7 +4016,7 @@ mod tests {
         );
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -3765,7 +4027,7 @@ mod tests {
         // nodes even though tiers 1-3 are the prose-heavy part of the proposed
         // reality. The rel-table now declares Note → every tier label; the
         // edge survives a tier-2 and a tier-3 target.
-        let (apg_root, dir) = fixture_layout("note-tier");
+        let (apg_root, repo, _wt) = fixture_layout("note-tier");
 
         // A spec project carrying a Domain (tier-2) and a System (tier-3) node.
         let path = specs::spec_jsonl_path(&apg_root, "foo");
@@ -3839,7 +4101,7 @@ mod tests {
         );
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -3849,8 +4111,7 @@ mod tests {
         // structure and the why-to-code chain were invisible. The render now
         // emits Stakeholders (tier 1), the Domain tree (tier 2), the Solution
         // tree (tier 3), and the Spine edges.
-        let (apg_root, dir) = fixture_layout("render-tiers");
-        let path = specs::spec_jsonl_path(&apg_root, "foo");
+        let (apg_root, repo, wt) = fixture_layout("render-tiers");
         let records = vec![
             Record::Spec {
                 fqn: "foo/spec".to_string(),
@@ -3928,7 +4189,7 @@ mod tests {
                 to: "github.com/x/y.Store".to_string(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &records);
         artifacts::reingest_project(&apg_root, "foo").unwrap();
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
 
@@ -3942,13 +4203,25 @@ mod tests {
         assert!(md.contains("## Domain"), "domain section: {md}");
         assert!(md.contains("**Domain `Auth`**"), "domain node: {md}");
         assert!(md.contains("the auth area"), "domain body: {md}");
-        assert!(md.contains("**Subdomain `Access`** (kind: core)"), "subdomain + kind: {md}");
-        assert!(md.contains("  - **Subdomain"), "subdomain indented under domain: {md}");
+        assert!(
+            md.contains("**Subdomain `Access`** (kind: core)"),
+            "subdomain + kind: {md}"
+        );
+        assert!(
+            md.contains("  - **Subdomain"),
+            "subdomain indented under domain: {md}"
+        );
         // Tier 3 Solution tree.
         assert!(md.contains("## Solution"), "solution section: {md}");
         assert!(md.contains("**System `Platform`**"), "system node: {md}");
-        assert!(md.contains("**Container `Api`** (kind: app)"), "container + kind: {md}");
-        assert!(md.contains("  - **Container"), "container indented under system: {md}");
+        assert!(
+            md.contains("**Container `Api`** (kind: app)"),
+            "container + kind: {md}"
+        );
+        assert!(
+            md.contains("  - **Container"),
+            "container indented under system: {md}"
+        );
         // Spine edges, in short FQN form.
         assert!(md.contains("## Spine"), "spine section: {md}");
         assert!(
@@ -3964,7 +4237,7 @@ mod tests {
             "implemented-by edge (code fqn passes through): {md}"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -3973,51 +4246,131 @@ mod tests {
         // satisfiable planned node (target code `github.com/x/y.Store` exists
         // in the fixture DB), an unrealized planned node, and an open feedback —
         // the `apg spec unresolved` CLI subcommand should report each section.
-        let (apg_root, dir) = fixture_layout("unresolved");
+        let (apg_root, repo, wt) = fixture_layout("unresolved");
         let records = vec![
-            Record::Spec { fqn: "foo/spec".into(), title: "T".into(), goal: String::new() },
-            Record::Requirement { fqn: "foo/spec.R1".into(), id: "R1".into(), title: "Timer".into(), body: String::new(), feature: String::new() },
-            Record::Requirement { fqn: "foo/spec.R2".into(), id: "R2".into(), title: "Delivered".into(), body: String::new(), feature: String::new() },
-            Record::Anchors { from: "foo/spec.R1".into(), to: "github.com/x/y.Gateway".into() },
-            Record::Implements { from: "github.com/x/y.Store".into(), to: "foo/spec.R2".into() },
-            Record::Feedback { fqn: "foo/feedback-1".into(), body: "b".into(), status: "open".into(), disposition: String::new() },
+            Record::Spec {
+                fqn: "foo/spec".into(),
+                title: "T".into(),
+                goal: String::new(),
+            },
+            Record::Requirement {
+                fqn: "foo/spec.R1".into(),
+                id: "R1".into(),
+                title: "Timer".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Requirement {
+                fqn: "foo/spec.R2".into(),
+                id: "R2".into(),
+                title: "Delivered".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Anchors {
+                from: "foo/spec.R1".into(),
+                to: "github.com/x/y.Gateway".into(),
+            },
+            Record::Implements {
+                from: "github.com/x/y.Store".into(),
+                to: "foo/spec.R2".into(),
+            },
+            Record::Feedback {
+                fqn: "foo/feedback-1".into(),
+                body: "b".into(),
+                status: "open".into(),
+                disposition: String::new(),
+            },
         ];
-        specs::write_jsonl(&apg_root.join("specs").join("foo.jsonl"), &records).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &records);
         // The plan carries the planned tier-4 additions: one that the DB has
         // realized (Store is real code) and one still unbuilt (Gateway).
         let plan_dir = apg_root.join(specs::TRANS).join("plans");
         std::fs::create_dir_all(&plan_dir).unwrap();
         let plan = vec![
-            Record::Plan { fqn: "foo/plan".into(), title: "P".into(), strategy: String::new() },
-            Record::PlanPhase { fqn: "foo/plan.phase-01".into(), number: 1, title: "P1".into(), deliverable: String::new(), status: String::new() },
-            Record::Task { fqn: "foo/plan.phase-01.task-1".into(), title: "t".into(), kind: "source".into(), tier: String::new(), status: "pending".into() },
-            Record::PlannedNode { fqn: "github.com/x/y.Store".into(), kind: "struct".into(), name: "Store".into(), parent: String::new() },
-            Record::PlannedNode { fqn: "github.com/x/y.Gateway".into(), kind: "struct".into(), name: "Gateway".into(), parent: String::new() },
-            Record::Contains { from: "foo/plan".into(), to: "foo/plan.phase-01".into() },
-            Record::Contains { from: "foo/plan.phase-01".into(), to: "foo/plan.phase-01.task-1".into() },
-            Record::Builds { from: "foo/plan.phase-01.task-1".into(), to: "github.com/x/y.Store".into() },
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "P".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: String::new(),
+                status: String::new(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".into(),
+                title: "t".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "pending".into(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Store".into(),
+                kind: "struct".into(),
+                name: "Store".into(),
+                parent: String::new(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Gateway".into(),
+                kind: "struct".into(),
+                name: "Gateway".into(),
+                parent: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+            Record::Builds {
+                from: "foo/plan.phase-01.task-1".into(),
+                to: "github.com/x/y.Store".into(),
+            },
         ];
         specs::write_jsonl(&plan_dir.join("foo.jsonl"), &plan).unwrap();
 
         let out = spec_unresolved_report(&apg_root, Some("foo")).unwrap();
         // Orphan R1 (no Satisfies, no Implements); R2 is delivered, not orphan.
-        assert!(out.contains("orphan requirements — no Satisfies, no Implements (1):"), "orphan: {out}");
+        assert!(
+            out.contains("orphan requirements — no Satisfies, no Implements (1):"),
+            "orphan: {out}"
+        );
         assert!(out.contains("  R1 — Timer"), "orphan line: {out}");
-        assert!(!out.contains("R2"), "delivered requirement must not be an orphan: {out}");
+        assert!(
+            !out.contains("R2"),
+            "delivered requirement must not be an orphan: {out}"
+        );
         // Store is realized (a scan replaced it); Gateway is still planned.
         assert!(out.contains("realized planned nodes"), "realized: {out}");
         assert!(out.contains("github.com/x/y.Store"), "realized line: {out}");
         assert!(out.contains("unbuilt planned code"), "unbuilt: {out}");
-        assert!(out.contains("github.com/x/y.Gateway"), "unbuilt line: {out}");
+        assert!(
+            out.contains("github.com/x/y.Gateway"),
+            "unbuilt line: {out}"
+        );
         // Gateway is unreferenced (no task Builds it).
-        assert!(out.contains("unreferenced planned nodes"), "unreferenced: {out}");
+        assert!(
+            out.contains("unreferenced planned nodes"),
+            "unreferenced: {out}"
+        );
         // Pending anchor to the planned Gateway node is expected.
         assert!(out.contains("pending anchors"), "pending anchor: {out}");
-        assert!(out.contains("github.com/x/y.Gateway"), "pending anchor line: {out}");
+        assert!(
+            out.contains("github.com/x/y.Gateway"),
+            "pending anchor line: {out}"
+        );
         // Open feedback surfaced.
         assert!(out.contains("feedback under review"), "feedback: {out}");
-        assert!(out.contains("foo/feedback-1 (open)"), "feedback line: {out}");
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            out.contains("foo/feedback-1 (open)"),
+            "feedback line: {out}"
+        );
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -4026,23 +4379,66 @@ mod tests {
         // clean; filtering to an unknown project reports nothing; a DB-less
         // layout still lints (planned-node realization unverifiable, not a
         // crash).
-        let (apg_root, dir) = fixture_layout("unresolved-clean");
+        let (apg_root, repo, wt) = fixture_layout("unresolved-clean");
         let records = vec![
-            Record::Spec { fqn: "foo/spec".into(), title: "T".into(), goal: String::new() },
-            Record::Requirement { fqn: "foo/spec.R1".into(), id: "R1".into(), title: "A".into(), body: String::new(), feature: String::new() },
-            Record::Satisfies { from: "foo/plan.phase-01".into(), to: "foo/spec.R1".into() },
+            Record::Spec {
+                fqn: "foo/spec".into(),
+                title: "T".into(),
+                goal: String::new(),
+            },
+            Record::Requirement {
+                fqn: "foo/spec.R1".into(),
+                id: "R1".into(),
+                title: "A".into(),
+                body: String::new(),
+                feature: String::new(),
+            },
+            Record::Satisfies {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/spec.R1".into(),
+            },
         ];
-        specs::write_jsonl(&apg_root.join("specs").join("foo.jsonl"), &records).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &records);
         let plan_dir = apg_root.join(specs::TRANS).join("plans");
         std::fs::create_dir_all(&plan_dir).unwrap();
         let plan = vec![
-            Record::Plan { fqn: "foo/plan".into(), title: "P".into(), strategy: String::new() },
-            Record::PlanPhase { fqn: "foo/plan.phase-01".into(), number: 1, title: "P1".into(), deliverable: String::new(), status: String::new() },
-            Record::Task { fqn: "foo/plan.phase-01.task-1".into(), title: "t".into(), kind: "source".into(), tier: String::new(), status: "pending".into() },
-            Record::PlannedNode { fqn: "github.com/x/y.Store".into(), kind: "struct".into(), name: "Store".into(), parent: String::new() },
-            Record::Contains { from: "foo/plan".into(), to: "foo/plan.phase-01".into() },
-            Record::Contains { from: "foo/plan.phase-01".into(), to: "foo/plan.phase-01.task-1".into() },
-            Record::Builds { from: "foo/plan.phase-01.task-1".into(), to: "github.com/x/y.Store".into() },
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "P".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: String::new(),
+                status: String::new(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".into(),
+                title: "t".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "pending".into(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Store".into(),
+                kind: "struct".into(),
+                name: "Store".into(),
+                parent: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+            Record::Builds {
+                from: "foo/plan.phase-01.task-1".into(),
+                to: "github.com/x/y.Store".into(),
+            },
         ];
         specs::write_jsonl(&plan_dir.join("foo.jsonl"), &plan).unwrap();
 
@@ -4054,13 +4450,25 @@ mod tests {
             out.contains("Lint clean"),
             "realized Store leaves nothing unresolved: {out}"
         );
-        assert!(!out.contains("orphan requirements"), "clean must not report orphans: {out}");
-        assert!(!out.contains("unbuilt planned code"), "store realized, nothing unbuilt: {out}");
-        assert!(!out.contains("unreferenced planned nodes"), "store is Builds'd, nothing unreferenced: {out}");
+        assert!(
+            !out.contains("orphan requirements"),
+            "clean must not report orphans: {out}"
+        );
+        assert!(
+            !out.contains("unbuilt planned code"),
+            "store realized, nothing unbuilt: {out}"
+        );
+        assert!(
+            !out.contains("unreferenced planned nodes"),
+            "store is Builds'd, nothing unreferenced: {out}"
+        );
 
         // Filtering to a project that does not exist reports nothing.
         let filtered = spec_unresolved_report(&apg_root, Some("nope")).unwrap();
-        assert!(filtered.is_empty() || !filtered.contains("nope"), "filter: {filtered}");
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            filtered.is_empty() || !filtered.contains("nope"),
+            "filter: {filtered}"
+        );
+        testutil::remove(&repo);
     }
 }

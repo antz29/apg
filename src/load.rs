@@ -1422,45 +1422,27 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query(
         "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, kind STRING, tier STRING, status STRING)",
     )?;
-    conn.query(
-        "CREATE NODE TABLE Stakeholder(fqn STRING PRIMARY KEY, name STRING, body STRING)",
-    )?;
-    conn.query(
-        "CREATE NODE TABLE Domain(fqn STRING PRIMARY KEY, name STRING, body STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE Stakeholder(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
+    conn.query("CREATE NODE TABLE Domain(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
     conn.query(
         "CREATE NODE TABLE Subdomain(fqn STRING PRIMARY KEY, name STRING, kind STRING, body STRING)",
     )?;
-    conn.query(
-        "CREATE NODE TABLE Entity(fqn STRING PRIMARY KEY, name STRING, body STRING)",
-    )?;
-    conn.query(
-        "CREATE NODE TABLE ValueObject(fqn STRING PRIMARY KEY, name STRING, body STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE Entity(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
+    conn.query("CREATE NODE TABLE ValueObject(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
     conn.query(
         "CREATE NODE TABLE Aggregate(fqn STRING PRIMARY KEY, name STRING, root STRING, body STRING)",
     )?;
-    conn.query(
-        "CREATE NODE TABLE DomainEvent(fqn STRING PRIMARY KEY, name STRING, body STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE DomainEvent(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
     conn.query(
         "CREATE NODE TABLE DomainProcess(fqn STRING PRIMARY KEY, name STRING, body STRING)",
     )?;
-    conn.query(
-        "CREATE NODE TABLE DomainRule(fqn STRING PRIMARY KEY, name STRING, body STRING)",
-    )?;
-    conn.query(
-        "CREATE NODE TABLE Actor(fqn STRING PRIMARY KEY, name STRING, body STRING)",
-    )?;
-    conn.query(
-        "CREATE NODE TABLE System(fqn STRING PRIMARY KEY, name STRING, body STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE DomainRule(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
+    conn.query("CREATE NODE TABLE Actor(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
+    conn.query("CREATE NODE TABLE System(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
     conn.query(
         "CREATE NODE TABLE Container(fqn STRING PRIMARY KEY, name STRING, kind STRING, body STRING)",
     )?;
-    conn.query(
-        "CREATE NODE TABLE Component(fqn STRING PRIMARY KEY, name STRING, body STRING)",
-    )?;
+    conn.query("CREATE NODE TABLE Component(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
     conn.query(
         "CREATE NODE TABLE Invariant(fqn STRING PRIMARY KEY, title STRING, body STRING, category STRING, scope STRING, status STRING)",
     )?;
@@ -1494,12 +1476,8 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query(
         "CREATE REL TABLE Builds(FROM Task TO Module, FROM Task TO File, FROM Task TO Struct, FROM Task TO Function)",
     )?;
-    conn.query(
-        "CREATE REL TABLE Drives(FROM Requirement TO Domain)",
-    )?;
-    conn.query(
-        "CREATE REL TABLE Requires(FROM Requirement TO Domain)",
-    )?;
+    conn.query("CREATE REL TABLE Drives(FROM Requirement TO Domain)")?;
+    conn.query("CREATE REL TABLE Requires(FROM Requirement TO Domain)")?;
     conn.query(
         "CREATE REL TABLE Realises(FROM Domain TO System, FROM Domain TO Container, FROM Domain TO Component)",
     )?;
@@ -1548,30 +1526,18 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         format!(r#"COPY Plan FROM "{}""#, p("plan.parquet")),
         format!(r#"COPY PlanPhase FROM "{}""#, p("plan_phase.parquet")),
         format!(r#"COPY Task FROM "{}""#, p("task.parquet")),
-        format!(
-            r#"COPY Stakeholder FROM "{}""#,
-            p("stakeholder.parquet")
-        ),
+        format!(r#"COPY Stakeholder FROM "{}""#, p("stakeholder.parquet")),
         format!(r#"COPY Domain FROM "{}""#, p("domain.parquet")),
         format!(r#"COPY Subdomain FROM "{}""#, p("subdomain.parquet")),
         format!(r#"COPY Entity FROM "{}""#, p("entity.parquet")),
-        format!(
-            r#"COPY ValueObject FROM "{}""#,
-            p("value_object.parquet")
-        ),
+        format!(r#"COPY ValueObject FROM "{}""#, p("value_object.parquet")),
         format!(r#"COPY Aggregate FROM "{}""#, p("aggregate.parquet")),
-        format!(
-            r#"COPY DomainEvent FROM "{}""#,
-            p("domain_event.parquet")
-        ),
+        format!(r#"COPY DomainEvent FROM "{}""#, p("domain_event.parquet")),
         format!(
             r#"COPY DomainProcess FROM "{}""#,
             p("domain_process.parquet")
         ),
-        format!(
-            r#"COPY DomainRule FROM "{}""#,
-            p("domain_rule.parquet")
-        ),
+        format!(r#"COPY DomainRule FROM "{}""#, p("domain_rule.parquet")),
         format!(r#"COPY Actor FROM "{}""#, p("actor.parquet")),
         format!(r#"COPY System FROM "{}""#, p("system.parquet")),
         format!(r#"COPY Container FROM "{}""#, p("container.parquet")),
@@ -2819,7 +2785,8 @@ mod tests {
                     g.uses.insert((s("from"), s("to")));
                 }
                 "unresolved_call" => {
-                    g.unresolved_calls.insert((s("from"), s("to"), s("target_type")));
+                    g.unresolved_calls
+                        .insert((s("from"), s("to"), s("target_type")));
                 }
                 "unresolved_use" => {
                     g.unresolved_uses.insert((s("from"), s("to")));
@@ -3197,45 +3164,29 @@ mod tests {
             ("foo/spec".into(), "foo/spec.R1".into()),
             ("foo/spec".into(), "foo/spec.phase-1".into()),
             ("foo/spec".into(), "foo/spec.phase-2".into()),
-            (
-                "foo/spec".into(),
-                "foo/spec.decision-d1".into(),
-            ),
+            ("foo/spec".into(), "foo/spec.decision-d1".into()),
             ("foo/spec".into(), "foo/spec.ng1".into()),
             ("foo/spec".into(), "foo/spec.ac1".into()),
             ("foo/spec".into(), "foo/spec.vi1".into()),
-            (
-                "foo/spec.phase-1".into(),
-                "foo/spec.R1".into(),
-            ),
+            ("foo/spec.phase-1".into(), "foo/spec.R1".into()),
             ("foo/plan".into(), "foo/plan.phase-1".into()),
-            (
-                "foo/plan.phase-1".into(),
-                "foo/plan.phase-1.task-1".into(),
-            ),
+            ("foo/plan.phase-1".into(), "foo/plan.phase-1.task-1".into()),
         ]);
-        g.details
-            .insert(("foo/note-1".into(), "foo/spec".into()));
+        g.details.insert(("foo/note-1".into(), "foo/spec".into()));
         g.reviews
             .insert(("foo/feedback-1".into(), "foo/spec.R1".into()));
         g.depends_on
             .insert(("foo/spec.R2".into(), "foo/spec.R1".into()));
-        g.gates.insert((
-            "foo/spec.phase-2".into(),
-            "foo/spec.phase-1".into(),
-        ));
+        g.gates
+            .insert(("foo/spec.phase-2".into(), "foo/spec.phase-1".into()));
         g.spec_depends
             .insert(("foo/spec".into(), "other/spec".into()));
         g.anchors
             .insert(("foo/spec.R1".into(), "foo/gateway".into()));
-        g.satisfies.insert((
-            "foo/plan.phase-1".into(),
-            "foo/spec.R1".into(),
-        ));
-        g.builds.insert((
-            "foo/plan.phase-1.task-1".into(),
-            "foo/gateway".into(),
-        ));
+        g.satisfies
+            .insert(("foo/plan.phase-1".into(), "foo/spec.R1".into()));
+        g.builds
+            .insert(("foo/plan.phase-1.task-1".into(), "foo/gateway".into()));
 
         let dir = std::env::temp_dir().join(format!("apg-test-spec-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -3284,20 +3235,14 @@ mod tests {
             .query("MATCH (s:Struct {fqn: 'foo/gateway'}) RETURN s.status")
             .unwrap()
             .to_string();
-        assert!(
-            out.contains("planned"),
-            "planned struct row: {out}"
-        );
+        assert!(out.contains("planned"), "planned struct row: {out}");
 
         // Multi-pair Contains: Spec -> Requirement and Spec -> Phase.
         let out = conn
             .query("MATCH (s:Spec)-[:Contains]->(r:Requirement) RETURN r.fqn")
             .unwrap()
             .to_string();
-        assert!(
-            out.contains("foo/spec.R1"),
-            "contains spec->req: {out}"
-        );
+        assert!(out.contains("foo/spec.R1"), "contains spec->req: {out}");
         let out = conn
             .query("MATCH (s:Spec)-[:Contains]->(p:Phase) RETURN p.fqn")
             .unwrap()
@@ -3445,7 +3390,8 @@ mod tests {
         // genuinely round-trippable: write_graph_jsonl → read_graph_jsonl →
         // fresh DB, and every tier node + spine edge must survive. A real
         // `Scan` node round-trips too (scan_meta control record on line 1).
-        let dir = std::env::temp_dir().join(format!("apg-test-spine-roundtrip-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("apg-test-spine-roundtrip-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -3571,48 +3517,29 @@ mod tests {
             ("foo/spec".into(), "foo/stakeholder.Ops".into()),
             ("foo/spec".into(), "foo/domain.Auth".into()),
             ("foo/spec".into(), "foo/system.Platform".into()),
-            (
-                "foo/domain.Auth".into(),
-                "foo/subdomain.Access".into(),
-            ),
+            ("foo/domain.Auth".into(), "foo/subdomain.Access".into()),
             (
                 "foo/domain.Auth".into(),
                 "foo/domain-rule.NoNegativeBalance".into(),
             ),
-            (
-                "foo/domain.Auth".into(),
-                "foo/actor.Customer".into(),
-            ),
+            ("foo/domain.Auth".into(), "foo/actor.Customer".into()),
             (
                 "foo/subdomain.Access".into(),
                 "foo/aggregate.Session".into(),
             ),
-            (
-                "foo/aggregate.Session".into(),
-                "foo/entity.User".into(),
-            ),
+            ("foo/aggregate.Session".into(), "foo/entity.User".into()),
             (
                 "foo/aggregate.Session".into(),
                 "foo/value-object.Email".into(),
             ),
-            (
-                "foo/system.Platform".into(),
-                "foo/container.Api".into(),
-            ),
-            (
-                "foo/container.Api".into(),
-                "foo/component.Gateway".into(),
-            ),
+            ("foo/system.Platform".into(), "foo/container.Api".into()),
+            ("foo/container.Api".into(), "foo/component.Gateway".into()),
         ]);
         // The full five-edge spine.
-        g.drives.insert((
-            "foo/spec.R1".to_string(),
-            "foo/domain.Auth".to_string(),
-        ));
-        g.requires.insert((
-            "foo/spec.R1".to_string(),
-            "foo/domain.Auth".to_string(),
-        ));
+        g.drives
+            .insert(("foo/spec.R1".to_string(), "foo/domain.Auth".to_string()));
+        g.requires
+            .insert(("foo/spec.R1".to_string(), "foo/domain.Auth".to_string()));
         g.realises.insert((
             "foo/domain.Auth".to_string(),
             "foo/system.Platform".to_string(),
@@ -3636,7 +3563,10 @@ mod tests {
         // Every node survives with its kind (a located code node keeps its span;
         // a location-less code node reads back without one).
         for (fqn, node) in &g.nodes {
-            let seen = back.nodes.get(fqn).unwrap_or_else(|| panic!("{fqn} lost in round-trip"));
+            let seen = back
+                .nodes
+                .get(fqn)
+                .unwrap_or_else(|| panic!("{fqn} lost in round-trip"));
             assert_eq!(seen.kind, node.kind, "{fqn} kind");
         }
         assert_eq!(back.nodes.len(), g.nodes.len(), "node count");
@@ -3654,7 +3584,10 @@ mod tests {
         ] {
             assert_eq!(a, b, "{name} edges");
         }
-        assert_eq!(back.unresolved_calls, g.unresolved_calls, "unresolved_calls edges");
+        assert_eq!(
+            back.unresolved_calls, g.unresolved_calls,
+            "unresolved_calls edges"
+        );
 
         // The closed loop lands in a queryable DB: load the re-ingested graph
         // into a fresh DB and resolve every tier label + the spine end to end.
@@ -3683,7 +3616,10 @@ mod tests {
                 .query(&format!("MATCH (n:{label} {{fqn: '{fqn}'}}) RETURN n.name"))
                 .unwrap()
                 .to_string();
-            assert!(!out.contains("(empty)"), "{label} {fqn} missing after round-trip: {out}");
+            assert!(
+                !out.contains("(empty)"),
+                "{label} {fqn} missing after round-trip: {out}"
+            );
         }
         let out = conn
             .query(
@@ -3691,7 +3627,10 @@ mod tests {
             )
             .unwrap()
             .to_string();
-        assert!(out.contains("mod.Gateway"), "spine to code after round-trip: {out}");
+        assert!(
+            out.contains("mod.Gateway"),
+            "spine to code after round-trip: {out}"
+        );
         let out = conn
             .query("MATCH (s:Scan) RETURN s.git_sha, s.git_clean")
             .unwrap()
@@ -3887,16 +3826,10 @@ mod tests {
         // Hierarchy.
         g.contains.extend([
             ("foo/spec".into(), "foo/spec.R1".into()),
-            (
-                "foo/spec".into(),
-                "foo/stakeholder.Ops".into(),
-            ),
+            ("foo/spec".into(), "foo/stakeholder.Ops".into()),
             ("foo/spec".into(), "foo/domain.Auth".into()),
             ("foo/spec".into(), "foo/system.Platform".into()),
-            (
-                "foo/domain.Auth".into(),
-                "foo/subdomain.Access".into(),
-            ),
+            ("foo/domain.Auth".into(), "foo/subdomain.Access".into()),
             (
                 "foo/domain.Auth".into(),
                 "foo/domain-event.UserLoggedIn".into(),
@@ -3909,36 +3842,22 @@ mod tests {
                 "foo/domain.Auth".into(),
                 "foo/domain-rule.NoNegativeBalance".into(),
             ),
-            (
-                "foo/domain.Auth".into(),
-                "foo/actor.Customer".into(),
-            ),
+            ("foo/domain.Auth".into(), "foo/actor.Customer".into()),
             (
                 "foo/subdomain.Access".into(),
                 "foo/aggregate.Session".into(),
             ),
-            (
-                "foo/aggregate.Session".into(),
-                "foo/entity.User".into(),
-            ),
+            ("foo/aggregate.Session".into(), "foo/entity.User".into()),
             (
                 "foo/aggregate.Session".into(),
                 "foo/value-object.Email".into(),
             ),
-            (
-                "foo/system.Platform".into(),
-                "foo/container.Api".into(),
-            ),
-            (
-                "foo/container.Api".into(),
-                "foo/component.Gateway".into(),
-            ),
+            ("foo/system.Platform".into(), "foo/container.Api".into()),
+            ("foo/container.Api".into(), "foo/component.Gateway".into()),
         ]);
         // The spine.
-        g.drives.insert((
-            "foo/spec.R1".to_string(),
-            "foo/domain.Auth".to_string(),
-        ));
+        g.drives
+            .insert(("foo/spec.R1".to_string(), "foo/domain.Auth".to_string()));
         g.realises.insert((
             "foo/domain.Auth".to_string(),
             "foo/system.Platform".to_string(),
@@ -3975,9 +3894,7 @@ mod tests {
             ("Component", "foo/component.Gateway"),
         ] {
             let out = conn
-                .query(&format!(
-                    "MATCH (n:{label} {{fqn: '{fqn}'}}) RETURN n.name"
-                ))
+                .query(&format!("MATCH (n:{label} {{fqn: '{fqn}'}}) RETURN n.name"))
                 .unwrap()
                 .to_string();
             assert!(!out.contains("(empty)"), "{label} {fqn} missing: {out}");
@@ -4015,10 +3932,7 @@ mod tests {
             )
             .unwrap()
             .to_string();
-        assert!(
-            out.contains("foo/entity.User"),
-            "domain hierarchy: {out}"
-        );
+        assert!(out.contains("foo/entity.User"), "domain hierarchy: {out}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

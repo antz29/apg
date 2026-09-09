@@ -114,9 +114,9 @@ fn apply_invariant_add(
         .get("title")
         .ok_or_else(|| anyhow::anyhow!("invariant requires --title"))?;
     let body = p.get("body").unwrap_or_default();
-    let category = p
-        .get("category")
-        .ok_or_else(|| anyhow::anyhow!("invariant requires --category <process|product|graph-integrity>"))?;
+    let category = p.get("category").ok_or_else(|| {
+        anyhow::anyhow!("invariant requires --category <process|product|graph-integrity>")
+    })?;
     validate_category(&category)?;
     let scope = p.get("scope").unwrap_or_default();
     let status = "active".to_string();
@@ -125,7 +125,7 @@ fn apply_invariant_add(
         Some(proj) => {
             // Project-scoped: `<project>/invariant/<name>` (the FQN is
             // project-scoped and stable; present-ness is branch membership, not an FQN
-// prefix).
+            // prefix).
             (
                 format!("{proj}/invariant/{name}"),
                 specs::spec_jsonl_path(apg_root, proj),
@@ -217,11 +217,7 @@ fn invariant_rm(args: &[String]) -> anyhow::Result<()> {
 /// The retirement write-through: load the ledger/project file, flip the
 /// invariant's status to `retired`, re-ingest. Separated from `invariant_rm` so
 /// tests can drive it against a fixture root (the `apply_invariant_add` pattern).
-fn apply_invariant_rm(
-    apg_root: &Path,
-    project: Option<&str>,
-    name: &str,
-) -> anyhow::Result<()> {
+fn apply_invariant_rm(apg_root: &Path, project: Option<&str>, name: &str) -> anyhow::Result<()> {
     let (fqn, file, project_name) = match project {
         Some(proj) => (
             format!("{proj}/invariant/{name}"),
@@ -297,17 +293,28 @@ mod tests {
     use super::*;
     use crate::graph::{Graph, Location, Node, NodeKind};
     use crate::load;
+    use crate::testutil::{self, Repo};
     use lbug::{Connection, Database};
 
-    /// A temp `apg/` layout with a real `apg/.trans/db.lbug` holding a code
-    /// graph (github.com/x/y.Store struct + file + module).
-    fn fixture_layout(name: &str) -> (PathBuf, PathBuf) {
-        let dir =
-            std::env::temp_dir().join(format!("apg-invariant-test-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
-        std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
+    /// A temp repo with a real project context for `foo` (R4 — non-git
+    /// fixtures are gone): the worktree on branch `foo` carries a real DB
+    /// (github.com/x/y.Store struct + file + module, plus a non-guardable
+    /// Note artifact) and a fresh scan_meta.
+    fn fixture_layout(name: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = Repo::new(&format!("invariant-{name}"));
+        let wt = repo.start_project("foo");
+        db_at(&wt);
+        testutil::write_scan_meta(
+            &wt.join(specs::LAYOUT),
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+        (wt.join(specs::LAYOUT), repo, wt)
+    }
 
+    /// Builds a real DB + load files under `dir/apg` (used by `fixture_layout`).
+    fn db_at(dir: &Path) {
         let mut g = Graph::default();
         g.nodes.insert(
             "github.com/x/y".to_string(),
@@ -378,12 +385,11 @@ mod tests {
         load::copy_from(&conn, &ldir).unwrap();
         drop(conn);
         drop(db);
-        (dir.join("apg"), dir)
     }
 
     #[test]
     fn invariant_roundtrip_with_guard() {
-        let (apg_root, dir) = fixture_layout("roundtrip");
+        let (apg_root, repo, _wt) = fixture_layout("roundtrip");
 
         // Universal invariant guarding a code node (the classic product rule:
         // "release records' version equals the tag").
@@ -436,10 +442,7 @@ mod tests {
             .query("MATCH (:Struct {fqn: 'github.com/x/y.Store'})-[:GuardedBy]->(:Invariant) RETURN count(*)")
             .unwrap()
             .to_string();
-        assert!(
-            out.lines().last() == Some("1"),
-            "guarded_by edge: {out}"
-        );
+        assert!(out.lines().last() == Some("1"), "guarded_by edge: {out}");
         drop(db);
 
         // Invalid category rejected before any write.
@@ -453,18 +456,20 @@ mod tests {
             "spec".to_string(),
         ]);
         assert!(apply_invariant_add(&apg_root, None, "x", &p).is_err());
-        assert!(!apg_root.join("specs").join("_invariants.jsonl").exists()
-            || specs::read_jsonl(&apg_root.join("specs").join("_invariants.jsonl"))
-                .unwrap()
-                .iter()
-                .all(|r| !matches!(r, Record::Invariant { fqn, .. } if fqn == "invariant/x")));
+        assert!(
+            !apg_root.join("specs").join("_invariants.jsonl").exists()
+                || specs::read_jsonl(&apg_root.join("specs").join("_invariants.jsonl"))
+                    .unwrap()
+                    .iter()
+                    .all(|r| !matches!(r, Record::Invariant { fqn, .. } if fqn == "invariant/x"))
+        );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn non_guardable_label_rejected_before_write() {
-        let (apg_root, dir) = fixture_layout("non-guardable");
+        let (apg_root, repo, _wt) = fixture_layout("non-guardable");
 
         // Guarding a Note — not a GuardedBy from-kind — must be rejected up
         // front, before any record lands in the ledger.
@@ -523,21 +528,20 @@ mod tests {
         assert!(out.lines().last() == Some("1"), "guarded_by edge: {out}");
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn invariant_add_works_with_no_db_and_zero_guards() {
-        // A bare `apg/` layout with a specs dir but NO db.lbug — the
-        // "emergent, works with zero invariants" flow (Invariants-SPEC
-        // "No precondition"). With zero --guard flags there is nothing to
-        // validate against the graph, so the write must not demand a scan.
-        let dir =
-            std::env::temp_dir().join(format!("apg-invariant-test-{}-nodb", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
-        std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
-        let apg_root = dir.join("apg");
+        // A project context with a specs dir but NO db.lbug — the "emergent,
+        // works with zero invariants" flow (Invariants-SPEC "No
+        // precondition"). With zero --guard flags there is nothing to validate
+        // against the graph, so the write must not demand a scan — but it
+        // still demands a project context (R3: writes only happen inside one).
+        let repo = Repo::new("nodb");
+        let wt = repo.start_project("foo");
+        let apg_root = wt.join(specs::LAYOUT);
+        std::fs::create_dir_all(apg_root.join("specs")).unwrap();
         assert!(
             !apg_root.join(specs::TRANS).join("db.lbug").exists(),
             "fixture must start DB-less"
@@ -605,12 +609,12 @@ mod tests {
             "error: {err}"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn invariant_retire_flips_status_and_preserves_edges() {
-        let (apg_root, dir) = fixture_layout("retire");
+        let (apg_root, repo, _wt) = fixture_layout("retire");
 
         // Add a universal invariant guarding a code node (status active).
         let p = parse_args(&[
@@ -671,12 +675,12 @@ mod tests {
         assert!(apply_invariant_rm(&apg_root, None, "nope").is_err());
         assert!(apply_invariant_rm(&apg_root, None, "task-kind").is_err());
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn project_scoped_invariant_and_checks_roundtrip() {
-        let (apg_root, dir) = fixture_layout("project-scoped");
+        let (apg_root, repo, _wt) = fixture_layout("project-scoped");
 
         // A spec project + requirement (so the project-scoped invariant has a
         // project file and a feedback target exists).
@@ -709,8 +713,8 @@ mod tests {
                 to: "foo/spec.R1".to_string(),
             },
         ];
-        specs::write_jsonl(&path, &recs).unwrap();
-        artifacts::reingest_project(&apg_root, "foo").unwrap();
+        // Seeded through the funnel (auto-committed on the branch, DB fresh).
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
 
         // A domain rule materialized as a project-scoped Invariant
         // (category=product) — the PHASE_02 DomainRule alignment.
@@ -760,13 +764,15 @@ mod tests {
         let out = db
             .conn()
             .unwrap()
-            .query("MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Checks]->(:Invariant) RETURN count(*)")
+            .query(
+                "MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Checks]->(:Invariant) RETURN count(*)",
+            )
             .unwrap()
             .to_string();
         assert!(out.lines().last() == Some("1"), "checks edge: {out}");
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     /// The PHASE_02 done gate's "tool smoke for the two suite tools" —
@@ -809,18 +815,18 @@ mod tests {
 
         // Live: run the real tool files through bun against a real fixture DB
         // and the real apg binary, exactly as opencode would invoke them.
-        let (_apg_root, dir) = fixture_layout("suite-smoke");
-        let bunver = std::process::Command::new("bun")
-            .arg("--version")
-            .output();
+        // The tools run with cwd inside the PROJECT WORKTREE (mutations are
+        // guarded — the universal ledger requires a project context).
+        let (_apg_root, repo, wt) = fixture_layout("suite-smoke");
+        let bunver = std::process::Command::new("bun").arg("--version").output();
         let Ok(bunver) = bunver else {
             eprintln!("skipping live suite-tool smoke: bun not on PATH");
-            let _ = std::fs::remove_dir_all(&dir);
+            testutil::remove(&repo);
             return;
         };
         if !bunver.status.success() {
             eprintln!("skipping live suite-tool smoke: bun unavailable");
-            let _ = std::fs::remove_dir_all(&dir);
+            testutil::remove(&repo);
             return;
         }
 
@@ -843,12 +849,22 @@ mod tests {
                 String::from_utf8_lossy(&out.stderr)
             );
         }
-        assert!(apg_bin.exists(), "apg binary missing at {}", apg_bin.display());
+        assert!(
+            apg_bin.exists(),
+            "apg binary missing at {}",
+            apg_bin.display()
+        );
 
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let tool_add = manifest.join("opencode-suite").join("tools").join("apg_invariant_add.ts");
-        let tool_list = manifest.join("opencode-suite").join("tools").join("apg_invariants.ts");
-        let entry = dir.join("suite_smoke.ts");
+        let tool_add = manifest
+            .join("opencode-suite")
+            .join("tools")
+            .join("apg_invariant_add.ts");
+        let tool_list = manifest
+            .join("opencode-suite")
+            .join("tools")
+            .join("apg_invariants.ts");
+        let entry = repo.root.join("suite_smoke.ts");
         std::fs::write(
             &entry,
             format!(
@@ -867,8 +883,8 @@ console.log("LIST_END")
 "#,
                 tool_add.display(),
                 tool_list.display(),
-                dir.display(),
-                dir.display()
+                wt.display(),
+                wt.display()
             ),
         )
         .unwrap();
@@ -904,6 +920,6 @@ console.log("LIST_END")
             "list tool output: {list}"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 }

@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::artifacts::{self, node_fqn, parse_args, ParsedArgs};
+use crate::artifacts::{self, ParsedArgs, node_fqn, parse_args};
 use crate::schema::Record;
 use crate::spec_cmd::project_of;
 use crate::specs;
@@ -41,7 +41,9 @@ pub fn cmd_review(args: &[String]) -> anyhow::Result<()> {
 fn review_add(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     if p.positional.is_empty() {
-        anyhow::bail!("usage: apg review add <target-fqn> --body … [--kind …] [--project <p>] [--checks <invariant-fqn>]*");
+        anyhow::bail!(
+            "usage: apg review add <target-fqn> --body … [--kind …] [--project <p>] [--checks <invariant-fqn>]*"
+        );
     }
     if p.get("body").is_none() {
         anyhow::bail!("review add requires --body");
@@ -74,10 +76,7 @@ fn apply_review_add(apg_root: &Path, p: &ParsedArgs) -> anyhow::Result<()> {
     if !checks.is_empty() {
         let db = artifacts::ArtifactDb::open(apg_root)?;
         for c in &checks {
-            if !db
-                .node_label(c)
-                .is_some_and(|l| l == "Invariant")
-            {
+            if !db.node_label(c).is_some_and(|l| l == "Invariant") {
                 anyhow::bail!("--checks target `{c}` is not an Invariant node");
             }
         }
@@ -109,7 +108,9 @@ fn apply_review_add(apg_root: &Path, p: &ParsedArgs) -> anyhow::Result<()> {
             }
             Some(_) => {
                 let proj = project_of(target).ok_or_else(|| {
-                    anyhow::anyhow!("target `{target}` is a spec/plan node without a project prefix")
+                    anyhow::anyhow!(
+                        "target `{target}` is a spec/plan node without a project prefix"
+                    )
                 })?;
                 let is_plan = target.starts_with(&format!("{proj}/plan"));
                 (proj, !is_plan)
@@ -227,9 +228,8 @@ fn set_feedback(
     disposition: Option<String>,
     _note: Option<String>,
 ) -> anyhow::Result<()> {
-    let project = project_of(fqn).ok_or_else(|| {
-        anyhow::anyhow!("feedback fqn `{fqn}` must be `<project>/feedback-<n>`")
-    })?;
+    let project = project_of(fqn)
+        .ok_or_else(|| anyhow::anyhow!("feedback fqn `{fqn}` must be `<project>/feedback-<n>`"))?;
     let apg_root = require_apg_root()?;
     set_feedback_at(&apg_root, fqn, &project, status, disposition)
 }
@@ -323,15 +323,27 @@ mod tests {
     use super::*;
     use crate::graph::{Graph, Location, Node, NodeKind};
     use crate::load;
+    use crate::testutil::{self, Repo};
     use lbug::{Connection, Database};
 
-    /// A temp `apg/` layout with a real DB carrying a minimal code graph.
-    fn fixture(name: &str) -> (PathBuf, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("apg-review-test-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
-        std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
+    /// A temp repo with a real project context for `foo` (R4 — non-git
+    /// fixtures are gone): the worktree on branch `foo` carries a real DB
+    /// with a minimal code graph and a fresh scan_meta.
+    fn fixture(name: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = Repo::new(&format!("review-{name}"));
+        let wt = repo.start_project("foo");
+        db_at(&wt);
+        testutil::write_scan_meta(
+            &wt.join(specs::LAYOUT),
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+        (wt.join(specs::LAYOUT), repo, wt)
+    }
 
+    /// Builds a real DB + load files under `dir/apg` (used by `fixture`).
+    fn db_at(dir: &Path) {
         let mut g = Graph::default();
         g.nodes.insert(
             "github.com/x/y".to_string(),
@@ -390,12 +402,11 @@ mod tests {
         load::copy_from(&conn, &ldir).unwrap();
         drop(conn);
         drop(db);
-        (dir.join("apg"), dir)
     }
 
     #[test]
     fn wont_fix_is_not_terminal_until_reviewer_resolves() {
-        let (apg_root, dir) = fixture("wont-fix");
+        let (apg_root, repo, _wt) = fixture("wont-fix");
 
         // A spec project with a requirement, plus an open Feedback reviewing it.
         let path = specs::spec_jsonl_path(&apg_root, "foo");
@@ -427,7 +438,8 @@ mod tests {
                 to: "foo/spec.R1".to_string(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        // Seeded through the funnel (auto-committed on the branch, DB fresh).
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         // Writer actions with --wont-fix: a *proposal*, not terminal.
         set_feedback_at(
@@ -437,16 +449,17 @@ mod tests {
             "actioned",
             Some("wont-fix".to_string()),
         )
-            .unwrap();
+        .unwrap();
         let recs = specs::read_jsonl(&path).unwrap();
         let f = recs
             .iter()
             .find_map(|r| match r {
-                Record::Feedback { fqn, status, disposition, .. }
-                    if fqn == "foo/feedback-1" =>
-                {
-                    Some((status.clone(), disposition.clone()))
-                }
+                Record::Feedback {
+                    fqn,
+                    status,
+                    disposition,
+                    ..
+                } if fqn == "foo/feedback-1" => Some((status.clone(), disposition.clone())),
                 _ => None,
             })
             .unwrap();
@@ -461,16 +474,17 @@ mod tests {
             "open",
             Some("rejected".to_string()),
         )
-            .unwrap();
+        .unwrap();
         let recs = specs::read_jsonl(&path).unwrap();
         let f = recs
             .iter()
             .find_map(|r| match r {
-                Record::Feedback { fqn, status, disposition, .. }
-                    if fqn == "foo/feedback-1" =>
-                {
-                    Some((status.clone(), disposition.clone()))
-                }
+                Record::Feedback {
+                    fqn,
+                    status,
+                    disposition,
+                    ..
+                } if fqn == "foo/feedback-1" => Some((status.clone(), disposition.clone())),
                 _ => None,
             })
             .unwrap();
@@ -490,7 +504,7 @@ mod tests {
             .unwrap();
         assert_eq!(f, "resolved");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -506,7 +520,7 @@ mod tests {
         // crashes on the next checkpoint). The routing handle is now scoped
         // and dropped before the write-through; this test drives the real
         // `apply_review_add` path end to end.
-        let (apg_root, dir) = fixture("checks-roundtrip");
+        let (apg_root, repo, _wt) = fixture("checks-roundtrip");
 
         // A spec project with one requirement, plus a project-scoped Invariant
         // to cite with --checks (established via write-through, like real use).
@@ -565,7 +579,9 @@ mod tests {
         let out = db
             .conn()
             .unwrap()
-            .query("MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Checks]->(i:Invariant) RETURN i.fqn")
+            .query(
+                "MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Checks]->(i:Invariant) RETURN i.fqn",
+            )
             .unwrap()
             .to_string();
         assert!(out.contains("foo/invariant/guard"), "checks edge: {out}");
@@ -580,13 +596,12 @@ mod tests {
         ]);
         apply_review_add(&apg_root, &p).unwrap();
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("foo/feedback-2"), "post-checks write-through lost the node");
+        assert!(
+            db.has_node("foo/feedback-2"),
+            "post-checks write-through lost the node"
+        );
         assert!(db.has_node("foo/feedback-1"));
         drop(db);
-
-        // A code-target review routes to the plan JSONL but numbers from the
-        // same project-wide `feedback-<n>` namespace (no FQN collision with
-        // the spec-file feedback). Reviews(Feedback → code node).
         let p = parse_args(&[
             "github.com/x/y.Store".to_string(),
             "--body".to_string(),
@@ -596,17 +611,23 @@ mod tests {
         ]);
         apply_review_add(&apg_root, &p).unwrap();
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("foo/feedback-3"), "code-target feedback FQN collided");
+        assert!(
+            db.has_node("foo/feedback-3"),
+            "code-target feedback FQN collided"
+        );
         let out = db
             .conn()
             .unwrap()
             .query("MATCH (:Feedback {fqn: 'foo/feedback-3'})-[:Reviews]->(n:Struct) RETURN n.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("github.com/x/y.Store"), "code reviews edge: {out}");
+        assert!(
+            out.contains("github.com/x/y.Store"),
+            "code reviews edge: {out}"
+        );
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -617,7 +638,7 @@ mod tests {
         // (Stakeholder/Domain/…/Component) pairs, so the Feedback node landed
         // with no Reviews edge. The rel-table now declares Feedback → every
         // tier label; the edge survives a tier-2 and a tier-3 target.
-        let (apg_root, dir) = fixture("tier-review");
+        let (apg_root, repo, _wt) = fixture("tier-review");
 
         // A spec project carrying a Domain (tier-2) and a System (tier-3) node.
         let path = specs::spec_jsonl_path(&apg_root, "foo");
@@ -675,16 +696,22 @@ mod tests {
             .query("MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Reviews]->(n) RETURN n.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("foo/domain.X"), "tier-2 reviews edge dropped: {out}");
+        assert!(
+            out.contains("foo/domain.X"),
+            "tier-2 reviews edge dropped: {out}"
+        );
         let out = db
             .conn()
             .unwrap()
             .query("MATCH (:Feedback {fqn: 'foo/feedback-2'})-[:Reviews]->(n) RETURN n.fqn")
             .unwrap()
             .to_string();
-        assert!(out.contains("foo/system.Y"), "tier-3 reviews edge dropped: {out}");
+        assert!(
+            out.contains("foo/system.Y"),
+            "tier-3 reviews edge dropped: {out}"
+        );
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 }

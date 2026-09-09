@@ -7,10 +7,13 @@ mod ingest;
 mod invariant_cmd;
 mod load;
 mod plan_cmd;
+mod project_cmd;
 mod review_cmd;
 mod schema;
 mod spec_cmd;
 mod specs;
+#[cfg(test)]
+mod testutil;
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -233,7 +236,8 @@ const APG_LIB: &str = include_str!("../opencode-suite/lib/apg.ts");
 /// configured to use the apg suite tools and to guide the user through running
 /// `apg scan` on the CLI (there is no in-chat scan tool). Single-sourced from
 /// the repo's own agent file.
-const CODEBASE_NAVIGATOR_AGENT: &str = include_str!("../opencode-suite/agents/codebase-navigator.md");
+const CODEBASE_NAVIGATOR_AGENT: &str =
+    include_str!("../opencode-suite/agents/codebase-navigator.md");
 
 /// The six distributed agents that `apg init` installs into `~/.opencode/agents/`
 /// (SPEC R13/R15): the navigator plus the five spec/plan/review/builder agents,
@@ -292,12 +296,12 @@ const DEFAULT_CONFIG_JSON: &str = r#"{
 /// Mirrors every run message to stderr *and* to `apg-frontend.log`, so the log
 /// is a complete high-resolution record of the run (the frontend's stderr is
 /// also redirected there, so one file has the whole pipeline).
-struct Log {
+pub(crate) struct Log {
     f: std::fs::File,
 }
 
 impl Log {
-    fn new() -> Log {
+    pub(crate) fn new() -> Log {
         Log {
             f: std::fs::File::create("apg-frontend.log")
                 .expect("failed to create apg-frontend.log"),
@@ -537,10 +541,15 @@ USAGE:
                               domain-process, domain-rule, actor, system,
                               container, component)
   apg plan <sub> …            The phased execution plan (transient, branch-local):
-                              init/add/link/done/undone/note/complete/render/apply
+                              init/add/link/done/undone/note/complete/render/verify
                               (add authors phases, tasks, and planned
                               Implementation nodes — module/file/struct/function
-                              marked planned at the FQN where the code lands)
+                              marked planned at the FQN where the code lands;
+                              verify is the pre-merge coherence gate)
+  apg project <sub> …         Project contexts (worktrees, git2-operated):
+                              start <name> — worktree + branch + branch DB off
+                              the default branch (apg/.worktrees/<name>);
+                              merge <name> — verify gate → merge → main rebuild
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
   apg invariant add …         Materialize a graph-wide invariant (universal or
@@ -575,6 +584,7 @@ fn main() {
         "spec" => spec_cmd::cmd_spec(&raw[2..]),
         "plan" => plan_cmd::cmd_plan(&raw[2..]),
         "review" => review_cmd::cmd_review(&raw[2..]),
+        "project" => project_cmd::cmd_project(&raw[2..]),
         "invariant" => invariant_cmd::cmd_invariant(&raw[2..]),
         "invariants" => invariant_cmd::cmd_invariants(&raw[2..]),
         "--version" | "-V" => {
@@ -672,8 +682,7 @@ fn is_dep_manifest(name: Option<&std::ffi::OsStr>) -> bool {
 fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
     let current_tools: std::collections::HashSet<&str> =
         SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
-    let current_agents: std::collections::HashSet<&str> =
-        AGENTS.iter().map(|(n, _)| *n).collect();
+    let current_agents: std::collections::HashSet<&str> = AGENTS.iter().map(|(n, _)| *n).collect();
     let mut pruned = 0;
 
     let tools_dir = opencode_dir.join("tools");
@@ -848,7 +857,11 @@ fn scaffold_gitignore(dir: &Path) -> anyhow::Result<()> {
 /// cwd) read-only and print the result as CSV with a header row.
 fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     let json = args.first().is_some_and(|a| a == "--json");
-    let query = if json { args[1..].join(" ") } else { args.join(" ") };
+    let query = if json {
+        args[1..].join(" ")
+    } else {
+        args.join(" ")
+    };
     if query.trim().is_empty() {
         anyhow::bail!("usage: apg query [--json] \"<cypher>\"");
     }
@@ -931,7 +944,7 @@ fn find_or_create_apg_root(dir: &Path) -> PathBuf {
 /// classification and FQN rendering). A `scan_meta` control record leads the
 /// whole stream with the git state the scan ran under (recorded as the DB's
 /// `Scan` node and graph.jsonl line 1).
-fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
+pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut language_args: Vec<String> = Vec::new();
     let mut path_excludes: Vec<String> = Vec::new();
     let mut module_dirs: Vec<String> = Vec::new();
@@ -1180,7 +1193,7 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
 /// Consumes the merged scanner JSONL stream, ingests it, and loads `db.lbug` +
 /// `graph.jsonl` (SPEC §6).
-fn run_pipeline(
+pub(crate) fn run_pipeline(
     records: impl IntoIterator<Item = schema::Record>,
     blacklist: &[String],
     path_excludes: &[String],
@@ -1453,7 +1466,7 @@ mod tests {
     /// the `[package] version` line on every release: the assertions below fail
     /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
     /// advertised release), so a bump commit cannot silently skip it.
-    const RELEASE_VERSION: &str = "0.10.2";
+    const RELEASE_VERSION: &str = "0.10.4";
 
     /// The `version = "..."` declared directly under a Cargo.toml `[package]`
     /// header.

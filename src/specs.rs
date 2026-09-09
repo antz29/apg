@@ -272,12 +272,9 @@ mod tests {
         g.nodes.insert("mod.A".to_string(), node(NodeKind::Struct));
         g.nodes
             .insert("mod.A.f".to_string(), node(NodeKind::Function));
+        g.nodes.insert("foo/spec".to_string(), node(NodeKind::Spec));
         g.nodes
-            .insert("foo/spec".to_string(), node(NodeKind::Spec));
-        g.nodes.insert(
-            "foo/spec.R1".to_string(),
-            node(NodeKind::Requirement),
-        );
+            .insert("foo/spec.R1".to_string(), node(NodeKind::Requirement));
         g.contains
             .insert(("mod".to_string(), "/x/a.go".to_string()));
         g.contains

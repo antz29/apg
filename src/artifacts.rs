@@ -57,11 +57,34 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<()> {
 /// mutation must be visible in the query index, and silently dropping it is
 /// what let the authoring agents believe writes had landed when they had not.
 ///
-/// Refuse-on-stale gate (agent-loop hardening): when a DB exists **and** the
-/// DB is stale (`is_stale` — the tree moved on since the scan that built it),
-/// the mutation bails *before* any JSONL write or re-ingest. Every spec/plan/
-/// review mutation funnels through here, so the single check covers them all.
-/// Missing-DB and non-git paths stay allowed.
+/// This is the **central mutation funnel** (R4): every spec/plan/review/
+/// invariant mutation routes through here, so the two gates beside each other
+/// cover them all:
+///
+/// 1. **Membership guard** (R3): writes only happen inside a project context —
+///    the project's worktree at `<main>/apg/.worktrees/<project>`, on the
+///    project's branch. A refused mutation names which membership half failed
+///    plus one fix line (exit 1 at the CLI). Reads are always unguarded; main
+///    is never a mutation place. Universal-scope targets (the shared
+///    `_invariants.jsonl` ledger) require any project context — scope is
+///    orthogonal to mutation context (R3).
+///
+/// 2. **Refuse-on-stale gate** (agent-loop hardening): when a DB exists **and**
+///    the DB is stale (`is_stale` — the tree moved on since the scan that
+///    built it), the mutation bails *before* any JSONL write or re-ingest.
+///    Missing-DB and non-git paths stay allowed (non-git paths cannot pass
+///    the membership guard anyway).
+///
+/// **Auto-commit** (R8): after the write-through succeeds, a durable target
+/// (anything outside the gitignored `apg/.trans/`) is committed on the
+/// project branch via git2 — one commit per mutation, single-file diffs —
+/// and the staleness gate's recorded `scan_meta` is re-anchored to the new
+/// state (DB and tree in sync by construction; consecutive mutations do not
+/// each demand a rescan). Plan mutations never commit: `apg/.trans` is
+/// gitignored and transient by design. An auto-commit failure degrades to a
+/// warning on stderr: the mutation already landed, and the staleness gate
+/// will demand a scan before the next one (the same degradation as a
+/// hand-committed change).
 ///
 /// Atomic by design (D1): the JSONL is never committed before the DB merge
 /// succeeds. The new records go to a sibling temp file first, the re-ingest
@@ -75,6 +98,15 @@ pub fn write_jsonl_and_reingest(
     project: &str,
     records: &[Record],
 ) -> anyhow::Result<()> {
+    // Membership guard (R3/R4): every write happens inside a project context.
+    // Universal-scope targets (the `_invariants.jsonl` shared ledger) have no
+    // project of their own — any project context satisfies the guard.
+    let universal = path.file_name().is_some_and(|n| n == "_invariants.jsonl");
+    if universal {
+        git::require_project_context(apg_root)?;
+    } else {
+        git::require_membership(apg_root, project)?;
+    }
     if apg_root.join(specs::TRANS).join("db.lbug").exists() {
         if let Some(msg) = git::refusal_message(apg_root) {
             anyhow::bail!("{msg}");
@@ -86,16 +118,36 @@ pub fn write_jsonl_and_reingest(
         match reingest_project_with(apg_root, project, Some((path, records))) {
             Ok(()) => {
                 std::fs::rename(&tmp, path)?;
-                Ok(())
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&tmp);
-                Err(e)
+                return Err(e);
             }
         }
     } else {
-        specs::write_jsonl(path, records)
+        specs::write_jsonl(path, records)?;
     }
+    // R8: auto-commit durable targets on the project branch; plan/review
+    // targets under apg/.trans never commit. Re-anchor the recorded scan_meta
+    // only when the commit actually moved the branch.
+    if !path.starts_with(apg_root.join(specs::TRANS)) {
+        match git::auto_commit(apg_root, path) {
+            Ok(Some(_)) => {
+                if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
+                    eprintln!(
+                        "apg: warning: could not re-anchor scan_meta after auto-commit: {e:#}"
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!(
+                    "apg: warning: mutation landed but auto-commit failed ({e:#}): the staleness gate will demand a scan before the next mutation"
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 pub struct ArtifactDb {
@@ -200,10 +252,10 @@ impl ArtifactDb {
     }
 
     /// Existence of any node at `fqn` in the live graph. Used by the test suite
-/// and the tool surface; `#[allow(dead_code)]` because the shipping CLI paths
-/// test existence via label queries.
-#[allow(dead_code)]
-pub fn has_node(&self, fqn: &str) -> bool {
+    /// and the tool surface; `#[allow(dead_code)]` because the shipping CLI paths
+    /// test existence via label queries.
+    #[allow(dead_code)]
+    pub fn has_node(&self, fqn: &str) -> bool {
         node_exists(&self.db, fqn)
     }
 
@@ -257,41 +309,44 @@ pub fn has_node(&self, fqn: &str) -> bool {
     }
 
     /// True when `fqn` is a `planned` Implementation node (a plan-writer-authored
-/// placeholder awaiting realization — GraphModel-SPEC.md). The placeholder
-/// node is gone (PHASE_02); pending anchors are detected by `status: planned`,
-/// never a separate kind.
-/// The label of a `planned` Implementation node at `fqn`, or `None`.
-pub fn is_planned(&self, fqn: &str) -> bool {
-    for l in ["Struct", "Function", "File", "Module"] {
-        if count(
-            &self.db,
-            &format!(
-                "MATCH (n:{l} {{fqn: {}}}) WHERE n.status = 'planned' RETURN count(*)",
-                lit(fqn)
-            ),
-        ) > 0
+    /// placeholder awaiting realization — GraphModel-SPEC.md). The placeholder
+    /// node is gone (PHASE_02); pending anchors are detected by `status: planned`,
+    /// never a separate kind.
+    /// The label of a `planned` Implementation node at `fqn`, or `None`.
+    pub fn is_planned(&self, fqn: &str) -> bool {
+        for l in ["Struct", "Function", "File", "Module"] {
+            if count(
+                &self.db,
+                &format!(
+                    "MATCH (n:{l} {{fqn: {}}}) WHERE n.status = 'planned' RETURN count(*)",
+                    lit(fqn)
+                ),
+            ) > 0
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Resolves an anchor target (R7/R8): real code (Module/Struct/Function/File)
+    /// or a proposed Solution node (System/Container/Component — the pending
+    /// tier-3 anchor of the plan bridge, GraphModel-SPEC.md). Anything else is an
+    /// error.
+    pub fn resolve_anchor(&self, fqn: &str) -> anyhow::Result<()> {
+        if self.code_label(fqn).is_some()
+            || matches!(
+                self.node_label(fqn),
+                Some("System" | "Container" | "Component")
+            )
         {
-            return true;
+            Ok(())
+        } else {
+            anyhow::bail!(
+                "anchor target `{fqn}` is neither resolved code nor a proposed Solution node (System/Container/Component)"
+            )
         }
     }
-    false
-}
-
-/// Resolves an anchor target (R7/R8): real code (Module/Struct/Function/File)
-/// or a proposed Solution node (System/Container/Component — the pending
-/// tier-3 anchor of the plan bridge, GraphModel-SPEC.md). Anything else is an
-/// error.
-pub fn resolve_anchor(&self, fqn: &str) -> anyhow::Result<()> {
-    if self.code_label(fqn).is_some()
-        || matches!(self.node_label(fqn), Some("System" | "Container" | "Component"))
-    {
-        Ok(())
-    } else {
-        anyhow::bail!(
-            "anchor target `{fqn}` is neither resolved code nor a proposed Solution node (System/Container/Component)"
-        )
-    }
-}
 
     /// The owning module of a code node (via the Contains Module→File→node
     /// chain), for note-ledger routing.
@@ -497,15 +552,15 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             fqn,
             vec![("id", id.clone()), ("summary", summary.clone())],
         )),
-        Record::PlannedNode {
-            fqn, kind, ..
-        } => Some((
+        Record::PlannedNode { fqn, kind, .. } => Some((
             match kind.as_str() {
                 "module" => "Module",
                 "file" => "File",
                 "struct" => "Struct",
                 "function" => "Function",
-                other => panic!("planned_node kind must be module/file/struct/function, got `{other}`"),
+                other => {
+                    panic!("planned_node kind must be module/file/struct/function, got `{other}`")
+                }
             },
             fqn,
             vec![("status", "planned".to_string())],
@@ -986,21 +1041,43 @@ mod tests {
     use super::*;
     use crate::graph::{Graph, Location, Node, NodeKind};
     use crate::load;
+    use crate::testutil::{self, Repo};
 
-    /// A temp `apg/` layout with a real `apg/.trans/db.lbug` holding a code
-    /// graph (mirrors the spec_cmd fixture).
-    fn fixture(name: &str) -> (PathBuf, PathBuf) {
-        let dir =
-            std::env::temp_dir().join(format!("apg-artifacts-test-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        db_at(&dir);
-        (dir.join("apg"), dir)
+    /// A real project context (R4): a git repo whose worktree `foo` on branch
+    /// `foo` carries a real `apg/.trans/db.lbug` code graph plus a fresh
+    /// scan_meta. Returns `(wt_apg_root, repo, wt_root)`. Tags are
+    /// module-prefixed so parallel tests in other modules never collide on a
+    /// temp dir.
+    fn project_fixture(name: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = Repo::new(&format!("artifacts-{name}"));
+        let wt = repo.start_project("foo");
+        db_at(&wt);
+        testutil::write_scan_meta(
+            &wt.join(specs::LAYOUT),
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+        (wt.join(specs::LAYOUT), repo, wt)
     }
 
-    /// Builds a real DB + load files under `dir/apg` (used by `fixture` and by
-    /// the git-aware staleness tests, which init a repo around the same
-    /// layout first).
+    /// A project context named like the mutation target (the membership guard
+    /// requires the mutation's project == the checkout's branch).
+    fn project_fixture_named(name: &str, project: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = Repo::new(&format!("artifacts-{name}"));
+        let wt = repo.start_project(project);
+        db_at(&wt);
+        testutil::write_scan_meta(
+            &wt.join(specs::LAYOUT),
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+        (wt.join(specs::LAYOUT), repo, wt)
+    }
+
+    /// Builds a real DB + load files under `dir/apg` (used by `project_fixture`
+    /// — the git-aware fixtures init the repo around the worktree first).
     fn db_at(dir: &Path) {
         std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
         std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
@@ -1063,63 +1140,6 @@ mod tests {
         drop(db);
     }
 
-    /// A temp dir with a real DB fixture inside a fresh git repo whose
-    /// `apg/.trans/` is gitignored (so building the DB and writing graph.jsonl
-    /// does not dirty the tree). Returns `(apg_root, dir, head_sha)`.
-    fn git_fixture(name: &str) -> (PathBuf, PathBuf, String) {
-        let dir =
-            std::env::temp_dir().join(format!("apg-artifacts-git-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let git_ok = |args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(args)
-                .current_dir(&dir)
-                .output()
-                .expect("git spawn");
-            assert!(
-                out.status.success(),
-                "git {args:?} failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-        };
-        git_ok(&["init", "-q"]);
-        git_ok(&["config", "user.email", "apg-test@example.com"]);
-        git_ok(&["config", "user.name", "apg test"]);
-        std::fs::write(dir.join(".gitignore"), "apg/.trans/\n").unwrap();
-        git_ok(&["add", ".gitignore"]);
-        git_ok(&["commit", "-q", "-m", "init"]);
-        let sha = String::from_utf8_lossy(
-            &std::process::Command::new("git")
-                .args(["rev-parse", "HEAD"])
-                .current_dir(&dir)
-                .output()
-                .unwrap()
-                .stdout,
-        )
-        .trim()
-        .to_string();
-        db_at(&dir);
-        (dir.join("apg"), dir, sha)
-    }
-
-    /// Writes a graph.jsonl whose line 1 records a scan at `sha`/`clean`
-    /// (via the real export writer).
-    fn write_scan_meta(apg_root: &Path, sha: &str, clean: bool) {
-        let mut g = Graph::default();
-        g.nodes.insert(
-            crate::schema::SCAN_HEAD.to_string(),
-            Node {
-                kind: NodeKind::Scan,
-                git_sha: Some(sha.to_string()),
-                git_clean: Some(clean),
-                scanned_at: Some("2026-09-07T00:00:00Z".to_string()),
-                ..Node::default()
-            },
-        );
-        load::write_graph_jsonl(&g, &apg_root.join(specs::TRANS).join("graph.jsonl")).unwrap();
-    }
-
     /// The committed baseline records for the `foo` project: a spec with one
     /// requirement and one healthy note (Details → Spec).
     fn baseline_records() -> Vec<Record> {
@@ -1163,9 +1183,28 @@ mod tests {
         total - with_edge
     }
 
+    /// Commits paths on the worktree's branch (git2) — for test setup that
+    /// deliberately writes files outside the funnel, followed by a scan_meta
+    /// re-anchor so the DB stays fresh.
+    fn wt_commit_paths(wt: &Path, paths: &[&str], msg: &str) -> String {
+        let repo = git2::Repository::open(wt).unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(paths.iter().copied(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &[&head])
+            .unwrap()
+            .to_string()
+    }
+
     #[test]
     fn illegal_details_pair_is_projected_away_not_a_binder_error() {
-        let (apg_root, dir) = fixture("orphan");
+        let (apg_root, repo, _wt) = project_fixture("orphan");
         let path = specs::spec_jsonl_path(&apg_root, "foo");
         let baseline = baseline_records();
 
@@ -1234,7 +1273,7 @@ mod tests {
         assert!(out.lines().last() == Some("1"), "healthy edge: {out}");
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -1243,16 +1282,28 @@ mod tests {
         // (the R2/R4 guards removed the binder-error injector): a malformed
         // peer spec file makes the re-ingest fail BEFORE any DB write, so the
         // committed JSONL and the live DB must both stay on the old state.
-        let (apg_root, dir) = fixture("orphan-peer");
+        let (apg_root, repo, wt) = project_fixture("orphan-peer");
         let path = specs::spec_jsonl_path(&apg_root, "foo");
         let baseline = baseline_records();
         write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
 
         // A peer project's spec file goes malformed (a line that is not a
         // Record). Every re-ingest merges all projects' files, so this poisons
-        // the assembled record set with a read error.
+        // the assembled record set with a read error. The peer file is
+        // committed on the branch + scan_meta re-anchored, so the DB stays
+        // fresh and the mutation below fails at the re-ingest read — the
+        // failure this test is about — not at the staleness gate.
         let peer = specs::spec_jsonl_path(&apg_root, "peer");
         std::fs::write(&peer, "{\"type\":\"spec\",\"fqn\":").unwrap();
+        let sha1 = wt_commit_paths(&wt, &["apg/specs/peer.jsonl"], "poison peer");
+        git::reanchor_scan_meta(
+            &apg_root,
+            &git::GitState {
+                sha: Some(sha1),
+                clean: true,
+            },
+        )
+        .unwrap();
 
         // A legal note-add to foo now fails at the re-ingest read step.
         let mut mutated = baseline.clone();
@@ -1287,7 +1338,7 @@ mod tests {
         assert!(db.has_node("foo/note-1"));
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -1308,7 +1359,7 @@ mod tests {
         // PRE-FIX this test fails with the binder exception on the `docs`
         // write-through below; POST-FIX the illegal pair is skipped exactly
         // like the scan load path projects it away, and the legal note lands.
-        let (apg_root, dir) = fixture("poison");
+        let (apg_root, repo, wt) = project_fixture_named("poison", "rename");
 
         // Project "rename" carries the legal targets from the mystery.
         let rename = vec![
@@ -1356,11 +1407,22 @@ mod tests {
                 to: "docs/note-2".into(),
             },
         ];
+        // The docs records ride the rename branch's checkout (spec graphs
+        // form one merged space — a branch carries every spec JSONL its
+        // history contains). Authored outside the funnel (docs is not the
+        // mutation context here), committed + scan_meta re-anchored so the
+        // rename mutations below stay fresh.
         let docs_path = specs::spec_jsonl_path(&apg_root, "docs");
-        // PRE-FIX (the R3 reproduction): this throws
-        // `Binder exception: …` and, because the docs record set rides along
-        // in every re-ingest, it poisoned note-adds to ANY project.
-        write_jsonl_and_reingest(&apg_root, &docs_path, "docs", &docs).unwrap();
+        specs::write_jsonl(&docs_path, &docs).unwrap();
+        let sha1 = wt_commit_paths(&wt, &["apg/specs/docs.jsonl"], "docs records");
+        git::reanchor_scan_meta(
+            &apg_root,
+            &git::GitState {
+                sha: Some(sha1),
+                clean: true,
+            },
+        )
+        .unwrap();
 
         // The legal note-add to rename must not be hostage to docs' poison:
         // `apg spec add rename note --on rename/spec`.
@@ -1386,9 +1448,7 @@ mod tests {
         let out = db
             .conn()
             .unwrap()
-            .query(
-                "MATCH (:Note {fqn: 'rename/note-1'})-[:Details]->(s:Spec) RETURN count(*)",
-            )
+            .query("MATCH (:Note {fqn: 'rename/note-1'})-[:Details]->(s:Spec) RETURN count(*)")
             .unwrap()
             .to_string();
         assert!(
@@ -1411,7 +1471,7 @@ mod tests {
         );
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -1422,27 +1482,51 @@ mod tests {
         // (their residues still sit in the live DB as edge-less orphans:
         // cosanima-1.0/note-7 and cosanima-docs/note-6). Run the
         // exact mystery commands against the committed state on a scratch
-        // root: a note on `cosanima-rename/spec` (Spec) and on
+        // project: a note on `cosanima-rename/spec` (Spec) and on
         // `cosanima-rename/spec.decision-D1` (Decision) writes through
         // without a binder error.
-        let (apg_root, dir) = fixture("rename-current");
+        let (apg_root, repo, wt) = project_fixture_named("rename-current", "cosanima-rename");
 
-        // Copy the repo's committed spec JSONLs into the scratch root. cargo
-        // test runs from the crate root, where `apg/specs/` lives.
-        let repo_specs = Path::new("apg/specs");
-        assert!(repo_specs.is_dir(), "committed apg/specs must exist");
-        for f in specs::jsonl_files(repo_specs) {
-            let recs = specs::read_jsonl(&f).unwrap();
-            let name = f.file_name().unwrap().to_owned();
-            specs::write_jsonl(&apg_root.join("specs").join(name), &recs).unwrap();
-        }
+        // The scratch project carries the clean rename spec + decision records
+        // (the historical cosanima-rename JSONL was retired from this branch;
+        // the mystery's committed state is modeled directly). Committed +
+        // re-anchored so the DB stays fresh.
+        let path = specs::spec_jsonl_path(&apg_root, "cosanima-rename");
+        specs::write_jsonl(
+            &path,
+            &[
+                Record::Spec {
+                    fqn: "cosanima-rename/spec".into(),
+                    title: "Rename".into(),
+                    goal: String::new(),
+                },
+                Record::Decision {
+                    fqn: "cosanima-rename/spec.decision-D1".into(),
+                    id: "D1".into(),
+                    summary: "rename now".into(),
+                },
+                Record::Contains {
+                    from: "cosanima-rename/spec".into(),
+                    to: "cosanima-rename/spec.decision-D1".into(),
+                },
+            ],
+        )
+        .unwrap();
+        let sha1 = wt_commit_paths(&wt, &["apg/specs/cosanima-rename.jsonl"], "rename spec");
+        git::reanchor_scan_meta(
+            &apg_root,
+            &git::GitState {
+                sha: Some(sha1),
+                clean: true,
+            },
+        )
+        .unwrap();
 
         // Establish the merged spec state in the scratch DB (one re-ingest
         // merges every project's files, like any write-through would).
         reingest_project(&apg_root, "cosanima-rename").unwrap();
 
         // The mystery command: add a note on the Spec AND the Decision.
-        let path = specs::spec_jsonl_path(&apg_root, "cosanima-rename");
         let mut records = specs::read_jsonl(&path).unwrap();
         records.push(Record::Note {
             fqn: "cosanima-rename/note-11".into(),
@@ -1468,18 +1552,15 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(out.contains("cosanima-rename/spec"), "{out}");
-        assert!(
-            out.contains("cosanima-rename/spec.decision-D1"),
-            "{out}"
-        );
+        assert!(out.contains("cosanima-rename/spec.decision-D1"), "{out}");
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn write_through_commits_jsonl_and_db() {
-        let (apg_root, dir) = fixture("commit");
+        let (apg_root, repo, _wt) = project_fixture("commit");
         let path = specs::spec_jsonl_path(&apg_root, "foo");
         let recs = baseline_records();
 
@@ -1502,12 +1583,12 @@ mod tests {
         assert!(out.contains("foo/spec"), "details edge: {out}");
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn write_through_without_db_writes_jsonl() {
-        let (apg_root, dir) = fixture("nodb");
+        let (apg_root, repo, _wt) = project_fixture("nodb");
         std::fs::remove_file(apg_root.join(specs::TRANS).join("db.lbug")).unwrap();
         let path = specs::spec_jsonl_path(&apg_root, "foo");
         let recs = baseline_records();
@@ -1517,24 +1598,16 @@ mod tests {
         assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
         assert!(!path.as_os_str().to_string_lossy().ends_with(".tmp"));
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn stale_db_refuses_mutation_before_any_jsonl_write() {
-        let (apg_root, dir, sha0) = git_fixture("stale");
-        // The DB records a clean scan at the *first* commit...
-        write_scan_meta(&apg_root, &sha0, true);
-        // ...but the tree has since moved on to a second commit: stale.
-        let git_ok = |args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .args(args)
-                .current_dir(&dir)
-                .output()
-                .unwrap();
-            assert!(out.status.success());
-        };
-        git_ok(&["commit", "-q", "--allow-empty", "-m", "second"]);
+        let (apg_root, repo, wt) = project_fixture("stale");
+        // The DB records a clean scan at the first commit; then the branch
+        // tree moves on to a second commit: stale.
+        std::fs::write(wt.join("extra.txt"), "x").unwrap();
+        wt_commit_paths(&wt, &["extra.txt"], "second");
         assert!(git::is_stale(&apg_root));
 
         let path = specs::spec_jsonl_path(&apg_root, "foo");
@@ -1553,14 +1626,13 @@ mod tests {
             .collect();
         assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn fresh_git_db_allows_write_through() {
-        let (apg_root, dir, sha) = git_fixture("fresh");
+        let (apg_root, repo, _wt) = project_fixture("fresh");
         // The recorded scan matches the current tree exactly → fresh.
-        write_scan_meta(&apg_root, &sha, true);
         assert!(!git::is_stale(&apg_root));
 
         let path = specs::spec_jsonl_path(&apg_root, "foo");
@@ -1575,7 +1647,7 @@ mod tests {
         assert_eq!(orphan_notes(&db), 0);
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]

@@ -16,3 +16,6 @@ anyhow = "1"
 libc = "0.2"
 lbug = "0.19.1"
 parquet = { version = "55", default-features = false, features = ["snap"] }
+# git2 with default-features = false: no https/ssh transports → no OpenSSL.
+# The git CLI is never shelled out to; push/tag remain human acts (R6).
+git2 = { version = "0.19", default-features = false }

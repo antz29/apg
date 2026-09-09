@@ -42,7 +42,7 @@ fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::
 
 pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg plan <init|add|link|done|undone|note|complete|render|apply> …");
+        anyhow::bail!("usage: apg plan <init|add|link|done|undone|note|complete|render|verify> …");
     };
     match sub {
         "init" => plan_init(&args[1..]),
@@ -53,7 +53,12 @@ pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
         "note" => plan_note(&args[1..]),
         "complete" => plan_complete(&args[1..]),
         "render" => plan_render(&args[1..]),
-        "apply" => plan_apply(&args[1..]),
+        "verify" => plan_verify(&args[1..]),
+        // R5: `apg plan apply` was renamed `verify` — the binary applies
+        // nothing; verify is the pre-merge coherence gate.
+        "apply" => anyhow::bail!(
+            "`apg plan apply` was renamed `verify` (R5) — the binary applies nothing; run `apg plan verify <project>` (the merge act is `apg project merge <project>`)"
+        ),
         other => anyhow::bail!("unknown apg plan subcommand: {other}"),
     }
 }
@@ -103,10 +108,9 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
     let plan_fqn = format!("{project}/plan");
     match kind {
         "planned" => {
-            let (Some(node_kind), Some(fqn)) = (
-                p.positional.get(2).map(|s| s.as_str()),
-                p.positional.get(3),
-            ) else {
+            let (Some(node_kind), Some(fqn)) =
+                (p.positional.get(2).map(|s| s.as_str()), p.positional.get(3))
+            else {
                 anyhow::bail!(
                     "usage: apg plan add <project> planned <kind> <fqn> [--name <name>] [--parent <parent-fqn>]"
                 );
@@ -206,7 +210,6 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
             println!("Added task {k} to plan.phase-{phase} of {project}");
         }
         other => anyhow::bail!("unknown plan add kind `{other}` — phase|task"),
-
     }
     Ok(())
 }
@@ -455,11 +458,7 @@ fn link_phase_edges(
 /// before the edge is ever accumulated into the records — so the JSONL/DB
 /// write-through never runs on a cycle. `records` must already have the
 /// phase's stale incident edges removed (the add/link callers do this).
-fn push_gate(
-    from: &str,
-    to: &str,
-    records: &[Record],
-) -> anyhow::Result<()> {
+fn push_gate(from: &str, to: &str, records: &[Record]) -> anyhow::Result<()> {
     let project = from
         .split('/')
         .next()
@@ -607,10 +606,9 @@ fn plan_note_at(
     let n = records
         .iter()
         .filter_map(|r| match r {
-            Record::Note { fqn, .. } if fqn.starts_with(&format!("{project}/plan.note-")) => {
-                fqn.rsplit_once("-")
-                    .and_then(|(_, s)| s.parse::<u64>().ok())
-            }
+            Record::Note { fqn, .. } if fqn.starts_with(&format!("{project}/plan.note-")) => fqn
+                .rsplit_once("-")
+                .and_then(|(_, s)| s.parse::<u64>().ok()),
             _ => None,
         })
         .max()
@@ -738,38 +736,47 @@ fn plan_complete_at(apg_root: &Path, project: &str, phase: u32) -> anyhow::Resul
     Ok(())
 }
 
-/// `apg plan apply <project>` (PHASE_03) — the single delivery moment
-/// (PlanCompletion-SPEC.md). Runs the change-set coherence gate against the
-/// branch's graph:
+/// `apg plan verify <project>` (R5 — renamed from `apply`): the pre-merge
+/// coherence gate (PlanCompletion-SPEC.md). Runs against the branch's graph:
 ///
 /// - every planned Implementation node is realized in the code graph (a
-///   planned node with no real code at its FQN blocks apply);
+///   planned node with no real code at its FQN blocks verify);
 /// - every phase and the whole-plan review are green (all `Feedback` resolved);
 /// - the human gate has passed (the navigator's summary; outside the CLI).
 ///
 /// The gate is all this command checks — it performs NO merge and NO graph
-/// mutation. On green it prints the merge + rebuild handoff; the navigator
-/// operates `git merge <project-branch>` into `main` and rebuilds `main`'s
-/// graph with a fresh scan on human approval (push/tag remain human).
+/// mutation. Guarded (R5): the verdict is only meaningful against the
+/// project's branch graph — outside the project context, or against a stale
+/// branch DB, verify refuses. On green it prints the merge handoff; the merge
+/// act itself is `apg project merge <project>` (git2-operated from the main
+/// checkout).
 ///
 /// Invariants are deliberately NOT evaluated here (wont-fix, REVIEW.md): an
 /// invariant's body is free prose, so a mechanical pass could not check it,
 /// and Invariants-SPEC's "Correctness never depends on them" makes a
 /// gate-blocking invariant incoherent with the emergent model — the navigator
 /// verifies the GuardedBy set (`apg invariants`) as part of the human gate.
-fn plan_apply(args: &[String]) -> anyhow::Result<()> {
+fn plan_verify(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(project) = p.positional.first() else {
-        anyhow::bail!("usage: apg plan apply <project>");
+        anyhow::bail!("usage: apg plan verify <project>");
     };
     let apg_root = require_apg_root()?;
-    plan_apply_at(&apg_root, project)
+    plan_verify_at(&apg_root, project)
 }
 
-/// Core of `plan_apply` — the coherence gate. Returns the apply handoff message
-/// on green, or errors listing every blocker (unrealized planned nodes,
-/// unresolved feedback).
-fn plan_apply_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
+/// Core of `plan verify` — the coherence gate. Returns the merge handoff
+/// message on green, or errors listing every blocker (unrealized planned
+/// nodes, unresolved feedback). Guarded: refuses outside the project context
+/// and against a stale branch DB (a verdict is only meaningful against the
+/// branch's graph — R5).
+pub(crate) fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
+    crate::git::require_membership(apg_root, project)?;
+    if crate::git::is_stale(apg_root) {
+        anyhow::bail!(
+            "cannot verify `{project}`: the branch graph is stale — run `apg scan` inside the project worktree first (a verdict is only meaningful against a fresh branch graph)"
+        );
+    }
     artifacts::acquire_spec_lock(apg_root)?;
     let records = load_plan(apg_root, project)?;
     let db = artifacts::ArtifactDb::open(apg_root)?;
@@ -777,7 +784,7 @@ fn plan_apply_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     // 1. Every planned Implementation node in the branch is realized: a scan
     // found real (present) code at its FQN and replaced the placeholder. A
     // planned node still marked `planned`, or with no node at all, blocks
-    // apply (PlanCompletion-SPEC.md — the planned-node realization gate).
+    // verify (PlanCompletion-SPEC.md — the planned-node realization gate).
     // Realization means one of the four Implementation labels — an
     // `UnresolvedTarget` at the FQN is NOT real code (REVIEW: the gate used to
     // accept any node label).
@@ -793,7 +800,7 @@ fn plan_apply_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
         let realized = db.impl_label(fqn).is_some() && !db.is_planned(fqn);
         if !realized {
             blocked.push(format!(
-                "planned {kind} node `{fqn}` is not realized — a scan must find real code at its FQN before apply (missing code blocks apply)"
+                "planned {kind} node `{fqn}` is not realized — a scan must find real code at its FQN before verify (missing or dangling code blocks verify)"
             ));
         }
     }
@@ -821,23 +828,24 @@ fn plan_apply_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
         })
         .collect();
 
-    if !blocked.is_empty() {
-        anyhow::bail!(
-            "apply coherence gate blocked: {}",
-            blocked.join("; ")
-        );
-    }
+    // Report BOTH blocker classes together: every unrealized planned node AND
+    // every unresolved feedback, in one gate refusal.
+    let mut problems: Vec<String> = Vec::new();
+    problems.extend(blocked);
     if !unresolved.is_empty() {
-        anyhow::bail!(
-            "apply coherence gate blocked: unresolved review feedback: {} — resolve every `Feedback` before apply",
+        problems.push(format!(
+            "unresolved review feedback: {} — resolve every `Feedback` before verify",
             unresolved.join(", ")
-        );
+        ));
+    }
+    if !problems.is_empty() {
+        anyhow::bail!("verify coherence gate blocked: {}", problems.join("; "));
     }
     println!(
-        "Apply gate passed for {project}: every planned node is realized, all feedback resolved."
+        "Verify gate passed for {project}: every planned node is realized, all feedback resolved."
     );
     println!(
-        "Merge: git merge {project} into main, then rebuild main's graph with `apg scan` (push/tag remain human)."
+        "Merge: `apg project merge {project}` from the main checkout (verify gate → merge → main rebuild; push/tag remain human)."
     );
     Ok(())
 }
@@ -1053,17 +1061,29 @@ mod tests {
     use super::*;
     use crate::graph::{Graph, Location, Node, NodeKind};
     use crate::load;
+    use crate::testutil::{self, Repo};
     use lbug::{Connection, Database};
 
-    /// A temp `apg/` layout with a real DB carrying a code graph (Module, File,
-    /// Struct) plus committed spec JSONL for project `foo`.
-    fn fixture(name: &str) -> (PathBuf, PathBuf) {
-        let dir =
-            std::env::temp_dir().join(format!("apg-plan-test-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
-        std::fs::create_dir_all(dir.join("apg").join("specs")).unwrap();
+    /// A temp repo with a real project context for `foo` (R4 — non-git
+    /// fixtures are gone): the worktree on branch `foo` carries a real DB
+    /// (Module/File/Struct + an UnresolvedTarget) and a fresh scan_meta.
+    /// Returns `(wt_apg_root, repo, wt_root)`. Tags are module-prefixed so
+    /// parallel tests in other modules never collide on a temp dir.
+    fn fixture(name: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = Repo::new(&format!("plan-{name}"));
+        let wt = repo.start_project("foo");
+        db_at(&wt);
+        testutil::write_scan_meta(
+            &wt.join(specs::LAYOUT),
+            Some(&repo.head_sha()),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+        (wt.join(specs::LAYOUT), repo, wt)
+    }
 
+    /// Builds a real DB + load files under `dir/apg` (used by `fixture`).
+    fn db_at(dir: &Path) {
         let mut g = Graph::default();
         g.nodes.insert(
             "github.com/x/y".to_string(),
@@ -1133,7 +1153,38 @@ mod tests {
         load::copy_from(&conn, &ldir).unwrap();
         drop(conn);
         drop(db);
-        (dir.join("apg"), dir)
+    }
+
+    /// Seeds a durable spec JSONL directly (outside the funnel) and commits it
+    /// on the branch + re-anchors the scan_meta — a hand-written durable file
+    /// would otherwise dirty the tree and trip the staleness gate.
+    fn seed_spec_file(apg_root: &Path, wt: &Path, project: &str, records: &[Record]) {
+        let path = specs::spec_jsonl_path(apg_root, project);
+        specs::write_jsonl(&path, records).unwrap();
+        let rel = format!("apg/specs/{project}.jsonl");
+        let sha = {
+            let repo = git2::Repository::open(wt).unwrap();
+            let mut index = repo.index().unwrap();
+            index
+                .add_all([rel.as_str()], git2::IndexAddOption::DEFAULT, None)
+                .unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+            let sig = repo.signature().unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "seed spec", &tree, &[&head])
+                .unwrap()
+                .to_string()
+        };
+        crate::git::reanchor_scan_meta(
+            apg_root,
+            &crate::git::GitState {
+                sha: Some(sha),
+                clean: true,
+            },
+        )
+        .unwrap();
     }
 
     /// Writes a plan JSONL for `foo` with one phase containing one task.
@@ -1174,7 +1225,7 @@ mod tests {
 
     #[test]
     fn plan_done_is_assertion_only_and_undone_reverses() {
-        let (apg_root, dir) = fixture("assertion-done");
+        let (apg_root, repo, _wt) = fixture("assertion-done");
         let _path = write_plan(&apg_root);
 
         // Mark the task done.
@@ -1194,8 +1245,7 @@ mod tests {
         // Assertion-only: no planned nodes were retired, no Implements appeared — the
         // plan carries no promotion side effects.
         assert!(
-            recs.iter()
-                .all(|r| !matches!(r, Record::Implements { .. })),
+            recs.iter().all(|r| !matches!(r, Record::Implements { .. })),
             "assertion-only done must not materialize Implements"
         );
 
@@ -1213,12 +1263,12 @@ mod tests {
             .unwrap();
         assert_eq!(status, "pending");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn plan_complete_is_milestone_only_with_gate_and_no_retirement() {
-        let (apg_root, dir) = fixture("milestone-complete");
+        let (apg_root, repo, _wt) = fixture("milestone-complete");
 
         // Pending task → complete is rejected by the gate.
         let _path = write_plan(&apg_root);
@@ -1246,12 +1296,12 @@ mod tests {
             "milestone-only complete must not materialize Implements"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn plan_note_roundtrip_into_plan_jsonl() {
-        let (apg_root, dir) = fixture("task-note");
+        let (apg_root, repo, _wt) = fixture("task-note");
         let _path = write_plan(&apg_root);
 
         plan_note_at(
@@ -1290,12 +1340,12 @@ mod tests {
         );
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn apply_gate_rejects_unrealized_planned_node() {
-        let (apg_root, dir) = fixture("apply-gate");
+        let (apg_root, repo, _wt) = fixture("apply-gate");
 
         // A plan whose task Builds a planned node whose FQN has NO real code
         // in the graph (the code was claimed-done but is missing).
@@ -1334,16 +1384,16 @@ mod tests {
         specs::write_jsonl(&path, &records).unwrap();
 
         // The gate rejects: the planned node does not resolve to real code.
-        let err = plan_apply_at(&apg_root, "foo").unwrap_err();
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         assert!(err.to_string().contains("coherence gate blocked"), "{err}");
         assert!(err.to_string().contains("github.com/x/y.Gateway"), "{err}");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn apply_gate_passes_when_planned_node_realized_and_feedback_resolved() {
-        let (apg_root, dir) = fixture("apply-gate-ok");
+        let (apg_root, repo, _wt) = fixture("apply-gate-ok");
 
         // The planned node's FQN resolves to the fixture's real Struct.
         let path = specs::plan_jsonl_path(&apg_root, "foo");
@@ -1391,14 +1441,14 @@ mod tests {
         specs::write_jsonl(&path, &records).unwrap();
 
         // Green: every planned node is realized, all feedback resolved.
-        assert!(plan_apply_at(&apg_root, "foo").is_ok());
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn apply_gate_checks_every_planned_node_not_just_builds_targets() {
-        let (apg_root, dir) = fixture("apply-gate-all-planned");
+        let (apg_root, repo, _wt) = fixture("apply-gate-all-planned");
 
         // Two planned nodes, only one built: the gate must block on the
         // unrealized one even though every Builds edge's target resolves (the
@@ -1443,15 +1493,15 @@ mod tests {
         ];
         specs::write_jsonl(&path, &records).unwrap();
 
-        let err = plan_apply_at(&apg_root, "foo").unwrap_err();
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         assert!(err.to_string().contains("github.com/x/y.Gateway"), "{err}");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn apply_gate_rejects_unresolved_feedback() {
-        let (apg_root, dir) = fixture("apply-feedback");
+        let (apg_root, repo, _wt) = fixture("apply-feedback");
 
         // Planned node realizes, but an open Feedback reviews the phase.
         let path = specs::plan_jsonl_path(&apg_root, "foo");
@@ -1498,10 +1548,13 @@ mod tests {
         ];
         specs::write_jsonl(&path, &records).unwrap();
 
-        let err = plan_apply_at(&apg_root, "foo").unwrap_err();
-        assert!(err.to_string().contains("unresolved review feedback"), "{err}");
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        assert!(
+            err.to_string().contains("unresolved review feedback"),
+            "{err}"
+        );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -1540,20 +1593,11 @@ mod tests {
         let satisfies: Vec<&str> = records
             .iter()
             .filter_map(|r| match r {
-                Record::Satisfies { from, to } if from == "foo/plan.phase-01" => {
-                    Some(to.as_str())
-                }
+                Record::Satisfies { from, to } if from == "foo/plan.phase-01" => Some(to.as_str()),
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            satisfies,
-            vec![
-                "foo/spec.R1",
-                "foo/spec.R2",
-                "foo/spec.R3"
-            ]
-        );
+        assert_eq!(satisfies, vec!["foo/spec.R1", "foo/spec.R2", "foo/spec.R3"]);
         // Outgoing Gates set; the incoming phase-02 → phase-01 gate survives.
         assert!(records.iter().any(|r| matches!(
             r,
@@ -1567,24 +1611,13 @@ mod tests {
         )));
         // Linking phase-01 to gate phase-02 would close the incoming
         // phase-02 → phase-01 gate into a cycle — rejected.
-        assert!(
-            link_phase_edges("foo/plan.phase-01", &[], &["2".into()], &mut records,)
-                .is_err()
-        );
+        assert!(link_phase_edges("foo/plan.phase-01", &[], &["2".into()], &mut records,).is_err());
         // Re-linking replaces, never duplicates.
-        link_phase_edges(
-            "foo/plan.phase-01",
-            &["R9".into()],
-            &[],
-            &mut records,
-        )
-        .unwrap();
+        link_phase_edges("foo/plan.phase-01", &["R9".into()], &[], &mut records).unwrap();
         let satisfies: Vec<&str> = records
             .iter()
             .filter_map(|r| match r {
-                Record::Satisfies { from, to } if from == "foo/plan.phase-01" => {
-                    Some(to.as_str())
-                }
+                Record::Satisfies { from, to } if from == "foo/plan.phase-01" => Some(to.as_str()),
                 _ => None,
             })
             .collect();
@@ -1665,9 +1698,7 @@ mod tests {
         let impls: Vec<&str> = spec_records
             .iter()
             .filter_map(|r| match r {
-                Record::Implements { from, to } if to == "foo/spec.R1" => {
-                    Some(from.as_str())
-                }
+                Record::Implements { from, to } if to == "foo/spec.R1" => Some(from.as_str()),
                 _ => None,
             })
             .collect();
@@ -1818,14 +1849,17 @@ mod tests {
         assert!(msg.contains("01 → 03"), "got: {msg}");
         // A self-gate is rejected (dedicated cycle path).
         let err = push_gate("foo/plan.phase-01", "foo/plan.phase-01", &records).unwrap_err();
-        assert!(format!("{err:#}").contains("would create a cycle"), "got: {err:#}");
+        assert!(
+            format!("{err:#}").contains("would create a cycle"),
+            "got: {err:#}"
+        );
         // A benign gate (phase-01 → phase-04) closes nothing.
         push_gate("foo/plan.phase-01", "foo/plan.phase-04", &records).unwrap();
     }
 
     #[test]
     fn plan_add_task_rejects_nonexistent_phase() {
-        let (apg_root, dir) = fixture("task-no-phase");
+        let (apg_root, repo, _wt) = fixture("task-no-phase");
         let _path = write_plan(&apg_root); // plan has phase-01 only
 
         let mut records = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "foo")).unwrap();
@@ -1845,18 +1879,18 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("no such phase"), "{err}");
         assert!(
-            records
-                .iter()
-                .all(|r| !matches!(r, Record::Task { fqn, .. } if fqn.starts_with("foo/plan.phase-02"))),
+            records.iter().all(
+                |r| !matches!(r, Record::Task { fqn, .. } if fqn.starts_with("foo/plan.phase-02"))
+            ),
             "a rejected task must not leave a partial Task record"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn plan_link_rejects_nonexistent_phase() {
-        let (apg_root, dir) = fixture("link-no-phase");
+        let (apg_root, repo, _wt) = fixture("link-no-phase");
         let _path = write_plan(&apg_root); // plan has phase-01 only
 
         let err = plan_link_at(&apg_root, "foo", 2, &["R1".into()], &[]).unwrap_err();
@@ -1864,17 +1898,16 @@ mod tests {
         // The plan JSONL is untouched (no partial write).
         let recs = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "foo")).unwrap();
         assert!(
-            recs.iter()
-                .all(|r| !matches!(r, Record::Satisfies { .. })),
+            recs.iter().all(|r| !matches!(r, Record::Satisfies { .. })),
             "a rejected link must not write Satisfies"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn plan_complete_writes_durable_phase_status() {
-        let (apg_root, dir) = fixture("durable-phase");
+        let (apg_root, repo, _wt) = fixture("durable-phase");
 
         // Pending task → the phase-complete gate rejects (nothing written).
         let _path = write_plan(&apg_root);
@@ -1883,13 +1916,16 @@ mod tests {
         let status = recs
             .iter()
             .find_map(|r| match r {
-                Record::PlanPhase {
-                    fqn, status, ..
-                } if fqn == "foo/plan.phase-01" => Some(status.as_str()),
+                Record::PlanPhase { fqn, status, .. } if fqn == "foo/plan.phase-01" => {
+                    Some(status.as_str())
+                }
                 _ => None,
             })
             .unwrap();
-        assert_eq!(status, "pending", "a rejected complete must not flip status");
+        assert_eq!(
+            status, "pending",
+            "a rejected complete must not flip status"
+        );
 
         // Gate green → the milestone is durably recorded: status flips to done
         // in the JSONL (distinguishable from tasks-done + feedback-resolved).
@@ -1899,9 +1935,9 @@ mod tests {
         let status = recs
             .iter()
             .find_map(|r| match r {
-                Record::PlanPhase {
-                    fqn, status, ..
-                } if fqn == "foo/plan.phase-01" => Some(status.as_str()),
+                Record::PlanPhase { fqn, status, .. } if fqn == "foo/plan.phase-01" => {
+                    Some(status.as_str())
+                }
                 _ => None,
             })
             .unwrap();
@@ -1919,12 +1955,12 @@ mod tests {
         assert!(out.contains("done"), "phase status in DB: {out}");
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
     fn apply_gate_rejects_unresolved_target_as_unrealized() {
-        let (apg_root, dir) = fixture("apply-unresolved");
+        let (apg_root, repo, _wt) = fixture("apply-unresolved");
 
         // The planned node's FQN matches an UnresolvedTarget node in the graph
         // (an unresolved reference, NOT real code) — the gate must block.
@@ -1957,11 +1993,11 @@ mod tests {
         ];
         specs::write_jsonl(&path, &records).unwrap();
 
-        let err = plan_apply_at(&apg_root, "foo").unwrap_err();
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         assert!(err.to_string().contains("not realized"), "{err}");
         assert!(err.to_string().contains("github.com/x/y.Missing"), "{err}");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -1970,7 +2006,7 @@ mod tests {
         // planned node is realized; a rebuild of the (merged) graph then shows
         // the delivered descriptions — the requirement's Anchors + the
         // Implements terminal link — resolving to real code with a location.
-        let (apg_root, dir) = fixture("apply-rebuild");
+        let (apg_root, repo, wt) = fixture("apply-rebuild");
 
         // Spec: R1 anchored to the fixture's real Store, delivered by it.
         let spec = vec![
@@ -1990,7 +2026,7 @@ mod tests {
                 to: "foo/spec.R1".to_string(),
             },
         ];
-        specs::write_jsonl(&specs::spec_jsonl_path(&apg_root, "foo"), &spec).unwrap();
+        seed_spec_file(&apg_root, &wt, "foo", &spec);
 
         // Plan: phase Satisfies R1; the task Builds the planned node that the
         // fixture's scan has already realized (Store is present code).
@@ -2033,7 +2069,7 @@ mod tests {
         specs::write_jsonl(&path, &plan).unwrap();
 
         // Gate green (planned node realized, no unresolved feedback).
-        assert!(plan_apply_at(&apg_root, "foo").is_ok());
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
         // Rebuild the present graph the apply would produce: merge the branch's
         // committed spec/plan JSONLs into the code graph (the fixture's DB is
@@ -2048,7 +2084,10 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(anchor.contains("github.com/x/y.Store"), "anchor: {anchor}");
-        assert!(anchor.contains("1"), "realized struct has a location: {anchor}");
+        assert!(
+            anchor.contains("1"),
+            "realized struct has a location: {anchor}"
+        );
         // The Implements terminal link resolves against the rebuilt graph.
         let impls = db
             .q("MATCH (:Struct {fqn: 'github.com/x/y.Store'})-[:Implements]->(:Requirement {fqn: 'foo/spec.R1'}) RETURN count(*)")
@@ -2060,7 +2099,7 @@ mod tests {
         );
         drop(db);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 
     #[test]
@@ -2070,7 +2109,7 @@ mod tests {
         // scope. The phase-complete gate only checks its phase's scope; the
         // apply gate checks every scope — so structural feedback does not
         // block a phase's completion milestone but blocks apply.
-        let (apg_root, dir) = fixture("scoped-review");
+        let (apg_root, repo, _wt) = fixture("scoped-review");
         let path = specs::plan_jsonl_path(&apg_root, "foo");
         let records = vec![
             Record::Plan {
@@ -2146,10 +2185,13 @@ mod tests {
 
         // Apply is blocked by the STRUCTURAL feedback — every scope must be
         // green at the coherence gate.
-        let err = plan_apply_at(&apg_root, "foo").unwrap_err();
-        assert!(err.to_string().contains("unresolved review feedback"), "{err}");
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        assert!(
+            err.to_string().contains("unresolved review feedback"),
+            "{err}"
+        );
         assert!(err.to_string().contains("foo/feedback-structural"), "{err}");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        testutil::remove(&repo);
     }
 }
