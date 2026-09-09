@@ -5,6 +5,7 @@ mod git;
 mod graph;
 mod ingest;
 mod invariant_cmd;
+mod layers;
 mod load;
 mod plan_cmd;
 mod project_cmd;
