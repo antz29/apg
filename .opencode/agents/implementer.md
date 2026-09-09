@@ -104,10 +104,25 @@ permission:
   apg_uses: allow
   apg_unresolved: allow
   apg_hunk: allow
+  apg_plan: allow
+  apg_plan_tasks: allow
+  apg_plan_phases: allow
+  apg_plan_render: allow
   apg_plan_done: allow
   apg_plan_undone: allow
   apg_plan_note: allow
+  apg_review: allow
   apg_review_action: allow
+  apg_spec: allow
+  apg_spec_requirements: allow
+  apg_spec_phases: allow
+  apg_spec_anchors: allow
+  apg_spec_deps: allow
+  apg_spec_trace: allow
+  apg_spec_unresolved: allow
+  apg_spec_fixes: allow
+  apg_spec_render: allow
+  apg_invariants: allow
   question: allow
 ---
 
