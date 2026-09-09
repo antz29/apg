@@ -1315,4 +1315,144 @@ mod tests {
         let msg = validate_edges(bad).unwrap_err().to_string();
         assert!(msg.contains("drives"), "{msg}");
     }
+
+    /// The plain-named domain types are accepted: the catalog's `group`,
+    /// `entity`, `value`, `service` (SPEC §3.1 — the cryptic DDD type names
+    /// collapse into these; their refusal is covered in
+    /// [`type_must_exist_in_its_layer`]). A plain-named node validates
+    /// end-to-end with its own type's kind/attribute rule applied.
+    #[test]
+    fn plain_domain_types_accepted_with_plain_names() {
+        let empty = BTreeSet::new();
+        // group/value/service need no properties and pass untouched.
+        for (node_type, name) in [
+            ("group", "order-fulfilment"),
+            ("value", "money"),
+            ("service", "checkout"),
+        ] {
+            assert!(
+                validate_node(Layer::Domain, node_type, name, &BTreeMap::new(), &empty).is_ok(),
+                "plain {node_type} `{name}` must be accepted"
+            );
+        }
+        // Entity is accepted once its required kind is present.
+        let props = BTreeMap::from([("kind".to_string(), "entity".to_string())]);
+        assert!(validate_node(Layer::Domain, "entity", "customer", &props, &empty).is_ok());
+    }
+
+    /// A `requirement` node is the ONE requirement type at every depth (SPEC
+    /// §3.1: theme/epic/story/feature are not types — everything is
+    /// `requirement`); a four-level requirement tree validates acyclically,
+    /// and `contains`/`depends-on` between requirement nodes are both
+    /// matrix-legal at any depth.
+    #[test]
+    fn requirement_tree_at_all_depths_is_one_node_type() {
+        let empty = BTreeSet::new();
+        let props = BTreeMap::new();
+        for pseudo in ["theme", "epic", "story", "feature"] {
+            let err = validate_node(Layer::Requirements, pseudo, "x", &props, &empty).unwrap_err();
+            assert!(
+                err.to_string().contains("does not exist in layer"),
+                "{pseudo}: {err}"
+            );
+        }
+        let universe: BTreeSet<(Layer, String, String)> = ["r1", "r2", "r3", "r4"]
+            .into_iter()
+            .map(|n| {
+                (
+                    Layer::Requirements,
+                    "requirement".to_string(),
+                    n.to_string(),
+                )
+            })
+            .collect();
+        // Four levels of contains, plus a depends-on cross-link — still a DAG.
+        let contains: &[(&str, &str)] = &[
+            ("requirements.requirement.r1", "requirements.requirement.r2"),
+            ("requirements.requirement.r2", "requirements.requirement.r3"),
+            ("requirements.requirement.r3", "requirements.requirement.r4"),
+        ];
+        let depends: &[(&str, &str)] =
+            &[("requirements.requirement.r1", "requirements.requirement.r4")];
+        let all: Vec<(&str, &str)> = contains
+            .iter()
+            .copied()
+            .chain(depends.iter().copied())
+            .collect();
+        assert!(
+            validate_trees_acyclic(&all, &universe).is_ok(),
+            "a four-level requirement tree must stay acyclic"
+        );
+        for &(src, dst) in contains {
+            assert!(
+                validate_edge("contains", src, dst).is_ok(),
+                "contains {src} -> {dst} must be matrix-legal"
+            );
+        }
+        for &(src, dst) in depends {
+            assert!(
+                validate_edge("depends-on", src, dst).is_ok(),
+                "depends-on {src} -> {dst} must be matrix-legal"
+            );
+        }
+    }
+
+    /// The sequential spine (SPEC §3.2) is tier-locked by the matrix: the
+    /// full legal chain Requirement --drives--> Domain --realised-by-->
+    /// Solution --implemented-by--> code passes hop-by-hop, and a tier skip
+    /// (Requirement directly realised-by a Solution — no Domain hop) is
+    /// refused.
+    #[test]
+    fn sequential_spine_is_tier_locked() {
+        // The full, legal spine from Requirement to code.
+        assert!(validate_edge("drives", "requirements.requirement.r1", "domain.group.g1").is_ok());
+        assert!(validate_edge("realised-by", "domain.group.g1", "solution.system.sys1").is_ok());
+        assert!(validate_edge("implemented-by", "solution.system.sys1", "apg.main").is_ok());
+        // A tier skip: Requirement realised-by Solution, skipping the Domain hop.
+        let msg = validate_edge(
+            "realised-by",
+            "requirements.requirement.r1",
+            "solution.system.sys1",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(msg.contains("realised-by"), "{msg}");
+        assert!(msg.contains("requirements.requirement.r1"), "{msg}");
+        assert!(msg.contains("solution.system.sys1"), "{msg}");
+    }
+
+    /// The §3.3 edge-kind matrix is complete and internally consistent: its
+    /// rows cover exactly the two-authored-endpoint kinds (all of
+    /// [`EDGE_KINDS`] except the code-exempt `implemented-by`/`details`), and
+    /// every row's source/target type is a real type of its layer's catalog.
+    #[test]
+    fn edge_kind_matrix_is_complete_and_consistent() {
+        let exempt = ["implemented-by", "details"];
+        let kinds: BTreeSet<&str> = MATRIX.iter().map(|(k, ..)| *k).collect();
+        let expected: BTreeSet<&str> = EDGE_KINDS
+            .iter()
+            .copied()
+            .filter(|k| !exempt.contains(k))
+            .collect();
+        assert_eq!(
+            kinds, expected,
+            "matrix rows must cover exactly the non-exempt edge kinds"
+        );
+        for &(kind, sl, sts, tl, tts) in MATRIX {
+            for t in sts {
+                assert!(
+                    sl.node_types().contains(t),
+                    "{kind}: source type `{t}` not in layer {}",
+                    sl.layer_dir()
+                );
+            }
+            for t in tts {
+                assert!(
+                    tl.node_types().contains(t),
+                    "{kind}: target type `{t}` not in layer {}",
+                    tl.layer_dir()
+                );
+            }
+        }
+    }
 }
