@@ -7,6 +7,7 @@ mod ingest;
 mod invariant_cmd;
 mod layers;
 mod load;
+mod node_cmd;
 mod plan_cmd;
 mod project_cmd;
 mod review_cmd;
@@ -662,6 +663,8 @@ fn main() {
         "project" => project_cmd::cmd_project(&raw[2..]),
         "invariant" => invariant_cmd::cmd_invariant(&raw[2..]),
         "invariants" => invariant_cmd::cmd_invariants(&raw[2..]),
+        "node" => node_cmd::cmd_node(&raw[2..]),
+        "edge" => node_cmd::cmd_edge(&raw[2..]),
         "--version" | "-V" => {
             println!("apg {}", env!("CARGO_PKG_VERSION"));
             Ok(())

@@ -36,6 +36,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::artifacts;
 use crate::git;
 use crate::schema::Record;
 
@@ -332,8 +333,8 @@ pub fn validate_node(
 
 /// Parse an authored-node FQN (`<layer>.<type>.<name>`) back into its
 /// (layer, type, name) identity. Used only to resolve edge endpoints against
-/// the change universe; the FQN *builder* is phase-3 task-8.
-fn parse_fqn(fqn: &str) -> anyhow::Result<(Layer, String, String)> {
+/// the change universe; the FQN *builder* is [`fqn`].
+pub fn parse_fqn(fqn: &str) -> anyhow::Result<(Layer, String, String)> {
     let mut parts = fqn.split('.');
     let (layer_s, node_type, name) = match (parts.next(), parts.next(), parts.next(), parts.next())
     {
@@ -956,6 +957,30 @@ pub fn write_node(apg_root: &Path, node: &NodeFile) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
+/// The node-file path for an identity (SPEC §4.1): the same derivation
+/// [`write_node`] uses. A helper for the command layer (`node_cmd`).
+pub fn node_file_path(apg_root: &Path, layer: Layer, node_type: &str, name: &str) -> PathBuf {
+    apg_root
+        .join(LAYERS_DIR)
+        .join(layer.layer_dir())
+        .join(node_type)
+        .join(format!("{name}.json"))
+}
+
+/// Read one node file by identity (SPEC §4.1) — errors when it does not
+/// exist. A helper for the command layer (`node_cmd`).
+pub fn read_node_file(
+    apg_root: &Path,
+    layer: Layer,
+    node_type: &str,
+    name: &str,
+) -> anyhow::Result<NodeFile> {
+    let path = node_file_path(apg_root, layer, node_type, name);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|_| anyhow::anyhow!("no node file at {}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))
+}
+
 // ---------------------------------------------------------------------------
 // SPEC §4.1 — in/out edge pairing (phase-3 task-9)
 // ---------------------------------------------------------------------------
@@ -1521,6 +1546,276 @@ fn edge_record(from: &str, kind: &str, to: &str) -> anyhow::Result<Record> {
         "details" => Record::Details { from, to },
         other => anyhow::bail!("unknown edge kind `{other}`"),
     })
+}
+
+// ---------------------------------------------------------------------------
+// SPEC §4.1/§4.2 — the durable mutation orchestrator (phase-3 task-16)
+// ---------------------------------------------------------------------------
+
+/// Read every durable node file under `apg/layers/` into a [`NodeFile`] vector
+/// (no validation) — the identity universe `validate_change` and `write_project`
+/// resolve writes against. The FQN is derived from the path, never read.
+pub(crate) fn read_existing_nodes(apg_root: &Path) -> anyhow::Result<Vec<NodeFile>> {
+    let mut nodes: Vec<NodeFile> = Vec::new();
+    for (layer_dir, types) in LAYERS_TREE {
+        for node_type in *types {
+            let dir = apg_root.join(LAYERS_DIR).join(layer_dir).join(node_type);
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.extension().is_some_and(|e| e == "json") {
+                    continue;
+                }
+                let name = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+                let nf: NodeFile = serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!("{}: bad node file: {e}", path.display()))?;
+                if nf.layer != *layer_dir || nf.node_type != *node_type || nf.name != name {
+                    anyhow::bail!(
+                        "node file {}: layer/type/name fields must match the path segments",
+                        path.display()
+                    );
+                }
+                nodes.push(nf);
+            }
+        }
+    }
+    nodes.sort_by(|a, b| (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name)));
+    Ok(nodes)
+}
+
+/// Derive the (layer, type, name) identity of a node file path under
+/// `apg/layers/` (the inverse of [`write_node`]'s path derivation).
+fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, String)> {
+    let rel = path.strip_prefix(apg_root.join(LAYERS_DIR)).ok()?;
+    let mut comps = rel.components();
+    let layer_dir = comps.next()?.as_os_str().to_str()?.to_string();
+    let node_type = comps.next()?.as_os_str().to_str()?.to_string();
+    let name = comps.next()?.as_os_str().to_str()?.to_string();
+    let name = name.strip_suffix(".json")?.to_string();
+    let layer = Layer::ALL.iter().find(|l| l.layer_dir() == layer_dir)?;
+    Some((*layer, node_type, name))
+}
+
+/// Validate a complete proposed mutation BEFORE anything is written (SPEC
+/// §4.1 "the complete proposed change is validated before anything is
+/// written"): every written node passes [`validate_node`], every written node's
+/// out-edge passes [`validate_edges`], and the assembled post-mutation set
+/// (existing nodes minus deleted/overwritten, plus the writes) satisfies
+/// [`check_edge_pairing`]. Pure read — no write.
+fn validate_change(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+) -> anyhow::Result<()> {
+    let mut existing: BTreeMap<String, NodeFile> = BTreeMap::new();
+    for n in read_existing_nodes(apg_root)? {
+        let f = fqn(layer_of(&n.layer), &n.node_type, &n.name);
+        existing.insert(f, n);
+    }
+
+    // Remove the deleted files and the overwritten files from the current set.
+    let mut deleted_fqns: BTreeSet<String> = BTreeSet::new();
+    for path in deletes {
+        if let Some((layer, node_type, name)) = identity_from_path(apg_root, path) {
+            deleted_fqns.insert(fqn(layer, &node_type, &name));
+        }
+    }
+    let written_fqns: BTreeSet<String> = writes
+        .iter()
+        .map(|n| fqn(layer_of(&n.layer), &n.node_type, &n.name))
+        .collect();
+    existing.retain(|f, _| !deleted_fqns.contains(f) && !written_fqns.contains(f));
+
+    // The uniqueness universe: everything currently present EXCEPT the nodes
+    // this change (re)writes — so an overwrite does not trip its own uniqueness.
+    let mut universe: BTreeSet<(Layer, String, String)> = existing
+        .keys()
+        .map(|f| {
+            let (l, t, n) = parse_fqn(f).expect("existing FQN must parse");
+            (l, t, n)
+        })
+        .collect();
+
+    // Per-node + per-edge validation over the written set (a write that also
+    // appears among the deletes is contradictory — refuse).
+    for n in writes {
+        let layer = layer_of(&n.layer);
+        validate_node(layer, &n.node_type, &n.name, &n.properties, &universe)?;
+        universe.insert((layer, n.node_type.clone(), n.name.clone()));
+    }
+    for n in writes {
+        let from = fqn(layer_of(&n.layer), &n.node_type, &n.name);
+        let edges: Vec<(&str, &str, &str)> = n
+            .out
+            .iter()
+            .map(|oe| (oe.kind.as_str(), from.as_str(), oe.target.as_str()))
+            .collect();
+        validate_edges(&edges)?;
+    }
+
+    // Pairwise symmetry over the assembled post-mutation set.
+    let mut merged: Vec<NodeFile> = existing.into_values().collect();
+    merged.extend(writes.iter().cloned());
+    check_edge_pairing(&merged)?;
+    Ok(())
+}
+
+/// Write a SET of node files atomically AND delete a set of node-file paths,
+/// in one logical mutation (SPEC §4.1 "renames / deletions are atomic
+/// write-throughs"): snapshot the prior state of every affected path, write
+/// the writes, remove the deletes, and on any failure restore every path —
+/// never leave mismatched endpoint files. Commits once. `write_through` (the
+/// write-only primitive, task-11) delegates here with an empty delete list.
+fn write_through_with_deletes(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+) -> anyhow::Result<()> {
+    // Structural pre-check: no plans layer, valid names, no duplicate write
+    // path, and a path may not be both written and deleted.
+    let mut write_paths: Vec<PathBuf> = Vec::with_capacity(writes.len());
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    for node in writes {
+        let layer = Layer::ALL
+            .iter()
+            .find(|l| l.layer_dir() == node.layer)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("unknown layer `{}`", node.layer))?;
+        if layer.storage() == StoragePolicy::TransientPlans {
+            anyhow::bail!(
+                "layer `plans` is transient (apg/.trans/plans/) — not a durable node-file layer"
+            );
+        }
+        if !valid_name(&node.name) {
+            anyhow::bail!(
+                "node name `{}` is invalid — the name allowlist is [a-z0-9][a-z0-9-]* (refused, never sanitized)",
+                node.name
+            );
+        }
+        let path = apg_root
+            .join(LAYERS_DIR)
+            .join(layer.layer_dir())
+            .join(&node.node_type)
+            .join(format!("{}.json", node.name));
+        if !seen.insert(path.clone()) {
+            anyhow::bail!(
+                "duplicate write: two entries target `{}` — one logical mutation touches each node file once",
+                path.display()
+            );
+        }
+        write_paths.push(path);
+    }
+    for d in deletes {
+        if write_paths.contains(d) {
+            anyhow::bail!(
+                "a path cannot be both written and deleted in one mutation: {}",
+                d.display()
+            );
+        }
+    }
+
+    // Serialize up front — a serialization failure is caught before any write.
+    let serialized: Vec<String> = writes
+        .iter()
+        .map(serde_json::to_string_pretty)
+        .collect::<Result<_, _>>()
+        .map_err(|e| anyhow::anyhow!("serialize node file failed: {e}"))?;
+
+    // Snapshot the prior state of every affected path (writes and deletes).
+    let mut paths: Vec<PathBuf> = write_paths.clone();
+    paths.extend(deletes.iter().cloned());
+    let mut prior: Vec<Option<Vec<u8>>> = Vec::with_capacity(paths.len());
+    for path in &paths {
+        prior.push(std::fs::read(path).ok());
+    }
+
+    // Apply: write the writes, remove the deletes; restore everything on the
+    // first failure.
+    for (i, path) in write_paths.iter().enumerate() {
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!(
+                "create_dir_all {} failed: {e}",
+                parent.display()
+            ));
+        }
+        if let Err(e) = std::fs::write(path, &serialized[i]) {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!("write {} failed: {e}", path.display()));
+        }
+    }
+    for path in deletes {
+        if let Err(e) = std::fs::remove_file(path) {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!("delete {} failed: {e}", path.display()));
+        }
+    }
+
+    // Commit once. Outside a git repo there is no commit; a commit failure
+    // rolls back so a failed mutation never leaves mismatched files.
+    if git::in_repo(apg_root) {
+        let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
+        let msg = git::graph_mutation_message(apg_root, &refs);
+        if let Err(e) = git::commit_files(apg_root, &refs, &msg) {
+            rollback(&paths, &prior);
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+/// The durable-mutation orchestrator (SPEC §2.2/§4.1/§4.2): one logical
+/// node/edge mutation — the full set of affected node files `writes` plus the
+/// paths `deletes` to remove — guarded, validated, written atomically, and
+/// re-merged into the live DB. Mirrors `artifacts::write_jsonl_and_reingest`'s
+/// envelope for node files:
+///
+/// 1. **Membership guard** — node files have no project segment, so any
+///    project context satisfies the guard (`git::require_project_context`).
+/// 2. **Staleness gate** — refuse-on-stale when a DB exists, before any write.
+/// 3. **Validate the complete change** ([`validate_change`]) before writing.
+/// 4. **Atomic write + delete + single commit** ([`write_through_with_deletes`]).
+/// 5. **DB re-merge** — re-ingest the layers tree and merge it (detach + merge
+///    in one transaction), so the query index reflects the mutation. Skipped
+///    when no DB exists (the files are the durable form).
+pub fn write_project(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+) -> anyhow::Result<()> {
+    // 1. Membership guard (writes only happen inside a project context).
+    git::require_project_context(apg_root)?;
+
+    // 2. Staleness gate (refuse-on-stale when a DB exists).
+    if apg_root.join(TRANS_DIR).join("db.lbug").exists()
+        && let Some(msg) = git::refusal_message(apg_root)
+    {
+        anyhow::bail!("{msg}");
+    }
+
+    // 3. Validate the complete change before anything is written.
+    validate_change(apg_root, writes, deletes)?;
+
+    // 4. Atomic write + delete + single commit (with rollback).
+    write_through_with_deletes(apg_root, writes, deletes)?;
+
+    // 5. DB re-merge (skipped when there is no query index yet).
+    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
+        let (scanned, planned) = artifacts::code_universes(apg_root)?;
+        let records = ingest_tree(apg_root, &scanned, &planned)?;
+        artifacts::reingest_layers(apg_root, &records)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -3481,6 +3776,52 @@ mod tests {
             Record::SpecImplementedBy { from, to }
                 if from == "solution.system.payments" && to == "apg.main"
         )));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // --- write_project orchestration (phase-3 task-16) ---
+
+    /// `validate_change` accepts a valid add and refuses an invalid one (bad
+    /// name) without writing anything — the complete change is validated first.
+    #[test]
+    fn validate_change_rejects_invalid_node_without_writing() {
+        let root = temp_root("validate-change");
+        let a = node("requirements", "requirement", "a");
+        write_node(&root, &a).unwrap();
+
+        let b = node("requirements", "requirement", "b");
+        assert!(validate_change(&root, &[b.clone()], &[]).is_ok());
+        let bad = node("requirements", "requirement", "Bad Name");
+        assert!(validate_change(&root, &[bad], &[]).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The delete write-through removes the node file AND rewrites the
+    /// referencing file (incident edge dropped), leaving a pairing-consistent
+    /// set — the §4.1 atomic delete.
+    #[test]
+    fn write_through_with_deletes_removes_file_and_rewrites_referencing() {
+        let root = temp_root("delete");
+        let mut a = node("requirements", "requirement", "a");
+        a.out
+            .push(out_edge("contains", "requirements.requirement.b"));
+        let mut b = node("requirements", "requirement", "b");
+        b.in_edges
+            .push(in_edge("contains", "requirements.requirement.a"));
+        write_through(&root, &[a.clone(), b.clone()]).unwrap();
+
+        let mut a2 = a.clone();
+        a2.out.clear();
+        let b_path = node_file_path(&root, Layer::Requirements, "requirement", "b");
+        write_through_with_deletes(&root, &[a2], &[b_path.clone()]).unwrap();
+
+        assert!(!b_path.exists(), "the deleted node file must be gone");
+        let a_read = read_node_file(&root, "requirements", "requirement", "a");
+        assert!(
+            a_read.out.is_empty(),
+            "the referencing file must drop the incident edge"
+        );
+        assert!(check_edge_pairing(&[a_read]).is_ok());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

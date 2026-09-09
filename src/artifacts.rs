@@ -5,7 +5,7 @@
 //! the DB — the code graph is untouched; only the project's `…` nodes
 //! are detached and re-merged from its JSONL files.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -743,6 +743,56 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("status", status.clone()),
             ],
         )),
+        Record::User { fqn, name, body } => Some((
+            "User",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Group {
+            fqn,
+            name,
+            attribute,
+            root,
+            body,
+        } => Some((
+            "DomainGroup",
+            fqn,
+            vec![
+                ("name", name.clone()),
+                ("attribute", attribute.clone()),
+                ("root", root.clone()),
+                ("body", body.clone()),
+            ],
+        )),
+        Record::Value { fqn, name, body } => Some((
+            "Value",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Service { fqn, name, body } => Some((
+            "Service",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Person { fqn, name, body } => Some((
+            "Person",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+        )),
+        Record::Constraint {
+            fqn,
+            name,
+            body,
+            attaches_to,
+        } => Some((
+            "Constraint",
+            fqn,
+            vec![
+                ("name", name.clone()),
+                ("body", body.clone()),
+                ("attaches_to", attaches_to.clone()),
+            ],
+        )),
         _ => None,
     }
 }
@@ -767,6 +817,10 @@ fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str)> {
         Record::ImplementedBy { from, to } => Some(("ImplementedBy", from, to)),
         Record::GuardedBy { from, to } => Some(("GuardedBy", from, to)),
         Record::Checks { from, to } => Some(("Checks", from, to)),
+        Record::RealisedBy { from, to } => Some(("RealisedBy", from, to)),
+        Record::SpecImplementedBy { from, to } => Some(("SpecImplementedBy", from, to)),
+        Record::Publishes { from, to } => Some(("Publishes", from, to)),
+        Record::Subscribes { from, to } => Some(("Subscribes", from, to)),
         _ => None,
     }
 }
@@ -812,7 +866,13 @@ pub fn node_fqn(r: &Record) -> Option<&str> {
         | Record::System { fqn, .. }
         | Record::Container { fqn, .. }
         | Record::Component { fqn, .. }
-        | Record::Invariant { fqn, .. } => Some(fqn),
+        | Record::Invariant { fqn, .. }
+        | Record::User { fqn, .. }
+        | Record::Group { fqn, .. }
+        | Record::Value { fqn, .. }
+        | Record::Service { fqn, .. }
+        | Record::Person { fqn, .. }
+        | Record::Constraint { fqn, .. } => Some(fqn),
         _ => None,
     }
 }
@@ -836,7 +896,11 @@ pub fn edge_endpoints(r: &Record) -> Option<(&str, &str)> {
         | Record::Represents { from, to }
         | Record::ImplementedBy { from, to }
         | Record::GuardedBy { from, to }
-        | Record::Checks { from, to } => Some((from, to)),
+        | Record::Checks { from, to }
+        | Record::RealisedBy { from, to }
+        | Record::SpecImplementedBy { from, to }
+        | Record::Publishes { from, to }
+        | Record::Subscribes { from, to } => Some((from, to)),
         _ => None,
     }
 }
@@ -1035,6 +1099,69 @@ pub fn next_free_annotation(records: &[Record], stem: &str) -> u64 {
         .max()
         .map(|n| n + 1)
         .unwrap_or(1)
+}
+
+/// The two code-reference universes `layers::ingest_tree` validates
+/// `implemented-by` targets against: `scanned` = every code-node FQN the last
+/// scan produced (Module/File/Struct/Function without `status: planned`),
+/// `planned` = the planned-node FQNs still awaiting realization (`status:
+/// planned`). Read from the live DB, so a node/edge write re-merge can run the
+/// code-ref check against the scanned graph.
+pub fn code_universes(apg_root: &Path) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
+    let db = ArtifactDb::open(apg_root)?;
+    let conn = db.conn()?;
+    let mut scanned = BTreeSet::new();
+    let mut planned = BTreeSet::new();
+    for label in ["Module", "File", "Struct", "Function"] {
+        let result = conn.query(&format!("MATCH (n:{label}) RETURN n.fqn, n.status"))?;
+        for row in result {
+            let fqn = row.first().map(|v| v.to_string()).unwrap_or_default();
+            let status = row.get(1).map(|v| v.to_string()).unwrap_or_default();
+            if status == "planned" {
+                planned.insert(fqn);
+            } else {
+                scanned.insert(fqn);
+            }
+        }
+    }
+    Ok((scanned, planned))
+}
+
+/// Re-ingests the durable layers tree into the live DB after a node/edge
+/// mutation: detaches every node-file node (FQN prefix `<layer>.` for the five
+/// durable layer dirs) and re-merges the caller-supplied `records` (the
+/// `layers::ingest_tree` output) — nodes first, then edges, in one transaction.
+/// A failed merge rolls back, so the DB keeps its prior committed state.
+pub fn reingest_layers(apg_root: &Path, records: &[Record]) -> anyhow::Result<()> {
+    let db = ArtifactDb::open(apg_root)?;
+    let conn = db.conn()?;
+    conn.query("BEGIN TRANSACTION")?;
+    let result = (|| -> anyhow::Result<()> {
+        for layer_dir in [
+            "requirements",
+            "domain",
+            "solution",
+            "implementation",
+            "global",
+        ] {
+            conn.query(&format!(
+                "MATCH (n) WHERE n.fqn STARTS WITH '{}.' DETACH DELETE n",
+                layer_dir
+            ))?;
+        }
+        db.merge_records(&conn, records)?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            conn.query("COMMIT")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.query("ROLLBACK");
+            Err(e)
+        }
+    }
 }
 
 #[cfg(test)]
