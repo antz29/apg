@@ -672,6 +672,13 @@ fn spec_node_kind(r: &Record) -> Option<NodeKind> {
 /// target (or any label outside the allow-list) is rejected with a clear CLI
 /// message instead of reaching the re-ingest, where LadybugDB would throw an
 /// opaque binder exception for the undeclared edge pair (R3).
+///
+/// R4/R8: a code-target note ledger is a durable artifact like any spec JSONL,
+/// so its write routes through the guarded mutation funnel
+/// (`artifacts::write_jsonl_and_reingest`) — the membership/stale gates run
+/// BEFORE the file is touched (a refused add writes nothing), and a landed
+/// ledger is auto-committed on the project branch with the scan_meta
+/// re-anchored, exactly like every other durable mutation.
 fn add_note(
     p: &ParsedArgs,
     apg_root: &Path,
@@ -698,9 +705,9 @@ fn add_note(
     }
     let db = artifacts::ArtifactDb::open(apg_root)?;
     // R2: validate every `--on` target BEFORE any record is pushed or any
-    // write happens (the loop below only mutates the in-memory `records`; the
-    // JSONL + live DB are untouched until `write_through`). A target whose
-    // node label is not an allowable Details target — Note, Feedback,
+    // write happens (the passes below only mutate the in-memory `records`;
+    // the JSONL + live DB are untouched until the funnel writes). A target
+    // whose node label is not an allowable Details target — Note, Feedback,
     // or anything outside the DB's Details rel-table pairs — is rejected here
     // with a clear CLI message instead of an opaque LadybugDB binder exception
     // from the re-ingest.
@@ -715,6 +722,13 @@ fn add_note(
             );
         }
     }
+    // Route every target and validate its kind BEFORE any durable write: the
+    // code-ledger writes below funnel through the guarded mutation funnel one
+    // file at a time, so a refusal anywhere in the command (a kind legal on
+    // one category but not another) must not leave an earlier target's ledger
+    // written. Code targets are staged as (target, ledger path); spec targets
+    // stage their note into the in-memory `records` (nothing durable yet).
+    let mut code_targets: Vec<(String, PathBuf)> = Vec::new();
     for target in &ons {
         let category = if db.code_label(target).is_some() {
             "code"
@@ -725,33 +739,7 @@ fn add_note(
         // A code FQN routes to the per-module note ledger; a spec FQN
         // (anything not in the code graph) to the project's spec JSONL.
         if category == "code" {
-            let file = db.note_file(apg_root, target);
-            let mut ledger = if file.exists() {
-                specs::read_jsonl(&file)?
-            } else {
-                Vec::new()
-            };
-            // Per-module ledger namespace: note fqns are
-            // `annotations/<ledger-stem>/<n>`, so two modules' notes never
-            // collide when the ledgers merge into one graph.
-            let stem = file
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("_root")
-                .to_string();
-            let n = artifacts::next_free_annotation(&ledger, &stem);
-            let fqn = format!("annotations/{stem}/{n}");
-            ledger.push(Record::Note {
-                fqn: fqn.clone(),
-                body: body.clone(),
-                kind: kind.clone(),
-            });
-            ledger.push(Record::Details {
-                from: fqn,
-                to: target.clone(),
-            });
-            specs::write_jsonl(&file, &ledger)?;
-            println!("Added note on `{target}` to {}", file.display());
+            code_targets.push((target.clone(), db.note_file(apg_root, target)));
         } else {
             let n = artifacts::next_free(records, "note");
             let fqn = format!("{project}/note-{n}");
@@ -768,9 +756,46 @@ fn add_note(
         }
     }
     drop(db);
-    // Code notes also land in the live DB immediately (R5): the ledger is
-    // written above; `write_through` re-ingests the project spec/plan and
-    // every note ledger (MERGE upserts the annotations nodes).
+    // Code notes land in the per-module ledger THROUGH the guarded mutation
+    // funnel — membership + stale gates before any write, temp/rename
+    // atomicity, live-DB re-ingest, and auto-commit + scan_meta re-anchor —
+    // so a refused add writes nothing and a landed note leaves the tree clean
+    // for the next mutation (the ledger used to be written raw here, before
+    // the funnel's guard ran, leaving durable files behind refused mutations
+    // and an uncommitted ledger that stale-refused every following mutation).
+    for (target, file) in &code_targets {
+        let mut ledger = if file.exists() {
+            specs::read_jsonl(file)?
+        } else {
+            Vec::new()
+        };
+        // Per-module ledger namespace: note fqns are
+        // `annotations/<ledger-stem>/<n>`, so two modules' notes never
+        // collide when the ledgers merge into one graph.
+        let stem = file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("_root")
+            .to_string();
+        let n = artifacts::next_free_annotation(&ledger, &stem);
+        let fqn = format!("annotations/{stem}/{n}");
+        ledger.push(Record::Note {
+            fqn: fqn.clone(),
+            body: body.clone(),
+            kind: kind.clone(),
+        });
+        ledger.push(Record::Details {
+            from: fqn,
+            to: target.clone(),
+        });
+        artifacts::write_jsonl_and_reingest(apg_root, file, project, &ledger)?;
+        println!("Added note on `{target}` to {}", file.display());
+    }
+    // Spec-side notes land in the project JSONL here; the re-ingest also
+    // re-merges the project spec/plan and every note ledger (MERGE upserts
+    // the annotations nodes), so the live DB reflects the whole mutation in
+    // one coherent merge — including a ledger file this command created for
+    // the first time, which the per-file funnel above could not yet re-ingest.
     write_through(apg_root, project, records)?;
     Ok(())
 }
@@ -3896,6 +3921,172 @@ mod tests {
             matches!(r, Record::Details { from, to }
                 if to == "foo/spec" && from != "foo/note-1")
         }));
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn add_note_code_target_refused_outside_project_context_writes_nothing() {
+        // REVIEW feedback-6 (plan.phase-01.task-8): the code-target branch of
+        // `add_note` used to write the durable apg/notes/<module>.jsonl ledger
+        // DIRECTLY (specs::write_jsonl) before the funnel's membership guard
+        // ran — the guard lived only in the trailing spec write-through — so a
+        // code-note add outside a project context (e.g. on the default branch)
+        // dirtied the tree with a ledger the mutation then refused to commit.
+        // The ledger write now routes through the guarded funnel, so a refused
+        // mutation must write nothing: no ledger file, untouched spec JSONL,
+        // clean tree.
+        let repo = Repo::new("note-code-refused");
+        // The MAIN checkout (the default branch — never a mutation place)
+        // carries a real code-graph DB (github.com/x/y.Store) + scan_meta and
+        // a committed spec project.
+        db_at(&repo.root);
+        let recs = vec![Record::Spec {
+            fqn: "foo/spec".into(),
+            title: "Foo".into(),
+            goal: String::new(),
+        }];
+        let path = specs::spec_jsonl_path(&repo.apg_root(), "foo");
+        specs::write_jsonl(&path, &recs).unwrap();
+        let sha = repo.commit_all("seed spec on main");
+        testutil::write_scan_meta(&repo.apg_root(), Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        // A code-note add from the main checkout is refused by the funnel's
+        // membership guard (exit 1 at the CLI) — BEFORE the ledger is touched.
+        let mut records = load_project(&repo.apg_root(), "foo").unwrap();
+        let p = parse_args(&[
+            "--body".into(),
+            "n".into(),
+            "--on".into(),
+            "github.com/x/y.Store".into(),
+        ]);
+        let err = add_note(&p, &repo.apg_root(), "foo", &mut records).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("mutation refused"), "{msg}");
+        assert!(msg.contains("default branch"), "{msg}");
+
+        // Nothing durable was written: no ledger file, the spec JSONL is
+        // byte-identical, and the tree is clean (the pre-fix code left the
+        // ledger behind and dirtied main).
+        let ledger = repo.apg_root().join("notes").join("github.com_x_y.jsonl");
+        assert!(!ledger.exists(), "refused add must not write {ledger:?}");
+        assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
+        assert!(repo.is_clean(), "refused add must leave the tree clean");
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn add_note_code_target_lands_and_auto_commits_in_project_context() {
+        // REVIEW feedback-6 (plan.phase-01.task-8): inside a project context
+        // the code-note ledger write must be covered by auto-commit +
+        // scan_meta re-anchor like every other durable mutation — pre-fix the
+        // raw ledger write stayed uncommitted (spec records unchanged → the
+        // trailing write-through committed nothing), leaving a dirty tree that
+        // stale-refused the NEXT mutation. Here: the note lands in the ledger
+        // and the live DB, the worktree is clean (auto-commit), and a second
+        // code-note add succeeds without a rescan (re-anchor held).
+        let (apg_root, repo, wt) = fixture_layout("note-code-commit");
+        let recs = vec![Record::Spec {
+            fqn: "foo/spec".into(),
+            title: "Foo".into(),
+            goal: String::new(),
+        }];
+        seed_spec_file(&apg_root, &wt, "foo", &recs);
+
+        // First code-note add: ledger write funneled (guard → temp/rename →
+        // re-ingest → auto-commit → re-anchor).
+        let mut records = load_project(&apg_root, "foo").unwrap();
+        let p = parse_args(&[
+            "--body".into(),
+            "code note".into(),
+            "--on".into(),
+            "github.com/x/y.Store".into(),
+        ]);
+        add_note(&p, &apg_root, "foo", &mut records).unwrap();
+
+        // The note landed in the committed per-module ledger...
+        let ledger = apg_root.join("notes").join("github.com_x_y.jsonl");
+        let ledger_recs = specs::read_jsonl(&ledger).unwrap();
+        assert!(
+            ledger_recs.iter().any(|r| {
+                matches!(r, Record::Note { fqn, body, .. }
+                    if fqn == "annotations/github.com_x_y/1" && body == "code note")
+            }),
+            "note must land in the ledger: {ledger_recs:?}"
+        );
+        assert!(
+            ledger_recs.iter().any(|r| {
+                matches!(r, Record::Details { from, to }
+                    if from == "annotations/github.com_x_y/1"
+                        && to == "github.com/x/y.Store")
+            }),
+            "Details edge must land in the ledger: {ledger_recs:?}"
+        );
+        // ...and is queryable in the live DB.
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Note)-[:Details]->(s {fqn: 'github.com/x/y.Store'}) RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.lines().last() == Some("1"),
+            "note must land in the live DB: {out}"
+        );
+        drop(db);
+
+        // The ledger was AUTO-COMMITTED on the project branch: the worktree
+        // tree is clean (the pre-fix code left the ledger file dirty).
+        let mut st = git2::StatusOptions::new();
+        st.include_untracked(true);
+        let wt_repo = git2::Repository::open(&wt).unwrap();
+        assert!(
+            wt_repo.statuses(Some(&mut st)).unwrap().is_empty(),
+            "auto-commit must leave the worktree clean"
+        );
+
+        // The scan_meta was re-anchored to the auto-commit: a SECOND code-note
+        // add succeeds without a rescan (stale-refusal would have fired if the
+        // recorded sha had not moved with the commit).
+        let mut records = load_project(&apg_root, "foo").unwrap();
+        let p = parse_args(&[
+            "--body".into(),
+            "second".into(),
+            "--on".into(),
+            "github.com/x/y.Store".into(),
+        ]);
+        add_note(&p, &apg_root, "foo", &mut records).unwrap();
+        let ledger_recs = specs::read_jsonl(&ledger).unwrap();
+        assert!(
+            ledger_recs.iter().any(|r| {
+                matches!(r, Record::Note { fqn, .. } if fqn == "annotations/github.com_x_y/2")
+            }),
+            "second note must land: {ledger_recs:?}"
+        );
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Note)-[:Details]->(s {fqn: 'github.com/x/y.Store'}) RETURN count(*)")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.lines().last() == Some("2"),
+            "both notes must be in the live DB: {out}"
+        );
+        drop(db);
+        let mut st = git2::StatusOptions::new();
+        st.include_untracked(true);
+        assert!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .statuses(Some(&mut st))
+                .unwrap()
+                .is_empty(),
+            "second auto-commit must leave the worktree clean"
+        );
 
         testutil::remove(&repo);
     }

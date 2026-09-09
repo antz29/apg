@@ -58,8 +58,9 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<()> {
 /// what let the authoring agents believe writes had landed when they had not.
 ///
 /// This is the **central mutation funnel** (R4): every spec/plan/review/
-/// invariant mutation routes through here, so the two gates beside each other
-/// cover them all:
+/// invariant mutation — and every code-note ledger write (`add_note`'s
+/// code-target branch) — routes through here, so the two gates beside each
+/// other cover them all:
 ///
 /// 1. **Membership guard** (R3): writes only happen inside a project context —
 ///    the project's worktree at `<main>/apg/.worktrees/<project>`, on the
