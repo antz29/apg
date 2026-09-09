@@ -44,8 +44,11 @@ part of the worktree).
 
 ### 2.2 The project membership guard
 
-- **Guards writes only; reads are always allowed.** Writes (spec/plan/review/invariant/node/
-  edge mutations) refuse outside a project context. Reads, queries, and scans work from
+- **Guards writes only; reads are always allowed.** Writes refuse outside a project context.
+  The durable mutation surface is `apg node` / `apg edge` — the spec/invariant/note writes of
+  the old model are node/edge mutations here (a requirement is a node; an invariant is a
+  constraint node; a note is a note node). Plan and review mutations are the transient
+  surfaces, over `.trans`. Reads, queries, and scans work from
   anywhere. `project start` itself is unguarded (the entry point).
 - **Membership = "the project's worktree, on the project's branch"**: current branch ==
   project name AND current checkout is the project's worktree (path under
@@ -245,7 +248,11 @@ apg/.trans/          (transient — mirrors the structure)
   language in this change-set).
 - **No migration:** legacy `apg/specs/*.jsonl` and `apg/notes/` are not read (version gate
   blocks old layouts; re-materialize instead). A migration would institutionalize the wrong
-  model — the lossy mapping is the spec-writer's judgement, not a converter's.
+  model — the lossy mapping is the spec-writer's judgement, not a converter's. The old
+  `apg spec` / `apg invariant` command surfaces and the old-model graph vocabulary are
+  removed from the binary — node kinds are exactly the §3.1 catalog plus the code kinds and
+  the transient plan/review kinds; edge kinds are exactly the §3.3 matrix plus the §5
+  plan/feedback edges; nothing else remains.
 
 ### 4.2 Auto-commit
 
