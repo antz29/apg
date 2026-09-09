@@ -111,6 +111,12 @@ Implementation = the code; Global = the laws.
 | 5 Implementation | `layers/implementation/` | only things that attach to code: `Note`, `Constraint` |
 | — Global | `layers/global/` | `Constraint` (the laws), `Note` (attached to them) |
 
+The catalog is **six logical layers** (requirements, domain, solution, plans, implementation,
+global). Storage policy is separate from the catalog: plans serialize only under
+`apg/.trans/plans/` (transient, per branch); implementation's actual nodes ARE the code in the
+branch (scanned, never serialized) — only its attach-only Note/Constraint files exist durably
+under `layers/implementation/`; the other four layers serialize durably under `apg/layers/`.
+
 **Requirements:** `Stakeholder` = anyone with an interest ("a thing that has an opinion");
 `User` ⊂ Stakeholder = "a thing that uses the system"; `Requirement` tree all the way down
 (theme → epic → feature → story as one node type at different depths; the spec-writer agent
@@ -134,9 +140,11 @@ carries explicit decomposition guidance — decompose until each requirement is 
 
 **Implementation:** the code in the branch — scanned, never serialized.
 
-**Global:** `Constraint` — declarative ("X must hold"), guards the whole graph, checked at
-every scan. Local constraints attach to any tier-1–3 node (requirement AC, domain law, design
-bound). Constraints declare what must hold about something that **exists** — never a non-thing.
+**Global:** `Constraint` — declarative ("X must hold"), guards the whole graph; the binary
+validates a constraint's *structure and references* at write time; whether the prose statement
+actually holds is assessed by review (non-deterministic), never executed. Local constraints
+attach to any tier-1–3 node (requirement AC, domain law, design bound). Constraints declare
+what must hold about something that **exists** — never a non-thing.
 
 ### 3.2 The spine
 
@@ -176,7 +184,8 @@ calls/publishes/subscribes — never a stored Group→Group edge.
 
 Node rules: name allowlist `[a-z0-9][a-z0-9-]*` (refuse, never sanitize); type must exist in
 its layer; `Entity` requires kind entity/event; `Group` takes core/supporting/generic +
-optional root; `Container` takes app/service/db/queue; unique FQN per (layer, type);
+optional root; `Container` takes app/service/db/queue; **FQN = `<layer>.<type>.<name>`** for
+authored nodes (code nodes keep their language-native FQNs) — names unique per (layer, type);
 contains/depends-on trees acyclic. Spine is sequential (lint). Dangling FQN references are
 write-time errors.
 
@@ -192,31 +201,57 @@ apg/layers/
   implementation/{note,constraint}/<name>.json
   global/{constraint,note}/<name>.json
 apg/.trans/          (transient — mirrors the structure)
-  plans/             (the plan, per branch)
-  requirements/ domain/ solution/ implementation/   (feedback, in the tier of the attached node)
+  plans/             (the plan, per branch; also the tier dir of plan nodes)
+  requirements/ domain/ solution/ implementation/ global/   (feedback, in the tier dir of the attached node)
 ```
 
-- One file per node. The file name IS the identity: FQN = `layer.name` (global per-layer
-  namespace, no project prefix). Short ids (R1) may exist as metadata only, never as identity.
+- One file per node. The file name IS the identity: FQN = `<layer>.<type>.<name>` (global
+  per-layer namespace, no project prefix). Short ids (R1) may exist as metadata only, never
+  as identity.
+- **Node-file schema** (the binary checks that `layer`/`type`/`name` match the path and
+  derives the FQN):
+
+  ```json
+  {
+    "name": "place-order",
+    "type": "requirement",
+    "layer": "requirements",
+    "body": "A customer can place an order.",
+    "properties": {},
+    "out": [{ "kind": "drives", "target": "domain.service.checkout", "properties": {} }],
+    "in":  [{ "kind": "contains", "source": "requirements.user.customer", "properties": {} }]
+  }
+  ```
 - **Both in and out edges live in the node file.** An edge appears in both endpoint files
   (out in the source's, in in the target's). **Validation: an in/out edge in one file without
-  the matching out/in edge in the other endpoint's file is an error** (caught at ingestion).
-  Outgoing edges are canonical for building the graph.
+  the matching out/in edge in the other endpoint's file is an error** (caught at ingestion);
+  a match means the same source, kind, target, AND edge properties — not merely endpoint
+  existence. Outgoing edges are canonical for building the graph.
+- **Transient-to-durable relationships stay entirely in `.trans`**: feedback (and plan)
+  edges are recorded BOTH halves in the transient store, referencing durable node FQNs —
+  committed node files never contain transient references. Ingestion combines the durable
+  nodes with their transient relationships and validates the pairs.
 - **Code endpoints are exempt from the pairwise rule** — code nodes have no files. The
   `implemented-by` edge is recorded on the spec side only, as a code FQN, validated against
   the scanned graph: resolves → real; planned (in `.trans`) → pending, not an error; **gone
   from the scanned graph → error** (spec drift). The scanned graph is the stronger check.
-- **Renames / deletions are atomic write-throughs:** a rename = file move + FQN change +
-  rewrite of every referencing file (Q1 pairwise rule); a delete = file removal + rewrite of
-  incident edges out of referencing files. Auto-committed as single-file diffs.
+- **Renames / deletions are atomic write-throughs:** rename = file move + FQN change +
+  rewrite of every referencing file; delete = file removal + rewrite of incident edges out of
+  referencing files. **One logical mutation updates ALL affected files and commits once** —
+  the complete proposed change is validated before anything is written; if applying fails,
+  the previous state is restored (never leave mismatched endpoint files).
+- **Constraints are prose**: the binary validates a constraint's structure and references at
+  write time; satisfaction is assessed by review, not executed (no constraint-expression
+  language in this change-set).
 - **No migration:** legacy `apg/specs/*.jsonl` and `apg/notes/` are not read (version gate
   blocks old layouts; re-materialize instead). A migration would institutionalize the wrong
   model — the lossy mapping is the spec-writer's judgement, not a converter's.
 
 ### 4.2 Auto-commit
 
-Each node/edge mutation writes its file(s) and auto-commits (one commit per mutation,
-single-file diffs); staleness re-anchoring moves with each auto-commit. Plan mutations never
+Each node/edge mutation writes its file(s) and auto-commits (one commit per logical
+mutation — all affected files together, single-file diffs when the mutation touches one
+file); staleness re-anchoring moves with each auto-commit. Plan mutations never
 commit — `.trans` is gitignored and transient; branch commits carry only code + node files.
 
 ## 5. Plans & transient data
@@ -234,7 +269,9 @@ commit — `.trans` is gitignored and transient; branch commits carry only code 
   - `renames` / `moves` — FQN changes
   - further verbs may reveal themselves through dogfooding
 - **Feedback is transient** — branch-lifecycle data, never committed; `.trans` mirrors the
-  layers structure (feedback sits in the tier dir of its attached node). Feedback links to
+  layers structure (feedback sits in the tier dir of its attached node — **all six tiers**:
+  requirements/domain/solution/implementation/global, and plan nodes under `.trans/plans`).
+  Both halves of the relationship live in `.trans` (see §4.1). Feedback links to
   durable nodes via `Reviews` edges without polluting node files. Review state dies with the
   branch; the reviewed nodes persist.
 - Verification items are the plan's test tier (`unit/int/e2e`), not graph content.
