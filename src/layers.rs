@@ -1826,6 +1826,71 @@ mod tests {
         }
     }
 
+    /// Coupling is derived, never stored as a Group->Group edge: the §3.3
+    /// matrix has no coupling row between groups — no coupling verb is an edge
+    /// kind, the coupling edges (`calls`/`publishes`/`subscribes`) touch only
+    /// Service/Entity, and the one Group->Group row (`contains`) is containment
+    /// (nesting), not coupling.
+    #[test]
+    fn coupling_is_never_a_group_to_group_edge() {
+        // No coupling verb is a durable edge kind — coupling is derived, not an
+        // edge kind and not a stored artifact.
+        for verb in ["couples", "coupled", "coupling", "coupled-to"] {
+            assert!(
+                !EDGE_KINDS.contains(&verb),
+                "`{verb}` must not be an edge kind — coupling is derived, never stored"
+            );
+        }
+        for &(kind, _, sts, _, tts) in MATRIX {
+            let src_is_group = sts.contains(&"group");
+            let dst_is_group = tts.contains(&"group");
+            // The coupling edges never touch a Group endpoint (they are
+            // Service->Service / Service->Entity).
+            if matches!(kind, "calls" | "publishes" | "subscribes") {
+                assert!(
+                    !src_is_group && !dst_is_group,
+                    "coupling edge `{kind}` must have no Group endpoint"
+                );
+            }
+            // The only Group->Group row is `contains` (nesting).
+            if src_is_group && dst_is_group {
+                assert_eq!(
+                    kind, "contains",
+                    "Group->Group must be containment, never `{kind}`"
+                );
+            }
+        }
+    }
+
+    /// The context-map flavor (direct/published/translated/shared/coevolving)
+    /// is an EDGE attribute — never a node type, never an edge kind. A type
+    /// named after a flavor is refused (it is not a catalog type); a flavor
+    /// used as an edge kind is refused (unknown kind); the edge verb is
+    /// `publishes`, not the flavor `published`.
+    #[test]
+    fn flavors_are_edge_attributes_never_types_or_kinds() {
+        let empty = BTreeSet::new();
+        let props = BTreeMap::new();
+        for flavor in ["direct", "published", "translated", "shared", "coevolving"] {
+            // Not a node type — validate_node refuses a type named after a flavor.
+            let err = validate_node(Layer::Domain, flavor, "x", &props, &empty).unwrap_err();
+            assert!(
+                err.to_string().contains("does not exist in layer"),
+                "flavor `{flavor}` as a node type: {err}"
+            );
+            // Not an edge kind — validate_edge refuses a flavor used as a kind.
+            let err = validate_edge(flavor, "domain.service.a", "domain.service.b")
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("unknown edge kind"),
+                "flavor `{flavor}` as an edge kind: {err}"
+            );
+        }
+        // The edge verb is `publishes`, not the flavor `published`.
+        assert!(validate_edge("publishes", "domain.service.a", "domain.entity.e").is_ok());
+    }
+
     /// A global constraint (layer Global) is well-formed with no attachment: it
     /// guards the whole graph, so it carries nothing but prose.
     #[test]
@@ -1912,6 +1977,32 @@ mod tests {
         )]);
         let err = eval_constraint(Layer::Global, "g2", &props, &existing).unwrap_err();
         assert!(err.to_string().contains("guards the whole graph"), "{err}");
+    }
+
+    /// A local constraint attaches to a tier-1–3 node — an EXISTING node
+    /// outside tiers 1–3 (an implementation note, a plans task) is still
+    /// refused: "never a non-thing" means the target must be a tier-1–3 thing,
+    /// not merely resolve. The contrast — an existing tier-1–3 thing — passes.
+    #[test]
+    fn constraint_attachment_to_existing_non_tier_node_refused() {
+        let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
+            (Layer::Implementation, "note".to_string(), "n1".to_string()),
+            (Layer::Plans, "task".to_string(), "t1".to_string()),
+            (Layer::Domain, "entity".to_string(), "customer".to_string()),
+        ]);
+        for target in ["implementation.note.n1", "plans.task.t1"] {
+            let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), target.to_string())]);
+            let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("not a tier"), "{target}: {msg}");
+            assert!(msg.contains(target), "{target}: {msg}");
+        }
+        // An existing tier-1–3 thing validates (the contrast).
+        let props = BTreeMap::from([(
+            PROP_ATTACHES_TO.to_string(),
+            "domain.entity.customer".to_string(),
+        )]);
+        assert!(eval_constraint(Layer::Domain, "law", &props, &existing).is_ok());
     }
 
     /// A `constraint` type is refused in a layer that does not host constraints
