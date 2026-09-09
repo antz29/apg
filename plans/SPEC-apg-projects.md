@@ -249,6 +249,11 @@ commit — `.trans` is gitignored and transient; branch commits carry only code 
 - The apg repo dogfoods the model: this session is the bootstrap dogfood (branch/worktree
   created manually because `apg project start` doesn't exist yet); from the next feature
   onward the binary handles it.
+- **DOGFOODING RULE: the developing binary is NEVER run against this codebase.** Only the
+  released binary (`/opt/homebrew/bin/apg`, 0.10.4) runs against this repo's graph until the
+  0.11.0 release. The new binary's behavior is exercised via cargo tests (fixture-based) and,
+  when end-to-end runs are needed, in a scratch test project (never this repo). The repo's own
+  config stays unversioned during development; the version field lands at release on main.
 - **Agent flow (operational):** the navigator runs `apg project start <name>` from the main
   checkout; the binary prints the worktree path; the navigator operates with cwd inside the
   worktree. Suite tools work unchanged — walk-up discovery finds the worktree's own `apg/`;
