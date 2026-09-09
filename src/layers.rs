@@ -953,6 +953,142 @@ pub fn write_node(apg_root: &Path, node: &NodeFile) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
+// ---------------------------------------------------------------------------
+// SPEC §4.1 — in/out edge pairing (phase-3 task-9)
+// ---------------------------------------------------------------------------
+
+/// Verify the SPEC §4.1 pairwise edge invariant over the node files the
+/// caller supplies: **an edge appears in BOTH endpoint files** — out in the
+/// source's file, in in the target's. An in/out edge in one file without the
+/// matching out/in edge in the other endpoint's file is an ERROR (caught at
+/// ingestion). A match means the **same source, kind, target, AND edge
+/// properties** — not merely endpoint existence. **Outgoing edges are the
+/// canonical source** for building the graph (task-15's [`ingest_tree`]);
+/// this function only VERIFIES symmetry — it builds nothing.
+///
+/// Authored vs code endpoints (SPEC §4.1 "code endpoints are exempt"): a code
+/// node has no file, so an edge to/from code has only the spec-side half. The
+/// discriminator is whether the endpoint parses as an authored-node FQN
+/// `<layer>.<type>.<name>` ([`parse_fqn`]) — **not** the edge kind. If it
+/// parses, the endpoint is authored and MUST be present (a dangling authored
+/// reference is an error) and MUST carry a matching counterpart (the target
+/// node's in-edge with source = this node's FQN and equal kind + properties;
+/// the symmetric rule for an in-edge's source). If it does not parse, it is a
+/// code FQN and the pairing check is skipped — the `implemented-by` target and
+/// a `details` target may both be code, and this parse-based rule is the
+/// clean, correct discriminator that matches "code nodes have no files".
+///
+/// Transient edges are OUT of scope here: committed durable node files carry
+/// only §3.3 edges ([`validate_edges`] refuses the §5 transient kinds
+/// upstream), and a transient-to-durable relationship lives ENTIRELY in
+/// `.trans` (both halves there — §4.1: committed files never hold transient
+/// references). Transient pair validation is the `.trans`-side job
+/// (phase-4), never this function.
+///
+/// Pure — no I/O; the caller supplies the node files to check. Builds the
+/// FQN → node-file map with [`fqn`] (the file name IS the identity), then
+/// verifies every edge half against its counterpart.
+// (Unused until ingest_tree, phase-3 task-15, calls it.)
+#[allow(dead_code)]
+pub fn check_edge_pairing(nodes: &[NodeFile]) -> anyhow::Result<()> {
+    // FQN → node file: the identity universe the pairing check resolves
+    // authored endpoints against. The FQN is derived (`fqn`), never read.
+    let mut by_fqn: BTreeMap<String, &NodeFile> = BTreeMap::new();
+    for node in nodes {
+        let layer = Layer::ALL
+            .iter()
+            .find(|l| l.layer_dir() == node.layer)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("unknown layer `{}`", node.layer))?;
+        by_fqn.insert(fqn(layer, &node.node_type, &node.name), node);
+    }
+
+    for (f, node) in &by_fqn {
+        // Outgoing halves — this node is the source; the target file must hold
+        // the matching in-edge (out-edges are canonical for graph assembly).
+        for out_edge in &node.out {
+            // Code-exempt: a non-parsing target is a code FQN, no pairing.
+            if parse_fqn(&out_edge.target).is_err() {
+                continue;
+            }
+            let Some(target) = by_fqn.get(&out_edge.target) else {
+                anyhow::bail!(
+                    "node `{f}` out edge `{}` -> `{}`: the target is an authored node but no node file supplies it (dangling authored reference)",
+                    out_edge.kind,
+                    out_edge.target
+                );
+            };
+            let exact = target.in_edges.iter().any(|ie| {
+                ie.kind.as_str() == out_edge.kind.as_str()
+                    && ie.source.as_str() == f.as_str()
+                    && ie.properties == out_edge.properties
+            });
+            if exact {
+                continue;
+            }
+            let same_endpoints = target.in_edges.iter().any(|ie| {
+                ie.kind.as_str() == out_edge.kind.as_str() && ie.source.as_str() == f.as_str()
+            });
+            if same_endpoints {
+                anyhow::bail!(
+                    "node `{f}` out edge `{}` -> `{}`: the in edge on `{}` has different properties — a match requires identical edge properties (same source, kind, target, AND properties)",
+                    out_edge.kind,
+                    out_edge.target,
+                    out_edge.target
+                );
+            }
+            anyhow::bail!(
+                "node `{f}` out edge `{}` -> `{}` has no matching in edge on `{}` — an edge must appear in BOTH endpoint files",
+                out_edge.kind,
+                out_edge.target,
+                out_edge.target
+            );
+        }
+
+        // Incoming halves — this node is the target; the source file must hold
+        // the matching out-edge.
+        for in_edge in &node.in_edges {
+            // Code-exempt: a non-parsing source is a code FQN, no pairing.
+            if parse_fqn(&in_edge.source).is_err() {
+                continue;
+            }
+            let Some(source) = by_fqn.get(&in_edge.source) else {
+                anyhow::bail!(
+                    "node `{f}` in edge `{}` <- `{}`: the source is an authored node but no node file supplies it (dangling authored reference)",
+                    in_edge.kind,
+                    in_edge.source
+                );
+            };
+            let exact = source.out.iter().any(|oe| {
+                oe.kind.as_str() == in_edge.kind.as_str()
+                    && oe.target.as_str() == f.as_str()
+                    && oe.properties == in_edge.properties
+            });
+            if exact {
+                continue;
+            }
+            let same_endpoints = source.out.iter().any(|oe| {
+                oe.kind.as_str() == in_edge.kind.as_str() && oe.target.as_str() == f.as_str()
+            });
+            if same_endpoints {
+                anyhow::bail!(
+                    "node `{f}` in edge `{}` <- `{}`: the out edge on `{}` has different properties — a match requires identical edge properties (same source, kind, target, AND properties)",
+                    in_edge.kind,
+                    in_edge.source,
+                    in_edge.source
+                );
+            }
+            anyhow::bail!(
+                "node `{f}` in edge `{}` <- `{}` has no matching out edge on `{}` — an edge must appear in BOTH endpoint files",
+                in_edge.kind,
+                in_edge.source,
+                in_edge.source
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2317,5 +2453,148 @@ mod tests {
         assert_eq!(back.properties.get("id").map(String::as_str), Some("R1"));
         assert_eq!(back, node);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // --- In/out edge pairing (phase-3 task-9) ---
+
+    /// A bare node file with no edges, for building the pairing test fixtures.
+    fn node(layer: &str, node_type: &str, name: &str) -> NodeFile {
+        NodeFile {
+            layer: layer.to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            body: String::new(),
+            properties: BTreeMap::new(),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        }
+    }
+
+    /// A bare out-edge with no properties.
+    fn out_edge(kind: &str, target: &str) -> OutEdge {
+        OutEdge {
+            kind: kind.to_string(),
+            target: target.to_string(),
+            properties: BTreeMap::new(),
+        }
+    }
+
+    /// A bare in-edge with no properties.
+    fn in_edge(kind: &str, source: &str) -> InEdge {
+        InEdge {
+            kind: kind.to_string(),
+            source: source.to_string(),
+            properties: BTreeMap::new(),
+        }
+    }
+
+    /// A fully paired set — A's out `contains -> B` and B's in `contains <-
+    /// A`, matching source/kind/target/properties — passes.
+    #[test]
+    fn paired_in_and_out_edges_pass() {
+        let mut a = node("requirements", "requirement", "a");
+        a.out
+            .push(out_edge("contains", "requirements.requirement.b"));
+        let mut b = node("requirements", "requirement", "b");
+        b.in_edges
+            .push(in_edge("contains", "requirements.requirement.a"));
+        assert!(check_edge_pairing(&[a, b]).is_ok());
+    }
+
+    /// An out edge in A without the matching in edge in B is an ERROR — the
+    /// error names the node, the kind, and the missing counterpart.
+    #[test]
+    fn out_edge_without_matching_in_edge_errors() {
+        let mut a = node("requirements", "requirement", "a");
+        a.out
+            .push(out_edge("contains", "requirements.requirement.b"));
+        let b = node("requirements", "requirement", "b");
+        let msg = check_edge_pairing(&[a, b]).unwrap_err().to_string();
+        assert!(msg.contains("requirements.requirement.a"), "{msg}");
+        assert!(msg.contains("contains"), "{msg}");
+        assert!(msg.contains("BOTH endpoint files"), "{msg}");
+    }
+
+    /// An in edge in B without the matching out edge in A is an ERROR — the
+    /// symmetric half of the pairwise rule.
+    #[test]
+    fn in_edge_without_matching_out_edge_errors() {
+        let a = node("requirements", "requirement", "a");
+        let mut b = node("requirements", "requirement", "b");
+        b.in_edges
+            .push(in_edge("contains", "requirements.requirement.a"));
+        let msg = check_edge_pairing(&[a, b]).unwrap_err().to_string();
+        assert!(msg.contains("requirements.requirement.b"), "{msg}");
+        assert!(msg.contains("contains"), "{msg}");
+        assert!(msg.contains("BOTH endpoint files"), "{msg}");
+    }
+
+    /// The SAME endpoints but DIFFERENT edge properties is a mismatch — a
+    /// match requires identical properties, not merely endpoint existence.
+    #[test]
+    fn same_endpoints_different_properties_is_a_mismatch() {
+        let mut a = node("requirements", "requirement", "a");
+        let mut oe = out_edge("contains", "requirements.requirement.b");
+        oe.properties
+            .insert("flavor".to_string(), "direct".to_string());
+        a.out.push(oe);
+        let mut b = node("requirements", "requirement", "b");
+        b.in_edges
+            .push(in_edge("contains", "requirements.requirement.a"));
+        let msg = check_edge_pairing(&[a, b]).unwrap_err().to_string();
+        assert!(msg.contains("contains"), "{msg}");
+        assert!(msg.contains("properties"), "{msg}");
+    }
+
+    /// A dangling authored target — parses as `<layer>.<type>.<name>` but no
+    /// such node file exists — is an error, not a silent skip.
+    #[test]
+    fn dangling_authored_target_errors() {
+        let mut a = node("requirements", "requirement", "a");
+        a.out
+            .push(out_edge("contains", "requirements.requirement.ghost"));
+        let msg = check_edge_pairing(&[a]).unwrap_err().to_string();
+        assert!(msg.contains("requirements.requirement.ghost"), "{msg}");
+    }
+
+    /// A dangling authored source on an in edge is the symmetric error.
+    #[test]
+    fn dangling_authored_source_errors() {
+        let mut b = node("requirements", "requirement", "b");
+        b.in_edges
+            .push(in_edge("contains", "requirements.requirement.ghost"));
+        let msg = check_edge_pairing(&[b]).unwrap_err().to_string();
+        assert!(msg.contains("requirements.requirement.ghost"), "{msg}");
+    }
+
+    /// An `implemented-by` out edge to a code FQN (non-parsing target) is NOT
+    /// flagged — code endpoints are exempt from the pairwise rule.
+    #[test]
+    fn implemented_by_to_code_fqn_is_not_flagged() {
+        let mut sys = node("solution", "system", "payments");
+        sys.out.push(out_edge("implemented-by", "apg.main"));
+        assert!(check_edge_pairing(&[sys]).is_ok());
+    }
+
+    /// A `details` out edge to a code FQN is NOT flagged — the target is a
+    /// code node (no file), so there is only the spec-side half.
+    #[test]
+    fn details_to_code_fqn_is_not_flagged() {
+        let mut n = node("requirements", "note", "n1");
+        n.out.push(out_edge(
+            "details",
+            "apg.artifacts.write_jsonl_and_reingest",
+        ));
+        assert!(check_edge_pairing(&[n]).is_ok());
+    }
+
+    /// A symmetric in edge whose source is a code FQN (non-parsing) is NOT
+    /// flagged — the parse-based rule treats code endpoints as exempt in both
+    /// directions.
+    #[test]
+    fn in_edge_from_code_fqn_is_not_flagged() {
+        let mut sys = node("solution", "system", "payments");
+        sys.in_edges.push(in_edge("implemented-by", "apg.main"));
+        assert!(check_edge_pairing(&[sys]).is_ok());
     }
 }
