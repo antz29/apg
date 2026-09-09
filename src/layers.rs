@@ -415,6 +415,245 @@ pub fn validate_trees_acyclic(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// SPEC §3.3 edge-kind matrix — write-time validation (phase-3 task-4)
+// ---------------------------------------------------------------------------
+
+/// The SPEC §3.3 durable edge kinds — the complete list. Plan edges
+/// (`contains` plan tiers, `gates`, `satisfies`, the Task→Implementation
+/// verbs) and `reviews` are §5 **transient** kinds — not here (phase 4). The
+/// matrix rows cover the nine two-authored-endpoint kinds; `implemented-by`
+/// (code-FQN target) and `details` (any-node target) have a code-exempt
+/// endpoint and are special-cased in [`validate_edge`].
+const EDGE_KINDS: [&str; 11] = [
+    "contains",
+    "drives",
+    "realised-by",
+    "implemented-by",
+    "calls",
+    "publishes",
+    "subscribes",
+    "depends-on",
+    "uses",
+    "represents",
+    "details",
+];
+
+/// One SPEC §3.3 matrix row: `(kind, source-layer, source-types,
+/// target-layer, target-types)`. Each endpoint is a (layer, type) pair: a type
+/// maps to a unique layer except `note`/`constraint` (which span the authoring
+/// layers — but neither is a matrix endpoint, so the layer+type granularity
+/// here is unambiguous). Source/target type sets are subsets of
+/// [`Layer::node_types`].
+type MatrixRow = (
+    &'static str,
+    Layer,
+    &'static [&'static str],
+    Layer,
+    &'static [&'static str],
+);
+
+/// The SPEC §3.3 edge-kind matrix — only the two-authored-endpoint kinds are
+/// listed; `implemented-by` and `details` are special-cased in
+/// [`validate_edge`].
+const MATRIX: &[MatrixRow] = &[
+    (
+        "contains",
+        Layer::Requirements,
+        &["stakeholder", "user", "requirement"],
+        Layer::Requirements,
+        &["requirement"],
+    ),
+    (
+        "contains",
+        Layer::Domain,
+        &["group"],
+        Layer::Domain,
+        &["group", "entity", "value", "service"],
+    ),
+    (
+        "contains",
+        Layer::Solution,
+        &["system"],
+        Layer::Solution,
+        &["container"],
+    ),
+    (
+        "contains",
+        Layer::Solution,
+        &["container"],
+        Layer::Solution,
+        &["component"],
+    ),
+    (
+        "drives",
+        Layer::Requirements,
+        &["requirement"],
+        Layer::Domain,
+        &["group", "entity", "value", "service"],
+    ),
+    (
+        "realised-by",
+        Layer::Domain,
+        &["group", "entity", "service"],
+        Layer::Solution,
+        &["system", "container", "component"],
+    ),
+    (
+        "calls",
+        Layer::Domain,
+        &["service"],
+        Layer::Domain,
+        &["service"],
+    ),
+    (
+        "publishes",
+        Layer::Domain,
+        &["service"],
+        Layer::Domain,
+        &["entity"],
+    ),
+    (
+        "subscribes",
+        Layer::Domain,
+        &["service"],
+        Layer::Domain,
+        &["entity"],
+    ),
+    (
+        "depends-on",
+        Layer::Requirements,
+        &["requirement"],
+        Layer::Requirements,
+        &["requirement"],
+    ),
+    (
+        "uses",
+        Layer::Solution,
+        &["person"],
+        Layer::Solution,
+        &["system"],
+    ),
+    (
+        "represents",
+        Layer::Requirements,
+        &["user"],
+        Layer::Domain,
+        &["entity"],
+    ),
+    (
+        "represents",
+        Layer::Domain,
+        &["entity"],
+        Layer::Solution,
+        &["person"],
+    ),
+];
+
+/// Format one kind's allowed source/target shapes from the matrix rows, e.g.
+/// `requirements.requirement -> domain.group|entity|value|service`.
+fn allowed_shapes(kind: &str) -> String {
+    MATRIX
+        .iter()
+        .filter(|(k, ..)| *k == kind)
+        .map(|(_, sl, sts, tl, tts)| {
+            format!(
+                "{}.{} -> {}.{}",
+                sl.layer_dir(),
+                sts.join("|"),
+                tl.layer_dir(),
+                tts.join("|")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Validate a set of proposed edges against the SPEC §3.3 edge-kind matrix —
+/// write-time enforcement, pure (no I/O; the FQN string itself encodes
+/// `layer.type.name`, so the endpoint (layer, type) is derived by parsing, no
+/// store needed). Each tuple is `(kind, source FQN, target FQN)`; the batch
+/// loops [`validate_edge`] over every edge.
+///
+/// This is also the sequential-spine lint (§3.2): every spine hop is
+/// tier-locked by the matrix (`drives`: Requirement → Domain; `realised-by`:
+/// Domain → Solution; `implemented-by`: Solution → code), so a tier skip is
+/// impossible once the matrix holds — the matrix IS the spine enforcement, and
+/// there is no extra tier machinery. A dangling FQN endpoint (malformed FQN or
+/// unknown layer) is a write-time error (SPEC §3.3).
+// (Unused until write_project, phase-3 task-16, calls it.)
+#[allow(dead_code)]
+pub fn validate_edges(edges: &[(&str, &str, &str)]) -> anyhow::Result<()> {
+    for &(kind, source, target) in edges {
+        validate_edge(kind, source, target)?;
+    }
+    Ok(())
+}
+
+/// Validate one `(kind, source, target)` edge against the SPEC §3.3 matrix.
+/// The source of every §3.3 edge is an authored node — parsed first, so a
+/// malformed source FQN or unknown layer is a dangling-reference write-time
+/// error for every kind. `implemented-by` (code-FQN target) and `details`
+/// (any-node target) have a code-exempt **target**: only their source is
+/// validated here; code-FQN validation against the scanned graph is task-10
+/// ([`validate_code_refs`]). For every other kind, both endpoints must parse
+/// as authored-node FQNs and the (layer, type) shape must match a matrix row.
+fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::Result<()> {
+    let (src_layer, src_type, _src_name) = parse_fqn(source)?;
+
+    match kind {
+        // implemented-by: System/Container/Component → code FQN. The target is
+        // exempt — validated against the scanned graph by validate_code_refs.
+        "implemented-by" => {
+            if src_layer != Layer::Solution
+                || !["system", "container", "component"].contains(&src_type.as_str())
+            {
+                anyhow::bail!(
+                    "`implemented-by` source `{source}` must be a Solution System/Container/Component, not {}.{src_type}",
+                    src_layer.layer_dir()
+                );
+            }
+            Ok(())
+        }
+        // details: Note (any layer) → any node, authored OR code. The target is
+        // exempt; only the source's note-ness is checked.
+        "details" => {
+            if src_type.as_str() != "note" {
+                anyhow::bail!(
+                    "`details` source `{source}` must be a `note` (any layer), not {}.{src_type}",
+                    src_layer.layer_dir()
+                );
+            }
+            Ok(())
+        }
+        // The matrix kinds: both endpoints parse, and the (layer, type) shape
+        // must match a §3.3 row.
+        _ => {
+            if !EDGE_KINDS.contains(&kind) {
+                anyhow::bail!(
+                    "unknown edge kind `{kind}` — durable edge kinds are {} (plan/feedback edges are §5 transient, not here)",
+                    EDGE_KINDS.join(", ")
+                );
+            }
+            let (dst_layer, dst_type, _dst_name) = parse_fqn(target)?;
+            let ok = MATRIX.iter().any(|(k, sl, sts, tl, tts)| {
+                *k == kind
+                    && *sl == src_layer
+                    && sts.contains(&src_type.as_str())
+                    && *tl == dst_layer
+                    && tts.contains(&dst_type.as_str())
+            });
+            if !ok {
+                anyhow::bail!(
+                    "invalid `{kind}` edge `{source}` -> `{target}` — allowed shapes: {}",
+                    allowed_shapes(kind)
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -770,5 +1009,310 @@ mod tests {
             err.to_string().contains("not a node of the change"),
             "{err}"
         );
+    }
+
+    /// Every §3.3 edge kind accepts at least one valid (source, target) shape:
+    /// each matrix row, both code-exempt kinds (`implemented-by` with a code
+    /// FQN target, `details` from a note in every authoring layer to any
+    /// target), and the `represents` pair.
+    #[test]
+    fn every_edge_kind_accepts_a_valid_shape() {
+        let ok: &[(&str, &str, &str)] = &[
+            (
+                "contains",
+                "requirements.stakeholder.s1",
+                "requirements.requirement.r1",
+            ),
+            (
+                "contains",
+                "requirements.user.u1",
+                "requirements.requirement.r1",
+            ),
+            (
+                "contains",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ),
+            ("contains", "domain.group.g1", "domain.group.g2"),
+            ("contains", "domain.group.g1", "domain.entity.e1"),
+            ("contains", "domain.group.g1", "domain.value.v1"),
+            ("contains", "domain.group.g1", "domain.service.svc1"),
+            ("contains", "solution.system.sys1", "solution.container.c1"),
+            (
+                "contains",
+                "solution.container.c1",
+                "solution.component.cmp1",
+            ),
+            ("drives", "requirements.requirement.r1", "domain.group.g1"),
+            ("drives", "requirements.requirement.r1", "domain.entity.e1"),
+            ("drives", "requirements.requirement.r1", "domain.value.v1"),
+            (
+                "drives",
+                "requirements.requirement.r1",
+                "domain.service.svc1",
+            ),
+            ("realised-by", "domain.group.g1", "solution.system.sys1"),
+            ("realised-by", "domain.entity.e1", "solution.container.c1"),
+            (
+                "realised-by",
+                "domain.service.svc1",
+                "solution.component.cmp1",
+            ),
+            (
+                "implemented-by",
+                "solution.system.sys1",
+                "apg.artifacts.write_jsonl_and_reingest",
+            ),
+            (
+                "implemented-by",
+                "solution.container.c1",
+                "apg.layers.validate_edges",
+            ),
+            ("implemented-by", "solution.component.cmp1", "apg.main"),
+            ("calls", "domain.service.svc1", "domain.service.svc2"),
+            ("publishes", "domain.service.svc1", "domain.entity.e1"),
+            ("subscribes", "domain.service.svc1", "domain.entity.e1"),
+            (
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ),
+            ("uses", "solution.person.p1", "solution.system.sys1"),
+            ("represents", "requirements.user.u1", "domain.entity.e1"),
+            ("represents", "domain.entity.e1", "solution.person.p1"),
+            (
+                "details",
+                "requirements.note.n1",
+                "requirements.requirement.r1",
+            ),
+            ("details", "domain.note.n1", "domain.entity.e1"),
+            ("details", "solution.note.n1", "solution.system.sys1"),
+            (
+                "details",
+                "implementation.note.n1",
+                "requirements.requirement.r1",
+            ),
+            ("details", "global.note.n1", "requirements.requirement.r1"),
+        ];
+        for &(kind, src, dst) in ok {
+            assert!(
+                validate_edge(kind, src, dst).is_ok(),
+                "{kind} {src} -> {dst} must be accepted"
+            );
+        }
+    }
+
+    /// A rejected (kind, source, target) shape errors naming the kind, the
+    /// source, and the target — tier skips and wrong-type shapes included.
+    #[test]
+    fn rejected_shapes_name_kind_source_and_target() {
+        let bad: &[(&str, &str, &str)] = &[
+            // calls from an Entity (not Service).
+            ("calls", "domain.entity.e1", "domain.service.svc1"),
+            // drives from a Group — a tier skip (Domain → Solution).
+            ("drives", "domain.group.g1", "solution.system.sys1"),
+            // contains from a Container to a Requirement — a tier skip.
+            (
+                "contains",
+                "solution.container.c1",
+                "requirements.requirement.r1",
+            ),
+            // depends-on from a Domain entity.
+            (
+                "depends-on",
+                "domain.entity.e1",
+                "requirements.requirement.r1",
+            ),
+            // realised-by from a Requirement — a tier skip.
+            (
+                "realised-by",
+                "requirements.requirement.r1",
+                "solution.system.sys1",
+            ),
+            // uses from a Service (must be Person).
+            ("uses", "domain.service.svc1", "solution.system.sys1"),
+            // publishes from a Group (must be Service).
+            ("publishes", "domain.group.g1", "domain.entity.e1"),
+            // subscribes to a Group (target must be an Entity).
+            ("subscribes", "domain.service.svc1", "domain.group.g1"),
+            // represents Entity → System (must be Entity → Person).
+            ("represents", "domain.entity.e1", "solution.system.sys1"),
+        ];
+        for &(kind, src, dst) in bad {
+            let msg = validate_edge(kind, src, dst).unwrap_err().to_string();
+            assert!(msg.contains(kind), "must name kind: {msg}");
+            assert!(msg.contains(src), "must name source: {msg}");
+            assert!(msg.contains(dst), "must name target: {msg}");
+        }
+    }
+
+    /// `implemented-by` accepts a code-FQN target (exempt — `validate_code_refs`
+    /// owns it, task-10) and refuses any non-Solution source.
+    #[test]
+    fn implemented_by_accepts_code_fqn_target_and_refuses_non_solution_source() {
+        for src in [
+            "solution.system.payments",
+            "solution.container.api",
+            "solution.component.checkout",
+        ] {
+            assert!(
+                validate_edge(
+                    "implemented-by",
+                    src,
+                    "apg.artifacts.write_jsonl_and_reingest"
+                )
+                .is_ok(),
+                "{src} must be a valid implemented-by source"
+            );
+        }
+        for src in [
+            "domain.service.checkout",
+            "requirements.requirement.r1",
+            "domain.entity.customer",
+            "solution.person.p1",
+        ] {
+            let msg = validate_edge("implemented-by", src, "apg.main")
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("implemented-by"), "{msg}");
+            assert!(msg.contains(src), "{msg}");
+        }
+    }
+
+    /// `details` accepts any target — authored OR code — and enforces that the
+    /// source is a `note` (spanning every authoring layer).
+    #[test]
+    fn details_accepts_any_target_and_enforces_note_source() {
+        for target in [
+            "requirements.requirement.r1",
+            "domain.entity.e1",
+            "solution.system.sys1",
+            // A code FQN target is exempt (not parsed).
+            "apg.artifacts.write_jsonl_and_reingest",
+        ] {
+            assert!(
+                validate_edge("details", "requirements.note.n1", target).is_ok(),
+                "details target {target} must be accepted"
+            );
+        }
+        for src in [
+            "requirements.note.n1",
+            "domain.note.n1",
+            "solution.note.n1",
+            "implementation.note.n1",
+            "global.note.n1",
+        ] {
+            assert!(
+                validate_edge("details", src, "requirements.requirement.r1").is_ok(),
+                "{src} must be a valid details source"
+            );
+        }
+        for src in [
+            "requirements.requirement.r1",
+            "domain.entity.e1",
+            "solution.system.sys1",
+        ] {
+            let msg = validate_edge("details", src, "requirements.requirement.r1")
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("details"), "{msg}");
+            assert!(msg.contains(src), "{msg}");
+        }
+    }
+
+    /// A dangling authored endpoint — malformed FQN or unknown layer — is a
+    /// write-time error for every matrix kind (SPEC §3.3). Code FQNs only pass
+    /// through the exempt endpoints (`implemented-by`/`details` targets).
+    #[test]
+    fn dangling_authored_endpoint_is_a_write_time_error() {
+        // Unknown layer in the source.
+        let msg = validate_edge("drives", "banana.type.name", "domain.group.g1")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("banana"), "{msg}");
+        // Unknown layer in the target.
+        let msg = validate_edge("drives", "requirements.requirement.r1", "banana.type.name")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("banana"), "{msg}");
+        // Malformed FQN (not <layer>.<type>.<name>) on a matrix-kind endpoint.
+        let msg = validate_edge(
+            "contains",
+            "requirements.requirement",
+            "requirements.requirement.r1",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(msg.contains("FQN"), "{msg}");
+        // A code FQN in a non-exempt endpoint (drives target) is a dangling ref.
+        let msg = validate_edge("drives", "requirements.requirement.r1", "apg.main")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("apg.main"), "{msg}");
+    }
+
+    /// Anything outside the §3.3 durable list — §5 plan/feedback edges
+    /// (`reviews`, `gates`, `satisfies`, task verbs) and gibberish — is refused
+    /// as an unknown edge kind.
+    #[test]
+    fn unknown_edge_kind_is_refused() {
+        for kind in [
+            "reviews",
+            "gates",
+            "satisfies",
+            "creates",
+            "modifies",
+            "deletes",
+            "banana",
+        ] {
+            let msg = validate_edge(
+                kind,
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(msg.contains("unknown edge kind"), "{msg}");
+            assert!(msg.contains(kind), "{msg}");
+        }
+    }
+
+    /// `represents` has exactly the two matrix rows — User → Entity and Entity
+    /// → Person; an Entity → System hop is refused (that would be a tier skip).
+    #[test]
+    fn represents_both_rows_and_refuses_tier_skips() {
+        assert!(validate_edge("represents", "requirements.user.u1", "domain.entity.e1").is_ok());
+        assert!(validate_edge("represents", "domain.entity.e1", "solution.person.p1").is_ok());
+        let msg = validate_edge("represents", "domain.entity.e1", "solution.system.sys1")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("represents"), "{msg}");
+        assert!(msg.contains("domain.entity.e1"), "{msg}");
+        assert!(msg.contains("solution.system.sys1"), "{msg}");
+    }
+
+    /// The batch entry point loops [`validate_edge`] over every edge; any bad
+    /// edge in the set fails the whole batch.
+    #[test]
+    fn validate_edges_batch_loops_validate_edge() {
+        let ok: &[(&str, &str, &str)] = &[
+            (
+                "contains",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ),
+            ("drives", "requirements.requirement.r1", "domain.group.g1"),
+        ];
+        assert!(validate_edges(ok).is_ok());
+        let bad: &[(&str, &str, &str)] = &[
+            (
+                "contains",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ),
+            ("drives", "domain.group.g1", "solution.system.sys1"),
+        ];
+        let msg = validate_edges(bad).unwrap_err().to_string();
+        assert!(msg.contains("drives"), "{msg}");
     }
 }
