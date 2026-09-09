@@ -2999,4 +2999,136 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    // --- Pairing/atomicity regression (phase-3 task-12) ---
+
+    /// The small paired node set the rewrite regression authors: A --contains-->
+    /// B, with A's out and B's in matching (the SPEC §4.1 pairwise invariant).
+    fn authored_pair(a_name: &str, b_name: &str) -> (NodeFile, NodeFile) {
+        let a_fqn = fqn(Layer::Requirements, "requirement", a_name);
+        let b_fqn = fqn(Layer::Requirements, "requirement", b_name);
+        let mut a = node("requirements", "requirement", a_name);
+        a.out.push(out_edge("contains", &b_fqn));
+        let mut b = node("requirements", "requirement", b_name);
+        b.in_edges.push(in_edge("contains", &a_fqn));
+        (a, b)
+    }
+
+    /// Read one node file back from its derived path (the file name IS the
+    /// identity) — the post-rewrite state the pairing check runs on.
+    fn read_node_file(root: &Path, layer: &str, node_type: &str, name: &str) -> NodeFile {
+        let path = root
+            .join("layers")
+            .join(layer)
+            .join(node_type)
+            .join(format!("{name}.json"));
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
+    }
+
+    /// Transient edges can never reach a committed durable node file: the §5
+    /// plan/review/feedback kinds (`reviews`, `gates`, `satisfies`) live
+    /// ENTIRELY under `.trans` (both halves there) — [`validate_edges`]
+    /// (task-4) refuses them upstream of any durable write, so a durable node
+    /// file whose `out` or `in` carries a transient kind is refused at
+    /// validation and can never reach a committed file. The full `.trans`-side
+    /// pairing (both halves in `.trans`) is phase-4/task-15 — NOT built here;
+    /// this asserts only the durable-side refusal gate.
+    #[test]
+    fn durable_node_file_carrying_a_transient_edge_is_refused() {
+        for kind in ["reviews", "gates", "satisfies"] {
+            // A durable requirement file carrying the transient kind on an
+            // out-edge — the edge is refused as an unknown durable kind.
+            let mut a = node("requirements", "requirement", "a");
+            a.out.push(out_edge(kind, "requirements.requirement.b"));
+            let edges: Vec<(&str, &str, &str)> = a
+                .out
+                .iter()
+                .map(|oe| {
+                    (
+                        oe.kind.as_str(),
+                        "requirements.requirement.a",
+                        oe.target.as_str(),
+                    )
+                })
+                .collect();
+            let msg = validate_edges(&edges).unwrap_err().to_string();
+            assert!(msg.contains("unknown edge kind"), "{kind}: {msg}");
+            assert!(msg.contains(kind), "{kind}: {msg}");
+
+            // The same transient kind on an in-edge — equally refused.
+            let mut a = node("requirements", "requirement", "a");
+            a.in_edges.push(in_edge(kind, "requirements.requirement.b"));
+            let edges: Vec<(&str, &str, &str)> = a
+                .in_edges
+                .iter()
+                .map(|ie| {
+                    (
+                        ie.kind.as_str(),
+                        ie.source.as_str(),
+                        "requirements.requirement.a",
+                    )
+                })
+                .collect();
+            let msg = validate_edges(&edges).unwrap_err().to_string();
+            assert!(msg.contains("unknown edge kind"), "{kind}: {msg}");
+            assert!(msg.contains(kind), "{kind}: {msg}");
+        }
+    }
+
+    /// note-18 regression: a node rewrite (rename or delete) must leave every
+    /// incident edge intact — the source's out-half AND the target's in-half
+    /// are rewritten or removed together, never dropped on one side.
+    /// [`write_through`] is the atomic rewrite (SPEC §4.1 "renames / deletions
+    /// are atomic write-throughs"); [`check_edge_pairing`] on the resulting
+    /// files then proves the rewrite left no dangling pairing and no
+    /// silently-dropped edge.
+    #[test]
+    fn incident_edges_survive_node_rewrites_rename_and_delete() {
+        // --- RENAME: author A --contains--> B, then rename B -> C. ---
+        let root = temp_root("rename");
+        let (a, b) = authored_pair("a", "b");
+        write_through(&root, &[a.clone(), b.clone()]).unwrap();
+        assert!(check_edge_pairing(&[a.clone(), b.clone()]).is_ok());
+
+        // The rewrite: B's file is gone, C carries the FQN plus the incoming
+        // edge, and A's out-edge target is re-pointed to C.
+        let mut a_renamed = node("requirements", "requirement", "a");
+        a_renamed
+            .out
+            .push(out_edge("contains", "requirements.requirement.c"));
+        let mut c = node("requirements", "requirement", "c");
+        c.in_edges
+            .push(in_edge("contains", "requirements.requirement.a"));
+        write_through(&root, &[a_renamed.clone(), c.clone()]).unwrap();
+
+        // The incident edge survived the rename intact: A's out -> C and C's
+        // in <- A still pair — no dangling reference to the gone B.
+        let a_read = read_node_file(&root, "requirements", "requirement", "a");
+        let c_read = read_node_file(&root, "requirements", "requirement", "c");
+        assert_eq!(a_read, a_renamed);
+        assert_eq!(c_read, c);
+        assert!(
+            check_edge_pairing(&[a_read, c_read]).is_ok(),
+            "a rename must leave no dangling pairing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+
+        // --- DELETE: author A --contains--> B, then delete B. ---
+        let root = temp_root("delete");
+        let (a, b) = authored_pair("a", "b");
+        write_through(&root, &[a.clone(), b.clone()]).unwrap();
+        assert!(check_edge_pairing(&[a.clone(), b.clone()]).is_ok());
+
+        // The rewrite: A's out-edge to B is removed and B's file is gone.
+        let a_deleted = node("requirements", "requirement", "a");
+        write_through(&root, &[a_deleted.clone()]).unwrap();
+
+        let a_read = read_node_file(&root, "requirements", "requirement", "a");
+        assert_eq!(a_read, a_deleted);
+        assert!(
+            check_edge_pairing(&[a_read]).is_ok(),
+            "a delete must leave no dangling pairing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
