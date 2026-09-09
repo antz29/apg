@@ -8,7 +8,11 @@
 //!   Idempotent only when `<name>` already IS the current project context
 //!   (re-run inside the project's worktree → no-op, prints the path);
 //!   otherwise every refusal is a hard fail naming the actual state and one
-//!   fix command (R2). Project names are never sanitized.
+//!   fix command (R2). Project names are never sanitized. Start is a
+//!   layout-touching op: the R10 version gate blocks layouts whose
+//!   `apg/config.json` version is missing or does not share the binary's
+//!   major.minor (in either direction), and the R9 self-heal scaffolds the
+//!   worktrees dir + the `.gitignore` entries when absent.
 //!
 //! - `apg project merge <name>` — the project's terminal lifecycle act:
 //!   verify gate (plan verify against the branch graph: every planned node
@@ -23,6 +27,7 @@ use crate::artifacts::parse_args;
 use crate::git;
 use crate::plan_cmd;
 use crate::specs;
+use crate::version_gate;
 
 /// `apg project <start|merge> …`.
 pub fn cmd_project(args: &[String]) -> anyhow::Result<()> {
@@ -106,15 +111,47 @@ fn project_start_at(apg_root: &Path, name: &str, scan: Option<&ScanFn>) -> anyho
         );
     }
 
+    // R10 version gate: `project start` is a layout-touching op (it
+    // self-heals + writes under `<main>/apg/`), so the main checkout's
+    // layout must be versioned for this binary's major.minor — a missing
+    // version (pre-versioning layout) or a mismatch in either direction
+    // blocks with upgrade guidance; `apg init` is the upgrade act.
+    version_gate::require_layout_version(apg_root, &format!("re-run `apg project start {name}`"))?;
+
     refuse_start(&identity, name)?;
+
+    // Self-heal (R9): when the worktree location is not gitignored — the
+    // repo .gitignore dropped the `apg/.worktrees/` entry, or the repo was
+    // cloned before it existed — scaffold the apg layout entries and commit
+    // the scaffold on the current branch. The dirty-main refusal above
+    // guarantees the tree was clean at entry, and a dropped entry must not
+    // leave the main checkout dirty (a later start would refuse it). If the
+    // location still is not ignored after the scaffold (e.g. an explicit
+    // negation shadowing the entries), refuse naming the actual state. The
+    // `.worktrees/` dir itself is created below (libgit2's worktree add does
+    // not create intermediate dirs; `apg init` scaffolds it, start heals it).
+    let probe = git::project_worktree_dir(&identity.main_root, name);
+    if !git::path_is_ignored(&identity.main_root, &probe) {
+        if crate::scaffold_gitignore(&identity.main_root)? {
+            git::commit_file(
+                &identity.main_root,
+                &identity.main_root.join(".gitignore"),
+                "apg: scaffold .gitignore entries for the apg layout",
+            )?;
+        }
+        if !git::path_is_ignored(&identity.main_root, &probe) {
+            anyhow::bail!(
+                "refused: {} is still not gitignored after scaffolding the apg layout entries — an explicit .gitignore negation must be shadowing them. Fix: remove the negation (or append `apg/.worktrees/` at the end of the .gitignore), then re-run `apg project start {name}`.",
+                probe.display()
+            );
+        }
+    }
 
     // Create branch + worktree (git2 only; the worktree's own HEAD is set to
     // the new branch and the branch tree is checked out into it). libgit2's
     // worktree add creates the branch itself (like `git worktree add <path>`
     // branches off the last path component) at the main checkout's HEAD —
-    // refuse_start already guaranteed the branch does not exist. The
-    // `<main>/apg/.worktrees/` parent must exist first (libgit2 does not
-    // create intermediate dirs; phase 2's init scaffolds the directory).
+    // refuse_start already guaranteed the branch does not exist.
     let main_repo = git2::Repository::open(&identity.main_root)?;
     if let Some(parent) = wt_dir.parent() {
         std::fs::create_dir_all(parent)?;
@@ -153,17 +190,8 @@ fn refuse_start(identity: &git::RepoIdentity, name: &str) -> anyhow::Result<()> 
         );
     }
 
-    // The worktree location must be gitignored, or the nested checkout would
-    // dirty the main checkout forever (apg init scaffolds the entry).
-    let probe = git::project_worktree_dir(&identity.main_root, name);
-    if !git::path_is_ignored(&identity.main_root, &probe) {
-        anyhow::bail!(
-            "refused: the project worktree location {} is not gitignored — add `apg/.worktrees/` to the repo .gitignore (`apg init` scaffolds it), then re-run `apg project start {name}`.",
-            probe.display()
-        );
-    }
-
     // Every collision is a case-specific "project already exists" (R2).
+    let probe = git::project_worktree_dir(&identity.main_root, name);
     let repo = git2::Repository::open(&identity.main_root)?;
     let branch = repo.find_branch(name, git2::BranchType::Local).ok();
     let registered = repo.find_worktree(name).ok();
@@ -406,6 +434,54 @@ mod tests {
         testutil::scan_checkout(dir)
     }
 
+    /// Rewrites the fixture's committed `apg/config.json` (the whole file)
+    /// and commits it, so the layout declares `version` (`None` → the
+    /// unversioned, pre-versioning shape).
+    fn set_layout_version(repo: &Repo, version: Option<&str>) {
+        let json = match version {
+            Some(v) => format!(
+                "{{\n  \"default\": \"src\",\n  \"types\": [],\n  \"version\": \"{v}\"\n}}\n"
+            ),
+            None => "{ \"default\": \"src\", \"types\": [] }\n".to_string(),
+        };
+        repo.write("apg/config.json", &json);
+        repo.commit_all("set layout version");
+    }
+
+    /// The binary's version with a patch bump — same major.minor, so the R10
+    /// gate must proceed (patch differences never block).
+    fn patch_shifted_version() -> String {
+        let v: Vec<u64> = env!("CARGO_PKG_VERSION")
+            .split('.')
+            .map(|p| p.parse().unwrap())
+            .collect();
+        format!("{}.{}.{}", v[0], v[1], v[2] + 1)
+    }
+
+    /// A version whose major.minor is guaranteed older than the binary's
+    /// (e.g. 0.9.x for a 0.10.4 binary).
+    fn older_minor_version() -> String {
+        let v: Vec<u64> = env!("CARGO_PKG_VERSION")
+            .split('.')
+            .map(|p| p.parse().unwrap())
+            .collect();
+        if v[1] > 0 {
+            format!("{}.{}.0", v[0], v[1] - 1)
+        } else {
+            format!("{}.99.0", v[0].saturating_sub(1))
+        }
+    }
+
+    /// A version whose major.minor is guaranteed newer than the binary's
+    /// (e.g. 0.11.x / 1.x for a 0.10.4 binary).
+    fn newer_minor_version() -> String {
+        let v: Vec<u64> = env!("CARGO_PKG_VERSION")
+            .split('.')
+            .map(|p| p.parse().unwrap())
+            .collect();
+        format!("{}.{}.0", v[0], v[1] + 1)
+    }
+
     /// Commits a single file on the worktree's branch (git2 — the same
     /// mechanics auto_commit uses).
     fn wt_commit(wt: &Path, rel: &str, msg: &str) -> String {
@@ -639,14 +715,93 @@ mod tests {
     }
 
     #[test]
-    fn start_refuses_when_worktree_location_is_not_gitignored() {
-        let repo = Repo::new("start-ignore");
+    fn start_self_heals_missing_worktrees_gitignore_entry() {
+        // A repo whose .gitignore dropped the worktrees entry (or was
+        // cloned before it existed): start must scaffold it + commit the
+        // scaffold (the main checkout stays clean), then proceed.
+        let repo = Repo::new("start-selfheal");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
         repo.write(".gitignore", "apg/.trans/\n");
         repo.commit_all("drop worktrees ignore");
+        let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+        assert!(wt.is_dir());
+        // The entry is back in the main checkout's .gitignore — committed,
+        // so the main checkout is clean again (a later start would refuse a
+        // dirty main).
+        let ignore = std::fs::read_to_string(repo.root.join(".gitignore")).unwrap();
+        assert!(ignore.contains("apg/.worktrees/"), "{ignore}");
+        assert!(repo.is_clean(), "self-heal must commit the scaffold");
+        // The worktree (checked out from the scaffolded HEAD) carries it too.
+        let wt_ignore = std::fs::read_to_string(wt.join(".gitignore")).unwrap();
+        assert!(wt_ignore.contains("apg/.worktrees/"), "{wt_ignore}");
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
+    // R10 version gate on start (task-3/task-5): blocks — never warns —
+    // on missing version and on major/minor mismatch in either direction,
+    // with upgrade guidance; a patch diff proceeds.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn start_blocks_unversioned_layout_with_init_guidance() {
+        let repo = Repo::new("start-gate-unversioned");
+        set_layout_version(&repo, None);
         let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
         let msg = format!("{err:#}");
-        assert!(msg.contains("gitignored"), "{msg}");
-        assert!(msg.contains("apg/.worktrees/"), "{msg}");
+        for needle in [
+            "no layout version",
+            "apg init",
+            "re-run `apg project start foo`",
+            "apg-upgrade.md",
+        ] {
+            assert!(msg.contains(needle), "{msg}");
+        }
+        // Nothing was created.
+        assert!(!repo.project_worktree_dir("foo").exists());
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn start_blocks_older_layout_with_upgrade_guidance() {
+        let repo = Repo::new("start-gate-older");
+        set_layout_version(&repo, Some(&older_minor_version()));
+        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("predates"), "{msg}");
+        assert!(msg.contains("apg init"), "{msg}");
+        assert!(msg.contains("apg-upgrade.md"), "{msg}");
+        assert!(!repo.project_worktree_dir("foo").exists());
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn start_blocks_newer_layout_with_upgrade_guidance() {
+        let repo = Repo::new("start-gate-newer");
+        set_layout_version(&repo, Some(&newer_minor_version()));
+        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("NEWER apg"), "{msg}");
+        assert!(msg.contains("upgrade apg"), "{msg}");
+        assert!(msg.contains("apg init"), "{msg}");
+        assert!(msg.contains("apg-upgrade.md"), "{msg}");
+        assert!(!repo.project_worktree_dir("foo").exists());
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn start_proceeds_on_patch_diff_layout() {
+        let repo = Repo::new("start-gate-patch");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        set_layout_version(&repo, Some(&patch_shifted_version()));
+        let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+        assert!(wt.is_dir(), "same major.minor must proceed");
         testutil::remove(&repo);
     }
 

@@ -451,43 +451,53 @@ fn membership_refusal(identity: &RepoIdentity, project: &str) -> anyhow::Error {
 // tree stay in sync by construction.
 // ---------------------------------------------------------------------------
 
+/// The path of `path` relative to the working directory of the checkout
+/// containing `apg_root`. Both sides are canonicalized: git2's workdir is
+/// canonical, while a mutation path may be lexical (e.g. through a
+/// /var → /private/var symlink).
+fn repo_rel(apg_root: &Path, path: &Path) -> anyhow::Result<PathBuf> {
+    let repo = discover_repo(apg_root)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| anyhow::anyhow!("repository has no working directory"))?;
+    let path = canonical(path);
+    let workdir = canonical(workdir);
+    path.strip_prefix(&workdir)
+        .map(|r| r.to_path_buf())
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "cannot commit {}: it is outside the checkout {}",
+                path.display(),
+                workdir.display()
+            )
+        })
+}
+
 /// Commits the single file `path` on the current branch of the checkout
-/// containing `apg_root` (git2 only — the git CLI is never shelled out to).
+/// containing `apg_root` with a caller-supplied message (git2 only — the git
+/// CLI is never shelled out to).
 ///
 /// Returns `Ok(Some(sha))` with the new HEAD sha when a commit was created,
 /// or `Ok(None)` when the file's content already matches HEAD (nothing to
 /// commit — e.g. an idempotent re-write). Errors when the file sits outside
 /// the checkout or git refuses the commit.
-pub fn auto_commit(apg_root: &Path, path: &Path) -> anyhow::Result<Option<String>> {
+pub fn commit_file(apg_root: &Path, path: &Path, msg: &str) -> anyhow::Result<Option<String>> {
     let repo = discover_repo(apg_root)?;
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| anyhow::anyhow!("repository has no working directory"))?;
-    // Compare canonical paths: git2's workdir is canonicalized, the mutation
-    // path may be lexical (e.g. through a /var → /private/var symlink).
-    let path = canonical(path);
-    let workdir = canonical(workdir);
-    let rel = path.strip_prefix(&workdir).map_err(|_| {
-        anyhow::anyhow!(
-            "cannot auto-commit {}: it is outside the checkout {}",
-            path.display(),
-            workdir.display()
-        )
-    })?;
+    let rel = repo_rel(apg_root, path)?;
     let head = repo.head().map_err(|e| {
         anyhow::anyhow!(
-            "cannot auto-commit {}: no HEAD to commit on ({e})",
-            path.display()
+            "cannot commit {}: no HEAD to commit on ({e})",
+            rel.display()
         )
     })?;
     let head_commit = head
         .peel_to_commit()
-        .map_err(|e| anyhow::anyhow!("cannot auto-commit: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("cannot commit: {e}"))?;
 
     // Stage the file and compare trees: an unchanged tree means nothing to
     // commit (an idempotent mutation re-wrote identical content).
     let mut index = repo.index()?;
-    index.add_path(rel)?;
+    index.add_path(&rel)?;
     index.write()?;
     let tree_id = index.write_tree()?;
     if tree_id == head_commit.tree_id() {
@@ -497,9 +507,19 @@ pub fn auto_commit(apg_root: &Path, path: &Path) -> anyhow::Result<Option<String
     let sig = repo
         .signature()
         .or_else(|_| git2::Signature::now("apg", "apg@localhost"))?;
-    let msg = format!("apg: graph mutation ({})", rel.display());
-    let oid = repo.commit(Some("HEAD"), &sig, &sig, &msg, &tree, &[&head_commit])?;
+    let oid = repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &[&head_commit])?;
     Ok(Some(oid.to_string()))
+}
+
+/// `commit_file` with the standard graph-mutation message — the funnel's
+/// one-commit-per-mutation commit (R8).
+pub fn auto_commit(apg_root: &Path, path: &Path) -> anyhow::Result<Option<String>> {
+    let rel = repo_rel(apg_root, path)?;
+    commit_file(
+        apg_root,
+        path,
+        &format!("apg: graph mutation ({})", rel.display()),
+    )
 }
 
 /// Re-anchors the staleness gate's recorded scan_meta after an auto-commit:
@@ -954,6 +974,32 @@ mod tests {
         // auto_commit uses), so HEAD already carries this content.
         wt_commit(&wt, &path, "seed");
         assert_eq!(auto_commit(&wt.join("apg"), &path).unwrap(), None);
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn commit_file_commits_with_custom_message() {
+        let repo = fixture_repo("commitfile");
+        repo.start_project("foo");
+        let wt = repo.project_worktree_dir("foo");
+        // The start-flow self-heal uses commit_file for its .gitignore
+        // scaffold commit — same mechanics, caller-supplied message.
+        let path = wt.join(".gitignore");
+        std::fs::write(&path, "apg/.trans/\napg/.worktrees/\n# extra\n").unwrap();
+        let sha0 = open_worktree_sha(&wt);
+        let Some(new_sha) =
+            commit_file(&wt.join("apg"), &path, "apg: scaffold .gitignore entries").unwrap()
+        else {
+            panic!("expected a commit");
+        };
+        assert_ne!(sha0, new_sha);
+        let wt_repo = git2::Repository::open(&wt).unwrap();
+        let head = wt_repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(
+            head.message().unwrap(),
+            "apg: scaffold .gitignore entries",
+            "commit_file must use the caller's message"
+        );
         testutil::remove(&repo);
     }
 

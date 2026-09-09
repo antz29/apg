@@ -20,7 +20,10 @@ use crate::schema;
 use crate::specs;
 
 /// A fresh git repo (main checkout on branch `main`) with an initial commit
-/// whose `.gitignore` covers `apg/.trans/` and `apg/.worktrees/`.
+/// whose `.gitignore` covers `apg/.trans/` and `apg/.worktrees/`, and whose
+/// `apg/config.json` carries the binary-managed `version` field at the
+/// binary's own version — the R10 layout gate passes on every fixture, and
+/// version-gate tests override the field explicitly.
 pub struct Repo {
     /// The main checkout root.
     pub root: PathBuf,
@@ -50,6 +53,16 @@ impl Repo {
         git_config(&repo);
         std::fs::write(root.join(".gitignore"), "apg/.trans/\napg/.worktrees/\n").unwrap();
         std::fs::create_dir_all(root.join(specs::LAYOUT).join(specs::TRANS)).unwrap();
+        // The versioned layout config (R10): the gate passes with the
+        // binary's own major.minor; version-gate tests rewrite this field.
+        std::fs::write(
+            root.join(specs::LAYOUT).join("config.json"),
+            format!(
+                "{{\n  \"default\": \"src\",\n  \"types\": [],\n  \"version\": \"{}\"\n}}\n",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+        .unwrap();
         let r = Repo { root };
         r.commit_all("init");
         r
