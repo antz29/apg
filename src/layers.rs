@@ -32,6 +32,9 @@
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
 
 /// The durable node-file root: `layers/` under the layout root (SPEC §4.1) —
 /// one file per node at `<layer>/<type>/<name>.json`, the file name IS the
@@ -226,7 +229,7 @@ pub type NodeProperties = BTreeMap<String, String>;
 /// sanitize. Lowercase ASCII letters and digits anywhere, hyphens after the
 /// first character; a leading digit and a trailing hyphen are fine; the empty
 /// name is not.
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     let mut chars = name.chars();
     match chars.next() {
         Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}
@@ -816,6 +819,138 @@ pub fn eval_constraint(
         );
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Node-file schema + single-node writer (phase-3 task-8)
+// ---------------------------------------------------------------------------
+
+/// One node file's schema (SPEC §4.1). `layer`/`type`/`name` are the identity
+/// — the file name IS the identity, so the FQN is derived, never stored:
+/// `<layer>.<type>.<name>` (global per-layer namespace, no project prefix).
+/// `body` is the prose; `properties` is metadata (short ids live here, never
+/// as identity); `out`/`in` hold both edge directions in this file (out in the
+/// source's file, in in the target's — the pairing check is task-9, and the
+/// edge/type validation is task-16's [`validate_node`]/[`validate_edges`],
+/// called by write_project **before** [`write_node`]).
+// (Unused until write_project, phase-3 task-16, calls write_node.)
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeFile {
+    /// The layer dir name (e.g. `requirements`) — must equal the path segment.
+    pub layer: String,
+    /// The node type (e.g. `requirement`) — must equal the path segment. Rust
+    /// reserves `type`, so the field is `node_type` renamed to `"type"` on the
+    /// wire.
+    #[serde(rename = "type")]
+    pub node_type: String,
+    /// The node name (e.g. `place-order`) — must equal the file-name stem.
+    pub name: String,
+    /// The node's prose body.
+    #[serde(default)]
+    pub body: String,
+    /// Metadata only — short ids and any other keys, never identity.
+    #[serde(default)]
+    pub properties: NodeProperties,
+    /// Outgoing edges (this node is the source) — canonical for graph assembly.
+    #[serde(default)]
+    pub out: Vec<OutEdge>,
+    /// Incoming edges (this node is the target). Rust reserves `in`, so the
+    /// field is `in_edges` renamed to `"in"` on the wire.
+    #[serde(default, rename = "in")]
+    pub in_edges: Vec<InEdge>,
+}
+
+/// One out-edge in a node file (SPEC §4.1): this node is the source. Two
+/// separate structs for out/in — they carry different fields (`target` vs
+/// `source`).
+// (Unused until write_project, phase-3 task-16, calls write_node.)
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutEdge {
+    /// The edge kind (e.g. `drives`).
+    pub kind: String,
+    /// The target node FQN (`<layer>.<type>.<name>`, or a code FQN for
+    /// `implemented-by`).
+    pub target: String,
+    /// Edge properties (metadata — e.g. the context-map flavor).
+    #[serde(default)]
+    pub properties: NodeProperties,
+}
+
+/// One in-edge in a node file (SPEC §4.1): this node is the target.
+// (Unused until write_project, phase-3 task-16, calls write_node.)
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InEdge {
+    /// The edge kind (e.g. `contains`).
+    pub kind: String,
+    /// The source node FQN (`<layer>.<type>.<name>`).
+    pub source: String,
+    /// Edge properties (metadata).
+    #[serde(default)]
+    pub properties: NodeProperties,
+}
+
+/// Build an authored-node FQN (`<layer>.<type>.<name>`) from its identity —
+/// the inverse of [`parse_fqn`]. The file name IS the identity, so the FQN is
+/// derived, never stored.
+// (Unused until write_project, phase-3 task-16, and ingest_tree, task-15, call it.)
+#[allow(dead_code)]
+pub fn fqn(layer: Layer, node_type: &str, name: &str) -> String {
+    format!("{}.{node_type}.{name}", layer.layer_dir())
+}
+
+/// Write one node file at `<apg_root>/layers/<layer>/<type>/<name>.json`
+/// (SPEC §4.1). The path is derived from the node's own layer/type/name, and
+/// those same values are what the serializer writes — so the file's
+/// `layer`/`type`/`name` fields match the path by construction, and the FQN is
+/// the path's segments.
+///
+/// This is the **single-file** writer: it creates the parent dirs and writes
+/// the one file (a plain [`std::fs::write`] — the multi-file atomicity is
+/// task-11's `write_through`). It does **not** validate edges or pairing
+/// (task-9/11) and does **not** validate the type against its layer's catalog
+/// (that is [`validate_node`], called by write_project before this) — it only
+/// does the cheap identity sanity checks a file name demands:
+///
+/// - the layer must be a known layer, and must **not** be plans — plans is
+///   transient (`.trans/plans/` only, per branch), never a durable node-file
+///   layer;
+/// - the name must match the allowlist `[a-z0-9][a-z0-9-]*` (refused, never
+///   sanitized), so the file name stays safe.
+///
+/// Returns the written file's path. Nothing here treats a `properties` key as
+/// identity — short ids are metadata, stored verbatim.
+// (Unused until write_project, phase-3 task-16, calls it.)
+#[allow(dead_code)]
+pub fn write_node(apg_root: &Path, node: &NodeFile) -> anyhow::Result<PathBuf> {
+    let layer = Layer::ALL
+        .iter()
+        .find(|l| l.layer_dir() == node.layer)
+        .copied()
+        .ok_or_else(|| anyhow::anyhow!("unknown layer `{}`", node.layer))?;
+    if layer.storage() == StoragePolicy::TransientPlans {
+        anyhow::bail!(
+            "layer `plans` is transient (apg/.trans/plans/) — not a durable node-file layer"
+        );
+    }
+    if !valid_name(&node.name) {
+        anyhow::bail!(
+            "node name `{}` is invalid — the name allowlist is [a-z0-9][a-z0-9-]* (refused, never sanitized)",
+            node.name
+        );
+    }
+    let path = apg_root
+        .join(LAYERS_DIR)
+        .join(layer.layer_dir())
+        .join(&node.node_type)
+        .join(format!("{}.json", node.name));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(node)?)?;
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -2048,5 +2183,139 @@ mod tests {
             "count(entities) == 0 AND count(entities) > 0".to_string(),
         )]);
         assert!(eval_constraint(Layer::Global, "law", &props, &existing).is_ok());
+    }
+
+    // --- Node-file schema + single-node writer (phase-3 task-8) ---
+
+    /// A unique temp dir for one test (removed on cleanup) — the node-file
+    /// writer is the first I/O in this module, so tests stage under
+    /// `std::env::temp_dir()` like specs.rs/git.rs do.
+    fn temp_root(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("apg-layers-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    /// A sample requirement node file mirroring the §4.1 example.
+    fn sample_node() -> NodeFile {
+        NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "requirement".to_string(),
+            name: "place-order".to_string(),
+            body: "A customer can place an order.".to_string(),
+            properties: BTreeMap::new(),
+            out: vec![OutEdge {
+                kind: "drives".to_string(),
+                target: "domain.service.checkout".to_string(),
+                properties: BTreeMap::new(),
+            }],
+            in_edges: vec![InEdge {
+                kind: "contains".to_string(),
+                source: "requirements.user.customer".to_string(),
+                properties: BTreeMap::new(),
+            }],
+        }
+    }
+
+    /// write_node writes one file at
+    /// `<root>/layers/<layer>/<type>/<name>.json`; the layer/type/name/body/
+    /// properties/out/in round-trip (write → read → deserialize == original),
+    /// and the FQN derived from the path's segments equals layer.type.name.
+    #[test]
+    fn write_node_writes_file_with_round_tripping_identity() {
+        let root = temp_root("roundtrip");
+        let node = sample_node();
+        let path = write_node(&root, &node).unwrap();
+        assert_eq!(
+            path,
+            root.join("layers")
+                .join("requirements")
+                .join("requirement")
+                .join("place-order.json")
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        let back: NodeFile = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, node);
+        // The file name IS the identity: the FQN is the path's segments.
+        assert_eq!(
+            fqn(Layer::Requirements, &back.node_type, &back.name),
+            "requirements.requirement.place-order"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The FQN builder is the inverse of [`parse_fqn`]: `<layer>.<type>.<name>`,
+    /// no project prefix.
+    #[test]
+    fn fqn_builder_returns_layer_type_name() {
+        assert_eq!(
+            fqn(Layer::Requirements, "requirement", "place-order"),
+            "requirements.requirement.place-order"
+        );
+        assert_eq!(
+            fqn(Layer::Domain, "service", "checkout"),
+            "domain.service.checkout"
+        );
+        assert_eq!(
+            fqn(Layer::Global, "constraint", "law"),
+            "global.constraint.law"
+        );
+        // And it is the inverse of parse_fqn.
+        let (layer, node_type, name) = parse_fqn("domain.entity.customer").unwrap();
+        assert_eq!(fqn(layer, &node_type, &name), "domain.entity.customer");
+    }
+
+    /// A plans-layer node is refused — plans is transient (apg/.trans/plans/),
+    /// never a durable node-file layer — and nothing is written.
+    #[test]
+    fn write_node_refuses_plans_layer() {
+        let root = temp_root("plans");
+        let mut node = sample_node();
+        node.layer = "plans".to_string();
+        node.node_type = "task".to_string();
+        let err = write_node(&root, &node).unwrap_err().to_string();
+        assert!(err.contains("plans"), "{err}");
+        assert!(!root.join("layers").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An allowlist-violating name is refused (never sanitized) — the file name
+    /// must stay safe. Also covers an unknown layer.
+    #[test]
+    fn write_node_refuses_allowlist_violating_name() {
+        let root = temp_root("badname");
+        for bad in ["CamelCase", "with.dot", "with space", "-lead", ""] {
+            let mut node = sample_node();
+            node.name = bad.to_string();
+            let err = write_node(&root, &node).unwrap_err().to_string();
+            assert!(err.contains("allowlist"), "{bad}: {err}");
+        }
+        // An unknown layer is refused too.
+        let mut node = sample_node();
+        node.layer = "banana".to_string();
+        let err = write_node(&root, &node).unwrap_err().to_string();
+        assert!(err.contains("banana"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Metadata properties (short ids) are stored verbatim, never treated as
+    /// identity — the file name stays layer.type.name even when an `id` is
+    /// present.
+    #[test]
+    fn write_node_preserves_metadata_properties_verbatim() {
+        let root = temp_root("metadata");
+        let mut node = sample_node();
+        node.properties = BTreeMap::from([("id".to_string(), "R1".to_string())]);
+        let path = write_node(&root, &node).unwrap();
+        // The identity is the path, never the short id.
+        assert_eq!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some("place-order.json")
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        let back: NodeFile = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.properties.get("id").map(String::as_str), Some("R1"));
+        assert_eq!(back, node);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
