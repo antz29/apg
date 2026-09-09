@@ -1089,6 +1089,75 @@ pub fn check_edge_pairing(nodes: &[NodeFile]) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// SPEC §4.1 — code-endpoint validation (phase-3 task-10)
+// ---------------------------------------------------------------------------
+
+/// The status of one `implemented-by` code FQN against the scanned graph
+/// (SPEC §4.1 "code endpoints are exempt"): a code FQN is language-native and
+/// opaque — never parsed, never layer-classified. Exact string set membership
+/// against the two caller-supplied universes is the whole check.
+// (Unused until ingest_tree, phase-3 task-15, validates implemented-by targets.)
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeRefStatus {
+    /// The FQN resolves in the scanned graph — the code exists.
+    Real,
+    /// The FQN is declared as a planned node in `.trans` but not yet scanned —
+    /// pending, not an error (it realizes once the code lands).
+    Pending,
+    /// The FQN is in neither universe — the code is gone from the scanned
+    /// graph (spec drift).
+    Drift,
+}
+
+/// Classify one `implemented-by` code FQN (SPEC §4.1): [`CodeRefStatus::Real`]
+/// if `fqn` is in `scanned`; [`CodeRefStatus::Pending`] if it is in `planned`
+/// (and not `scanned`); [`CodeRefStatus::Drift`] otherwise. `scanned` is the
+/// set of code FQNs the scan produced; `planned` is the set of FQNs the plan
+/// declared as planned nodes (`.trans`).
+///
+/// **The scanned graph is the stronger check**: membership in `scanned` wins
+/// over membership in `planned` — a FQN in both universes is `Real` (it has
+/// landed; the plan's planned-node declaration is moot).
+// (Unused until ingest_tree, phase-3 task-15, validates implemented-by targets.)
+#[allow(dead_code)]
+pub fn classify_code_ref(
+    fqn: &str,
+    scanned: &BTreeSet<String>,
+    planned: &BTreeSet<String>,
+) -> CodeRefStatus {
+    if scanned.contains(fqn) {
+        CodeRefStatus::Real
+    } else if planned.contains(fqn) {
+        CodeRefStatus::Pending
+    } else {
+        CodeRefStatus::Drift
+    }
+}
+
+/// Validate a batch of `implemented-by` code FQNs against the scanned graph
+/// (SPEC §4.1): returns Ok if every ref is [`CodeRefStatus::Real`] or
+/// [`CodeRefStatus::Pending`]. A Pending ref is expected until the code lands
+/// (the scan later realizes it), never an error. Only a
+/// [`CodeRefStatus::Drift`] ref errors — the FQN is gone from the scanned graph
+/// (spec drift). Bails on the first Drift, naming the offending FQN. Pure — no
+/// I/O; the caller supplies both universes.
+// (Unused until ingest_tree, phase-3 task-15, validates implemented-by targets.)
+#[allow(dead_code)]
+pub fn validate_code_refs(
+    refs: &[&str],
+    scanned: &BTreeSet<String>,
+    planned: &BTreeSet<String>,
+) -> anyhow::Result<()> {
+    for fqn in refs {
+        if classify_code_ref(fqn, scanned, planned) == CodeRefStatus::Drift {
+            anyhow::bail!("spec drift: code FQN `{fqn}` is gone from the scanned graph");
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2596,5 +2665,77 @@ mod tests {
         let mut sys = node("solution", "system", "payments");
         sys.in_edges.push(in_edge("implemented-by", "apg.main"));
         assert!(check_edge_pairing(&[sys]).is_ok());
+    }
+
+    // --- Code-endpoint validation (phase-3 task-10) ---
+
+    /// A caller-supplied code-FQN universe: the scanned set or the planned
+    /// set, both plain [`BTreeSet`]s of opaque FQN strings.
+    fn code_universe(fqns: &[&str]) -> BTreeSet<String> {
+        fqns.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The three-way split (SPEC §4.1): a scanned FQN is Real, a planned-only
+    /// FQN is Pending, a FQN in neither universe is Drift.
+    #[test]
+    fn classify_code_ref_three_ways() {
+        let scanned = code_universe(&["apg.layers.validate_edges", "apg.main"]);
+        let planned = code_universe(&["apg.layers.ingest_tree"]);
+        assert_eq!(
+            classify_code_ref("apg.layers.validate_edges", &scanned, &planned),
+            CodeRefStatus::Real
+        );
+        assert_eq!(
+            classify_code_ref("apg.layers.ingest_tree", &scanned, &planned),
+            CodeRefStatus::Pending
+        );
+        assert_eq!(
+            classify_code_ref("apg.layers.gone", &scanned, &planned),
+            CodeRefStatus::Drift
+        );
+    }
+
+    /// The scanned graph is the stronger check: a FQN in BOTH scanned and
+    /// planned is Real (it has landed), not Pending.
+    #[test]
+    fn scanned_wins_over_planned() {
+        let scanned = code_universe(&["apg.main"]);
+        let planned = code_universe(&["apg.main"]);
+        assert_eq!(
+            classify_code_ref("apg.main", &scanned, &planned),
+            CodeRefStatus::Real
+        );
+    }
+
+    /// Pending is NOT an error — a planned-only FQN validates Ok (it realizes
+    /// once the code lands), never a spec-drift bail.
+    #[test]
+    fn pending_code_ref_is_not_an_error() {
+        let scanned = code_universe(&["apg.main"]);
+        let planned = code_universe(&["apg.layers.ingest_tree"]);
+        assert!(validate_code_refs(&["apg.layers.ingest_tree"], &scanned, &planned).is_ok());
+    }
+
+    /// A batch mixing Real and Pending refs validates Ok; a batch with one
+    /// Drift bails naming the offending FQN.
+    #[test]
+    fn validate_code_refs_ok_on_real_and_pending_errors_on_drift() {
+        let scanned = code_universe(&["apg.layers.validate_edges", "apg.main"]);
+        let planned = code_universe(&["apg.layers.ingest_tree"]);
+        // Real + Pending -> Ok.
+        assert!(
+            validate_code_refs(
+                &["apg.layers.validate_edges", "apg.layers.ingest_tree"],
+                &scanned,
+                &planned
+            )
+            .is_ok()
+        );
+        // One Drift -> Err, naming the FQN.
+        let err =
+            validate_code_refs(&["apg.main", "apg.layers.gone"], &scanned, &planned).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("spec drift"), "{msg}");
+        assert!(msg.contains("apg.layers.gone"), "{msg}");
     }
 }
