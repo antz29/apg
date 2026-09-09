@@ -735,6 +735,89 @@ pub fn derive_coupling(
     coupled
 }
 
+// ---------------------------------------------------------------------------
+// SPEC §3.1 — constraints are prose, review-only (phase-3 task-6)
+// ---------------------------------------------------------------------------
+
+/// Property key a **local** constraint uses to name the node it constrains
+/// (SPEC §3.1: "Local constraints attach to any tier-1–3 node"). The value is
+/// one authored-node FQN `<layer>.<type>.<name>` — the single node the prose
+/// "must hold" about. This is the *only* constraint property the binary
+/// interprets: a constraint has no expression language, so an attachment is a
+/// reference, never an expression.
+pub const PROP_ATTACHES_TO: &str = "attaches-to";
+
+/// Validate a proposed `constraint` node at write time (SPEC §3.1): constraints
+/// are **prose** ("X must hold") over things that **exist**. The binary
+/// validates only a constraint's *structure* and *references* — never whether
+/// the prose actually holds. **Satisfaction is assessed by review**
+/// (non-deterministic), never executed: there is no constraint-expression
+/// language in this change-set, and this function takes no prose input at all
+/// (the prose `body` is the node-file schema's top-level `body`, stored
+/// verbatim and read by a reviewer — not by the binary).
+///
+/// Structure (reuses [`validate_node`]'s shared node rules — a `constraint`
+/// carries no `kind`/`attribute`/`root`): the name matches the allowlist, the
+/// type exists in its layer (requirements/domain/solution/implementation/global
+/// host `constraint`; plans does not, so a plans-layer constraint is refused),
+/// and the name is unique per (layer, type).
+///
+/// References (the "never a non-thing" rule): a **local** constraint
+/// (requirements/domain/solution) *may* name the one tier-1–3 node it
+/// constrains via [`PROP_ATTACHES_TO`] — that FQN must parse and resolve
+/// against `existing` (the caller-supplied (layer, type, name) universe), or
+/// the write is refused. A **global** constraint ([`Layer::Global`]) guards the
+/// whole graph and must not declare an attachment — one is refused, not
+/// ignored (naming one thing contradicts whole-graph scope).
+///
+/// `existing` is the current identity universe, exactly as in [`validate_node`]:
+/// every node that already exists (or is co-proposed in the change) — *not* the
+/// constraint being validated.
+// (Unused until ingest_tree, phase-3 task-15, consults it.)
+#[allow(dead_code)]
+pub fn eval_constraint(
+    layer: Layer,
+    name: &str,
+    properties: &NodeProperties,
+    existing: &BTreeSet<(Layer, String, String)>,
+) -> anyhow::Result<()> {
+    // Structure: reuse the shared node rules — name allowlist, type-in-layer,
+    // uniqueness. A `constraint` takes no kind/attribute/root.
+    validate_node(layer, "constraint", name, properties, existing)?;
+
+    // References: only an `attaches-to` property is interpreted (there is no
+    // expression language — the prose body is never an input here).
+    let Some(target) = properties.get(PROP_ATTACHES_TO) else {
+        return Ok(());
+    };
+
+    // A global constraint guards the whole graph — an attachment is refused.
+    if layer == Layer::Global {
+        anyhow::bail!(
+            "global constraint `{name}` must not declare `{PROP_ATTACHES_TO}` — a global constraint guards the whole graph"
+        );
+    }
+
+    // A local constraint attaches to a tier-1–3 node. The target must parse as
+    // an authored-node FQN, live in a tier-1–3 layer, and resolve — never a
+    // non-thing.
+    let (target_layer, target_type, target_name) = parse_fqn(target.as_str())?;
+    if !matches!(
+        target_layer,
+        Layer::Requirements | Layer::Domain | Layer::Solution
+    ) {
+        anyhow::bail!(
+            "constraint `{name}` attaches to `{target}`, which is not a tier-1–3 node — local constraints attach to requirements/domain/solution"
+        );
+    }
+    if !existing.contains(&(target_layer, target_type, target_name)) {
+        anyhow::bail!(
+            "constraint `{name}` attaches to `{target}`, which does not exist — a constraint declares what must hold about something that EXISTS (never a non-thing)"
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1741,5 +1824,138 @@ mod tests {
                 assert!(!b.contains(flavor), "flavor {flavor} leaked into {b}");
             }
         }
+    }
+
+    /// A global constraint (layer Global) is well-formed with no attachment: it
+    /// guards the whole graph, so it carries nothing but prose.
+    #[test]
+    fn global_constraint_needs_no_attachment() {
+        let empty = BTreeSet::new();
+        assert!(eval_constraint(Layer::Global, "g1", &BTreeMap::new(), &empty).is_ok());
+    }
+
+    /// A local constraint (requirements/domain/solution) is well-formed when
+    /// its `attaches-to` resolves to an existing tier-1–3 node; a local
+    /// constraint without an attachment is also fine ("may attach").
+    #[test]
+    fn local_constraint_with_resolving_attachment_is_well_formed() {
+        let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
+            (
+                Layer::Requirements,
+                "requirement".to_string(),
+                "place-order".to_string(),
+            ),
+            (Layer::Domain, "entity".to_string(), "customer".to_string()),
+            (
+                Layer::Solution,
+                "system".to_string(),
+                "payments".to_string(),
+            ),
+        ]);
+        for (layer, target) in [
+            (
+                Layer::Requirements,
+                "requirements.requirement.place-order".to_string(),
+            ),
+            (Layer::Domain, "domain.entity.customer".to_string()),
+            (Layer::Solution, "solution.system.payments".to_string()),
+        ] {
+            let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), target.clone())]);
+            assert!(
+                eval_constraint(layer, "law", &props, &existing).is_ok(),
+                "{layer:?} attaching to {target} must validate"
+            );
+        }
+        // A local constraint without an attachment is fine ("may attach").
+        assert!(eval_constraint(Layer::Domain, "law", &BTreeMap::new(), &existing).is_ok());
+    }
+
+    /// A local constraint referencing a non-existent node is refused — "never a
+    /// non-thing": the reference must resolve, not merely parse.
+    #[test]
+    fn local_constraint_attaching_to_a_non_thing_bails() {
+        let existing: BTreeSet<(Layer, String, String)> =
+            BTreeSet::from([(Layer::Domain, "entity".to_string(), "customer".to_string())]);
+        let props = BTreeMap::from([(
+            PROP_ATTACHES_TO.to_string(),
+            "domain.entity.ghost".to_string(),
+        )]);
+        let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("never a non-thing"), "{msg}");
+        assert!(msg.contains("domain.entity.ghost"), "{msg}");
+    }
+
+    /// A local constraint attaches to a tier-1–3 node: a non-tier target (a
+    /// global node) is refused, and a malformed FQN does not even parse.
+    #[test]
+    fn local_constraint_attachment_must_be_a_tier_1_3_node() {
+        let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
+            (Layer::Global, "constraint".to_string(), "g1".to_string()),
+            (Layer::Domain, "entity".to_string(), "customer".to_string()),
+        ]);
+        // A global node is not a tier-1–3 node.
+        let props = BTreeMap::from([(
+            PROP_ATTACHES_TO.to_string(),
+            "global.constraint.g1".to_string(),
+        )]);
+        let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
+        assert!(err.to_string().contains("tier-1–3"), "{err}");
+        // A malformed FQN does not parse.
+        let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), "not-an-fqn".to_string())]);
+        let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
+        assert!(err.to_string().contains("FQN"), "{err}");
+        // A global constraint must not declare an attachment at all.
+        let props = BTreeMap::from([(
+            PROP_ATTACHES_TO.to_string(),
+            "domain.entity.customer".to_string(),
+        )]);
+        let err = eval_constraint(Layer::Global, "g2", &props, &existing).unwrap_err();
+        assert!(err.to_string().contains("guards the whole graph"), "{err}");
+    }
+
+    /// A `constraint` type is refused in a layer that does not host constraints
+    /// (plans); implementation hosts the attach-only pair, so it is NOT refused.
+    #[test]
+    fn constraint_type_refused_in_a_layer_without_constraints() {
+        let empty = BTreeSet::new();
+        let props = BTreeMap::new();
+        let err = eval_constraint(Layer::Plans, "x", &props, &empty).unwrap_err();
+        assert!(err.to_string().contains("does not exist in layer"), "{err}");
+        // Implementation hosts note/constraint (attach-only) — a constraint
+        // there is a real type.
+        assert!(eval_constraint(Layer::Implementation, "x", &props, &empty).is_ok());
+    }
+
+    /// Satisfaction is NEVER evaluated: there is no constraint-expression
+    /// language, and this function takes no prose input (the prose `body` is
+    /// the node-file's top-level field, never read here). A constraint whose
+    /// prose "would fail" — contradictory, or even expression-looking — still
+    /// passes structure/reference validation, because satisfaction is assessed
+    /// by review only.
+    #[test]
+    fn satisfaction_is_review_only_never_evaluated() {
+        let existing: BTreeSet<(Layer, String, String)> =
+            BTreeSet::from([(Layer::Domain, "entity".to_string(), "customer".to_string())]);
+        // Contradictory prose (stands in for the top-level `body`) — the binary
+        // never reads or evaluates it; only the reference is checked.
+        let props = BTreeMap::from([
+            (
+                PROP_ATTACHES_TO.to_string(),
+                "domain.entity.customer".to_string(),
+            ),
+            (
+                "body".to_string(),
+                "every order has a customer AND every order has no customer".to_string(),
+            ),
+        ]);
+        assert!(eval_constraint(Layer::Domain, "law", &props, &existing).is_ok());
+        // A global constraint with expression-looking prose is equally
+        // unevaluated.
+        let props = BTreeMap::from([(
+            "body".to_string(),
+            "count(entities) == 0 AND count(entities) > 0".to_string(),
+        )]);
+        assert!(eval_constraint(Layer::Global, "law", &props, &existing).is_ok());
     }
 }
