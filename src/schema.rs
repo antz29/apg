@@ -301,6 +301,73 @@ pub enum Record {
         body: String,
     },
 
+    // --- New-model tier catalog (apg-projects SPEC §3.1). ADD-ONLY: the old
+    // variants stay until task-18 removes them. FQNs are now
+    // `<layer>.<type>.<name>` (no project prefix) — derived from the node-file
+    // path by `ingest_tree`, never carried on the wire. ---
+    /// `{"type":"user","fqn":"requirements.user.<name>","name":"...","body":"..."}`
+    /// `User` ⊂ Stakeholder — "a thing that uses the system" (requirements).
+    User {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"group","fqn":"domain.group.<name>","name":"...","attribute":"core","root":"...","body":"..."}`
+    /// `Group` — the hierarchical domain container. `attribute` ∈
+    /// core|supporting|generic; `root` is the optional aggregate-group root.
+    Group {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        attribute: String,
+        #[serde(default)]
+        root: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"value","fqn":"domain.value.<name>","name":"...","body":"..."}`
+    /// `Value` — immutable (was ValueObject).
+    Value {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"service","fqn":"domain.service.<name>","name":"...","body":"..."}`
+    /// `Service` — stateless behaviour (was DomainProcess).
+    Service {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"person","fqn":"solution.person.<name>","name":"...","body":"..."}`
+    /// `Person` — the C4 view of User/Stakeholder (solution).
+    Person {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+    },
+
+    /// `{"type":"constraint","fqn":"<layer>.constraint.<name>","name":"...","body":"...","attaches-to":"..."}`
+    /// `Constraint` — declarative prose ("X must hold"); `attaches-to` is the
+    /// optional FQN of the one tier-1–3 node a local constraint constrains
+    /// (a global constraint carries none).
+    Constraint {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+        #[serde(rename = "attaches-to", default)]
+        attaches_to: String,
+    },
+
     /// `{"type":"invariant","fqn":"invariant/<name>","title":"...","body":"...","category":"process","scope":"spec","status":"active"}`
     /// Graph-wide rules artifacts must respect (Invariants-SPEC.md). Roots:
     /// `invariant/<name>` for universal rules, `<project>/invariant/<name>`
@@ -449,6 +516,42 @@ pub enum Record {
     /// `Checks` (Feedback → Invariant) — a review comment cites the rule it
     /// enforces (optional; most feedback is not an invariant violation).
     Checks {
+        from: String,
+        to: String,
+    },
+
+    // --- New-model §3.3 spec edges (apg-projects). ADD-ONLY: the old spine
+    // edges (`Realises`, `ImplementedBy`) stay until task-18. The kebab
+    // spellings are the §3.3 wire names — `Record`'s `rename_all =
+    // "snake_case"` would give `realised_by`/`implemented_by`, which is NOT
+    // the §3.3 spelling, so these carry explicit renames. `contains`/`drives`/
+    // `represents`/`details`/`calls`/`uses`/`depends-on` reuse the existing
+    // record variants and are routed by endpoint node-kind at load time
+    // (`depends-on` is the existing `DependsOn` Requirement→Requirement). ---
+    /// `{"type":"realised-by","from":"domain.service.<name>","to":"solution.system.<name>"}`
+    /// Domain Group/Entity/Service → Solution System/Container/Component.
+    #[serde(rename = "realised-by")]
+    RealisedBy {
+        from: String,
+        to: String,
+    },
+    /// `{"type":"implemented-by","from":"solution.component.<name>","to":"<code fqn>"}`
+    /// Solution System/Container/Component → code FQN (validated vs the
+    /// scanned graph by `layers::validate_code_refs`).
+    #[serde(rename = "implemented-by")]
+    SpecImplementedBy {
+        from: String,
+        to: String,
+    },
+    /// `{"type":"publishes","from":"domain.service.<name>","to":"domain.entity.<name>"}`
+    /// Service → Entity (kind: event).
+    Publishes {
+        from: String,
+        to: String,
+    },
+    /// `{"type":"subscribes","from":"domain.service.<name>","to":"domain.entity.<name>"}`
+    /// Service → Entity (kind: event).
+    Subscribes {
         from: String,
         to: String,
     },
@@ -693,5 +796,91 @@ mod tests {
         );
         assert!(matches!(c, Record::Checks { from, to }
                 if from == "foo/feedback-1" && to == "invariant/plan.task-kind-in-set"));
+    }
+
+    #[test]
+    fn new_model_node_records_parse() {
+        // The §3.1 catalog's new node records (apg-projects) parse with
+        // `<layer>.<type>.<name>` FQNs and their §3.1 attributes.
+        let lines = [
+            r#"{"type":"user","fqn":"requirements.user.customer","name":"customer","body":"uses it"}"#,
+            r#"{"type":"group","fqn":"domain.group.sales","name":"sales","attribute":"core","root":"sales-root","body":"..."}"#,
+            r#"{"type":"value","fqn":"domain.value.money","name":"money","body":"..."}"#,
+            r#"{"type":"service","fqn":"domain.service.checkout","name":"checkout","body":"..."}"#,
+            r#"{"type":"person","fqn":"solution.person.alice","name":"alice","body":"..."}"#,
+            r#"{"type":"constraint","fqn":"domain.constraint.law","name":"law","body":"X must hold","attaches-to":"domain.entity.customer"}"#,
+        ];
+        for l in lines {
+            let _ = parse(l);
+        }
+        match parse(lines[1]) {
+            Record::Group {
+                fqn,
+                name,
+                attribute,
+                root,
+                ..
+            } => {
+                assert_eq!(fqn, "domain.group.sales");
+                assert_eq!(name, "sales");
+                assert_eq!(attribute, "core");
+                assert_eq!(root, "sales-root");
+            }
+            other => panic!("expected group, got {other:?}"),
+        }
+        match parse(lines[5]) {
+            Record::Constraint {
+                fqn, attaches_to, ..
+            } => {
+                assert_eq!(fqn, "domain.constraint.law");
+                assert_eq!(attaches_to, "domain.entity.customer");
+            }
+            other => panic!("expected constraint, got {other:?}"),
+        }
+        // Optional attributes default when absent.
+        let g = parse(r#"{"type":"group","fqn":"domain.group.sales","name":"sales"}"#);
+        assert!(
+            matches!(g, Record::Group { ref attribute, ref root, ref body, .. }
+                if attribute.is_empty() && root.is_empty() && body.is_empty())
+        );
+        let c = parse(r#"{"type":"constraint","fqn":"global.constraint.law","name":"law"}"#);
+        assert!(matches!(c, Record::Constraint { ref attaches_to, .. } if attaches_to.is_empty()));
+    }
+
+    #[test]
+    fn new_model_edge_records_use_kebab_wire_names() {
+        // The §3.3 matrix edges that are NEW verbs serialize with kebab wire
+        // names, NOT the snake_case `rename_all` spelling. `depends-on` is not
+        // here — it reuses the existing `DependsOn` (Requirement→Requirement).
+        let lines = [
+            r#"{"type":"realised-by","from":"domain.group.sales","to":"solution.system.payments"}"#,
+            r#"{"type":"implemented-by","from":"solution.component.checkout","to":"apg.layers.ingest_tree"}"#,
+            r#"{"type":"publishes","from":"domain.service.orders","to":"domain.entity.order-placed"}"#,
+            r#"{"type":"subscribes","from":"domain.service.shipping","to":"domain.entity.order-placed"}"#,
+        ];
+        for l in lines {
+            let _ = parse(l);
+        }
+        assert!(
+            matches!(parse(lines[0]), Record::RealisedBy { ref from, ref to }
+                if from == "domain.group.sales" && to == "solution.system.payments")
+        );
+        assert!(
+            matches!(parse(lines[1]), Record::SpecImplementedBy { ref to, .. }
+                if to == "apg.layers.ingest_tree")
+        );
+        assert!(
+            matches!(parse(lines[2]), Record::Publishes { ref from, ref to }
+                if from == "domain.service.orders" && to == "domain.entity.order-placed")
+        );
+        assert!(matches!(parse(lines[3]), Record::Subscribes { ref to, .. }
+                if to == "domain.entity.order-placed"));
+        // Serialization round-trips the kebab wire name (not snake_case).
+        let s = serde_json::to_string(&parse(lines[0])).unwrap();
+        assert!(s.contains(r#""type":"realised-by""#), "{s}");
+        assert!(!s.contains("realised_by"), "{s}");
+        let s = serde_json::to_string(&parse(lines[1])).unwrap();
+        assert!(s.contains(r#""type":"implemented-by""#), "{s}");
+        assert!(!s.contains("implemented_by"), "{s}");
     }
 }

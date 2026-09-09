@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::git;
+use crate::schema::Record;
 
 /// The durable node-file root: `layers/` under the layout root (SPEC §4.1) —
 /// one file per node at `<layer>/<type>/<name>.json`, the file name IS the
@@ -1297,6 +1298,229 @@ fn rollback(paths: &[PathBuf], prior: &[Option<Vec<u8>>]) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// SPEC §4.1 — tree ingestion (phase-3 task-15)
+// ---------------------------------------------------------------------------
+
+/// Ingest the durable `apg/layers/` tree into the new-model graph records
+/// (apg-projects SPEC §4.1): walk [`LAYERS_TREE`], deserialize every
+/// `<layer>/<type>/<name>.json` into a [`NodeFile`], validate the assembled
+/// set, and convert it into the unified-JSONL `Record` stream `cmd_scan`
+/// chains after the scanner records.
+///
+/// Validation (all ERRORs, never silent):
+/// - [`check_edge_pairing`] over every node file — an in/out edge in one file
+///   without the matching out/in edge (same source, kind, target, AND
+///   properties) in the other endpoint's file is refused (R16 AC).
+/// - [`validate_code_refs`] on every `implemented-by` target against
+///   `scanned_code` (the code FQNs the just-run scan produced) and `planned`
+///   (the plan's planned-node FQNs, from `.trans`): resolves → real; planned →
+///   pending (not an error); gone from both → spec-drift error.
+/// - [`eval_constraint`] on every `constraint` node (structure + reference
+///   validation; satisfaction is review-only, R14).
+///
+/// The FQN of each node is derived from its **path** (`fqn(layer, type,
+/// name)`), never read — the file name IS the identity, and the file's own
+/// `layer`/`type`/`name` fields must match the path (SPEC §4.1). Out-edges
+/// are the canonical source for the emitted edge records; in-edges are
+/// verified (pairing) but never emitted.
+pub fn ingest_tree(
+    apg_root: &Path,
+    scanned_code: &BTreeSet<String>,
+    planned: &BTreeSet<String>,
+) -> anyhow::Result<Vec<Record>> {
+    // Walk the durable tree, deserializing one NodeFile per `<name>.json`.
+    let mut nodes: Vec<NodeFile> = Vec::new();
+    for (layer_dir, types) in LAYERS_TREE {
+        for node_type in *types {
+            let dir = apg_root.join(LAYERS_DIR).join(layer_dir).join(node_type);
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.extension().is_some_and(|e| e == "json") {
+                    continue;
+                }
+                let name = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+                let nf: NodeFile = serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!("{}: bad node file: {e}", path.display()))?;
+                // The file name IS the identity: the layer/type/name fields
+                // must match the path segments (SPEC §4.1).
+                if nf.layer != *layer_dir || nf.node_type != *node_type || nf.name != name {
+                    anyhow::bail!(
+                        "node file {}: layer/type/name fields must match the path segments",
+                        path.display()
+                    );
+                }
+                nodes.push(nf);
+            }
+        }
+    }
+    // Deterministic record order (one file per node, so paths are unique).
+    nodes.sort_by(|a, b| (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name)));
+
+    // 1. Pairwise in/out symmetry across ALL node files (R16 AC).
+    check_edge_pairing(&nodes)?;
+
+    // 2. `implemented-by` code refs against the scanned graph + planned nodes.
+    let refs: Vec<&str> = nodes
+        .iter()
+        .flat_map(|n| n.out.iter())
+        .filter(|oe| oe.kind == "implemented-by")
+        .map(|oe| oe.target.as_str())
+        .collect();
+    validate_code_refs(&refs, scanned_code, planned)?;
+
+    // 3. Constraint structure/reference validation over the assembled graph.
+    let universe: BTreeSet<(Layer, String, String)> = nodes
+        .iter()
+        .map(|n| (layer_of(&n.layer), n.node_type.clone(), n.name.clone()))
+        .collect();
+    for n in &nodes {
+        if n.node_type != "constraint" {
+            continue;
+        }
+        eval_constraint(layer_of(&n.layer), &n.name, &n.properties, &universe)?;
+    }
+
+    // Convert node files + out-edges into records (out is canonical).
+    let mut records = Vec::new();
+    for n in &nodes {
+        let layer = layer_of(&n.layer);
+        let f = fqn(layer, &n.node_type, &n.name);
+        records.push(node_record(&f, &n.node_type, n)?);
+        for oe in &n.out {
+            records.push(edge_record(&f, &oe.kind, &oe.target)?);
+        }
+    }
+    Ok(records)
+}
+
+/// Resolve a node file's `layer` string to its [`Layer`] — a hard error on an
+/// unknown layer (the catalog is closed).
+fn layer_of(layer_dir: &str) -> Layer {
+    match Layer::ALL.iter().find(|l| l.layer_dir() == layer_dir) {
+        Some(l) => *l,
+        None => panic!("unknown layer `{layer_dir}`"),
+    }
+}
+
+/// Convert one node file into its new-model node record. `f` is the derived
+/// FQN (`<layer>.<type>.<name>`); `properties` carries the §3.1 attributes
+/// (entity/container `kind`, group `attribute`/`root`, constraint
+/// `attaches-to`, a requirement's metadata `id`/`feature`) — short ids are
+/// metadata, never identity.
+fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record> {
+    let name = n.name.clone();
+    let body = n.body.clone();
+    let prop = |k: &str| n.properties.get(k).cloned().unwrap_or_default();
+    Ok(match node_type {
+        "stakeholder" => Record::Stakeholder {
+            fqn: f.to_string(),
+            name,
+            body,
+        },
+        "user" => Record::User {
+            fqn: f.to_string(),
+            name,
+            body,
+        },
+        "requirement" => Record::Requirement {
+            fqn: f.to_string(),
+            id: prop("id"),
+            title: name,
+            body,
+            feature: prop("feature"),
+        },
+        "note" => Record::Note {
+            fqn: f.to_string(),
+            body,
+            kind: prop("kind"),
+        },
+        "constraint" => Record::Constraint {
+            fqn: f.to_string(),
+            name,
+            body,
+            attaches_to: prop("attaches-to"),
+        },
+        "group" => Record::Group {
+            fqn: f.to_string(),
+            name,
+            attribute: prop("attribute"),
+            root: prop("root"),
+            body,
+        },
+        "entity" => Record::Entity {
+            fqn: f.to_string(),
+            name,
+            body,
+        },
+        "value" => Record::Value {
+            fqn: f.to_string(),
+            name,
+            body,
+        },
+        "service" => Record::Service {
+            fqn: f.to_string(),
+            name,
+            body,
+        },
+        "system" => Record::System {
+            fqn: f.to_string(),
+            name,
+            body,
+        },
+        "container" => Record::Container {
+            fqn: f.to_string(),
+            name,
+            kind: prop("kind"),
+            body,
+        },
+        "component" => Record::Component {
+            fqn: f.to_string(),
+            name,
+            body,
+        },
+        "person" => Record::Person {
+            fqn: f.to_string(),
+            name,
+            body,
+        },
+        other => anyhow::bail!("unknown node type `{other}` in layer `{}`", n.layer),
+    })
+}
+
+/// Convert one out-edge into its new-model edge record. `from` is the source
+/// node's derived FQN. The §3.3 kebab kinds map to the new-model records
+/// (`realised-by` → `RealisedBy`, `implemented-by` → `SpecImplementedBy`);
+/// `contains`/`drives`/`calls`/`uses`/`represents`/`details`/`depends-on` map
+/// to the shared records the ingestor routes by endpoint node-kind.
+fn edge_record(from: &str, kind: &str, to: &str) -> anyhow::Result<Record> {
+    let from = from.to_string();
+    let to = to.to_string();
+    Ok(match kind {
+        "contains" => Record::Contains { from, to },
+        "drives" => Record::Drives { from, to },
+        "realised-by" => Record::RealisedBy { from, to },
+        "implemented-by" => Record::SpecImplementedBy { from, to },
+        "calls" => Record::Calls { from, to },
+        "publishes" => Record::Publishes { from, to },
+        "subscribes" => Record::Subscribes { from, to },
+        "depends-on" => Record::DependsOn { from, to },
+        "uses" => Record::Uses { from, to },
+        "represents" => Record::Represents { from, to },
+        "details" => Record::Details { from, to },
+        other => anyhow::bail!("unknown edge kind `{other}`"),
+    })
 }
 
 #[cfg(test)]
@@ -3129,6 +3353,134 @@ mod tests {
             check_edge_pairing(&[a_read]).is_ok(),
             "a delete must leave no dangling pairing"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // --- Tree ingestion (phase-3 task-15) ---
+
+    /// Write a set of node files under `<root>/layers/…` at their derived
+    /// paths — the durable tree `ingest_tree` walks.
+    fn write_tree(root: &Path, nodes: &[NodeFile]) {
+        for n in nodes {
+            write_node(root, n).unwrap();
+        }
+    }
+
+    /// A sample spine tree: a requirement `drives` a group, the group is
+    /// `realised-by` a system, the system is `implemented-by` a code FQN.
+    /// Fully paired in/out halves.
+    fn sample_tree() -> Vec<NodeFile> {
+        let mut req = node("requirements", "requirement", "place-order");
+        req.out.push(out_edge("drives", "domain.group.sales"));
+        let mut grp = node("domain", "group", "sales");
+        grp.in_edges
+            .push(in_edge("drives", "requirements.requirement.place-order"));
+        grp.out
+            .push(out_edge("realised-by", "solution.system.payments"));
+        let mut sys = node("solution", "system", "payments");
+        sys.in_edges
+            .push(in_edge("realised-by", "domain.group.sales"));
+        sys.out.push(out_edge("implemented-by", "apg.main"));
+        vec![req, grp, sys]
+    }
+
+    /// `ingest_tree` on a small tree produces the right records: the three
+    /// node records at their derived `<layer>.<type>.<name>` FQNs, the three
+    /// edge records (drives / realised-by / implemented-by), and nothing from
+    /// the in-edge halves (out is canonical).
+    #[test]
+    fn ingest_tree_produces_node_and_edge_records() {
+        let root = temp_root("ingest-tree");
+        write_tree(&root, &sample_tree());
+        let scanned = code_universe(&["apg.main"]);
+        let planned: BTreeSet<String> = BTreeSet::new();
+
+        let records = ingest_tree(&root, &scanned, &planned).unwrap();
+
+        let has_node = |fqn: &str| {
+            records.iter().any(|r| match r {
+                Record::Requirement { fqn: f, .. }
+                | Record::Group { fqn: f, .. }
+                | Record::System { fqn: f, .. } => f == fqn,
+                _ => false,
+            })
+        };
+        assert!(has_node("requirements.requirement.place-order"));
+        assert!(has_node("domain.group.sales"));
+        assert!(has_node("solution.system.payments"));
+        // Exactly three node records (the group carries no attribute/root).
+        assert_eq!(
+            records
+                .iter()
+                .filter(|r| matches!(
+                    r,
+                    Record::Requirement { .. } | Record::Group { .. } | Record::System { .. }
+                ))
+                .count(),
+            3
+        );
+        // The spine edges, out-side only.
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Drives { from, to }
+                if from == "requirements.requirement.place-order" && to == "domain.group.sales"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::RealisedBy { from, to }
+                if from == "domain.group.sales" && to == "solution.system.payments"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::SpecImplementedBy { from, to }
+                if from == "solution.system.payments" && to == "apg.main"
+        )));
+        // The in-edge halves are never emitted (out is canonical).
+        assert!(!records.iter().any(|r| matches!(
+            r,
+            Record::RealisedBy { from, .. } if from == "solution.system.payments"
+        )));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A pairing mismatch — an out-edge in one file without the matching
+    /// in-edge in the target's file — is an ERROR at ingestion.
+    #[test]
+    fn ingest_tree_pairing_mismatch_errors() {
+        let root = temp_root("ingest-mismatch");
+        let mut nodes = sample_tree();
+        // Drop the group's in-edge: the requirement's out-edge now dangles.
+        nodes[1].in_edges.clear();
+        write_tree(&root, &nodes);
+        let scanned = code_universe(&["apg.main"]);
+        let planned: BTreeSet<String> = BTreeSet::new();
+        let err = ingest_tree(&root, &scanned, &planned).unwrap_err();
+        assert!(err.to_string().contains("BOTH endpoint files"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A `implemented-by` target gone from the scanned graph (and not a
+    /// planned node) is a spec-drift ERROR; a planned-only FQN ingests fine
+    /// (pending, not an error).
+    #[test]
+    fn ingest_tree_code_ref_gone_errors_planned_ingests() {
+        let root = temp_root("ingest-drift");
+        let nodes = sample_tree();
+        write_tree(&root, &nodes);
+        // `apg.main` is neither scanned nor planned → drift.
+        let scanned = code_universe(&["apg.other"]);
+        let planned: BTreeSet<String> = BTreeSet::new();
+        let err = ingest_tree(&root, &scanned, &planned).unwrap_err();
+        assert!(err.to_string().contains("spec drift"), "{err}");
+        assert!(err.to_string().contains("apg.main"), "{err}");
+        // `apg.main` planned (not scanned) → pending, ingests Ok.
+        let planned = code_universe(&["apg.main"]);
+        let records = ingest_tree(&root, &scanned, &planned).unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::SpecImplementedBy { from, to }
+                if from == "solution.system.payments" && to == "apg.main"
+        )));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

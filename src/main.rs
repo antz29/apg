@@ -17,6 +17,7 @@ mod specs;
 mod testutil;
 mod version_gate;
 
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -1059,6 +1060,39 @@ fn find_or_create_apg_root(dir: &Path) -> PathBuf {
     specs::find_or_create_apg_root(dir)
 }
 
+/// Build the scanner JSONL record stream from the frontend spools: a
+/// `lang_switch` record before each language's records plus the leading
+/// `scan_meta` control record. Borrows the spool paths (reopening each file)
+/// so it can be run twice — once for the pre-ingest that computes
+/// `ingest_tree`'s scanned code-FQN universe, then again for the real
+/// pipeline.
+fn scanner_records<'a>(
+    spools: &'a [(String, PathBuf)],
+    git_state: &'a git::GitState,
+) -> impl Iterator<Item = schema::Record> + 'a {
+    let iterators = spools.iter().map(|(lang, spool)| {
+        let lines = BufReader::new(std::fs::File::open(spool).unwrap()).lines();
+        let records = lines.map(|x| {
+            let line = x.expect("io error");
+            serde_json::from_str::<schema::Record>(&line)
+                .unwrap_or_else(|e| panic!("bad json {e}: {line}"))
+        });
+        Box::new(
+            std::iter::once(schema::Record::LangSwitch {
+                language: lang.clone(),
+            })
+            .chain(records),
+        ) as Box<dyn Iterator<Item = schema::Record>>
+    });
+    let records = iterators.into_iter().flatten();
+    std::iter::once(schema::Record::ScanMeta {
+        git_sha: git_state.sha.clone(),
+        git_clean: git_state.sha.as_ref().map(|_| git_state.clean),
+        scanned_at: git::now_iso8601(),
+    })
+    .chain(records)
+}
+
 /// `apg scan [dir] [options] [blacklist...]`: run the scanner + ingestor
 /// pipeline and write `db.lbug`, `graph.jsonl`, and `apg-frontend.log` into
 /// the project's `.apg` directory. A repo may mix languages: auto-detection
@@ -1254,49 +1288,12 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // each under the right language. A `scan_meta` control record (the git
     // state this scan ran under) leads the whole stream; the ingestor turns it
     // into the DB's `Scan` node and the export puts it on graph.jsonl line 1.
-    let iterators: Vec<Box<dyn Iterator<Item = schema::Record>>> = spools
-        .into_iter()
-        .map(|(lang, spool)| {
-            let lines = BufReader::new(std::fs::File::open(&spool).unwrap()).lines();
-            let records = lines.map(|x| {
-                let line = x.expect("io error");
-                serde_json::from_str::<schema::Record>(&line)
-                    .unwrap_or_else(|e| panic!("bad json {e}: {line}"))
-            });
-            Box::new(std::iter::once(schema::Record::LangSwitch { language: lang }).chain(records))
-                as Box<dyn Iterator<Item = schema::Record>>
-        })
-        .collect();
-    let records = iterators.into_iter().flatten();
-    let records = std::iter::once(schema::Record::ScanMeta {
-        git_sha: git_state.sha.clone(),
-        git_clean: git_state.sha.as_ref().map(|_| git_state.clean),
-        scanned_at: git::now_iso8601(),
-    })
-    .chain(records);
-
-    // Re-ingest the committed spec/plan/note data after code (SPEC R10):
-    // `apg/specs/*.jsonl`, `apg/notes/*.jsonl`, `apg/.trans/plans/*.jsonl`.
-    // Spec records carry canonical FQNs and reference code by FQN, so they
-    // merge into the same stream; pending anchors are reconciled ingestor-side.
-    let spec_inputs = specs::scan_inputs(&apg_root);
-    let mut spec_count = 0;
-    for set in [
-        spec_inputs.0.clone(),
-        spec_inputs.1.clone(),
-        spec_inputs.2.clone(),
-    ] {
-        spec_count += set.len();
-    }
-    if spec_count > 0 {
-        log.ln(&format!(
-            "Spec/plan/note inputs: {} spec files, {} note files, {} plan files",
-            spec_inputs.0.len(),
-            spec_inputs.1.len(),
-            spec_inputs.2.len(),
-        ));
-    }
-    let records = records.chain(specs::read_all(&apg_root));
+    //
+    // The scanner stream is built by a helper (borrowing the spool paths) so
+    // it can be read twice: once for a pre-ingest that computes the scanned
+    // code-FQN universe (the honest renderer reuse for `ingest_tree`'s
+    // `implemented-by` validation), and once for the real pipeline.
+    let records = scanner_records(&spools, &git_state);
 
     // Cleanup span validation is per-language: keep the single-language value,
     // and disable it (by joining) for mixed scans where the check cannot be
@@ -1306,6 +1303,63 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     } else {
         languages.join(",")
     };
+
+    // Pre-ingest the scanner stream to compute the scanned code-FQN universe
+    // `ingest_tree` validates `implemented-by` refs against (real → real).
+    let scanned_code: BTreeSet<String> = {
+        let (pre, _) = ingest::ingest(
+            scanner_records(&spools, &git_state),
+            &ingest::IngestOptions {
+                blacklist: &blacklist,
+                language: &cleanup_language,
+                config: config.as_ref(),
+            },
+        );
+        pre.nodes
+            .iter()
+            .filter(|(_, n)| {
+                matches!(
+                    n.kind,
+                    graph::NodeKind::Module
+                        | graph::NodeKind::Struct
+                        | graph::NodeKind::Function
+                        | graph::NodeKind::File
+                ) && n.status.is_none()
+            })
+            .map(|(f, _)| f.clone())
+            .collect()
+    };
+
+    // Read the transient plans leg (`.trans/plans/*.jsonl` — the old-model
+    // Plan/PlanPhase/Task/PlannedNode records, SURVIVES per R18) into both the
+    // planned-FQN universe `ingest_tree` uses (planned → pending) and the
+    // records the pipeline chains after code.
+    let (_, _, plan_files) = specs::scan_inputs(&apg_root);
+    let mut plan_records: Vec<schema::Record> = Vec::new();
+    let mut planned: BTreeSet<String> = BTreeSet::new();
+    for f in &plan_files {
+        for r in specs::read_jsonl(f).unwrap_or_else(|e| panic!("{e:#}")) {
+            if let schema::Record::PlannedNode { fqn, .. } = &r {
+                planned.insert(fqn.clone());
+            }
+            plan_records.push(r);
+        }
+    }
+
+    // Ingest the durable `apg/layers/` tree into the new-model records,
+    // validating pairing / code-refs / constraints (R14/R16) against the
+    // scanned graph and the planned-node universe.
+    let layers_records = layers::ingest_tree(&apg_root, &scanned_code, &planned)?;
+
+    if !layers_records.is_empty() || !plan_records.is_empty() {
+        log.ln(&format!(
+            "Layer tree + plan inputs: {} layer-node records, {} plan records",
+            layers_records.len(),
+            plan_records.len(),
+        ));
+    }
+
+    let records = records.chain(layers_records).chain(plan_records);
 
     run_pipeline(
         records,

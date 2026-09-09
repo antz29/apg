@@ -34,6 +34,17 @@ pub struct Graph {
     /// (`GuardedBy`) and Feedback → Invariant (`Checks`).
     pub guarded_by: HashSet<(String, String)>,
     pub checks: HashSet<(String, String)>,
+    /// New-model §3.3 spec edges (apg-projects). The kebab spellings
+    /// (`realised-by`, `implemented-by`) are the §3.3 wire names — distinct
+    /// from the old spine edges (`Realises`, `ImplementedBy`) that task-18
+    /// removes. `calls`/`uses`/`contains`/`drives`/`represents`/`details`/
+    /// `depends-on` reuse the scanner/spine sets above and are routed by
+    /// endpoint node-kind at load time (`depends-on` is the same
+    /// Requirement→Requirement relation as `DependsOn`).
+    pub realised_by: HashSet<(String, String)>,
+    pub spec_implemented_by: HashSet<(String, String)>,
+    pub publishes: HashSet<(String, String)>,
+    pub subscribes: HashSet<(String, String)>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -89,6 +100,24 @@ pub enum NodeKind {
     /// rule artifacts must respect, guardable onto them (`GuardedBy`) and
     /// citable from review feedback (`Checks`).
     Invariant,
+    // --- New-model tier catalog (apg-projects SPEC §3.1). ADD-ONLY: the old
+    // ValueObject/DomainProcess/Actor/Invariant/etc. variants stay until
+    // task-18 removes them; these new kinds coexist. ---
+    /// `User` ⊂ Stakeholder — "a thing that uses the system" (requirements).
+    User,
+    /// `Group` — the hierarchical domain container (groups in groups;
+    /// attribute core/supporting/generic, optional root). BoundedContext/
+    /// Subdomain/Aggregate/DomainRule collapse into it.
+    Group,
+    /// `Value` — immutable (was ValueObject).
+    Value,
+    /// `Service` — stateless behaviour (was DomainProcess).
+    Service,
+    /// `Person` — the C4 view of User/Stakeholder (solution).
+    Person,
+    /// `Constraint` — declarative prose ("X must hold"); structure/reference
+    /// validation only, satisfaction by review (was Invariant).
+    Constraint,
     /// The scan-time git-state node (fqn `scan/HEAD`, one per DB; rewritten at
     /// every scan). Standalone — it carries no rel tables.
     Scan,
@@ -123,6 +152,13 @@ pub struct Node {
     /// The aggregate-root entity name of an `Aggregate` node.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
+    /// The `attribute` of a `Group` node (`core`/`supporting`/`generic`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attribute: Option<String>,
+    /// The `attaches-to` FQN of a `Constraint` node — the one tier-1–3 node a
+    /// local constraint constrains (a global constraint carries none).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attaches_to: Option<String>,
     /// The `scope` of an `Invariant` node (the artifact kind it applies to:
     /// spec/plan/review/code/…).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -180,6 +216,8 @@ impl Default for Node {
             id: None,
             name: None,
             root: None,
+            attribute: None,
+            attaches_to: None,
             scope: None,
             feature: None,
             body: None,

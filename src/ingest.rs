@@ -600,6 +600,75 @@ pub fn ingest(
                         ..spec_node(NodeKind::Invariant)
                     },
                 ),
+                // New-model tier catalog (apg-projects SPEC §3.1).
+                Record::User { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::User)
+                    },
+                ),
+                Record::Group {
+                    fqn,
+                    name,
+                    attribute,
+                    root,
+                    body,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        attribute: opt(attribute),
+                        root: opt(root),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Group)
+                    },
+                ),
+                Record::Value { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Value)
+                    },
+                ),
+                Record::Service { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Service)
+                    },
+                ),
+                Record::Person { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Person)
+                    },
+                ),
+                Record::Constraint {
+                    fqn,
+                    name,
+                    body,
+                    attaches_to,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        attaches_to: opt(attaches_to),
+                        ..spec_node(NodeKind::Constraint)
+                    },
+                ),
                 Record::Note { fqn, body, kind } => insert_node(
                     &mut graph,
                     fqn,
@@ -986,6 +1055,39 @@ pub fn ingest(
                     }
                     graph.checks.insert((a, b));
                 }
+                // New-model §3.3 spec edges (apg-projects).
+                Record::RealisedBy { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.realised_by.insert((a, b));
+                }
+                Record::SpecImplementedBy { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.spec_implemented_by.insert((a, b));
+                }
+                Record::Publishes { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.publishes.insert((a, b));
+                }
+                Record::Subscribes { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.subscribes.insert((a, b));
+                }
                 _ => unreachable!("non-edge record reached the edge pass"),
             }
         }
@@ -1008,14 +1110,18 @@ pub fn ingest(
     graph.calls.retain(|(a, b)| {
         graph.nodes.contains_key(a)
             && graph.nodes.contains_key(b)
-            && graph.nodes[a].kind == NodeKind::Function
-            && graph.nodes[b].kind == NodeKind::Function
+            && ((graph.nodes[a].kind == NodeKind::Function
+                && graph.nodes[b].kind == NodeKind::Function)
+                || (graph.nodes[a].kind == NodeKind::Service
+                    && graph.nodes[b].kind == NodeKind::Service))
     });
     graph.uses.retain(|(a, b)| {
         graph.nodes.contains_key(a)
             && graph.nodes.contains_key(b)
-            && graph.nodes[b].kind == NodeKind::Struct
-            && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
+            && ((graph.nodes[b].kind == NodeKind::Struct
+                && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct))
+                || (graph.nodes[a].kind == NodeKind::Person
+                    && graph.nodes[b].kind == NodeKind::System))
     });
     graph.unresolved_calls.retain(|(a, b, _)| {
         graph.nodes.contains_key(a)
@@ -1082,8 +1188,16 @@ pub fn ingest(
     // Requirement → Domain; Realises/Represents run Domain → Solution
     // (System/Container/Component); ImplementedBy runs Solution → Implementation
     // (the code tier). Both endpoints must exist and carry the tier kinds.
+    // The §3.3 `drives`/`represents` shapes (apg-projects) extend the same
+    // sets: `drives` also runs Requirement → Group/Entity/Value/Service, and
+    // `represents` also runs User → Entity and Entity → Person.
     graph.drives = filter_edges(&graph, &graph.drives, |g, a, b| {
-        kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Domain)
+        kind_is(g, a, NodeKind::Requirement)
+            && (kind_is(g, b, NodeKind::Domain)
+                || matches!(
+                    g.nodes[b].kind,
+                    NodeKind::Group | NodeKind::Entity | NodeKind::Value | NodeKind::Service
+                ))
     });
     graph.requires = filter_edges(&graph, &graph.requires, |g, a, b| {
         kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Domain)
@@ -1092,7 +1206,9 @@ pub fn ingest(
         kind_is(g, a, NodeKind::Domain) && is_solution_kind(g, b)
     });
     graph.represents = filter_edges(&graph, &graph.represents, |g, a, b| {
-        kind_is(g, a, NodeKind::Domain) && is_solution_kind(g, b)
+        (kind_is(g, a, NodeKind::Domain) && is_solution_kind(g, b))
+            || (kind_is(g, a, NodeKind::User) && kind_is(g, b, NodeKind::Entity))
+            || (kind_is(g, a, NodeKind::Entity) && kind_is(g, b, NodeKind::Person))
     });
     graph.implemented_by = filter_edges(&graph, &graph.implemented_by, |g, a, b| {
         is_solution_kind(g, a)
@@ -1147,6 +1263,30 @@ pub fn ingest(
             && g.nodes[b].kind == NodeKind::Invariant
     });
 
+    // New-model §3.3 spec edges (apg-projects). RealisedBy runs Group/Entity/
+    // Service → System/Container/Component; SpecImplementedBy runs System/
+    // Container/Component → code; Publishes/Subscribes run Service → Entity.
+    graph.realised_by = filter_edges(&graph, &graph.realised_by, |g, a, b| {
+        matches!(
+            g.nodes[a].kind,
+            NodeKind::Group | NodeKind::Entity | NodeKind::Service
+        ) && is_solution_kind(g, b)
+    });
+    graph.spec_implemented_by = filter_edges(&graph, &graph.spec_implemented_by, |g, a, b| {
+        is_solution_kind(g, a)
+            && g.nodes.contains_key(b)
+            && matches!(
+                g.nodes[b].kind,
+                NodeKind::Module | NodeKind::File | NodeKind::Struct | NodeKind::Function
+            )
+    });
+    graph.publishes = filter_edges(&graph, &graph.publishes, |g, a, b| {
+        kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
+    });
+    graph.subscribes = filter_edges(&graph, &graph.subscribes, |g, a, b| {
+        kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
+    });
+
     (
         graph,
         IngestReport {
@@ -1198,6 +1338,15 @@ fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
             | (NodeKind::Aggregate, NodeKind::ValueObject)
             | (NodeKind::System, NodeKind::Container)
             | (NodeKind::Container, NodeKind::Component)
+            // New-model §3.3 `contains` rows (apg-projects): the requirements
+            // tree and the plain-named domain hierarchy.
+            | (NodeKind::Stakeholder, NodeKind::Requirement)
+            | (NodeKind::User, NodeKind::Requirement)
+            | (NodeKind::Requirement, NodeKind::Requirement)
+            | (NodeKind::Group, NodeKind::Group)
+            | (NodeKind::Group, NodeKind::Entity)
+            | (NodeKind::Group, NodeKind::Value)
+            | (NodeKind::Group, NodeKind::Service)
     )
 }
 
@@ -1234,7 +1383,8 @@ fn filter_edges(
 /// 2 uses, 3 unresolved_call, 4 unresolved_use, 5 details, 6 reviews,
 /// 7 depends_on, 8 gates, 9 spec_depends, 10 anchors, 11 implements,
 /// 12 satisfies, 13 builds, 14 drives, 15 requires, 16 realises,
-/// 17 represents, 18 implemented_by, 19 guarded_by, 20 checks) followed by
+/// 17 represents, 18 implemented_by, 19 guarded_by, 20 checks, 21 realised_by,
+/// 22 spec_implemented_by, 23 publishes, 24 subscribes) followed by
 /// three length-prefixed UTF-8 strings (from, to, target_type; the last empty
 /// for most).
 fn write_edge(w: &mut impl Write, r: Record) {
@@ -1264,6 +1414,10 @@ fn write_edge(w: &mut impl Write, r: Record) {
         Record::ImplementedBy { from, to } => write_edge_fields(w, 18, &from, &to, ""),
         Record::GuardedBy { from, to } => write_edge_fields(w, 19, &from, &to, ""),
         Record::Checks { from, to } => write_edge_fields(w, 20, &from, &to, ""),
+        Record::RealisedBy { from, to } => write_edge_fields(w, 21, &from, &to, ""),
+        Record::SpecImplementedBy { from, to } => write_edge_fields(w, 22, &from, &to, ""),
+        Record::Publishes { from, to } => write_edge_fields(w, 23, &from, &to, ""),
+        Record::Subscribes { from, to } => write_edge_fields(w, 24, &from, &to, ""),
         other => unreachable!("non-edge record reached the edge spool: {other:?}"),
     }
 }
@@ -1315,6 +1469,10 @@ impl<R: BufRead> EdgeReader<R> {
             18 => Record::ImplementedBy { from: a, to: b },
             19 => Record::GuardedBy { from: a, to: b },
             20 => Record::Checks { from: a, to: b },
+            21 => Record::RealisedBy { from: a, to: b },
+            22 => Record::SpecImplementedBy { from: a, to: b },
+            23 => Record::Publishes { from: a, to: b },
+            24 => Record::Subscribes { from: a, to: b },
             t => panic!("bad edge spool tag: {t}"),
         })
     }

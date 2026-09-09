@@ -252,6 +252,29 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut invariant_scope = Vec::new();
     let mut invariant_status = Vec::new();
 
+    // New-model tier catalog (apg-projects SPEC §3.1).
+    let mut user_fqn = Vec::new();
+    let mut user_name = Vec::new();
+    let mut user_body = Vec::new();
+    let mut group_fqn = Vec::new();
+    let mut group_name = Vec::new();
+    let mut group_attribute = Vec::new();
+    let mut group_root = Vec::new();
+    let mut group_body = Vec::new();
+    let mut value_fqn = Vec::new();
+    let mut value_name = Vec::new();
+    let mut value_body = Vec::new();
+    let mut service_fqn = Vec::new();
+    let mut service_name = Vec::new();
+    let mut service_body = Vec::new();
+    let mut person_fqn = Vec::new();
+    let mut person_name = Vec::new();
+    let mut person_body = Vec::new();
+    let mut constraint_fqn = Vec::new();
+    let mut constraint_name = Vec::new();
+    let mut constraint_body = Vec::new();
+    let mut constraint_attaches_to = Vec::new();
+
     for (fqn, node) in &graph.nodes {
         match node.kind {
             NodeKind::Module => {
@@ -442,6 +465,39 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 invariant_category.push(node.category.clone().unwrap_or_default());
                 invariant_scope.push(node.scope.clone().unwrap_or_default());
                 invariant_status.push(node.status.clone().unwrap_or_default());
+            }
+            NodeKind::User => {
+                user_fqn.push(fqn.clone());
+                user_name.push(node.name.clone().unwrap_or_default());
+                user_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Group => {
+                group_fqn.push(fqn.clone());
+                group_name.push(node.name.clone().unwrap_or_default());
+                group_attribute.push(node.attribute.clone().unwrap_or_default());
+                group_root.push(node.root.clone().unwrap_or_default());
+                group_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Value => {
+                value_fqn.push(fqn.clone());
+                value_name.push(node.name.clone().unwrap_or_default());
+                value_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Service => {
+                service_fqn.push(fqn.clone());
+                service_name.push(node.name.clone().unwrap_or_default());
+                service_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Person => {
+                person_fqn.push(fqn.clone());
+                person_name.push(node.name.clone().unwrap_or_default());
+                person_body.push(node.body.clone().unwrap_or_default());
+            }
+            NodeKind::Constraint => {
+                constraint_fqn.push(fqn.clone());
+                constraint_name.push(node.name.clone().unwrap_or_default());
+                constraint_body.push(node.body.clone().unwrap_or_default());
+                constraint_attaches_to.push(node.attaches_to.clone().unwrap_or_default());
             }
         }
     }
@@ -717,6 +773,57 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("status", Col::Str(invariant_status)),
         ],
     )?;
+    write_parquet(
+        &dir.join("user.parquet"),
+        &[
+            ("fqn", Col::Str(user_fqn)),
+            ("name", Col::Str(user_name)),
+            ("body", Col::Str(user_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("group.parquet"),
+        &[
+            ("fqn", Col::Str(group_fqn)),
+            ("name", Col::Str(group_name)),
+            ("attribute", Col::Str(group_attribute)),
+            ("root", Col::Str(group_root)),
+            ("body", Col::Str(group_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("value.parquet"),
+        &[
+            ("fqn", Col::Str(value_fqn)),
+            ("name", Col::Str(value_name)),
+            ("body", Col::Str(value_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("service.parquet"),
+        &[
+            ("fqn", Col::Str(service_fqn)),
+            ("name", Col::Str(service_name)),
+            ("body", Col::Str(service_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("person.parquet"),
+        &[
+            ("fqn", Col::Str(person_fqn)),
+            ("name", Col::Str(person_name)),
+            ("body", Col::Str(person_body)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("constraint.parquet"),
+        &[
+            ("fqn", Col::Str(constraint_fqn)),
+            ("name", Col::Str(constraint_name)),
+            ("body", Col::Str(constraint_body)),
+            ("attaches_to", Col::Str(constraint_attaches_to)),
+        ],
+    )?;
 
     // --- Rel tables ---
     let mut c_mm = (Vec::new(), Vec::new());
@@ -756,18 +863,26 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         }
     }
 
-    let mut calls = (Vec::new(), Vec::new());
+    let mut calls_fn = (Vec::new(), Vec::new());
+    let mut calls_svc = (Vec::new(), Vec::new());
     for (a, b) in &graph.calls {
-        calls.0.push(a.clone());
-        calls.1.push(b.clone());
+        let dst = match graph.nodes[a].kind {
+            NodeKind::Function => &mut calls_fn,
+            NodeKind::Service => &mut calls_svc,
+            _ => unreachable!("unvalidated calls edge"),
+        };
+        dst.0.push(a.clone());
+        dst.1.push(b.clone());
     }
 
     let mut u_fn = (Vec::new(), Vec::new());
     let mut u_st = (Vec::new(), Vec::new());
+    let mut u_person = (Vec::new(), Vec::new());
     for (a, b) in &graph.uses {
         let dst = match graph.nodes[a].kind {
             NodeKind::Function => &mut u_fn,
             NodeKind::Struct => &mut u_st,
+            NodeKind::Person => &mut u_person,
             _ => unreachable!("unvalidated uses edge"),
         };
         dst.0.push(a.clone());
@@ -807,9 +922,11 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     rel("contains_file_fn.parquet", c_ff.0, c_ff.1)?;
     rel("contains_struct_struct.parquet", c_ss.0, c_ss.1)?;
     rel("contains_struct_fn.parquet", c_sf.0, c_sf.1)?;
-    rel("calls.parquet", calls.0, calls.1)?;
+    rel("calls_fn.parquet", calls_fn.0, calls_fn.1)?;
+    rel("calls_svc.parquet", calls_svc.0, calls_svc.1)?;
     rel("uses_fn.parquet", u_fn.0, u_fn.1)?;
     rel("uses_struct.parquet", u_st.0, u_st.1)?;
+    rel("uses_person.parquet", u_person.0, u_person.1)?;
     write_parquet(
         &dir.join("unresolved_call.parquet"),
         &[
@@ -972,6 +1089,39 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                     }
                 }
             }
+            // New-model §3.3 spec edges (apg-projects).
+            "RealisedBy" => {
+                for (a, b) in &graph.realised_by {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "SpecImplementedBy" => {
+                for (a, b) in &graph.spec_implemented_by {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Publishes" => {
+                for (a, b) in &graph.publishes {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Subscribes" => {
+                for (a, b) in &graph.subscribes {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
             _ => unreachable!("unknown spec rel table: {table}"),
         }
         rel(&pair_file(table, from, to), fa, fb)?;
@@ -1020,6 +1170,17 @@ fn contains_pairs() -> Vec<(NodeKind, NodeKind)> {
         (Aggregate, ValueObject),
         (System, Container),
         (Container, Component),
+        // New-model §3.3 `contains` rows (apg-projects): the requirements tree
+        // (Stakeholder/User/Requirement ⊃ Requirement) and the plain-named
+        // domain hierarchy (Group ⊃ Group/Entity/Value/Service). System ⊃
+        // Container ⊃ Component are already listed above.
+        (Stakeholder, Requirement),
+        (User, Requirement),
+        (Requirement, Requirement),
+        (Group, Group),
+        (Group, Entity),
+        (Group, Value),
+        (Group, Service),
     ]
 }
 
@@ -1073,6 +1234,12 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
         System,
         Container,
         Component,
+        User,
+        Group,
+        Value,
+        Service,
+        Person,
+        Constraint,
     ] {
         v.push(("Details", Note, to));
     }
@@ -1104,6 +1271,12 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
         System,
         Container,
         Component,
+        User,
+        Group,
+        Value,
+        Service,
+        Person,
+        Constraint,
     ] {
         v.push(("Reviews", Feedback, to));
     }
@@ -1141,6 +1314,28 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
         v.push(("ImplementedBy", to, Struct));
         v.push(("ImplementedBy", to, Function));
     }
+    // New-model §3.3 spec edges (apg-projects). `drives`/`represents` extend
+    // the spine tables with the §3.3 endpoint shapes; the new verbs get their
+    // own tables. `depends-on` reuses `DependsOn` (Requirement→Requirement)
+    // above; `calls`/`uses`/`contains` are handled by their own bucket loops.
+    for to in [Group, Entity, Value, Service] {
+        v.push(("Drives", Requirement, to));
+    }
+    v.push(("Represents", User, Entity));
+    v.push(("Represents", Entity, Person));
+    for from in [Group, Entity, Service] {
+        for to in [System, Container, Component] {
+            v.push(("RealisedBy", from, to));
+        }
+    }
+    for from in [System, Container, Component] {
+        v.push(("SpecImplementedBy", from, Module));
+        v.push(("SpecImplementedBy", from, File));
+        v.push(("SpecImplementedBy", from, Struct));
+        v.push(("SpecImplementedBy", from, Function));
+    }
+    v.push(("Publishes", Service, Entity));
+    v.push(("Subscribes", Service, Entity));
     // Invariant edges (Invariants-SPEC.md; PHASE_02): GuardedBy artifact →
     // Invariant (every guardable kind), Checks Feedback → Invariant.
     for from in [
@@ -1219,6 +1414,12 @@ fn kind_slug(k: NodeKind) -> &'static str {
         NodeKind::Container => "container",
         NodeKind::Component => "component",
         NodeKind::Invariant => "invariant",
+        NodeKind::User => "user",
+        NodeKind::Group => "group",
+        NodeKind::Value => "value",
+        NodeKind::Service => "service",
+        NodeKind::Person => "person",
+        NodeKind::Constraint => "constraint",
     }
 }
 
@@ -1331,6 +1532,12 @@ pub fn node_labels() -> &'static [&'static str] {
         "Container",
         "Component",
         "Invariant",
+        "User",
+        "DomainGroup",
+        "Value",
+        "Service",
+        "Person",
+        "Constraint",
     ]
 }
 
@@ -1381,6 +1588,15 @@ pub fn label_of(k: NodeKind) -> &'static str {
         NodeKind::Container => "Container",
         NodeKind::Component => "Component",
         NodeKind::Invariant => "Invariant",
+        NodeKind::User => "User",
+        // `Group` is a reserved LadybugDB keyword (like `GROUP BY`), so the
+        // node TABLE label is `DomainGroup` — the FQN type string stays
+        // `group` (e.g. `domain.group.<name>`), only the DB table name differs.
+        NodeKind::Group => "DomainGroup",
+        NodeKind::Value => "Value",
+        NodeKind::Service => "Service",
+        NodeKind::Person => "Person",
+        NodeKind::Constraint => "Constraint",
     }
 }
 
@@ -1446,11 +1662,23 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query(
         "CREATE NODE TABLE Invariant(fqn STRING PRIMARY KEY, title STRING, body STRING, category STRING, scope STRING, status STRING)",
     )?;
+    conn.query("CREATE NODE TABLE User(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
     conn.query(
-        "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Spec TO Requirement, FROM Spec TO Phase, FROM Phase TO Requirement, FROM Spec TO Decision, FROM Spec TO NonGoal, FROM Spec TO AcceptanceCriterion, FROM Spec TO VerificationItem, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM PlanPhase TO AcceptanceCriterion, FROM PlanPhase TO VerificationItem, FROM Spec TO Stakeholder, FROM Spec TO Domain, FROM Spec TO System, FROM Domain TO Subdomain, FROM Domain TO DomainEvent, FROM Domain TO DomainProcess, FROM Domain TO DomainRule, FROM Domain TO Actor, FROM Subdomain TO Aggregate, FROM Aggregate TO Entity, FROM Aggregate TO ValueObject, FROM System TO Container, FROM Container TO Component)",
+        "CREATE NODE TABLE DomainGroup(fqn STRING PRIMARY KEY, name STRING, attribute STRING, root STRING, body STRING)",
     )?;
-    conn.query("CREATE REL TABLE Calls(FROM Function TO Function)")?;
-    conn.query("CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct)")?;
+    conn.query("CREATE NODE TABLE Value(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
+    conn.query("CREATE NODE TABLE Service(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
+    conn.query("CREATE NODE TABLE Person(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
+    conn.query(
+        "CREATE NODE TABLE Constraint(fqn STRING PRIMARY KEY, name STRING, body STRING, attaches_to STRING)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Spec TO Requirement, FROM Spec TO Phase, FROM Phase TO Requirement, FROM Spec TO Decision, FROM Spec TO NonGoal, FROM Spec TO AcceptanceCriterion, FROM Spec TO VerificationItem, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM PlanPhase TO AcceptanceCriterion, FROM PlanPhase TO VerificationItem, FROM Spec TO Stakeholder, FROM Spec TO Domain, FROM Spec TO System, FROM Domain TO Subdomain, FROM Domain TO DomainEvent, FROM Domain TO DomainProcess, FROM Domain TO DomainRule, FROM Domain TO Actor, FROM Subdomain TO Aggregate, FROM Aggregate TO Entity, FROM Aggregate TO ValueObject, FROM System TO Container, FROM Container TO Component, FROM Stakeholder TO Requirement, FROM User TO Requirement, FROM Requirement TO Requirement, FROM DomainGroup TO DomainGroup, FROM DomainGroup TO Entity, FROM DomainGroup TO Value, FROM DomainGroup TO Service)",
+    )?;
+    conn.query("CREATE REL TABLE Calls(FROM Function TO Function, FROM Service TO Service)")?;
+    conn.query(
+        "CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct, FROM Person TO System)",
+    )?;
     conn.query(
         "CREATE REL TABLE UnresolvedCall(FROM Function TO UnresolvedTarget, target_type STRING)",
     )?;
@@ -1458,10 +1686,10 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE UnresolvedUse(FROM Function TO UnresolvedTarget, FROM Struct TO UnresolvedTarget)",
     )?;
     conn.query(
-        "CREATE REL TABLE Details(FROM Note TO Module, FROM Note TO Function, FROM Note TO Struct, FROM Note TO File, FROM Note TO Spec, FROM Note TO Requirement, FROM Note TO Phase, FROM Note TO Decision, FROM Note TO NonGoal, FROM Note TO AcceptanceCriterion, FROM Note TO VerificationItem, FROM Note TO Plan, FROM Note TO PlanPhase, FROM Note TO Task, FROM Note TO Stakeholder, FROM Note TO Domain, FROM Note TO Subdomain, FROM Note TO Entity, FROM Note TO ValueObject, FROM Note TO Aggregate, FROM Note TO DomainEvent, FROM Note TO DomainProcess, FROM Note TO DomainRule, FROM Note TO Actor, FROM Note TO System, FROM Note TO Container, FROM Note TO Component)",
+        "CREATE REL TABLE Details(FROM Note TO Module, FROM Note TO Function, FROM Note TO Struct, FROM Note TO File, FROM Note TO Spec, FROM Note TO Requirement, FROM Note TO Phase, FROM Note TO Decision, FROM Note TO NonGoal, FROM Note TO AcceptanceCriterion, FROM Note TO VerificationItem, FROM Note TO Plan, FROM Note TO PlanPhase, FROM Note TO Task, FROM Note TO Stakeholder, FROM Note TO Domain, FROM Note TO Subdomain, FROM Note TO Entity, FROM Note TO ValueObject, FROM Note TO Aggregate, FROM Note TO DomainEvent, FROM Note TO DomainProcess, FROM Note TO DomainRule, FROM Note TO Actor, FROM Note TO System, FROM Note TO Container, FROM Note TO Component, FROM Note TO User, FROM Note TO DomainGroup, FROM Note TO Value, FROM Note TO Service, FROM Note TO Person, FROM Note TO Constraint)",
     )?;
     conn.query(
-        "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Spec, FROM Feedback TO Requirement, FROM Feedback TO Phase, FROM Feedback TO Decision, FROM Feedback TO NonGoal, FROM Feedback TO AcceptanceCriterion, FROM Feedback TO VerificationItem, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task, FROM Feedback TO Stakeholder, FROM Feedback TO Domain, FROM Feedback TO Subdomain, FROM Feedback TO Entity, FROM Feedback TO ValueObject, FROM Feedback TO Aggregate, FROM Feedback TO DomainEvent, FROM Feedback TO DomainProcess, FROM Feedback TO DomainRule, FROM Feedback TO Actor, FROM Feedback TO System, FROM Feedback TO Container, FROM Feedback TO Component)",
+        "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Spec, FROM Feedback TO Requirement, FROM Feedback TO Phase, FROM Feedback TO Decision, FROM Feedback TO NonGoal, FROM Feedback TO AcceptanceCriterion, FROM Feedback TO VerificationItem, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task, FROM Feedback TO Stakeholder, FROM Feedback TO Domain, FROM Feedback TO Subdomain, FROM Feedback TO Entity, FROM Feedback TO ValueObject, FROM Feedback TO Aggregate, FROM Feedback TO DomainEvent, FROM Feedback TO DomainProcess, FROM Feedback TO DomainRule, FROM Feedback TO Actor, FROM Feedback TO System, FROM Feedback TO Container, FROM Feedback TO Component, FROM Feedback TO User, FROM Feedback TO DomainGroup, FROM Feedback TO Value, FROM Feedback TO Service, FROM Feedback TO Person, FROM Feedback TO Constraint)",
     )?;
     conn.query("CREATE REL TABLE DependsOn(FROM Requirement TO Requirement)")?;
     conn.query("CREATE REL TABLE Gates(FROM Phase TO Phase, FROM PlanPhase TO PlanPhase)")?;
@@ -1476,17 +1704,27 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query(
         "CREATE REL TABLE Builds(FROM Task TO Module, FROM Task TO File, FROM Task TO Struct, FROM Task TO Function)",
     )?;
-    conn.query("CREATE REL TABLE Drives(FROM Requirement TO Domain)")?;
+    conn.query(
+        "CREATE REL TABLE Drives(FROM Requirement TO Domain, FROM Requirement TO DomainGroup, FROM Requirement TO Entity, FROM Requirement TO Value, FROM Requirement TO Service)",
+    )?;
     conn.query("CREATE REL TABLE Requires(FROM Requirement TO Domain)")?;
     conn.query(
         "CREATE REL TABLE Realises(FROM Domain TO System, FROM Domain TO Container, FROM Domain TO Component)",
     )?;
     conn.query(
-        "CREATE REL TABLE Represents(FROM Domain TO System, FROM Domain TO Container, FROM Domain TO Component)",
+        "CREATE REL TABLE Represents(FROM Domain TO System, FROM Domain TO Container, FROM Domain TO Component, FROM User TO Entity, FROM Entity TO Person)",
     )?;
     conn.query(
         "CREATE REL TABLE ImplementedBy(FROM System TO Module, FROM System TO File, FROM System TO Struct, FROM System TO Function, FROM Container TO Module, FROM Container TO File, FROM Container TO Struct, FROM Container TO Function, FROM Component TO Module, FROM Component TO File, FROM Component TO Struct, FROM Component TO Function)",
     )?;
+    conn.query(
+        "CREATE REL TABLE RealisedBy(FROM DomainGroup TO System, FROM DomainGroup TO Container, FROM DomainGroup TO Component, FROM Entity TO System, FROM Entity TO Container, FROM Entity TO Component, FROM Service TO System, FROM Service TO Container, FROM Service TO Component)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE SpecImplementedBy(FROM System TO Module, FROM System TO File, FROM System TO Struct, FROM System TO Function, FROM Container TO Module, FROM Container TO File, FROM Container TO Struct, FROM Container TO Function, FROM Component TO Module, FROM Component TO File, FROM Component TO Struct, FROM Component TO Function)",
+    )?;
+    conn.query("CREATE REL TABLE Publishes(FROM Service TO Entity)")?;
+    conn.query("CREATE REL TABLE Subscribes(FROM Service TO Entity)")?;
     conn.query(
         "CREATE REL TABLE GuardedBy(FROM Module TO Invariant, FROM File TO Invariant, FROM Struct TO Invariant, FROM Function TO Invariant, FROM Spec TO Invariant, FROM Requirement TO Invariant, FROM Phase TO Invariant, FROM Decision TO Invariant, FROM NonGoal TO Invariant, FROM AcceptanceCriterion TO Invariant, FROM VerificationItem TO Invariant, FROM Plan TO Invariant, FROM PlanPhase TO Invariant, FROM Task TO Invariant, FROM Stakeholder TO Invariant, FROM Domain TO Invariant, FROM Subdomain TO Invariant, FROM Entity TO Invariant, FROM ValueObject TO Invariant, FROM Aggregate TO Invariant, FROM DomainEvent TO Invariant, FROM DomainProcess TO Invariant, FROM DomainRule TO Invariant, FROM Actor TO Invariant, FROM System TO Invariant, FROM Container TO Invariant, FROM Component TO Invariant)",
     )?;
@@ -1543,6 +1781,12 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         format!(r#"COPY Container FROM "{}""#, p("container.parquet")),
         format!(r#"COPY Component FROM "{}""#, p("component.parquet")),
         format!(r#"COPY Invariant FROM "{}""#, p("invariant.parquet")),
+        format!(r#"COPY User FROM "{}""#, p("user.parquet")),
+        format!(r#"COPY DomainGroup FROM "{}""#, p("group.parquet")),
+        format!(r#"COPY Value FROM "{}""#, p("value.parquet")),
+        format!(r#"COPY Service FROM "{}""#, p("service.parquet")),
+        format!(r#"COPY Person FROM "{}""#, p("person.parquet")),
+        format!(r#"COPY Constraint FROM "{}""#, p("constraint.parquet")),
         format!(
             r#"COPY Contains FROM "{}" (from="Module", to="Module")"#,
             p("contains_mod_mod.parquet")
@@ -1567,7 +1811,14 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
             r#"COPY Contains FROM "{}" (from="Struct", to="Function")"#,
             p("contains_struct_fn.parquet")
         ),
-        format!(r#"COPY Calls FROM "{}""#, p("calls.parquet")),
+        format!(
+            r#"COPY Calls FROM "{}" (from="Function", to="Function")"#,
+            p("calls_fn.parquet")
+        ),
+        format!(
+            r#"COPY Calls FROM "{}" (from="Service", to="Service")"#,
+            p("calls_svc.parquet")
+        ),
         format!(
             r#"COPY Uses FROM "{}" (from="Function", to="Struct")"#,
             p("uses_fn.parquet")
@@ -1575,6 +1826,10 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         format!(
             r#"COPY Uses FROM "{}" (from="Struct", to="Struct")"#,
             p("uses_struct.parquet")
+        ),
+        format!(
+            r#"COPY Uses FROM "{}" (from="Person", to="System")"#,
+            p("uses_person.parquet")
         ),
         format!(
             r#"COPY UnresolvedCall FROM "{}""#,
@@ -1892,6 +2147,54 @@ enum Export {
         #[serde(skip_serializing_if = "String::is_empty")]
         status: String,
     },
+    User {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Group {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        attribute: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        root: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Value {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Service {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Person {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Constraint {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+        #[serde(rename = "attaches-to", skip_serializing_if = "String::is_empty")]
+        attaches_to: String,
+    },
     Details {
         from: String,
         to: String,
@@ -1953,6 +2256,24 @@ enum Export {
         to: String,
     },
     Checks {
+        from: String,
+        to: String,
+    },
+    #[serde(rename = "realised-by")]
+    RealisedBy {
+        from: String,
+        to: String,
+    },
+    #[serde(rename = "implemented-by")]
+    SpecImplementedBy {
+        from: String,
+        to: String,
+    },
+    Publishes {
+        from: String,
+        to: String,
+    },
+    Subscribes {
         from: String,
         to: String,
     },
@@ -2174,6 +2495,39 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                 scope: node.scope.clone().unwrap_or_default(),
                 status: node.status.clone().unwrap_or_default(),
             },
+            NodeKind::User => Export::User {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Group => Export::Group {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                attribute: node.attribute.clone().unwrap_or_default(),
+                root: node.root.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Value => Export::Value {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Service => Export::Service {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Person => Export::Person {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Constraint => Export::Constraint {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+                attaches_to: node.attaches_to.clone().unwrap_or_default(),
+            },
         };
         write_line(&mut w, &rec)?;
     }
@@ -2362,6 +2716,42 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
         write_line(
             &mut w,
             &Export::Checks {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.realised_by {
+        write_line(
+            &mut w,
+            &Export::RealisedBy {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.spec_implemented_by {
+        write_line(
+            &mut w,
+            &Export::SpecImplementedBy {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.publishes {
+        write_line(
+            &mut w,
+            &Export::Publishes {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.subscribes {
+        write_line(
+            &mut w,
+            &Export::Subscribes {
                 from: a.clone(),
                 to: b.clone(),
             },
@@ -2775,6 +3165,75 @@ mod tests {
                         },
                     );
                 }
+                "user" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::User,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "group" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Group,
+                            name: o("name"),
+                            attribute: o("attribute"),
+                            root: o("root"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "value" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Value,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "service" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Service,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "person" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Person,
+                            name: o("name"),
+                            body: o("body"),
+                            ..Node::default()
+                        },
+                    );
+                }
+                "constraint" => {
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Constraint,
+                            name: o("name"),
+                            body: o("body"),
+                            attaches_to: o("attaches-to"),
+                            ..Node::default()
+                        },
+                    );
+                }
                 "contains" => {
                     g.contains.insert((s("from"), s("to")));
                 }
@@ -2838,6 +3297,18 @@ mod tests {
                 }
                 "checks" => {
                     g.checks.insert((s("from"), s("to")));
+                }
+                "realised-by" => {
+                    g.realised_by.insert((s("from"), s("to")));
+                }
+                "implemented-by" => {
+                    g.spec_implemented_by.insert((s("from"), s("to")));
+                }
+                "publishes" => {
+                    g.publishes.insert((s("from"), s("to")));
+                }
+                "subscribes" => {
+                    g.subscribes.insert((s("from"), s("to")));
                 }
                 other => {
                     anyhow::bail!("graph.jsonl record with unknown type `{other}`");
