@@ -654,6 +654,87 @@ fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::Result<()> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SPEC §3.1 — group coupling, derived never stored (phase-3 task-5)
+// ---------------------------------------------------------------------------
+
+/// Derive the group-coupling relation from a set of domain service/event edges
+/// (SPEC §3.1: "Group coupling is derived, never stored"). A and B are coupled
+/// iff a `calls`/`publishes`/`subscribes` edge chain connects them; coupling
+/// is the transitive closure of that relation, computed as undirected
+/// connectivity over the services and events the edges name — a `calls` chain
+/// (Service→Service) connects its services, and a shared event (a `publishes`
+/// Service→Entity and a `subscribes` Service→Entity to the same event) connects
+/// publisher and subscriber through the event medium. The relation is
+/// symmetric ("A and B are coupled"), so two services are coupled iff they sit
+/// in the same connected component.
+///
+/// The coupled units are the GROUPS that own the services, not the services —
+/// a service's FQN (`domain.service.<name>`) does not encode its owning group,
+/// so ownership is an input: `owner` maps a service FQN to its owning group
+/// FQN. A node absent from `owner` (an event, or an unmapped service) is never
+/// a coupled unit — an event is only the medium. Each connected component's
+/// distinct groups are pairwise coupled; a component with a single group (e.g.
+/// a lone service or an event nobody else touches) couples nothing.
+///
+/// `edges` is the caller's `(kind, source FQN, target FQN)` triples; only
+/// `calls`/`publishes`/`subscribes` are coupling edges (any other kind is
+/// ignored — [`validate_edges`] already refuses it). The DDD context-map flavor
+/// (direct/published/translated/shared/coevolving) is an edge attribute on
+/// those edges, kept by the caller — it is never a node type, never a
+/// Group→Group edge, and never part of this result.
+///
+/// Returns the derived coupled pairs as a [`BTreeSet`] of `(group, group)`
+/// FQNs, each normalized so the lower FQN sorts first (a pair is unordered).
+/// Purely derived data — nothing is stored and no Group→Group edge or coupling
+/// node is produced.
+// (Unused until a later phase surfaces the derived coupling relation.)
+#[allow(dead_code)]
+pub fn derive_coupling(
+    edges: &[(&str, &str, &str)],
+    owner: &BTreeMap<String, String>,
+) -> BTreeSet<(String, String)> {
+    // Undirected adjacency over every node the coupling edges name.
+    let mut adj: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for &(kind, src, dst) in edges {
+        if matches!(kind, "calls" | "publishes" | "subscribes") {
+            adj.entry(src).or_default().insert(dst);
+            adj.entry(dst).or_default().insert(src);
+        }
+    }
+
+    // Connected components (DFS); each component's owned groups are pairwise
+    // coupled. An isolated node never appears in `adj`, so no chain → no pair.
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut coupled: BTreeSet<(String, String)> = BTreeSet::new();
+    for &start in adj.keys() {
+        if !seen.insert(start) {
+            continue;
+        }
+        let mut groups: BTreeSet<String> = BTreeSet::new();
+        let mut stack = vec![start];
+        while let Some(node) = stack.pop() {
+            if let Some(group) = owner.get(node) {
+                groups.insert(group.clone());
+            }
+            if let Some(nexts) = adj.get(node) {
+                for &next in nexts {
+                    if seen.insert(next) {
+                        stack.push(next);
+                    }
+                }
+            }
+        }
+        let list: Vec<&String> = groups.iter().collect();
+        for i in 0..list.len() {
+            for j in (i + 1)..list.len() {
+                coupled.insert((list[i].clone(), list[j].clone()));
+            }
+        }
+    }
+    coupled
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1452,6 +1533,212 @@ mod tests {
                     "{kind}: target type `{t}` not in layer {}",
                     tl.layer_dir()
                 );
+            }
+        }
+    }
+
+    /// Two services that call each other are coupled: their owning groups are
+    /// one derived pair — symmetric, nothing stored (SPEC §3.1).
+    #[test]
+    fn mutual_calls_couple_their_groups() {
+        let edges: &[(&str, &str, &str)] = &[
+            ("calls", "domain.service.orders", "domain.service.billing"),
+            ("calls", "domain.service.billing", "domain.service.orders"),
+        ];
+        let owner = BTreeMap::from([
+            (
+                "domain.service.orders".to_string(),
+                "domain.group.sales".to_string(),
+            ),
+            (
+                "domain.service.billing".to_string(),
+                "domain.group.billing".to_string(),
+            ),
+        ]);
+        let coupled = derive_coupling(edges, &owner);
+        assert_eq!(
+            coupled,
+            BTreeSet::from([(
+                "domain.group.billing".to_string(),
+                "domain.group.sales".to_string()
+            )])
+        );
+    }
+
+    /// A publisher and a subscriber sharing one event are coupled through the
+    /// event medium; the event itself names no coupled group.
+    #[test]
+    fn publish_subscribe_via_shared_event_couples() {
+        let edges: &[(&str, &str, &str)] = &[
+            (
+                "publishes",
+                "domain.service.orders",
+                "domain.entity.order-placed",
+            ),
+            (
+                "subscribes",
+                "domain.service.shipping",
+                "domain.entity.order-placed",
+            ),
+        ];
+        let owner = BTreeMap::from([
+            (
+                "domain.service.orders".to_string(),
+                "domain.group.sales".to_string(),
+            ),
+            (
+                "domain.service.shipping".to_string(),
+                "domain.group.fulfilment".to_string(),
+            ),
+        ]);
+        let coupled = derive_coupling(edges, &owner);
+        assert_eq!(
+            coupled,
+            BTreeSet::from([(
+                "domain.group.fulfilment".to_string(),
+                "domain.group.sales".to_string()
+            )])
+        );
+    }
+
+    /// A calls chain A→B→C couples A and C — coupling is the transitive
+    /// closure, every pair in the component.
+    #[test]
+    fn transitive_call_chain_couples_endpoints() {
+        let edges: &[(&str, &str, &str)] = &[
+            (
+                "calls",
+                "domain.service.checkout",
+                "domain.service.inventory",
+            ),
+            (
+                "calls",
+                "domain.service.inventory",
+                "domain.service.payments",
+            ),
+        ];
+        let owner = BTreeMap::from([
+            (
+                "domain.service.checkout".to_string(),
+                "domain.group.storefront".to_string(),
+            ),
+            (
+                "domain.service.inventory".to_string(),
+                "domain.group.stock".to_string(),
+            ),
+            (
+                "domain.service.payments".to_string(),
+                "domain.group.money".to_string(),
+            ),
+        ]);
+        let coupled = derive_coupling(edges, &owner);
+        // All three groups are pairwise coupled (3 unordered pairs).
+        assert_eq!(
+            coupled,
+            BTreeSet::from([
+                (
+                    "domain.group.money".to_string(),
+                    "domain.group.stock".to_string()
+                ),
+                (
+                    "domain.group.money".to_string(),
+                    "domain.group.storefront".to_string()
+                ),
+                (
+                    "domain.group.stock".to_string(),
+                    "domain.group.storefront".to_string()
+                ),
+            ])
+        );
+    }
+
+    /// Two services with no connecting edge chain are NOT coupled —
+    /// disconnected components yield no cross-component pair.
+    #[test]
+    fn unconnected_services_are_not_coupled() {
+        let edges: &[(&str, &str, &str)] = &[
+            ("calls", "domain.service.orders", "domain.service.billing"),
+            ("calls", "domain.service.catalog", "domain.service.search"),
+        ];
+        let owner = BTreeMap::from([
+            (
+                "domain.service.orders".to_string(),
+                "domain.group.sales".to_string(),
+            ),
+            (
+                "domain.service.billing".to_string(),
+                "domain.group.billing".to_string(),
+            ),
+            (
+                "domain.service.catalog".to_string(),
+                "domain.group.catalog".to_string(),
+            ),
+            (
+                "domain.service.search".to_string(),
+                "domain.group.search".to_string(),
+            ),
+        ]);
+        let coupled = derive_coupling(edges, &owner);
+        assert_eq!(
+            coupled,
+            BTreeSet::from([
+                (
+                    "domain.group.billing".to_string(),
+                    "domain.group.sales".to_string()
+                ),
+                (
+                    "domain.group.catalog".to_string(),
+                    "domain.group.search".to_string()
+                ),
+            ])
+        );
+    }
+
+    /// Coupling is DERIVED: the result is only group-FQN pairs — no edge
+    /// kinds, no flavor values, no coupling node. The context-map flavor rides
+    /// on the edge (an attribute the caller keeps), never in the derived
+    /// structure.
+    #[test]
+    fn coupling_is_derived_and_flavor_is_not_structure() {
+        let edges: &[(&str, &str, &str)] = &[
+            ("calls", "domain.service.orders", "domain.service.billing"),
+            (
+                "publishes",
+                "domain.service.orders",
+                "domain.entity.order-placed",
+            ),
+            (
+                "subscribes",
+                "domain.service.shipping",
+                "domain.entity.order-placed",
+            ),
+        ];
+        let owner = BTreeMap::from([
+            (
+                "domain.service.orders".to_string(),
+                "domain.group.sales".to_string(),
+            ),
+            (
+                "domain.service.billing".to_string(),
+                "domain.group.billing".to_string(),
+            ),
+            (
+                "domain.service.shipping".to_string(),
+                "domain.group.fulfilment".to_string(),
+            ),
+        ]);
+        let coupled = derive_coupling(edges, &owner);
+        // Three groups, all pairwise coupled through the call + the shared
+        // event — but as DERIVED pairs, nothing stored.
+        assert_eq!(coupled.len(), 3);
+        for (a, b) in &coupled {
+            // Every endpoint is a group FQN.
+            assert!(a.starts_with("domain.group."), "{a}");
+            assert!(b.starts_with("domain.group."), "{b}");
+            // No flavor (edge attribute) leaks into the derived pair.
+            for flavor in ["direct", "published", "translated", "shared", "coevolving"] {
+                assert!(!a.contains(flavor), "flavor {flavor} leaked into {a}");
+                assert!(!b.contains(flavor), "flavor {flavor} leaked into {b}");
             }
         }
     }
