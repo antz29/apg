@@ -6,44 +6,11 @@ generated: true
 permission:
   "*": deny
   read:
-    "*": deny
-    "src/*.rs": allow
-    "build.rs": allow
-    "Cargo.toml": allow
-    "Cargo.lock": allow
-    "SPEC.md": allow
-    "SPEC-*.md": allow
-    "AGENTS.md": allow
-    ".gitignore": allow
-    "README.md": allow
-    ".opencode/**": allow
-    "opencode-suite/**": allow
+    "*": allow
   glob:
-    "*": deny
-    "src/*.rs": allow
-    "build.rs": allow
-    "Cargo.toml": allow
-    "Cargo.lock": allow
-    "SPEC.md": allow
-    "SPEC-*.md": allow
-    "AGENTS.md": allow
-    ".gitignore": allow
-    "README.md": allow
-    ".opencode/**": allow
-    "opencode-suite/**": allow
+    "*": allow
   grep:
-    "*": deny
-    "src/*.rs": allow
-    "build.rs": allow
-    "Cargo.toml": allow
-    "Cargo.lock": allow
-    "SPEC.md": allow
-    "SPEC-*.md": allow
-    "AGENTS.md": allow
-    ".gitignore": allow
-    "README.md": allow
-    ".opencode/**": allow
-    "opencode-suite/**": allow
+    "*": allow
   edit:
     "*": deny
     "src/*.rs": allow
@@ -66,6 +33,7 @@ permission:
   external_directory:
     "*": deny
     "/tmp/**": allow
+    "/var/folders/**/T/opencode/**": allow
   bash:
     "*": deny
     "ls *": allow
