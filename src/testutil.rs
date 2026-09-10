@@ -225,6 +225,14 @@ pub fn struct_line(id: &str, parent: &str, name: &str, path: &str) -> String {
     )
 }
 
+/// A scanner-style function record line (unique in its parent scope — no
+/// params — so the ingestor renders the plain `parent.name` FQN).
+pub fn function_line(id: &str, parent: &str, name: &str, path: &str) -> String {
+    format!(
+        "{{\"type\":\"function\",\"id\":\"{id}\",\"parent\":\"{parent}\",\"name\":\"{name}\",\"params\":[],\"file\":\"{path}\",\"path\":\"{path}\",\"start\":1,\"end\":5,\"start_line\":1,\"end_line\":5}}"
+    )
+}
+
 /// A ready-made payload for one fixture "module": module + structs + file
 /// (containment is derived ingestor-side from `parent`/`path`, like the real
 /// scanner streams).

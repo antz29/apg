@@ -1585,34 +1585,36 @@ mod tests {
     /// The transient plan that pairs with the re-materialized tiers (SPEC §5):
     /// one phase satisfying the rollout requirement, and one `modifies` task
     /// per solution `implemented-by` FQN — derived coverage holds, no planned
-    /// nodes, no feedback, so the verify gate passes green.
-    fn apg_projects_plan_records() -> Vec<Record> {
+    /// nodes, no feedback, so the verify gate passes green. FQNs are
+    /// project-prefixed (`<project>/plan…`), matching the branch/project name
+    /// the plan JSONL lives under (`.trans/plans/<project>.jsonl`).
+    fn apg_projects_plan_records(project: &str) -> Vec<Record> {
         let mut r: Vec<Record> = vec![
             Record::Plan {
-                fqn: "apg-projects/plan".to_string(),
+                fqn: format!("{project}/plan"),
                 title: "apg-projects plan".to_string(),
                 strategy:
                     "Bootstrap dogfood: re-materialize the change-set in the layers model (SPEC §6)"
                         .to_string(),
             },
             Record::PlanPhase {
-                fqn: "apg-projects/plan.phase-01".to_string(),
+                fqn: format!("{project}/plan.phase-01"),
                 number: 1,
                 title: "rollout".to_string(),
                 deliverable: "re-materialized tiers".to_string(),
                 status: "pending".to_string(),
             },
             Record::Contains {
-                from: "apg-projects/plan".to_string(),
-                to: "apg-projects/plan.phase-01".to_string(),
+                from: format!("{project}/plan"),
+                to: format!("{project}/plan.phase-01"),
             },
             Record::Satisfies {
-                from: "apg-projects/plan.phase-01".to_string(),
+                from: format!("{project}/plan.phase-01"),
                 to: "requirements.requirement.r20".to_string(),
             },
         ];
         for (i, code) in IMPL_FQNS.iter().enumerate() {
-            let task = format!("apg-projects/plan.phase-01.task-{}", i + 1);
+            let task = format!("{project}/plan.phase-01.task-{}", i + 1);
             r.push(Record::Task {
                 fqn: task.clone(),
                 title: format!("touch {code}"),
@@ -1709,7 +1711,7 @@ mod tests {
             &wt_apg,
             &plan_path,
             "apg-projects",
-            &apg_projects_plan_records(),
+            &apg_projects_plan_records("apg-projects"),
         )
         .unwrap();
 
@@ -1828,6 +1830,291 @@ mod tests {
         );
         drop(db);
         assert!(!git::is_stale(&main_apg));
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
+    // phase-5 task-4 (e2e): the FULL dogfood round trip — suite-tool
+    // lookups and mutations with cwd inside the worktree (SPEC §6: walk-up
+    // discovery finds the worktree's own apg/ + branch DB, even though the
+    // worktree lives INSIDE the main checkout's apg/), verify, merge, main
+    // rebuilds unguarded. The main checkout's apg/ is untouched by every
+    // in-worktree operation.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn full_dogfood_round_trip_suite_tool_ops_inside_the_worktree() {
+        // A main checkout whose scanned code carries the structs the solution
+        // tier's implemented-by edges claim (resolves -> real), plus one
+        // function so the branch-DB lookups assert the
+        // module/struct/function triple from the scanned payload.
+        let repo = Repo::new("dogfood-full-e2e");
+        let mut payload = testutil::code_payload(
+            MOD,
+            FILE,
+            &[
+                "Store",
+                "ProjectStart",
+                "MutationGuard",
+                "LayersSerializer",
+                "PlanBridge",
+                "InitVersionGate",
+            ],
+        );
+        payload.push_str(&testutil::function_line("n7", MOD, "Lookup", FILE));
+        repo.write("code/seed.scan.jsonl", &payload);
+        repo.commit_all("seed code");
+
+        // A main-checkout scan first: the "untouched" assertions compare
+        // against a real main DB (its db.lbug + graph.jsonl must not move
+        // during in-worktree operation).
+        start_scan(&repo.root).unwrap();
+        let main_apg = repo.apg_root();
+        let main_db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+        assert!(main_db.has_node(format!("{MOD}.Store").as_str()));
+        assert!(main_db.has_node(format!("{MOD}.Lookup").as_str()));
+        drop(main_db);
+        let main_db_bytes = std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap();
+        let main_graph_bytes =
+            std::fs::read(main_apg.join(specs::TRANS).join("graph.jsonl")).unwrap();
+        let main_tip = repo.head_sha();
+
+        // 1. start from main: one command yields worktree + branch + branch
+        // DB. The worktree lives INSIDE main's apg/ (at
+        // <main>/apg/.worktrees/round-trip), so walk-up discovery has a real
+        // choice to make — the worktree's own apg/ vs main's apg/ above it.
+        let wt = project_start_at(&repo.apg_root(), "round-trip", Some(&start_scan)).unwrap();
+        let wt_apg = wt.join(specs::LAYOUT);
+        assert!(wt.is_dir());
+        assert!(wt_apg.join(specs::TRANS).join("db.lbug").exists());
+        let id_wt = git::repo_identity(&wt_apg).unwrap();
+        assert!(id_wt.is_worktree);
+        assert_eq!(id_wt.branch.as_deref(), Some("round-trip"));
+        let id_main = git::repo_identity(&main_apg).unwrap();
+        assert!(!id_main.is_worktree);
+        assert_eq!(id_main.branch.as_deref(), Some("main"));
+
+        // 2. operate in-worktree: the suite tools shell out to `apg` with cwd
+        // inside the worktree, and the binary resolves the layout root by
+        // walking up from current_dir. Simulated here by passing a deep
+        // in-worktree cwd to the same walk-up (tests never mutate the
+        // process-global cwd outside the scan lock).
+        let deep_cwd = wt.join("code").join("deep");
+        std::fs::create_dir_all(&deep_cwd).unwrap();
+        let resolved = specs::find_apg_root(&deep_cwd)
+            .expect("walk-up from an in-worktree cwd must find a layout root");
+        assert_eq!(
+            resolved, wt_apg,
+            "walk-up must find the worktree's OWN apg/, not the main checkout's (its parent)"
+        );
+        assert_ne!(resolved, main_apg);
+        // Negative control: from a cwd deep inside MAIN, the same walk-up
+        // finds main's apg/ — the discovery is checkout-local, not global.
+        let main_deep = repo.root.join("code").join("deep");
+        std::fs::create_dir_all(&main_deep).unwrap();
+        assert_eq!(specs::find_apg_root(&main_deep), Some(main_apg.clone()));
+
+        // 2a. lookups — the `apg query`-equivalent: open the branch DB found
+        // by walk-up and query it; the module/struct/function triple from the
+        // scanned payload is there, and no authored tiers yet (the branch DB
+        // is the fresh start-scan).
+        let db = artifacts::ArtifactDb::open(&resolved).unwrap();
+        assert!(db.has_node(MOD), "module from the scanned payload");
+        assert!(
+            db.has_node(format!("{MOD}.Store").as_str()),
+            "struct from the scanned payload"
+        );
+        assert!(
+            db.has_node(format!("{MOD}.Lookup").as_str()),
+            "function from the scanned payload"
+        );
+        assert!(!db.has_node("requirements.requirement.r1"));
+        let count = |q: &str| -> i64 {
+            db.q(q)
+                .unwrap()
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .trim()
+                .parse()
+                .unwrap_or(0)
+        };
+        assert_eq!(count("MATCH (n:Function) RETURN count(*)"), 1);
+        drop(db);
+
+        // 2b. mutations — the `apg node add`-equivalent (the exact node_cmd
+        // shape through layers::write_project) against the walk-up root:
+        // membership guard -> validate -> atomic write -> auto-commit -> DB
+        // re-merge, and a fresh query sees the new node.
+        layers::write_project(
+            &resolved,
+            &[nf(
+                "requirements",
+                "note",
+                "dogfood-log",
+                "The task-4 dogfood node: authored through the apg node add-equivalent surface with cwd inside the worktree.",
+                &[("kind", "background")],
+            )],
+            &[],
+        )
+        .unwrap();
+        let node_file = wt_apg
+            .join(layers::LAYERS_DIR)
+            .join("requirements")
+            .join("note")
+            .join("dogfood-log.json");
+        assert!(node_file.exists(), "{} must exist", node_file.display());
+        let db = artifacts::ArtifactDb::open(&resolved).unwrap();
+        assert!(
+            db.has_node("requirements.note.dogfood-log"),
+            "the mutation's DB re-merge must make the new node visible to a fresh query"
+        );
+        drop(db);
+        // The node file auto-committed on the project branch (R8).
+        let wt_repo = git2::Repository::open(&wt).unwrap();
+        assert!(
+            wt_repo
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .tree()
+                .unwrap()
+                .get_path(Path::new("apg/layers/requirements/note/dogfood-log.json"))
+                .is_ok(),
+            "the node file must be committed on the project branch"
+        );
+
+        // 2c. author the re-materialized dogfood tiers (task-1 builder reused)
+        // + the transient plan (task-1 builder, project name parametrized).
+        layers::write_project(&resolved, &apg_projects_tier_nodes(), &[]).unwrap();
+        let plan_path = resolved
+            .join(specs::TRANS)
+            .join("plans")
+            .join("round-trip.jsonl");
+        let tip_before_plan = wt_repo.head().unwrap().peel_to_commit().unwrap().id();
+        artifacts::write_jsonl_and_reingest(
+            &resolved,
+            &plan_path,
+            "round-trip",
+            &apg_projects_plan_records("round-trip"),
+        )
+        .unwrap();
+        // The plan mutation commits nothing (.trans is transient — R8): the
+        // branch tip is unchanged and the plan JSONL never enters a commit.
+        assert!(plan_path.exists(), "the plan JSONL lands under .trans");
+        let wt_tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(
+            wt_tip.id(),
+            tip_before_plan,
+            "plan mutations never commit on the project branch"
+        );
+        assert!(
+            wt_tip
+                .tree()
+                .unwrap()
+                .get_path(Path::new("apg/.trans/plans/round-trip.jsonl"))
+                .is_err(),
+            "the plan JSONL must never be committed"
+        );
+
+        // 2d. the MAIN checkout's apg/ is untouched by all of it: its db.lbug
+        // and graph.jsonl are byte-identical, no apg/layers was created there,
+        // and main's branch never moved.
+        assert_eq!(
+            std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap(),
+            main_db_bytes,
+            "main's db.lbug must be unchanged by the in-worktree operations"
+        );
+        assert_eq!(
+            std::fs::read(main_apg.join(specs::TRANS).join("graph.jsonl")).unwrap(),
+            main_graph_bytes,
+            "main's graph.jsonl must be unchanged by the in-worktree operations"
+        );
+        assert!(
+            !main_apg.join("layers").exists(),
+            "no apg/layers may be created under the main checkout"
+        );
+        assert_eq!(repo.head_sha(), main_tip, "main's branch must not move");
+
+        // 3. scan the worktree (the `apg scan`-equivalent rebuild, cwd inside
+        // the worktree): the branch DB now holds code + tiers + plan together.
+        start_scan(&wt).unwrap();
+        let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        for f in expected_tier_fqns() {
+            assert!(db.has_node(&f), "branch DB must hold tier node `{f}`");
+        }
+        assert!(db.has_node("requirements.note.dogfood-log"));
+        for f in [
+            "round-trip/plan",
+            "round-trip/plan.phase-01",
+            "round-trip/plan.phase-01.task-1",
+            "round-trip/plan.phase-01.task-5",
+        ] {
+            assert!(
+                db.has_node(f),
+                "branch DB must hold transient plan node `{f}`"
+            );
+        }
+        drop(db);
+        assert_eq!(
+            std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap(),
+            main_db_bytes,
+            "a worktree scan must not touch main's DB"
+        );
+
+        // 4. verify: the coherence gate passes green — no planned nodes, no
+        // feedback, and derived solution coverage holds.
+        plan_cmd::plan_verify_at(&wt_apg, "round-trip").unwrap();
+
+        // 5. merge from the main checkout: verify gate -> fast-forward -> main
+        // rebuilds unguarded (a plain scan of the main checkout).
+        project_merge_at(&repo.apg_root(), "round-trip", Some(&start_scan)).unwrap();
+
+        // The default branch holds the project tip; the merged main checkout
+        // carries the node files (the tiers + the dogfood node).
+        let main_repo = git2::Repository::open(&repo.root).unwrap();
+        assert_eq!(
+            main_repo.head().unwrap().peel_to_commit().unwrap().id(),
+            wt_tip.id(),
+            "main must fast-forward to the project tip"
+        );
+        assert!(
+            repo.root
+                .join("apg/layers/solution/container/project-commands.json")
+                .exists(),
+            "the merged main checkout carries the tier node files"
+        );
+        assert!(
+            repo.root
+                .join("apg/layers/requirements/note/dogfood-log.json")
+                .exists(),
+            "the merged main checkout carries the dogfood node"
+        );
+        assert!(repo.is_clean(), "merged main must be clean");
+
+        // Main rebuild: the main DB has the code + the merged tiers, does NOT
+        // hold the transient plan, and its scan_meta is fresh (not stale).
+        let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+        for f in [
+            "requirements.requirement.r1",
+            "requirements.requirement.r20",
+            "requirements.note.dogfood-log",
+            "domain.group.change-sets",
+            "solution.system.apg-cli",
+            "solution.container.project-commands",
+            format!("{MOD}.Store").as_str(),
+            format!("{MOD}.Lookup").as_str(),
+            format!("{MOD}.ProjectStart").as_str(),
+        ] {
+            assert!(db.has_node(f), "main DB must hold `{f}` after the rebuild");
+        }
+        assert!(
+            !db.has_node("round-trip/plan"),
+            "transient plans never reach main"
+        );
+        drop(db);
+        assert!(!git::is_stale(&main_apg), "main's scan_meta must be fresh");
         testutil::remove(&repo);
     }
 
