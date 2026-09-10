@@ -90,67 +90,21 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         "apg_hunk.ts",
         include_str!("../opencode-suite/tools/apg_hunk.ts"),
     ),
-    // Spec/plan/review suite (SPEC R12).
+    // Durable node-file mutation surface (apg-projects SPEC §2.2/§4).
     (
-        "apg_spec.ts",
-        include_str!("../opencode-suite/tools/apg_spec.ts"),
+        "apg_node.ts",
+        include_str!("../opencode-suite/tools/apg_node.ts"),
     ),
     (
-        "apg_spec_requirements.ts",
-        include_str!("../opencode-suite/tools/apg_spec_requirements.ts"),
+        "apg_edge.ts",
+        include_str!("../opencode-suite/tools/apg_edge.ts"),
     ),
+    // Project lifecycle (start / verify / merge).
     (
-        "apg_spec_phases.ts",
-        include_str!("../opencode-suite/tools/apg_spec_phases.ts"),
+        "apg_project.ts",
+        include_str!("../opencode-suite/tools/apg_project.ts"),
     ),
-    (
-        "apg_spec_deps.ts",
-        include_str!("../opencode-suite/tools/apg_spec_deps.ts"),
-    ),
-    (
-        "apg_spec_anchors.ts",
-        include_str!("../opencode-suite/tools/apg_spec_anchors.ts"),
-    ),
-    (
-        "apg_spec_trace.ts",
-        include_str!("../opencode-suite/tools/apg_spec_trace.ts"),
-    ),
-    (
-        "apg_spec_unresolved.ts",
-        include_str!("../opencode-suite/tools/apg_spec_unresolved.ts"),
-    ),
-    (
-        "apg_spec_fixes.ts",
-        include_str!("../opencode-suite/tools/apg_spec_fixes.ts"),
-    ),
-    (
-        "apg_spec_init.ts",
-        include_str!("../opencode-suite/tools/apg_spec_init.ts"),
-    ),
-    (
-        "apg_spec_add.ts",
-        include_str!("../opencode-suite/tools/apg_spec_add.ts"),
-    ),
-    (
-        "apg_spec_anchor.ts",
-        include_str!("../opencode-suite/tools/apg_spec_anchor.ts"),
-    ),
-    (
-        "apg_spec_link.ts",
-        include_str!("../opencode-suite/tools/apg_spec_link.ts"),
-    ),
-    (
-        "apg_spec_spine.ts",
-        include_str!("../opencode-suite/tools/apg_spec_spine.ts"),
-    ),
-    (
-        "apg_spec_rm.ts",
-        include_str!("../opencode-suite/tools/apg_spec_rm.ts"),
-    ),
-    (
-        "apg_spec_render.ts",
-        include_str!("../opencode-suite/tools/apg_spec_render.ts"),
-    ),
+    // Plan/review suite.
     (
         "apg_review.ts",
         include_str!("../opencode-suite/tools/apg_review.ts"),
@@ -170,14 +124,6 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
     (
         "apg_review_reject.ts",
         include_str!("../opencode-suite/tools/apg_review_reject.ts"),
-    ),
-    (
-        "apg_invariant_add.ts",
-        include_str!("../opencode-suite/tools/apg_invariant_add.ts"),
-    ),
-    (
-        "apg_invariants.ts",
-        include_str!("../opencode-suite/tools/apg_invariants.ts"),
     ),
     (
         "apg_plan.ts",
@@ -224,8 +170,8 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         include_str!("../opencode-suite/tools/apg_plan_note.ts"),
     ),
     (
-        "apg_plan_apply.ts",
-        include_str!("../opencode-suite/tools/apg_plan_apply.ts"),
+        "apg_plan_verify.ts",
+        include_str!("../opencode-suite/tools/apg_plan_verify.ts"),
     ),
 ];
 
@@ -782,42 +728,13 @@ fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
     Ok(pruned)
 }
 
-/// `apg init [dir]`: create the committed `apg/` layout (config.json carrying
-/// the binary-managed layout `version` + `.trans/` + the project-worktrees
-/// dir), install (or update) the opencode apg tool suite + the six
-/// distributed agents + the upgrade guide into `~/.opencode/`, scaffold the
-/// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
-/// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`
-/// files that duplicate the installed suite (never deletes anything).
-/// Project-specific implementer/reviewer agents are installed into the
-/// project `.opencode/` by the agent-builder, not by init. Init is the
-/// layout's versioning/upgrade act (R9/R10): it re-runs idempotently and
-/// writes the binary version into `apg/config.json` (user code_type rules
-/// untouched) — `apg scan` and `apg project start` refuse to touch a layout
-/// whose version is missing or does not share the binary's major.minor.
-fn cmd_init(args: &[String]) -> anyhow::Result<()> {
-    let dir = if args.is_empty() {
-        std::env::current_dir()?
-    } else {
-        PathBuf::from(&args[0])
-    };
-    let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
-
-    let apg_dir = dir.join(specs::LAYOUT);
-    std::fs::create_dir_all(apg_dir.join(specs::TRANS))?;
-    // The project-worktrees dir (gitignored; `project start` nests each
-    // project's worktree under it). Scaffolded even before git exists — the
-    // dir itself is what libgit2's worktree add needs as a parent.
-    std::fs::create_dir_all(apg_dir.join(git::WORKTREES))?;
-    let cfg_path = apg_dir.join("config.json");
-    if !cfg_path.exists() {
-        std::fs::write(&cfg_path, DEFAULT_CONFIG_JSON)?;
-    }
-    // The binary-managed version field (R9): init is the layout's upgrade
-    // act — write-through on every init, idempotent when already current.
-    version_gate::ensure_config_version(&apg_dir, env!("CARGO_PKG_VERSION"))?;
-
-    let opencode_dir = user_opencode_dir()?;
+/// Installs (or updates) the apg suite into `opencode_dir`: every `SUITE_TOOLS`
+/// file, the shared lib, the upgrade guide, and the six distributed agents —
+/// each written only when missing or changed — then prunes stale apg-owned
+/// files. Returns `(files written/updated, files pruned)`. `cmd_init` calls it
+/// against `~/.opencode`; tests call it against a temp dir. The package.json
+/// scaffold is only written when absent (never clobbered).
+fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
     let tools_dir = opencode_dir.join("tools");
     std::fs::create_dir_all(&tools_dir)?;
     let agents_dir = opencode_dir.join("agents");
@@ -855,7 +772,47 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
             updated += 1;
         }
     }
-    let pruned = prune_stale_suite(&opencode_dir)?;
+    let pruned = prune_stale_suite(opencode_dir)?;
+    Ok((updated, pruned))
+}
+
+/// `apg init [dir]`: create the committed `apg/` layout (config.json carrying
+/// the binary-managed layout `version` + `.trans/` + the project-worktrees
+/// dir), install (or update) the opencode apg tool suite + the six
+/// distributed agents + the upgrade guide into `~/.opencode/`, scaffold the
+/// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
+/// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`
+/// files that duplicate the installed suite (never deletes anything).
+/// Project-specific implementer/reviewer agents are installed into the
+/// project `.opencode/` by the agent-builder, not by init. Init is the
+/// layout's versioning/upgrade act (R9/R10): it re-runs idempotently and
+/// writes the binary version into `apg/config.json` (user code_type rules
+/// untouched) — `apg scan` and `apg project start` refuse to touch a layout
+/// whose version is missing or does not share the binary's major.minor.
+fn cmd_init(args: &[String]) -> anyhow::Result<()> {
+    let dir = if args.is_empty() {
+        std::env::current_dir()?
+    } else {
+        PathBuf::from(&args[0])
+    };
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+
+    let apg_dir = dir.join(specs::LAYOUT);
+    std::fs::create_dir_all(apg_dir.join(specs::TRANS))?;
+    // The project-worktrees dir (gitignored; `project start` nests each
+    // project's worktree under it). Scaffolded even before git exists — the
+    // dir itself is what libgit2's worktree add needs as a parent.
+    std::fs::create_dir_all(apg_dir.join(git::WORKTREES))?;
+    let cfg_path = apg_dir.join("config.json");
+    if !cfg_path.exists() {
+        std::fs::write(&cfg_path, DEFAULT_CONFIG_JSON)?;
+    }
+    // The binary-managed version field (R9): init is the layout's upgrade
+    // act — write-through on every init, idempotent when already current.
+    version_gate::ensure_config_version(&apg_dir, env!("CARGO_PKG_VERSION"))?;
+
+    let opencode_dir = user_opencode_dir()?;
+    let (updated, pruned) = install_suite(&opencode_dir)?;
 
     if !opencode_dir
         .join("node_modules")
@@ -1629,6 +1586,75 @@ mod tests {
         assert!(dir.join("tools").join("my_custom_tool.ts").exists());
         assert!(dir.join("agents").join("codebase-navigator.md").exists());
         assert!(dir.join("agents").join("my-reviewer.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The suite install derives from SUITE_TOOLS: the new project/layers
+    /// tools (apg_node/apg_edge/apg_project/apg_plan_verify) embed + install,
+    /// and the retired spec/invariant tools are gone from both the embed list
+    /// and the installed set (a stale file in the target is pruned).
+    #[test]
+    fn suite_installs_node_edge_project_tools_and_retires_spec_invariant() {
+        let dir = std::env::temp_dir().join(format!("apg-suite-install-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A stale pre-rewrite tool already present in the target: pruned by
+        // the install (the old `apg spec`/`apg invariant` surfaces are gone).
+        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        std::fs::write(dir.join("tools").join("apg_spec.ts"), "stale").unwrap();
+
+        let (updated, pruned) = install_suite(&dir).unwrap();
+        assert!(updated > 0, "a fresh install writes files");
+        assert_eq!(pruned, 1, "the retired apg_spec.ts is pruned");
+
+        for name in [
+            "apg_node.ts",
+            "apg_edge.ts",
+            "apg_project.ts",
+            "apg_plan_verify.ts",
+        ] {
+            let p = dir.join("tools").join(name);
+            assert!(p.exists(), "{name} must install");
+            let content = std::fs::read_to_string(&p).unwrap();
+            assert!(
+                content.contains("@opencode-ai/plugin"),
+                "{name} must be a real tool file"
+            );
+        }
+        for name in [
+            "apg_spec.ts",
+            "apg_spec_add.ts",
+            "apg_spec_requirements.ts",
+            "apg_invariants.ts",
+            "apg_invariant_add.ts",
+            "apg_plan_apply.ts",
+        ] {
+            assert!(
+                !dir.join("tools").join(name).exists(),
+                "{name} must not install"
+            );
+        }
+        // The embed list itself: new tools present, old tools gone.
+        let names: Vec<&str> = SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
+        for name in [
+            "apg_node.ts",
+            "apg_edge.ts",
+            "apg_project.ts",
+            "apg_plan_verify.ts",
+        ] {
+            assert!(names.contains(&name), "SUITE_TOOLS embeds {name}");
+        }
+        assert!(
+            names.iter().all(|n| !n.starts_with("apg_spec")),
+            "no apg_spec tools remain in SUITE_TOOLS"
+        );
+        assert!(
+            !names.contains(&"apg_invariants.ts") && !names.contains(&"apg_invariant_add.ts"),
+            "no apg_invariant tools remain in SUITE_TOOLS"
+        );
+        assert!(
+            !names.contains(&"apg_plan_apply.ts"),
+            "apg_plan_apply was renamed verify"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

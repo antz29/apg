@@ -3,12 +3,12 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "List review feedback: every Feedback with its status/disposition and the node it reviews, or filtered to one target (`apg review list [<target-fqn>]`). Read-only.",
+    "List review feedback: every Feedback with its status/disposition and the node it reviews, or filtered to one target (`apg review list [<target-fqn>]`). Feedback is transient (branch-local apg/.trans mirrors); read-only.",
   args: {
     target: tool.schema
       .string()
       .optional()
-      .describe("Only list feedback reviewing this node FQN (spec, plan, task, or code)."),
+      .describe("Only list feedback reviewing this node FQN (a layer node, plan/phase/task, or code)."),
   },
   async execute(args, context) {
     const cli = ["review", "list"]

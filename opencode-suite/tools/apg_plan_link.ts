@@ -3,11 +3,11 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Add Satisfies and/or prereq (Gates) edges to a plan phase: `apg plan link <project> <phase-n> [--satisfies <req-id>]* [--prereq <phase-n>]*`. Satisfies marks the requirements the phase's deliverable fulfils; prereq adds a Gates edge.",
+    "Add Satisfies and/or prereq (Gates) edges to a plan phase: `apg plan link <project> <phase-n> [--satisfies <req-name>]* [--prereq <phase-n>]*`. Satisfies marks the requirements the phase's deliverable fulfils — requirement names from the layers store (`requirements.requirement.<name>`); prereq adds a Gates edge.",
   args: {
     project: tool.schema.string().describe("Plan project (required)."),
     phaseNumber: tool.schema.string().describe("The phase number to link (required)."),
-    satisfies: tool.schema.array(tool.schema.string()).optional().describe("Requirement ids this phase delivers."),
+    satisfies: tool.schema.array(tool.schema.string()).optional().describe("Requirement names this phase delivers (→ requirements.requirement.<name>)."),
     prereq: tool.schema.array(tool.schema.string()).optional().describe("Phase numbers this phase is gated on."),
   },
   async execute(args, context) {
