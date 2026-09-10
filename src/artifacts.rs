@@ -247,7 +247,10 @@ impl ArtifactDb {
         Ok(Connection::new(&self.db)?)
     }
 
-    /// Runs a query and returns its formatted output.
+    /// Runs a query and returns its formatted output. Test-only: the shipping
+    /// CLI paths use label-typed queries via [`count`](Self::count) or the
+    /// query subcommand.
+    #[cfg(test)]
     pub fn q(&self, query: &str) -> anyhow::Result<String> {
         Ok(self.conn()?.query(query)?.to_string())
     }
