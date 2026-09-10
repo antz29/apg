@@ -174,7 +174,9 @@ on the old version) ships stale `OLD-version` bottles — the v0.10.3 mistake.
 
 Forward release (the `scripts/release.sh <version>` helper automates steps 4–5):
 
-1. **Gate green**: `cargo check` (or `cargo test`) passes.
+1. **Gate green**: `cargo test` passes (not just `cargo check` — the
+   release-version guard tests only run under `cargo test`, and a stale
+   `RELEASE_VERSION` literal ships the release HEAD red).
 2. **Bump the version** in `Cargo.toml` **and** `Cargo.lock`
    (`version = "X.Y.Z"`).
 3. **Commit the release content** (the version bump + whatever ships in it).
