@@ -149,35 +149,14 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                     "usage: apg plan add <project> planned <kind> <fqn> [--name <name>] [--parent <parent-fqn>]"
                 );
             };
-            if !["module", "file", "struct", "function"].contains(&node_kind) {
-                anyhow::bail!(
-                    "planned node kind must be module/file/struct/function, got `{node_kind}`"
-                );
-            }
-            // A plan never plans code that already exists: a present node at
-            // the FQN would make the planned placeholder incoherent (the
-            // scanner-replace only ever supersedes, never the reverse).
-            if let Ok(db) = artifacts::ArtifactDb::open(&apg_root)
-                && let Some(label) = db.code_label(fqn)
-            {
-                anyhow::bail!(
-                    "planned node `{fqn}` already resolves to a `{label}` code node — a plan never plans existing code (plan the delta, not the present)"
-                );
-            }
-            let rec = Record::PlannedNode {
-                fqn: fqn.clone(),
-                kind: node_kind.to_string(),
-                name: p.get("name").unwrap_or_default(),
-                parent: p.get("parent").unwrap_or_default(),
-            };
-            remove_node(&mut records, fqn);
-            records.push(rec);
-            if let Some(parent) = p.get("parent") {
-                records.push(Record::Contains {
-                    from: parent.clone(),
-                    to: fqn.clone(),
-                });
-            }
+            plan_add_planned_at(
+                &apg_root,
+                &mut records,
+                node_kind,
+                fqn,
+                &p.get("name").unwrap_or_default(),
+                p.get("parent").as_deref(),
+            )?;
             write_through(&apg_root, project, &records)?;
             println!("Added planned {node_kind} `{fqn}` to plan {project}");
         }
@@ -357,6 +336,68 @@ fn plan_add_task_at(
     });
     remove_node(records, &fqn);
     records.extend(recs);
+    Ok(())
+}
+
+/// Core of the `planned` add arm (extracted for tests): validates the node
+/// kind, refuses only a FQN that is **real scanned code**, then upserts the
+/// `Record::PlannedNode` + its parent `Contains` edge (the plan-file side of
+/// re-declaration — `remove_node` drops the old record and its incident edges
+/// first).
+///
+/// The refusal reuses the task verbs' two code-reference universes
+/// (`task_verb_universes`): `scanned` = every real code FQN the last scan
+/// produced, `planned` = the planned-node universe (DB `status: planned`
+/// nodes UNION the plan records' `Record::PlannedNode` FQNs). Only a
+/// `CodeRefStatus::Real` FQN is refused — the plan's own placeholder is
+/// `Pending`, because the write-through re-ingests every declared planned
+/// node as a `status: planned` DB row (planned FQNs carry no `<project>/`
+/// detach prefix, so they persist); a `code_label`-style "any row" probe
+/// would therefore block the plan's own re-declaration (the field bug: an
+/// upsert parent-correction). An absent FQN is `Drift` (a planned node may
+/// be declared before anything exists), and an `UnresolvedTarget` at the FQN
+/// is never read (`code_universes` reads only the four Implementation
+/// labels — an unresolved reference is not code).
+fn plan_add_planned_at(
+    apg_root: &Path,
+    records: &mut Vec<Record>,
+    node_kind: &str,
+    fqn: &str,
+    name: &str,
+    parent: Option<&str>,
+) -> anyhow::Result<()> {
+    if !["module", "file", "struct", "function"].contains(&node_kind) {
+        anyhow::bail!("planned node kind must be module/file/struct/function, got `{node_kind}`");
+    }
+    // A plan never plans code that already exists: only a FQN that resolves
+    // to REAL scanned code makes the planned placeholder incoherent (the
+    // scanner-replace only ever supersedes, never the reverse).
+    let (scanned, planned) = task_verb_universes(apg_root, records)?;
+    if crate::layers::classify_code_ref(fqn, &scanned, &planned)
+        == crate::layers::CodeRefStatus::Real
+    {
+        let label = artifacts::ArtifactDb::open(apg_root)
+            .ok()
+            .and_then(|db| db.impl_label(fqn))
+            .unwrap_or("code");
+        anyhow::bail!(
+            "planned node `{fqn}` already resolves to a `{label}` code node — a plan never plans existing code (plan the delta, not the present)"
+        );
+    }
+    let rec = Record::PlannedNode {
+        fqn: fqn.to_string(),
+        kind: node_kind.to_string(),
+        name: name.to_string(),
+        parent: parent.unwrap_or_default().to_string(),
+    };
+    remove_node(records, fqn);
+    records.push(rec);
+    if let Some(parent) = parent {
+        records.push(Record::Contains {
+            from: parent.to_string(),
+            to: fqn.to_string(),
+        });
+    }
     Ok(())
 }
 
@@ -1994,6 +2035,159 @@ mod tests {
             ),
             "a refused creates must not leave a partial Task record"
         );
+
+        testutil::remove(&repo);
+    }
+
+    /// Field repro: the plan's own `status: planned` placeholder (re-ingested
+    /// by the write-through, and no `<project>/` detach prefix) must not block
+    /// re-declaring the SAME FQN — the upsert path a parent correction takes.
+    /// The old guard's `code_label` probe matched the placeholder as a `File`
+    /// code node and refused while zero real code existed.
+    #[test]
+    fn plan_add_planned_redeclares_own_placeholder_with_corrected_parent() {
+        let (apg_root, repo, _wt) = fixture("planned-redeclare");
+        let _path = write_plan(&apg_root);
+        let mut records = load_plan(&apg_root, "foo").unwrap();
+
+        // First declaration: a planned File whose parent is an UnresolvedTarget
+        // (not code — and not a valid Contains pair, so no DB edge is ever
+        // merged for it). The write-through re-ingests the placeholder as a
+        // `status: planned` File row.
+        plan_add_planned_at(
+            &apg_root,
+            &mut records,
+            "file",
+            "/todo/app.ts",
+            "app.ts",
+            Some("github.com/x/y.Missing"),
+        )
+        .unwrap();
+        write_through(&apg_root, "foo", &records).unwrap();
+
+        // The second declaration of the SAME FQN with the corrected parent
+        // must succeed: the only DB match is the plan's own planned
+        // placeholder (Pending), not real scanned code.
+        plan_add_planned_at(
+            &apg_root,
+            &mut records,
+            "file",
+            "/todo/app.ts",
+            "app.ts",
+            Some("github.com/x/y"),
+        )
+        .unwrap();
+        write_through(&apg_root, "foo", &records).unwrap();
+
+        // Plan records: one PlannedNode at the FQN with the corrected parent,
+        // and exactly one Contains record to it (the upsert dropped the old).
+        let recs = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "foo")).unwrap();
+        let parents: Vec<&str> = recs
+            .iter()
+            .filter_map(|r| match r {
+                Record::PlannedNode { fqn, parent, .. } if fqn == "/todo/app.ts" => {
+                    Some(parent.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            parents,
+            vec!["github.com/x/y"],
+            "the planned record carries the corrected parent"
+        );
+        let contains: Vec<&str> = recs
+            .iter()
+            .filter_map(|r| match r {
+                Record::Contains { from, to } if to == "/todo/app.ts" => Some(from.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            contains,
+            vec!["github.com/x/y"],
+            "exactly the corrected parent Contains edge"
+        );
+
+        // DB: the placeholder is still a `status: planned` File (not real
+        // code), and the corrected parent's Contains edge is the only one.
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        let out = db
+            .q("MATCH (n:File {fqn: '/todo/app.ts'}) RETURN n.status")
+            .unwrap();
+        assert!(out.contains("planned"), "DB placeholder row: {out}");
+        let out = db
+            .q("MATCH (p)-[:Contains]->(f:File {fqn: '/todo/app.ts'}) RETURN p.fqn")
+            .unwrap();
+        assert!(
+            out.contains("github.com/x/y"),
+            "DB corrected parent edge: {out}"
+        );
+        assert!(
+            !out.contains("github.com/x/y.Missing"),
+            "no stale parent edge: {out}"
+        );
+        drop(db);
+
+        testutil::remove(&repo);
+    }
+
+    /// Positive control: a FQN that IS real scanned code is still refused,
+    /// with the existing message wording.
+    #[test]
+    fn plan_add_planned_refuses_real_scanned_code() {
+        let (apg_root, repo, _wt) = fixture("planned-real");
+        let _path = write_plan(&apg_root);
+        let mut records = load_plan(&apg_root, "foo").unwrap();
+
+        // `github.com/x/y.Store` is a real Struct in the fixture DB — planning
+        // over it is refused before any record lands.
+        let err = plan_add_planned_at(
+            &apg_root,
+            &mut records,
+            "struct",
+            "github.com/x/y.Store",
+            "Store",
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("already resolves to a `Struct` code node"),
+            "{err}"
+        );
+        assert!(
+            records.iter().all(
+                |r| !matches!(r, Record::PlannedNode { fqn, .. } if fqn == "github.com/x/y.Store")
+            ),
+            "a refused planned node must not leave a record"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// An FQN that matches only an `UnresolvedTarget` is not code: the planned
+    /// declaration lands (the old `code_label` probe counted the unresolved
+    /// row and refused).
+    #[test]
+    fn plan_add_planned_ignores_unresolved_targets() {
+        let (apg_root, repo, _wt) = fixture("planned-unresolved");
+        let _path = write_plan(&apg_root);
+        let mut records = load_plan(&apg_root, "foo").unwrap();
+
+        plan_add_planned_at(
+            &apg_root,
+            &mut records,
+            "function",
+            "github.com/x/y.Missing",
+            "Missing",
+            None,
+        )
+        .unwrap();
+        write_through(&apg_root, "foo", &records).unwrap();
+        assert!(records.iter().any(
+            |r| matches!(r, Record::PlannedNode { fqn, .. } if fqn == "github.com/x/y.Missing")
+        ));
 
         testutil::remove(&repo);
     }
