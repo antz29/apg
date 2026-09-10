@@ -423,8 +423,10 @@ fn project_merge_at(
 mod tests {
     use super::*;
     use crate::artifacts;
+    use crate::layers::{self, InEdge, NodeFile, OutEdge};
     use crate::schema::Record;
     use crate::testutil::{self, Repo};
+    use std::collections::BTreeMap;
 
     /// The module/fqn namespace the payload fixtures use.
     const MOD: &str = "fixture.mod";
@@ -996,6 +998,919 @@ mod tests {
         drop(db);
         // The main DB is fresh (scan_meta re-anchored by the rebuild scan).
         assert!(!git::is_stale(&main_apg));
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
+    // phase-5 task-1 (e2e): bootstrap dogfood — the apg-projects change-set
+    // re-materializes in the layers model through the REAL project flow
+    // (SPEC §6: "this spec ... will be re-materialized in the new model
+    // later" — this is that re-materialization): start from the main
+    // checkout (worktree + branch + auto-scan) -> author the tiers as node
+    // files through the write_project funnel (the same funnel `apg node`/
+    // `apg edge` use) -> the transient plan ingests alongside -> verify ->
+    // merge -> main rebuild. Plus the SPEC §6 guard: the test worktree
+    // `apg/.worktrees/test` stays until before shipping and cleanup deletes
+    // no branch.
+    // ------------------------------------------------------------------
+
+    /// The code FQNs the solution tier's `implemented-by` edges claim — all
+    /// resolve in the fixture's scanned graph, and the plan's tasks must touch
+    /// every one of them for derived solution coverage (SPEC §5).
+    const IMPL_FQNS: [&str; 5] = [
+        "fixture.mod.ProjectStart",
+        "fixture.mod.MutationGuard",
+        "fixture.mod.LayersSerializer",
+        "fixture.mod.PlanBridge",
+        "fixture.mod.InitVersionGate",
+    ];
+
+    /// A bare node file (identity + prose + metadata; edges added by the
+    /// pairing helpers below).
+    fn nf(
+        layer: &str,
+        node_type: &str,
+        name: &str,
+        body: &str,
+        props: &[(&str, &str)],
+    ) -> NodeFile {
+        NodeFile {
+            layer: layer.to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            body: body.to_string(),
+            properties: props
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        }
+    }
+
+    fn out_e(kind: &str, target: &str) -> OutEdge {
+        OutEdge {
+            kind: kind.to_string(),
+            target: target.to_string(),
+            properties: BTreeMap::new(),
+        }
+    }
+
+    fn in_e(kind: &str, source: &str) -> InEdge {
+        InEdge {
+            kind: kind.to_string(),
+            source: source.to_string(),
+            properties: BTreeMap::new(),
+        }
+    }
+
+    /// Pushes a node and records its FQN (`<layer>.<type>.<name>`) in `idx`.
+    fn tier_push(nodes: &mut Vec<NodeFile>, idx: &mut BTreeMap<String, usize>, n: NodeFile) {
+        let f = format!("{}.{}.{}", n.layer, n.node_type, n.name);
+        idx.insert(f, nodes.len());
+        nodes.push(n);
+    }
+
+    /// Adds one edge to BOTH endpoint files (SPEC §4.1 pairwise rule — out in
+    /// the source's file, matching in in the target's).
+    fn tier_edge(
+        nodes: &mut [NodeFile],
+        idx: &BTreeMap<String, usize>,
+        kind: &str,
+        from: &str,
+        to: &str,
+    ) {
+        nodes[idx[from]].out.push(out_e(kind, to));
+        nodes[idx[to]].in_edges.push(in_e(kind, from));
+    }
+
+    /// The re-materialized apg-projects tiers in the layers model: tier 1
+    /// (stakeholder/user + the 20 requirements R1–R20 with their depends-on
+    /// edges, AC constraints, background/design notes), tier 2 (the
+    /// change-sets domain: group/entities/events/value + the four domain laws
+    /// as constraints), tier 3 (the apg-cli C4 solution: system + five
+    /// containers with `implemented-by` code refs), threaded through the
+    /// strictly sequential spine (Requirement —Drives→ Domain —RealisedBy→
+    /// Solution —ImplementedBy→ code). Bodies are condensed from
+    /// plans/SPEC-apg-projects.md §1–6 and the old-model bootstrap
+    /// apg/specs/apg-projects.jsonl — the lossy mapping is the spec-writer's
+    /// judgement (SPEC §4.1 "re-materialize instead").
+    fn apg_projects_tier_nodes() -> Vec<NodeFile> {
+        let mut nodes: Vec<NodeFile> = Vec::new();
+        let mut idx: BTreeMap<String, usize> = BTreeMap::new();
+
+        // --- Tier 1: requirements -------------------------------------
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "requirements",
+                "stakeholder",
+                "maintainer",
+                "The apg maintainers — anyone with an interest in the projects model and its dogfooding (SPEC §1: a thing that has an opinion).",
+                &[],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "requirements",
+                "user",
+                "agent",
+                "The codebase agents (navigator/implementer) — a thing that uses the system (SPEC §6 agent flow: the navigator runs `apg project start <name>` from the main checkout and operates with cwd inside the worktree).",
+                &[],
+            ),
+        );
+        // (id, feature, body) — condensed from the old-model bootstrap
+        // requirements (apg/specs/apg-projects.jsonl), source cites kept.
+        let reqs: &[(&str, &str, &str)] = &[
+            (
+                "R1",
+                "project-start",
+                "`apg project start <name>` creates the project context in one command: worktree + branch off the repo's DEFAULT branch (symbolic HEAD, not literal main) + auto-scan (worktree + branch + branch DB). Worktree location fixed at <main>/apg/.worktrees/<project>. Always a branch — no escape hatch. Idempotent ONLY when <name> matches the current project context; otherwise hard fail. AC: one command yields worktree + branch + branch DB. Source: SPEC-apg-projects.md §2.1.",
+            ),
+            (
+                "R2",
+                "project-start",
+                "Hard refusals at project start: non-git dirs (suggest `apg init`); dirty main at start; unborn HEAD; invalid branch names NEVER sanitized (project names inherit git refname constraints); every collision is a case-specific \"project already exists\" naming the actual state and the fix command. `project start` is a main-checkout operation: run from inside a worktree → hard fail (\"you work one project at a time\"). AC: refusal exits 1 with a fix line. Source: SPEC-apg-projects.md §2.1.",
+            ),
+            (
+                "R3",
+                "mutation-guard",
+                "The project membership guard: guards WRITES only — reads are always allowed; `project start` itself is unguarded (the entry point). Writes refuse outside a project context. Membership = \"the project's worktree, on the project's branch\": current branch == project name AND current checkout is the project's worktree; failure messages name which half failed. Main is never a mutation place — delivered or not. AC: a failure names which half failed. Source: SPEC-apg-projects.md §2.2.",
+            ),
+            (
+                "R4",
+                "mutation-guard",
+                "The guard lives in the central mutation funnel — write_jsonl_and_reingest (src/artifacts.rs) — beside the existing staleness gate: one check covers all mutations. Consequence: non-git test fixtures gain a real project context (real git fixtures with branch + worktree). Source: SPEC-apg-projects.md §2.3.",
+            ),
+            (
+                "R5",
+                "mutation-guard",
+                "`apg plan apply` is renamed `apg plan verify` — the binary applies nothing; verify is the pre-merge coherence gate (no remaining planned/dangling nodes + all feedback resolved), guarded (a verdict is only meaningful against the branch's graph). `apg project merge` = verify gate → merge → main rebuild: binary-operated via git2 from the main checkout — the project's terminal lifecycle act; the rebuild is a plain unguarded scan on main. Source: SPEC-apg-projects.md §2.2 + §2.3.",
+            ),
+            (
+                "R6",
+                "binary-plumbing",
+                "git2 crate with default-features = false (no https/ssh → no OpenSSL). The git CLI is never shelled out to; push/tag remain human acts. VI: cargo check and cargo test pass green with git2 default-features=false. Source: SPEC-apg-projects.md §2.3.",
+            ),
+            (
+                "R7",
+                "binary-plumbing",
+                "Root resolution split: keep the existing walk-up for checkout-local apg/ (correct in worktrees by construction); git2 for identity (branch, checkout path, main path, worktree existence). Invariant: the git checkout root contains the walked-up apg/ — verify cheaply, error on divergence. Source: SPEC-apg-projects.md §2.3.",
+            ),
+            (
+                "R8",
+                "binary-plumbing",
+                "Graph mutations auto-commit on the project branch via git2: one commit per logical mutation (single-file diffs); after an auto-commit the staleness gate's recorded scan_meta is re-anchored (DB and tree in sync by construction). Plan mutations NEVER commit — .trans is gitignored and transient. Source: SPEC-apg-projects.md §2.3 + §4.2.",
+            ),
+            (
+                "R9",
+                "init-version-gate",
+                "`apg init` scaffolds apg/.worktrees/ + its gitignore entry and writes the binary version into apg/config.json as a binary-managed `version` field (user code_type rules untouched). `project start` self-heals the dir/gitignore if absent. Source: SPEC-apg-projects.md §2.4.",
+            ),
+            (
+                "R10",
+                "init-version-gate",
+                "The version gate BLOCKS, never warns: same major.minor → proceed (patch diff fine); missing `version` → block; major or minor mismatch in EITHER direction → block with upgrade guidance. Applies to `apg scan` and `apg project start` (the layout-touching ops); `apg init` is the upgrade act. Source: SPEC-apg-projects.md §2.4.",
+            ),
+            (
+                "R11",
+                "tier-model",
+                "One model per layer (2.0 catalog): requirements = Stakeholder/User/Requirement/Note/Constraint with the requirement tree at all depths (theme → epic → feature → story is ONE node type; decompose until each requirement is atomic/testable); domain = Group/Entity/Value/Service/Note/Constraint; solution = System/Container/Component/Person/Note/Constraint; plans = the bridge, .trans-only; implementation = code — scanned, never serialized (Note/Constraint attach only); global = Constraint (the laws) + Notes. Source: SPEC-apg-projects.md §3.1.",
+            ),
+            (
+                "R12",
+                "tier-model",
+                "Domain semantics use PLAIN names (DDD nomenclature is cryptic): Group hierarchical (groups in groups), attributes core/supporting/generic + optional root (aggregate-groups); BoundedContext/Subdomain/Aggregate/DomainRule collapse into it. Entity kind entity|event (events are ephemeral entities with motion, not a type). Value immutable. Service stateless behaviour. Container kind app/service/db/queue. Solution = C4 only; Person is the C4 view of User/Stakeholder. Stakeholder = anyone with an interest (\"a thing that has an opinion\"); User ⊂ Stakeholder (\"a thing that uses the system\"). Source: SPEC-apg-projects.md §3.1.",
+            ),
+            (
+                "R13",
+                "tier-model",
+                "Spine strictly sequential — no tier skips (lint): Stakeholder ⊃ Requirement —Drives→ Domain —RealisedBy→ Solution —ImplementedBy→ code. Write-time edge-kind validation matrix (§3.3): contains/drives/realised-by/implemented-by/calls/publishes/subscribes/depends-on/uses/represents/details with their exact source/target shapes. Node rules: name allowlist [a-z0-9][a-z0-9-]* (refuse, never sanitize); type must exist in its layer; Entity requires kind; Group takes core/supporting/generic + optional root; Container takes app/service/db/queue; FQN = <layer>.<type>.<name>; names unique per (layer, type); contains/depends-on trees acyclic; dangling FQN references are write-time errors. Source: SPEC-apg-projects.md §3.2 + §3.3.",
+            ),
+            (
+                "R14",
+                "tier-model",
+                "Coupling is DERIVED, never stored: A and B are coupled iff a service/event edge chain connects them. The DDD context-map flavors (direct/published/translated/shared/coevolving) are EDGE ATTRIBUTES on calls/publishes/subscribes — never node types, never Group→Group edges. Constraints are PROSE (\"X must hold\") over things that EXIST: the binary validates structure and references at write time; global constraints guard the whole graph; local constraints attach to any tier-1–3 node; SATISFACTION IS ASSESSED BY REVIEW, never executed. Source: SPEC-apg-projects.md §3.1 + §3.3.",
+            ),
+            (
+                "R15",
+                "serialization",
+                "Layout + identity: the SIX-layer catalog with storage policy separate from it — plans serialize only under apg/.trans/plans/ (transient, per branch); implementation = the code (scanned, never serialized; attach-only note/constraint durable dir); the other four durable. apg/layers/ tree plus the complete .trans mirrors (all six tiers incl. global). One file per node; the file name IS the identity: FQN = <layer>.<type>.<name>, no project prefix. Node-file schema: layer/type/name/body/properties/in/out. Short ids may exist as metadata only, never as identity. Source: SPEC-apg-projects.md §4.1.",
+            ),
+            (
+                "R16",
+                "serialization",
+                "Edge pairing + atomic write-throughs: BOTH in and out edges live in the node file; an in/out edge in one file without the matching out/in edge (same source, kind, target, AND properties) in the other endpoint's file is an ERROR caught at ingestion; outgoing edges are canonical. Transient-to-durable relationships stay ENTIRELY in .trans. Code endpoints are EXEMPT from the pairwise rule — implemented-by is recorded spec-side only, validated against the scanned graph: resolves → real; planned → pending, not an error; gone → error (spec drift). Renames/deletions are atomic write-throughs: one logical mutation updates ALL affected files and commits once; restore the previous state on failure. Source: SPEC-apg-projects.md §4.1.",
+            ),
+            (
+                "R17",
+                "serialization",
+                "No migration: legacy apg/specs/*.jsonl and apg/notes/ are NOT read; the version gate blocks old layouts; re-materialize instead — the lossy mapping is the spec-writer's judgement, not a converter's. The old `apg spec` / `apg invariant` command surfaces and the old-model graph vocabulary are removed from the binary — node kinds are exactly the §3.1 catalog plus the code kinds and the transient plan/review kinds; edge kinds are exactly the §3.3 matrix plus the §5 plan/feedback edges. Source: SPEC-apg-projects.md §4.1.",
+            ),
+            (
+                "R18",
+                "plans-transient",
+                "Plans are tier 4 — the bridge. Plan nodes (PlanPhase, Task, planned Implementation nodes) exist ONLY in apg/.trans/plans/ per branch, never durable. Plan edges: contains (Plan ⊃ PlanPhase ⊃ Task), gates (PlanPhase→PlanPhase), satisfies (PlanPhase→Requirement), and Task→Implementation verbs (creates/modifies/deletes/renames/moves — further verbs reveal themselves through dogfooding). Feedback is transient — branch-lifecycle data, never committed; .trans mirrors the layers structure; Reviews edges link feedback to durable nodes; review state dies with the branch, the reviewed nodes persist. Verification items are the plan's test tier (unit/int/e2e), not graph content. Source: SPEC-apg-projects.md §5.",
+            ),
+            (
+                "R19",
+                "plans-transient",
+                "Coverage is derived and enforced: every solution node's implemented-by FQN must be touched by at least one plan task; the plan is the HOW for the whole solution; the bridge is complete iff coverage holds. Source: SPEC-apg-projects.md §5.",
+            ),
+            (
+                "R20",
+                "rollout",
+                "Standalone change-set + dogfood operational flow: the apg repo dogfoods the model — THIS spec is the bootstrap dogfood (authored with the v0.10.4 binary in the old model, within its boundaries; branch/worktree created manually because `apg project start` does not exist yet; from the next feature onward the binary handles it). Agent flow: the navigator runs `apg project start <name>` from the main checkout; the binary prints the worktree path; the navigator operates with cwd inside the worktree; suite tools work unchanged — walk-up discovery finds the worktree's own apg/. Test worktree apg/.worktrees/test stays until before shipping; cleanup deletes no branch. Source: SPEC-apg-projects.md §6.",
+            ),
+        ];
+        for (id, feature, body) in reqs {
+            tier_push(
+                &mut nodes,
+                &mut idx,
+                nf(
+                    "requirements",
+                    "requirement",
+                    &id.to_lowercase(),
+                    body,
+                    &[("id", id), ("feature", feature)],
+                ),
+            );
+        }
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "requirements",
+                "constraint",
+                "ac-start-one-command",
+                "R1 AC (§2.1): one `apg project start <name>` command yields the worktree + branch + branch DB — the branch DB exists after start.",
+                &[(layers::PROP_ATTACHES_TO, "requirements.requirement.r1")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "requirements",
+                "constraint",
+                "ac-refusals-name-fix",
+                "R2 AC (§2.1): every hard-refusal case exits 1 with a fix line on stderr naming the actual state and the command that fixes it.",
+                &[(layers::PROP_ATTACHES_TO, "requirements.requirement.r2")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "requirements",
+                "constraint",
+                "ac-membership-names-half",
+                "R3 AC (§2.2): a refused mutation's error names which membership half failed (branch half vs worktree half) plus one actionable fix line.",
+                &[(layers::PROP_ATTACHES_TO, "requirements.requirement.r3")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "requirements",
+                "note",
+                "bootstrap-dogfood",
+                "This session is the bootstrap dogfood: branch/worktree created manually because `apg project start` does not exist yet; from the next feature onward the binary handles it. This change-set is standalone (SPEC §6).",
+                &[("kind", "background")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "requirements",
+                "note",
+                "worktree-safety",
+                "The fixed worktree location <main>/apg/.worktrees/<project> is a gitignored path INSIDE the main checkout — tested and verified safe; the test worktree apg/.worktrees/test stays until before shipping; cleanup deletes no branch (SPEC §2.1/§6).",
+                &[("kind", "background")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "requirements",
+                "note",
+                "write-through-regression",
+                "Regression target (bootstrap note-18): a node rewrite must preserve/rewrite ALL incident edges — never drop them silently. The old-model body-upsert did exactly that; the 2.0 atomic write-through (R16, §4.1) is the fix.",
+                &[("kind", "design")],
+            ),
+        );
+
+        // --- Tier 2: domain -------------------------------------------
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "domain",
+                "group",
+                "change-sets",
+                "The projects-model domain (SPEC §1): a project is a container for a change-set over the graph (and the code that underpins it) — a project ≠ a spec ≠ a plan, it CONTAINS those things. The worktree/branch context, the membership guard, the node-file serialization semantics, and the .trans plan bridge all express this one domain concept.",
+                &[("attribute", "core")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "domain",
+                "entity",
+                "project",
+                "The change-set container created by `apg project start <name>`: a git worktree at <main>/apg/.worktrees/<project> on a branch named after the project — branch name == project name is the membership mechanism — off the repo's DEFAULT branch (SPEC §2.1).",
+                &[("kind", "entity")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "domain",
+                "entity",
+                "graph-node",
+                "The universal graph node the serialization and pairwise-edge rules talk about: code nodes (scanned, never serialized) and tier-1–3 nodes (one file per node under the apg/layers/ tree) (SPEC §3.1/§5).",
+                &[("kind", "entity")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "domain",
+                "entity",
+                "project-started",
+                "The event a change-set comes into being: `apg project start <name>` creates the project context — worktree + branch + auto-scan branch DB in one command (SPEC §2.1).",
+                &[("kind", "event")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "domain",
+                "entity",
+                "node-file-written",
+                "The event a node file lands in the worktree: every node/edge mutation writes its file(s) and auto-commits on the project branch — one commit per logical mutation (SPEC §4.2).",
+                &[("kind", "event")],
+            ),
+        );
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "domain",
+                "value",
+                "node-name",
+                "A node's file name IS its identity — the name allowlist [a-z0-9][a-z0-9-]* (refuse, never sanitize); FQN = <layer>.<type>.<name>, no project prefix (SPEC §3.3/§4.1).",
+                &[],
+            ),
+        );
+        for (name, body) in [
+            (
+                "mutation-requires-project",
+                "\"It is not possible to mutate the graph without a project — at all\" (SPEC §2.2): writes refuse outside a project context — membership = the project's worktree on the project's branch.",
+            ),
+            (
+                "pairwise-edge-matching",
+                "An edge appears in BOTH endpoint files (out in the source's, in in the target's); a match requires the same source, kind, target, AND properties; outgoing edges are canonical (SPEC §4.1).",
+            ),
+            (
+                "plan-covers-solution",
+                "Every solution node's implemented-by FQN must be touched by at least one plan task; the bridge is complete iff coverage holds (SPEC §5).",
+            ),
+            (
+                "drift-is-error",
+                "An implemented-by code FQN gone from the scanned graph is spec drift and an error — the scanned graph is the stronger check (resolves → real, planned → pending, gone → error) (SPEC §4.1).",
+            ),
+        ] {
+            tier_push(
+                &mut nodes,
+                &mut idx,
+                nf(
+                    "domain",
+                    "constraint",
+                    name,
+                    body,
+                    &[(layers::PROP_ATTACHES_TO, "domain.group.change-sets")],
+                ),
+            );
+        }
+
+        // --- Tier 3: solution -----------------------------------------
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "solution",
+                "system",
+                "apg-cli",
+                "The apg binary itself — the single C4 system that hosts the project commands, the mutation guard, the layers serializer, the plan bridge and the init/version gate (SPEC §2.3/§6).",
+                &[],
+            ),
+        );
+        for (name, kind, body) in [
+            (
+                "project-commands",
+                "app",
+                "The `apg project` command surface: `apg project start <name>` (§2.1) and `apg project merge` = verify gate → merge → main rebuild, binary-operated via git2 from the main checkout (§2.3).",
+            ),
+            (
+                "mutation-guard",
+                "service",
+                "The cross-cutting enforcement point: the project membership guard in the central mutation funnel write_jsonl_and_reingest beside the staleness gate (§2.2/§2.3), plus the pre-merge coherence gate behind the renamed `apg plan verify` (§2.2).",
+            ),
+            (
+                "layers-serializer",
+                "app",
+                "The node-file serializer behind §3 (tier model, edge-kind validation matrix) and §4 (apg/layers/ layout, one file per node, pairwise edges, atomic write-throughs, auto-commit).",
+            ),
+            (
+                "plan-bridge",
+                "app",
+                "The transient tier-4 bridge (§5): PlanPhase/Task/planned Implementation nodes live only in apg/.trans/plans/ per branch, never durable; Task→Implementation verbs; feedback transient in .trans mirrors.",
+            ),
+            (
+                "init-version-gate",
+                "app",
+                "`apg init` scaffolding apg/.worktrees/ + gitignore entry + binary-managed `version` in apg/config.json (§2.4), and the version gate (blocks not warns; applies to apg scan + apg project start; init is the upgrade act).",
+            ),
+        ] {
+            tier_push(
+                &mut nodes,
+                &mut idx,
+                nf("solution", "container", name, body, &[("kind", kind)]),
+            );
+        }
+
+        // --- The spine + trees (paired both halves, SPEC §3.2/§3.3) ----
+        let req_fqns: Vec<String> = (1..=20)
+            .map(|i| format!("requirements.requirement.r{i}"))
+            .collect();
+        // contains: User ⊃ every Requirement.
+        for r in &req_fqns {
+            tier_edge(&mut nodes, &idx, "contains", "requirements.user.agent", r);
+        }
+        // depends-on (SPEC §5 source ordering; the R8→R6/R7 pair mirrors the
+        // bootstrap feedback-1 resolution).
+        for (from, to) in [
+            ("r2", "r1"),
+            ("r3", "r1"),
+            ("r4", "r3"),
+            ("r5", "r4"),
+            ("r7", "r6"),
+            ("r8", "r6"),
+            ("r8", "r7"),
+            ("r10", "r9"),
+            ("r15", "r10"),
+            ("r16", "r15"),
+            ("r17", "r10"),
+            ("r19", "r18"),
+        ] {
+            tier_edge(
+                &mut nodes,
+                &idx,
+                "depends-on",
+                &format!("requirements.requirement.{from}"),
+                &format!("requirements.requirement.{to}"),
+            );
+        }
+        // drives: every Requirement → the change-sets domain group.
+        for r in &req_fqns {
+            tier_edge(&mut nodes, &idx, "drives", r, "domain.group.change-sets");
+        }
+        // contains: the change-sets group hosts its entities/events/value.
+        for (name, node_type) in [
+            ("project", "entity"),
+            ("graph-node", "entity"),
+            ("project-started", "entity"),
+            ("node-file-written", "entity"),
+            ("node-name", "value"),
+        ] {
+            tier_edge(
+                &mut nodes,
+                &idx,
+                "contains",
+                "domain.group.change-sets",
+                &format!("domain.{node_type}.{name}"),
+            );
+        }
+        // realised-by: Domain → Solution (the strictly sequential spine).
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "realised-by",
+            "domain.group.change-sets",
+            "solution.system.apg-cli",
+        );
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "realised-by",
+            "domain.entity.project",
+            "solution.container.project-commands",
+        );
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "realised-by",
+            "domain.entity.graph-node",
+            "solution.container.layers-serializer",
+        );
+        // contains: System ⊃ the five Containers.
+        for c in [
+            "project-commands",
+            "mutation-guard",
+            "layers-serializer",
+            "plan-bridge",
+            "init-version-gate",
+        ] {
+            tier_edge(
+                &mut nodes,
+                &idx,
+                "contains",
+                "solution.system.apg-cli",
+                &format!("solution.container.{c}"),
+            );
+        }
+        // implemented-by: Solution → code FQNs (code-exempt — spec-side only,
+        // validated against the scanned graph at write time and at scan).
+        for (i, container) in [
+            "project-commands",
+            "mutation-guard",
+            "layers-serializer",
+            "plan-bridge",
+            "init-version-gate",
+        ]
+        .iter()
+        .enumerate()
+        {
+            nodes[idx[&format!("solution.container.{container}")]]
+                .out
+                .push(out_e("implemented-by", IMPL_FQNS[i]));
+        }
+        // details: notes attach to the nodes they explain.
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "details",
+            "requirements.note.bootstrap-dogfood",
+            "requirements.requirement.r20",
+        );
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "details",
+            "requirements.note.worktree-safety",
+            "domain.entity.project",
+        );
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "details",
+            "requirements.note.write-through-regression",
+            "domain.constraint.pairwise-edge-matching",
+        );
+
+        nodes
+    }
+
+    /// The transient plan that pairs with the re-materialized tiers (SPEC §5):
+    /// one phase satisfying the rollout requirement, and one `modifies` task
+    /// per solution `implemented-by` FQN — derived coverage holds, no planned
+    /// nodes, no feedback, so the verify gate passes green.
+    fn apg_projects_plan_records() -> Vec<Record> {
+        let mut r: Vec<Record> = vec![
+            Record::Plan {
+                fqn: "apg-projects/plan".to_string(),
+                title: "apg-projects plan".to_string(),
+                strategy:
+                    "Bootstrap dogfood: re-materialize the change-set in the layers model (SPEC §6)"
+                        .to_string(),
+            },
+            Record::PlanPhase {
+                fqn: "apg-projects/plan.phase-01".to_string(),
+                number: 1,
+                title: "rollout".to_string(),
+                deliverable: "re-materialized tiers".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "apg-projects/plan".to_string(),
+                to: "apg-projects/plan.phase-01".to_string(),
+            },
+            Record::Satisfies {
+                from: "apg-projects/plan.phase-01".to_string(),
+                to: "requirements.requirement.r20".to_string(),
+            },
+        ];
+        for (i, code) in IMPL_FQNS.iter().enumerate() {
+            let task = format!("apg-projects/plan.phase-01.task-{}", i + 1);
+            r.push(Record::Task {
+                fqn: task.clone(),
+                title: format!("touch {code}"),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: "modifies".to_string(),
+                target: code.to_string(),
+                new_fqn: String::new(),
+            });
+            r.push(Record::Contains {
+                from: "apg-projects/plan.phase-01".to_string(),
+                to: task,
+            });
+        }
+        r
+    }
+
+    /// Every durable FQN the re-materialization authors — the e2e asserts the
+    /// branch DB holds all of them (tier 1 + tier 2 + tier 3).
+    fn expected_tier_fqns() -> Vec<String> {
+        let mut fqns: Vec<String> = (1..=20)
+            .map(|i| format!("requirements.requirement.r{i}"))
+            .collect();
+        fqns.extend([
+            "requirements.stakeholder.maintainer".to_string(),
+            "requirements.user.agent".to_string(),
+            "requirements.constraint.ac-start-one-command".to_string(),
+            "requirements.constraint.ac-refusals-name-fix".to_string(),
+            "requirements.constraint.ac-membership-names-half".to_string(),
+            "requirements.note.bootstrap-dogfood".to_string(),
+            "requirements.note.worktree-safety".to_string(),
+            "requirements.note.write-through-regression".to_string(),
+            "domain.group.change-sets".to_string(),
+            "domain.entity.project".to_string(),
+            "domain.entity.graph-node".to_string(),
+            "domain.entity.project-started".to_string(),
+            "domain.entity.node-file-written".to_string(),
+            "domain.value.node-name".to_string(),
+            "domain.constraint.mutation-requires-project".to_string(),
+            "domain.constraint.pairwise-edge-matching".to_string(),
+            "domain.constraint.plan-covers-solution".to_string(),
+            "domain.constraint.drift-is-error".to_string(),
+            "solution.system.apg-cli".to_string(),
+            "solution.container.project-commands".to_string(),
+            "solution.container.mutation-guard".to_string(),
+            "solution.container.layers-serializer".to_string(),
+            "solution.container.plan-bridge".to_string(),
+            "solution.container.init-version-gate".to_string(),
+        ]);
+        fqns
+    }
+
+    #[test]
+    fn dogfood_round_trip_re_materializes_tiers_start_author_scan_verify_merge() {
+        // A main checkout whose scanned code carries the structs the solution
+        // tier's implemented-by edges claim (SPEC §4.1: resolves → real).
+        let repo = Repo::new("dogfood-e2e");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(
+                MOD,
+                FILE,
+                &[
+                    "Store",
+                    "ProjectStart",
+                    "MutationGuard",
+                    "LayersSerializer",
+                    "PlanBridge",
+                    "InitVersionGate",
+                ],
+            ),
+        );
+        repo.commit_all("seed code");
+
+        // start: one command yields worktree + branch + branch DB, off the
+        // default branch (the dogfood flow the next feature will run).
+        let wt = project_start_at(&repo.apg_root(), "apg-projects", Some(&start_scan)).unwrap();
+        let wt_apg = wt.join(specs::LAYOUT);
+
+        // author: the re-materialized tiers land as node files through the
+        // write_project funnel (the exact surface `apg node`/`apg edge`
+        // use): membership guard → validate → atomic write → auto-commit →
+        // DB re-merge.
+        layers::write_project(&wt_apg, &apg_projects_tier_nodes(), &[]).unwrap();
+
+        // author: the transient plan (SPEC §5) — never committed, but it must
+        // ingest alongside the durable tiers.
+        let plan_path = wt_apg
+            .join(specs::TRANS)
+            .join("plans")
+            .join("apg-projects.jsonl");
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &plan_path,
+            "apg-projects",
+            &apg_projects_plan_records(),
+        )
+        .unwrap();
+
+        // The branch carries the node files (one auto-commit) and never the
+        // plan (R8 — .trans is transient).
+        let wt_repo = git2::Repository::open(&wt).unwrap();
+        let tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
+        assert!(
+            tip.tree()
+                .unwrap()
+                .get_path(Path::new("apg/layers/requirements/requirement/r1.json"))
+                .is_ok(),
+            "the tier node files must be committed on the project branch"
+        );
+        assert!(
+            tip.tree()
+                .unwrap()
+                .get_path(Path::new("apg/.trans/plans/apg-projects.jsonl"))
+                .is_err(),
+            "the plan JSONL must never be committed (.trans is transient)"
+        );
+
+        // scan: the branch DB is rebuilt from code + layers + .trans plans —
+        // the tiers appear and the transient plan ingests alongside them.
+        start_scan(&wt).unwrap();
+        let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        for f in expected_tier_fqns() {
+            assert!(db.has_node(&f), "branch DB must hold tier node `{f}`");
+        }
+        for f in [
+            "apg-projects/plan",
+            "apg-projects/plan.phase-01",
+            "apg-projects/plan.phase-01.task-1",
+            "apg-projects/plan.phase-01.task-5",
+        ] {
+            assert!(
+                db.has_node(f),
+                "branch DB must hold transient plan node `{f}`"
+            );
+        }
+        // The spine is real in the DB: 20 drives edges, the domain→solution
+        // realised-by hop, the 5 implemented-by claims onto scanned structs,
+        // and the User→Requirement contains tree.
+        let count = |q: &str| -> i64 {
+            db.q(q)
+                .unwrap()
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .trim()
+                .parse()
+                .unwrap_or(0)
+        };
+        assert_eq!(
+            count("MATCH (:Requirement)-[:Drives]->(:DomainGroup) RETURN count(*)"),
+            20
+        );
+        assert_eq!(
+            count("MATCH (:DomainGroup)-[:RealisedBy]->(:System) RETURN count(*)"),
+            1
+        );
+        assert_eq!(
+            count("MATCH (:Container)-[:SpecImplementedBy]->(:Struct) RETURN count(*)"),
+            5
+        );
+        assert_eq!(
+            count("MATCH (:User)-[:Contains]->(:Requirement) RETURN count(*)"),
+            20
+        );
+        assert_eq!(
+            count("MATCH (:Note)-[:Details]->(:Requirement) RETURN count(*)"),
+            1
+        );
+        drop(db);
+
+        // verify: the coherence gate passes — no planned nodes, no feedback,
+        // and every implemented-by FQN is touched by a plan task.
+        plan_cmd::plan_verify_at(&wt_apg, "apg-projects").unwrap();
+
+        // merge: verify gate → fast-forward into the default branch → main
+        // rebuild (a plain unguarded scan on main).
+        project_merge_at(&repo.apg_root(), "apg-projects", Some(&start_scan)).unwrap();
+
+        // The default branch now holds the project's tip with the node files.
+        let main_repo = git2::Repository::open(&repo.root).unwrap();
+        assert_eq!(
+            main_repo.head().unwrap().peel_to_commit().unwrap().id(),
+            tip.id(),
+            "main must fast-forward to the project tip"
+        );
+        assert!(
+            repo.root
+                .join("apg/layers/solution/container/project-commands.json")
+                .exists(),
+            "the merged main checkout carries the tier node files"
+        );
+        assert!(repo.is_clean(), "merged main must be clean");
+
+        // Main rebuild: the main DB has the code + the re-materialized tiers;
+        // the transient plan did not cross the merge.
+        let main_apg = repo.apg_root();
+        let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+        for f in [
+            "requirements.requirement.r1",
+            "requirements.requirement.r20",
+            "domain.group.change-sets",
+            "solution.system.apg-cli",
+            "fixture.mod.Store",
+            "fixture.mod.ProjectStart",
+        ] {
+            assert!(db.has_node(f), "main DB must hold `{f}` after the rebuild");
+        }
+        assert!(
+            !db.has_node("apg-projects/plan"),
+            "transient plans never reach main"
+        );
+        drop(db);
+        assert!(!git::is_stale(&main_apg));
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn merge_keeps_worktree_and_branch_cleanup_deletes_no_branch() {
+        // SPEC §6: "Test worktree apg/.worktrees/test stays until before
+        // shipping ... cleanup deletes no branch." The guard: neither the
+        // merge act nor a subsequent project start may remove the test
+        // worktree or its branch.
+        let repo = Repo::new("dogfood-guard");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+
+        let wt = project_start_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
+        let wt_apg = wt.join(specs::LAYOUT);
+        // Durable content (a node file, auto-committed) + a minimal transient
+        // plan (no planned nodes, no feedback) so the verify gate passes.
+        write_spec_node(&wt_apg);
+        let plan_path = wt_apg.join(specs::TRANS).join("plans").join("test.jsonl");
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &plan_path,
+            "test",
+            &[
+                Record::Plan {
+                    fqn: "test/plan".to_string(),
+                    title: "test plan".to_string(),
+                    strategy: String::new(),
+                },
+                Record::PlanPhase {
+                    fqn: "test/plan.phase-01".to_string(),
+                    number: 1,
+                    title: "P1".to_string(),
+                    deliverable: "D".to_string(),
+                    status: "pending".to_string(),
+                },
+                Record::Contains {
+                    from: "test/plan".to_string(),
+                    to: "test/plan.phase-01".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+        start_scan(&wt).unwrap();
+        plan_cmd::plan_verify_at(&wt_apg, "test").unwrap();
+
+        // Merge: the terminal lifecycle act — and it must NOT clean up the
+        // project behind itself.
+        project_merge_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
+
+        let main_repo = git2::Repository::open(&repo.root).unwrap();
+        assert!(
+            wt.is_dir(),
+            "the test worktree apg/.worktrees/test must survive the merge (SPEC §6)"
+        );
+        assert!(
+            main_repo.find_worktree("test").is_ok(),
+            "the test worktree must stay registered after the merge"
+        );
+        assert!(
+            main_repo
+                .find_branch("test", git2::BranchType::Local)
+                .is_ok(),
+            "cleanup deletes no branch — branch `test` must survive the merge"
+        );
+
+        // A second project start (a fresh dogfood cycle) must not sweep the
+        // test worktree away either.
+        let wt2 = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+        assert!(wt2.is_dir());
+        assert!(
+            wt.is_dir(),
+            "starting another project must not delete the test worktree"
+        );
+        assert!(
+            main_repo
+                .find_branch("test", git2::BranchType::Local)
+                .is_ok(),
+            "starting another project must not delete the test branch"
+        );
         testutil::remove(&repo);
     }
 }
