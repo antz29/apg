@@ -202,8 +202,8 @@ pub fn remove(repo: &Repo) {
 // Hermetic scans: tests never spawn frontends, so a fixture checkout's "code"
 // is whatever `*.scan.jsonl` payload files it carries (scanner-shaped records,
 // piped through the real ingest pipeline exactly like a frontend spool), plus
-// its committed apg/specs + apg/notes + apg/.trans/plans JSONLs (the same
-// record stream `cmd_scan` assembles).
+// its `apg/layers` node-file tree and `apg/.trans/` plan store + feedback
+// mirrors (the same record stream `cmd_scan` assembles).
 // ---------------------------------------------------------------------------
 
 /// A scanner-style module record line.
@@ -276,11 +276,10 @@ pub fn payload_files(dir: &Path) -> Vec<PathBuf> {
 /// A hermetic stand-in for `apg scan` (tests never spawn frontends): pipes the
 /// checkout's `*.scan.jsonl` payloads through the real ingest pipeline, then
 /// chains the same post-code leg `cmd_scan` assembles — the durable
-/// `apg/layers` tree via `layers::ingest_tree` plus the transient
-/// `.trans/plans/*.jsonl` plan leg (the committed `apg/specs`/`apg/notes`
-/// durable halves are gone) — writing `db.lbug` + `graph.jsonl` into the
-/// checkout's own `apg/.trans/`. The `scan_meta` records the real git state of
-/// the checkout, so staleness behaves exactly like a real scan.
+/// `apg/layers` tree via `layers::ingest_tree` plus the transient `.trans/`
+/// plan store and feedback tier mirrors — writing `db.lbug` + `graph.jsonl`
+/// into the checkout's own `apg/.trans/`. The `scan_meta` records the real git
+/// state of the checkout, so staleness behaves exactly like a real scan.
 ///
 /// `run_pipeline` writes relative to the process cwd, so every scan is
 /// serialized behind a process-wide lock: concurrent scans (tests run in
@@ -345,17 +344,22 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
             .collect()
     };
 
-    // The transient plans leg only (`.trans/plans/*.jsonl`) — the committed
+    // The transient legs (`.trans/plans/*.jsonl` — the plan store — plus the
+    // five `.trans/<tier>/*.jsonl` feedback mirrors, SPEC §5) — the committed
     // spec/note durable halves are gone; spec data comes from the `apg/layers`
     // tree via `layers::ingest_tree`.
-    let mut plan_records: Vec<crate::schema::Record> = Vec::new();
+    let mut transient_records: Vec<crate::schema::Record> = Vec::new();
     let mut planned: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for f in crate::specs::plan_files(&apg_root) {
+    let transient_files = crate::specs::plan_files(&apg_root)
+        .into_iter()
+        .chain(crate::specs::trans_mirror_files(&apg_root))
+        .collect::<Vec<_>>();
+    for f in transient_files {
         for r in crate::specs::read_jsonl(&f).unwrap_or_else(|e| panic!("{e:#}")) {
             if let crate::schema::Record::PlannedNode { fqn, .. } = &r {
                 planned.insert(fqn.clone());
             }
-            plan_records.push(r);
+            transient_records.push(r);
         }
     }
 
@@ -367,7 +371,7 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
     let records = scanner_records
         .into_iter()
         .chain(layers_records)
-        .chain(plan_records);
+        .chain(transient_records);
 
     let old = std::env::current_dir()?;
     std::env::set_current_dir(&trans_dir)?;

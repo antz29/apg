@@ -63,8 +63,13 @@ pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
     }
 }
 
-/// `apg plan init <project> [--title T] [--strategy S]` — the plan is only
-/// ever for a project that has a spec.
+/// `apg plan init <project> [--title T] [--strategy S]` — the plan is the
+/// tier-4 bridge for a project whose requirements live in the layers store
+/// (`apg/layers/requirements/`, SPEC §5). The legacy spec-exists gate (the
+/// old `apg/specs/<project>.jsonl` and `apg spec init`) is gone: a plan
+/// without any requirement node files yet is allowed, but the empty spec is
+/// surfaced as a warning — phases added with `--satisfies` validate against
+/// the layers store and will refuse until the requirement tier exists.
 fn plan_init(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(project) = p.positional.first() else {
@@ -72,24 +77,48 @@ fn plan_init(args: &[String]) -> anyhow::Result<()> {
     };
     let apg_root = require_apg_root()?;
     artifacts::acquire_spec_lock(&apg_root)?;
-    let spec_path = specs::spec_jsonl_path(&apg_root, project);
-    if !spec_path.exists() {
-        anyhow::bail!("no spec for `{project}` — author a spec first (`apg spec init {project}`)");
+    let has_requirements = plan_init_at(
+        &apg_root,
+        project,
+        &p.get("title")
+            .unwrap_or_else(|| format!("Plan for {project}")),
+        &p.get("strategy").unwrap_or_default(),
+    )?;
+    if !has_requirements {
+        eprintln!(
+            "apg: warning: no requirements under apg/layers/requirements/ — the plan for `{project}` has nothing to satisfy yet; author the requirement tier before adding phases with --satisfies"
+        );
     }
     let path = specs::plan_jsonl_path(&apg_root, project);
+    println!("Created plan {project} at {}", path.display());
+    Ok(())
+}
+
+/// Core of `plan_init`: writes the Plan record into the transient plan store
+/// (`.trans/plans/<project>.jsonl`). Returns whether the layers store holds
+/// any requirement node file — the spec-exists gate, resolved against the
+/// layers store (never the legacy spec JSONL); the CLI wrapper surfaces a
+/// warning when no requirements exist yet (a warning, never a blocker).
+fn plan_init_at(
+    apg_root: &Path,
+    project: &str,
+    title: &str,
+    strategy: &str,
+) -> anyhow::Result<bool> {
+    let path = specs::plan_jsonl_path(apg_root, project);
     if path.exists() {
         anyhow::bail!("plan for `{project}` already exists at {}", path.display());
     }
+    let has_requirements = crate::layers::read_existing_nodes(apg_root)?
+        .iter()
+        .any(|n| n.layer == "requirements" && n.node_type == "requirement");
     let records = vec![Record::Plan {
         fqn: format!("{project}/plan"),
-        title: p
-            .get("title")
-            .unwrap_or_else(|| format!("Plan for {project}")),
-        strategy: p.get("strategy").unwrap_or_default(),
+        title: title.to_string(),
+        strategy: strategy.to_string(),
     }];
-    write_through(&apg_root, project, &records)?;
-    println!("Created plan {project} at {}", path.display());
-    Ok(())
+    write_through(apg_root, project, &records)?;
+    Ok(has_requirements)
 }
 
 /// `apg plan add <project> phase <n> …` / `task <phase> <k> …` /
@@ -251,9 +280,13 @@ fn plan_add_phase_at(
         });
     }
     for req in satisfies {
-        let req_fqn = format!("{project}/spec.{req}");
+        // Requirements live in the layers store: FQN `requirements.requirement.<name>`
+        // (no project prefix — the old `<project>/spec.<id>` vocabulary is gone).
+        let req_fqn = format!("requirements.requirement.{req}");
         if !spec_has_requirement(apg_root, project, &req_fqn)? {
-            anyhow::bail!("satisfies target `{req}` is not a requirement of `{project}`");
+            anyhow::bail!(
+                "satisfies target `{req}` is not a requirement of `{project}` — requirements live in apg/layers/requirements/"
+            );
         }
         recs.push(Record::Satisfies {
             from: fqn.clone(),
@@ -376,9 +409,12 @@ fn plan_link_at(
         );
     }
     for req in satisfies {
-        let req_fqn = format!("{project}/spec.{req}");
+        // Requirements live in the layers store: FQN `requirements.requirement.<name>`.
+        let req_fqn = format!("requirements.requirement.{req}");
         if !spec_has_requirement(apg_root, project, &req_fqn)? {
-            anyhow::bail!("satisfies target `{req}` is not a requirement of `{project}`");
+            anyhow::bail!(
+                "satisfies target `{req}` is not a requirement of `{project}` — requirements live in apg/layers/requirements/"
+            );
         }
     }
     link_phase_edges(&phase_fqn, satisfies, prereqs, &mut records)?;
@@ -404,7 +440,9 @@ fn link_phase_edges(
         .ok_or_else(|| anyhow::anyhow!("bad phase fqn `{phase_fqn}`"))?;
     records.retain(|r| !matches!(r, Record::Satisfies { from, .. } if from.as_str() == phase_fqn));
     for req in reqs {
-        let req_fqn = format!("{project}/spec.{req}");
+        // The new-model requirement FQN: `requirements.requirement.<name>`
+        // (layer-prefixed, no project segment).
+        let req_fqn = format!("requirements.requirement.{req}");
         records.push(Record::Satisfies {
             from: phase_fqn.to_string(),
             to: req_fqn,
@@ -980,15 +1018,19 @@ fn short_id(fqn: &str, project: &str) -> String {
     fqn.strip_prefix(&prefix).unwrap_or(fqn).to_string()
 }
 
-/// Whether the spec project has a requirement with this fqn.
-fn spec_has_requirement(apg_root: &Path, project: &str, req_fqn: &str) -> anyhow::Result<bool> {
-    let path = specs::spec_jsonl_path(apg_root, project);
-    if !path.exists() {
-        return Ok(false);
-    }
-    Ok(specs::read_jsonl(&path)?
+/// Whether the layers store has a requirement with this FQN
+/// (`requirements.requirement.<name>` — one node file per requirement under
+/// `apg/layers/requirements/requirement/`, no project prefix; the legacy spec
+/// JSONL is gone).
+fn spec_has_requirement(apg_root: &Path, _project: &str, req_fqn: &str) -> anyhow::Result<bool> {
+    Ok(crate::layers::read_existing_nodes(apg_root)?
         .iter()
-        .any(|r| matches!(r, Record::Requirement { fqn, .. } if fqn == req_fqn)))
+        .any(|n| {
+            n.layer == "requirements"
+                && n.node_type == "requirement"
+                && crate::layers::fqn(crate::layers::Layer::Requirements, &n.node_type, &n.name)
+                    == req_fqn
+        }))
 }
 
 #[cfg(test)]
@@ -1468,7 +1510,14 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(satisfies, vec!["foo/spec.R1", "foo/spec.R2", "foo/spec.R3"]);
+        assert_eq!(
+            satisfies,
+            vec![
+                "requirements.requirement.R1",
+                "requirements.requirement.R2",
+                "requirements.requirement.R3"
+            ]
+        );
         // Outgoing Gates set; the incoming phase-02 → phase-01 gate survives.
         assert!(records.iter().any(|r| matches!(
             r,
@@ -1492,7 +1541,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(satisfies, vec!["foo/spec.R9"]);
+        assert_eq!(satisfies, vec!["requirements.requirement.R9"]);
     }
 
     #[test]
@@ -1850,6 +1899,123 @@ mod tests {
             "{err}"
         );
         assert!(err.to_string().contains("foo/feedback-structural"), "{err}");
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn plan_init_works_and_warns_without_spec_jsonl() {
+        // The legacy spec-exists gate is gone: no `apg/specs/<project>.jsonl`
+        // (and no requirement node files yet) still allows init — the empty
+        // spec is surfaced by the caller, never a blocker. With a requirement
+        // in the layers store the gate resolves green.
+        let (apg_root, repo, _wt) = fixture("init-no-spec");
+
+        // No requirements yet: init works and reports the warning condition.
+        let has = plan_init_at(&apg_root, "foo", "Plan Foo", "S").unwrap();
+        assert!(!has, "no requirement node files -> the warning path");
+        assert!(
+            specs::plan_jsonl_path(&apg_root, "foo").exists(),
+            "init must create the plan store even without requirements"
+        );
+        let recs = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "foo")).unwrap();
+        assert!(
+            recs.iter()
+                .any(|r| matches!(r, Record::Plan { fqn, .. } if fqn == "foo/plan")),
+            "the Plan record must land in .trans/plans"
+        );
+        // The legacy spec store is never created or referenced.
+        assert!(
+            !apg_root.join("specs").exists(),
+            "apg/specs must never be written"
+        );
+
+        // A requirement node file in the layers store satisfies the gate —
+        // under a second project context (init is a per-branch act).
+        let wt2 = repo.start_project("bar");
+        let bar_apg = wt2.join(specs::LAYOUT);
+        let req_file = crate::layers::node_file_path(
+            &bar_apg,
+            crate::layers::Layer::Requirements,
+            "requirement",
+            "timer",
+        );
+        std::fs::create_dir_all(req_file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &req_file,
+            r#"{"name":"timer","type":"requirement","layer":"requirements","body":"x","properties":{},"out":[],"in":[]}"#,
+        )
+        .unwrap();
+        let has = plan_init_at(&bar_apg, "bar", "Plan Bar", "S2").unwrap();
+        assert!(
+            has,
+            "a requirement node file must satisfy the spec-exists gate"
+        );
+        assert!(specs::plan_jsonl_path(&bar_apg, "bar").exists());
+        assert!(
+            !bar_apg.join("specs").exists(),
+            "apg/specs must never be written"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn plan_mutations_never_commit() {
+        // Transience (SPEC §4.2/§5): plan mutations write the gitignored
+        // `.trans/plans/` store and NEVER auto-commit — the branch HEAD does
+        // not move and the tree stays clean through add/done/note mutations.
+        let (apg_root, repo, _wt) = fixture("never-commit");
+        let _path = write_plan(&apg_root);
+        let head_before = repo.head_sha();
+
+        // plan add (a phase), plan done (assertion), plan note — three
+        // mutations through the central funnel.
+        let mut records = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "foo")).unwrap();
+        let plan_fqn = "foo/plan".to_string();
+        plan_add_phase_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            &plan_fqn,
+            2,
+            "P2",
+            "D2",
+            &[],
+            &[],
+        )
+        .unwrap();
+        write_through(&apg_root, "foo", &records).unwrap();
+        plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+        plan_note_at(
+            &apg_root,
+            "foo",
+            "foo/plan.phase-01.task-1",
+            "concern noted",
+            "note",
+        )
+        .unwrap();
+
+        // The plan state landed in the transient store...
+        let recs = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "foo")).unwrap();
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::PlanPhase { fqn, .. } if fqn == "foo/plan.phase-02"
+        )));
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Note { fqn, .. } if fqn == "foo/plan.note-1"
+        )));
+        // ...and nothing was committed: `.trans` is gitignored and transient.
+        assert_eq!(
+            repo.head_sha(),
+            head_before,
+            "plan mutations must never auto-commit"
+        );
+        assert!(
+            repo.is_clean(),
+            "the tree must stay clean — plan files are gitignored"
+        );
 
         testutil::remove(&repo);
     }

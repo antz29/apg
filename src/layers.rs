@@ -4471,10 +4471,11 @@ mod tests {
         testutil::remove(&repo);
     }
 
-    /// R18: `.trans` plans (Plan/PlanPhase/Task/PlannedNode) and feedback
-    /// (Feedback + Reviews) still ingest through the scan and pair against
-    /// durable node-file nodes — the Reviews edge points at a durable
-    /// requirement and lands in the DB.
+    /// R18/§5: `.trans` plans (Plan/PlanPhase/Task/PlannedNode) and feedback
+    /// still ingest through the scan and pair against durable node-file nodes.
+    /// The feedback sits in the tier dir of its attached node (SPEC §5) — the
+    /// requirements tier mirror, `.trans/requirements/foo.jsonl` — and its
+    /// Reviews edge points at the durable requirement and lands in the DB.
     #[test]
     fn scan_ingests_transient_plans_and_feedback_paired_to_durable_nodes() {
         let repo = scan_repo("scan-plans-feedback");
@@ -4483,8 +4484,10 @@ mod tests {
             &repo.apg_root(),
             &[node("requirements", "requirement", "timer")],
         );
-        // The transient side: plan/phase/task/planned-node + feedback with a
-        // Reviews edge targeting the durable requirement.
+        // The transient side: the plan store (plan/phase/task/planned-node)
+        // plus the feedback mirror — a review of the durable requirement
+        // lives in `.trans/requirements/foo.jsonl` with both halves (the
+        // Feedback record AND its Reviews edge) in `.trans`.
         let plan_path = repo
             .apg_root()
             .join(crate::specs::TRANS)
@@ -4524,18 +4527,29 @@ mod tests {
                 name: "Widget".to_string(),
                 parent: SCAN_MOD.to_string(),
             },
-            Record::Feedback {
-                fqn: "foo/feedback-1".to_string(),
-                body: "review".to_string(),
-                status: "open".to_string(),
-                disposition: String::new(),
-            },
-            Record::Reviews {
-                from: "foo/feedback-1".to_string(),
-                to: "requirements.requirement.timer".to_string(),
-            },
         ];
         crate::specs::write_jsonl(&plan_path, &records).unwrap();
+        let req_mirror = repo
+            .apg_root()
+            .join(crate::specs::TRANS)
+            .join("requirements")
+            .join("foo.jsonl");
+        crate::specs::write_jsonl(
+            &req_mirror,
+            &[
+                Record::Feedback {
+                    fqn: "foo/feedback-1".to_string(),
+                    body: "review".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-1".to_string(),
+                    to: "requirements.requirement.timer".to_string(),
+                },
+            ],
+        )
+        .unwrap();
 
         testutil::scan_checkout(&repo.root).unwrap();
 

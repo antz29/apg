@@ -1321,19 +1321,24 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             .collect()
     };
 
-    // Read the transient plans leg (`.trans/plans/*.jsonl` — the old-model
-    // Plan/PlanPhase/Task/PlannedNode records, SURVIVES per R18) into both the
-    // planned-FQN universe `ingest_tree` uses (planned → pending) and the
-    // records the pipeline chains after code.
-    let plan_files = specs::plan_files(&apg_root);
-    let mut plan_records: Vec<schema::Record> = Vec::new();
+    // Read the transient legs (`.trans/plans/*.jsonl` — the per-branch plan
+    // store — plus the five `.trans/<tier>/*.jsonl` feedback mirrors, SPEC
+    // §5: feedback sits in the tier dir of its attached node, both halves of
+    // the relationship in `.trans`) into both the planned-FQN universe
+    // `ingest_tree` uses (planned → pending) and the records the pipeline
+    // chains after code.
+    let transient_files = specs::plan_files(&apg_root)
+        .into_iter()
+        .chain(specs::trans_mirror_files(&apg_root))
+        .collect::<Vec<_>>();
+    let mut transient_records: Vec<schema::Record> = Vec::new();
     let mut planned: BTreeSet<String> = BTreeSet::new();
-    for f in &plan_files {
+    for f in &transient_files {
         for r in specs::read_jsonl(f).unwrap_or_else(|e| panic!("{e:#}")) {
             if let schema::Record::PlannedNode { fqn, .. } = &r {
                 planned.insert(fqn.clone());
             }
-            plan_records.push(r);
+            transient_records.push(r);
         }
     }
 
@@ -1342,15 +1347,15 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // scanned graph and the planned-node universe.
     let layers_records = layers::ingest_tree(&apg_root, &scanned_code, &planned)?;
 
-    if !layers_records.is_empty() || !plan_records.is_empty() {
+    if !layers_records.is_empty() || !transient_records.is_empty() {
         log.ln(&format!(
-            "Layer tree + plan inputs: {} layer-node records, {} plan records",
+            "Layer tree + transient inputs: {} layer-node records, {} transient records",
             layers_records.len(),
-            plan_records.len(),
+            transient_records.len(),
         ));
     }
 
-    let records = records.chain(layers_records).chain(plan_records);
+    let records = records.chain(layers_records).chain(transient_records);
 
     run_pipeline(
         records,

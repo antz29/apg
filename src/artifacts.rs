@@ -397,8 +397,23 @@ impl ArtifactDb {
         to: &str,
         known: &HashMap<String, &'static str>,
     ) -> anyhow::Result<()> {
-        let la = known.get(from).copied().or_else(|| self.code_label(from));
-        let lb = known.get(to).copied().or_else(|| self.code_label(to));
+        // Endpoint labels come from the record set being merged (`known`), the
+        // code graph, or the live DB itself — a durable layer node (a
+        // requirement, an entity, a constraint) persists across a transient
+        // write-through (only `<project>/…` nodes are detached), so a Reviews
+        // edge from `.trans` feedback to a durable node resolves its label
+        // from the DB and merges (SPEC §5: feedback links to durable nodes
+        // via Reviews edges).
+        let la = known
+            .get(from)
+            .copied()
+            .or_else(|| self.code_label(from))
+            .or_else(|| self.node_label(from));
+        let lb = known
+            .get(to)
+            .copied()
+            .or_else(|| self.code_label(to))
+            .or_else(|| self.node_label(to));
         if let (Some(a), Some(b)) = (la, lb) {
             if !rel_pair_allowed(rel_table, a, b) {
                 return Ok(());
@@ -810,10 +825,17 @@ fn reingest_project_with(
     }
 }
 
-/// Assembles the record set a re-ingest merges: the project's transient plan
-/// JSONL (the committed spec/note durable halves are gone — spec data lives in
-/// the `apg/layers` tree, re-ingested separately). When `substitute` names the
-/// plan file, it contributes `records` instead of its on-disk content
+/// Assembles the record set a re-ingest merges: the project's transient
+/// state — the plan store plus the five feedback tier mirrors (SPEC §5:
+/// `.trans/plans/<project>.jsonl` and `.trans/<tier>/<project>.jsonl`).
+/// Feedback on durable/code nodes lives in the mirrors, and every file shares
+/// the project's `<project>/feedback-<n>` namespace, so a re-ingest after ANY
+/// of them must merge ALL of them (`detach_delete_project` drops every
+/// `<project>/…` node first; a write-through that forgot the other mirrors
+/// would silently erase their feedback from the DB). The committed spec/note
+/// durable halves are gone — spec data lives in the `apg/layers` tree,
+/// re-ingested separately. When `substitute` names one of the transient
+/// files, it contributes `records` instead of its on-disk content
 /// (write-through re-ingests the in-memory records before they are committed).
 fn assembled_records(
     apg_root: &Path,
@@ -824,20 +846,16 @@ fn assembled_records(
         Some((p, r)) => (Some(p), r),
         None => (None, &[][..]),
     };
-    let plan_path = specs::plan_jsonl_path(apg_root, project);
 
     let mut records: Vec<Record> = Vec::new();
-
-    // The project's plan (transient; read from disk unless substituted). The
-    // committed spec/note durable halves are gone — spec data lives in the
-    // `apg/layers` tree (re-ingested separately via `reingest_layers`), not in
-    // project-scoped JSONL.
-    let sub_is_plan = sub_path == Some(plan_path.as_path());
-    if sub_is_plan || plan_path.exists() {
-        if sub_is_plan {
-            records.extend_from_slice(sub_records);
-        } else {
-            records.extend(specs::read_jsonl(&plan_path)?);
+    for f in specs::project_transient_files(apg_root, project) {
+        let sub_is_f = sub_path == Some(f.as_path());
+        if sub_is_f || f.exists() {
+            if sub_is_f {
+                records.extend_from_slice(sub_records);
+            } else {
+                records.extend(specs::read_jsonl(&f)?);
+            }
         }
     }
     Ok(records)
