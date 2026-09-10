@@ -456,6 +456,82 @@ mod tests {
         testutil::remove(&repo);
     }
 
+    /// Authored `uses` (Person→System) and `calls` (Service→Service) edges
+    /// survive the write-through re-merge: `artifacts::edge_merge` maps both
+    /// record kinds and the merge guard admits their rel pairs, so the branch
+    /// DB shows them exactly like a full scan would. Regression for the
+    /// `_ => None` arm that used to drop them.
+    #[test]
+    fn edge_add_lands_authored_uses_and_calls_in_the_branch_db() {
+        let (wt_apg, repo, _wt) = mutation_fixture("authored-edges");
+        // `apg node add` × 4: a Person + System (the `uses` pair) and two
+        // Services (the `calls` pair).
+        layers::write_project(
+            &wt_apg,
+            &[
+                node("solution", "person", "alice"),
+                node("solution", "system", "portal"),
+                node("domain", "service", "svc-a"),
+                node("domain", "service", "svc-b"),
+            ],
+            &[],
+        )
+        .unwrap();
+
+        // `apg edge add uses solution.person.alice solution.system.portal` and
+        // `apg edge add calls domain.service.svc-a domain.service.svc-b` —
+        // both halves of each edge in one mutation.
+        let mut person =
+            layers::read_node_file(&wt_apg, Layer::Solution, "person", "alice").unwrap();
+        person.out.push(OutEdge {
+            kind: "uses".to_string(),
+            target: "solution.system.portal".to_string(),
+            properties: BTreeMap::new(),
+        });
+        let mut system =
+            layers::read_node_file(&wt_apg, Layer::Solution, "system", "portal").unwrap();
+        system.in_edges.push(InEdge {
+            kind: "uses".to_string(),
+            source: "solution.person.alice".to_string(),
+            properties: BTreeMap::new(),
+        });
+        let mut svc_a = layers::read_node_file(&wt_apg, Layer::Domain, "service", "svc-a").unwrap();
+        svc_a.out.push(OutEdge {
+            kind: "calls".to_string(),
+            target: "domain.service.svc-b".to_string(),
+            properties: BTreeMap::new(),
+        });
+        let mut svc_b = layers::read_node_file(&wt_apg, Layer::Domain, "service", "svc-b").unwrap();
+        svc_b.in_edges.push(InEdge {
+            kind: "calls".to_string(),
+            source: "domain.service.svc-a".to_string(),
+            properties: BTreeMap::new(),
+        });
+        layers::write_project(&wt_apg, &[person, system, svc_a, svc_b], &[]).unwrap();
+
+        // Both authored edges are in the branch DB after the write-through
+        // re-merge.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let uses = db
+            .q("MATCH (p:Person {fqn: 'solution.person.alice'})-[:Uses]->(s:System {fqn: 'solution.system.portal'}) RETURN count(*)")
+            .unwrap();
+        assert_eq!(
+            uses.lines().last().map(str::trim),
+            Some("1"),
+            "the authored Uses edge must survive the write-through re-merge: {uses}"
+        );
+        let calls = db
+            .q("MATCH (a:Service {fqn: 'domain.service.svc-a'})-[:Calls]->(b:Service {fqn: 'domain.service.svc-b'}) RETURN count(*)")
+            .unwrap();
+        assert_eq!(
+            calls.lines().last().map(str::trim),
+            Some("1"),
+            "the authored Calls edge must survive the write-through re-merge: {calls}"
+        );
+        drop(db);
+        testutil::remove(&repo);
+    }
+
     /// Reads see the node files: `read_existing_nodes` returns every written
     /// node; `read_node_file`/`node_file_path` resolve the identity.
     #[test]

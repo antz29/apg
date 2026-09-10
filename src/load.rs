@@ -977,10 +977,24 @@ fn kind_slug(k: NodeKind) -> &'static str {
     }
 }
 
+/// The rel-table pairs only the write-through merge guard needs: the authored
+/// `calls` (Service→Service) and `uses` (Person→System) edges share the code
+/// rel tables `Calls`/`Uses`, whose parquet files and COPY statements are
+/// written by the explicit code-rel branches in `build_load_files`/`copy_from`
+/// (`calls_svc.parquet`, `uses_person.parquet`). They must NOT join
+/// [`spec_rel_pairs`]: that enumeration feeds `build_load_files` and
+/// `copy_from`, so a second entry would double-write those files and emit
+/// duplicate COPY statements.
+const AUTHORED_REL_PAIRS: [(&str, &str, &str); 2] = [
+    ("Calls", "Service", "Service"),
+    ("Uses", "Person", "System"),
+];
+
 /// Every `(rel_table, from_label, to_label)` triple the DB schema declares —
 /// derived from the same pair enumerations that write the load files
 /// (`build_load_files`) and the `CREATE REL TABLE` statements
-/// (`create_schema`), so the write-through merge guard in `artifacts.rs`
+/// (`create_schema`), plus the authored-only pairs ([`AUTHORED_REL_PAIRS`]),
+/// so the write-through merge guard in `artifacts.rs`
 /// (R3/R4: skip an undeclared pair instead of feeding LadybugDB a Cypher MERGE
 /// that throws a binder exception) cannot drift from the schema.
 pub fn rel_table_pairs() -> &'static [(&'static str, &'static str, &'static str)] {
@@ -994,6 +1008,7 @@ pub fn rel_table_pairs() -> &'static [(&'static str, &'static str, &'static str)
         for (table, from, to) in spec_rel_pairs() {
             v.push((table, label_of(from), label_of(to)));
         }
+        v.extend(AUTHORED_REL_PAIRS);
         v
     })
 }
@@ -3102,5 +3117,24 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    /// The write-through merge guard sees the two authored-only pairs, while
+    /// the load path's pair enumeration keeps omitting them: `build_load_files`
+    /// and `copy_from` already write/COPY `calls_svc.parquet` /
+    /// `uses_person.parquet` explicitly, so a `spec_rel_pairs` entry would
+    /// double-write the files and emit duplicate COPY statements.
+    #[test]
+    fn merge_guard_sees_authored_calls_and_uses_but_the_load_path_does_not() {
+        let pairs = rel_table_pairs();
+        assert!(pairs.contains(&("Calls", "Service", "Service")));
+        assert!(pairs.contains(&("Uses", "Person", "System")));
+        assert!(
+            !spec_rel_pairs().iter().any(|(t, f, to)| {
+                (*t == "Calls" && *f == NodeKind::Service && *to == NodeKind::Service)
+                    || (*t == "Uses" && *f == NodeKind::Person && *to == NodeKind::System)
+            }),
+            "spec_rel_pairs feeds build_load_files/copy_from — the authored pairs must stay out"
+        );
     }
 }
