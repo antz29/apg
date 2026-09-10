@@ -18,29 +18,18 @@ pub struct Graph {
     pub reviews: HashSet<(String, String)>,
     pub depends_on: HashSet<(String, String)>,
     pub gates: HashSet<(String, String)>,
-    pub spec_depends: HashSet<(String, String)>,
-    pub anchors: HashSet<(String, String)>,
-    pub implements: HashSet<(String, String)>,
     pub satisfies: HashSet<(String, String)>,
-    pub builds: HashSet<(String, String)>,
     /// Spine edges (GraphModel-SPEC.md; PHASE_01): end-to-end why-to-code
-    /// traceability through the Domain and Solution tiers.
+    /// traceability through the Domain and Solution tiers. `drives`
+    /// (Requirement → Domain), `represents` (User → Entity, Entity → Person).
     pub drives: HashSet<(String, String)>,
-    pub requires: HashSet<(String, String)>,
-    pub realises: HashSet<(String, String)>,
     pub represents: HashSet<(String, String)>,
-    pub implemented_by: HashSet<(String, String)>,
-    /// Invariant edges (Invariants-SPEC.md; PHASE_02): artifact → Invariant
-    /// (`GuardedBy`) and Feedback → Invariant (`Checks`).
-    pub guarded_by: HashSet<(String, String)>,
-    pub checks: HashSet<(String, String)>,
     /// New-model §3.3 spec edges (apg-projects). The kebab spellings
-    /// (`realised-by`, `implemented-by`) are the §3.3 wire names — distinct
-    /// from the old spine edges (`Realises`, `ImplementedBy`) that task-18
-    /// removes. `calls`/`uses`/`contains`/`drives`/`represents`/`details`/
-    /// `depends-on` reuse the scanner/spine sets above and are routed by
-    /// endpoint node-kind at load time (`depends-on` is the same
-    /// Requirement→Requirement relation as `DependsOn`).
+    /// (`realised-by`, `implemented-by`) are the §3.3 wire names.
+    /// `calls`/`uses`/`contains`/`drives`/`represents`/`details`/`depends-on`
+    /// reuse the scanner/spine sets above and are routed by endpoint node-kind
+    /// at load time (`depends-on` is the same Requirement→Requirement relation
+    /// as `DependsOn`).
     pub realised_by: HashSet<(String, String)>,
     pub spec_implemented_by: HashSet<(String, String)>,
     pub publishes: HashSet<(String, String)>,
@@ -67,56 +56,35 @@ pub enum NodeKind {
     Function,
     File,
     UnresolvedTarget,
-    Spec,
     Requirement,
-    Phase,
-    Decision,
-    NonGoal,
-    AcceptanceCriterion,
-    VerificationItem,
     Note,
     Feedback,
     Plan,
     PlanPhase,
     Task,
-    // Tier-1/2/3 graph-native spec nodes (GraphModel-SPEC.md; PHASE_01).
-    // Tier 1: Stakeholder. Tier 2 (DDD): Domain, Subdomain, Entity,
-    // ValueObject, Aggregate, DomainEvent, DomainProcess, DomainRule, Actor.
-    // Tier 3 (C4): System, Container, Component.
+    // --- The §3.1 node catalog (apg-projects). ---
+    /// Tier 1 — "a person/group with a stake" (requirements).
     Stakeholder,
-    Domain,
-    Subdomain,
-    Entity,
-    ValueObject,
-    Aggregate,
-    DomainEvent,
-    DomainProcess,
-    DomainRule,
-    Actor,
-    System,
-    Container,
-    Component,
-    /// The graph-wide invariant mechanism (Invariants-SPEC.md; PHASE_02): a
-    /// rule artifacts must respect, guardable onto them (`GuardedBy`) and
-    /// citable from review feedback (`Checks`).
-    Invariant,
-    // --- New-model tier catalog (apg-projects SPEC §3.1). ADD-ONLY: the old
-    // ValueObject/DomainProcess/Actor/Invariant/etc. variants stay until
-    // task-18 removes them; these new kinds coexist. ---
     /// `User` ⊂ Stakeholder — "a thing that uses the system" (requirements).
     User,
     /// `Group` — the hierarchical domain container (groups in groups;
     /// attribute core/supporting/generic, optional root). BoundedContext/
     /// Subdomain/Aggregate/DomainRule collapse into it.
     Group,
-    /// `Value` — immutable (was ValueObject).
+    /// `Entity` — kind `entity` | `event` (domain).
+    Entity,
+    /// `Value` — immutable.
     Value,
-    /// `Service` — stateless behaviour (was DomainProcess).
+    /// `Service` — stateless behaviour.
     Service,
+    /// Tier 3 (C4): the solution.
+    System,
+    Container,
+    Component,
     /// `Person` — the C4 view of User/Stakeholder (solution).
     Person,
     /// `Constraint` — declarative prose ("X must hold"); structure/reference
-    /// validation only, satisfaction by review (was Invariant).
+    /// validation only, satisfaction by review.
     Constraint,
     /// The scan-time git-state node (fqn `scan/HEAD`, one per DB; rewritten at
     /// every scan). Standalone — it carries no rel tables.

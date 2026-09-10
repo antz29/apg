@@ -114,14 +114,6 @@ pub enum Record {
     },
 
     // --- Spec/plan graph records (SPEC R1/R20; canonical FQNs, no ids) ---
-    /// `{"type":"spec","fqn":"<project>/spec","title":"...","goal":"..."}`
-    Spec {
-        fqn: String,
-        title: String,
-        #[serde(default)]
-        goal: String,
-    },
-
     /// `{"type":"requirement","fqn":"<project>/spec.<id>","id":"R1","title":"...","body":"...","feature":"..."}`
     Requirement {
         fqn: String,
@@ -131,20 +123,6 @@ pub enum Record {
         body: String,
         #[serde(default)]
         feature: String,
-    },
-
-    /// `{"type":"phase","fqn":"<project>/spec.phase-<n>","number":1,"title":"..."}`
-    Phase {
-        fqn: String,
-        number: u32,
-        title: String,
-    },
-
-    /// `{"type":"decision","fqn":"<project>/spec.decision-<id>","id":"...","summary":"..."}`
-    Decision {
-        fqn: String,
-        id: String,
-        summary: String,
     },
 
     /// `{"type":"planned_node","fqn":"github.com/x/y.Store","kind":"struct","name":"Store","parent":"github.com/x/y"}`
@@ -165,19 +143,6 @@ pub enum Record {
         parent: String,
     },
 
-    NonGoal {
-        fqn: String,
-        body: String,
-    },
-    AcceptanceCriterion {
-        fqn: String,
-        body: String,
-    },
-    VerificationItem {
-        fqn: String,
-        body: String,
-    },
-
     // --- Tier-1/2/3 graph-native spec nodes (GraphModel-SPEC.md; PHASE_01) ---
     // The 4-tier taxonomy: tier 1 Requirements (Stakeholder), tier 2 Domain
     // (DDD), tier 3 Solution (C4), tier 4 Implementation (scanner code nodes).
@@ -192,81 +157,8 @@ pub enum Record {
         body: String,
     },
 
-    /// `{"type":"domain","fqn":"<project>/domain.<name>","name":"...","body":"..."}`
-    /// The domain area (a bounded context); `bounded-context` is an authoring
-    /// alias that produces a Domain node.
-    Domain {
-        fqn: String,
-        name: String,
-        #[serde(default)]
-        body: String,
-    },
-
-    /// `{"type":"subdomain","fqn":"<project>/subdomain.<name>","name":"...","kind":"core","body":"..."}`
-    /// `kind` ∈ core|supporting|generic (the DDD subdomain partitioning).
-    Subdomain {
-        fqn: String,
-        name: String,
-        #[serde(default)]
-        kind: String,
-        #[serde(default)]
-        body: String,
-    },
-
     /// `{"type":"entity","fqn":"<project>/entity.<name>","name":"...","body":"..."}`
     Entity {
-        fqn: String,
-        name: String,
-        #[serde(default)]
-        body: String,
-    },
-
-    /// `{"type":"value_object","fqn":"<project>/value-object.<name>","name":"...","body":"..."}`
-    ValueObject {
-        fqn: String,
-        name: String,
-        #[serde(default)]
-        body: String,
-    },
-
-    /// `{"type":"aggregate","fqn":"<project>/aggregate.<name>","name":"...","root":"Order","body":"..."}`
-    /// `root` names the aggregate root entity.
-    Aggregate {
-        fqn: String,
-        name: String,
-        #[serde(default)]
-        root: String,
-        #[serde(default)]
-        body: String,
-    },
-
-    /// `{"type":"domain_event","fqn":"<project>/domain-event.<name>","name":"...","body":"..."}`
-    DomainEvent {
-        fqn: String,
-        name: String,
-        #[serde(default)]
-        body: String,
-    },
-
-    /// `{"type":"domain_process","fqn":"<project>/domain-process.<name>","name":"...","body":"..."}`
-    DomainProcess {
-        fqn: String,
-        name: String,
-        #[serde(default)]
-        body: String,
-    },
-
-    /// `{"type":"domain_rule","fqn":"<project>/domain-rule.<name>","name":"...","body":"..."}`
-    /// The invariant mechanism at the domain tier (Invariants-SPEC.md).
-    DomainRule {
-        fqn: String,
-        name: String,
-        #[serde(default)]
-        body: String,
-    },
-
-    /// `{"type":"actor","fqn":"<project>/actor.<name>","name":"...","body":"..."}`
-    Actor {
         fqn: String,
         name: String,
         #[serde(default)]
@@ -301,8 +193,7 @@ pub enum Record {
         body: String,
     },
 
-    // --- New-model tier catalog (apg-projects SPEC §3.1). ADD-ONLY: the old
-    // variants stay until task-18 removes them. FQNs are now
+    // --- New-model tier catalog (apg-projects SPEC §3.1). FQNs are now
     // `<layer>.<type>.<name>` (no project prefix) — derived from the node-file
     // path by `ingest_tree`, never carried on the wire. ---
     /// `{"type":"user","fqn":"requirements.user.<name>","name":"...","body":"..."}`
@@ -366,25 +257,6 @@ pub enum Record {
         body: String,
         #[serde(rename = "attaches-to", default)]
         attaches_to: String,
-    },
-
-    /// `{"type":"invariant","fqn":"invariant/<name>","title":"...","body":"...","category":"process","scope":"spec","status":"active"}`
-    /// Graph-wide rules artifacts must respect (Invariants-SPEC.md). Roots:
-    /// `invariant/<name>` for universal rules, `<project>/invariant/<name>`
-    /// for repo/project-specific ones. `category` ∈ process|product|
-    /// graph-integrity; `status` ∈ active|retired.
-    Invariant {
-        fqn: String,
-        #[serde(default)]
-        title: String,
-        #[serde(default)]
-        body: String,
-        #[serde(default)]
-        category: String,
-        #[serde(default)]
-        scope: String,
-        #[serde(default)]
-        status: String,
     },
 
     /// `{"type":"note","fqn":"<project>/note-<n>","body":"...","kind":"background"}`
@@ -459,42 +331,16 @@ pub enum Record {
         from: String,
         to: String,
     },
-    SpecDepends {
-        from: String,
-        to: String,
-    },
-    Anchors {
-        from: String,
-        to: String,
-    },
-    Implements {
-        from: String,
-        to: String,
-    },
     Satisfies {
-        from: String,
-        to: String,
-    },
-    Builds {
         from: String,
         to: String,
     },
 
     // --- Spine edges (GraphModel-SPEC.md; PHASE_01) ---
-    // End-to-end traceability from why to code:
-    //   Requirement --Drives/Requires--> Domain --Realises/Represents--> Solution
-    //   --ImplementedBy--> Implementation (code).
-    // `Drives`/`Requires` are Requirement → Domain; `Realises`/`Represents`
-    // Domain → Solution; `ImplementedBy` Solution → Implementation.
+    // End-to-end traceability from why to code. The §3.3 matrix (apg-projects)
+    // keeps `Drives` (Requirement → Group/Entity/Value/Service) and
+    // `Represents` (User → Entity, Entity → Person).
     Drives {
-        from: String,
-        to: String,
-    },
-    Requires {
-        from: String,
-        to: String,
-    },
-    Realises {
         from: String,
         to: String,
     },
@@ -502,32 +348,14 @@ pub enum Record {
         from: String,
         to: String,
     },
-    ImplementedBy {
-        from: String,
-        to: String,
-    },
-    /// `GuardedBy` (artifact → Invariant) — an artifact (Spec, Plan,
-    /// Requirement, Task, or a code/domain node) is guarded by the invariants
-    /// it must respect (Invariants-SPEC.md).
-    GuardedBy {
-        from: String,
-        to: String,
-    },
-    /// `Checks` (Feedback → Invariant) — a review comment cites the rule it
-    /// enforces (optional; most feedback is not an invariant violation).
-    Checks {
-        from: String,
-        to: String,
-    },
 
-    // --- New-model §3.3 spec edges (apg-projects). ADD-ONLY: the old spine
-    // edges (`Realises`, `ImplementedBy`) stay until task-18. The kebab
-    // spellings are the §3.3 wire names — `Record`'s `rename_all =
-    // "snake_case"` would give `realised_by`/`implemented_by`, which is NOT
-    // the §3.3 spelling, so these carry explicit renames. `contains`/`drives`/
-    // `represents`/`details`/`calls`/`uses`/`depends-on` reuse the existing
-    // record variants and are routed by endpoint node-kind at load time
-    // (`depends-on` is the existing `DependsOn` Requirement→Requirement). ---
+    // --- New-model §3.3 spec edges (apg-projects). The kebab spellings are the
+    // §3.3 wire names — `Record`'s `rename_all = "snake_case"` would give
+    // `realised_by`/`implemented_by`, which is NOT the §3.3 spelling, so these
+    // carry explicit renames. `contains`/`drives`/`represents`/`details`/
+    // `calls`/`uses`/`depends-on` reuse the existing record variants and are
+    // routed by endpoint node-kind at load time (`depends-on` is the existing
+    // `DependsOn` Requirement→Requirement). ---
     /// `{"type":"realised-by","from":"domain.service.<name>","to":"solution.system.<name>"}`
     /// Domain Group/Entity/Service → Solution System/Container/Component.
     #[serde(rename = "realised-by")]
@@ -604,14 +432,8 @@ mod tests {
         // Fixture lines in the unified-JSONL style of the SPEC serialization
         // section (canonical fqns, type-tagged).
         let lines = [
-            r#"{"type":"spec","fqn":"workitem-timer/spec","title":"Workitem Timer","goal":"Let workitems time out"}"#,
             r#"{"type":"requirement","fqn":"workitem-timer/spec.R1","id":"R1","title":"Timer","body":"A workitem can be started","feature":"feature-a"}"#,
-            r#"{"type":"phase","fqn":"workitem-timer/spec.phase-1","number":1,"title":"Core"}"#,
-            r#"{"type":"decision","fqn":"workitem-timer/spec.decision-d1","id":"d1","summary":"Wall-clock"}"#,
             r#"{"type":"planned_node","fqn":"github.com/foundry/flow.Store","kind":"struct","name":"Store","parent":"github.com/foundry/flow"}"#,
-            r#"{"type":"non_goal","fqn":"workitem-timer/spec.ng1","body":"No daemon"}"#,
-            r#"{"type":"acceptance_criterion","fqn":"workitem-timer/spec.ac1","body":"Fires once"}"#,
-            r#"{"type":"verification_item","fqn":"workitem-timer/spec.vi1","body":"cargo test green"}"#,
             r#"{"type":"note","fqn":"workitem-timer/note-1","body":"Prose","kind":"background"}"#,
             r#"{"type":"feedback","fqn":"workitem-timer/feedback-1","body":"Split R1","status":"open"}"#,
             r#"{"type":"plan","fqn":"workitem-timer/plan","title":"Plan","strategy":"Layer-first"}"#,
@@ -622,7 +444,7 @@ mod tests {
             let _ = parse(l);
         }
         // Field extraction sanity checks.
-        let r = parse(lines[1]);
+        let r = parse(lines[0]);
         match r {
             Record::Requirement {
                 fqn, id, feature, ..
@@ -633,7 +455,7 @@ mod tests {
             }
             other => panic!("expected requirement, got {other:?}"),
         }
-        let r = parse(lines[4]);
+        let r = parse(lines[1]);
         match r {
             Record::PlannedNode {
                 fqn,
@@ -657,22 +479,16 @@ mod tests {
             r#"{"type":"details","from":"foo/note-1","to":"foo/spec"}"#,
             r#"{"type":"reviews","from":"foo/feedback-1","to":"foo/spec.R1"}"#,
             r#"{"type":"depends_on","from":"foo/spec.R2","to":"foo/spec.R1"}"#,
-            r#"{"type":"gates","from":"foo/spec.phase-2","to":"foo/spec.phase-1"}"#,
-            r#"{"type":"spec_depends","from":"foo/spec","to":"bar/spec"}"#,
-            r#"{"type":"anchors","from":"foo/spec.R1","to":"github.com/x/impl"}"#,
-            r#"{"type":"implements","from":"github.com/x/impl","to":"foo/spec.R1"}"#,
+            r#"{"type":"gates","from":"foo/plan.phase-02","to":"foo/plan.phase-01"}"#,
             r#"{"type":"satisfies","from":"foo/plan.phase-01","to":"foo/spec.R1"}"#,
-            r#"{"type":"builds","from":"foo/plan.phase-01.task-1","to":"github.com/x/y.Store"}"#,
         ];
         for l in lines {
             let _ = parse(l);
         }
         assert!(
-            matches!(parse(lines[4]), Record::Gates { from, to } if from == "foo/spec.phase-2" && to == "foo/spec.phase-1")
+            matches!(parse(lines[4]), Record::Gates { from, to } if from == "foo/plan.phase-02" && to == "foo/plan.phase-01")
         );
-        assert!(
-            matches!(parse(lines[9]), Record::Builds { to, .. } if to == "github.com/x/y.Store")
-        );
+        assert!(matches!(parse(lines[5]), Record::Satisfies { to, .. } if to == "foo/spec.R1"));
     }
 
     #[test]
@@ -704,17 +520,11 @@ mod tests {
 
     #[test]
     fn tier_1_2_3_node_records_parse() {
+        // The surviving tier-1/2/3 records (the removed DDD/Aggregate/Domain*
+        // vocabulary collapsed into the §3.1 catalog).
         let lines = [
             r#"{"type":"stakeholder","fqn":"foo/stakeholder.Ops","name":"Ops","body":"runs it"}"#,
-            r#"{"type":"domain","fqn":"foo/domain.Auth","name":"Auth","body":"the auth area"}"#,
-            r#"{"type":"subdomain","fqn":"foo/subdomain.Access","name":"Access","kind":"core","body":"..."}"#,
             r#"{"type":"entity","fqn":"foo/entity.User","name":"User","body":"an identity"}"#,
-            r#"{"type":"value_object","fqn":"foo/value-object.Email","name":"Email","body":"..."}"#,
-            r#"{"type":"aggregate","fqn":"foo/aggregate.Order","name":"Order","root":"Order","body":"..."}"#,
-            r#"{"type":"domain_event","fqn":"foo/domain-event.UserLoggedIn","name":"UserLoggedIn","body":"..."}"#,
-            r#"{"type":"domain_process","fqn":"foo/domain-process.Checkout","name":"Checkout","body":"..."}"#,
-            r#"{"type":"domain_rule","fqn":"foo/domain-rule.NoNegativeBalance","name":"NoNegativeBalance","body":"..."}"#,
-            r#"{"type":"actor","fqn":"foo/actor.Customer","name":"Customer","body":"..."}"#,
             r#"{"type":"system","fqn":"foo/system.Platform","name":"Platform","body":"..."}"#,
             r#"{"type":"container","fqn":"foo/container.Api","name":"Api","kind":"app","body":"..."}"#,
             r#"{"type":"component","fqn":"foo/component.Gateway","name":"Gateway","body":"..."}"#,
@@ -723,79 +533,32 @@ mod tests {
             let _ = parse(l);
         }
         match parse(lines[1]) {
-            Record::Domain { fqn, name, body } => {
-                assert_eq!(fqn, "foo/domain.Auth");
-                assert_eq!(name, "Auth");
-                assert_eq!(body, "the auth area");
+            Record::Entity { fqn, name, body } => {
+                assert_eq!(fqn, "foo/entity.User");
+                assert_eq!(name, "User");
+                assert_eq!(body, "an identity");
             }
-            other => panic!("expected domain, got {other:?}"),
+            other => panic!("expected entity, got {other:?}"),
         }
-        match parse(lines[2]) {
-            Record::Subdomain { kind, .. } => assert_eq!(kind, "core"),
-            other => panic!("expected subdomain, got {other:?}"),
-        }
-        match parse(lines[5]) {
-            Record::Aggregate { root, .. } => assert_eq!(root, "Order"),
-            other => panic!("expected aggregate, got {other:?}"),
+        match parse(lines[3]) {
+            Record::Container { kind, .. } => assert_eq!(kind, "app"),
+            other => panic!("expected container, got {other:?}"),
         }
     }
 
     #[test]
     fn spine_edge_records_parse() {
         let lines = [
-            r#"{"type":"drives","from":"foo/spec.R1","to":"foo/domain.Auth"}"#,
-            r#"{"type":"requires","from":"foo/spec.R2","to":"foo/domain.Auth"}"#,
-            r#"{"type":"realises","from":"foo/domain.Auth","to":"foo/system.Platform"}"#,
-            r#"{"type":"represents","from":"foo/domain.Auth","to":"foo/container.Api"}"#,
-            r#"{"type":"implemented_by","from":"foo/component.Gateway","to":"github.com/x/impl.Gateway"}"#,
+            r#"{"type":"drives","from":"foo/spec.R1","to":"domain.group.sales"}"#,
+            r#"{"type":"represents","from":"requirements.user.u1","to":"domain.entity.e1"}"#,
         ];
         for l in lines {
             let _ = parse(l);
         }
         assert!(matches!(parse(lines[0]), Record::Drives { from, to }
-                if from == "foo/spec.R1" && to == "foo/domain.Auth"));
-        assert!(matches!(parse(lines[4]), Record::ImplementedBy { from, to }
-                if from == "foo/component.Gateway" && to == "github.com/x/impl.Gateway"));
-    }
-
-    #[test]
-    fn invariant_and_guard_checks_records_parse() {
-        let i = parse(
-            r#"{"type":"invariant","fqn":"invariant/plan.task-kind-in-set","title":"Task kind","body":"Every task carries one kind","category":"process","scope":"plan","status":"active"}"#,
-        );
-        match i {
-            Record::Invariant {
-                fqn,
-                title,
-                category,
-                status,
-                ..
-            } => {
-                assert_eq!(fqn, "invariant/plan.task-kind-in-set");
-                assert_eq!(title, "Task kind");
-                assert_eq!(category, "process");
-                assert_eq!(status, "active");
-            }
-            other => panic!("expected invariant, got {other:?}"),
-        }
-        // A project-scoped invariant (a domain rule materialized as an
-        // Invariant with category=product).
-        let i = parse(
-            r#"{"type":"invariant","fqn":"foo/invariant/NoNegativeBalance","title":"No negative balance","category":"product","scope":"code","status":"active"}"#,
-        );
-        assert!(matches!(i, Record::Invariant { ref fqn, ref category, .. }
-                if fqn == "foo/invariant/NoNegativeBalance" && category == "product"));
-        // GuardedBy and Checks edges.
-        let g = parse(
-            r#"{"type":"guarded_by","from":"foo/spec","to":"invariant/plan.task-kind-in-set"}"#,
-        );
-        assert!(matches!(g, Record::GuardedBy { from, to }
-                if from == "foo/spec" && to == "invariant/plan.task-kind-in-set"));
-        let c = parse(
-            r#"{"type":"checks","from":"foo/feedback-1","to":"invariant/plan.task-kind-in-set"}"#,
-        );
-        assert!(matches!(c, Record::Checks { from, to }
-                if from == "foo/feedback-1" && to == "invariant/plan.task-kind-in-set"));
+                if from == "foo/spec.R1" && to == "domain.group.sales"));
+        assert!(matches!(parse(lines[1]), Record::Represents { from, to }
+                if from == "requirements.user.u1" && to == "domain.entity.e1"));
     }
 
     #[test]

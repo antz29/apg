@@ -8,8 +8,15 @@ use std::path::{Path, PathBuf};
 
 use crate::artifacts::{self, ParsedArgs, node_fqn, parse_args};
 use crate::schema::Record;
-use crate::spec_cmd::project_of;
 use crate::specs;
+
+/// The project of a project-scoped spec/plan/review fqn (`<project>/spec.R1`,
+/// `<project>/plan.phase-01`, `<project>/feedback-1`). Callers must already
+/// know the fqn is spec-family (a feedback fqn, a requirement FQN) — for
+/// arbitrary fqns use the DB to discriminate code nodes first.
+fn project_of(fqn: &str) -> Option<String> {
+    fqn.split('/').next().map(|s| s.to_string())
+}
 
 fn require_apg_root() -> anyhow::Result<PathBuf> {
     let start = std::env::current_dir()?;
@@ -68,19 +75,6 @@ fn apply_review_add(apg_root: &Path, p: &ParsedArgs) -> anyhow::Result<()> {
     // R26 accepts `--kind`; the Feedback record has no kind column, so it is
     // accepted for CLI compatibility and ignored.
     let _ = p.get("kind");
-
-    // Validate --checks targets before any write: each must be an Invariant
-    // node in the graph (Checks is Feedback → Invariant). The handle is
-    // scoped and dropped before the write-through (see the fn doc).
-    let checks = p.all("checks");
-    if !checks.is_empty() {
-        let db = artifacts::ArtifactDb::open(apg_root)?;
-        for c in &checks {
-            if !db.node_label(c).is_some_and(|l| l == "Invariant") {
-                anyhow::bail!("--checks target `{c}` is not an Invariant node");
-            }
-        }
-    }
 
     // Discriminate a spec-family target from a code target by its DB node
     // label (the placeholder prefix is gone — PHASE_02): code nodes
@@ -148,14 +142,6 @@ fn apply_review_add(apg_root: &Path, p: &ParsedArgs) -> anyhow::Result<()> {
     };
     records.push(rec);
     records.push(edge);
-    // Optional Checks edges (Feedback → Invariant): a comment cites the rule it
-    // enforces (PHASE_02; most feedback has none).
-    for c in &checks {
-        records.push(Record::Checks {
-            from: fqn.clone(),
-            to: c.clone(),
-        });
-    }
     artifacts::write_jsonl_and_reingest(apg_root, &file, &project, &records)?;
     println!("Attached {fqn} (open) → {target}");
     Ok(())
@@ -408,24 +394,35 @@ mod tests {
     fn wont_fix_is_not_terminal_until_reviewer_resolves() {
         let (apg_root, repo, _wt) = fixture("wont-fix");
 
-        // A spec project with a requirement, plus an open Feedback reviewing it.
-        let path = specs::spec_jsonl_path(&apg_root, "foo");
+        // A transient plan with a task, plus an open Feedback reviewing it.
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
         let records = vec![
-            Record::Spec {
-                fqn: "foo/spec".to_string(),
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
                 title: "Foo".to_string(),
-                goal: String::new(),
+                strategy: String::new(),
             },
-            Record::Requirement {
-                fqn: "foo/spec.R1".to_string(),
-                id: "R1".to_string(),
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                body: String::new(),
-                feature: String::new(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
             },
             Record::Contains {
-                from: "foo/spec".to_string(),
-                to: "foo/spec.R1".to_string(),
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
             },
             Record::Feedback {
                 fqn: "foo/feedback-1".to_string(),
@@ -435,7 +432,7 @@ mod tests {
             },
             Record::Reviews {
                 from: "foo/feedback-1".to_string(),
-                to: "foo/spec.R1".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
             },
         ];
         // Seeded through the funnel (auto-committed on the branch, DB fresh).
@@ -508,100 +505,54 @@ mod tests {
     }
 
     #[test]
-    fn review_add_with_checks_roundtrips_and_does_not_poison_db() {
-        // REVIEW.md item 1 + item 2 regression: `apg review add <target>
-        // --checks <invariant>` wrote the feedback + reviews + checks records
-        // to the JSONL but the re-ingest silently dropped them (no Feedback
-        // node, no Reviews/Checks edges), and any later write-through SIGSEGV'd
-        // (exit 139, lbug LocalNodeTable::isVisible). Root cause: the routing
-        // `ArtifactDb` was left live across `write_jsonl_and_reingest`, so a
-        // second `Database` opened on the same `db.lbug` while the first was
-        // still open — the file got corrupted (Feedback node vanishes, engine
-        // crashes on the next checkpoint). The routing handle is now scoped
-        // and dropped before the write-through; this test drives the real
-        // `apply_review_add` path end to end.
-        let (apg_root, repo, _wt) = fixture("checks-roundtrip");
+    fn review_add_roundtrips_reviews_edge_to_task_and_code() {
+        // `apg review add <target>` attaches an open Feedback with a Reviews
+        // edge; the edge survives the re-ingest for both a plan/task target and
+        // a code target (which needs an explicit --project).
+        let (apg_root, repo, _wt) = fixture("roundtrip");
 
-        // A spec project with one requirement, plus a project-scoped Invariant
-        // to cite with --checks (established via write-through, like real use).
-        let path = specs::spec_jsonl_path(&apg_root, "foo");
-        let base = vec![
-            Record::Spec {
-                fqn: "foo/spec".to_string(),
+        // A transient plan with one task.
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
                 title: "Foo".to_string(),
-                goal: String::new(),
+                strategy: String::new(),
             },
-            Record::Requirement {
-                fqn: "foo/spec.R1".to_string(),
-                id: "R1".to_string(),
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
                 title: "T".to_string(),
-                body: String::new(),
-                feature: String::new(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
             },
             Record::Contains {
-                from: "foo/spec".to_string(),
-                to: "foo/spec.R1".to_string(),
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
             },
-            Record::Invariant {
-                fqn: "foo/invariant/guard".to_string(),
-                title: "guard".to_string(),
-                body: String::new(),
-                category: "product".to_string(),
-                scope: "code".to_string(),
-                status: "active".to_string(),
+            Record::Contains {
+                from: "foo/plan.phase-01".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
             },
         ];
-        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &base).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
-        // `apg review add foo/spec.R1 --body … --checks foo/invariant/guard`.
+        // Review the task (a plan target — routes to the transient plan JSONL).
         let p = parse_args(&[
-            "foo/spec.R1".to_string(),
+            "foo/plan.phase-01.task-1".to_string(),
             "--body".to_string(),
-            "violates the rule".to_string(),
-            "--checks".to_string(),
-            "foo/invariant/guard".to_string(),
+            "task review".to_string(),
         ]);
         apply_review_add(&apg_root, &p).unwrap();
 
-        // The Feedback node round-trips with its Reviews and Checks edges.
-        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
-        assert!(
-            db.has_node("foo/feedback-1"),
-            "feedback node dropped by re-ingest"
-        );
-        let out = db
-            .conn()
-            .unwrap()
-            .query("MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Reviews]->(n) RETURN n.fqn")
-            .unwrap()
-            .to_string();
-        assert!(out.contains("foo/spec.R1"), "reviews edge: {out}");
-        let out = db
-            .conn()
-            .unwrap()
-            .query(
-                "MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Checks]->(i:Invariant) RETURN i.fqn",
-            )
-            .unwrap()
-            .to_string();
-        assert!(out.contains("foo/invariant/guard"), "checks edge: {out}");
-        drop(db);
-
-        // A later write-through must not crash — PRE-FIX this SIGSEGV'd (the
-        // checks path poisoned the DB so every mutation died with exit 139).
-        let p = parse_args(&[
-            "foo/spec.R1".to_string(),
-            "--body".to_string(),
-            "second review".to_string(),
-        ]);
-        apply_review_add(&apg_root, &p).unwrap();
-        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
-        assert!(
-            db.has_node("foo/feedback-2"),
-            "post-checks write-through lost the node"
-        );
-        assert!(db.has_node("foo/feedback-1"));
-        drop(db);
+        // Review a code node (needs --project).
         let p = parse_args(&[
             "github.com/x/y.Store".to_string(),
             "--body".to_string(),
@@ -610,83 +561,8 @@ mod tests {
             "foo".to_string(),
         ]);
         apply_review_add(&apg_root, &p).unwrap();
-        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
-        assert!(
-            db.has_node("foo/feedback-3"),
-            "code-target feedback FQN collided"
-        );
-        let out = db
-            .conn()
-            .unwrap()
-            .query("MATCH (:Feedback {fqn: 'foo/feedback-3'})-[:Reviews]->(n:Struct) RETURN n.fqn")
-            .unwrap()
-            .to_string();
-        assert!(
-            out.contains("github.com/x/y.Store"),
-            "code reviews edge: {out}"
-        );
-        drop(db);
 
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn review_add_on_tier_node_roundtrips_reviews_edge() {
-        // REVIEW.md item: `apg review add <project>/domain.X …` wrote the
-        // Reviews edge to the JSONL but the re-ingest silently projected it
-        // away — the Reviews rel-table had no tier-1/2/3
-        // (Stakeholder/Domain/…/Component) pairs, so the Feedback node landed
-        // with no Reviews edge. The rel-table now declares Feedback → every
-        // tier label; the edge survives a tier-2 and a tier-3 target.
-        let (apg_root, repo, _wt) = fixture("tier-review");
-
-        // A spec project carrying a Domain (tier-2) and a System (tier-3) node.
-        let path = specs::spec_jsonl_path(&apg_root, "foo");
-        let records = vec![
-            Record::Spec {
-                fqn: "foo/spec".to_string(),
-                title: "Foo".to_string(),
-                goal: String::new(),
-            },
-            Record::Contains {
-                from: "foo/spec".to_string(),
-                to: "foo/domain.X".to_string(),
-            },
-            Record::Domain {
-                fqn: "foo/domain.X".to_string(),
-                name: "X".to_string(),
-                body: String::new(),
-            },
-            Record::Contains {
-                from: "foo/spec".to_string(),
-                to: "foo/system.Y".to_string(),
-            },
-            Record::System {
-                fqn: "foo/system.Y".to_string(),
-                name: "Y".to_string(),
-                body: String::new(),
-            },
-        ];
-        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
-
-        // A review against the tier-2 Domain node, then one against the tier-3
-        // System node — both routed to the spec JSONL (not code labels).
-        let p = parse_args(&[
-            "foo/domain.X".to_string(),
-            "--body".to_string(),
-            "domain review".to_string(),
-        ]);
-        apply_review_add(&apg_root, &p).unwrap();
-        let p = parse_args(&[
-            "foo/system.Y".to_string(),
-            "--body".to_string(),
-            "system review".to_string(),
-        ]);
-        apply_review_add(&apg_root, &p).unwrap();
-
-        // The Feedback nodes round-trip WITH their Reviews edges — pre-fix the
-        // edges vanished (projected away at re-ingest) despite the JSONL
-        // records being written.
+        // The Feedback nodes round-trip WITH their Reviews edges.
         let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
         assert!(db.has_node("foo/feedback-1"), "feedback-1 node dropped");
         assert!(db.has_node("foo/feedback-2"), "feedback-2 node dropped");
@@ -697,18 +573,18 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(
-            out.contains("foo/domain.X"),
-            "tier-2 reviews edge dropped: {out}"
+            out.contains("foo/plan.phase-01.task-1"),
+            "task reviews edge dropped: {out}"
         );
         let out = db
             .conn()
             .unwrap()
-            .query("MATCH (:Feedback {fqn: 'foo/feedback-2'})-[:Reviews]->(n) RETURN n.fqn")
+            .query("MATCH (:Feedback {fqn: 'foo/feedback-2'})-[:Reviews]->(n:Struct) RETURN n.fqn")
             .unwrap()
             .to_string();
         assert!(
-            out.contains("foo/system.Y"),
-            "tier-3 reviews edge dropped: {out}"
+            out.contains("github.com/x/y.Store"),
+            "code reviews edge dropped: {out}"
         );
         drop(db);
 

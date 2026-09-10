@@ -4,7 +4,6 @@ mod cleanup;
 mod git;
 mod graph;
 mod ingest;
-mod invariant_cmd;
 mod layers;
 mod load;
 mod node_cmd;
@@ -12,7 +11,6 @@ mod plan_cmd;
 mod project_cmd;
 mod review_cmd;
 mod schema;
-mod spec_cmd;
 mod specs;
 #[cfg(test)]
 mod testutil;
@@ -608,14 +606,6 @@ USAGE:
   apg query [--json] \"<cypher>\"  Run a read-only Cypher query against
                                apg/.trans/db.lbug (found by walking up from
                                cwd); CSV by default, --json for JSON rows
-  apg spec <sub> …            Author + lifecycle a graph-native spec:
-                              init/add/anchor/link/spine/rm/render/unresolved
-                              (add authors the 4-tier taxonomy: requirement,
-                              phase, decision, non-goal, AC, VI, note,
-                              stakeholder, domain, subdomain, entity,
-                              value-object, aggregate, domain-event,
-                              domain-process, domain-rule, actor, system,
-                              container, component)
   apg plan <sub> …            The phased execution plan (transient, branch-local):
                               init/add/link/done/undone/note/complete/render/verify
                               (add authors phases, tasks, and planned
@@ -628,9 +618,10 @@ USAGE:
                               merge <name> — verify gate → merge → main rebuild
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
-  apg invariant add …         Materialize a graph-wide invariant (universal or
-                              project-scoped), optionally guarding artifacts
-  apg invariants              List invariants (filter by --scope/--project)
+  apg node <sub> …            Durable node-file model mutations:
+                              add/rm (type-as-argument, writes apg/layers)
+  apg edge <sub> …            Durable node-file model edge mutations:
+                              add/rm (kind/from/to)
   apg --version               Print version
   apg --help                  Show this help
 
@@ -657,12 +648,9 @@ fn main() {
         "init" => cmd_init(&raw[2..]),
         "query" => cmd_query(&raw[2..]),
         "scan" => cmd_scan(&raw[2..]),
-        "spec" => spec_cmd::cmd_spec(&raw[2..]),
         "plan" => plan_cmd::cmd_plan(&raw[2..]),
         "review" => review_cmd::cmd_review(&raw[2..]),
         "project" => project_cmd::cmd_project(&raw[2..]),
-        "invariant" => invariant_cmd::cmd_invariant(&raw[2..]),
-        "invariants" => invariant_cmd::cmd_invariants(&raw[2..]),
         "node" => node_cmd::cmd_node(&raw[2..]),
         "edge" => node_cmd::cmd_edge(&raw[2..]),
         "--version" | "-V" => {

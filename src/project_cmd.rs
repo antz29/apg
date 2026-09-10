@@ -865,10 +865,6 @@ mod tests {
                 name: "Widget".into(),
                 parent: MOD.into(),
             },
-            Record::Builds {
-                from: "foo/plan.phase-01.task-1".into(),
-                to: format!("{MOD}.Widget"),
-            },
         ];
         if with_feedback {
             r.push(Record::Feedback {
