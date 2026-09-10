@@ -274,11 +274,13 @@ pub fn payload_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// A hermetic stand-in for `apg scan` (tests never spawn frontends): pipes the
-/// checkout's `*.scan.jsonl` payloads plus its committed spec/note/plan JSONLs
-/// through the real ingest pipeline — the exact record stream `cmd_scan`
-/// assembles — writing `db.lbug` + `graph.jsonl` into the checkout's own
-/// `apg/.trans/`. The `scan_meta` records the real git state of the checkout,
-/// so staleness behaves exactly like a real scan.
+/// checkout's `*.scan.jsonl` payloads through the real ingest pipeline, then
+/// chains the same post-code leg `cmd_scan` assembles — the durable
+/// `apg/layers` tree via `layers::ingest_tree` plus the transient
+/// `.trans/plans/*.jsonl` plan leg (the committed `apg/specs`/`apg/notes`
+/// durable halves are gone) — writing `db.lbug` + `graph.jsonl` into the
+/// checkout's own `apg/.trans/`. The `scan_meta` records the real git state of
+/// the checkout, so staleness behaves exactly like a real scan.
 ///
 /// `run_pipeline` writes relative to the process cwd, so every scan is
 /// serialized behind a process-wide lock: concurrent scans (tests run in
@@ -290,14 +292,18 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
     let trans_dir = apg_root.join(specs::TRANS);
     std::fs::create_dir_all(&trans_dir)?;
     let state = crate::git::git_state(&apg_root);
-    let mut records: Vec<crate::schema::Record> = Vec::new();
-    records.push(crate::schema::Record::ScanMeta {
+
+    // The scanner-shaped records (scan_meta + payloads) — the same stream
+    // `cmd_scan` builds, kept separate so it can be pre-ingested for the
+    // scanned code-FQN universe `ingest_tree` validates against.
+    let mut scanner_records: Vec<crate::schema::Record> = Vec::new();
+    scanner_records.push(crate::schema::Record::ScanMeta {
         git_sha: state.sha.clone(),
         git_clean: state.sha.as_ref().map(|_| state.clean),
         scanned_at: crate::git::now_iso8601(),
     });
     for p in payload_files(project_dir) {
-        records.push(crate::schema::Record::LangSwitch {
+        scanner_records.push(crate::schema::Record::LangSwitch {
             language: "go".to_string(),
         });
         let text = std::fs::read_to_string(&p)?;
@@ -309,15 +315,65 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
             let rec: crate::schema::Record = serde_json::from_str(line).map_err(|e| {
                 anyhow::anyhow!("{}:{}: bad payload record: {e}\n{line}", p.display(), i + 1)
             })?;
-            records.push(rec);
+            scanner_records.push(rec);
         }
     }
-    records.extend(crate::specs::read_all(&apg_root));
+
+    // Pre-ingest the scanner stream to compute the scanned code-FQN universe
+    // (mirrors cmd_scan).
+    let scanned_code: std::collections::BTreeSet<String> = {
+        let (pre, _) = crate::ingest::ingest(
+            scanner_records.clone().into_iter(),
+            &crate::ingest::IngestOptions {
+                blacklist: &[],
+                language: "go",
+                config: None,
+            },
+        );
+        pre.nodes
+            .iter()
+            .filter(|(_, n)| {
+                matches!(
+                    n.kind,
+                    crate::graph::NodeKind::Module
+                        | crate::graph::NodeKind::Struct
+                        | crate::graph::NodeKind::Function
+                        | crate::graph::NodeKind::File
+                ) && n.status.is_none()
+            })
+            .map(|(f, _)| f.clone())
+            .collect()
+    };
+
+    // The transient plans leg only (`.trans/plans/*.jsonl`) — the committed
+    // spec/note durable halves are gone; spec data comes from the `apg/layers`
+    // tree via `layers::ingest_tree`.
+    let mut plan_records: Vec<crate::schema::Record> = Vec::new();
+    let mut planned: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for f in crate::specs::plan_files(&apg_root) {
+        for r in crate::specs::read_jsonl(&f).unwrap_or_else(|e| panic!("{e:#}")) {
+            if let crate::schema::Record::PlannedNode { fqn, .. } = &r {
+                planned.insert(fqn.clone());
+            }
+            plan_records.push(r);
+        }
+    }
+
+    // Ingest the durable `apg/layers` tree into new-model records (mirrors
+    // cmd_scan), validating pairing/code-refs/constraints against the scanned
+    // code and the planned-node universe.
+    let layers_records = crate::layers::ingest_tree(&apg_root, &scanned_code, &planned)?;
+
+    let records = scanner_records
+        .into_iter()
+        .chain(layers_records)
+        .chain(plan_records);
+
     let old = std::env::current_dir()?;
     std::env::set_current_dir(&trans_dir)?;
     let result = (|| -> anyhow::Result<()> {
         let mut log = crate::Log::new();
-        crate::run_pipeline(records.into_iter(), &[], &[], "go", None, &mut log);
+        crate::run_pipeline(records, &[], &[], "go", None, &mut log);
         Ok(())
     })();
     std::env::set_current_dir(old)?;

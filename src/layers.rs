@@ -1297,9 +1297,22 @@ pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()>
     if git::in_repo(apg_root) {
         let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
         let msg = git::graph_mutation_message(apg_root, &refs);
-        if let Err(e) = git::commit_files(apg_root, &refs, &msg) {
-            rollback(&paths, &prior);
-            return Err(e);
+        match git::commit_files(apg_root, &refs, &msg) {
+            Ok(Some(_)) => {
+                // Re-anchor the staleness gate's recorded scan_meta (mirrors
+                // the JSONL funnel's auto-commit — DB and tree in sync by
+                // construction). A re-anchor failure degrades to a warning.
+                if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
+                    eprintln!(
+                        "apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}"
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                rollback(&paths, &prior);
+                return Err(e);
+            }
         }
     }
 
@@ -1766,9 +1779,24 @@ fn write_through_with_deletes(
     if git::in_repo(apg_root) {
         let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
         let msg = git::graph_mutation_message(apg_root, &refs);
-        if let Err(e) = git::commit_files(apg_root, &refs, &msg) {
-            rollback(&paths, &prior);
-            return Err(e);
+        match git::commit_files(apg_root, &refs, &msg) {
+            Ok(Some(_)) => {
+                // Re-anchor the staleness gate's recorded scan_meta (mirrors
+                // the JSONL funnel's auto-commit: DB and tree in sync by
+                // construction, so consecutive node/edge mutations never trip
+                // the refuse-on-stale gate). A re-anchor failure degrades to a
+                // warning — the mutation already landed.
+                if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
+                    eprintln!(
+                        "apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}"
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                rollback(&paths, &prior);
+                return Err(e);
+            }
         }
     }
     Ok(())

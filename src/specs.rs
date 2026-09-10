@@ -129,6 +129,14 @@ pub fn scan_inputs(apg_root: &Path) -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>
     (specs, notes, plans)
 }
 
+/// Every `apg/.trans/plans/*.jsonl` file (sorted), or `[]` when absent — the
+/// transient plan leg a scan re-ingests after code. The committed `apg/specs`
+/// and `apg/notes` durable halves are gone: spec data now comes from the
+/// `apg/layers` node-file tree via `layers::ingest_tree`.
+pub fn plan_files(apg_root: &Path) -> Vec<PathBuf> {
+    jsonl_files(&apg_root.join(TRANS).join("plans"))
+}
+
 /// The owning module of a code node: the module that `Contains` it (via its
 /// file for Struct/Function), or `None` for non-code / unowned nodes.
 // (Unused until Phase 03 routes notes by module.)

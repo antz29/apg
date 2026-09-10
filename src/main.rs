@@ -1337,7 +1337,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // Plan/PlanPhase/Task/PlannedNode records, SURVIVES per R18) into both the
     // planned-FQN universe `ingest_tree` uses (planned → pending) and the
     // records the pipeline chains after code.
-    let (_, _, plan_files) = specs::scan_inputs(&apg_root);
+    let plan_files = specs::plan_files(&apg_root);
     let mut plan_records: Vec<schema::Record> = Vec::new();
     let mut planned: BTreeSet<String> = BTreeSet::new();
     for f in &plan_files {

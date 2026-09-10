@@ -811,25 +811,21 @@ mod tests {
     // and unresolved feedback.
     // ------------------------------------------------------------------
 
-    fn spec_records() -> Vec<Record> {
-        vec![
-            Record::Spec {
-                fqn: "foo/spec".into(),
-                title: "Foo".into(),
-                goal: "G".into(),
-            },
-            Record::Requirement {
-                fqn: "foo/spec.R1".into(),
-                id: "R1".into(),
-                title: "Timer".into(),
-                body: String::new(),
-                feature: String::new(),
-            },
-            Record::Contains {
-                from: "foo/spec".into(),
-                to: "foo/spec.R1".into(),
-            },
-        ]
+    /// Authors the durable spec as a node file under `apg/layers/` (the
+    /// new-model store) rather than the retired `apg/specs/` JSONL: one
+    /// requirement node, written through the node-file mutation funnel (guard →
+    /// validate → atomic write → commit → re-merge).
+    fn write_spec_node(wt_apg: &Path) {
+        let node = crate::layers::NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "requirement".to_string(),
+            name: "timer".to_string(),
+            body: "A workitem can be started".to_string(),
+            properties: std::collections::BTreeMap::from([("id".to_string(), "R1".to_string())]),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        };
+        crate::layers::write_project(wt_apg, &[node], &[]).unwrap();
     }
 
     /// A plan whose single task plans `fixture.mod.Widget` (not yet real
@@ -902,10 +898,10 @@ mod tests {
         let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
         let wt_apg = wt.join(specs::LAYOUT);
 
-        // mutate: author the spec (durable -> auto-commits on the branch) and
-        // the plan (transient -> never commits), both through the funnel.
-        let spec_path = wt_apg.join("specs").join("foo.jsonl");
-        artifacts::write_jsonl_and_reingest(&wt_apg, &spec_path, "foo", &spec_records()).unwrap();
+        // mutate: author the spec (a durable node file -> auto-commits on the
+        // branch) and the plan (transient -> never commits), both through the
+        // funnel.
+        write_spec_node(&wt_apg);
         let plan_path = wt_apg.join(specs::TRANS).join("plans").join("foo.jsonl");
         artifacts::write_jsonl_and_reingest(&wt_apg, &plan_path, "foo", &plan_records(true))
             .unwrap();
@@ -917,9 +913,9 @@ mod tests {
             foo_tip
                 .tree()
                 .unwrap()
-                .get_path(Path::new("apg/specs/foo.jsonl"))
+                .get_path(Path::new("apg/layers/requirements/requirement/timer.json"))
                 .is_ok(),
-            "spec JSONL must be committed on the project branch"
+            "spec node file must be committed on the project branch"
         );
         assert!(
             foo_tip
@@ -982,16 +978,19 @@ mod tests {
             foo_tip,
             "main must fast-forward to the project tip"
         );
-        // The main checkout carries the merged content (the spec JSONL).
-        assert!(repo.root.join("apg/specs/foo.jsonl").exists());
+        // The main checkout carries the merged content (the spec node file).
+        assert!(
+            repo.root
+                .join("apg/layers/requirements/requirement/timer.json")
+                .exists()
+        );
         assert!(repo.is_clean(), "merged main must be clean");
 
         // Main rebuild: the main DB has the code (Store + Widget) and the
         // merged spec; the transient plan did not cross the merge.
         let main_apg = repo.apg_root();
         let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
-        assert!(db.has_node("foo/spec"));
-        assert!(db.has_node("foo/spec.R1"));
+        assert!(db.has_node("requirements.requirement.timer"));
         assert!(db.has_node(format!("{MOD}.Store").as_str()));
         assert!(db.has_node(format!("{MOD}.Widget").as_str()));
         assert!(!db.has_node("foo/plan"), "transient plans never reach main");
