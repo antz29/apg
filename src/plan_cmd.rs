@@ -3064,6 +3064,185 @@ mod tests {
         assert_eq!(report.no_claims, vec!["solution.component.checkout"]);
     }
 
+    // ------------------------------------------------------------------
+    // task-5 (coverage tests): the task-text audit gaps — the green path
+    // across MULTIPLE solution nodes, both halves of a renames/moves pair as
+    // touches, and a refusal that names ONLY the uncovered node.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn coverage_holds_across_multiple_solution_nodes() {
+        // The bridge is complete only when EVERY solution node's implemented-by
+        // FQNs are touched — this is the green end-to-end path through
+        // plan_verify_at across MULTIPLE solution nodes (two containers; one
+        // real FQN, one still-absent FQN), not just several FQNs on a single
+        // node. Verify returns its green verdict and the derived report agrees:
+        // no gaps, no no-claims warnings.
+        let (apg_root, repo, wt) = fixture("coverage-multi-ok");
+        write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
+        write_solution_node(
+            &apg_root,
+            "component",
+            "checkout",
+            &["github.com/x/y.Store"],
+        );
+        let sha = wt_commit_paths(
+            &wt,
+            &[
+                "apg/layers/solution/container/api.json",
+                "apg/layers/solution/component/checkout.json",
+            ],
+            "author solution nodes",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        let mut records = bare_plan();
+        records.push(Record::Task {
+            fqn: "foo/plan.phase-01.task-1".to_string(),
+            title: "T1".to_string(),
+            kind: "source".to_string(),
+            tier: String::new(),
+            status: "pending".to_string(),
+            verb: "creates".to_string(),
+            target: "github.com/x/y.Gateway".to_string(),
+            new_fqn: String::new(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        records.push(Record::Task {
+            fqn: "foo/plan.phase-01.task-2".to_string(),
+            title: "T2".to_string(),
+            kind: "source".to_string(),
+            tier: String::new(),
+            status: "pending".to_string(),
+            verb: "modifies".to_string(),
+            target: "github.com/x/y.Store".to_string(),
+            new_fqn: String::new(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-2".to_string(),
+        });
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+
+        // Every solution node's every implemented-by FQN is touched -> green.
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
+        let nodes = crate::layers::read_existing_nodes(&apg_root).unwrap();
+        let report = coverage_check(&records, &nodes);
+        assert!(report.gaps.is_empty(), "{report:?}");
+        assert!(report.no_claims.is_empty(), "{report:?}");
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn coverage_refusal_names_only_the_uncovered_solution() {
+        // Mixed coverage: the component's real FQN is covered by a modifies
+        // task, the container's absent FQN is not. The refusal names the
+        // uncovered node/FQN only — the covered node and its claim appear
+        // nowhere in the message (no false positives for a partially-covered
+        // bridge).
+        let (apg_root, repo, wt) = fixture("coverage-mixed-names");
+        write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
+        write_solution_node(
+            &apg_root,
+            "component",
+            "checkout",
+            &["github.com/x/y.Store"],
+        );
+        let sha = wt_commit_paths(
+            &wt,
+            &[
+                "apg/layers/solution/container/api.json",
+                "apg/layers/solution/component/checkout.json",
+            ],
+            "author solution nodes",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        let mut records = bare_plan();
+        records.push(Record::Task {
+            fqn: "foo/plan.phase-01.task-1".to_string(),
+            title: "T1".to_string(),
+            kind: "source".to_string(),
+            tier: String::new(),
+            status: "pending".to_string(),
+            verb: "modifies".to_string(),
+            target: "github.com/x/y.Store".to_string(),
+            new_fqn: String::new(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("coverage incomplete"), "{msg}");
+        assert!(msg.contains("solution.container.api"), "{msg}");
+        assert!(msg.contains("github.com/x/y.Gateway"), "{msg}");
+        // The covered component and its claim are NOT named.
+        assert!(!msg.contains("solution.component.checkout"), "{msg}");
+        assert!(!msg.contains("github.com/x/y.Store"), "{msg}");
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn coverage_moves_touches_source_and_destination_halves() {
+        // A renames/moves task claims the code at BOTH FQNs: `target` (the
+        // source, where the code was) and `new_fqn` (the destination, where it
+        // lands). Here the two halves are different solution nodes'
+        // implemented-by targets, so the single `moves` covers both and the
+        // bridge holds. (coverage_check counts `target` for every verb plus
+        // `new_fqn` for renames/moves — the pair is one claim across two
+        // locations; the existing renames test covers the destination half.)
+        let (apg_root, repo, wt) = fixture("coverage-rename-both");
+        write_solution_node(&apg_root, "system", "payments", &["github.com/x/y.Store"]);
+        write_solution_node(
+            &apg_root,
+            "component",
+            "checkout",
+            &["github.com/x/y.Store2"],
+        );
+        let sha = wt_commit_paths(
+            &wt,
+            &[
+                "apg/layers/solution/system/payments.json",
+                "apg/layers/solution/component/checkout.json",
+            ],
+            "author solution nodes",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        let mut records = bare_plan();
+        records.push(Record::Task {
+            fqn: "foo/plan.phase-01.task-1".to_string(),
+            title: "T1".to_string(),
+            kind: "source".to_string(),
+            tier: String::new(),
+            status: "pending".to_string(),
+            verb: "moves".to_string(),
+            target: "github.com/x/y.Store".to_string(),
+            new_fqn: "github.com/x/y.Store2".to_string(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
+        let nodes = crate::layers::read_existing_nodes(&apg_root).unwrap();
+        let report = coverage_check(&records, &nodes);
+        assert!(report.gaps.is_empty(), "{report:?}");
+
+        testutil::remove(&repo);
+    }
+
     #[test]
     fn scoped_review_feedback_routes_and_gates_by_scope() {
         // Scoped-review routing (structural vs phase): feedback on the Plan
