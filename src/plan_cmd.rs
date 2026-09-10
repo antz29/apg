@@ -10,8 +10,10 @@
 //! itself. Nothing advances automatically with `plan done`/`plan complete` —
 //! those are assertion + milestone only; a branch scan **replaces realized
 //! planned nodes**. The plan survives until the apply act, whose coherence gate (every
-//! planned node realized, all feedback resolved) precedes the merge + rebuild
-//! of `main`'s graph (PlanCompletion-SPEC.md).
+//! planned node realized, all feedback resolved, derived solution coverage
+//! holds — SPEC §5: every solution node's `implemented-by` FQN touched by a
+//! plan task) precedes the merge + rebuild of `main`'s graph
+//! (PlanCompletion-SPEC.md).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -876,6 +878,8 @@ fn plan_complete_at(apg_root: &Path, project: &str, phase: u32) -> anyhow::Resul
 /// - every planned Implementation node is realized in the code graph (a
 ///   planned node with no real code at its FQN blocks verify);
 /// - every phase and the whole-plan review are green (all `Feedback` resolved);
+/// - derived solution coverage holds (SPEC §5): every solution node's
+///   `implemented-by` FQN is touched by at least one plan task ([`coverage_check`]);
 /// - the human gate has passed (the navigator's summary; outside the CLI).
 ///
 /// The gate is all this command checks — it performs NO merge and NO graph
@@ -901,9 +905,9 @@ fn plan_verify(args: &[String]) -> anyhow::Result<()> {
 
 /// Core of `plan verify` — the coherence gate. Returns the merge handoff
 /// message on green, or errors listing every blocker (unrealized planned
-/// nodes, unresolved feedback). Guarded: refuses outside the project context
-/// and against a stale branch DB (a verdict is only meaningful against the
-/// branch's graph — R5).
+/// nodes, unresolved feedback, coverage gaps). Guarded: refuses outside the
+/// project context and against a stale branch DB (a verdict is only
+/// meaningful against the branch's graph — R5).
 pub(crate) fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     crate::git::require_membership(apg_root, project)?;
     if crate::git::is_stale(apg_root) {
@@ -962,8 +966,8 @@ pub(crate) fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<(
         })
         .collect();
 
-    // Report BOTH blocker classes together: every unrealized planned node AND
-    // every unresolved feedback, in one gate refusal.
+    // Report ALL blocker classes together: every unrealized planned node,
+    // every unresolved feedback, and every coverage gap, in one gate refusal.
     let mut problems: Vec<String> = Vec::new();
     problems.extend(blocked);
     if !unresolved.is_empty() {
@@ -972,16 +976,158 @@ pub(crate) fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<(
             unresolved.join(", ")
         ));
     }
+
+    // 3. Derived solution coverage (SPEC §5): every solution node's
+    // `implemented-by` FQN must be touched by at least one plan task — the
+    // plan is the HOW for the whole solution, and the bridge is complete iff
+    // coverage holds. Task targets come from the transient plan records
+    // (note-26: the DB's Task table is static — the plan JSONL is the source
+    // of truth), the solution nodes from the durable layers store. The
+    // suggestion names the verb the uncovered FQN's status calls for: a
+    // `modifies` over code that already resolves, a `creates` over a planned
+    // or still-absent FQN.
+    let coverage = coverage_check(&records, &crate::layers::read_existing_nodes(apg_root)?);
+    if !coverage.gaps.is_empty() {
+        let (scanned, planned) = artifacts::code_universes(apg_root)?;
+        let mut lines: Vec<String> = coverage
+            .gaps
+            .iter()
+            .map(|g| {
+                let verb = match crate::layers::classify_code_ref(&g.fqn, &scanned, &planned) {
+                    crate::layers::CodeRefStatus::Real => "modifies",
+                    _ => "creates",
+                };
+                format!(
+                    "solution node `{}` implemented-by `{}` is touched by no plan task (add one with `--verb {verb} --fqn {}`)",
+                    g.solution, g.fqn, g.fqn
+                )
+            })
+            .collect();
+        if !coverage.no_claims.is_empty() {
+            lines.push(format!(
+                "solution nodes with no implemented-by edge (exempt — nothing to touch, but no code claims them): {}",
+                coverage.no_claims.join(", ")
+            ));
+        }
+        problems.push(format!("coverage incomplete: {}", lines.join("; ")));
+    }
     if !problems.is_empty() {
         anyhow::bail!("verify coherence gate blocked: {}", problems.join("; "));
     }
+    if !coverage.no_claims.is_empty() {
+        eprintln!(
+            "apg: warning: solution nodes with no implemented-by edge (exempt from coverage — nothing to touch, but no code claims them): {}",
+            coverage.no_claims.join(", ")
+        );
+    }
     println!(
-        "Verify gate passed for {project}: every planned node is realized, all feedback resolved."
+        "Verify gate passed for {project}: every planned node is realized, all feedback resolved, solution coverage holds."
     );
     println!(
         "Merge: `apg project merge {project}` from the main checkout (verify gate → merge → main rebuild; push/tag remain human)."
     );
     Ok(())
+}
+
+/// One uncovered `implemented-by` code FQN with the solution node that claims
+/// it (SPEC §5 derived coverage).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CoverageGap {
+    /// The owning solution node FQN (`solution.system.<name>` /
+    /// `solution.container.<name>` / `solution.component.<name>`).
+    pub solution: String,
+    /// The `implemented-by` code FQN no plan task touches.
+    pub fqn: String,
+}
+
+/// The derived-coverage verdict (SPEC §5): whether every solution node's
+/// `implemented-by` FQN is touched by at least one plan task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CoverageReport {
+    /// The uncovered `implemented-by` FQNs with their owning solution node —
+    /// non-empty iff coverage does NOT hold (the coherence gate refuses).
+    pub gaps: Vec<CoverageGap>,
+    /// Solution nodes declaring NO `implemented-by` edge — exempt from the
+    /// coverage rule (with no FQN there is nothing to touch), surfaced as a
+    /// warning so the bridge gap ("no code claims this node") stays visible.
+    pub no_claims: Vec<String>,
+}
+
+/// Derived solution coverage (SPEC §5): every solution-layer node's
+/// (System/Container/Component) `implemented-by` code FQN must be touched by
+/// at least one plan task — the plan is the HOW for the whole solution, and
+/// the bridge is complete iff coverage holds.
+///
+/// A task touches an FQN when its verb's subject equals it: `target` for
+/// every verb, plus `new_fqn` for a renames/moves pair (the destination FQN
+/// the code lands at). Coverage is verb-agnostic and status-agnostic: a
+/// `creates` over a still-planned FQN counts exactly like a `modifies` over
+/// real code — the task's claim is what coverage measures, and the
+/// realization gate separately ensures the code actually lands.
+///
+/// A solution node with NO `implemented-by` edge is exempt — the rule is over
+/// the node's implemented-by FQNs, and with none there is nothing to touch —
+/// but it is reported in [`CoverageReport::no_claims`] (a warning, never a
+/// blocker): the bridge has a gap the spec-writer should close by authoring
+/// the edge.
+///
+/// Pure — no I/O. The caller supplies the transient plan records (note-26:
+/// the `.trans/plans/<project>.jsonl`, not the DB's static Task table, is the
+/// task source of truth) and the durable node files
+/// ([`crate::layers::read_existing_nodes`]).
+pub(crate) fn coverage_check(
+    records: &[Record],
+    nodes: &[crate::layers::NodeFile],
+) -> CoverageReport {
+    let mut touched: BTreeSet<&str> = BTreeSet::new();
+    for r in records {
+        if let Record::Task {
+            verb,
+            target,
+            new_fqn,
+            ..
+        } = r
+        {
+            if !target.is_empty() {
+                touched.insert(target.as_str());
+            }
+            if matches!(verb.as_str(), "renames" | "moves") && !new_fqn.is_empty() {
+                touched.insert(new_fqn.as_str());
+            }
+        }
+    }
+    let mut gaps: Vec<CoverageGap> = Vec::new();
+    let mut no_claims: Vec<String> = Vec::new();
+    for n in nodes {
+        if n.layer != "solution"
+            || !["system", "container", "component"].contains(&n.node_type.as_str())
+        {
+            continue;
+        }
+        let solution = crate::layers::fqn(crate::layers::Layer::Solution, &n.node_type, &n.name);
+        let refs: Vec<&str> = n
+            .out
+            .iter()
+            .filter(|oe| oe.kind == "implemented-by")
+            .map(|oe| oe.target.as_str())
+            .collect();
+        if refs.is_empty() {
+            no_claims.push(solution);
+            continue;
+        }
+        for fqn in refs {
+            if !touched.contains(fqn) {
+                gaps.push(CoverageGap {
+                    solution: solution.clone(),
+                    fqn: fqn.to_string(),
+                });
+            }
+        }
+    }
+    // Deterministic order for the verdict and the tests.
+    gaps.sort_by(|a, b| (&a.solution, &a.fqn).cmp(&(&b.solution, &b.fqn)));
+    no_claims.sort();
+    CoverageReport { gaps, no_claims }
 }
 
 /// `apg plan render <project> [--out <path>|-]` — PLAN.md-style markdown with
@@ -2514,6 +2660,408 @@ mod tests {
         assert!(err.to_string().contains("github.com/x/y.Missing"), "{err}");
 
         testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
+    // task-4 (coverage_check): derived solution coverage in plan verify —
+    // every solution node's implemented-by FQN must be touched by at least
+    // one plan task (SPEC §5); the coherence gate refuses when it does not.
+    // ------------------------------------------------------------------
+
+    /// Writes one solution-layer node file under `apg/layers/solution/` with
+    /// the given `implemented-by` code-FQN targets (raw file write — the
+    /// fixture commits it; the production node-file path is exercised by
+    /// layers' own tests).
+    fn write_solution_node(apg_root: &Path, node_type: &str, name: &str, refs: &[&str]) {
+        let nf = crate::layers::NodeFile {
+            layer: "solution".to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            body: String::new(),
+            properties: std::collections::BTreeMap::new(),
+            out: refs
+                .iter()
+                .map(|t| crate::layers::OutEdge {
+                    kind: "implemented-by".to_string(),
+                    target: t.to_string(),
+                    properties: std::collections::BTreeMap::new(),
+                })
+                .collect(),
+            in_edges: Vec::new(),
+        };
+        let path = crate::layers::node_file_path(
+            apg_root,
+            crate::layers::Layer::Solution,
+            node_type,
+            name,
+        );
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(&nf).unwrap()).unwrap();
+    }
+
+    /// Commits the given repo-relative paths on the worktree's branch (git2
+    /// — the same mechanics auto_commit uses), returning the new branch HEAD
+    /// sha (re-anchor scan_meta against it so the branch graph stays fresh).
+    fn wt_commit_paths(wt: &Path, rels: &[&str], msg: &str) -> String {
+        let repo = git2::Repository::open(wt).unwrap();
+        let mut index = repo.index().unwrap();
+        for rel in rels {
+            index.add_path(Path::new(rel)).unwrap();
+        }
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, msg, &tree, &[&head])
+            .unwrap();
+        oid.to_string()
+    }
+
+    /// A minimal green plan: Plan + phase-01 (no tasks, no planned nodes, no
+    /// feedback) — the gates other than coverage are vacuous.
+    fn bare_plan() -> Vec<Record> {
+        vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+        ]
+    }
+
+    #[test]
+    fn coverage_holds_when_every_implemented_by_fqn_is_touched() {
+        // One solution node whose implemented-by FQNs are a real scanned
+        // Struct (covered by a modifies task) and an absent FQN (covered by a
+        // creates task — the planned-node case: a creates over a still-absent
+        // FQN counts exactly like a modifies over real code).
+        let (apg_root, repo, wt) = fixture("coverage-ok");
+        write_solution_node(
+            &apg_root,
+            "system",
+            "payments",
+            &["github.com/x/y.Store", "github.com/x/y.Gateway"],
+        );
+        let sha = wt_commit_paths(
+            &wt,
+            &["apg/layers/solution/system/payments.json"],
+            "author solution node",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        let mut records = bare_plan();
+        records.push(Record::Task {
+            fqn: "foo/plan.phase-01.task-1".to_string(),
+            title: "T1".to_string(),
+            kind: "source".to_string(),
+            tier: String::new(),
+            status: "done".to_string(),
+            verb: "modifies".to_string(),
+            target: "github.com/x/y.Store".to_string(),
+            new_fqn: String::new(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        records.push(Record::Task {
+            fqn: "foo/plan.phase-01.task-2".to_string(),
+            title: "T2".to_string(),
+            kind: "source".to_string(),
+            tier: String::new(),
+            status: "pending".to_string(),
+            verb: "creates".to_string(),
+            target: "github.com/x/y.Gateway".to_string(),
+            new_fqn: String::new(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-2".to_string(),
+        });
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+
+        // Every implemented-by FQN is touched -> the bridge is complete.
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn coverage_refuses_when_an_implemented_by_fqn_is_untouched() {
+        // Two solution nodes; the plan touches only the real Struct — the
+        // container's absent Gateway FQN is uncovered, so verify refuses,
+        // naming the FQN, its solution node, and the matching creates
+        // suggestion.
+        let (apg_root, repo, wt) = fixture("coverage-gap");
+        write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
+        write_solution_node(
+            &apg_root,
+            "component",
+            "checkout",
+            &["github.com/x/y.Store"],
+        );
+        let sha = wt_commit_paths(
+            &wt,
+            &[
+                "apg/layers/solution/container/api.json",
+                "apg/layers/solution/component/checkout.json",
+            ],
+            "author solution nodes",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        let mut records = bare_plan();
+        records.push(Record::Task {
+            fqn: "foo/plan.phase-01.task-1".to_string(),
+            title: "T1".to_string(),
+            kind: "source".to_string(),
+            tier: String::new(),
+            status: "pending".to_string(),
+            verb: "modifies".to_string(),
+            target: "github.com/x/y.Store".to_string(),
+            new_fqn: String::new(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("coverage incomplete"), "{msg}");
+        assert!(msg.contains("solution.container.api"), "{msg}");
+        assert!(msg.contains("github.com/x/y.Gateway"), "{msg}");
+        assert!(
+            msg.contains("--verb creates --fqn github.com/x/y.Gateway"),
+            "{msg}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn coverage_renames_moves_destination_counts() {
+        // A renames task whose destination equals the implemented-by FQN
+        // touches it (the new_fqn half of the pair) — the bridge holds.
+        let (apg_root, repo, wt) = fixture("coverage-rename");
+        write_solution_node(
+            &apg_root,
+            "component",
+            "checkout",
+            &["github.com/x/y.Store2"],
+        );
+        let sha = wt_commit_paths(
+            &wt,
+            &["apg/layers/solution/component/checkout.json"],
+            "author solution node",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        let mut records = bare_plan();
+        records.push(Record::Task {
+            fqn: "foo/plan.phase-01.task-1".to_string(),
+            title: "T1".to_string(),
+            kind: "source".to_string(),
+            tier: String::new(),
+            status: "pending".to_string(),
+            verb: "renames".to_string(),
+            target: "github.com/x/y.Store".to_string(),
+            new_fqn: "github.com/x/y.Store2".to_string(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn coverage_trivially_holds_with_no_solution_nodes() {
+        // No solution-layer node files at all — coverage is a no-op (there
+        // is nothing to touch) and verify passes on the other gates alone.
+        let (apg_root, repo, _wt) = fixture("coverage-empty");
+        let _path = write_plan(&apg_root);
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn coverage_exempts_solution_node_without_implemented_by_edge() {
+        // A solution node with NO implemented-by edge is exempt from the
+        // coverage rule — the SPEC's rule is over the node's implemented-by
+        // FQNs, and with none there is nothing to touch (nothing blocks).
+        // The gap is surfaced as a warning (no code claims the node), never a
+        // blocker: the no-claims list is part of the report.
+        let (apg_root, repo, wt) = fixture("coverage-no-claim");
+        write_solution_node(&apg_root, "system", "payments", &[]);
+        let sha = wt_commit_paths(
+            &wt,
+            &["apg/layers/solution/system/payments.json"],
+            "author solution node",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        let records = bare_plan();
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
+
+        let nodes = crate::layers::read_existing_nodes(&apg_root).unwrap();
+        let report = coverage_check(&records, &nodes);
+        assert_eq!(report.no_claims, vec!["solution.system.payments"]);
+        assert!(report.gaps.is_empty());
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn coverage_check_reports_gaps_no_claims_and_verb_agnostic_touches() {
+        // Pure semantics: exact-FQN touch matching, verb-agnostic (a deletes
+        // task touches what it deletes), a renames/moves new_fqn covering the
+        // destination, a creates covering a planned FQN, empty-target tasks
+        // touching nothing, and non-solution nodes (person, solution notes)
+        // ignored.
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
+                title: "T1".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: "modifies".to_string(),
+                target: "github.com/x/y.Store".to_string(),
+                new_fqn: String::new(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-2".to_string(),
+                title: "T2".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: "deletes".to_string(),
+                target: "github.com/x/y.Store".to_string(),
+                new_fqn: String::new(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-3".to_string(),
+                title: "T3".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: "renames".to_string(),
+                target: "github.com/x/y.Old".to_string(),
+                new_fqn: "github.com/x/y.Store2".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-4".to_string(),
+                title: "T4".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: "creates".to_string(),
+                target: "github.com/x/y.Gateway".to_string(),
+                new_fqn: String::new(),
+            },
+            // A target-less creates touches nothing.
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-5".to_string(),
+                title: "T5".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: "creates".to_string(),
+                target: String::new(),
+                new_fqn: String::new(),
+            },
+            // The planned-node declaration is irrelevant to coverage — the
+            // creates task's touch is what counts (edge case: an
+            // implemented-by FQN already `status: planned` in the DB,
+            // awaiting its creates task).
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Gateway".to_string(),
+                kind: "struct".to_string(),
+                name: "Gateway".to_string(),
+                parent: String::new(),
+            },
+        ];
+        let node = |t: &str, n: &str, refs: &[&str]| crate::layers::NodeFile {
+            layer: "solution".to_string(),
+            node_type: t.to_string(),
+            name: n.to_string(),
+            body: String::new(),
+            properties: std::collections::BTreeMap::new(),
+            out: refs
+                .iter()
+                .map(|r| crate::layers::OutEdge {
+                    kind: "implemented-by".to_string(),
+                    target: r.to_string(),
+                    properties: std::collections::BTreeMap::new(),
+                })
+                .collect(),
+            in_edges: Vec::new(),
+        };
+        let nodes = vec![
+            node(
+                "system",
+                "payments",
+                &["github.com/x/y.Store", "github.com/x/y.Gateway"],
+            ),
+            node("container", "api", &["github.com/x/y.Store2"]),
+            // An untouched implemented-by FQN -> the gap.
+            node("component", "reporting", &["github.com/x/y.Reporting"]),
+            // No implemented-by edge -> exempt, reported as a warning.
+            node("component", "checkout", &[]),
+            // Not a solution kind -> ignored entirely.
+            node("person", "ops", &["github.com/x/y.Store"]),
+            crate::layers::NodeFile {
+                layer: "solution".to_string(),
+                node_type: "note".to_string(),
+                name: "design-note".to_string(),
+                body: String::new(),
+                properties: std::collections::BTreeMap::new(),
+                out: vec![crate::layers::OutEdge {
+                    kind: "implemented-by".to_string(),
+                    target: "github.com/x/y.Store".to_string(),
+                    properties: std::collections::BTreeMap::new(),
+                }],
+                in_edges: Vec::new(),
+            },
+        ];
+        let report = coverage_check(&records, &nodes);
+        // Only the reporting component's FQN is untouched: Store is touched
+        // (modifies AND deletes — verb-agnostic), Gateway by the creates,
+        // Store2 by the rename's new_fqn.
+        assert_eq!(
+            report.gaps,
+            vec![CoverageGap {
+                solution: "solution.component.reporting".to_string(),
+                fqn: "github.com/x/y.Reporting".to_string(),
+            }]
+        );
+        assert_eq!(report.no_claims, vec!["solution.component.checkout"]);
     }
 
     #[test]
