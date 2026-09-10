@@ -169,7 +169,7 @@ fix the code (the implementer's job) or **reconcile the spec** — your job,
 through the normal spec-review cycle. When issued for reconciliation:
 
 1. Compare the authored nodes against the code in the branch (`apg_query` the
-   spine: `MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:ImplementedBy]->(c) RETURN …` vs `apg_find_symbol`/`apg_struct` for the built FQNs).
+   spine: `MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:SpecImplementedBy]->(c) RETURN …` vs `apg_find_symbol`/`apg_struct` for the built FQNs).
 2. Update the spec to tie it back to the implementation: re-point drifted
    `implemented-by` edges, adjust requirement bodies/constraints to what was
    actually built (if that is the right call), and add notes documenting

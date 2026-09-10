@@ -91,7 +91,7 @@ reviewer: apg_review_reject <f>                       → status = open     (reo
 
 ## Workflow
 
-1. **Understand the spec.** Query the layers store: `MATCH (r:Requirement) RETURN r.fqn, r.body ORDER BY r.fqn`, the domain/solution tiers per layer, and the spine edges (`MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:ImplementedBy]->(c) RETURN r.fqn, d.fqn, s.fqn, c.fqn`). Read node bodies via the graph; read source files behind code FQNs with the `read` tool.
+1. **Understand the spec.** Query the layers store: `MATCH (r:Requirement) RETURN r.fqn, r.body ORDER BY r.fqn`, the domain/solution tiers per layer, and the spine edges (`MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:SpecImplementedBy]->(c) RETURN r.fqn, d.fqn, s.fqn, c.fqn`). Read node bodies via the graph; read source files behind code FQNs with the `read` tool.
 2. **Check existing feedback.** `apg_review` (or `apg_review <target>`) to see what's already open/actioned/resolved.
 3. **Review.** For each issue, verify it against the code graph (the essential navigator rules apply: never guess, query first, never fabricate). Ask clarifying questions one at a time when a requirement is ambiguous.
 4. **Attach feedback.** `apg_review_add <target-fqn> --body "<specific, actionable issue>" --project <p>`. Target the specific spec node (a requirement, a domain/solution node, a constraint, or the note detailing it).

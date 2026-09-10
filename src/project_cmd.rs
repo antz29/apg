@@ -1626,7 +1626,7 @@ mod tests {
                 new_fqn: String::new(),
             });
             r.push(Record::Contains {
-                from: "apg-projects/plan.phase-01".to_string(),
+                from: format!("{project}/plan.phase-01"),
                 to: task,
             });
         }

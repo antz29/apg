@@ -251,7 +251,7 @@ up empty.
 | Units a diff hunk touches | `apg_hunk {path, startLine, endLine}` |
 | What couldn't the scanner resolve for a unit/file? | `apg_unresolved {fqn}` or `{path}` |
 | The authored spec (layer nodes) | `apg_query "MATCH (n) WHERE n.fqn STARTS WITH 'requirements.' RETURN n.fqn, n.body"` etc. per layer |
-| Trace the spine to code | `apg_query "MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->(:Container)-[:ImplementedBy]->(c) RETURN r.fqn, c.fqn"` |
+| Trace the spine to code | `apg_query "MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->(:Container)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn"` |
 | Plan overview / phases / tasks | `apg_plan`, `apg_plan_phases`, `apg_plan_tasks` |
 | Pre-merge coherence gate | `apg_plan_verify {project}` |
 | List review feedback | `apg_review {target?}` |

@@ -137,7 +137,7 @@ reviewer: apg_review_reject <f>                       → status = open     (reo
 - **Task classification integrity** (`apg_plan_tasks`): every task carries one `kind` (source/test/gate/docs); a `test` task must have a `tier` (unit/int/e2e) and no non-test task may. Flag tasks that shoehorn two kinds into one ("implement + unit-test X" should be two tasks).
 - **Verbs**: a `creates` verb must name a **declared planned node** (never auto-created); `modifies`/`deletes` must name code that exists in the branch graph; `renames`/`moves` must carry `--to` and claim both FQNs. A task with no target at all is review-worthy unless it is genuinely target-less (docs/gate).
 - **Satisfies claims**: every spec requirement (in `apg/layers/requirements/`) is Satisfied by **exactly one** phase (flag a requirement with zero or more than one Satisfies), and the phase's deliverable actually implements the requirement.
-- **Derived solution coverage**: every solution node's `implemented-by` FQN must be touched by at least one plan task — `apg_plan_phases`/`apg_plan_tasks` against `MATCH (s)-[:ImplementedBy]->(c) RETURN s.fqn, c.fqn`; an uncovered solution node blocks the verify gate.
+- **Derived solution coverage**: every solution node's `implemented-by` FQN must be touched by at least one plan task — `apg_plan_phases`/`apg_plan_tasks` against `MATCH (s)-[:SpecImplementedBy]->(c) RETURN s.fqn, c.fqn`; an uncovered solution node blocks the verify gate.
 - Acceptance criteria and verification items for the phase; seam contracts carried by notes.
 - Unresolved feedback left over from earlier review rounds.
 - **Structural/holistic checks**: no `Gates` cycles, no phase without tasks, consistent kind/tier classification.

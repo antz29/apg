@@ -194,7 +194,7 @@ orchestrates; you operate the breakdown or a per-phase write):
 
 ## Workflow
 
-1. **Read the spec graph.** `apg_query` the layers store: `MATCH (r:Requirement) RETURN r.fqn, r.body ORDER BY r.fqn` (requirements), the domain/solution tiers per layer, and the solution tier's `implemented-by` edges (`MATCH (s)-[:ImplementedBy]->(c) RETURN s.fqn, c.fqn`). If no requirement nodes exist, report that a spec is required first (or that the plan starts empty — a warning, not a blocker).
+1. **Read the spec graph.** `apg_query` the layers store: `MATCH (r:Requirement) RETURN r.fqn, r.body ORDER BY r.fqn` (requirements), the domain/solution tiers per layer, and the solution tier's `implemented-by` edges (`MATCH (s)-[:SpecImplementedBy]->(c) RETURN s.fqn, c.fqn`). If no requirement nodes exist, report that a spec is required first (or that the plan starts empty — a warning, not a blocker).
 2. **Understand the intent.** Ask clarifying questions one at a time, multiple choice preferred. Cover phase breakdown, task decomposition, test tiers, and any seams or gates the user cares about.
 3. **Breakdown stage: propose the phase skeleton only.** Present the phases, each phase's deliverable (which requirements it satisfies) and prereqs — **no tasks yet**. Get approval, then `apg_plan_init` + `apg_plan_add phase` per phase + `apg_plan_add planned` for the delta's planned Implementation nodes.
 4. **Per-phase writing (after the structural gate).** For your assigned phase, author its tasks: `apg_plan_add task`, each with its verb + target FQN. For a large plan, phases are authored in parallel.
