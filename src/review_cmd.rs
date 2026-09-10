@@ -219,8 +219,12 @@ fn write_transient_feedback(
 /// `<project>/feedback-<n>` namespace regardless of which mirror a review
 /// routes to; numbering per-file would give two reviews the same FQN and the
 /// re-ingest would collapse them into one Feedback node with both edges.
+/// The namespace starts at `feedback-1` even when no transient file exists
+/// yet (a plan-less project reviewing a durable/code node): the counter is
+/// seeded at 1, matching `artifacts::next_free`, which returns 1 for an
+/// empty record set.
 fn feedback_number(apg_root: &Path, project: &str) -> anyhow::Result<u64> {
-    let mut n: u64 = 0;
+    let mut n: u64 = 1;
     for file in specs::project_transient_files(apg_root, project) {
         if file.exists() {
             let records = specs::read_jsonl(&file)?;
@@ -603,6 +607,103 @@ mod tests {
             })
             .unwrap();
         assert_eq!(f, "resolved");
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn first_review_without_transient_files_numbers_feedback_1() {
+        // Numbering quirk fix (note-27): the shared `<project>/feedback-<n>`
+        // namespace starts at 1 even when NO transient file exists yet — a
+        // plan-less project reviewing a durable/code node. The first review
+        // must land `foo/feedback-1` (never `feedback-0`); a second review
+        // lands `foo/feedback-2` (the counter is shared across mirrors).
+        let (apg_root, repo, _wt) = fixture("first-number");
+
+        // The fixture starts with no plan store and no tier mirrors at all.
+        for f in specs::project_transient_files(&apg_root, "foo") {
+            assert!(
+                !f.exists(),
+                "fixture must start with no transient file: {}",
+                f.display()
+            );
+        }
+
+        // First review: a code node → the implementation tier mirror.
+        let p = parse_args(&[
+            "github.com/x/y.Store".to_string(),
+            "--body".to_string(),
+            "code review".to_string(),
+            "--project".to_string(),
+            "foo".to_string(),
+        ]);
+        apply_review_add(&apg_root, &p).unwrap();
+
+        // Second review: a durable node → the requirements tier mirror.
+        let p = parse_args(&[
+            "requirements.requirement.timer".to_string(),
+            "--body".to_string(),
+            "req review".to_string(),
+            "--project".to_string(),
+            "foo".to_string(),
+        ]);
+        apply_review_add(&apg_root, &p).unwrap();
+
+        // The mirrors carry feedback-1 then feedback-2 — no 0 slot.
+        let impl_mirror = apg_root
+            .join(specs::TRANS)
+            .join("implementation")
+            .join("foo.jsonl");
+        let req_mirror = apg_root
+            .join(specs::TRANS)
+            .join("requirements")
+            .join("foo.jsonl");
+        let impl_recs = specs::read_jsonl(&impl_mirror).unwrap();
+        let req_recs = specs::read_jsonl(&req_mirror).unwrap();
+        assert!(
+            impl_recs.iter().any(|r| matches!(
+                r,
+                Record::Feedback { fqn, .. } if fqn == "foo/feedback-1"
+            )),
+            "the first review of a plan-less project must number feedback-1"
+        );
+        assert!(
+            req_recs.iter().any(|r| matches!(
+                r,
+                Record::Feedback { fqn, .. } if fqn == "foo/feedback-2"
+            )),
+            "the second review must number feedback-2"
+        );
+
+        // Both round-trip into the branch DB; the 0 slot never exists.
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        assert!(db.has_node("foo/feedback-1"), "feedback-1 node dropped");
+        assert!(db.has_node("foo/feedback-2"), "feedback-2 node dropped");
+        assert!(
+            !db.has_node("foo/feedback-0"),
+            "feedback-0 must never be created"
+        );
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Reviews]->(n) RETURN n.fqn")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("github.com/x/y.Store"),
+            "feedback-1 reviews edge dropped: {out}"
+        );
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Feedback {fqn: 'foo/feedback-2'})-[:Reviews]->(n) RETURN n.fqn")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("requirements.requirement.timer"),
+            "feedback-2 reviews edge dropped: {out}"
+        );
+        drop(db);
 
         testutil::remove(&repo);
     }
