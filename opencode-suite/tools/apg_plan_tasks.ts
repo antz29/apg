@@ -5,6 +5,10 @@ export default tool({
   description:
     "List a plan's tasks with phase, kind (owning role), tier (verification depth, test only), status, the Task→Implementation verb (creates/modifies/deletes/renames/moves) with its target FQN(s), and the new FQN for renames/moves. The implementation checklist view.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     project: tool.schema.string().describe("Plan project (required)."),
     status: tool.schema
       .string()
@@ -22,6 +26,7 @@ export default tool({
       await runCypher(
         context,
         `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.title, t.kind, t.tier, t.status, t.verb, t.target, t.new_fqn ORDER BY t.fqn LIMIT ${limit}`,
+        args.directory,
       ),
     )
     if (tasks.length <= 1) return `No tasks in plan \`${project}\`.`

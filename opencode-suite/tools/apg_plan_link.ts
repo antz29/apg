@@ -5,6 +5,10 @@ export default tool({
   description:
     "Add Satisfies and/or prereq (Gates) edges to a plan phase: `apg plan link <project> <phase-n> [--satisfies <req-name>]* [--prereq <phase-n>]*`. Satisfies marks the requirements the phase's deliverable fulfils — requirement names from the layers store (`requirements.requirement.<name>`); prereq adds a Gates edge.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     project: tool.schema.string().describe("Plan project (required)."),
     phaseNumber: tool.schema.string().describe("The phase number to link (required)."),
     satisfies: tool.schema.array(tool.schema.string()).optional().describe("Requirement names this phase delivers (→ requirements.requirement.<name>)."),
@@ -17,6 +21,6 @@ export default tool({
     const cli = ["plan", "link", project, phaseNumber]
     for (const s of satisfies ?? []) cli.push("--satisfies", s)
     for (const p of prereq ?? []) cli.push("--prereq", p)
-    return runCli(context, cli)
+    return runCli(context, cli, args.directory)
   },
 })

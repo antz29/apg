@@ -5,6 +5,10 @@ export default tool({
   description:
     "Show a struct/class/interface/enum: its file location and line range, plus any nested structs it directly contains.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     fqn: tool.schema.string().describe("Struct FQN, e.g. org.jgrapht.graph.DefaultGraphType (required)"),
   },
   async execute(args, context) {
@@ -18,7 +22,10 @@ export default tool({
       `MATCH (s:Struct {fqn: ${lit(fqn)}})-[:Contains]->(n:Struct) ` +
       `RETURN n.fqn, n.start_line, n.end_line ORDER BY n.start_line`
 
-    const [selfOut, nestedOut] = await Promise.all([runCypher(context, self), runCypher(context, nested)])
+    const [selfOut, nestedOut] = await Promise.all([
+      runCypher(context, self, args.directory),
+      runCypher(context, nested, args.directory),
+    ])
     const nestedBody = nestedOut.split("\n").slice(1).join("\n")
     return nestedBody ? `${selfOut}\n-- nested structs --\n${nestedBody}` : selfOut
   },

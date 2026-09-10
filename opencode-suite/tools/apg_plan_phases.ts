@@ -5,6 +5,10 @@ export default tool({
   description:
     "Plan-phase health for a project: unsatisfied requirements (declared but no PlanPhase Satisfies them), requirements Satisfied by more than one phase (violating the exactly-one-phase rule), Gates cycles (a phase transitively gated on itself), phases with no tasks, and tasks under review (done but with unresolved Feedback on the phase or its tasks).",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     project: tool.schema.string().describe("Plan project (required)."),
   },
   async execute(args, context) {
@@ -13,7 +17,7 @@ export default tool({
     const pfx = `${project}/plan.phase-`
 
     const phases = csvToRows(
-      await runCypher(context, `MATCH (pp:PlanPhase) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, pp.number, pp.title ORDER BY pp.number`),
+      await runCypher(context, `MATCH (pp:PlanPhase) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, pp.number, pp.title ORDER BY pp.number`, args.directory),
     )
     if (phases.length <= 1) return `No plan for \`${project}\`.`
 
@@ -21,31 +25,31 @@ export default tool({
     // `requirements.requirement.<name>`, no project prefix); the plan's
     // Satisfies edges point at them by FQN.
     const reqs = csvToRows(
-      await runCypher(context, `MATCH (r:Requirement) RETURN r.fqn, r.name`),
+      await runCypher(context, `MATCH (r:Requirement) RETURN r.fqn, r.name`, args.directory),
     )
     // Satisfying phase per requirement — count, not membership: the spec
     // requires every requirement Satisfied by EXACTLY one phase, so >1 is a
     // finding too (not just 0).
     const satBy = new Map<string, string[]>()
     for (const [r, p] of csvToRows(
-      await runCypher(context, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn, pp.fqn"),
+      await runCypher(context, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn, pp.fqn", args.directory),
     ).slice(1)) {
       satBy.set(r, [...(satBy.get(r) ?? []), p])
     }
     const gates: Array<[string, string]> = csvToRows(
-      await runCypher(context, `MATCH (a:PlanPhase)-[:Gates]->(b:PlanPhase) WHERE a.fqn STARTS WITH ${lit(pfx)} RETURN a.fqn, b.fqn`),
+      await runCypher(context, `MATCH (a:PlanPhase)-[:Gates]->(b:PlanPhase) WHERE a.fqn STARTS WITH ${lit(pfx)} RETURN a.fqn, b.fqn`, args.directory),
     ).slice(1) as Array<[string, string]>
     const taskCount = new Map<string, number>()
     const doneSet = new Set<string>()
     for (const [phase, , status] of csvToRows(
-      await runCypher(context, `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.status`),
+      await runCypher(context, `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.status`, args.directory),
     ).slice(1)) {
       taskCount.set(phase, (taskCount.get(phase) ?? 0) + 1)
       if (status === "done") doneSet.add(phase)
     }
     const feedbackUnderReview = new Set<string>()
     for (const [, status, , target] of csvToRows(
-      await runCypher(context, "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn"),
+      await runCypher(context, "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn", args.directory),
     ).slice(1)) {
       if (status !== "resolved" && target.startsWith(pfx)) feedbackUnderReview.add(target)
     }

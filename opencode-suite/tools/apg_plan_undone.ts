@@ -5,6 +5,10 @@ export default tool({
   description:
     "Flip a done plan task back to pending: `apg plan undone <project> <task-fqn>`. A checklist correction only — it does not recreate retired planned nodes (the code stays in the present).",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     project: tool.schema.string().describe("Plan project (required)."),
     task: tool.schema
       .string()
@@ -14,6 +18,6 @@ export default tool({
     const { project, task } = args
     if (!project || !task) return "Error: project and task are required"
     const fqn = task.includes("/") ? task : `${project}/${task}`
-    return runCli(context, ["plan", "undone", project, fqn])
+    return runCli(context, ["plan", "undone", project, fqn], args.directory)
   },
 })

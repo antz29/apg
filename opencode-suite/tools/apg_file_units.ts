@@ -5,6 +5,10 @@ export default tool({
   description:
     "List everything declared in a source file (structs and functions) with their line ranges. The file's fqn is its absolute path. Use as the file-scoped view for reviews.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     path: tool.schema.string().describe("Absolute path of the file, e.g. /abs/src/Graph.java (required)"),
     limit: tool.schema.string().optional().describe("Max results (default 500, max 1000)"),
   },
@@ -16,6 +20,6 @@ export default tool({
     const cypher =
       `MATCH (f:File {fqn: ${lit(path)}})-[:Contains]->(n) ` +
       `RETURN labels(n) as kind, n.fqn, n.start_line, n.end_line ORDER BY n.start_line LIMIT ${limit}`
-    return runCypher(context, cypher)
+    return runCypher(context, cypher, args.directory)
   },
 })

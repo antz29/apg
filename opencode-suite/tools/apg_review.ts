@@ -5,6 +5,10 @@ export default tool({
   description:
     "List review feedback: every Feedback with its status/disposition and the node it reviews, or filtered to one target (`apg review list [<target-fqn>]`). Feedback is transient (branch-local apg/.trans mirrors); read-only.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     target: tool.schema
       .string()
       .optional()
@@ -13,6 +17,6 @@ export default tool({
   async execute(args, context) {
     const cli = ["review", "list"]
     if (args.target) cli.push(args.target)
-    return runCli(context, cli)
+    return runCli(context, cli, args.directory)
   },
 })

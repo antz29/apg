@@ -23,9 +23,17 @@ export function apgBinary(): string {
 /** Walks up from the session dirs looking for the project's `apg/.trans/db.lbug`.
  *  In a project worktree this resolves to the worktree's OWN `apg/` (and its
  *  branch DB) — never the main checkout's — so the tools work unchanged with
- *  cwd inside the worktree. */
-export function findApgRoot(context: ToolContext): string | null {
-  const starts = [context.directory, process.cwd(), context.worktree]
+ *  cwd inside the worktree.
+ *
+ *  `directory` (the tools' optional arg) overrides the starting point: a
+ *  session rooted at the main checkout passes a project worktree path
+ *  (`apg/.worktrees/<name>`) and the walk-up starts there, falling back to the
+ *  session dirs only when it yields nothing. This is how a main-rooted session
+ *  targets a project worktree's own `apg/` instead of main's. */
+export function findApgRoot(context: ToolContext, directory?: string): string | null {
+  const starts = directory
+    ? [directory, context.directory, process.cwd(), context.worktree]
+    : [context.directory, process.cwd(), context.worktree]
   for (const s of starts) {
     if (!s) continue
     let dir = s
@@ -43,8 +51,12 @@ export function findApgRoot(context: ToolContext): string | null {
  * Runs a Cypher query against the project's db and returns CSV text with a
  * header row (or an error message prefixed with "apg query failed").
  */
-export async function runCypher(context: ToolContext, cypher: string): Promise<string> {
-  const root = findApgRoot(context)
+export async function runCypher(
+  context: ToolContext,
+  cypher: string,
+  directory?: string,
+): Promise<string> {
+  const root = findApgRoot(context, directory)
   if (!root) {
     return "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
   }
@@ -93,8 +105,8 @@ export function noteIfEmpty(out: string, note: string): string {
  * stdout (or an error string prefixed with the subcommand). Authoring tools
  * are thin wrappers over this.
  */
-export async function runCli(context: ToolContext, args: string[]): Promise<string> {
-  const root = findApgRoot(context)
+export async function runCli(context: ToolContext, args: string[], directory?: string): Promise<string> {
+  const root = findApgRoot(context, directory)
   if (!root) {
     return "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
   }

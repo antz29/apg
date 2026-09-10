@@ -5,6 +5,10 @@ export default tool({
   description:
     "A writer actions review feedback (`apg review action <feedback-fqn> --fix|--wont-fix`): marks it actioned with disposition fixed or wont-fix. Only the writer side does this — reviewers attach/resolve/reject, never action.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     feedback: tool.schema
       .string()
       .describe("Feedback FQN, e.g. <project>/feedback-1 (required)."),
@@ -18,6 +22,6 @@ export default tool({
     if (disposition !== "fix" && disposition !== "wont-fix") {
       return "Error: disposition must be \"fix\" or \"wont-fix\""
     }
-    return runCli(context, ["review", "action", feedback, `--${disposition}`])
+    return runCli(context, ["review", "action", feedback, `--${disposition}`], args.directory)
   },
 })

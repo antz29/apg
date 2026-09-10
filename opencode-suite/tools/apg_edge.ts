@@ -5,6 +5,10 @@ export default tool({
   description:
     "Durable node-file edge mutations (`apg edge add|rm <kind> <from> <to> [--property k=v]*`). Writes BOTH endpoint files in one atomic, auto-committed mutation — the out half in the source's file, the matching in half in the target's. Kinds (SPEC §3.3): contains, drives, realised-by, implemented-by, calls, publishes, subscribes, depends-on, uses, represents, details. Endpoints are authored FQNs (`<layer>.<type>.<name>`) or, for implemented-by/details targets, code FQNs validated against the scanned graph (a planned code FQN is pending; a vanished one is drift and refused). Both endpoints must already exist.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     action: tool.schema.string().describe('"add" or "rm" (required).'),
     kind: tool.schema
       .string()
@@ -24,6 +28,6 @@ export default tool({
     if (action === "add") {
       for (const p of args.properties ?? []) cli.push("--property", p)
     }
-    return runCli(context, cli)
+    return runCli(context, cli, args.directory)
   },
 })

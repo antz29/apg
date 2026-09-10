@@ -5,6 +5,10 @@ export default tool({
   description:
     "Durable node-file mutations (`apg node add|rm <layer> <type> <name> …`). One file per node under apg/layers/<layer>/<type>/<name>.json; the file name IS the identity and the FQN is `<layer>.<type>.<name>` (no project prefix). Layers/types: requirements (stakeholder/user/requirement/note/constraint), domain (group/entity/value/service/note/constraint), solution (system/container/component/person/note/constraint), implementation (note/constraint — attach-only to code), global (constraint/note). `--body` carries the prose; `--property k=v` sets metadata: an entity requires kind=entity|event, a container takes kind=app|service|db|queue, a group takes attribute=core|supporting|generic and an optional root, and a local constraint attaches with property attaches-to=<fqn>. Names are `[a-z0-9][a-z0-9-]*` (refused, never sanitized). Mutations are guarded — they only run inside a project worktree on the project branch — and auto-commit the affected files in one commit.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     action: tool.schema.string().describe('"add" or "rm" (required).'),
     layer: tool.schema
       .string()
@@ -32,6 +36,6 @@ export default tool({
       if (args.body) cli.push("--body", args.body)
       for (const p of args.properties ?? []) cli.push("--property", p)
     }
-    return runCli(context, cli)
+    return runCli(context, cli, args.directory)
   },
 })

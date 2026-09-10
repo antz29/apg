@@ -5,6 +5,10 @@ export default tool({
   description:
     "Add a phase, task, or planned Implementation node to a plan (`apg plan add <project> phase|task|planned …`). Phase: number, title, deliverable, prereq (phase numbers), satisfies (requirement NAMES from the layers store — `requirements.requirement.<name>`). Task: phase number, task number, title, kind (source/test/gate/docs — owning role), tier (unit/int/e2e — required for test tasks only), verb (creates/modifies/deletes/renames/moves — the Task→Implementation verb), fqn (the Implementation FQN the verb applies to; for renames/moves the source FQN), to (the new FQN for renames/moves). Planned node: kind (module/file/struct/function), fqn (the real code FQN where the code will land), optional name + parent — the plan-writer's tier-4 additions.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     project: tool.schema.string().describe("Plan project (required)."),
     kind: tool.schema.string().describe('"phase", "task", or "planned" (required).'),
     number: tool.schema.string().optional().describe("For phase: the phase number."),
@@ -67,6 +71,6 @@ export default tool({
     } else {
       return 'Error: kind must be "phase", "task", or "planned"'
     }
-    return runCli(context, cli)
+    return runCli(context, cli, args.directory)
   },
 })

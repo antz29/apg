@@ -5,6 +5,10 @@ export default tool({
   description:
     "List the methods and functions of a struct/class/interface/enum (its Struct -> Function containment), with file locations and line ranges.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     fqn: tool.schema.string().describe("Struct FQN, e.g. org.jgrapht.Graph (required)"),
     codeType: tool.schema
       .string()
@@ -21,7 +25,7 @@ export default tool({
     const ctCond = codeTypeCondition("f", args.codeType)
     if (ctCond) cypher += ` WHERE ${ctCond}`
     cypher += ` RETURN f.fqn, f.path, f.start_line, f.end_line, f.code_type ORDER BY f.fqn LIMIT ${limit}`
-    const out = await runCypher(context, cypher)
+    const out = await runCypher(context, cypher, args.directory)
     return noteIfEmpty(
       out,
       "no results (FQN is exact — overloads carry parameter suffixes; use apg_find_symbol to locate one)",

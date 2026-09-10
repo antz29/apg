@@ -5,6 +5,10 @@ export default tool({
   description:
     "Follow Uses edges (type references) for a symbol. direction=out lists the types a function/struct uses; direction=in lists who uses a struct. Note: calls to a struct's methods appear as Calls, not Uses.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     fqn: tool.schema.string().describe("Symbol FQN (required)"),
     direction: tool.schema
       .string()
@@ -34,6 +38,6 @@ export default tool({
       if (ctCond) cypher += ` AND ${ctCond}`
       cypher += ` RETURN s.fqn as used_type, s.path, s.start_line, s.end_line, s.code_type ORDER BY s.fqn LIMIT ${limit}`
     }
-    return runCypher(context, cypher)
+    return runCypher(context, cypher, args.directory)
   },
 })

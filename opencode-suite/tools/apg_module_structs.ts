@@ -5,6 +5,10 @@ export default tool({
   description:
     "List every struct/class/interface/enum declared anywhere under a module (two hops through its files). Use for 'all types in a package' style questions.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     fqn: tool.schema.string().describe("Module FQN, e.g. org.jgrapht.alg (required)"),
     codeType: tool.schema
       .string()
@@ -22,6 +26,6 @@ export default tool({
     const ctCond = codeTypeCondition("s", args.codeType)
     if (ctCond) cypher += ` WHERE ${ctCond}`
     cypher += ` RETURN s.fqn, s.path, s.start_line, s.end_line, s.code_type ORDER BY s.fqn LIMIT ${limit}`
-    return runCypher(context, cypher)
+    return runCypher(context, cypher, args.directory)
   },
 })

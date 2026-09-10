@@ -5,6 +5,10 @@ export default tool({
   description:
     "Find the structs and functions that overlap a line range in one file. Use to map a diff hunk or review comment (startLine..endLine, inclusive) to the units it touches. Works with file line numbers, not byte offsets.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     path: tool.schema.string().describe("Absolute path of the file, e.g. /abs/src/Graph.java (required)"),
     startLine: tool.schema.string().describe("First line of the hunk, inclusive (required)"),
     endLine: tool.schema.string().describe("Last line of the hunk, inclusive (required)"),
@@ -33,6 +37,6 @@ export default tool({
       cypher += ` AND (labels(n) = 'Struct' OR labels(n) = 'Function')`
     }
     cypher += ` RETURN labels(n) as kind, n.fqn, n.start_line, n.end_line ORDER BY n.start_line LIMIT ${limit}`
-    return runCypher(context, cypher)
+    return runCypher(context, cypher, args.directory)
   },
 })

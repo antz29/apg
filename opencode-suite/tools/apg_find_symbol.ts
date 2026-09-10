@@ -5,6 +5,10 @@ export default tool({
   description:
     "Search the project's code graph for symbols whose FQN contains a string. Returns matching Modules, Files, Structs, and Functions with their locations. Use to look up an exact FQN when you only know part of a name.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     name: tool.schema.string().describe("Substring to match against node FQNs (required)"),
     kind: tool.schema
       .string()
@@ -36,6 +40,6 @@ export default tool({
       cypher += ` AND ${conds.join(" AND ")}`
     }
     cypher += ` RETURN labels(n) as kind, n.fqn, n.path, n.start_line, n.end_line ORDER BY n.fqn LIMIT ${limit}`
-    return runCypher(context, cypher)
+    return runCypher(context, cypher, args.directory)
   },
 })

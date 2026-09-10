@@ -5,6 +5,10 @@ export default tool({
   description:
     "Show unresolved references for a symbol or a whole file: calls and type uses the scanner could not resolve to a project symbol. Pass fqn for one unit, or path for every unit in a file.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     fqn: tool.schema.string().optional().describe("Function or Struct FQN to inspect (mutually exclusive with path)"),
     path: tool.schema.string().optional().describe("Absolute file path to inspect all units in (mutually exclusive with fqn)"),
     limit: tool.schema.string().optional().describe("Max results (default 200, max 1000)"),
@@ -26,6 +30,6 @@ export default tool({
         `MATCH (f:File {fqn: ${lit(path)}})-[:Contains]->(n)-[r:UnresolvedCall|UnresolvedUse]->(u:UnresolvedTarget) ` +
         `RETURN n.fqn as source, labels(r) as edge, u.fqn, u.category ORDER BY n.fqn, u.fqn LIMIT ${limit}`
     }
-    return runCypher(context, cypher)
+    return runCypher(context, cypher, args.directory)
   },
 })

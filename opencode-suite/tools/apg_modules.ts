@@ -5,6 +5,10 @@ export default tool({
   description:
     "List the Module nodes in the project (packages for Java, modules for Go/C++, namespaces for C++). Optionally filter by FQN prefix.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     prefix: tool.schema.string().optional().describe("Only return modules whose FQN contains this string"),
     limit: tool.schema.string().optional().describe("Max results (default 200, max 1000)"),
   },
@@ -15,6 +19,6 @@ export default tool({
       cypher += ` WHERE m.fqn CONTAINS ${lit(args.prefix)}`
     }
     cypher += ` RETURN m.fqn ORDER BY m.fqn LIMIT ${limit}`
-    return runCypher(context, cypher)
+    return runCypher(context, cypher, args.directory)
   },
 })

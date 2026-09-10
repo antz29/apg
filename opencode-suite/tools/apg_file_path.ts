@@ -5,6 +5,10 @@ export default tool({
   description:
     "Resolve a file path to its File node: line count, code type, and the module that contains it. Use to confirm a path is scanned or to map a file to its package/module.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     path: tool.schema.string().describe("Absolute path of the file, e.g. /abs/src/Graph.java (required)"),
   },
   async execute(args, context) {
@@ -16,12 +20,12 @@ export default tool({
     const joined =
       `MATCH (m:Module)-[:Contains]->(f:File {fqn: ${lit(path)}}) ` +
       `RETURN m.fqn as module, f.fqn, f.start_line, f.end_line, f.code_type`
-    const res = await runCypher(context, joined)
+    const res = await runCypher(context, joined, args.directory)
     if (res.includes("\n")) return res
 
     const bare =
       `MATCH (f:File {fqn: ${lit(path)}}) ` +
       `RETURN '' as module, f.fqn, f.start_line, f.end_line, f.code_type`
-    return runCypher(context, bare)
+    return runCypher(context, bare, args.directory)
   },
 })

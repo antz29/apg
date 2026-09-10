@@ -5,6 +5,10 @@ export default tool({
   description:
     "Find every function that calls the given function (incoming Calls edges). Include the caller's location so you can jump to each call site.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     fqn: tool.schema.string().describe("Target function FQN, e.g. org.jgrapht.Graph.addVertex (required)"),
     codeType: tool.schema
       .string()
@@ -21,7 +25,7 @@ export default tool({
     const ctCond = codeTypeCondition("c", args.codeType)
     if (ctCond) cypher += ` WHERE ${ctCond}`
     cypher += ` RETURN c.fqn, c.path, c.start_line, c.end_line, c.code_type ORDER BY c.fqn LIMIT ${limit}`
-    const out = await runCypher(context, cypher)
+    const out = await runCypher(context, cypher, args.directory)
     return noteIfEmpty(
       out,
       "no results (FQN is exact — overloads carry parameter suffixes; use apg_find_symbol to locate one)",

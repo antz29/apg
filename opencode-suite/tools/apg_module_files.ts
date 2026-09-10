@@ -5,6 +5,10 @@ export default tool({
   description:
     "List the source files in a module (package/directory), with their line counts. Each file's fqn is its absolute path; use apg_file_units to see what a file contains.",
   args: {
+    directory: tool.schema
+      .string()
+      .optional()
+      .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
     fqn: tool.schema.string().describe("Module FQN, e.g. org.jgrapht.alg or github.com/org/repo (required)"),
     codeType: tool.schema
       .string()
@@ -21,6 +25,6 @@ export default tool({
     const ctCond = codeTypeCondition("f", args.codeType)
     if (ctCond) cypher += ` WHERE ${ctCond}`
     cypher += ` RETURN f.fqn, f.start_line, f.end_line, f.code_type ORDER BY f.fqn LIMIT ${limit}`
-    return runCypher(context, cypher)
+    return runCypher(context, cypher, args.directory)
   },
 })
