@@ -41,10 +41,10 @@ export default tool({
       if (status === "done") doneSet.add(phase)
     }
     const feedbackUnderReview = new Set<string>()
-    for (const [, , , target] of csvToRows(
+    for (const [, status, , target] of csvToRows(
       await runCypher(context, "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn"),
     ).slice(1)) {
-      if (target.startsWith(pfx)) feedbackUnderReview.add(target)
+      if (status !== "resolved" && target.startsWith(pfx)) feedbackUnderReview.add(target)
     }
 
     const lines: string[] = []
