@@ -4,13 +4,16 @@
 //! branch-local. The plan-writer authors the tier-4 additions as **planned
 //! Implementation nodes** (`apg plan add <project> planned <kind> <fqn>` —
 //! Module/File/Struct/Function marked `status: planned` at the FQN where the
-//! code will land, GraphModel-SPEC.md); a task `Builds` the planned node it
-//! creates. Nothing advances automatically with `plan done`/`plan complete` —
+//! code will land, GraphModel-SPEC.md); a task declares how it touches the
+//! Implementation tier through its **verb** (`creates`/`modifies`/`deletes`/
+//! `renames`/`moves`, SPEC §5) with the target FQN(s) recorded on the task
+//! itself. Nothing advances automatically with `plan done`/`plan complete` —
 //! those are assertion + milestone only; a branch scan **replaces realized
 //! planned nodes**. The plan survives until the apply act, whose coherence gate (every
 //! planned node realized, all feedback resolved) precedes the merge + rebuild
 //! of `main`'s graph (PlanCompletion-SPEC.md).
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::artifacts::{self, parse_args, remove_node};
@@ -214,7 +217,7 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
             ) else {
                 anyhow::bail!(
-                    "usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs>] [--tier <unit|int|e2e>]"
+                    "usage: apg plan add <project> task <phase> <k> --title … [--kind <source|test|gate|docs>] [--tier <unit|int|e2e>] [--verb <creates|modifies|deletes|renames|moves>] [--fqn <fqn>] [--to <new-fqn>]"
                 );
             };
             let Some(title) = p.get("title") else {
@@ -222,6 +225,9 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
             };
             let kind = p.get("kind").unwrap_or_else(|| "source".to_string());
             let tier = p.get("tier").unwrap_or_default();
+            let verb = p.get("verb").unwrap_or_default();
+            let target = p.get("fqn").unwrap_or_default();
+            let new_fqn = p.get("to").unwrap_or_default();
             plan_add_task_at(
                 &apg_root,
                 project,
@@ -231,6 +237,9 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
                 &title,
                 &kind,
                 &tier,
+                &verb,
+                &target,
+                &new_fqn,
             )?;
             write_through(&apg_root, project, &records)?;
             println!("Added task {k} to plan.phase-{phase} of {project}");
@@ -299,8 +308,9 @@ fn plan_add_phase_at(
 
 /// Core of the `task` add arm (extracted for tests): verifies the target
 /// phase exists (a task under a nonexistent `plan.phase-NN` is rejected
-/// before any write), validates kind/tier, and appends the Task + Contains
-/// records.
+/// before any write), validates kind/tier, validates the Task→Implementation
+/// verb + target FQN(s) against the scanned graph and the planned-node
+/// universe, and appends the Task + Contains records.
 #[allow(clippy::too_many_arguments)]
 fn plan_add_task_at(
     apg_root: &Path,
@@ -311,6 +321,9 @@ fn plan_add_task_at(
     title: &str,
     kind: &str,
     tier: &str,
+    verb: &str,
+    target: &str,
+    new_fqn: &str,
 ) -> anyhow::Result<()> {
     let fqn = format!("{project}/plan.phase-{phase:02}.task-{k}");
     let phase_fqn = format!("{project}/plan.phase-{phase:02}");
@@ -323,18 +336,23 @@ fn plan_add_task_at(
         );
     }
     validate_task_kind_tier(kind, tier)?;
+    let verb = if verb.is_empty() { "creates" } else { verb };
+    let (scanned, planned) = task_verb_universes(apg_root, records)?;
+    validate_task_verb(verb, target, new_fqn, &scanned, &planned)?;
     let mut recs = vec![Record::Task {
         fqn: fqn.clone(),
         title: title.to_string(),
         kind: kind.to_string(),
         tier: tier.to_string(),
         status: "pending".to_string(),
+        verb: verb.to_string(),
+        target: target.to_string(),
+        new_fqn: new_fqn.to_string(),
     }];
     recs.push(Record::Contains {
         from: phase_fqn,
         to: fqn.clone(),
     });
-    let _ = apg_root; // (the DB was only needed for the removed Builds/Anchors arms)
     remove_node(records, &fqn);
     records.extend(recs);
     Ok(())
@@ -360,6 +378,111 @@ fn validate_task_kind_tier(kind: &str, tier: &str) -> anyhow::Result<()> {
         anyhow::bail!("invalid tier `{tier}` — one of unit/int/e2e");
     }
     Ok(())
+}
+
+/// The Task→Implementation verbs (SPEC §5): how a task touches the
+/// Implementation tier. `creates` is the default; further verbs may reveal
+/// themselves through dogfooding.
+const TASK_VERBS: [&str; 5] = ["creates", "modifies", "deletes", "renames", "moves"];
+
+/// Validate a task's Task→Implementation verb + target FQN(s) (SPEC §5)
+/// against the two code-reference universes: `scanned` = every real code FQN
+/// in the live graph, `planned` = the planned-node universe (a `status:
+/// planned` DB node or a `Record::PlannedNode` in `.trans/plans`). The rules:
+///
+/// - `creates` (the default) — builds a *planned* node: the target must NOT
+///   resolve in the scanned graph (it may be a planned node or still absent);
+///   a creates against existing real code is refused.
+/// - `modifies` / `deletes` — the target must resolve in the scanned graph;
+///   an unresolvable (or still-planned) FQN is refused.
+/// - `renames` / `moves` — FQN changes: the source must resolve in the
+///   scanned graph and the new FQN must not collide with existing real code;
+///   the pair is recorded on the task.
+///
+/// An empty `target` is a target-less task (the pre-verb record shape) — only
+/// a `creates` may omit its target. An empty `verb` means `creates`. Pure —
+/// no I/O; the caller supplies both universes.
+fn validate_task_verb(
+    verb: &str,
+    target: &str,
+    new_fqn: &str,
+    scanned: &BTreeSet<String>,
+    planned: &BTreeSet<String>,
+) -> anyhow::Result<()> {
+    let verb = if verb.is_empty() { "creates" } else { verb };
+    if !TASK_VERBS.contains(&verb) {
+        anyhow::bail!("invalid task verb `{verb}` — one of creates/modifies/deletes/renames/moves");
+    }
+    if !new_fqn.is_empty() && !matches!(verb, "renames" | "moves") {
+        anyhow::bail!("--to <new-fqn> is only valid for renames/moves tasks (got `{verb}`)");
+    }
+    if target.is_empty() {
+        if verb != "creates" {
+            anyhow::bail!("{verb} task requires --fqn <fqn> (the code it touches)");
+        }
+        return Ok(());
+    }
+    let status = crate::layers::classify_code_ref(target, scanned, planned);
+    match verb {
+        "creates" => {
+            if status == crate::layers::CodeRefStatus::Real {
+                anyhow::bail!(
+                    "creates target `{target}` already resolves to scanned code — a creates builds a planned node; plan the delta, not the present"
+                );
+            }
+        }
+        "modifies" | "deletes" => match status {
+            crate::layers::CodeRefStatus::Real => {}
+            crate::layers::CodeRefStatus::Pending => anyhow::bail!(
+                "{verb} target `{target}` is a planned node, not scanned code — only a creates builds a planned node"
+            ),
+            crate::layers::CodeRefStatus::Drift => anyhow::bail!(
+                "{verb} target `{target}` does not resolve in the scanned graph — {verb} changes existing code (a creates would plan it)"
+            ),
+        },
+        "renames" | "moves" => {
+            if new_fqn.is_empty() {
+                anyhow::bail!("{verb} task requires --to <new-fqn> (the destination FQN)");
+            }
+            if status != crate::layers::CodeRefStatus::Real {
+                anyhow::bail!(
+                    "{verb} source `{target}` does not resolve in the scanned graph — {verb} changes an existing FQN"
+                );
+            }
+            if crate::layers::classify_code_ref(new_fqn, scanned, planned)
+                == crate::layers::CodeRefStatus::Real
+            {
+                anyhow::bail!(
+                    "{verb} target `{new_fqn}` already resolves to scanned code — the new FQN must not collide with existing code"
+                );
+            }
+        }
+        _ => unreachable!("validated against TASK_VERBS"),
+    }
+    Ok(())
+}
+
+/// The two universes `validate_task_verb` classifies a task's target against:
+/// `scanned` = every real code FQN the last scan produced (a missing DB
+/// counts as no scanned graph — every target is absent), `planned` = the
+/// planned-node universe: the DB's `status: planned` Implementation nodes
+/// UNION the `Record::PlannedNode` FQNs declared in the plan records
+/// themselves (a planned node just authored in `.trans/plans` is a planned
+/// target even before its re-ingest).
+fn task_verb_universes(
+    apg_root: &Path,
+    records: &[Record],
+) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
+    let (scanned, mut planned) = if apg_root.join(specs::TRANS).join("db.lbug").exists() {
+        artifacts::code_universes(apg_root)?
+    } else {
+        (BTreeSet::new(), BTreeSet::new())
+    };
+    planned.extend(records.iter().filter_map(|r| match r {
+        Record::PlannedNode { fqn, .. } => Some(fqn.clone()),
+        _ => None,
+    }));
+    Ok((scanned, planned))
 }
 
 /// `apg plan link <project> <phase-n> [--satisfies <req-id>]* [--prereq <n>]*`
@@ -503,7 +626,7 @@ fn push_gate(from: &str, to: &str, records: &[Record]) -> anyhow::Result<()> {
 
 /// `apg plan done <project> <task-fqn>` (PHASE_03) — the implementer's
 /// assertion. Marks a task done with NO promotion and NO code-graph
-/// verification: the plan's `Builds` planned nodes stay declared until the
+/// verification: the plan's planned nodes stay declared until the
 /// apply act (PlanCompletion-SPEC.md), whose coherence gate verifies every
 /// planned node is realized against the merged graph before applying.
 /// `apg plan undone` remains the reversal.
@@ -987,6 +1110,7 @@ fn render_phase_tasks(records: &[Record], pfqn: &str) -> String {
                     kind,
                     tier,
                     status,
+                    ..
                 } if fqn == &t => Some((title.clone(), kind.clone(), tier.clone(), status.clone())),
                 _ => None,
             })
@@ -1158,6 +1282,9 @@ mod tests {
                 kind: "source".to_string(),
                 tier: String::new(),
                 status: "pending".to_string(),
+                verb: "creates".to_string(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
@@ -1298,6 +1425,9 @@ mod tests {
                 kind: "source".to_string(),
                 tier: String::new(),
                 status: "done".to_string(),
+                verb: "creates".to_string(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Gateway".to_string(),
@@ -1341,6 +1471,9 @@ mod tests {
                 kind: "source".to_string(),
                 tier: String::new(),
                 status: "done".to_string(),
+                verb: "creates".to_string(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -1394,6 +1527,9 @@ mod tests {
                 kind: "source".to_string(),
                 tier: String::new(),
                 status: "done".to_string(),
+                verb: "creates".to_string(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -1441,6 +1577,9 @@ mod tests {
                 kind: "source".to_string(),
                 tier: String::new(),
                 status: "done".to_string(),
+                verb: "creates".to_string(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -1568,6 +1707,548 @@ mod tests {
     }
 
     #[test]
+    fn task_verb_creates_accepts_absent_and_planned_targets() {
+        let (apg_root, repo, _wt) = fixture("verb-creates");
+        let mut records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+        ];
+
+        // A creates against an FQN absent from the scanned graph — and not yet
+        // declared anywhere — is accepted (the plan may declare the planned
+        // node later; the verb's rule is only "not existing real code").
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "creates",
+            "github.com/x/y.Gateway",
+            "",
+        )
+        .unwrap();
+        match records
+            .iter()
+            .find(|r| matches!(r, Record::Task { fqn, .. } if fqn == "foo/plan.phase-01.task-1"))
+        {
+            Some(Record::Task {
+                verb,
+                target,
+                new_fqn,
+                ..
+            }) => {
+                assert_eq!(verb, "creates");
+                assert_eq!(target, "github.com/x/y.Gateway");
+                assert!(new_fqn.is_empty());
+            }
+            other => panic!("expected the creates task, got {other:?}"),
+        }
+
+        // A creates against a DB `status: planned` node is accepted: the
+        // planned-node universe is the DB's planned nodes UNION the
+        // `Record::PlannedNode` records — here the planned FQN was written
+        // through (re-ingested `status: planned`) while the records handed to
+        // the add carry no PlannedNode record, so the DB half must count.
+        let mut with_planned = records.clone();
+        with_planned.push(Record::PlannedNode {
+            fqn: "github.com/x/y.Gateway".to_string(),
+            kind: "struct".to_string(),
+            name: "Gateway".to_string(),
+            parent: String::new(),
+        });
+        write_through(&apg_root, "foo", &with_planned).unwrap();
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            2,
+            "T2",
+            "source",
+            "",
+            "creates",
+            "github.com/x/y.Gateway",
+            "",
+        )
+        .unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Task { fqn, verb, target, .. }
+                if fqn == "foo/plan.phase-01.task-2"
+                    && verb == "creates"
+                    && target == "github.com/x/y.Gateway"
+        )));
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn task_verb_creates_refuses_real_scanned_code() {
+        let (apg_root, repo, _wt) = fixture("verb-creates-real");
+        let mut records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+        ];
+
+        // `github.com/x/y.Store` is a real Struct in the fixture DB — a
+        // creates against it is refused before any Task record lands.
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "creates",
+            "github.com/x/y.Store",
+            "",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("already resolves to scanned code"),
+            "{err}"
+        );
+        assert!(
+            records.iter().all(
+                |r| !matches!(r, Record::Task { fqn, .. } if fqn == "foo/plan.phase-01.task-1")
+            ),
+            "a refused creates must not leave a partial Task record"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn task_verb_modifies_deletes_require_real_scanned_code() {
+        let (apg_root, repo, _wt) = fixture("verb-modifies");
+        let mut records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+        ];
+
+        // modifies/deletes with an unresolvable FQN are refused.
+        for verb in ["modifies", "deletes"] {
+            let err = plan_add_task_at(
+                &apg_root,
+                "foo",
+                &mut records,
+                1,
+                1,
+                "T",
+                "source",
+                "",
+                verb,
+                "github.com/x/y.Nope",
+                "",
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("does not resolve in the scanned graph"),
+                "{verb}: {err}"
+            );
+        }
+        // modifies/deletes against a still-planned FQN are refused too — only
+        // a creates builds a planned node.
+        let mut with_planned = records.clone();
+        with_planned.push(Record::PlannedNode {
+            fqn: "github.com/x/y.Gateway".to_string(),
+            kind: "struct".to_string(),
+            name: "Gateway".to_string(),
+            parent: String::new(),
+        });
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut with_planned,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "modifies",
+            "github.com/x/y.Gateway",
+            "",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is a planned node, not scanned code"),
+            "{err}"
+        );
+
+        // modifies/deletes with a real scanned FQN are accepted; the verb and
+        // target land on the task record.
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "modifies",
+            "github.com/x/y.Store",
+            "",
+        )
+        .unwrap();
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            2,
+            "T2",
+            "source",
+            "",
+            "deletes",
+            "github.com/x/y.Store",
+            "",
+        )
+        .unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Task { fqn, verb, target, .. }
+                if fqn == "foo/plan.phase-01.task-1"
+                    && verb == "modifies"
+                    && target == "github.com/x/y.Store"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Task { fqn, verb, target, .. }
+                if fqn == "foo/plan.phase-01.task-2"
+                    && verb == "deletes"
+                    && target == "github.com/x/y.Store"
+        )));
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn task_verb_renames_moves_validate_source_and_new_fqn() {
+        let (apg_root, repo, _wt) = fixture("verb-rename");
+        let mut records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+        ];
+
+        // renames/moves with an unresolvable source are refused.
+        for verb in ["renames", "moves"] {
+            let err = plan_add_task_at(
+                &apg_root,
+                "foo",
+                &mut records,
+                1,
+                1,
+                "T",
+                "source",
+                "",
+                verb,
+                "github.com/x/y.Nope",
+                "github.com/x/y.Gateway",
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("does not resolve in the scanned graph"),
+                "{verb}: {err}"
+            );
+        }
+        // A rename without the destination is refused.
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "renames",
+            "github.com/x/y.Store",
+            "",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("requires --to"), "{err}");
+
+        // A colliding destination is refused — both against another real node
+        // and against the source itself.
+        for (verb, to) in [
+            ("renames", "/abs/store.go"),
+            ("moves", "github.com/x/y.Store"),
+        ] {
+            let err = plan_add_task_at(
+                &apg_root,
+                "foo",
+                &mut records,
+                1,
+                1,
+                "T",
+                "source",
+                "",
+                verb,
+                "github.com/x/y.Store",
+                to,
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("must not collide with existing code"),
+                "{verb}: {err}"
+            );
+        }
+
+        // renames/moves with a resolving source and a free destination are
+        // accepted; the pair is recorded on the task.
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "renames",
+            "github.com/x/y.Store",
+            "github.com/x/y.Store2",
+        )
+        .unwrap();
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            2,
+            "T2",
+            "source",
+            "",
+            "moves",
+            "github.com/x/y.Store",
+            "github.com/x/y.Store2",
+        )
+        .unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Task { fqn, verb, target, new_fqn, .. }
+                if fqn == "foo/plan.phase-01.task-1"
+                    && verb == "renames"
+                    && target == "github.com/x/y.Store"
+                    && new_fqn == "github.com/x/y.Store2"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Task { fqn, verb, target, new_fqn, .. }
+                if fqn == "foo/plan.phase-01.task-2"
+                    && verb == "moves"
+                    && target == "github.com/x/y.Store"
+                    && new_fqn == "github.com/x/y.Store2"
+        )));
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn task_verb_invalid_verbs_and_flag_combinations_refused() {
+        let (apg_root, repo, _wt) = fixture("verb-flags");
+        let mut records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+        ];
+
+        // Unknown verb refused.
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "explodes",
+            "github.com/x/y.Store",
+            "",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("invalid task verb"), "{err}");
+
+        // A non-creates verb without a target FQN is meaningless — refused.
+        for verb in ["modifies", "deletes", "renames", "moves"] {
+            let err = plan_add_task_at(
+                &apg_root,
+                "foo",
+                &mut records,
+                1,
+                1,
+                "T",
+                "source",
+                "",
+                verb,
+                "",
+                "",
+            )
+            .unwrap_err();
+            assert!(err.to_string().contains("requires --fqn"), "{verb}: {err}");
+        }
+
+        // --to is only valid for renames/moves.
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "creates",
+            "github.com/x/y.Gateway",
+            "github.com/x/y.Gateway2",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("only valid for renames/moves"),
+            "{err}"
+        );
+
+        // An omitted verb defaults to creates-without-target — the pre-verb
+        // task shape still authors.
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "",
+            "",
+            "",
+        )
+        .unwrap();
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Task { fqn, verb, target, new_fqn, .. }
+                if fqn == "foo/plan.phase-01.task-1"
+                    && verb == "creates"
+                    && target.is_empty()
+                    && new_fqn.is_empty()
+        )));
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn task_verb_old_format_records_default_to_creates() {
+        // A task record authored before the verb model (no verb/target keys)
+        // parses with the default verb `creates` and no target — the transient
+        // plan store is forward-compatible with old-format tasks.
+        let dir = std::env::temp_dir().join(format!("apg-plan-verb-parse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"type":"task","fqn":"foo/plan.phase-01.task-1","title":"T","kind":"source","tier":"","status":"pending"}"#,
+        )
+        .unwrap();
+        let recs = specs::read_jsonl(&path).unwrap();
+        match &recs[0] {
+            Record::Task {
+                verb,
+                target,
+                new_fqn,
+                ..
+            } => {
+                assert_eq!(verb, "creates");
+                assert!(target.is_empty(), "old tasks carry no target");
+                assert!(new_fqn.is_empty(), "old tasks carry no destination");
+            }
+            other => panic!("expected a task record, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn render_groups_tasks_by_kind_and_shows_test_tier() {
         let records = vec![
             Record::PlanPhase {
@@ -1583,6 +2264,9 @@ mod tests {
                 kind: "source".into(),
                 tier: String::new(),
                 status: "done".into(),
+                verb: "creates".into(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-2".into(),
@@ -1590,6 +2274,9 @@ mod tests {
                 kind: "test".into(),
                 tier: "unit".into(),
                 status: "pending".into(),
+                verb: "creates".into(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-3".into(),
@@ -1597,6 +2284,9 @@ mod tests {
                 kind: "docs".into(),
                 tier: String::new(),
                 status: "pending".into(),
+                verb: "creates".into(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
@@ -1689,8 +2379,20 @@ mod tests {
 
         let mut records = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "foo")).unwrap();
         // A task under phase 02 (not authored) is rejected before any write.
-        let err =
-            plan_add_task_at(&apg_root, "foo", &mut records, 2, 1, "T", "source", "").unwrap_err();
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            2,
+            1,
+            "T",
+            "source",
+            "",
+            "creates",
+            "",
+            "",
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("no such phase"), "{err}");
         assert!(
             records.iter().all(
@@ -1842,6 +2544,9 @@ mod tests {
                 kind: "source".to_string(),
                 tier: String::new(),
                 status: "done".to_string(),
+                verb: "creates".to_string(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),

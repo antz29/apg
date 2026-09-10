@@ -573,6 +573,7 @@ pub fn ingest(
                     kind,
                     tier,
                     status,
+                    ..
                 } => insert_node(
                     &mut graph,
                     fqn,

@@ -300,10 +300,15 @@ pub enum Record {
         status: String,
     },
 
-    /// `{"type":"task","fqn":"<project>/plan.phase-<n>.task-<k>","title":"...","kind":"source","tier":"","status":"pending"}`
+    /// `{"type":"task","fqn":"<project>/plan.phase-<n>.task-<k>","title":"...","kind":"source","tier":"","status":"pending","verb":"creates","target":"github.com/x/y.Gateway","new_fqn":""}`
     /// `kind` is the owning role (source/test/gate/docs); `tier`
     /// (unit/int/e2e) is the verification depth, meaningful only for
-    /// `kind = test`.
+    /// `kind = test`. `verb` is the Task→Implementation verb (SPEC §5):
+    /// creates|modifies|deletes|renames|moves — `creates` is the default, so
+    /// task records authored before the verb model parse unchanged. `target`
+    /// is the Implementation FQN the verb applies to (the source FQN of a
+    /// renames/moves pair; empty on a target-less task); `new_fqn` is the
+    /// destination FQN of a renames/moves pair, empty otherwise.
     Task {
         fqn: String,
         title: String,
@@ -313,6 +318,12 @@ pub enum Record {
         tier: String,
         #[serde(default)]
         status: String,
+        #[serde(default = "default_task_verb")]
+        verb: String,
+        #[serde(default)]
+        target: String,
+        #[serde(default)]
+        new_fqn: String,
     },
 
     Details {
@@ -383,6 +394,13 @@ pub enum Record {
         from: String,
         to: String,
     },
+}
+
+/// The default Task→Implementation verb: `creates`. A task record authored
+/// before the verb model (no `verb` key) is a `creates`-without-target task —
+/// the verb's target FQN is validated only when one is declared (SPEC §5).
+fn default_task_verb() -> String {
+    "creates".to_string()
 }
 
 #[cfg(test)]

@@ -854,6 +854,9 @@ mod tests {
                 kind: "source".into(),
                 tier: String::new(),
                 status: "pending".into(),
+                verb: "creates".into(),
+                target: String::new(),
+                new_fqn: String::new(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),

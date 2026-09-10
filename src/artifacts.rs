@@ -567,6 +567,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             kind,
             tier,
             status,
+            ..
         } => Some((
             "Task",
             fqn,
