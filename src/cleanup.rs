@@ -65,18 +65,20 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
     graph
         .unresolved_uses
         .retain(|(a, b)| is_removed(a) && is_removed(b));
-    // Spec/plan edges reference code nodes (anchors to a file that gets
-    // excluded, Details/Reviews on excluded units); drop those that dangle.
+    // Spec/plan edges reference code nodes (Details/Reviews on excluded
+    // units, plan edges into excluded code); drop those that dangle.
     for edges in [
         &mut graph.details,
         &mut graph.reviews,
         &mut graph.depends_on,
         &mut graph.gates,
-        &mut graph.spec_depends,
-        &mut graph.anchors,
-        &mut graph.implements,
         &mut graph.satisfies,
-        &mut graph.builds,
+        &mut graph.drives,
+        &mut graph.represents,
+        &mut graph.realised_by,
+        &mut graph.spec_implemented_by,
+        &mut graph.publishes,
+        &mut graph.subscribes,
     ] {
         edges.retain(|(a, b)| is_removed(a) && is_removed(b));
     }

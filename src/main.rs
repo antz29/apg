@@ -4,14 +4,19 @@ mod cleanup;
 mod git;
 mod graph;
 mod ingest;
-mod invariant_cmd;
+mod layers;
 mod load;
+mod node_cmd;
 mod plan_cmd;
+mod project_cmd;
 mod review_cmd;
 mod schema;
-mod spec_cmd;
 mod specs;
+#[cfg(test)]
+mod testutil;
+mod version_gate;
 
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -85,67 +90,21 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         "apg_hunk.ts",
         include_str!("../opencode-suite/tools/apg_hunk.ts"),
     ),
-    // Spec/plan/review suite (SPEC R12).
+    // Durable node-file mutation surface (apg-projects SPEC §2.2/§4).
     (
-        "apg_spec.ts",
-        include_str!("../opencode-suite/tools/apg_spec.ts"),
+        "apg_node.ts",
+        include_str!("../opencode-suite/tools/apg_node.ts"),
     ),
     (
-        "apg_spec_requirements.ts",
-        include_str!("../opencode-suite/tools/apg_spec_requirements.ts"),
+        "apg_edge.ts",
+        include_str!("../opencode-suite/tools/apg_edge.ts"),
     ),
+    // Project lifecycle (start / verify / merge).
     (
-        "apg_spec_phases.ts",
-        include_str!("../opencode-suite/tools/apg_spec_phases.ts"),
+        "apg_project.ts",
+        include_str!("../opencode-suite/tools/apg_project.ts"),
     ),
-    (
-        "apg_spec_deps.ts",
-        include_str!("../opencode-suite/tools/apg_spec_deps.ts"),
-    ),
-    (
-        "apg_spec_anchors.ts",
-        include_str!("../opencode-suite/tools/apg_spec_anchors.ts"),
-    ),
-    (
-        "apg_spec_trace.ts",
-        include_str!("../opencode-suite/tools/apg_spec_trace.ts"),
-    ),
-    (
-        "apg_spec_unresolved.ts",
-        include_str!("../opencode-suite/tools/apg_spec_unresolved.ts"),
-    ),
-    (
-        "apg_spec_fixes.ts",
-        include_str!("../opencode-suite/tools/apg_spec_fixes.ts"),
-    ),
-    (
-        "apg_spec_init.ts",
-        include_str!("../opencode-suite/tools/apg_spec_init.ts"),
-    ),
-    (
-        "apg_spec_add.ts",
-        include_str!("../opencode-suite/tools/apg_spec_add.ts"),
-    ),
-    (
-        "apg_spec_anchor.ts",
-        include_str!("../opencode-suite/tools/apg_spec_anchor.ts"),
-    ),
-    (
-        "apg_spec_link.ts",
-        include_str!("../opencode-suite/tools/apg_spec_link.ts"),
-    ),
-    (
-        "apg_spec_spine.ts",
-        include_str!("../opencode-suite/tools/apg_spec_spine.ts"),
-    ),
-    (
-        "apg_spec_rm.ts",
-        include_str!("../opencode-suite/tools/apg_spec_rm.ts"),
-    ),
-    (
-        "apg_spec_render.ts",
-        include_str!("../opencode-suite/tools/apg_spec_render.ts"),
-    ),
+    // Plan/review suite.
     (
         "apg_review.ts",
         include_str!("../opencode-suite/tools/apg_review.ts"),
@@ -165,14 +124,6 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
     (
         "apg_review_reject.ts",
         include_str!("../opencode-suite/tools/apg_review_reject.ts"),
-    ),
-    (
-        "apg_invariant_add.ts",
-        include_str!("../opencode-suite/tools/apg_invariant_add.ts"),
-    ),
-    (
-        "apg_invariants.ts",
-        include_str!("../opencode-suite/tools/apg_invariants.ts"),
     ),
     (
         "apg_plan.ts",
@@ -219,8 +170,8 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         include_str!("../opencode-suite/tools/apg_plan_note.ts"),
     ),
     (
-        "apg_plan_apply.ts",
-        include_str!("../opencode-suite/tools/apg_plan_apply.ts"),
+        "apg_plan_verify.ts",
+        include_str!("../opencode-suite/tools/apg_plan_verify.ts"),
     ),
 ];
 
@@ -228,12 +179,82 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
 /// `apg init` alongside the tools.
 const APG_LIB: &str = include_str!("../opencode-suite/lib/apg.ts");
 
+/// The layout-upgrade guide that `apg init` installs into
+/// `~/.opencode/lib/apg-upgrade.md` next to the shared lib: version-field
+/// meaning, mismatch detection, upgrade steps (re-run init → re-scan),
+/// common-issue fixes. The R10 version gate's block text points at it.
+///
+/// Maintained inline here; if the suite tree (`opencode-suite/lib/`) ever
+/// gains an `apg-upgrade.md`, this const should flip to an `include_str!` of
+/// it like `APG_LIB` above.
+const APG_UPGRADE_DOC: &str = r#"# apg layout upgrades — the `apg/config.json` version field
+
+This guide is installed by `apg init` at `~/.opencode/lib/apg-upgrade.md`;
+the version gate's block text points here.
+
+## What the `version` field is
+
+`apg/config.json` (the committed layout config at the repo root) carries a
+**binary-managed `version` field** — for example `"version": "0.10.4"`. It
+records which apg binary last initialized or upgraded the layout. It is not a
+user setting: `apg init` owns it. Your `default` / `types` (code_type rules)
+are yours; the `version` field is the binary's — never hand-edit it.
+
+## What checks it
+
+The layout-touching operations — `apg scan` and `apg project start` —
+**block, they never warn**, unless the layout's declared version shares the
+running binary's **major.minor** (patch versions never matter):
+
+| apg/config.json `version` | apg 0.10.4 verdict |
+|---|---|
+| same major.minor (`0.10.0` … `0.10.99`) | proceed (patch diff is fine) |
+| missing `version` field (pre-versioning layout) | **block** |
+| older major.minor (`0.9.x`, `0.8.x`, …) | **block** — upgrade the layout |
+| newer major.minor (`0.11.x`, `1.x`, …) | **block** — upgrade the binary |
+
+`apg init` is the upgrade act: it re-runs idempotently, writes the current
+version, and scaffolds the layout. `apg init` is also the layout entry point —
+a repo never created by `apg init` has no versioned layout at all.
+
+## Upgrade steps
+
+1. Re-run **`apg init`** from the repo root. It is idempotent: writes the
+   current binary version into `apg/config.json` (your code_type rules are
+   untouched), scaffolds `apg/.worktrees/` + the `.gitignore` entries
+   (`apg/.trans/`, `apg/.worktrees/`), and installs/updates the opencode apg
+   suite (tools, agents, this guide).
+2. Re-run the blocked command: `apg scan`, or `apg project start <name>`.
+3. **Layout newer than the binary** (the block text says so): upgrade apg
+   first — `brew upgrade apg` (or the matching frontend formulae), the
+   `install.sh` installer, or a newer release — then `apg init`, then re-run
+   the blocked command.
+
+## Common issues
+
+- **"declares no layout version"** — the layout predates layout versioning,
+  or was created without `apg init` (an old `apg scan` created only
+  `apg/.trans/`). Fix: `apg init` writes the field.
+- **"not a valid version"** — the field was hand-edited into something
+  unparseable. Fix: `apg init` rewrites it.
+- **"config.json does not exist"** — no versioned layout here yet. Fix:
+  `apg init` (the layout entry point), then re-run.
+- **Worktree scaffolding missing** — `apg init` scaffolds `apg/.worktrees/`
+  and its `.gitignore` entry; `apg project start` also self-heals both when
+  absent, so this resolves itself on the next start.
+- **Code_type rules look reformatted** — the JSON file is rewritten when the
+  version changes; the rules' *content* is preserved (only whitespace/field
+  order may normalize). Never re-add the version by hand afterwards — re-run
+  `apg init`.
+"#;
+
 /// The `codebase-navigator.md` agent file that `apg init` installs into
 /// `~/.opencode/`. Auto-discovered by opencode from `~/.opencode/agents/*.md`;
 /// configured to use the apg suite tools and to guide the user through running
 /// `apg scan` on the CLI (there is no in-chat scan tool). Single-sourced from
 /// the repo's own agent file.
-const CODEBASE_NAVIGATOR_AGENT: &str = include_str!("../opencode-suite/agents/codebase-navigator.md");
+const CODEBASE_NAVIGATOR_AGENT: &str =
+    include_str!("../opencode-suite/agents/codebase-navigator.md");
 
 /// The six distributed agents that `apg init` installs into `~/.opencode/agents/`
 /// (SPEC R13/R15): the navigator plus the five spec/plan/review/builder agents,
@@ -292,12 +313,12 @@ const DEFAULT_CONFIG_JSON: &str = r#"{
 /// Mirrors every run message to stderr *and* to `apg-frontend.log`, so the log
 /// is a complete high-resolution record of the run (the frontend's stderr is
 /// also redirected there, so one file has the whole pipeline).
-struct Log {
+pub(crate) struct Log {
     f: std::fs::File,
 }
 
 impl Log {
-    fn new() -> Log {
+    pub(crate) fn new() -> Log {
         Log {
             f: std::fs::File::create("apg-frontend.log")
                 .expect("failed to create apg-frontend.log"),
@@ -518,34 +539,35 @@ fn print_help() {
         "apg — program graph scanner + LadybugDB query CLI for opencode
 
 USAGE:
-  apg init [dir]              Set up apg/ (config.json + .trans/), scaffold the
-                              repo .gitignore for apg/.trans/, install/update the
-                              opencode apg tool suite + six distributed agents in
-                              ~/.opencode/, and warn loudly about project .opencode/
-                              files that duplicate the installed suite (never deletes)
+  apg init [dir]              Set up apg/ (config.json carrying the binary
+                              version + .trans/ + .worktrees/), scaffold the
+                              repo .gitignore for the apg layout entries,
+                              install/update the opencode apg tool suite + six
+                              distributed agents + the upgrade guide in
+                              ~/.opencode/, and warn loudly about project
+                              .opencode/ files that duplicate the installed
+                              suite (never deletes)
   apg scan [dir] [options]    Scan a project; writes apg/.trans/db.lbug and
                               apg/.trans/graph.jsonl
   apg query [--json] \"<cypher>\"  Run a read-only Cypher query against
                                apg/.trans/db.lbug (found by walking up from
                                cwd); CSV by default, --json for JSON rows
-  apg spec <sub> …            Author + lifecycle a graph-native spec:
-                              init/add/anchor/link/spine/rm/render/unresolved
-                              (add authors the 4-tier taxonomy: requirement,
-                              phase, decision, non-goal, AC, VI, note,
-                              stakeholder, domain, subdomain, entity,
-                              value-object, aggregate, domain-event,
-                              domain-process, domain-rule, actor, system,
-                              container, component)
   apg plan <sub> …            The phased execution plan (transient, branch-local):
-                              init/add/link/done/undone/note/complete/render/apply
+                              init/add/link/done/undone/note/complete/render/verify
                               (add authors phases, tasks, and planned
                               Implementation nodes — module/file/struct/function
-                              marked planned at the FQN where the code lands)
+                              marked planned at the FQN where the code lands;
+                              verify is the pre-merge coherence gate)
+  apg project <sub> …         Project contexts (worktrees, git2-operated):
+                              start <name> — worktree + branch + branch DB off
+                              the default branch (apg/.worktrees/<name>);
+                              merge <name> — verify gate → merge → main rebuild
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
-  apg invariant add …         Materialize a graph-wide invariant (universal or
-                              project-scoped), optionally guarding artifacts
-  apg invariants              List invariants (filter by --scope/--project)
+  apg node <sub> …            Durable node-file model mutations:
+                              add/rm (type-as-argument, writes apg/layers)
+  apg edge <sub> …            Durable node-file model edge mutations:
+                              add/rm (kind/from/to)
   apg --version               Print version
   apg --help                  Show this help
 
@@ -572,11 +594,11 @@ fn main() {
         "init" => cmd_init(&raw[2..]),
         "query" => cmd_query(&raw[2..]),
         "scan" => cmd_scan(&raw[2..]),
-        "spec" => spec_cmd::cmd_spec(&raw[2..]),
         "plan" => plan_cmd::cmd_plan(&raw[2..]),
         "review" => review_cmd::cmd_review(&raw[2..]),
-        "invariant" => invariant_cmd::cmd_invariant(&raw[2..]),
-        "invariants" => invariant_cmd::cmd_invariants(&raw[2..]),
+        "project" => project_cmd::cmd_project(&raw[2..]),
+        "node" => node_cmd::cmd_node(&raw[2..]),
+        "edge" => node_cmd::cmd_edge(&raw[2..]),
         "--version" | "-V" => {
             println!("apg {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -672,8 +694,7 @@ fn is_dep_manifest(name: Option<&std::ffi::OsStr>) -> bool {
 fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
     let current_tools: std::collections::HashSet<&str> =
         SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
-    let current_agents: std::collections::HashSet<&str> =
-        AGENTS.iter().map(|(n, _)| *n).collect();
+    let current_agents: std::collections::HashSet<&str> = AGENTS.iter().map(|(n, _)| *n).collect();
     let mut pruned = 0;
 
     let tools_dir = opencode_dir.join("tools");
@@ -707,29 +728,13 @@ fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
     Ok(pruned)
 }
 
-/// `apg init [dir]`: create the committed `apg/` layout (config.json +
-/// `.trans/`), install (or update) the opencode apg tool suite + the six
-/// distributed agents into `~/.opencode/`, scaffold the repo `.gitignore` for
-/// `apg/.trans/`, and warn loudly about any project-local `.opencode/` files
-/// that duplicate the installed suite (never deletes anything). Project-specific
-/// implementer/reviewer agents are installed into the project `.opencode/` by
-/// the agent-builder, not by init.
-fn cmd_init(args: &[String]) -> anyhow::Result<()> {
-    let dir = if args.is_empty() {
-        std::env::current_dir()?
-    } else {
-        PathBuf::from(&args[0])
-    };
-    let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
-
-    let apg_dir = dir.join(specs::LAYOUT);
-    std::fs::create_dir_all(apg_dir.join(specs::TRANS))?;
-    let cfg_path = apg_dir.join("config.json");
-    if !cfg_path.exists() {
-        std::fs::write(&cfg_path, DEFAULT_CONFIG_JSON)?;
-    }
-
-    let opencode_dir = user_opencode_dir()?;
+/// Installs (or updates) the apg suite into `opencode_dir`: every `SUITE_TOOLS`
+/// file, the shared lib, the upgrade guide, and the six distributed agents —
+/// each written only when missing or changed — then prunes stale apg-owned
+/// files. Returns `(files written/updated, files pruned)`. `cmd_init` calls it
+/// against `~/.opencode`; tests call it against a temp dir. The package.json
+/// scaffold is only written when absent (never clobbered).
+fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
     let tools_dir = opencode_dir.join("tools");
     std::fs::create_dir_all(&tools_dir)?;
     let agents_dir = opencode_dir.join("agents");
@@ -750,12 +755,64 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     if write_if_changed(&lib_dir.join("apg.ts"), APG_LIB)? {
         updated += 1;
     }
+    // The upgrade guide the R10 gate's block text points at (task-4).
+    // Best-effort with a warning: an unwritable ~/.opencode must not fail
+    // init (mirrors the npm-install failure handling below).
+    let upgrade_doc_path = lib_dir.join("apg-upgrade.md");
+    match write_if_changed(&upgrade_doc_path, APG_UPGRADE_DOC) {
+        Ok(true) => updated += 1,
+        Ok(false) => {}
+        Err(e) => eprintln!(
+            "warning: could not install the upgrade guide into {} ({e}); the version-gate block text points at ~/.opencode/lib/apg-upgrade.md — re-run `apg init` once the location is writable",
+            upgrade_doc_path.display()
+        ),
+    }
     for (name, content) in AGENTS {
         if write_if_changed(&agents_dir.join(name), content)? {
             updated += 1;
         }
     }
-    let pruned = prune_stale_suite(&opencode_dir)?;
+    let pruned = prune_stale_suite(opencode_dir)?;
+    Ok((updated, pruned))
+}
+
+/// `apg init [dir]`: create the committed `apg/` layout (config.json carrying
+/// the binary-managed layout `version` + `.trans/` + the project-worktrees
+/// dir), install (or update) the opencode apg tool suite + the six
+/// distributed agents + the upgrade guide into `~/.opencode/`, scaffold the
+/// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
+/// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`
+/// files that duplicate the installed suite (never deletes anything).
+/// Project-specific implementer/reviewer agents are installed into the
+/// project `.opencode/` by the agent-builder, not by init. Init is the
+/// layout's versioning/upgrade act (R9/R10): it re-runs idempotently and
+/// writes the binary version into `apg/config.json` (user code_type rules
+/// untouched) — `apg scan` and `apg project start` refuse to touch a layout
+/// whose version is missing or does not share the binary's major.minor.
+fn cmd_init(args: &[String]) -> anyhow::Result<()> {
+    let dir = if args.is_empty() {
+        std::env::current_dir()?
+    } else {
+        PathBuf::from(&args[0])
+    };
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+
+    let apg_dir = dir.join(specs::LAYOUT);
+    std::fs::create_dir_all(apg_dir.join(specs::TRANS))?;
+    // The project-worktrees dir (gitignored; `project start` nests each
+    // project's worktree under it). Scaffolded even before git exists — the
+    // dir itself is what libgit2's worktree add needs as a parent.
+    std::fs::create_dir_all(apg_dir.join(git::WORKTREES))?;
+    let cfg_path = apg_dir.join("config.json");
+    if !cfg_path.exists() {
+        std::fs::write(&cfg_path, DEFAULT_CONFIG_JSON)?;
+    }
+    // The binary-managed version field (R9): init is the layout's upgrade
+    // act — write-through on every init, idempotent when already current.
+    version_gate::ensure_config_version(&apg_dir, env!("CARGO_PKG_VERSION"))?;
+
+    let opencode_dir = user_opencode_dir()?;
+    let (updated, pruned) = install_suite(&opencode_dir)?;
 
     if !opencode_dir
         .join("node_modules")
@@ -778,16 +835,18 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
 
     if updated == 0 {
         println!(
-            "Initialized apg/ (config.json + .trans/); {} apg tools + {} agents already up to date in {}",
-            SUITE_TOOLS.len() + 1,
+            "Initialized apg/ (config.json v{} + .trans/ + .worktrees/); {} suite files + {} agents already up to date in {}",
+            env!("CARGO_PKG_VERSION"),
+            SUITE_TOOLS.len() + 2,
             AGENTS.len(),
             opencode_dir.display()
         );
     } else {
         println!(
-            "Initialized apg/ (config.json + .trans/) and installed/updated {} of {} apg tools + {} agents in {}",
+            "Initialized apg/ (config.json v{} + .trans/ + .worktrees/) and installed/updated {} of {} suite files + {} agents in {}",
+            env!("CARGO_PKG_VERSION"),
             updated,
-            SUITE_TOOLS.len() + 1,
+            SUITE_TOOLS.len() + 2,
             AGENTS.len(),
             opencode_dir.display()
         );
@@ -822,33 +881,61 @@ fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ensures the repo `.gitignore` carries `apg/.trans/` (added if missing; other
-/// lines untouched), so the durable `apg/` data (specs, notes, config) is
-/// committed and only transient state (db, export, plans, renders, logs) is
-/// ignored (SPEC R4/R15).
-fn scaffold_gitignore(dir: &Path) -> anyhow::Result<()> {
+/// The apg-owned entries `apg init` scaffolds into the repo `.gitignore`:
+/// the gitignored transient `apg/.trans/` (db, export, plans, renders, logs)
+/// and the project worktrees dir `apg/.worktrees/` — one entry covers every
+/// `<project>` nested under it (R9). Durable `apg/` data (config, specs,
+/// notes) stays committed above both.
+const GITIGNORE_APG_ENTRIES: &[&str] = &["apg/.trans/", "apg/.worktrees/"];
+
+/// Ensures the repo `.gitignore` carries the apg layout entries (each added
+/// if missing; other lines untouched), so the durable `apg/` data is
+/// committed and only transient state (db, export, plans, renders, logs) and
+/// project worktrees are ignored. `apg init` scaffolds both; `apg project
+/// start` calls the same scaffolder to self-heal a repo whose entries were
+/// dropped (it commits the change itself). Returns whether the file was
+/// modified.
+pub(crate) fn scaffold_gitignore(dir: &Path) -> anyhow::Result<bool> {
     let p = dir.join(".gitignore");
     let content = std::fs::read_to_string(&p).unwrap_or_default();
     let lines: Vec<&str> = content.lines().collect();
-    let has = lines
-        .iter()
-        .any(|l| l.trim() == "apg/.trans/" || l.trim() == "apg/.trans");
-    if !has {
-        let mut out = content.clone();
-        if !out.is_empty() && !out.ends_with('\n') {
-            out.push('\n');
+    let mut missing: Vec<&str> = Vec::new();
+    for entry in GITIGNORE_APG_ENTRIES {
+        // Both spellings count as present (git treats `dir/` and `dir`
+        // equivalently for a directory entry).
+        let bare = entry.trim_end_matches('/');
+        let present = lines.iter().any(|l| l.trim().trim_end_matches('/') == bare);
+        if !present {
+            missing.push(entry);
         }
-        out.push_str("# apg transient state (rebuildable; committed apg/ data lives above it)\napg/.trans/\n");
-        std::fs::write(&p, out)?;
     }
-    Ok(())
+    if missing.is_empty() {
+        return Ok(false);
+    }
+    let mut out = content.clone();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(
+        "# apg layout entries (transient/worktree dirs; committed apg/ data lives above them)\n",
+    );
+    for entry in &missing {
+        out.push_str(entry);
+        out.push('\n');
+    }
+    std::fs::write(&p, out)?;
+    Ok(true)
 }
 
 /// `apg query "<cypher>"`: open `apg/.trans/db.lbug` (found by walking up from
 /// cwd) read-only and print the result as CSV with a header row.
 fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     let json = args.first().is_some_and(|a| a == "--json");
-    let query = if json { args[1..].join(" ") } else { args.join(" ") };
+    let query = if json {
+        args[1..].join(" ")
+    } else {
+        args.join(" ")
+    };
     if query.trim().is_empty() {
         anyhow::bail!("usage: apg query [--json] \"<cypher>\"");
     }
@@ -921,6 +1008,39 @@ fn find_or_create_apg_root(dir: &Path) -> PathBuf {
     specs::find_or_create_apg_root(dir)
 }
 
+/// Build the scanner JSONL record stream from the frontend spools: a
+/// `lang_switch` record before each language's records plus the leading
+/// `scan_meta` control record. Borrows the spool paths (reopening each file)
+/// so it can be run twice — once for the pre-ingest that computes
+/// `ingest_tree`'s scanned code-FQN universe, then again for the real
+/// pipeline.
+fn scanner_records<'a>(
+    spools: &'a [(String, PathBuf)],
+    git_state: &'a git::GitState,
+) -> impl Iterator<Item = schema::Record> + 'a {
+    let iterators = spools.iter().map(|(lang, spool)| {
+        let lines = BufReader::new(std::fs::File::open(spool).unwrap()).lines();
+        let records = lines.map(|x| {
+            let line = x.expect("io error");
+            serde_json::from_str::<schema::Record>(&line)
+                .unwrap_or_else(|e| panic!("bad json {e}: {line}"))
+        });
+        Box::new(
+            std::iter::once(schema::Record::LangSwitch {
+                language: lang.clone(),
+            })
+            .chain(records),
+        ) as Box<dyn Iterator<Item = schema::Record>>
+    });
+    let records = iterators.into_iter().flatten();
+    std::iter::once(schema::Record::ScanMeta {
+        git_sha: git_state.sha.clone(),
+        git_clean: git_state.sha.as_ref().map(|_| git_state.clean),
+        scanned_at: git::now_iso8601(),
+    })
+    .chain(records)
+}
+
 /// `apg scan [dir] [options] [blacklist...]`: run the scanner + ingestor
 /// pipeline and write `db.lbug`, `graph.jsonl`, and `apg-frontend.log` into
 /// the project's `.apg` directory. A repo may mix languages: auto-detection
@@ -931,7 +1051,7 @@ fn find_or_create_apg_root(dir: &Path) -> PathBuf {
 /// classification and FQN rendering). A `scan_meta` control record leads the
 /// whole stream with the git state the scan ran under (recorded as the DB's
 /// `Scan` node and graph.jsonl line 1).
-fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
+pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut language_args: Vec<String> = Vec::new();
     let mut path_excludes: Vec<String> = Vec::new();
     let mut module_dirs: Vec<String> = Vec::new();
@@ -983,6 +1103,17 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // recorded as the scan_meta control record and the DB's Scan node so later
     // spec/plan/review mutations can refuse to run against a stale DB.
     let git_state = git::git_state(&project_dir);
+
+    // R10 version gate: `apg scan` is a layout-touching op, so the repo must
+    // carry a versioned layout — `apg init` is the layout entry/upgrade act
+    // that writes the binary version into apg/config.json. A missing version
+    // (pre-versioning layout) or a major/minor mismatch in either direction
+    // blocks with upgrade guidance; the gate never warns. The gate runs
+    // BEFORE find_or_create below so a refusal never leaves a stray,
+    // unversioned layout behind.
+    let gate_root =
+        specs::find_apg_root(&project_dir).unwrap_or_else(|| project_dir.join(specs::LAYOUT));
+    version_gate::require_layout_version(&gate_root, "re-run `apg scan`")?;
 
     // Resolve the committed `apg/` layout root, then run the pipeline from
     // inside its gitignored `.trans/` so db.lbug / graph.jsonl /
@@ -1105,49 +1236,12 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // each under the right language. A `scan_meta` control record (the git
     // state this scan ran under) leads the whole stream; the ingestor turns it
     // into the DB's `Scan` node and the export puts it on graph.jsonl line 1.
-    let iterators: Vec<Box<dyn Iterator<Item = schema::Record>>> = spools
-        .into_iter()
-        .map(|(lang, spool)| {
-            let lines = BufReader::new(std::fs::File::open(&spool).unwrap()).lines();
-            let records = lines.map(|x| {
-                let line = x.expect("io error");
-                serde_json::from_str::<schema::Record>(&line)
-                    .unwrap_or_else(|e| panic!("bad json {e}: {line}"))
-            });
-            Box::new(std::iter::once(schema::Record::LangSwitch { language: lang }).chain(records))
-                as Box<dyn Iterator<Item = schema::Record>>
-        })
-        .collect();
-    let records = iterators.into_iter().flatten();
-    let records = std::iter::once(schema::Record::ScanMeta {
-        git_sha: git_state.sha.clone(),
-        git_clean: git_state.sha.as_ref().map(|_| git_state.clean),
-        scanned_at: git::now_iso8601(),
-    })
-    .chain(records);
-
-    // Re-ingest the committed spec/plan/note data after code (SPEC R10):
-    // `apg/specs/*.jsonl`, `apg/notes/*.jsonl`, `apg/.trans/plans/*.jsonl`.
-    // Spec records carry canonical FQNs and reference code by FQN, so they
-    // merge into the same stream; pending anchors are reconciled ingestor-side.
-    let spec_inputs = specs::scan_inputs(&apg_root);
-    let mut spec_count = 0;
-    for set in [
-        spec_inputs.0.clone(),
-        spec_inputs.1.clone(),
-        spec_inputs.2.clone(),
-    ] {
-        spec_count += set.len();
-    }
-    if spec_count > 0 {
-        log.ln(&format!(
-            "Spec/plan/note inputs: {} spec files, {} note files, {} plan files",
-            spec_inputs.0.len(),
-            spec_inputs.1.len(),
-            spec_inputs.2.len(),
-        ));
-    }
-    let records = records.chain(specs::read_all(&apg_root));
+    //
+    // The scanner stream is built by a helper (borrowing the spool paths) so
+    // it can be read twice: once for a pre-ingest that computes the scanned
+    // code-FQN universe (the honest renderer reuse for `ingest_tree`'s
+    // `implemented-by` validation), and once for the real pipeline.
+    let records = scanner_records(&spools, &git_state);
 
     // Cleanup span validation is per-language: keep the single-language value,
     // and disable it (by joining) for mixed scans where the check cannot be
@@ -1157,6 +1251,68 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     } else {
         languages.join(",")
     };
+
+    // Pre-ingest the scanner stream to compute the scanned code-FQN universe
+    // `ingest_tree` validates `implemented-by` refs against (real → real).
+    let scanned_code: BTreeSet<String> = {
+        let (pre, _) = ingest::ingest(
+            scanner_records(&spools, &git_state),
+            &ingest::IngestOptions {
+                blacklist: &blacklist,
+                language: &cleanup_language,
+                config: config.as_ref(),
+            },
+        );
+        pre.nodes
+            .iter()
+            .filter(|(_, n)| {
+                matches!(
+                    n.kind,
+                    graph::NodeKind::Module
+                        | graph::NodeKind::Struct
+                        | graph::NodeKind::Function
+                        | graph::NodeKind::File
+                ) && n.status.is_none()
+            })
+            .map(|(f, _)| f.clone())
+            .collect()
+    };
+
+    // Read the transient legs (`.trans/plans/*.jsonl` — the per-branch plan
+    // store — plus the five `.trans/<tier>/*.jsonl` feedback mirrors, SPEC
+    // §5: feedback sits in the tier dir of its attached node, both halves of
+    // the relationship in `.trans`) into both the planned-FQN universe
+    // `ingest_tree` uses (planned → pending) and the records the pipeline
+    // chains after code.
+    let transient_files = specs::plan_files(&apg_root)
+        .into_iter()
+        .chain(specs::trans_mirror_files(&apg_root))
+        .collect::<Vec<_>>();
+    let mut transient_records: Vec<schema::Record> = Vec::new();
+    let mut planned: BTreeSet<String> = BTreeSet::new();
+    for f in &transient_files {
+        for r in specs::read_jsonl(f).unwrap_or_else(|e| panic!("{e:#}")) {
+            if let schema::Record::PlannedNode { fqn, .. } = &r {
+                planned.insert(fqn.clone());
+            }
+            transient_records.push(r);
+        }
+    }
+
+    // Ingest the durable `apg/layers/` tree into the new-model records,
+    // validating pairing / code-refs / constraints (R14/R16) against the
+    // scanned graph and the planned-node universe.
+    let layers_records = layers::ingest_tree(&apg_root, &scanned_code, &planned)?;
+
+    if !layers_records.is_empty() || !transient_records.is_empty() {
+        log.ln(&format!(
+            "Layer tree + transient inputs: {} layer-node records, {} transient records",
+            layers_records.len(),
+            transient_records.len(),
+        ));
+    }
+
+    let records = records.chain(layers_records).chain(transient_records);
 
     run_pipeline(
         records,
@@ -1180,7 +1336,7 @@ fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
 /// Consumes the merged scanner JSONL stream, ingests it, and loads `db.lbug` +
 /// `graph.jsonl` (SPEC §6).
-fn run_pipeline(
+pub(crate) fn run_pipeline(
     records: impl IntoIterator<Item = schema::Record>,
     blacklist: &[String],
     path_excludes: &[String],
@@ -1433,27 +1589,135 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The suite install derives from SUITE_TOOLS: the new project/layers
+    /// tools (apg_node/apg_edge/apg_project/apg_plan_verify) embed + install,
+    /// and the retired spec/invariant tools are gone from both the embed list
+    /// and the installed set (a stale file in the target is pruned).
     #[test]
-    fn scaffold_gitignore_adds_apg_trans_once() {
+    fn suite_installs_node_edge_project_tools_and_retires_spec_invariant() {
+        let dir = std::env::temp_dir().join(format!("apg-suite-install-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A stale pre-rewrite tool already present in the target: pruned by
+        // the install (the old `apg spec`/`apg invariant` surfaces are gone).
+        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        std::fs::write(dir.join("tools").join("apg_spec.ts"), "stale").unwrap();
+
+        let (updated, pruned) = install_suite(&dir).unwrap();
+        assert!(updated > 0, "a fresh install writes files");
+        assert_eq!(pruned, 1, "the retired apg_spec.ts is pruned");
+
+        for name in [
+            "apg_node.ts",
+            "apg_edge.ts",
+            "apg_project.ts",
+            "apg_plan_verify.ts",
+        ] {
+            let p = dir.join("tools").join(name);
+            assert!(p.exists(), "{name} must install");
+            let content = std::fs::read_to_string(&p).unwrap();
+            assert!(
+                content.contains("@opencode-ai/plugin"),
+                "{name} must be a real tool file"
+            );
+        }
+        for name in [
+            "apg_spec.ts",
+            "apg_spec_add.ts",
+            "apg_spec_requirements.ts",
+            "apg_invariants.ts",
+            "apg_invariant_add.ts",
+            "apg_plan_apply.ts",
+        ] {
+            assert!(
+                !dir.join("tools").join(name).exists(),
+                "{name} must not install"
+            );
+        }
+        // The embed list itself: new tools present, old tools gone.
+        let names: Vec<&str> = SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
+        for name in [
+            "apg_node.ts",
+            "apg_edge.ts",
+            "apg_project.ts",
+            "apg_plan_verify.ts",
+        ] {
+            assert!(names.contains(&name), "SUITE_TOOLS embeds {name}");
+        }
+        assert!(
+            names.iter().all(|n| !n.starts_with("apg_spec")),
+            "no apg_spec tools remain in SUITE_TOOLS"
+        );
+        assert!(
+            !names.contains(&"apg_invariants.ts") && !names.contains(&"apg_invariant_add.ts"),
+            "no apg_invariant tools remain in SUITE_TOOLS"
+        );
+        assert!(
+            !names.contains(&"apg_plan_apply.ts"),
+            "apg_plan_apply was renamed verify"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scaffold_gitignore_adds_layout_entries_once() {
         let d = std::env::temp_dir().join(format!("apg-gitignore-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join(".gitignore"), "/target\n").unwrap();
-        scaffold_gitignore(&d).unwrap();
+        assert!(scaffold_gitignore(&d).unwrap(), "first scaffold writes");
         let once = std::fs::read_to_string(d.join(".gitignore")).unwrap();
         assert!(once.contains("apg/.trans/"));
-        assert!(once.starts_with("/target\n"));
-        scaffold_gitignore(&d).unwrap();
+        assert!(once.contains("apg/.worktrees/"));
+        assert!(
+            once.starts_with("/target\n"),
+            "other lines untouched: {once}"
+        );
+        assert!(
+            !scaffold_gitignore(&d).unwrap(),
+            "idempotent scaffold writes nothing"
+        );
         let twice = std::fs::read_to_string(d.join(".gitignore")).unwrap();
         assert_eq!(once, twice);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn scaffold_gitignore_accepts_existing_entries_in_either_spelling() {
+        let d = std::env::temp_dir().join(format!("apg-gitignore-spell-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        // No trailing slashes: both entries are present for git purposes.
+        std::fs::write(d.join(".gitignore"), "apg/.trans\napg/.worktrees\n").unwrap();
+        assert!(!scaffold_gitignore(&d).unwrap());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The upgrade guide (task-4) must cover the version field's meaning,
+    /// the mismatch detection, and the upgrade steps — the R10 block text
+    /// points users at it.
+    #[test]
+    fn upgrade_doc_covers_version_field_gate_and_fix_steps() {
+        for needle in [
+            "version",
+            "apg/config.json",
+            "apg scan",
+            "apg project start",
+            "apg init",
+            "major.minor",
+            "apg-upgrade.md",
+        ] {
+            assert!(
+                APG_UPGRADE_DOC.contains(needle),
+                "doc must mention {needle}"
+            );
+        }
     }
 
     /// The version this release gate guards. Bump this literal in lockstep with
     /// the `[package] version` line on every release: the assertions below fail
     /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
     /// advertised release), so a bump commit cannot silently skip it.
-    const RELEASE_VERSION: &str = "0.10.2";
+    const RELEASE_VERSION: &str = "0.10.4";
 
     /// The `version = "..."` declared directly under a Cargo.toml `[package]`
     /// header.

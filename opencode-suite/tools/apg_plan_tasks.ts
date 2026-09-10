@@ -3,7 +3,7 @@ import { runCypher, lit, csvToRows } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "List a plan's tasks with phase, kind (owning role), tier (verification depth, test only), status, the planned Implementation node each task Builds, and its Anchors (files/code touched). The implementation checklist view.",
+    "List a plan's tasks with phase, kind (owning role), tier (verification depth, test only), status, the Task→Implementation verb (creates/modifies/deletes/renames/moves) with its target FQN(s), and the new FQN for renames/moves. The implementation checklist view.",
   args: {
     project: tool.schema.string().describe("Plan project (required)."),
     status: tool.schema
@@ -21,26 +21,13 @@ export default tool({
     const tasks = csvToRows(
       await runCypher(
         context,
-        `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.title, t.kind, t.tier, t.status ORDER BY t.fqn LIMIT ${limit}`,
+        `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.title, t.kind, t.tier, t.status, t.verb, t.target, t.new_fqn ORDER BY t.fqn LIMIT ${limit}`,
       ),
     )
     if (tasks.length <= 1) return `No tasks in plan \`${project}\`.`
 
-    const builds = new Map<string, string>()
-    for (const [t, f] of csvToRows(
-      await runCypher(context, `MATCH (t:Task)-[:Builds]->(p) WHERE t.fqn STARTS WITH ${lit(pfx)} RETURN t.fqn, p.fqn`),
-    ).slice(1)) {
-      builds.set(t, f)
-    }
-    const anchors = new Map<string, string[]>()
-    for (const [t, x] of csvToRows(
-      await runCypher(context, `MATCH (t:Task)-[:Anchors]->(x) WHERE t.fqn STARTS WITH ${lit(pfx)} RETURN t.fqn, x.fqn`),
-    ).slice(1)) {
-      anchors.set(t, [...(anchors.get(t) ?? []), x])
-    }
-
-    const lines = ["task,phase,title,kind,tier,status,builds,anchors"]
-    for (const [phase, fqn, title, kind, tier, status] of tasks.slice(1)) {
+    const lines = ["task,phase,title,kind,tier,status,verb,target,new_fqn"]
+    for (const [phase, fqn, title, kind, tier, status, verb, target, newFqn] of tasks.slice(1)) {
       if (args.status && status !== args.status) continue
       const short = fqn.replace(`${project}/`, "")
       const phaseShort = phase.replace(`${project}/`, "")
@@ -52,8 +39,9 @@ export default tool({
           kind,
           tier,
           status,
-          (builds.get(fqn) ?? "").replace(`${project}/`, ""),
-          (anchors.get(fqn) ?? []).join(";"),
+          verb,
+          target,
+          newFqn,
         ].join(","),
       )
     }

@@ -20,7 +20,10 @@ export function apgBinary(): string {
   return process.env.APG_BINARY || "apg"
 }
 
-/** Walks up from the session dirs looking for the project's `apg/.trans/db.lbug`. */
+/** Walks up from the session dirs looking for the project's `apg/.trans/db.lbug`.
+ *  In a project worktree this resolves to the worktree's OWN `apg/` (and its
+ *  branch DB) — never the main checkout's — so the tools work unchanged with
+ *  cwd inside the worktree. */
 export function findApgRoot(context: ToolContext): string | null {
   const starts = [context.directory, process.cwd(), context.worktree]
   for (const s of starts) {
@@ -85,9 +88,10 @@ export function noteIfEmpty(out: string, note: string): string {
 }
 
 /**
- * Runs an `apg` CLI subcommand (`apg spec …` / `apg plan …` / `apg review …`)
- * from the project root, returning its stdout (or an error string prefixed
- * with the subcommand). Authoring tools are thin wrappers over this.
+ * Runs an `apg` CLI subcommand (`apg node …` / `apg edge …` / `apg plan …` /
+ * `apg review …` / `apg project …`) from the project root, returning its
+ * stdout (or an error string prefixed with the subcommand). Authoring tools
+ * are thin wrappers over this.
  */
 export async function runCli(context: ToolContext, args: string[]): Promise<string> {
   const root = findApgRoot(context)
@@ -102,10 +106,11 @@ export async function runCli(context: ToolContext, args: string[]): Promise<stri
   return result.stdout.toString().trim()
 }
 
-/** Extracts the project name from a project-scoped spec/plan/review FQN
- * (`<project>/spec.R1`, `<project>/plan.phase-01`, `<project>/feedback-1`).
- * Callers must already know the FQN is spec-family (spec/plan/review nodes,
- * never code nodes) — for arbitrary FQNs use a code-node check first. */
+/** Extracts the project name from a project-scoped plan/review FQN
+ * (`<project>/plan.phase-01`, `<project>/feedback-1`). Callers must already
+ * know the FQN is plan-family (plan/phase/task/feedback nodes, never code or
+ * durable layer nodes) — durable layer FQNs (`<layer>.<type>.<name>`) carry
+ * no project prefix. */
 export function projectOf(fqn: string): string | null {
   const m = /^([^/]+)\//.exec(fqn)
   return m ? m[1] : null
@@ -186,9 +191,8 @@ export async function resolvesInCode(context: ToolContext, fqn: string): Promise
 /**
  * True when `fqn` is a `planned` Implementation node (a plan-writer-authored
  * placeholder awaiting realization) or a proposed Solution node — the pending
- * anchors of the finalized model (GraphModel-SPEC.md). The placeholder node
- * is gone (PHASE_02); "pending" anchors are detected by `status: planned` or a
- * tier-3 Solution label.
+ * anchors of the model. Planned nodes are detected by `status: planned`;
+ * pending solution anchors by a tier-3 Solution label.
  */
 export async function isPendingAnchor(context: ToolContext, fqn: string): Promise<boolean> {
   for (const label of ["Struct", "Function", "File", "Module"]) {

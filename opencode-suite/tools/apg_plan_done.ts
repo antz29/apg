@@ -3,7 +3,7 @@ import { runCli } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Mark a plan task done: `apg plan done <project> <task-fqn>`. The implementer's assertion ONLY — no promotion, no code-graph verification (the plan's planned nodes stay declared until the apply act's coherence gate, PlanCompletion-SPEC.md). Use apg_plan_undone to reverse.",
+    "Mark a plan task done: `apg plan done <project> <task-fqn>`. The implementer's assertion ONLY — no promotion, no code-graph verification (the plan's planned nodes stay declared until the verify gate's coherence check). Use apg_plan_undone to reverse.",
   args: {
     project: tool.schema.string().describe("Plan project (required)."),
     task: tool.schema

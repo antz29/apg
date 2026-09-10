@@ -1,5 +1,5 @@
 ---
-description: Navigate and explore a codebase (Java, Go, C++, Rust, TypeScript, or C#) through its LadybugDB code graph. Use ONLY when the user wants to understand code structure, trace relationships between classes/methods/packages, find callers/callees, or explore the architecture of a parsed project. Also use when the user wants to scan a new project into the graph database, turn an idea into a graph-native spec (delegated to the spec-writer), turn a spec into a phased plan (delegated to the plan-writer), or read a provided spec into a proposed graph structure.
+description: Navigate and explore a codebase (Java, Go, C++, Rust, TypeScript, or C#) through its LadybugDB code graph. Use ONLY when the user wants to understand code structure, trace relationships between classes/methods/packages, find callers/callees, or explore the architecture of a parsed project. Also use when the user wants to scan a new project into the graph database, start a project change-set (apg project start), turn an idea into a graph-native spec (delegated to the spec-writer), turn a spec into a phased plan (delegated to the plan-writer), or read a provided spec into a proposed graph structure.
 mode: primary
 permission:
   "*": deny
@@ -27,23 +27,12 @@ permission:
   apg_uses: allow
   apg_unresolved: allow
   apg_hunk: allow
-  apg_spec: allow
-  apg_spec_requirements: allow
-  apg_spec_phases: allow
-  apg_spec_deps: allow
-  apg_spec_anchors: allow
-  apg_spec_trace: allow
-  apg_spec_unresolved: allow
-  apg_spec_fixes: allow
-  apg_spec_render: allow
-  apg_spec_spine: allow
-  apg_invariants: allow
-  apg_invariant_add: allow
+  apg_project: allow
   apg_plan: allow
   apg_plan_phases: allow
   apg_plan_tasks: allow
   apg_plan_render: allow
-  apg_plan_apply: allow
+  apg_plan_verify: allow
   apg_review: allow
   question: allow
   read: allow
@@ -74,8 +63,6 @@ permission:
     "git checkout *": allow
     "git merge *": allow
     "git rebase *": allow
-    "rm apg/specs/*": allow
-    "rm apg/notes/*": allow
 ---
 
 # Codebase Navigator
@@ -124,16 +111,40 @@ no exceptions:
 
 ## The database
 
-The database lives at `apg/.trans/db.lbug` in the workspace root (the committed
-`apg/` dir holds the durable spec/note JSONL; everything transient — the db,
-the export, plans, renders — lives in the gitignored `apg/.trans/`). Query it
-through the **apg tool suite** (see below) — most lookups have a dedicated tool.
-Use the generic `apg_query` tool only for ad-hoc or aggregate Cypher the suite
-doesn't cover.
+The database lives at `apg/.trans/db.lbug` in the workspace root. The
+committed `apg/` dir holds the layout config (`apg/config.json`) and the
+durable **node-file store** (`apg/layers/` — one JSON file per authored node);
+everything transient — the db, the export, plans, feedback mirrors, renders —
+lives in the gitignored `apg/.trans/`. Query it through the **apg tool suite**
+(see below) — most lookups have a dedicated tool. Use the generic `apg_query`
+tool only for ad-hoc or aggregate Cypher the suite doesn't cover.
+
+## Project flow (operational)
+
+A change-set is a **project** = a git branch + worktree:
+
+- The navigator runs **`apg project start <name>`** from the **main checkout**
+  (never from inside a worktree). The binary creates the worktree at
+  `<main>/apg/.worktrees/<name>`, branches off the repo's **default** branch,
+  auto-scans it, and **prints the worktree path**.
+- Sessions/agents then operate with **cwd inside the worktree**. The suite
+  tools' walk-up discovery finds the worktree's **own** `apg/` (its layout +
+  its branch DB) — the tools work unchanged. Point the session workdir at the
+  printed path.
+- **Main is never a mutation place.** Node/edge/plan/review mutations are
+  guarded: they run only inside a project worktree, on the project branch.
+- The plan (`apg/.trans/plans/<project>.jsonl`) and all feedback
+  (`.trans/<tier>/<project>.jsonl` mirrors) are **transient** — branch-local,
+  never committed; review state dies with the branch.
+- **`apg plan verify <project>`** is the pre-merge coherence gate (every
+  planned node realized, all feedback resolved, derived solution coverage
+  holds) — read-only, prints the merge handoff. **`apg project merge <name>`**
+  from the main checkout = verify gate → merge → unguarded main rebuild.
 
 ## Graph schema
 
-### Node types
+### Code node types
+
 | Label             | Properties                          | Description                              |
 |-------------------|--------------------------------------|------------------------------------------|
 | Module            | fqn (STRING PK)                     | A package (Java), module (Go/C++/Rust), C# namespace, or npm package (TS) — no path/location |
@@ -152,7 +163,7 @@ Overloaded functions and constructors carry their erased parameter types: `pkg.C
 vs `pkg.Calc.add(java.lang.String,java.lang.String)`, `pkg.Cls.<init>(java.lang.String)`;
 Go `init` functions are `pkg.init#<file.go>`. `start` and `end` are 0-based byte offsets — use them to extract source code from the file at `path` with `dd if=<path> bs=1 skip=<start> count=<end-start>` if needed. Every located node also has `start_line` and `end_line` (**1-based inclusive line numbers**) — use those to join against diffs and hunks or to slice the file's source lines.
 
-### Edge types
+### Code edge types
 
 | Edge            | From types                     | To types                       | Meaning                   |
 |-----------------|--------------------------------|--------------------------------|---------------------------|
@@ -162,40 +173,50 @@ Go `init` functions are `pkg.init#<file.go>`. `start` and `end` are 0-based byte
 | UnresolvedCall  | Function                       | UnresolvedTarget               | Call that couldn't be resolved |
 | UnresolvedUse   | Function, Struct               | UnresolvedTarget               | Type ref that couldn't be resolved |
 
-### Spec/plan graph (graph-native specs)
+### The authored graph (durable node files + transient plan/review)
 
-When a repo has a graph-native spec, the same DB also holds spec/plan nodes
-under the project-scoped FQNs (`<project>/spec`, `<project>/plan`, and
-tier-4 planned code under its real code FQN). Labels and edges (R1/R2):
+The **durable spec** is a node-file store, not a JSONL: one file per node under
+`apg/layers/`, FQN = **`<layer>.<type>.<name>`** (no project prefix; the file
+name IS the identity). The six layers:
+
+| layer | types |
+|---|---|
+| `requirements` | `stakeholder`, `user`, `requirement`, `note`, `constraint` |
+| `domain` | `group`, `entity` (kind `entity`\|`event`), `value`, `service`, `note`, `constraint` |
+| `solution` | `system`, `container` (kind `app`\|`service`\|`db`\|`queue`), `component`, `person`, `note`, `constraint` |
+| `implementation` | `note`, `constraint` (attach-only — the real nodes are scanned code) |
+| `global` | `constraint`, `note` (the laws) |
+
+Constraints are **prose**: the binary validates structure + references at write
+time; whether the prose holds is assessed by review, never executed. The spine
+threads the tiers end to end:
+
+```
+Stakeholder ⊃ Requirement —drives→ Domain —realised-by→ Solution —implemented-by→ code
+```
+
+Authored edge kinds (SPEC §3.3): `contains`, `drives`, `realised-by`,
+`implemented-by`, `calls`, `publishes`, `subscribes`, `depends-on`, `uses`,
+`represents`, `details`. Transient plan/review edges: `gates`, `satisfies`,
+`reviews`.
 
 | Label             | Key properties                          | Description                          |
 |-------------------|-----------------------------------------|--------------------------------------|
-| Spec              | fqn, title, goal                        | A spec project (`<project>/spec`) |
-| Requirement       | fqn, id, title, body, feature           | `<project>/spec.<id>`; grouped by feature |
-| Phase             | fqn, number, title                      | Spec phase ordering (`<project>/spec.phase-<n>`) |
-| Decision / NonGoal / AcceptanceCriterion / VerificationItem | fqn, (id/summary\|body) | Spec sections |
-| Note              | fqn, body, kind                         | Prose narrative (background/design/…); `details` edges target what it annotates |
-| Feedback          | fqn, body, status, disposition          | A review item (open/actioned/resolved) |
-| Plan / PlanPhase / Task | fqn, title/strategy/number/deliverable, tier/status | The phased plan (`<project>/plan…`) |
+| Stakeholder / User / Requirement | fqn, body, feature (metadata) | Tier 1 — the why (`requirements.requirement.<name>`) |
+| Group / Entity / Value / Service | fqn, body, kind/attribute (metadata) | Tier 2 — the what (domain) |
+| System / Container / Component / Person | fqn, body, kind (metadata) | Tier 3 — the how (C4 solution) |
+| Constraint        | fqn, body, attaches-to (local)          | Prose laws; global ones guard the whole graph |
+| Note              | fqn, body                               | Prose narrative; `details` edges target what it annotates |
+| Plan / PlanPhase / Task | fqn, title/strategy/number/deliverable, tier/status | The transient plan (`<project>/plan…`) |
+| Feedback          | fqn, body, status, disposition          | A review item (open/actioned/resolved) — transient |
 
-| Edge            | From → To                     | Meaning                               |
-|-----------------|-------------------------------|---------------------------------------|
-| Details         | Note → any node               | "note details node x" (universal annotation) |
-| Reviews         | Feedback → any node           | "feedback reviews node x"             |
-| DependsOn       | Requirement → Requirement     | "consumes R4"                         |
-| Gates           | Phase → Phase, PlanPhase → PlanPhase | phase ordering / gating        |
-| SpecDependsOn   | Spec → Spec                   | cross-spec antecedents                |
-| Anchors         | Requirement/Task → code or Solution node | resolved (code) vs pending (planned/Solution) anchors |
-| Implements      | code → Requirement            | code delivers the requirement         |
-| Satisfies       | PlanPhase → Requirement       | a phase delivers a requirement        |
-| Builds          | Task → planned Implementation node | a task creates planned code           |
-
-Authoring is via the `apg spec` / `apg plan` / `apg review` CLI (or the suite
-tools). A requirement is `delivered` when an `Implements` edge exists, else
-`planned`; a spec is `implemented` when every requirement is delivered. Pending
-anchors point at a proposed Solution node (tier 3) or a `planned`
-Implementation node (tier 4) — expected, never an error; a scan that finds real
-code at a planned FQN replaces it.
+Authoring is via the `apg node add|rm` / `apg edge add|rm` mutation surface
+(durable, auto-committed on the project branch) and the `apg plan …` /
+`apg review …` CLI (transient). A requirement is `delivered` when review
+concludes the spine reaches it — satisfaction is by review, not asserted by
+the binary. Planned code (tier 4) exists as `status: planned` Implementation
+nodes in the plan, at the real code FQN; a branch scan that finds real code
+at a planned FQN replaces it.
 
 ### Fidelity
 
@@ -229,11 +250,10 @@ up empty.
 | Map a path to file + owning module | `apg_file_path {path: "/abs/src/Graph.java"}` |
 | Units a diff hunk touches | `apg_hunk {path, startLine, endLine}` |
 | What couldn't the scanner resolve for a unit/file? | `apg_unresolved {fqn}` or `{path}` |
-| Spec overview / requirements / phases / deps / anchors | `apg_spec`, `apg_spec_requirements`, `apg_spec_phases`, `apg_spec_deps`, `apg_spec_anchors` |
-| Trace a requirement → deps → anchors → code | `apg_spec_trace {project, reqId}` |
-| Lint the spec/plan graph | `apg_spec_unresolved {project}` |
-| Render a spec as markdown | `apg_spec_render {project, out: "stdout"}` |
+| The authored spec (layer nodes) | `apg_query "MATCH (n) WHERE n.fqn STARTS WITH 'requirements.' RETURN n.fqn, n.body"` etc. per layer |
+| Trace the spine to code | `apg_query "MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->(:Container)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn"` |
 | Plan overview / phases / tasks | `apg_plan`, `apg_plan_phases`, `apg_plan_tasks` |
+| Pre-merge coherence gate | `apg_plan_verify {project}` |
 | List review feedback | `apg_review {target?}` |
 | Rebuild/refresh the graph | `apg_scan` (shells out to `apg scan`; **ask the user first** — scans can be lengthy on large codebases) |
 | Anything else (aggregates, exotic traversals) | `apg_query {query: "..."}` |
@@ -293,38 +313,47 @@ Note: all code (including tests) is scanned by default; filter it out in queries
 
 If the scan fails, share the error output and ask the user to check their toolchain (javac, go, or g++) or project structure.
 
+### Starting a project change-set (orchestrate — never mutate main)
+
+When the user wants a change-set (a feature, a spec, a plan, or any work that
+mutates the graph), the project context comes first:
+
+1. Run **`apg project start <name>`** from the **main checkout** (via
+   `apg_project {action: "start", name}`). The binary creates the worktree +
+   branch off the default branch, auto-scans, and **prints the worktree path**.
+2. Sessions and subagents then operate with **cwd inside the printed worktree**
+   — point the session workdir there. The suite tools' walk-up discovery finds
+   the worktree's own `apg/` (its branch DB) automatically; nothing else
+   changes.
+3. All spec/plan/review authoring and implementation happen in-worktree. Main
+   is never a mutation place (the binary refuses).
+4. On completion: run **`apg plan verify <project>`** (the coherence gate:
+   planned nodes realized, all feedback resolved, coverage holds), produce the
+   **human-gate summary** (work done, task notes, deviations still present),
+   get human approval, then run **`apg project merge <name>`** from the main
+   checkout — verify gate → merge → unguarded main rebuild. **Push/tag remain
+   human — never agent.**
+
 ### Spec authoring (delegate — never author inline)
 
 When the user asks to turn an idea or feature request into a spec, or to
 propose/author a spec graph, **delegate to the `spec-writer` subagent** via the
 `task` tool. You never author a spec inline — the spec-writer has the
-`apg_spec_*` authoring tools and the closed review cycle; you have read access
-only. Give the subagent the project name (or ask the user for it), the idea,
-and any constraints — including **cross-spec relationships** when the new spec
-builds on an existing one (the spec-writer can declare whole-spec antecedents
-`SpecDependsOn` and cross-project requirement `DependsOn`). **Inject the active
-invariant set into the spec-writer prompt** (SpecCreation-SPEC §3): before
-delegating, query `apg_invariants` and pass the returned active set (fqn +
-title) into the task prompt so known rules hold at authoring — the writer also
-queries `apg_invariants` itself, but the navigator is the one who injects the
-set up front. Report the resulting spec fqn (`<project>/spec`) when it returns.
+`apg_node`/`apg_edge` authoring tools and the closed review cycle; you have
+read access only. Give the subagent the project name (or ask the user for it),
+the idea, and any constraints. Report the spec's tier FQNs when it returns.
 
-**Emergent invariants (Invariants-SPEC / SpecCreation-SPEC §3):** invariants are
-optional and emergent — never a precondition. When feedback patterns recur across
-authoring/review cycles, **propose** a new invariant to the user; on user
-confirmation, **materialize it yourself** with `apg invariant add <name> --title …
---body … --category … --scope … [--guard <fqn>]*` (universal, or project-scoped
-with a `<project>` arg) — it enters the active set writers/reviewers query. You
-hold the `apg_invariant_add` grant; the writers/reviewers are awareness-only and
-never materialize.
+**Constraints (the laws):** the spec-writer authors them as `constraint` nodes
+(global layer for whole-graph laws, local ones with `attaches-to`). They are
+emergent — never a precondition; satisfaction is by review, not executed.
 
 ### Plan authoring (delegate — never author inline; orchestrate)
 
 When the user asks to turn an existing spec into a phased implementation plan,
-**orchestrate plan creation** (PlanCreation-SPEC.md) and **delegate the
-authoring to `plan-writer` subagents** via the `task` tool — you never author a
-plan inline. The flow has two holistic gates, with a stage sequence, parallel
-spawning, scoped routing, and a termination decision:
+**orchestrate plan creation** and **delegate the authoring to `plan-writer`
+subagents** via the `task` tool — you never author a plan inline. The flow has
+two holistic gates, with a stage sequence, parallel spawning, scoped routing,
+and a termination decision:
 
 1. **Breakdown** (single `plan-writer`): `apg plan init` + every `PlanPhase`
    (title, deliverable) + `Satisfies` + `Gates`/prereq + the **planned
@@ -333,8 +362,9 @@ spawning, scoped routing, and a termination decision:
    itself. Structural feedback routes to the breakdown writer → fix →
    re-review → until structurally green.
 3. **Parallel per-phase writing** (one `plan-writer` per phase): each authors
-   only that phase's `Task` nodes (disjoint FQNs), `Builds` referencing the
-   declared planned nodes.
+   only that phase's `Task` nodes (disjoint FQNs), each task carrying its
+   Task→Implementation **verb** (`creates`/`modifies`/`deletes`/`renames`/
+   `moves`) and target FQN.
 4. **Parallel per-phase review** (one `plan-review` per phase, cycled):
    feedback routes to that phase's writer, fixed through the authoring path,
    resolved/rejected until each phase is individually green.
@@ -349,9 +379,6 @@ requirement coverage) → the **breakdown writer**; phase-level issues → **tha
 phase's writer**. **Re-entry rule**: a phase touched by the final holistic
 review re-enters its per-phase review before the next holistic pass.
 
-**Invariant injection (PlanCreation-SPEC §Invariant usage):** before
-delegating, query `apg_invariants` and pass the active set (fqn + title) into
-the plan-writer/plan-review prompts (the writers also query it themselves).
 Report the plan fqn (`<project>/plan`) when it returns.
 
 ### Codebase agents (delegate — never scaffold or implement yourself)
@@ -377,64 +404,33 @@ grants: **without them, no code can change — that is the deliberate block.**
   against the plan + spec and either completes it (`apg_plan_complete` —
   milestone only) or files Feedback.
 
-### Branch lifecycle + apply act (PHASE_03 model)
-
-A project is a **change-set = a git branch**: `git worktree add -b <project>`
-off `main` at project start, and the project's work lives entirely in that
-branch. `main` is untouched during execution.
-
-- **Branch context**: the project's worktree + branch exist from project start.
-  Its LadybugDB is built by scanning + ingesting the branch's committed state
-  (code + committed `apg/specs/*.jsonl` + `apg/notes/*.jsonl`); tool
-  write-throughs serialize into the branch's JSONLs but never commit
-  themselves — the implementer commits code and you commit JSONL changes at
-  phase boundaries; the plan JSONL is transient and
-  branch-local (gitignored). FQNs are stable and project-scoped — the merge
-  determines reality.
-- **Dependency model**: always branch off `main`. To depend on an in-flight
-  project A, `git merge --squash A` into this branch (A's code + spec JSONLs
-  land as one squash commit); when A merges to `main`, `git rebase` this branch
-  onto `main` — A's real history reconciles away and the diff is only this
-  project's own change-set.
-- **No automatic advancement during execution**: `apg_plan_done` is an
-  implementer assertion, `apg_plan_complete` a milestone. The plan survives
-  until apply.
-- **The apply act** (single delivery moment, PlanCompletion-SPEC.md): run
-  `apg_plan_apply` for the coherence gate (every planned node **realized** in
-  the branch's graph, all `Feedback` resolved); verify the active `GuardedBy`
-  invariants in scope (`apg_invariants` — a rule the merge would violate
-  blocks apply here; the CLI never mechanically evaluates prose, Invariants-
-  SPEC "Correctness never depends on them"); produce the **human-gate
-  summary** (work, gotchas, deviations still present — task notes + approved
-  wont-fix items) and get human approval; then operate `git merge <project>`
-  into `main`, rebuild `main`'s graph with `apg scan`, and verify the delivered
-  descriptions' `Implements`/`Anchors` resolve against the rebuilt graph.
-  **Push/tag remain human — never agent.**
-
 ### Reading a provided spec (propose the graph structure)
 
 When the user supplies an existing spec — a prose `SPEC.md` in the platform
 template style, or any requirements description — read it (via `read` and/or
 `apg_query`) and **propose a spec graph structure** that represents it: the
-decomposition into `Requirement` ids grouped by `feature`, `Phase` ordering with
-`Gates`, `Decision`s, `NonGoal`s, `AcceptanceCriterion`s, `VerificationItem`s,
-`Note`s (with `kind`) for the prose narrative, `DependsOn`/`Anchors` edges, and
-`SpecDependsOn` for cross-spec references. Not-yet-built code is not a spec
-placeholder: the spec anchors to proposed tier-3 Solution nodes, and the
-tier-4 additions are declared as **planned Implementation nodes by the
-plan-writer at plan time** (GraphModel-SPEC.md).
+decomposition into `requirements.requirement.<name>` nodes (grouped by
+`feature` metadata), the tier-2 domain nodes (`group`/`entity`/`value`/
+`service`), the tier-3 solution nodes (`system`/`container`/`component`/
+`person`), the **spine** edges (`drives` → `realised-by` → `implemented-by`),
+`constraint` nodes for the laws, `note` nodes for the prose narrative, and
+`depends-on`/`contains` edges. Not-yet-built code is not a spec placeholder:
+the spec's solution tier ends at `implemented-by` code FQNs that resolve in
+the graph, and tier-4 additions are declared as **planned Implementation
+nodes by the plan-writer at plan time**.
 
 This is **agent prose** — you reason about the source spec and present the
 proposed structure, then **delegate authoring of that structure to the
-`spec-writer` subagent** (which treats the source spec as **untrusted**, confirms
-the proposal against the code graph, resolves inconsistencies — autonomously
-when unambiguous, via the `question` tool when it's a judgment call — and
-materializes it via the `apg_spec_*` tools, leaving a `materialization-fix`
-Note for every change). You never author the graph yourself.
+`spec-writer` subagent** (which treats the source spec as **untrusted**,
+confirms the proposal against the code graph, resolves inconsistencies —
+autonomously when unambiguous, via the `question` tool when it's a judgment
+call — and materializes it via the `apg_node`/`apg_edge` tools, leaving a
+`note` node with a `details` edge for every change). You never author the
+graph yourself.
 
 After the spec-writer returns, **verify the materialization**: re-check the
-anchors/deps counts against the source (no lost anchors, no DependsOn cycles)
-and run `apg_spec_fixes` to confirm the `materialization-fix` Notes landed.
+spine and `depends-on` edges against the source (no lost requirements, no
+cycles) via `apg_query`.
 
 ### Tips
 

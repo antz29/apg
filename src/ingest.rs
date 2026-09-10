@@ -344,15 +344,6 @@ pub fn ingest(
                 // so they enter the graph immediately like modules and
                 // unresolved targets. `insert_node` panics on a residual FQN
                 // collision (SPEC R3), never silently overwrites.
-                Record::Spec { fqn, title, goal } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        title: Some(title),
-                        goal: opt(goal),
-                        ..spec_node(NodeKind::Spec)
-                    },
-                ),
                 Record::Requirement {
                     fqn,
                     id,
@@ -370,24 +361,6 @@ pub fn ingest(
                         ..spec_node(NodeKind::Requirement)
                     },
                 ),
-                Record::Phase { fqn, number, title } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        number: Some(number),
-                        title: Some(title),
-                        ..spec_node(NodeKind::Phase)
-                    },
-                ),
-                Record::Decision { fqn, id, summary } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        id: opt(id),
-                        summary: Some(summary),
-                        ..spec_node(NodeKind::Decision)
-                    },
-                ),
                 Record::PlannedNode {
                     fqn,
                     kind,
@@ -399,7 +372,9 @@ pub fn ingest(
                         "file" => NodeKind::File,
                         "struct" => NodeKind::Struct,
                         "function" => NodeKind::Function,
-                        other => panic!("planned_node kind must be module/file/struct/function, got `{other}`"),
+                        other => panic!(
+                            "planned_node kind must be module/file/struct/function, got `{other}`"
+                        ),
                     };
                     insert_node(
                         &mut graph,
@@ -415,33 +390,9 @@ pub fn ingest(
                         graph.contains.insert((parent, fqn));
                     }
                 }
-                Record::NonGoal { fqn, body } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        body: Some(body),
-                        ..spec_node(NodeKind::NonGoal)
-                    },
-                ),
-                Record::AcceptanceCriterion { fqn, body } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        body: Some(body),
-                        ..spec_node(NodeKind::AcceptanceCriterion)
-                    },
-                ),
-                Record::VerificationItem { fqn, body } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        body: Some(body),
-                        ..spec_node(NodeKind::VerificationItem)
-                    },
-                ),
                 // Tier-1/2/3 spec nodes (GraphModel-SPEC.md; PHASE_01): authored
                 // via the spec tools, never scanned. All carry `name` (+ `body`);
-                // Subdomain/Container carry a `kind`, Aggregate a `root`.
+                // Container carries a `kind`.
                 Record::Stakeholder { fqn, name, body } => insert_node(
                     &mut graph,
                     fqn,
@@ -451,30 +402,6 @@ pub fn ingest(
                         ..spec_node(NodeKind::Stakeholder)
                     },
                 ),
-                Record::Domain { fqn, name, body } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        name: Some(name),
-                        body: opt(body),
-                        ..spec_node(NodeKind::Domain)
-                    },
-                ),
-                Record::Subdomain {
-                    fqn,
-                    name,
-                    kind,
-                    body,
-                } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        name: Some(name),
-                        sub_kind: opt(kind),
-                        body: opt(body),
-                        ..spec_node(NodeKind::Subdomain)
-                    },
-                ),
                 Record::Entity { fqn, name, body } => insert_node(
                     &mut graph,
                     fqn,
@@ -482,66 +409,6 @@ pub fn ingest(
                         name: Some(name),
                         body: opt(body),
                         ..spec_node(NodeKind::Entity)
-                    },
-                ),
-                Record::ValueObject { fqn, name, body } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        name: Some(name),
-                        body: opt(body),
-                        ..spec_node(NodeKind::ValueObject)
-                    },
-                ),
-                Record::Aggregate {
-                    fqn,
-                    name,
-                    root,
-                    body,
-                } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        name: Some(name),
-                        root: opt(root),
-                        body: opt(body),
-                        ..spec_node(NodeKind::Aggregate)
-                    },
-                ),
-                Record::DomainEvent { fqn, name, body } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        name: Some(name),
-                        body: opt(body),
-                        ..spec_node(NodeKind::DomainEvent)
-                    },
-                ),
-                Record::DomainProcess { fqn, name, body } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        name: Some(name),
-                        body: opt(body),
-                        ..spec_node(NodeKind::DomainProcess)
-                    },
-                ),
-                Record::DomainRule { fqn, name, body } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        name: Some(name),
-                        body: opt(body),
-                        ..spec_node(NodeKind::DomainRule)
-                    },
-                ),
-                Record::Actor { fqn, name, body } => insert_node(
-                    &mut graph,
-                    fqn,
-                    Node {
-                        name: Some(name),
-                        body: opt(body),
-                        ..spec_node(NodeKind::Actor)
                     },
                 ),
                 Record::System { fqn, name, body } => insert_node(
@@ -577,25 +444,73 @@ pub fn ingest(
                         ..spec_node(NodeKind::Component)
                     },
                 ),
-                // The invariant mechanism (Invariants-SPEC.md; PHASE_02): a
-                // graph-wide rule; `title`/`body`/`category`/`scope`/`status`.
-                Record::Invariant {
+                // New-model tier catalog (apg-projects SPEC §3.1).
+                Record::User { fqn, name, body } => insert_node(
+                    &mut graph,
                     fqn,
-                    title,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::User)
+                    },
+                ),
+                Record::Group {
+                    fqn,
+                    name,
+                    attribute,
+                    root,
                     body,
-                    category,
-                    scope,
-                    status,
                 } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
-                        title: opt(title),
+                        name: Some(name),
+                        attribute: opt(attribute),
+                        root: opt(root),
                         body: opt(body),
-                        category: opt(category),
-                        scope: opt(scope),
-                        status: opt(status),
-                        ..spec_node(NodeKind::Invariant)
+                        ..spec_node(NodeKind::Group)
+                    },
+                ),
+                Record::Value { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Value)
+                    },
+                ),
+                Record::Service { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Service)
+                    },
+                ),
+                Record::Person { fqn, name, body } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        ..spec_node(NodeKind::Person)
+                    },
+                ),
+                Record::Constraint {
+                    fqn,
+                    name,
+                    body,
+                    attaches_to,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        attaches_to: opt(attaches_to),
+                        ..spec_node(NodeKind::Constraint)
                     },
                 ),
                 Record::Note { fqn, body, kind } => insert_node(
@@ -658,6 +573,7 @@ pub fn ingest(
                     kind,
                     tier,
                     status,
+                    ..
                 } => insert_node(
                     &mut graph,
                     fqn,
@@ -887,30 +803,6 @@ pub fn ingest(
                     }
                     graph.gates.insert((a, b));
                 }
-                Record::SpecDepends { from, to } => {
-                    let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
-                        skipped += 1;
-                        continue;
-                    }
-                    graph.spec_depends.insert((a, b));
-                }
-                Record::Anchors { from, to } => {
-                    let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
-                        skipped += 1;
-                        continue;
-                    }
-                    graph.anchors.insert((a, b));
-                }
-                Record::Implements { from, to } => {
-                    let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
-                        skipped += 1;
-                        continue;
-                    }
-                    graph.implements.insert((a, b));
-                }
                 Record::Satisfies { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
@@ -918,14 +810,6 @@ pub fn ingest(
                         continue;
                     }
                     graph.satisfies.insert((a, b));
-                }
-                Record::Builds { from, to } => {
-                    let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
-                        skipped += 1;
-                        continue;
-                    }
-                    graph.builds.insert((a, b));
                 }
                 // Spine edges (GraphModel-SPEC.md; PHASE_01).
                 Record::Drives { from, to } => {
@@ -936,22 +820,6 @@ pub fn ingest(
                     }
                     graph.drives.insert((a, b));
                 }
-                Record::Requires { from, to } => {
-                    let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
-                        skipped += 1;
-                        continue;
-                    }
-                    graph.requires.insert((a, b));
-                }
-                Record::Realises { from, to } => {
-                    let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
-                        skipped += 1;
-                        continue;
-                    }
-                    graph.realises.insert((a, b));
-                }
                 Record::Represents { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
@@ -960,29 +828,38 @@ pub fn ingest(
                     }
                     graph.represents.insert((a, b));
                 }
-                Record::ImplementedBy { from, to } => {
+                // New-model §3.3 spec edges (apg-projects).
+                Record::RealisedBy { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
                         skipped += 1;
                         continue;
                     }
-                    graph.implemented_by.insert((a, b));
+                    graph.realised_by.insert((a, b));
                 }
-                Record::GuardedBy { from, to } => {
+                Record::SpecImplementedBy { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
                         skipped += 1;
                         continue;
                     }
-                    graph.guarded_by.insert((a, b));
+                    graph.spec_implemented_by.insert((a, b));
                 }
-                Record::Checks { from, to } => {
+                Record::Publishes { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
                         skipped += 1;
                         continue;
                     }
-                    graph.checks.insert((a, b));
+                    graph.publishes.insert((a, b));
+                }
+                Record::Subscribes { from, to } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                        skipped += 1;
+                        continue;
+                    }
+                    graph.subscribes.insert((a, b));
                 }
                 _ => unreachable!("non-edge record reached the edge pass"),
             }
@@ -1006,14 +883,18 @@ pub fn ingest(
     graph.calls.retain(|(a, b)| {
         graph.nodes.contains_key(a)
             && graph.nodes.contains_key(b)
-            && graph.nodes[a].kind == NodeKind::Function
-            && graph.nodes[b].kind == NodeKind::Function
+            && ((graph.nodes[a].kind == NodeKind::Function
+                && graph.nodes[b].kind == NodeKind::Function)
+                || (graph.nodes[a].kind == NodeKind::Service
+                    && graph.nodes[b].kind == NodeKind::Service))
     });
     graph.uses.retain(|(a, b)| {
         graph.nodes.contains_key(a)
             && graph.nodes.contains_key(b)
-            && graph.nodes[b].kind == NodeKind::Struct
-            && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct)
+            && ((graph.nodes[b].kind == NodeKind::Struct
+                && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct))
+                || (graph.nodes[a].kind == NodeKind::Person
+                    && graph.nodes[b].kind == NodeKind::System))
     });
     graph.unresolved_calls.retain(|(a, b, _)| {
         graph.nodes.contains_key(a)
@@ -1029,12 +910,7 @@ pub fn ingest(
     });
 
     // Spec/plan edge validation (SPEC R2/R21). Spec records carry no ids, so
-    // dangling here means a JSONL referenced a node that isn't in the graph
-    // (e.g. an anchor to code that was blacklisted, or a cross-file reference
-    // the author will fix in the JSONL). Pending anchors (to a planned
-    // Implementation node or a proposed Solution node) are valid — the target
-    // node exists in the graph; a truly dangling anchor (target in no graph)
-    // is dropped.
+    // dangling here means a JSONL referenced a node that isn't in the graph.
     graph.details = filter_edges(&graph, &graph.details, |g, a, b| {
         g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Note
     });
@@ -1045,107 +921,49 @@ pub fn ingest(
         kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Requirement)
     });
     graph.gates = filter_edges(&graph, &graph.gates, |g, a, b| {
-        (kind_is(g, a, NodeKind::Phase) && kind_is(g, b, NodeKind::Phase))
-            || (kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::PlanPhase))
-    });
-    graph.spec_depends = filter_edges(&graph, &graph.spec_depends, |g, a, b| {
-        kind_is(g, a, NodeKind::Spec) && kind_is(g, b, NodeKind::Spec)
-    });
-    graph.anchors = filter_edges(&graph, &graph.anchors, |g, a, b| {
-        g.nodes.contains_key(a)
-            && matches!(g.nodes[a].kind, NodeKind::Requirement | NodeKind::Task)
-            && g.nodes.contains_key(b)
-    });
-    graph.implements = filter_edges(&graph, &graph.implements, |g, a, b| {
-        g.nodes.contains_key(a)
-            && kind_is(g, b, NodeKind::Requirement)
-            && matches!(
-                g.nodes[a].kind,
-                NodeKind::Function | NodeKind::Struct | NodeKind::File
-            )
+        kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::PlanPhase)
     });
     graph.satisfies = filter_edges(&graph, &graph.satisfies, |g, a, b| {
         kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::Requirement)
     });
-    graph.builds = filter_edges(&graph, &graph.builds, |g, a, b| {
-        kind_is(g, a, NodeKind::Task)
+
+    // Spine edges (GraphModel-SPEC.md; PHASE_01). `drives` runs Requirement →
+    // Group/Entity/Value/Service; `represents` runs User → Entity and Entity →
+    // Person (both endpoints must exist and carry the tier kinds).
+    graph.drives = filter_edges(&graph, &graph.drives, |g, a, b| {
+        kind_is(g, a, NodeKind::Requirement)
+            && matches!(
+                g.nodes[b].kind,
+                NodeKind::Group | NodeKind::Entity | NodeKind::Value | NodeKind::Service
+            )
+    });
+    graph.represents = filter_edges(&graph, &graph.represents, |g, a, b| {
+        (kind_is(g, a, NodeKind::User) && kind_is(g, b, NodeKind::Entity))
+            || (kind_is(g, a, NodeKind::Entity) && kind_is(g, b, NodeKind::Person))
+    });
+
+    // New-model §3.3 spec edges (apg-projects). RealisedBy runs Group/Entity/
+    // Service → System/Container/Component; SpecImplementedBy runs System/
+    // Container/Component → code; Publishes/Subscribes run Service → Entity.
+    graph.realised_by = filter_edges(&graph, &graph.realised_by, |g, a, b| {
+        matches!(
+            g.nodes[a].kind,
+            NodeKind::Group | NodeKind::Entity | NodeKind::Service
+        ) && is_solution_kind(g, b)
+    });
+    graph.spec_implemented_by = filter_edges(&graph, &graph.spec_implemented_by, |g, a, b| {
+        is_solution_kind(g, a)
             && g.nodes.contains_key(b)
             && matches!(
                 g.nodes[b].kind,
                 NodeKind::Module | NodeKind::File | NodeKind::Struct | NodeKind::Function
             )
     });
-
-    // Spine edges (GraphModel-SPEC.md; PHASE_01). Drives/Requires run
-    // Requirement → Domain; Realises/Represents run Domain → Solution
-    // (System/Container/Component); ImplementedBy runs Solution → Implementation
-    // (the code tier). Both endpoints must exist and carry the tier kinds.
-    graph.drives = filter_edges(&graph, &graph.drives, |g, a, b| {
-        kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Domain)
+    graph.publishes = filter_edges(&graph, &graph.publishes, |g, a, b| {
+        kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
     });
-    graph.requires = filter_edges(&graph, &graph.requires, |g, a, b| {
-        kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Domain)
-    });
-    graph.realises = filter_edges(&graph, &graph.realises, |g, a, b| {
-        kind_is(g, a, NodeKind::Domain) && is_solution_kind(g, b)
-    });
-    graph.represents = filter_edges(&graph, &graph.represents, |g, a, b| {
-        kind_is(g, a, NodeKind::Domain) && is_solution_kind(g, b)
-    });
-    graph.implemented_by = filter_edges(&graph, &graph.implemented_by, |g, a, b| {
-        is_solution_kind(g, a)
-            && g.nodes.contains_key(b)
-            && matches!(
-                g.nodes[b].kind,
-                NodeKind::Module
-                    | NodeKind::File
-                    | NodeKind::Struct
-                    | NodeKind::Function
-            )
-    });
-
-    // Invariant edges (Invariants-SPEC.md; PHASE_02). GuardedBy runs any
-    // guardable artifact → Invariant: code, spec/plan, and domain/solution
-    // nodes. Checks runs Feedback → Invariant.
-    graph.guarded_by = filter_edges(&graph, &graph.guarded_by, |g, a, b| {
-        g.nodes.contains_key(a)
-            && g.nodes.contains_key(b)
-            && g.nodes[b].kind == NodeKind::Invariant
-            && matches!(
-                g.nodes[a].kind,
-                NodeKind::Module
-                    | NodeKind::File
-                    | NodeKind::Struct
-                    | NodeKind::Function
-                    | NodeKind::Spec
-                    | NodeKind::Requirement
-                    | NodeKind::Phase
-                    | NodeKind::Decision
-                    | NodeKind::NonGoal
-                    | NodeKind::AcceptanceCriterion
-                    | NodeKind::VerificationItem
-                    | NodeKind::Plan
-                    | NodeKind::PlanPhase
-                    | NodeKind::Task
-                    | NodeKind::Stakeholder
-                    | NodeKind::Domain
-                    | NodeKind::Subdomain
-                    | NodeKind::Entity
-                    | NodeKind::ValueObject
-                    | NodeKind::Aggregate
-                    | NodeKind::DomainEvent
-                    | NodeKind::DomainProcess
-                    | NodeKind::DomainRule
-                    | NodeKind::Actor
-                    | NodeKind::System
-                    | NodeKind::Container
-                    | NodeKind::Component
-            )
-    });
-    graph.checks = filter_edges(&graph, &graph.checks, |g, a, b| {
-        kind_is(g, a, NodeKind::Feedback)
-            && g.nodes.contains_key(b)
-            && g.nodes[b].kind == NodeKind::Invariant
+    graph.subscribes = filter_edges(&graph, &graph.subscribes, |g, a, b| {
+        kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
     });
 
     (
@@ -1159,13 +977,10 @@ pub fn ingest(
 }
 
 /// Whether a `(from, to)` kind pair is a valid `Contains` edge (SPEC §7, R2,
-/// R21): the six code pairs, seven spec pairs, four plan pairs, plus the
-/// tier-1/2/3 hierarchy (GraphModel-SPEC.md; PHASE_01):
-/// `Domain ⊃ Subdomain ⊃ Aggregate ⊃ Entity/ValueObject` — a strict chain, an
-/// Aggregate hangs under a Subdomain, never directly under a Domain —
-/// `Domain ⊃ DomainEvent/DomainProcess/DomainRule/Actor`,
-/// `System ⊃ Container ⊃ Component`, and Spec ⊃ Stakeholder/Domain/System
-/// (the Spec root is the top of the proposed-reality tree).
+/// R21): the six code pairs, the two plan pairs, the §3.1 requirements tree
+/// (Stakeholder/User/Requirement ⊃ Requirement), the plain-named domain
+/// hierarchy (Group ⊃ Group/Entity/Value/Service), and the solution hierarchy
+/// (System ⊃ Container ⊃ Component).
 fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
     matches!(
         (a, b),
@@ -1175,28 +990,17 @@ fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
             | (NodeKind::File, NodeKind::Function)
             | (NodeKind::Struct, NodeKind::Struct)
             | (NodeKind::Struct, NodeKind::Function)
-            | (NodeKind::Spec, NodeKind::Requirement)
-            | (NodeKind::Spec, NodeKind::Phase)
-            | (NodeKind::Phase, NodeKind::Requirement)
-            | (NodeKind::Spec, NodeKind::Decision)
-            | (NodeKind::Spec, NodeKind::NonGoal)
-            | (NodeKind::Spec, NodeKind::AcceptanceCriterion)
-            | (NodeKind::Spec, NodeKind::VerificationItem)
             | (NodeKind::Plan, NodeKind::PlanPhase)
             | (NodeKind::PlanPhase, NodeKind::Task)
-            | (NodeKind::PlanPhase, NodeKind::AcceptanceCriterion)
-            | (NodeKind::PlanPhase, NodeKind::VerificationItem)
-            | (NodeKind::Spec, NodeKind::Stakeholder)
-            | (NodeKind::Spec, NodeKind::Domain)
-            | (NodeKind::Spec, NodeKind::System)
-            | (NodeKind::Domain, NodeKind::Subdomain)
-            | (NodeKind::Domain, NodeKind::DomainEvent)
-            | (NodeKind::Domain, NodeKind::DomainProcess)
-            | (NodeKind::Domain, NodeKind::DomainRule)
-            | (NodeKind::Domain, NodeKind::Actor)
-            | (NodeKind::Subdomain, NodeKind::Aggregate)
-            | (NodeKind::Aggregate, NodeKind::Entity)
-            | (NodeKind::Aggregate, NodeKind::ValueObject)
+            // New-model §3.3 `contains` rows (apg-projects): the requirements
+            // tree and the plain-named domain hierarchy.
+            | (NodeKind::Stakeholder, NodeKind::Requirement)
+            | (NodeKind::User, NodeKind::Requirement)
+            | (NodeKind::Requirement, NodeKind::Requirement)
+            | (NodeKind::Group, NodeKind::Group)
+            | (NodeKind::Group, NodeKind::Entity)
+            | (NodeKind::Group, NodeKind::Value)
+            | (NodeKind::Group, NodeKind::Service)
             | (NodeKind::System, NodeKind::Container)
             | (NodeKind::Container, NodeKind::Component)
     )
@@ -1233,11 +1037,10 @@ fn filter_edges(
 
 /// Binary spool format for edge records: one u8 tag (0 contains, 1 calls,
 /// 2 uses, 3 unresolved_call, 4 unresolved_use, 5 details, 6 reviews,
-/// 7 depends_on, 8 gates, 9 spec_depends, 10 anchors, 11 implements,
-/// 12 satisfies, 13 builds, 14 drives, 15 requires, 16 realises,
-/// 17 represents, 18 implemented_by, 19 guarded_by, 20 checks) followed by
-/// three length-prefixed UTF-8 strings (from, to, target_type; the last empty
-/// for most).
+/// 7 depends_on, 8 gates, 9 satisfies, 10 drives, 11 represents,
+/// 12 realised_by, 13 spec_implemented_by, 14 publishes, 15 subscribes)
+/// followed by three length-prefixed UTF-8 strings (from, to, target_type;
+/// the last empty for most).
 fn write_edge(w: &mut impl Write, r: Record) {
     match r {
         Record::Contains { from, to } => write_edge_fields(w, 0, &from, &to, ""),
@@ -1253,18 +1056,13 @@ fn write_edge(w: &mut impl Write, r: Record) {
         Record::Reviews { from, to } => write_edge_fields(w, 6, &from, &to, ""),
         Record::DependsOn { from, to } => write_edge_fields(w, 7, &from, &to, ""),
         Record::Gates { from, to } => write_edge_fields(w, 8, &from, &to, ""),
-        Record::SpecDepends { from, to } => write_edge_fields(w, 9, &from, &to, ""),
-        Record::Anchors { from, to } => write_edge_fields(w, 10, &from, &to, ""),
-        Record::Implements { from, to } => write_edge_fields(w, 11, &from, &to, ""),
-        Record::Satisfies { from, to } => write_edge_fields(w, 12, &from, &to, ""),
-        Record::Builds { from, to } => write_edge_fields(w, 13, &from, &to, ""),
-        Record::Drives { from, to } => write_edge_fields(w, 14, &from, &to, ""),
-        Record::Requires { from, to } => write_edge_fields(w, 15, &from, &to, ""),
-        Record::Realises { from, to } => write_edge_fields(w, 16, &from, &to, ""),
-        Record::Represents { from, to } => write_edge_fields(w, 17, &from, &to, ""),
-        Record::ImplementedBy { from, to } => write_edge_fields(w, 18, &from, &to, ""),
-        Record::GuardedBy { from, to } => write_edge_fields(w, 19, &from, &to, ""),
-        Record::Checks { from, to } => write_edge_fields(w, 20, &from, &to, ""),
+        Record::Satisfies { from, to } => write_edge_fields(w, 9, &from, &to, ""),
+        Record::Drives { from, to } => write_edge_fields(w, 10, &from, &to, ""),
+        Record::Represents { from, to } => write_edge_fields(w, 11, &from, &to, ""),
+        Record::RealisedBy { from, to } => write_edge_fields(w, 12, &from, &to, ""),
+        Record::SpecImplementedBy { from, to } => write_edge_fields(w, 13, &from, &to, ""),
+        Record::Publishes { from, to } => write_edge_fields(w, 14, &from, &to, ""),
+        Record::Subscribes { from, to } => write_edge_fields(w, 15, &from, &to, ""),
         other => unreachable!("non-edge record reached the edge spool: {other:?}"),
     }
 }
@@ -1304,18 +1102,13 @@ impl<R: BufRead> EdgeReader<R> {
             6 => Record::Reviews { from: a, to: b },
             7 => Record::DependsOn { from: a, to: b },
             8 => Record::Gates { from: a, to: b },
-            9 => Record::SpecDepends { from: a, to: b },
-            10 => Record::Anchors { from: a, to: b },
-            11 => Record::Implements { from: a, to: b },
-            12 => Record::Satisfies { from: a, to: b },
-            13 => Record::Builds { from: a, to: b },
-            14 => Record::Drives { from: a, to: b },
-            15 => Record::Requires { from: a, to: b },
-            16 => Record::Realises { from: a, to: b },
-            17 => Record::Represents { from: a, to: b },
-            18 => Record::ImplementedBy { from: a, to: b },
-            19 => Record::GuardedBy { from: a, to: b },
-            20 => Record::Checks { from: a, to: b },
+            9 => Record::Satisfies { from: a, to: b },
+            10 => Record::Drives { from: a, to: b },
+            11 => Record::Represents { from: a, to: b },
+            12 => Record::RealisedBy { from: a, to: b },
+            13 => Record::SpecImplementedBy { from: a, to: b },
+            14 => Record::Publishes { from: a, to: b },
+            15 => Record::Subscribes { from: a, to: b },
             t => panic!("bad edge spool tag: {t}"),
         })
     }
@@ -1893,80 +1686,22 @@ mod tests {
     }
 
     #[test]
-    fn planned_node_lands_and_dangling_anchor_is_dropped() {
-        // The finalized model (GraphModel-SPEC.md): no placeholder node. A plan-side
-        // planned_node record lands as an Implementation node with
-        // `status: planned`; a dangling requirement anchor (target not in the
-        // graph) is dropped — no placeholder is synthesized. A Task anchor to a
-        // missing file is stale and dropped; the Task's Builds edge to the
-        // planned node survives.
+    fn planned_node_lands_with_parent_contains() {
+        // A plan-side planned_node record lands as an Implementation node with
+        // `status: planned` (no location); a `parent` names the containing node
+        // via a Contains edge (a valid File→Struct pair).
         let records = vec![
-            Record::Spec {
-                fqn: "foo/spec".to_string(),
-                title: "T".to_string(),
-                goal: String::new(),
-            },
-            Record::Requirement {
-                fqn: "foo/spec.R1".to_string(),
-                id: "R1".to_string(),
-                title: "Timer".to_string(),
-                body: String::new(),
-                feature: String::new(),
-            },
-            Record::Contains {
-                from: "foo/spec".to_string(),
-                to: "foo/spec.R1".to_string(),
-            },
-            Record::Anchors {
-                from: "foo/spec.R1".to_string(),
-                to: "github.com/x/missing".to_string(),
-            },
-            Record::Plan {
-                fqn: "foo/plan".to_string(),
-                title: "P".to_string(),
-                strategy: String::new(),
-            },
-            Record::PlanPhase {
-                fqn: "foo/plan.phase-1".to_string(),
-                number: 1,
-                title: "P1".to_string(),
-                deliverable: String::new(),
-                status: String::new(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-1.task-1".to_string(),
-                title: "t".to_string(),
-                kind: String::new(),
-                tier: String::new(),
-                status: String::new(),
-            },
-            Record::Contains {
-                from: "foo/plan".to_string(),
-                to: "foo/plan.phase-1".to_string(),
-            },
-            Record::Contains {
-                from: "foo/plan.phase-1".to_string(),
-                to: "foo/plan.phase-1.task-1".to_string(),
-            },
-            Record::Anchors {
-                from: "foo/plan.phase-1.task-1".to_string(),
-                to: "/missing/file.go".to_string(),
-            },
-            Record::PlannedNode {
-                fqn: "github.com/x/gateway".to_string(),
-                kind: "struct".to_string(),
-                name: "Gateway".to_string(),
-                parent: "/abs/gateway.go".to_string(),
-            },
             Record::PlannedNode {
                 fqn: "/abs/gateway.go".to_string(),
                 kind: "file".to_string(),
                 name: "gateway.go".to_string(),
                 parent: String::new(),
             },
-            Record::Builds {
-                from: "foo/plan.phase-1.task-1".to_string(),
-                to: "github.com/x/gateway".to_string(),
+            Record::PlannedNode {
+                fqn: "github.com/x/gateway".to_string(),
+                kind: "struct".to_string(),
+                name: "Gateway".to_string(),
+                parent: "/abs/gateway.go".to_string(),
             },
         ];
         let (graph, _) = ingest(
@@ -1977,38 +1712,30 @@ mod tests {
                 config: None,
             },
         );
-        // The planned node lands as a Struct with status=planned (no location,
-        // no placeholder kind).
+        // The planned node lands as a Struct with status=planned (no location).
         let fqn = "github.com/x/gateway".to_string();
         assert_eq!(graph.nodes[&fqn].kind, NodeKind::Struct);
         assert_eq!(graph.nodes[&fqn].status.as_deref(), Some("planned"));
         assert!(graph.nodes[&fqn].location.is_none());
-        // The dangling requirement anchor (target in no graph) is dropped — no
-        // placeholder created.
-        assert!(!graph
-            .anchors
-            .contains(&("foo/spec.R1".to_string(), "github.com/x/missing".to_string())));
+        assert_eq!(
+            graph.nodes["/abs/gateway.go"].status.as_deref(),
+            Some("planned")
+        );
         // The planned File→Struct containment lands (a valid Contains pair).
-        assert!(graph
-            .contains
-            .contains(&("/abs/gateway.go".to_string(), fqn.clone())));
-        // The Task anchor to a missing file is dropped; its Builds edge to the
-        // planned node survives.
-        assert!(!graph.anchors.contains(&(
-            "foo/plan.phase-1.task-1".to_string(),
-            "/missing/file.go".to_string()
-        )));
-        assert!(graph
-            .builds
-            .contains(&("foo/plan.phase-1.task-1".to_string(), fqn)));
+        assert!(
+            graph
+                .contains
+                .contains(&("/abs/gateway.go".to_string(), fqn))
+        );
     }
 
     #[test]
     fn scanner_replace_supersedes_planned_node_and_keeps_edges() {
         // The scanner-replace (PlanExecution-SPEC.md): a real declaration at a
         // planned FQN supersedes the planned node (status cleared, location
-        // filled), and FQN-keyed incident edges re-point to the real node
-        // automatically — the why-to-code chain resolves to real code.
+        // filled), and FQN-keyed incident edges (implemented-by) re-point to
+        // the real node automatically — the why-to-code chain resolves to real
+        // code.
         let records = vec![
             Record::Module {
                 fqn: "github.com/x/y".to_string(),
@@ -2016,24 +1743,14 @@ mod tests {
             // The scanner's real declaration of the planned FQN.
             srec("n1", "github.com/x/y", "Gateway", "/abs/gateway.go"),
             file_rec("/abs/gateway.go", "github.com/x/y", 50),
-            Record::Spec {
-                fqn: "foo/spec".to_string(),
-                title: "T".to_string(),
-                goal: String::new(),
-            },
-            Record::Requirement {
-                fqn: "foo/spec.R1".to_string(),
-                id: "R1".to_string(),
-                title: "Timer".to_string(),
+            // A solution component the planned node is implemented-by.
+            Record::Component {
+                fqn: "solution.component.checkout".to_string(),
+                name: "checkout".to_string(),
                 body: String::new(),
-                feature: String::new(),
             },
-            Record::Contains {
-                from: "foo/spec".to_string(),
-                to: "foo/spec.R1".to_string(),
-            },
-            Record::Anchors {
-                from: "foo/spec.R1".to_string(),
+            Record::SpecImplementedBy {
+                from: "solution.component.checkout".to_string(),
                 to: "github.com/x/y.Gateway".to_string(),
             },
             Record::PlannedNode {
@@ -2041,37 +1758,6 @@ mod tests {
                 kind: "struct".to_string(),
                 name: "Gateway".to_string(),
                 parent: String::new(),
-            },
-            Record::Plan {
-                fqn: "foo/plan".to_string(),
-                title: "P".to_string(),
-                strategy: String::new(),
-            },
-            Record::PlanPhase {
-                fqn: "foo/plan.phase-1".to_string(),
-                number: 1,
-                title: "P1".to_string(),
-                deliverable: String::new(),
-                status: String::new(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-1.task-1".to_string(),
-                title: "t".to_string(),
-                kind: String::new(),
-                tier: String::new(),
-                status: String::new(),
-            },
-            Record::Contains {
-                from: "foo/plan".to_string(),
-                to: "foo/plan.phase-1".to_string(),
-            },
-            Record::Contains {
-                from: "foo/plan.phase-1".to_string(),
-                to: "foo/plan.phase-1.task-1".to_string(),
-            },
-            Record::Builds {
-                from: "foo/plan.phase-1.task-1".to_string(),
-                to: "github.com/x/y.Gateway".to_string(),
             },
         ];
         let (graph, _) = ingest(
@@ -2088,65 +1774,18 @@ mod tests {
         assert_eq!(node.kind, NodeKind::Struct);
         assert!(node.status.is_none(), "scanner-replace clears status");
         assert!(node.location.is_some(), "real node carries its location");
-        // Edges re-point to the realized node: the requirement anchor and the
-        // Builds edge both resolve.
-        assert!(graph
-            .anchors
-            .contains(&("foo/spec.R1".to_string(), fqn.clone())));
-        assert!(graph
-            .builds
-            .contains(&("foo/plan.phase-1.task-1".to_string(), fqn.clone())));
-        // The real File→Struct containment landed from the scanner.
-        assert!(graph.contains.contains(&("/abs/gateway.go".to_string(), fqn)));
-    }
-
-    #[test]
-    fn spec_anchor_resolves_to_code_node() {
-        // An anchor to a real code node resolves directly; no planned
-        // placeholder exists for it.
-        let records = vec![
-            Record::Module {
-                fqn: "github.com/x/y".to_string(),
-            },
-            srec("n1", "github.com/x/y", "Store", "/abs/store.go"),
-            file_rec("/abs/store.go", "github.com/x/y", 10),
-            Record::Spec {
-                fqn: "foo/spec".to_string(),
-                title: "T".to_string(),
-                goal: String::new(),
-            },
-            Record::Requirement {
-                fqn: "foo/spec.R1".to_string(),
-                id: "R1".to_string(),
-                title: "Timer".to_string(),
-                body: String::new(),
-                feature: String::new(),
-            },
-            Record::Contains {
-                from: "foo/spec".to_string(),
-                to: "foo/spec.R1".to_string(),
-            },
-            Record::Anchors {
-                from: "foo/spec.R1".to_string(),
-                to: "github.com/x/y.Store".to_string(),
-            },
-        ];
-        let (graph, _) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
+        // The implemented-by edge re-points to the realized node (FQN-keyed).
+        assert!(
+            graph
+                .spec_implemented_by
+                .contains(&("solution.component.checkout".to_string(), fqn.clone()))
         );
-        assert!(graph.anchors.contains(&(
-            "foo/spec.R1".to_string(),
-            "github.com/x/y.Store".to_string()
-        )));
-        assert!(graph.contains.contains(&(
-            "foo/spec".to_string(),
-            "foo/spec.R1".to_string()
-        )));
+        // The real File→Struct containment landed from the scanner.
+        assert!(
+            graph
+                .contains
+                .contains(&("/abs/gateway.go".to_string(), fqn))
+        );
     }
 
     #[test]

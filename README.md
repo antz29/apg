@@ -147,8 +147,9 @@ apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 
 Sets up the project:
 
-- creates `apg/` with a default `config.json` (classification rules) and a
-  gitignored `apg/.trans/`, and scaffolds the repo `.gitignore` for `apg/.trans/`
+- creates `apg/` with a default `config.json` (classification rules + a
+  binary-managed `version` field) and the gitignored `apg/.trans/`,
+  scaffolds the repo `.gitignore` for `apg/.trans/` and `apg/.worktrees/`
   (added if missing, other lines untouched),
 - installs the **apg tool suite** into `~/.opencode/tools/` (query tools +
   `apg_scan` + the spec/plan/review suite, shared plumbing in `~/.opencode/lib/`)
@@ -187,8 +188,8 @@ apg scan . example.com/pkg other.prefix  # blacklist FQN prefixes (after the dir
 ```
 
 Outputs (all under the gitignored `apg/.trans/` directory; the committed
-`apg/` dir holds only `config.json` plus the durable `apg/specs/*.jsonl` and
-`apg/notes/*.jsonl` when the repo has a graph-native spec):
+`apg/` dir holds `config.json` plus the durable `apg/layers/` node files —
+one JSON file per authored spec node, FQN `<layer>.<type>.<name>`):
 
 | File | Contents |
 |---|---|
@@ -235,14 +236,14 @@ agent to explore the graph directly — it will pick the right tool:
 | `apg_hunk` | units overlapping a line range (diff/review join) |
 | `apg_query` | ad-hoc read-only Cypher (power users) |
 | `apg_scan` | rebuild `apg/.trans/db.lbug` |
-| `apg_spec` / `apg_spec_*` | author + inspect the graph-native spec (requirements, tiers, spine) |
-| `apg_plan` / `apg_plan_*` | plan phases/tasks/planned nodes, task notes, apply gate |
-| `apg_review` / `apg_review_*` | writer↔reviewer feedback cycle |
-| `apg_invariants` / `apg_invariant_add` | list / materialize graph-wide invariants |
+| `apg_project` | project lifecycle — `start` (main → worktree + branch + branch DB), `verify`, `merge` |
+| `apg_node` / `apg_edge` | durable spec mutations — node files under `apg/layers/`, paired edges |
+| `apg_plan` / `apg_plan_*` | plan phases/tasks/planned nodes, task notes, verify gate |
+| `apg_review` / `apg_review_*` | writer↔reviewer feedback cycle (transient mirrors) |
 
-The code-graph tools above return location data; the `apg_spec_*`/`apg_plan_*`/
-`apg_review_*`/`apg_invariant*` tools operate on the graph-native spec and plan
-(see [Graph-native specs, plans, and invariants](#graph-native-specs-plans-and-invariants)).
+The code-graph tools above return location data; the `apg_project`/`apg_node`/
+`apg_edge`/`apg_plan_*`/`apg_review_*` tools operate on the project's spec/plan
+graph (see [Graph-native specs and plans](#graph-native-specs-and-plans)).
 
 Every row carries `fqn`, `path`, and `start_line`/`end_line` where relevant, so
 the agent can jump straight to source. All suite tools accept an optional
@@ -287,72 +288,68 @@ is its own namespace, so same-named symbols in different files never collide).
 directory. (Java and TypeScript scanners report `start`/`end` as UTF-16 code-unit
 offsets, matching their compilers' native positions.)
 
-## Graph-native specs, plans, and invariants
+## Graph-native specs and plans (the project model)
 
-Beyond the scanned code graph, a repo can carry a **graph-native spec** in the
-same `apg/.trans/db.lbug`, authored with `apg spec`/`apg plan`/`apg review` and
-serialized durably to the committed `apg/specs/<project>.jsonl` (plans to the
-transient, branch-local `apg/.trans/plans/<project>.jsonl`).
+A change-set is a **project**: a git branch + its worktree. `apg project start
+<name>` — run from the main checkout — branches off the default branch, creates
+the worktree at `apg/.worktrees/<name>`, auto-scans it, and **prints the
+worktree path**; sessions then operate with cwd inside the worktree (walk-up
+discovery finds the worktree's own `apg/` and its branch DB). Main is never a
+mutation place — `apg node`/`apg edge`/`apg plan`/`apg review` refuse outside a
+project context.
 
-### The 4-tier taxonomy (GraphModel-SPEC.md)
+The durable spec is a **node-file store** under `apg/layers/` — one JSON file
+per node, authored with `apg node add|rm <layer> <type> <name>` and
+`apg edge add|rm <kind> <from> <to>` (never by hand-editing files: the binary
+validates schema, pairings, and references, and auto-commits each mutation).
+The FQN is **`<layer>.<type>.<name>`** — the file name IS the identity, no
+project prefix. Six layers:
 
-| Tier | Node kinds | What |
-|---|---|---|
-| 1 — Requirements | `Requirement`, `Stakeholder` | the why |
-| 2 — Domain (DDD) | `Domain`, `Subdomain`, `Entity`, `ValueObject`, `Aggregate`, `DomainEvent`, `DomainProcess`, `DomainRule`, `Actor` | the what |
-| 3 — Solution (C4) | `System`, `Container`, `Component` | the how |
-| 4 — Implementation | scanner code nodes (`Module`/`File`/`Struct`/`Function`) | what is |
+| layer | node types |
+|---|---|
+| `requirements` | `stakeholder`, `user`, `requirement`, `note`, `constraint` |
+| `domain` | `group` (core/supporting/generic), `entity` (`entity`/`event`), `value`, `service`, `note`, `constraint` |
+| `solution` | `system`, `container` (app/service/db/queue), `component`, `person`, `note`, `constraint` |
+| `implementation` | `note`, `constraint` (attach-only — the real nodes are scanned code) |
+| `global` | `constraint`, `note` (the laws) |
+| `plans` (transient) | `PlanPhase`, `Task`, planned Implementation nodes — `.trans/plans/` only |
 
-FQNs are **project-scoped and stable**: `<project>/spec`, `<project>/spec.R1`,
-`<project>/plan.phase-01`, `<project>/<tier>.<name>`, and a tier-4 code FQN
-(`<project>/<module>.<name>`) for planned code. A project is a **git branch**,
-and a node's present-ness is branch membership (nodes only on a branch =
-proposed; nodes on `main` = present).
+Node files carry both halves of every edge (the out half in the source's file,
+the matching in half in the target's). Constraints are **prose** — the binary
+validates structure and references at write time; whether the prose holds is
+assessed by review, never executed. The **spine** threads the tiers end to end:
+`Stakeholder ⊃ Requirement —drives→ Domain —realised-by→ Solution
+—implemented-by→ code`; any requirement traces down to the code that implements
+it, any code traces up to the why.
 
 ### Planned Implementation nodes (the pre-build bridge)
 
-Code that a plan will build exists in the graph *before* it is written: the
+Code a plan will build exists in the graph *before* it is written: the
 plan-writer declares it as a **planned Implementation node** — a
 `Module`/`File`/`Struct`/`Function` record at its **real code FQN** carrying
-`status: planned` (`apg plan add <project> planned <kind> <fqn>`). A planned
-node has no location (no `path`/`start`/`end`), anchors requirements
-(`Anchors(req→planned)`), and is the target of `Builds(Task→planned)`. When the
+`status: planned` (`apg plan add <project> planned <kind> <fqn>`). When the
 code actually exists, the next **branch scan replaces the planned node**: the
-scanner finds the FQN, clears `status`, fills in the location, and re-points its
-incident edges. On `main` there are no planned nodes — every Implementation
+scanner finds the FQN, clears `status`, fills in the location, and re-points
+its incident edges. On `main` there are no planned nodes — every Implementation
 node is real code, and the spine resolves straight through to it.
 
-### The spine (end-to-end traceability)
+### Plans & feedback (transient)
 
-`Requirement --Drives/Requires--> Domain --Realises/Represents--> Solution
---ImplementedBy--> code` — authored with `apg spec add` (the tier nodes) and
-`apg spec spine <project> <from> --drives/--requires/--realises/--represents/
---implemented-by <to>`. Any requirement traces down to the code that implements
-it; any code traces up to the why.
+The plan serializes to the gitignored, branch-local
+`apg/.trans/plans/<project>.jsonl`; feedback lives in the `.trans/<tier>/`
+mirrors (in the tier dir of the attached node). Both die with the branch —
+nothing is committed. Tasks carry a **verb + target**: `creates` (a planned
+node), `modifies`/`deletes` (existing code), `renames`/`moves` (`--fqn` source
+→ `--to` destination).
 
-### Invariants
-
-`apg invariant add` materializes a graph-wide invariant (universal
-`invariant/<name>`, or project-scoped `<project>/invariant/<name>`), optionally
-guarded onto artifacts (`GuardedBy`). `apg invariant rm` retires one via status
-flip to `retired` (node + edges preserved for traceability). A `domain-rule`
-also materializes a project-scoped `Invariant` (`category=product`). Reviewers
-cite invariants with `apg review add --checks <invariant-fqn>` (`Checks`).
-
-### The plan lifecycle (execution + apply)
-
-- `apg plan add <project> planned <kind> <fqn>` authors a planned
-  Implementation node (the plan-writer's job); `apg plan add task --builds
-  <fqn>` links each task to the planned node it creates.
 - `apg plan done` is an **implementer assertion** — no graph verification.
-- `apg plan complete` is a **milestone only** — the plan survives until apply.
-- `apg plan note` attaches task notes (execution context, surfaced at the human
-  gate).
-- `apg plan apply` runs the **apply-act coherence gate** (every planned node is
-  **realized** — a branch scan found real code at its FQN; all feedback
-  resolved) and hands off the merge + rebuild: the navigator operates
-  `git merge <project>` into `main` and rebuilds `main`'s graph. Push/tag
-  remain human.
+- `apg plan complete` is a **milestone only** — the plan survives until verify.
+- `apg plan note` attaches task notes (execution context, surfaced at the human gate).
+- `apg plan verify <project>` runs the **pre-merge coherence gate** (every
+  planned node **realized** — a branch scan found real code at its FQN; all
+  feedback resolved; derived solution coverage holds) and prints the merge
+  handoff. `apg project merge <name>` (from the main checkout) then runs
+  verify → merge → unguarded main rebuild. Push/tag remain human.
 
 ## Configuration
 
@@ -417,15 +414,18 @@ Run the test suite with `cargo test`.
 ## Project layout
 
 ```
-src/main.rs          apg CLI (init / scan / query / spec / plan / review / invariant) + pipeline driver
+src/main.rs          apg CLI (init / scan / query / node / edge / plan / project / review) + pipeline driver
 src/ingest.rs        two-pass ingestion, canonical FQN rendering
 src/load.rs          PARQUET load files → db.lbug, graph.jsonl export
 src/classify.rs      code_type classification
-src/spec_cmd.rs      graph-native spec authoring (apg spec)
-src/plan_cmd.rs      phased execution plan (apg plan)
+src/layers.rs        node-file model: layers, validation, ingestion of apg/layers/
+src/node_cmd.rs      durable node-file mutations (apg node / apg edge)
+src/plan_cmd.rs      phased execution plan (apg plan, incl. the verify gate)
+src/project_cmd.rs   project contexts (apg project start / merge, git2)
 src/review_cmd.rs    writer↔reviewer feedback cycle (apg review)
-src/invariant_cmd.rs graph-wide invariants (apg invariant / apg invariants)
-src/specs.rs         spec/plan JSONL serialization + re-ingest on scan
+src/specs.rs         plan/feedback JSONL serialization + re-ingest on scan
+src/git.rs           git2 identity + worktree operations
+src/version_gate.rs  apg/config.json layout version gate
 src/golib/           Go scanner
 src/javalib/         Java scanner (javac)
 src/cpplib/          C++ scanner (tree-sitter)

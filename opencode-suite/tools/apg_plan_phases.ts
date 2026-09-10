@@ -17,8 +17,11 @@ export default tool({
     )
     if (phases.length <= 1) return `No plan for \`${project}\`.`
 
+    // Requirements live in the layers store (global FQNs
+    // `requirements.requirement.<name>`, no project prefix); the plan's
+    // Satisfies edges point at them by FQN.
     const reqs = csvToRows(
-      await runCypher(context, `MATCH (r:Requirement) WHERE r.fqn STARTS WITH ${lit(`${project}/spec.`)} RETURN r.fqn, r.id`),
+      await runCypher(context, `MATCH (r:Requirement) RETURN r.fqn, r.name`),
     )
     // Satisfying phase per requirement — count, not membership: the spec
     // requires every requirement Satisfied by EXACTLY one phase, so >1 is a
@@ -41,10 +44,10 @@ export default tool({
       if (status === "done") doneSet.add(phase)
     }
     const feedbackUnderReview = new Set<string>()
-    for (const [, , , target] of csvToRows(
+    for (const [, status, , target] of csvToRows(
       await runCypher(context, "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn"),
     ).slice(1)) {
-      if (target.startsWith(pfx)) feedbackUnderReview.add(target)
+      if (status !== "resolved" && target.startsWith(pfx)) feedbackUnderReview.add(target)
     }
 
     const lines: string[] = []
@@ -57,9 +60,10 @@ export default tool({
     const cycle = detectCycle(gates)
     if (cycle) lines.push(`!! Gates cycle detected: ${cycle.join(" -> ")}`)
 
+    const reqName = (r: string[]) => r[1] || r[0].replace("requirements.requirement.", "")
     const unsatisfied = reqs.slice(1).filter((r) => !satBy.has(r[0]))
     if (unsatisfied.length) {
-      lines.push(`!! unsatisfied requirements (no PlanPhase Satisfies them): ${unsatisfied.map((r) => r[1]).join(", ")}`)
+      lines.push(`!! unsatisfied requirements (no PlanPhase Satisfies them): ${unsatisfied.map(reqName).join(", ")}`)
     }
     const overSatisfied = reqs
       .slice(1)
@@ -68,7 +72,7 @@ export default tool({
     if (overSatisfied.length) {
       for (const [r, ps] of overSatisfied) {
         const phases = ps.map((p) => p.replace(pfx, "")).join(", ")
-        lines.push(`!! ${r[1]} Satisfied by more than one phase (${phases}) — every requirement must be Satisfied by exactly one phase`)
+        lines.push(`!! ${reqName(r)} Satisfied by more than one phase (${phases}) — every requirement must be Satisfied by exactly one phase`)
       }
     }
     return lines.join("\n")

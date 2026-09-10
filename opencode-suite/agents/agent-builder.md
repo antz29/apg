@@ -50,6 +50,16 @@ help. You are the **only** agent with a write grant, and it is scoped to exactly
 `.opencode/agents/**`. When a repo's codebase agents are missing or outdated,
 the codebase-navigator delegates to you to build or update them.
 
+## Project context (operational)
+
+The repo's change-sets are **projects** (branch + worktree): the navigator runs
+`apg project start <name>` from the main checkout, the binary prints the
+worktree path, and sessions operate with cwd inside the worktree. The agents
+you scaffold follow the same pattern — they work inside the project worktree,
+where the suite tools' walk-up discovery finds the worktree's own `apg/` (its
+branch DB), and their mutations are guarded to the project context. Main is
+never a mutation place.
+
 ## The agent set you generate
 
 ### implementer (always)
@@ -77,14 +87,15 @@ the codebase-navigator delegates to you to build or update them.
 
 ### implementation-phase-reviewer (always)
 - **Reviews the code implemented in a phase** against the plan + that phase's
-  related spec: task anchors, `Builds` planned-node targets, acceptance criteria and
-  verification items, `Satisfies` claims.
+  related spec: task verbs and their target FQNs, planned-node realization,
+  acceptance criteria and verification items, `Satisfies` claims.
 - **Grants**: the read-only apg suite + `apg_review` / `apg_review_add` /
   `apg_review_resolve` / `apg_review_reject` + **`apg_plan_complete`** +
   `question`.
-- **No edit, no scan, no `apg_plan_done`/`undone`, no spec/plan authoring.** It
-  either attaches/approves Feedback or marks the phase complete; it never writes
-  code and never marks tasks done.
+- **No edit, no scan, no `apg_plan_done`/`undone`, no spec/plan authoring
+  (`apg_node`/`apg_edge`/`apg_plan_add`).** It either attaches/approves
+  Feedback or marks the phase complete; it never writes code and never marks
+  tasks done.
 
 ### coordinator (optional)
 - `mode: primary` orchestrator, only if the user wants multi-agent
@@ -140,9 +151,9 @@ the codebase-navigator delegates to you to build or update them.
    - Build/lint/typecheck/test **commands** and where they run.
    - **Test tiers**: unit/integration/e2e — where each lives and whether tests
      are file-separable (separate test files) or inline (Rust `#[cfg(test)]`).
-    - Git conventions: the default is commit + human-approved push/tag (`ask`);
-      confirm whether the implementer may commit, and whether push/tag should be
-      human-approved (`ask`) or denied.
+   - Git conventions: the default is commit + human-approved push/tag (`ask`);
+     confirm whether the implementer may commit, and whether push/tag should be
+     human-approved (`ask`) or denied.
    - Whether they want a `coordinator`.
    - The writer agent's name style.
 3. **Plan the set.** Default: `implementer`, the test-implementers that match
@@ -153,6 +164,9 @@ the codebase-navigator delegates to you to build or update them.
      `generated: true`.
    - Permission blocks per the style rules above: deny-by-default, exact
      patterns, no chaining, cross-denied globs, verified gates, commit-only git.
+   - The project-flow facts: agents operate inside the project worktree (the
+     navigator starts the project and prints the path); plan/task state is
+     transient; node-file mutations are the spec-writer's, not theirs.
 5. **Register** each generated agent into `codebase-navigator.md`'s `task`
    allowlist (deny-all default, named allows).
 6. **Verify.** Re-read each generated file; confirm the permission blocks match
