@@ -16,7 +16,7 @@ class ApgTs < Formula
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.11.2"
     rebuild 12
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "61a10d8fde476ef2bc31d021ed0d8b1b72b297356b72a2576d1fdb1d6176a6f1"
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "b76bd7bf2d7dd7252b9982b435b190a8d0891f200f56884f0febcfee925c8edf"
   end
 
   depends_on "node" # npm ci to fetch typescript at build; node at scan time
