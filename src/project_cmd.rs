@@ -608,7 +608,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let mut opts = git2::RepositoryInitOptions::new();
         opts.initial_head("refs/heads/main");
-        git2::Repository::init_opts(&root, &mut opts).unwrap();
+        git2::Repository::init_opts(&root, &opts).unwrap();
         std::fs::create_dir_all(root.join("apg").join(specs::TRANS)).unwrap();
         let err = project_start_at(&root.join("apg"), "foo", Some(&start_scan)).unwrap_err();
         let msg = format!("{err:#}");

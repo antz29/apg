@@ -49,7 +49,7 @@ impl Repo {
         std::fs::create_dir_all(&root).unwrap();
         let mut opts = git2::RepositoryInitOptions::new();
         opts.initial_head("refs/heads/main");
-        let repo = git2::Repository::init_opts(&root, &mut opts).unwrap();
+        let repo = git2::Repository::init_opts(&root, &opts).unwrap();
         git_config(&repo);
         std::fs::write(root.join(".gitignore"), "apg/.trans/\napg/.worktrees/\n").unwrap();
         std::fs::create_dir_all(root.join(specs::LAYOUT).join(specs::TRANS)).unwrap();
@@ -330,7 +330,7 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
     // (mirrors cmd_scan).
     let scanned_code: std::collections::BTreeSet<String> = {
         let (pre, _) = crate::ingest::ingest(
-            scanner_records.clone().into_iter(),
+            scanner_records.clone(),
             &crate::ingest::IngestOptions {
                 blacklist: &[],
                 language: "go",
@@ -383,11 +383,11 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
 
     let old = std::env::current_dir()?;
     std::env::set_current_dir(&trans_dir)?;
-    let result = (|| -> anyhow::Result<()> {
+    let result = {
         let mut log = crate::Log::new();
         crate::run_pipeline(records, &[], &[], "go", None, &mut log);
         Ok(())
-    })();
+    };
     std::env::set_current_dir(old)?;
     result
 }

@@ -3823,7 +3823,7 @@ mod tests {
 
         // The rewrite: A's out-edge to B is removed and B's file is gone.
         let a_deleted = node("requirements", "requirement", "a");
-        write_through(&root, &[a_deleted.clone()]).unwrap();
+        write_through(&root, std::slice::from_ref(&a_deleted)).unwrap();
 
         let a_read = read_node_file(&root, "requirements", "requirement", "a");
         assert_eq!(a_read, a_deleted);
@@ -4042,7 +4042,7 @@ mod tests {
         write_node(&root, &a).unwrap();
 
         let b = node("requirements", "requirement", "b");
-        assert!(validate_change(&root, &[b.clone()], &[]).is_ok());
+        assert!(validate_change(&root, std::slice::from_ref(&b), &[]).is_ok());
         let bad = node("requirements", "requirement", "Bad Name");
         assert!(validate_change(&root, &[bad], &[]).is_err());
         let _ = std::fs::remove_dir_all(&root);
@@ -4227,7 +4227,7 @@ mod tests {
         let mut a2 = a.clone();
         a2.out.clear();
         let b_path = node_file_path(&root, Layer::Requirements, "requirement", "b");
-        write_through_with_deletes(&root, &[a2], &[b_path.clone()]).unwrap();
+        write_through_with_deletes(&root, &[a2], std::slice::from_ref(&b_path)).unwrap();
 
         assert!(!b_path.exists(), "the deleted node file must be gone");
         let a_read = read_node_file(&root, "requirements", "requirement", "a");

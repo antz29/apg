@@ -264,7 +264,7 @@ mod tests {
         let got: Vec<String> = mirrors
             .iter()
             .map(|p| {
-                p.strip_prefix(&dir.join(TRANS))
+                p.strip_prefix(dir.join(TRANS))
                     .unwrap()
                     .display()
                     .to_string()
