@@ -359,8 +359,10 @@ pub fn parse_fqn(fqn: &str) -> anyhow::Result<(Layer, String, String)> {
 /// validated and any co-proposed nodes), so a dangling endpoint is refused
 /// here too. Pure structure check — the edge-kind matrix is
 /// [`validate_edges`]'s job (phase-3 task-4).
-// (Unused until write_project, phase-3 task-16, calls it.)
-#[allow(dead_code)]
+///
+/// Run over the assembled post-mutation edge set by
+/// [`validate_assembled_rules`]: the write path (`validate_change`, behind
+/// [`write_project`]) and the scan path ([`ingest_tree`]) both enforce it.
 pub fn validate_trees_acyclic(
     edges: &[(&str, &str)],
     existing: &BTreeSet<(Layer, String, String)>,
@@ -659,6 +661,83 @@ fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// The property half of the SPEC §3.3 `publishes`/`subscribes` matrix rows:
+/// those edges target an `Entity` with `kind: event` (a published/subscribed
+/// event), not a plain entity. [`validate_edge`] is type-only — it never sees
+/// a node's properties — so the caller supplies the assembled post-mutation
+/// node set as FQN → node file and this function resolves each target against
+/// it. A target absent from `assembled` is left to the dangling-reference
+/// checks ([`validate_edges`] parses matrix endpoints; [`check_edge_pairing`]
+/// resolves authored endpoints): this function only refuses a present target
+/// that is not an event.
+fn validate_event_targets(
+    edges: &[(&str, &str, &str)],
+    assembled: &BTreeMap<String, &NodeFile>,
+) -> anyhow::Result<()> {
+    for &(kind, _source, target) in edges {
+        if !matches!(kind, "publishes" | "subscribes") {
+            continue;
+        }
+        let Some(node) = assembled.get(target) else {
+            continue;
+        };
+        if node.node_type != "entity"
+            || node.properties.get(PROP_KIND).map(String::as_str) != Some("event")
+        {
+            anyhow::bail!(
+                "`{kind}` target `{target}` must be an Entity with kind `event` — the §3.3 matrix qualifies publishes/subscribes targets as Entity (kind: event)"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The assembled-set property rules of SPEC §3.3 — the rules the edge-kind
+/// matrix cannot express (it never sees properties, and a cycle only exists
+/// across edges):
+///
+/// - contains/depends-on trees are acyclic ([`validate_trees_acyclic`],
+///   including its dangling-endpoint refusal);
+/// - `publishes`/`subscribes` targets are `Entity (kind: event)`
+///   ([`validate_event_targets`]).
+///
+/// `assembled` maps every post-mutation FQN to its node file (a write
+/// overrides the current file); `universe` is the same set's (layer, type,
+/// name) identity universe, which [`validate_trees_acyclic`] resolves
+/// endpoints against. Pure — no I/O.
+///
+/// Both the write path (`validate_change`, behind [`write_project`]) and the
+/// scan path ([`ingest_tree`]) run this over their assembled post-mutation
+/// node set, so neither can write or ingest a violation.
+fn validate_assembled_rules(
+    assembled: &BTreeMap<String, &NodeFile>,
+    universe: &BTreeSet<(Layer, String, String)>,
+) -> anyhow::Result<()> {
+    let mut tree_edges: Vec<(String, String)> = Vec::new();
+    let mut event_edges: Vec<(String, String, String)> = Vec::new();
+    for (from, n) in assembled {
+        for oe in &n.out {
+            match oe.kind.as_str() {
+                "contains" | "depends-on" => tree_edges.push((from.clone(), oe.target.clone())),
+                "publishes" | "subscribes" => {
+                    event_edges.push((oe.kind.clone(), from.clone(), oe.target.clone()))
+                }
+                _ => {}
+            }
+        }
+    }
+    let tree_refs: Vec<(&str, &str)> = tree_edges
+        .iter()
+        .map(|(s, t)| (s.as_str(), t.as_str()))
+        .collect();
+    validate_trees_acyclic(&tree_refs, universe)?;
+    let event_refs: Vec<(&str, &str, &str)> = event_edges
+        .iter()
+        .map(|(k, s, t)| (k.as_str(), s.as_str(), t.as_str()))
+        .collect();
+    validate_event_targets(&event_refs, assembled)
 }
 
 // ---------------------------------------------------------------------------
@@ -1352,6 +1431,10 @@ fn rollback(paths: &[PathBuf], prior: &[Option<Vec<u8>>]) {
 /// - [`check_edge_pairing`] over every node file — an in/out edge in one file
 ///   without the matching out/in edge (same source, kind, target, AND
 ///   properties) in the other endpoint's file is refused (R16 AC).
+/// - [`validate_assembled_rules`] over the assembled set — contains/depends-on
+///   trees acyclic ([`validate_trees_acyclic`]) and `publishes`/`subscribes`
+///   targets are `Entity (kind: event)` ([`validate_event_targets`]) (SPEC
+///   §3.3 property rules).
 /// - [`validate_code_refs`] on every `implemented-by` target against
 ///   `scanned_code` (the code FQNs the just-run scan produced) and `planned`
 ///   (the plan's planned-node FQNs, from `.trans`): resolves → real; planned →
@@ -1406,10 +1489,25 @@ pub fn ingest_tree(
     // Deterministic record order (one file per node, so paths are unique).
     nodes.sort_by(|a, b| (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name)));
 
+    // The assembled identity universe + FQN → node map: the constraint check
+    // and the property-aware §3.3 rules both resolve against them.
+    let universe: BTreeSet<(Layer, String, String)> = nodes
+        .iter()
+        .map(|n| (layer_of(&n.layer), n.node_type.clone(), n.name.clone()))
+        .collect();
+    let assembled: BTreeMap<String, &NodeFile> = nodes
+        .iter()
+        .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
+        .collect();
+
     // 1. Pairwise in/out symmetry across ALL node files (R16 AC).
     check_edge_pairing(&nodes)?;
 
-    // 2. `implemented-by` code refs against the scanned graph + planned nodes.
+    // 2. Property-aware §3.3 rules over the assembled set: contains/depends-on
+    // trees acyclic, and publishes/subscribes targets are Entity (kind: event).
+    validate_assembled_rules(&assembled, &universe)?;
+
+    // 3. `implemented-by` code refs against the scanned graph + planned nodes.
     let refs: Vec<&str> = nodes
         .iter()
         .flat_map(|n| n.out.iter())
@@ -1418,11 +1516,7 @@ pub fn ingest_tree(
         .collect();
     validate_code_refs(&refs, scanned_code, planned)?;
 
-    // 3. Constraint structure/reference validation over the assembled graph.
-    let universe: BTreeSet<(Layer, String, String)> = nodes
-        .iter()
-        .map(|n| (layer_of(&n.layer), n.node_type.clone(), n.name.clone()))
-        .collect();
+    // 4. Constraint structure/reference validation over the assembled graph.
     for n in &nodes {
         if n.node_type != "constraint" {
             continue;
@@ -1628,11 +1722,16 @@ fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, St
 /// Validate a complete proposed mutation BEFORE anything is written (SPEC
 /// §4.1 "the complete proposed change is validated before anything is
 /// written"): every written node passes [`validate_node`], every written node's
-/// out-edge passes [`validate_edges`], every written constraint's
+/// out-edge passes [`validate_edges`], the assembled post-mutation set
+/// (existing nodes minus deleted/overwritten, plus the writes) satisfies the
+/// property-aware §3.3 rules ([`validate_assembled_rules`]: acyclic
+/// contains/depends-on trees; `Entity (kind: event)` publishes/subscribes
+/// targets) and [`check_edge_pairing`], every written constraint's
 /// `attaches-to` reference resolves against the post-mutation universe
-/// ([`eval_constraint`], R14), and the assembled post-mutation set (existing
-/// nodes minus deleted/overwritten, plus the writes) satisfies
-/// [`check_edge_pairing`]. Pure read — no write.
+/// ([`eval_constraint`], R14), and — when a DB exists — every assembled
+/// `implemented-by` target is Real or Pending against the scanned graph
+/// ([`validate_code_refs`]; a Drift target aborts before the write). Pure
+/// read — no write.
 fn validate_change(
     apg_root: &Path,
     writes: &[NodeFile],
@@ -1682,6 +1781,36 @@ fn validate_change(
             .map(|oe| (oe.kind.as_str(), from.as_str(), oe.target.as_str()))
             .collect();
         validate_edges(&edges)?;
+    }
+
+    // The assembled post-mutation node set, FQN → node file (a write overrides
+    // the current file) — the property-aware §3.3 rules and the code-ref drift
+    // check need the full set, not just the writes.
+    let mut assembled: BTreeMap<String, &NodeFile> =
+        existing.iter().map(|(f, n)| (f.clone(), n)).collect();
+    for n in writes {
+        assembled.insert(fqn(layer_of(&n.layer), &n.node_type, &n.name), n);
+    }
+
+    // SPEC §3.3 property rules over the assembled set: contains/depends-on
+    // trees acyclic, and publishes/subscribes targets are Entity (kind: event).
+    // Both abort before anything is written.
+    validate_assembled_rules(&assembled, &universe)?;
+
+    // Code-ref drift (SPEC §4.1): an `implemented-by` target gone from the
+    // scanned graph must abort BEFORE anything is written — otherwise the
+    // file lands and commits and only the step-5 re-merge fails (a committed
+    // partial mutation). Skipped when there is no DB: the files are the
+    // durable form and there is no scanned graph to check against.
+    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
+        let (scanned, planned) = artifacts::code_universes(apg_root)?;
+        let refs: Vec<&str> = assembled
+            .values()
+            .flat_map(|n| n.out.iter())
+            .filter(|oe| oe.kind == "implemented-by")
+            .map(|oe| oe.target.as_str())
+            .collect();
+        validate_code_refs(&refs, &scanned, &planned)?;
     }
 
     // Constraint reference validation (R14): a written constraint's
@@ -3833,6 +3962,75 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// SPEC §3.3 "contains/depends-on trees acyclic": the scan leg refuses a
+    /// cycle in either edge kind at ingestion. Pairing alone would pass (both
+    /// halves of every edge are present) — the acyclicity rule is what stops
+    /// it.
+    #[test]
+    fn ingest_tree_refuses_contains_and_depends_on_cycles() {
+        for kind in ["contains", "depends-on"] {
+            let root = temp_root(&format!("ingest-cycle-{kind}"));
+            let a_fqn = "requirements.requirement.a";
+            let b_fqn = "requirements.requirement.b";
+            let mut a = node("requirements", "requirement", "a");
+            a.out.push(out_edge(kind, b_fqn));
+            a.in_edges.push(in_edge(kind, b_fqn));
+            let mut b = node("requirements", "requirement", "b");
+            b.out.push(out_edge(kind, a_fqn));
+            b.in_edges.push(in_edge(kind, a_fqn));
+            write_tree(&root, &[a, b]);
+
+            let empty: BTreeSet<String> = BTreeSet::new();
+            let err = ingest_tree(&root, &empty, &empty).unwrap_err().to_string();
+            assert!(err.contains("cycle"), "{kind}: {err}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    /// SPEC §3.3: a `publishes`/`subscribes` target must be an `Entity` with
+    /// `kind: event` — the scan leg refuses a plain entity (or a target whose
+    /// file lacks the property) and ingests the event-targeted edge.
+    #[test]
+    fn ingest_tree_requires_publishes_subscribes_targets_to_be_events() {
+        let empty: BTreeSet<String> = BTreeSet::new();
+        for kind in ["publishes", "subscribes"] {
+            // Entity (kind: event) → ingests.
+            let root = temp_root(&format!("ingest-event-ok-{kind}"));
+            let mut svc = node("domain", "service", "checkout");
+            svc.out.push(out_edge(kind, "domain.entity.order-placed"));
+            let mut event = node("domain", "entity", "order-placed");
+            event
+                .properties
+                .insert(PROP_KIND.to_string(), "event".to_string());
+            event
+                .in_edges
+                .push(in_edge(kind, "domain.service.checkout"));
+            write_tree(&root, &[svc, event]);
+            assert!(
+                ingest_tree(&root, &empty, &empty).is_ok(),
+                "{kind} -> Entity(kind:event) must ingest"
+            );
+            let _ = std::fs::remove_dir_all(&root);
+
+            // A plain Entity (kind: entity) → refused.
+            let root = temp_root(&format!("ingest-event-plain-{kind}"));
+            let mut svc = node("domain", "service", "checkout");
+            svc.out.push(out_edge(kind, "domain.entity.orders"));
+            let mut plain = node("domain", "entity", "orders");
+            plain
+                .properties
+                .insert(PROP_KIND.to_string(), "entity".to_string());
+            plain
+                .in_edges
+                .push(in_edge(kind, "domain.service.checkout"));
+            write_tree(&root, &[svc, plain]);
+            let err = ingest_tree(&root, &empty, &empty).unwrap_err().to_string();
+            assert!(err.contains(kind), "{kind}: {err}");
+            assert!(err.contains("event"), "{kind}: {err}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
     // --- write_project orchestration (phase-3 task-16) ---
 
     /// `validate_change` accepts a valid add and refuses an invalid one (bad
@@ -3848,6 +4046,168 @@ mod tests {
         let bad = node("requirements", "requirement", "Bad Name");
         assert!(validate_change(&root, &[bad], &[]).is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// SPEC §3.3 "contains/depends-on trees acyclic" on the write path: a
+    /// cycle closed by the proposed change is refused by `validate_change`
+    /// over the assembled post-mutation edge set (pairing alone passes — both
+    /// halves of every edge are present), and nothing is written.
+    #[test]
+    fn validate_change_refuses_contains_and_depends_on_cycles() {
+        for kind in ["contains", "depends-on"] {
+            let root = temp_root(&format!("write-cycle-{kind}"));
+            // A --kind--> B already on disk, both halves.
+            let mut a = node("requirements", "requirement", "a");
+            a.out.push(out_edge(kind, "requirements.requirement.b"));
+            let mut b = node("requirements", "requirement", "b");
+            b.in_edges.push(in_edge(kind, "requirements.requirement.a"));
+            write_node(&root, &a).unwrap();
+            write_node(&root, &b).unwrap();
+
+            // The proposed change adds B --kind--> A (both halves): the
+            // assembled set now cycles A → B → A.
+            let mut a2 = a.clone();
+            a2.in_edges
+                .push(in_edge(kind, "requirements.requirement.b"));
+            let mut b2 = b.clone();
+            b2.out.push(out_edge(kind, "requirements.requirement.a"));
+            let err = validate_change(&root, &[a2, b2], &[])
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("cycle"), "{kind}: {err}");
+            // Nothing was written: the files on disk still carry only the
+            // one-directional edge.
+            let a_read = read_node_file(&root, "requirements", "requirement", "a");
+            assert!(a_read.in_edges.is_empty(), "{kind}: file must be unchanged");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    /// SPEC §3.3: `publishes`/`subscribes` targets must be `Entity` with
+    /// `kind: event` — `validate_change` refuses a plain entity (the edge
+    /// matrix is type-only) and accepts the event-targeted edge.
+    #[test]
+    fn validate_change_requires_publishes_subscribes_targets_to_be_events() {
+        let root = temp_root("write-event-targets");
+        for kind in ["publishes", "subscribes"] {
+            // Entity (kind: event) → accepted.
+            let mut svc = node("domain", "service", "checkout");
+            svc.out.push(out_edge(kind, "domain.entity.order-placed"));
+            let mut event = node("domain", "entity", "order-placed");
+            event
+                .properties
+                .insert(PROP_KIND.to_string(), "event".to_string());
+            event
+                .in_edges
+                .push(in_edge(kind, "domain.service.checkout"));
+            assert!(
+                validate_change(&root, &[svc, event], &[]).is_ok(),
+                "{kind} -> Entity(kind:event) must be accepted"
+            );
+
+            // A plain Entity (kind: entity) → refused.
+            let mut svc = node("domain", "service", "checkout");
+            svc.out.push(out_edge(kind, "domain.entity.orders"));
+            let mut plain = node("domain", "entity", "orders");
+            plain
+                .properties
+                .insert(PROP_KIND.to_string(), "entity".to_string());
+            plain
+                .in_edges
+                .push(in_edge(kind, "domain.service.checkout"));
+            let err = validate_change(&root, &[svc, plain], &[])
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(kind), "{kind}: {err}");
+            assert!(err.contains("event"), "{kind}: {err}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A real project context for `write_project` tests: the scan fixture's
+    /// repo plus a worktree `foo` branched off it and a branch DB built by the
+    /// hermetic scan (mirrors node_cmd's mutation fixture). Returns
+    /// `(wt_apg_root, repo, wt_root)`.
+    fn mutation_fixture(tag: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = scan_repo(tag);
+        let wt = repo.start_project("foo");
+        testutil::scan_checkout(&wt).unwrap();
+        (wt.join(crate::specs::LAYOUT), repo, wt)
+    }
+
+    /// SPEC §4.1: the code-ref drift check runs BEFORE anything is written —
+    /// `write_project` with `implemented-by` targeting a FQN gone from the
+    /// scanned graph is refused with no file and no commit (the class note-24
+    /// fixed for constraints); the same edge to a `.trans` planned FQN is
+    /// pending, not an error, and is accepted at write time.
+    #[test]
+    fn write_project_checks_code_ref_drift_before_writing_or_committing() {
+        let (wt_apg, repo, wt) = mutation_fixture("write-drift");
+
+        // (a) implemented-by -> a FQN neither scanned nor planned: drift.
+        let mut ghost = node("solution", "system", "ghost-sys");
+        ghost
+            .out
+            .push(out_edge("implemented-by", "fixture.mod.Gone"));
+        let head_before = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+        let err = write_project(&wt_apg, &[ghost], &[]).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("spec drift"), "{msg}");
+        assert!(msg.contains("fixture.mod.Gone"), "{msg}");
+        let ghost_path = node_file_path(&wt_apg, Layer::Solution, "system", "ghost-sys");
+        assert!(
+            !ghost_path.exists(),
+            "a refused drift write must not land a file"
+        );
+        let head_after = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+        assert_eq!(
+            head_after, head_before,
+            "a refused drift write must not commit"
+        );
+
+        // (b) The same edge to a `.trans` planned FQN is pending, not an
+        // error: declare the planned node, re-scan (the DB carries it), and
+        // the write is accepted and re-merged.
+        let plan_path = wt_apg
+            .join(crate::specs::TRANS)
+            .join("plans")
+            .join("foo.jsonl");
+        crate::specs::write_jsonl(
+            &plan_path,
+            &[Record::PlannedNode {
+                fqn: "fixture.mod.Widget".to_string(),
+                kind: "struct".to_string(),
+                name: "Widget".to_string(),
+                parent: SCAN_MOD.to_string(),
+            }],
+        )
+        .unwrap();
+        testutil::scan_checkout(&wt).unwrap();
+
+        let mut pending = node("solution", "system", "pending-sys");
+        pending
+            .out
+            .push(out_edge("implemented-by", "fixture.mod.Widget"));
+        write_project(&wt_apg, &[pending], &[]).unwrap();
+        let back = read_node_file(&wt_apg, "solution", "system", "pending-sys");
+        assert!(
+            back.out
+                .iter()
+                .any(|oe| oe.kind == "implemented-by" && oe.target == "fixture.mod.Widget")
+        );
+        testutil::remove(&repo);
     }
 
     /// The delete write-through removes the node file AND rewrites the
@@ -3973,6 +4333,28 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(msg.contains("BOTH endpoint files"), "{msg}");
         assert!(msg.contains("requirements.requirement.a"), "{msg}");
+        testutil::remove(&repo);
+    }
+
+    /// SPEC §3.3 "contains/depends-on trees acyclic": a cycle between node
+    /// files FAILS the scan at ingestion. Pairing alone would pass (all four
+    /// halves are present) — the acyclicity rule is what stops the scan,
+    /// proving it is wired into the scan leg.
+    #[test]
+    fn scan_fails_on_contains_cycle_between_node_files() {
+        let repo = scan_repo("scan-cycle");
+        let a_fqn = "requirements.requirement.a";
+        let b_fqn = "requirements.requirement.b";
+        let mut a = node("requirements", "requirement", "a");
+        a.out.push(out_edge("contains", b_fqn));
+        a.in_edges.push(in_edge("contains", b_fqn));
+        let mut b = node("requirements", "requirement", "b");
+        b.out.push(out_edge("contains", a_fqn));
+        b.in_edges.push(in_edge("contains", a_fqn));
+        write_tree(&repo.apg_root(), &[a, b]);
+
+        let err = testutil::scan_checkout(&repo.root).unwrap_err();
+        assert!(err.to_string().contains("cycle"), "{err}");
         testutil::remove(&repo);
     }
 
