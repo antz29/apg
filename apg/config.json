@@ -1,4 +1,5 @@
 {
   "default": "src",
-  "types": []
+  "types": [],
+  "version": "0.11.0"
 }
