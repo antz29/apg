@@ -180,6 +180,22 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "src"
         }
+        "py" => {
+            if filename_lower.ends_with("_test.py")
+                || filename_lower.starts_with("test_")
+                || filename_lower.ends_with(".test.py")
+                || has_seg(&["test", "tests", "__tests__"])
+            {
+                return "test";
+            }
+            if filename_lower.ends_with(".pyi") || has_seg(&["__pycache__", "gen", "generated"]) {
+                return "generated";
+            }
+            if has_seg(&["vendor", "third_party", "thirdparty", "site-packages"]) {
+                return "external";
+            }
+            "src"
+        }
         _ => "src",
     }
 }

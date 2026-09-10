@@ -395,6 +395,9 @@ fn available_languages() -> Vec<String> {
         if dir.join("tsfrontend").is_dir() {
             langs.push("ts".into());
         }
+        if dir.join("pyfrontend").exists() {
+            langs.push("py".into());
+        }
         if !langs.is_empty() {
             return langs;
         }
@@ -446,6 +449,9 @@ fn frontend_cmd(language: &str) -> Option<String> {
                     dir.join("tsfrontend").join("scanner.mjs").display()
                 ));
             }
+            "py" if dir.join("pyfrontend").exists() => {
+                return Some(dir.join("pyfrontend").display().to_string());
+            }
             _ => {}
         }
     }
@@ -456,6 +462,7 @@ fn frontend_cmd(language: &str) -> Option<String> {
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         "ts" => option_env!("APG_FRONTEND_TS"),
+        "py" => option_env!("APG_FRONTEND_PY"),
         _ => None,
     };
     baked.map(|s| s.to_string())
@@ -500,6 +507,7 @@ fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec<Str
         ("rust", &[".rs"]),
         ("ts", &[".ts", ".tsx", ".mts", ".cts"]),
         ("csharp", &[".cs", ".csx"]),
+        ("py", &[".py", ".pyi", ".pyx"]),
     ];
     let mut out = Vec::new();
     for (lang, exts) in &candidates {
@@ -522,6 +530,7 @@ fn id_prefix_for(language: &str) -> &'static str {
         "rust" => "r",
         "ts" => "t",
         "csharp" => "cs",
+        "py" => "y",
         _ => "x",
     }
 }
@@ -573,10 +582,11 @@ USAGE:
 
 SCAN OPTIONS:
   --language <lang>            Scanner language(s): java, go, cpp, rust, ts,
-                               csharp (comma-separated or repeated; auto-detected
-                               for every language present if omitted)
+                               csharp, py (comma-separated or repeated;
+                               auto-detected for every language present if
+                               omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
-  --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS/C#,
+  --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS/C#/Python,
                                repeatable)
   --no-build-scripts          Rust only: skip cargo build scripts and the
                               proc-macro server (hermetic scans)

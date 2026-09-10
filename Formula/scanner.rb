@@ -70,6 +70,7 @@ class Scanner < Formula
         brew install antz29/apg/apg-rust     # Rust
         brew install antz29/apg/apg-ts       # TypeScript (needs `node` at scan time)
         brew install antz29/apg/apg-csharp   # C# (needs `dotnet` at build time only)
+        brew install antz29/apg/apg-py       # Python
     EOS
   end
 

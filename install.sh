@@ -42,7 +42,7 @@ raw_frontends=""
 install_all=0
 components=""
 
-ALL_FRONTENDS="cpp go rust csharp java ts"
+ALL_FRONTENDS="cpp go rust csharp java ts py"
 
 usage() {
     cat <<'EOF'
@@ -59,6 +59,7 @@ Components:
   csharp          C# scanner frontend (csharpfrontend)
   java            Java scanner frontend (java-classes)
   ts              TypeScript scanner frontend (tsfrontend)
+  py              Python scanner frontend (pyfrontend)
   all             Core scanner + all frontends
 
 Options:
@@ -103,8 +104,9 @@ normalize_component() {
         csharp | cs | "c#" | apg-csharp) echo "csharp" ;;
         java | apg-java) echo "java" ;;
         ts | typescript | apg-ts) echo "ts" ;;
+        py | python | apg-py) echo "py" ;;
         all) echo "all" ;;
-        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, all)" ;;
+        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, py, all)" ;;
     esac
 }
 
@@ -206,6 +208,10 @@ if [ "$uninstall" -eq 1 ]; then
             ts)
                 rm -rf "$frontends_dir/tsfrontend"
                 echo "Removed TypeScript frontend."
+                ;;
+            py)
+                rm -f "$frontends_dir/pyfrontend"
+                echo "Removed Python frontend."
                 ;;
         esac
     done
@@ -405,6 +411,10 @@ for f in $target_frontends; do
             rm -rf "$frontends_dir/tsfrontend"
             cp -r "$work/extract_${f}/tsfrontend" "$frontends_dir/"
             ;;
+        py)
+            [ -x "$work/extract_${f}/pyfrontend" ] || die "${tarball} does not contain 'pyfrontend'"
+            install -m 0755 "$work/extract_${f}/pyfrontend" "$frontends_dir/pyfrontend"
+            ;;
     esac
 
     installed_components="${installed_components}${installed_components:+, }${f}"
@@ -440,6 +450,7 @@ for lang in $ALL_FRONTENDS; do
         csharp) { [ -x "$frontends_dir/csharpfrontend" ] || [ -x "$frontends_dir/csharpfrontend.exe" ]; } && present=1 ;;
         java) [ -d "$frontends_dir/java-classes" ] && present=1 ;;
         ts) [ -d "$frontends_dir/tsfrontend" ] && present=1 ;;
+        py) [ -x "$frontends_dir/pyfrontend" ] && present=1 ;;
     esac
     if [ "$present" -eq 1 ]; then
         installed_langs="${installed_langs}${installed_langs:+ }$lang"

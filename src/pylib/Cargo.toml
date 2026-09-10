@@ -1,0 +1,34 @@
+[package]
+name = "apg-pyfrontend"
+version = "0.0.0"
+edition = "2024"
+
+[[bin]]
+name = "pyfrontend"
+path = "src/main.rs"
+
+# Astral Ruff/ty engine crates.
+#
+# `ty_ide` (call hierarchy: outgoing_calls/incoming_calls) and `ty_project`
+# (ProjectDatabase/ProjectMetadata) are marked `publish = false` in the Ruff
+# monorepo, so they are not on crates.io — pulled straight from the Ruff repo
+# (in-repo package names) at a pinned release tag, same pattern as
+# src/rustlib's rust-analyzer pin. They are version-locked to each other: bump
+# by moving every dep to the next Ruff release tag in one commit, then re-run
+# the fixture scan. Cargo.lock pins the resolved rev.
+[dependencies]
+ruff_db = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6", features = ["os"] }
+ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+ruff_source_file = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+ruff_text_size = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+ty_ide = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+ty_project = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+ty_python_core = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+ty_python_semantic = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+ty_module_resolver = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+ty_vendored = { git = "https://github.com/astral-sh/ruff", tag = "0.16.6" }
+salsa = "0.27"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"

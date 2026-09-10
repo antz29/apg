@@ -18,6 +18,7 @@ fn build_frontends() -> Vec<String> {
             "rust".into(),
             "ts".into(),
             "csharp".into(),
+            "py".into(),
         ],
     }
 }
@@ -37,6 +38,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/tslib/scanner.mjs");
     println!("cargo:rerun-if-changed=src/csharplib/CsharpFrontend.csproj");
     println!("cargo:rerun-if-changed=src/csharplib/Program.cs");
+    println!("cargo:rerun-if-changed=src/pylib/Cargo.toml");
+    println!("cargo:rerun-if-changed=src/pylib/src/main.rs");
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let frontends = build_frontends();
@@ -342,9 +345,33 @@ fn main() {
         }
     }
 
+    // --- Python frontend (Astral's `ty` type checker + Ruff parser crates,
+    // vendored from the astral-sh/ruff repo at a pinned release tag — see
+    // src/pylib/Cargo.toml) ---
+    if enabled(&frontends, "py") {
+        let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+        let pyfrontend = Path::new("src/pylib")
+            .join("target")
+            .join(&profile)
+            .join("pyfrontend");
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build")
+            .arg("--manifest-path")
+            .arg("src/pylib/Cargo.toml");
+        if profile == "release" {
+            cmd.arg("--release");
+        }
+        cmd.arg("--bin").arg("pyfrontend");
+        let py_ok = cmd.status().is_ok_and(|s| s.success()) && pyfrontend.exists();
+        if py_ok {
+            println!("cargo:rustc-env=APG_FRONTEND_PY={}", pyfrontend.display());
+            let _ = std::fs::copy(&pyfrontend, stage_dir.join("pyfrontend"));
+            languages.push("py".into());
+        }
+    }
+
     println!("cargo:rustc-env=APG_LANGUAGES={}", languages.join(","));
 }
-
 fn copy_dir(from: &Path, to: &Path) {
     let entries = match std::fs::read_dir(from) {
         Ok(e) => e,
