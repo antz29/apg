@@ -573,7 +573,9 @@ pub fn ingest(
                     kind,
                     tier,
                     status,
-                    ..
+                    verb,
+                    target,
+                    new_fqn,
                 } => insert_node(
                     &mut graph,
                     fqn,
@@ -582,6 +584,9 @@ pub fn ingest(
                         sub_kind: opt(kind),
                         tier: opt(tier),
                         status: opt(status),
+                        verb: opt(verb),
+                        target: opt(target),
+                        new_fqn: opt(new_fqn),
                         ..spec_node(NodeKind::Task)
                     },
                 ),

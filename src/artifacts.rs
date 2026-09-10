@@ -567,7 +567,9 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             kind,
             tier,
             status,
-            ..
+            verb,
+            target,
+            new_fqn,
         } => Some((
             "Task",
             fqn,
@@ -576,6 +578,9 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("kind", kind.clone()),
                 ("tier", tier.clone()),
                 ("status", status.clone()),
+                ("verb", verb.clone()),
+                ("target", target.clone()),
+                ("new_fqn", new_fqn.clone()),
             ],
         )),
         Record::Stakeholder { fqn, name, body } => Some((
@@ -1189,6 +1194,65 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(out.contains("foo/plan"), "details edge: {out}");
+        drop(db);
+
+        testutil::remove(&repo);
+    }
+
+    /// The plan re-merge write-through (`node_merge` → `MERGE SET`) carries the
+    /// Task verb projection too: a re-ingested Task record lands its
+    /// verb/target/new_fqn in the live DB, so the suite tools see the same
+    /// columns the scan load path projects.
+    #[test]
+    fn write_through_projects_task_verb_fields() {
+        let (apg_root, repo, _wt) = project_fixture("task-verb");
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let recs = vec![
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "Foo".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: String::new(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".into(),
+                title: "Rename".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "pending".into(),
+                verb: "renames".into(),
+                target: "foo.Old".into(),
+                new_fqn: "foo.New".into(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+        ];
+
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
+
+        let db = ArtifactDb::open(&apg_root).unwrap();
+        let out = db
+            .q("MATCH (t:Task) RETURN t.fqn, t.verb, t.target, t.new_fqn")
+            .unwrap();
+        assert!(
+            out.contains("foo/plan.phase-01.task-1")
+                && out.contains("renames")
+                && out.contains("foo.Old")
+                && out.contains("foo.New"),
+            "write-through task verb projection: {out}"
+        );
         drop(db);
 
         testutil::remove(&repo);

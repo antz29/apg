@@ -186,6 +186,9 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut task_kind = Vec::new();
     let mut task_tier = Vec::new();
     let mut task_status = Vec::new();
+    let mut task_verb = Vec::new();
+    let mut task_target = Vec::new();
+    let mut task_new_fqn = Vec::new();
 
     // Tier-1/2/3 node tables (GraphModel-SPEC.md; PHASE_01).
     let mut stakeholder_fqn = Vec::new();
@@ -315,6 +318,9 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 task_kind.push(node.sub_kind.clone().unwrap_or_default());
                 task_tier.push(node.tier.clone().unwrap_or_default());
                 task_status.push(node.status.clone().unwrap_or_default());
+                task_verb.push(node.verb.clone().unwrap_or_default());
+                task_target.push(node.target.clone().unwrap_or_default());
+                task_new_fqn.push(node.new_fqn.clone().unwrap_or_default());
             }
             NodeKind::Stakeholder => {
                 stakeholder_fqn.push(fqn.clone());
@@ -490,6 +496,9 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("kind", Col::Str(task_kind)),
             ("tier", Col::Str(task_tier)),
             ("status", Col::Str(task_status)),
+            ("verb", Col::Str(task_verb)),
+            ("target", Col::Str(task_target)),
+            ("new_fqn", Col::Str(task_new_fqn)),
         ],
     )?;
     write_parquet(
@@ -1094,7 +1103,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE NODE TABLE PlanPhase(fqn STRING PRIMARY KEY, number INT64, title STRING, deliverable STRING, status STRING)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, kind STRING, tier STRING, status STRING)",
+        "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, kind STRING, tier STRING, status STRING, verb STRING, target STRING, new_fqn STRING)",
     )?;
     conn.query("CREATE NODE TABLE Stakeholder(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
     conn.query("CREATE NODE TABLE Entity(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
@@ -1401,6 +1410,12 @@ enum Export {
         tier: String,
         #[serde(skip_serializing_if = "String::is_empty")]
         status: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        verb: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        target: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        new_fqn: String,
     },
     Stakeholder {
         fqn: String,
@@ -1647,6 +1662,9 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                 kind: node.sub_kind.clone().unwrap_or_default(),
                 tier: node.tier.clone().unwrap_or_default(),
                 status: node.status.clone().unwrap_or_default(),
+                verb: node.verb.clone().unwrap_or_default(),
+                target: node.target.clone().unwrap_or_default(),
+                new_fqn: node.new_fqn.clone().unwrap_or_default(),
             },
             NodeKind::Stakeholder => Export::Stakeholder {
                 fqn: fqn.clone(),
@@ -2036,6 +2054,9 @@ mod tests {
                             sub_kind: o("kind"),
                             tier: o("tier"),
                             status: o("status"),
+                            verb: o("verb"),
+                            target: o("target"),
+                            new_fqn: o("new_fqn"),
                             ..Node::default()
                         },
                     );
@@ -2429,6 +2450,19 @@ mod tests {
                 title: Some("Add RootStore".to_string()),
                 sub_kind: Some("source".to_string()),
                 status: Some("pending".to_string()),
+                verb: Some("renames".to_string()),
+                target: Some("foo.Old".to_string()),
+                new_fqn: Some("foo.New".to_string()),
+                ..sp(NodeKind::Task)
+            },
+        );
+        // An old-format Task node (pre-verb shape): no verb/target/new_fqn.
+        n(
+            "foo/plan.phase-1.task-2",
+            Node {
+                title: Some("Legacy".to_string()),
+                sub_kind: Some("source".to_string()),
+                status: Some("pending".to_string()),
                 ..sp(NodeKind::Task)
             },
         );
@@ -2521,6 +2555,37 @@ mod tests {
             out.contains("source") && out.contains("pending"),
             "task rows: {out}"
         );
+        // The Task table carries the Task→Implementation verb fields the suite
+        // tools query (apg_plan_tasks/apg_plan): verb/target/new_fqn.
+        let out = conn
+            .query("MATCH (t:Task) RETURN t.fqn, t.verb, t.target, t.new_fqn ORDER BY t.fqn")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("foo/plan.phase-1.task-1")
+                && out.contains("renames")
+                && out.contains("foo.Old")
+                && out.contains("foo.New"),
+            "task verb rows: {out}"
+        );
+        // An old-format Task (no verb fields) projects empty strings, not a
+        // binder error.
+        let out = conn
+            .query("MATCH (t:Task {fqn: 'foo/plan.phase-1.task-2'}) RETURN t.verb, t.target, t.new_fqn")
+            .unwrap()
+            .to_string();
+        assert!(
+            !out.contains("(empty)"),
+            "old-format task must still be a row: {out}"
+        );
+        let out = conn
+            .query("MATCH (t:Task) RETURN t.verb, t.target, t.new_fqn")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("renames") && out.contains("foo.New"),
+            "suite query shape must bind: {out}"
+        );
         let out = conn
             .query("MATCH (s:Struct {fqn: 'foo/gateway'}) RETURN s.status")
             .unwrap()
@@ -2560,6 +2625,102 @@ mod tests {
         assert!(out.contains("foo/spec.R1"), "satisfies: {out}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The suite tools (`apg_plan_tasks`/`apg_plan`) query
+    /// `MATCH (t:Task) RETURN t.verb, t.target, t.new_fqn`; the DB projection
+    /// must carry those columns end to end. A plan fixture in the project
+    /// worktree's `.trans/plans` is scanned through the real fixture pipeline
+    /// (ingest → parquet → COPY), the exact suite query shapes bind, an
+    /// old-format Task record (no verb keys) inserts with its serde defaults
+    /// (`verb = "creates"`, empty target/new_fqn), and graph.jsonl round-trips
+    /// the fields.
+    #[test]
+    fn scan_projects_task_verb_target_and_new_fqn_into_the_db() {
+        use crate::artifacts::ArtifactDb;
+        use crate::testutil::{self, Repo};
+
+        let repo = Repo::new("task-verb-db");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]),
+        );
+        repo.commit_all("seed code");
+        let wt = repo.start_project("task-verb-db");
+        // The transient plan fixture: one full verb/target/new_fqn task plus an
+        // old-format record with no verb keys at all.
+        let plan_path = wt
+            .join(crate::specs::LAYOUT)
+            .join(crate::specs::TRANS)
+            .join("plans")
+            .join("task-verb-db.jsonl");
+        std::fs::create_dir_all(plan_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &plan_path,
+            concat!(
+                "{\"type\":\"plan\",\"fqn\":\"task-verb-db/plan\",\"title\":\"Task verb\",\"strategy\":\"fixture\"}\n",
+                "{\"type\":\"plan_phase\",\"fqn\":\"task-verb-db/plan.phase-01\",\"number\":1,\"title\":\"P1\",\"deliverable\":\"D\",\"status\":\"pending\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-verb-db/plan\",\"to\":\"task-verb-db/plan.phase-01\"}\n",
+                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-1\",\"title\":\"Rename\",\"kind\":\"source\",\"tier\":\"\",\"status\":\"pending\",\"verb\":\"renames\",\"target\":\"fixture.mod.Old\",\"new_fqn\":\"fixture.mod.New\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-verb-db/plan.phase-01\",\"to\":\"task-verb-db/plan.phase-01.task-1\"}\n",
+                "{\"type\":\"task\",\"fqn\":\"task-verb-db/plan.phase-01.task-2\",\"title\":\"Legacy\",\"kind\":\"source\",\"tier\":\"\",\"status\":\"pending\"}\n",
+                "{\"type\":\"contains\",\"from\":\"task-verb-db/plan.phase-01\",\"to\":\"task-verb-db/plan.phase-01.task-2\"}\n",
+            ),
+        )
+        .unwrap();
+
+        testutil::scan_checkout(&wt).unwrap();
+
+        let db = ArtifactDb::open(&wt.join(crate::specs::LAYOUT)).unwrap();
+        // The exact suite query shapes must bind (the defect was a binder
+        // error: `Cannot find property verb for t`).
+        let out = db
+            .q("MATCH (t:Task) RETURN t.fqn, t.verb, t.target, t.new_fqn ORDER BY t.fqn")
+            .unwrap();
+        assert!(
+            out.contains("task-verb-db/plan.phase-01.task-1")
+                && out.contains("renames")
+                && out.contains("fixture.mod.Old")
+                && out.contains("fixture.mod.New"),
+            "task verb projection: {out}"
+        );
+        assert!(
+            out.contains("task-verb-db/plan.phase-01.task-2") && out.contains("creates"),
+            "old-format task defaults to creates: {out}"
+        );
+        let out = db
+            .q("MATCH (t:Task) RETURN t.verb, t.target, t.new_fqn")
+            .unwrap();
+        assert!(
+            out.contains("renames") && out.contains("fixture.mod.New"),
+            "suite query shape: {out}"
+        );
+        drop(db);
+
+        // The export (graph.jsonl) round-trips the new fields; an old-format
+        // task stays empty on target/new_fqn.
+        let back = read_graph_jsonl(
+            &wt.join(crate::specs::LAYOUT)
+                .join(crate::specs::TRANS)
+                .join("graph.jsonl"),
+        )
+        .unwrap();
+        let t1 = back
+            .nodes
+            .get("task-verb-db/plan.phase-01.task-1")
+            .expect("task-1 in graph.jsonl");
+        assert_eq!(t1.verb.as_deref(), Some("renames"));
+        assert_eq!(t1.target.as_deref(), Some("fixture.mod.Old"));
+        assert_eq!(t1.new_fqn.as_deref(), Some("fixture.mod.New"));
+        let t2 = back
+            .nodes
+            .get("task-verb-db/plan.phase-01.task-2")
+            .expect("task-2 in graph.jsonl");
+        assert_eq!(t2.verb.as_deref(), Some("creates"));
+        assert_eq!(t2.target, None);
+        assert_eq!(t2.new_fqn, None);
+
+        testutil::remove(&repo);
     }
 
     #[test]

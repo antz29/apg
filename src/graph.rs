@@ -144,8 +144,17 @@ pub struct Node {
     /// Implementation nodes carry their kind as a DB label, not a string.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_kind: Option<String>,
+    /// The Implementation FQN a `Task` node's verb applies to (the source FQN
+    /// of a renames/moves pair); `None` on a target-less task.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// The Task→Implementation verb of a `Task` node (creates/modifies/
+    /// deletes/renames/moves); `None` when the record carried no verb.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verb: Option<String>,
+    /// The destination FQN of a renames/moves `Task` node; `None` otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_fqn: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deliverable: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,6 +202,8 @@ impl Default for Node {
             number: None,
             sub_kind: None,
             target: None,
+            verb: None,
+            new_fqn: None,
             deliverable: None,
             strategy: None,
             tier: None,
