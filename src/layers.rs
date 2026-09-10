@@ -1849,6 +1849,7 @@ pub fn write_project(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{self, Repo};
 
     /// The catalog is the SPEC §3.1 table: per-layer dirs and node types,
     /// verbatim (global holds constraint before note; implementation holds
@@ -3851,5 +3852,82 @@ mod tests {
         );
         assert!(check_edge_pairing(&[a_read]).is_ok());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // --- Scan wiring through the hermetic fixture (phase-3 task-14/17) ---
+    // The full post-code scan leg — durable `apg/layers` tree + transient
+    // `.trans/plans` mirror — exercised through `testutil::scan_checkout`
+    // (a real git repo, a real payload scan, a real db.lbug), mirroring
+    // `cmd_scan`'s assembly.
+
+    /// The module/fqn namespace the scan payloads use.
+    const SCAN_MOD: &str = "fixture.mod";
+    const SCAN_FILE: &str = "/abs/store.go";
+
+    /// A fixture repo carrying a scanned-code payload, committed.
+    fn scan_repo(tag: &str) -> Repo {
+        let repo = Repo::new(&format!("layers-scan-{tag}"));
+        repo.write(
+            "code/seed.scan.jsonl",
+            &crate::testutil::code_payload(SCAN_MOD, SCAN_FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        repo
+    }
+
+    /// R17 VI: the scan never opens `apg/specs/*.jsonl` or `apg/notes/` — a
+    /// fixture whose committed legacy durable files are poisoned (malformed
+    /// JSONL AND old-model sentinel records whose types the post-removal
+    /// `Record` enum no longer knows) still scans green, ingests nothing from
+    /// them, and leaves them byte-identical. Spec data comes from the
+    /// `apg/layers` tree + the `.trans/plans` mirror only.
+    #[test]
+    fn scan_ignores_poisoned_legacy_spec_and_note_files() {
+        let repo = scan_repo("vi-unread");
+        repo.write("apg/specs/foo.jsonl", "this is not json\n");
+        repo.write(
+            "apg/specs/_invariants.jsonl",
+            "{\"type\":\"invariant\",\"fqn\":\"ghost/invariant\",\"title\":\"x\",\"body\":\"x\",\"category\":\"product\",\"scope\":\"global\",\"status\":\"active\"}\n",
+        );
+        repo.write(
+            "apg/notes/fixture.mod.jsonl",
+            "{\"type\":\"note\",\"fqn\":\"ghost/note-1\",\"body\":\"legacy\",\"kind\":\"background\"}\n",
+        );
+        repo.write("apg/notes/_root.jsonl", "broken {\n");
+        repo.commit_all("poison the legacy durable files");
+        // The positive control: a durable layers node the scan DOES ingest.
+        write_tree(
+            &repo.apg_root(),
+            &[node("requirements", "requirement", "timer")],
+        );
+
+        testutil::scan_checkout(&repo.root).unwrap();
+
+        // Scanned code + the layers tree landed...
+        let db = artifacts::ArtifactDb::open(&repo.apg_root()).unwrap();
+        assert!(
+            db.has_node("fixture.mod.Store"),
+            "scanned code must be in the DB"
+        );
+        assert!(
+            db.has_node("requirements.requirement.timer"),
+            "spec data must come from the apg/layers tree"
+        );
+        // ...and nothing from the poisoned legacy files (never read, never
+        // ingested — any read would have failed on the malformed lines or the
+        // unknown old-model types).
+        assert!(!db.has_node("ghost/invariant"));
+        assert!(!db.has_node("ghost/note-1"));
+        drop(db);
+        // Unwritten too: the poisoned files are byte-identical after the scan.
+        assert_eq!(
+            std::fs::read_to_string(repo.root.join("apg/specs/foo.jsonl")).unwrap(),
+            "this is not json\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.root.join("apg/notes/_root.jsonl")).unwrap(),
+            "broken {\n"
+        );
+        testutil::remove(&repo);
     }
 }

@@ -204,3 +204,155 @@ fn edge_rm(args: &[String]) -> anyhow::Result<()> {
     println!("Removed edge {kind} {from} -> {to}");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::artifacts::ArtifactDb;
+    use crate::testutil::{self, Repo};
+
+    const MOD: &str = "fixture.mod";
+    const FILE: &str = "/abs/store.go";
+
+    /// Commits paths on the worktree's branch (git2 — the same mechanics
+    /// `git::commit_files` uses).
+    fn wt_commit(wt: &Path, rels: &[&str], msg: &str) {
+        let repo = git2::Repository::open(wt).unwrap();
+        let mut index = repo.index().unwrap();
+        for rel in rels {
+            index.add_path(Path::new(rel)).unwrap();
+        }
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &[&head])
+            .unwrap();
+    }
+
+    /// Writes `content` to `<wt>/<rel>`, creating parent dirs.
+    fn wt_write(wt: &Path, rel: &str, content: &str) {
+        let p = wt.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, content).unwrap();
+    }
+
+    /// A real project context (R3/R4): a git repo whose worktree `foo` on
+    /// branch `foo` carries a real `apg/.trans/db.lbug` code graph built by
+    /// the hermetic scan fixture — the context every `apg node`/`apg edge`
+    /// mutation runs in. Returns `(wt_apg_root, repo, wt_root)`.
+    fn mutation_fixture(tag: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = Repo::new(&format!("nodecmd-{tag}"));
+        let wt = repo.start_project("foo");
+        let wt_apg = wt.join(specs::LAYOUT);
+        wt_write(
+            &wt,
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        wt_commit(&wt, &["code/seed.scan.jsonl"], "seed code");
+        testutil::scan_checkout(&wt).unwrap();
+        (wt_apg, repo, wt)
+    }
+
+    /// A bare node file with no edges — the exact shape `apg node add`
+    /// builds.
+    fn node(layer: &str, node_type: &str, name: &str) -> NodeFile {
+        NodeFile {
+            layer: layer.to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            body: String::new(),
+            properties: BTreeMap::new(),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        }
+    }
+
+    /// `RETURN count(*)` over `db` as a number.
+    fn count_rows(db: &ArtifactDb, q: &str) -> i64 {
+        db.q(q)
+            .unwrap()
+            .lines()
+            .last()
+            .and_then(|l| l.trim().parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// R17 VI (write half): `apg node add` and `apg edge add` never create or
+    /// modify `apg/specs/` or `apg/notes/`. Pre-existing committed legacy
+    /// files stay byte-identical through node and edge mutations, and no new
+    /// file appears beside them — the mutations land in `apg/layers/` + the
+    /// branch DB only.
+    #[test]
+    fn node_and_edge_mutations_leave_pre_existing_legacy_files_untouched() {
+        let repo = Repo::new("nodecmd-vi-unwritten");
+        let wt = repo.start_project("foo");
+        let wt_apg = wt.join(specs::LAYOUT);
+        // Committed legacy durable files with sentinel content.
+        std::fs::create_dir_all(wt_apg.join("specs")).unwrap();
+        std::fs::create_dir_all(wt_apg.join("notes")).unwrap();
+        std::fs::write(wt_apg.join("specs").join("foo.jsonl"), "SENTINEL SPEC\n").unwrap();
+        std::fs::write(
+            wt_apg.join("notes").join("fixture.mod.jsonl"),
+            "SENTINEL NOTE\n",
+        )
+        .unwrap();
+        wt_write(
+            &wt,
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        wt_commit(
+            &wt,
+            &[
+                "code/seed.scan.jsonl",
+                "apg/specs/foo.jsonl",
+                "apg/notes/fixture.mod.jsonl",
+            ],
+            "seed code + legacy durable files",
+        );
+        testutil::scan_checkout(&wt).unwrap();
+
+        // `apg node add` twice, then `apg edge add` once (the command shapes).
+        layers::write_project(&wt_apg, &[node("requirements", "requirement", "r1")], &[]).unwrap();
+        layers::write_project(&wt_apg, &[node("requirements", "requirement", "r2")], &[]).unwrap();
+        let mut src =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        src.out.push(OutEdge {
+            kind: "depends-on".to_string(),
+            target: "requirements.requirement.r2".to_string(),
+            properties: BTreeMap::new(),
+        });
+        let mut dst =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
+        dst.in_edges.push(InEdge {
+            kind: "depends-on".to_string(),
+            source: "requirements.requirement.r1".to_string(),
+            properties: BTreeMap::new(),
+        });
+        layers::write_project(&wt_apg, &[src, dst], &[]).unwrap();
+
+        // The legacy files are byte-identical, and nothing new appeared.
+        assert_eq!(
+            std::fs::read_to_string(wt_apg.join("specs").join("foo.jsonl")).unwrap(),
+            "SENTINEL SPEC\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(wt_apg.join("notes").join("fixture.mod.jsonl")).unwrap(),
+            "SENTINEL NOTE\n"
+        );
+        assert_eq!(
+            std::fs::read_dir(wt_apg.join("specs")).unwrap().count(),
+            1,
+            "apg/specs must not gain files"
+        );
+        assert_eq!(
+            std::fs::read_dir(wt_apg.join("notes")).unwrap().count(),
+            1,
+            "apg/notes must not gain files"
+        );
+        testutil::remove(&repo);
+    }
+}
