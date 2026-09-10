@@ -23,12 +23,28 @@ permission:
     "AGENTS.md": allow
     ".gitignore": allow
     "README.md": allow
+    "apg/.worktrees/*/src/*.rs": allow
+    "apg/.worktrees/*/build.rs": allow
+    "apg/.worktrees/*/Cargo.toml": allow
+    "apg/.worktrees/*/Cargo.lock": allow
+    "apg/.worktrees/*/SPEC.md": allow
+    "apg/.worktrees/*/SPEC-*.md": allow
+    "apg/.worktrees/*/plans/SPEC*.md": allow
+    "apg/.worktrees/*/AGENTS.md": allow
+    "apg/.worktrees/*/.gitignore": allow
+    "apg/.worktrees/*/README.md": allow
     "src/golib/**": deny
     "src/javalib/**": deny
     "src/cpplib/**": deny
     "src/rustlib/**": deny
     "src/tslib/**": deny
     "src/csharplib/**": deny
+    "apg/.worktrees/*/src/golib/**": deny
+    "apg/.worktrees/*/src/javalib/**": deny
+    "apg/.worktrees/*/src/cpplib/**": deny
+    "apg/.worktrees/*/src/rustlib/**": deny
+    "apg/.worktrees/*/src/tslib/**": deny
+    "apg/.worktrees/*/src/csharplib/**": deny
     "opencode-suite/**": deny
     ".opencode/**": deny
   external_directory:
