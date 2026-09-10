@@ -68,18 +68,30 @@ never a mutation place.
   files — `**/*_test.go`, `**/*.test.ts`, `**/test/**`). Where tests are inline
   (Rust `#[cfg(test)]`), a glob cannot separate them — the implementer owns
   source and its inline tests.
+- **Worktree mirroring (MANDATORY)**: the agent works inside the project
+  worktree at `<main>/apg/.worktrees/<name>/`, and the permission engine
+  resolves edit globs relative to the session workspace root (the main
+  checkout). Therefore EVERY edit glob granted at the repo root MUST also be
+  granted under `apg/.worktrees/*/` — and every deny mirrored the same way
+  (`apg/.worktrees/*/src/golib/**` etc.). An agent whose grants only cover the
+  root paths cannot touch the worktree it operates in; that is a broken
+  scaffold (the 0.11.0 feedback-0-fix miss).
 - **`apg_plan_done` / `apg_plan_undone`** — marks plan tasks done as it
   completes them.
 - **`apg_review_action`** — actions Feedback on its work (`--fix|--wont-fix`).
 - **git: `add` + `commit`**, with `push` and `tag` human-approved (`ask`) —
-  they prompt for explicit human approval before running.
+  they prompt for explicit human approval before running. (Git commands run
+  with cwd inside the worktree via the allowed `cd *`; they need no path
+  variants.)
 - **Build gates** as exact, verified bash patterns (the repo's real commands).
 - The full read-only apg suite + the codebase-navigator rules embedded in the body.
 
 ### unit/int/e2e-test-implementer(s) (per detected tier)
 - **Edit** scoped to the tier's test-file globs; **source denied**.
 - Same grant shape as the implementer (plan_done/review_action/git add+commit/
-  verified gates). Cross-denied against the implementer's globs.
+  verified gates), **including the worktree mirroring**: every test glob also
+  granted under `apg/.worktrees/*/`, every deny mirrored.
+- Cross-denied against the implementer's globs.
 - **Skip a tier's test-implementer when the tier is not file-separable** (e.g.
   Rust inline unit tests): a glob cannot separate them, so the implementer owns
   them. Never scaffold a test-implementer whose edit scope is identical to the
@@ -140,6 +152,15 @@ never a mutation place.
    in your write scope). The navigator may only delegate to defined agents.
 9. **Re-running updates idempotently.** Regenerating an agent rewrites it in
    place; never accumulate duplicates.
+10. **Worktree-mirrored edit grants.** The generated agents operate inside the
+    project worktree (`<main>/apg/.worktrees/<name>/`), but opencode resolves
+    edit globs against the session workspace root (the main checkout). Every
+    allow and every deny an agent gets for a repo-root path MUST be duplicated
+    under `apg/.worktrees/*/` (e.g. `src/*.rs` → also `apg/.worktrees/*/src/*.rs`;
+    `src/golib/**` deny → also `apg/.worktrees/*/src/golib/**` deny). An agent
+    whose grants cover only the main checkout cannot touch the worktree it must
+    mutate — the scaffold is broken. Bash command patterns and tool grants need
+    no variants (they are cwd-agnostic; the agents `cd` into the worktree).
 
 ## Workflow
 
@@ -172,7 +193,10 @@ never a mutation place.
 6. **Verify.** Re-read each generated file; confirm the permission blocks match
    the detected layout and the user's stated gates; confirm no allowed pattern
    contains `&&`, `|`, `;`, `$()`, or redirection; confirm `generated: true` is
-   present and the navigator allowlist covers every generated agent.
+   present and the navigator allowlist covers every generated agent. Confirm
+   the **worktree mirroring** (rule 10): for every edit allow/deny at the repo
+   root, the matching `apg/.worktrees/*/` entry exists — read the worktree
+   path shape off `project_cmd.rs` (`apg/.worktrees/<name>`) if unsure.
 
 ## What to tell the user at the end
 
