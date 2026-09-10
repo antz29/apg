@@ -1427,7 +1427,15 @@ pub fn ingest_tree(
         if n.node_type != "constraint" {
             continue;
         }
-        eval_constraint(layer_of(&n.layer), &n.name, &n.properties, &universe)?;
+        // The constraint under validation is not part of its own existence
+        // universe: `eval_constraint` reuses `validate_node`'s uniqueness
+        // rule, which compares against everything EXCEPT the node being
+        // validated (the same exclusion `validate_change` applies). Duplicates
+        // among constraints are still caught — each one validates against the
+        // other's presence.
+        let mut own_universe = universe.clone();
+        own_universe.remove(&(layer_of(&n.layer), n.node_type.clone(), n.name.clone()));
+        eval_constraint(layer_of(&n.layer), &n.name, &n.properties, &own_universe)?;
     }
 
     // Convert node files + out-edges into records (out is canonical).
@@ -1620,8 +1628,10 @@ fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, St
 /// Validate a complete proposed mutation BEFORE anything is written (SPEC
 /// §4.1 "the complete proposed change is validated before anything is
 /// written"): every written node passes [`validate_node`], every written node's
-/// out-edge passes [`validate_edges`], and the assembled post-mutation set
-/// (existing nodes minus deleted/overwritten, plus the writes) satisfies
+/// out-edge passes [`validate_edges`], every written constraint's
+/// `attaches-to` reference resolves against the post-mutation universe
+/// ([`eval_constraint`], R14), and the assembled post-mutation set (existing
+/// nodes minus deleted/overwritten, plus the writes) satisfies
 /// [`check_edge_pairing`]. Pure read — no write.
 fn validate_change(
     apg_root: &Path,
@@ -1672,6 +1682,21 @@ fn validate_change(
             .map(|oe| (oe.kind.as_str(), from.as_str(), oe.target.as_str()))
             .collect();
         validate_edges(&edges)?;
+    }
+
+    // Constraint reference validation (R14): a written constraint's
+    // `attaches-to` must resolve against the post-mutation universe — a
+    // non-thing reference is refused BEFORE anything is written. (Without
+    // this, the files would land and the step-5 re-merge would fail
+    // afterwards, leaving a committed partial mutation.)
+    for n in writes {
+        if n.node_type != "constraint" {
+            continue;
+        }
+        let layer = layer_of(&n.layer);
+        let mut own_universe = universe.clone();
+        own_universe.remove(&(layer, n.node_type.clone(), n.name.clone()));
+        eval_constraint(layer, &n.name, &n.properties, &own_universe)?;
     }
 
     // Pairwise symmetry over the assembled post-mutation set.
@@ -3927,6 +3952,229 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(repo.root.join("apg/notes/_root.jsonl")).unwrap(),
             "broken {\n"
+        );
+        testutil::remove(&repo);
+    }
+
+    /// R16 AC: an in/out edge in one node file without the matching out/in
+    /// edge in the other endpoint's file FAILS the scan — the pairing
+    /// mismatch is caught at ingestion, not silently tolerated.
+    #[test]
+    fn scan_fails_on_pairing_mismatch_between_node_files() {
+        let repo = scan_repo("scan-mismatch");
+        // A's out `contains -> B` with no matching in-edge on B's file.
+        let mut a = node("requirements", "requirement", "a");
+        a.out
+            .push(out_edge("contains", "requirements.requirement.b"));
+        let b = node("requirements", "requirement", "b");
+        write_tree(&repo.apg_root(), &[a, b]);
+
+        let err = testutil::scan_checkout(&repo.root).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("BOTH endpoint files"), "{msg}");
+        assert!(msg.contains("requirements.requirement.a"), "{msg}");
+        testutil::remove(&repo);
+    }
+
+    /// R16 AC (edge properties): the SAME endpoints with DIFFERENT edge
+    /// properties is a mismatch — a match requires identical properties —
+    /// and fails the scan.
+    #[test]
+    fn scan_fails_on_same_endpoints_with_different_edge_properties() {
+        let repo = scan_repo("scan-prop-mismatch");
+        // The out half carries a flavor the in half does not.
+        let mut a = node("requirements", "requirement", "a");
+        let mut oe = out_edge("contains", "requirements.requirement.b");
+        oe.properties
+            .insert("flavor".to_string(), "direct".to_string());
+        a.out.push(oe);
+        let mut b = node("requirements", "requirement", "b");
+        b.in_edges
+            .push(in_edge("contains", "requirements.requirement.a"));
+        write_tree(&repo.apg_root(), &[a, b]);
+
+        let err = testutil::scan_checkout(&repo.root).unwrap_err();
+        assert!(err.to_string().contains("properties"), "{err}");
+        testutil::remove(&repo);
+    }
+
+    /// `implemented-by` code refs vs the scanned graph (R16 code exemption):
+    /// a FQN gone from the scanned graph (and not a `.trans` planned node) is
+    /// spec drift and FAILS the scan; a `.trans` planned FQN ingests as
+    /// pending, not an error.
+    #[test]
+    fn scan_fails_on_implemented_by_drift_and_ingests_transient_planned_pending() {
+        let repo = scan_repo("scan-drift");
+        let mut sys = node("solution", "system", "payments");
+        sys.out.push(out_edge("implemented-by", "fixture.mod.Gone"));
+        write_tree(&repo.apg_root(), &[sys]);
+
+        // Gone from both the scanned graph and .trans -> spec drift; the scan
+        // fails naming the FQN.
+        let err = testutil::scan_checkout(&repo.root).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("spec drift"), "{msg}");
+        assert!(msg.contains("fixture.mod.Gone"), "{msg}");
+
+        // Declared as a planned node in .trans -> pending, not an error: the
+        // scan succeeds and the planned node ingests with status planned.
+        let plan_path = repo
+            .apg_root()
+            .join(crate::specs::TRANS)
+            .join("plans")
+            .join("foo.jsonl");
+        crate::specs::write_jsonl(
+            &plan_path,
+            &[Record::PlannedNode {
+                fqn: "fixture.mod.Gone".to_string(),
+                kind: "struct".to_string(),
+                name: "Gone".to_string(),
+                parent: SCAN_MOD.to_string(),
+            }],
+        )
+        .unwrap();
+        testutil::scan_checkout(&repo.root).unwrap();
+        let db = artifacts::ArtifactDb::open(&repo.apg_root()).unwrap();
+        assert!(
+            db.is_planned("fixture.mod.Gone"),
+            "a .trans planned FQN must ingest as pending"
+        );
+        assert!(db.has_node("solution.system.payments"));
+        testutil::remove(&repo);
+    }
+
+    /// R14: a constraint whose `attaches-to` reference is unresolvable FAILS
+    /// the scan — a constraint is never a non-thing, and the reference is
+    /// checked at every scan over the assembled graph.
+    #[test]
+    fn scan_fails_on_constraint_with_unresolvable_reference() {
+        let repo = scan_repo("scan-constraint-ref");
+        // A local constraint attaching to a node that does not exist.
+        let mut c = node("requirements", "constraint", "law");
+        c.properties.insert(
+            PROP_ATTACHES_TO.to_string(),
+            "domain.entity.ghost".to_string(),
+        );
+        write_tree(&repo.apg_root(), &[c]);
+
+        let err = testutil::scan_checkout(&repo.root).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("domain.entity.ghost"), "{msg}");
+        assert!(msg.contains("never a non-thing"), "{msg}");
+        testutil::remove(&repo);
+    }
+
+    /// R14: prose satisfaction is never executed — a constraint whose body
+    /// LOOKS like an expression (and is contradictory) still ingests when its
+    /// references resolve; the scan validates structure + references only, no
+    /// expression parsing, no evaluation.
+    #[test]
+    fn scan_never_evaluates_constraint_prose() {
+        let repo = scan_repo("scan-constraint-prose");
+        let mut ent = node("domain", "entity", "customer");
+        ent.properties
+            .insert("kind".to_string(), "entity".to_string());
+        let mut c = node("requirements", "constraint", "law");
+        c.properties.insert(
+            PROP_ATTACHES_TO.to_string(),
+            "domain.entity.customer".to_string(),
+        );
+        c.body = "count(entities) == 0 AND count(entities) > 0".to_string();
+        write_tree(&repo.apg_root(), &[ent, c]);
+
+        testutil::scan_checkout(&repo.root).unwrap();
+        let db = artifacts::ArtifactDb::open(&repo.apg_root()).unwrap();
+        assert!(db.has_node("requirements.constraint.law"));
+        assert!(db.has_node("domain.entity.customer"));
+        testutil::remove(&repo);
+    }
+
+    /// R18: `.trans` plans (Plan/PlanPhase/Task/PlannedNode) and feedback
+    /// (Feedback + Reviews) still ingest through the scan and pair against
+    /// durable node-file nodes — the Reviews edge points at a durable
+    /// requirement and lands in the DB.
+    #[test]
+    fn scan_ingests_transient_plans_and_feedback_paired_to_durable_nodes() {
+        let repo = scan_repo("scan-plans-feedback");
+        // The durable side: one requirement node file.
+        write_tree(
+            &repo.apg_root(),
+            &[node("requirements", "requirement", "timer")],
+        );
+        // The transient side: plan/phase/task/planned-node + feedback with a
+        // Reviews edge targeting the durable requirement.
+        let plan_path = repo
+            .apg_root()
+            .join(crate::specs::TRANS)
+            .join("plans")
+            .join("foo.jsonl");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "Foo".to_string(),
+                strategy: "G".to_string(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
+                title: "T".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
+            },
+            Record::PlannedNode {
+                fqn: "fixture.mod.Widget".to_string(),
+                kind: "struct".to_string(),
+                name: "Widget".to_string(),
+                parent: SCAN_MOD.to_string(),
+            },
+            Record::Feedback {
+                fqn: "foo/feedback-1".to_string(),
+                body: "review".to_string(),
+                status: "open".to_string(),
+                disposition: String::new(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-1".to_string(),
+                to: "requirements.requirement.timer".to_string(),
+            },
+        ];
+        crate::specs::write_jsonl(&plan_path, &records).unwrap();
+
+        testutil::scan_checkout(&repo.root).unwrap();
+
+        let db = artifacts::ArtifactDb::open(&repo.apg_root()).unwrap();
+        for f in [
+            "foo/plan",
+            "foo/plan.phase-01",
+            "foo/plan.phase-01.task-1",
+            "foo/feedback-1",
+            "requirements.requirement.timer",
+        ] {
+            assert!(db.has_node(f), "{f} must be in the DB");
+        }
+        assert!(db.is_planned("fixture.mod.Widget"));
+        let out = db
+            .q("MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Reviews]->(r:Requirement {fqn: 'requirements.requirement.timer'}) RETURN count(*)")
+            .unwrap();
+        assert_eq!(
+            out.lines().last().map(str::trim),
+            Some("1"),
+            "the Reviews edge must pair feedback to the durable node: {out}"
         );
         testutil::remove(&repo);
     }

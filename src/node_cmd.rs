@@ -210,6 +210,7 @@ mod tests {
     use super::*;
     use crate::artifacts::ArtifactDb;
     use crate::testutil::{self, Repo};
+    use std::collections::BTreeSet;
 
     const MOD: &str = "fixture.mod";
     const FILE: &str = "/abs/store.go";
@@ -268,16 +269,6 @@ mod tests {
             out: Vec::new(),
             in_edges: Vec::new(),
         }
-    }
-
-    /// `RETURN count(*)` over `db` as a number.
-    fn count_rows(db: &ArtifactDb, q: &str) -> i64 {
-        db.q(q)
-            .unwrap()
-            .lines()
-            .last()
-            .and_then(|l| l.trim().parse().ok())
-            .unwrap_or(0)
     }
 
     /// R17 VI (write half): `apg node add` and `apg edge add` never create or
@@ -353,6 +344,231 @@ mod tests {
             1,
             "apg/notes must not gain files"
         );
+        testutil::remove(&repo);
+    }
+
+    /// `apg node add` (the command shape through `layers::write_project`)
+    /// lands ONE file per node at `<layer>/<type>/<name>.json` — the file
+    /// name IS the identity, the FQN is derived `<layer>.<type>.<name>` —
+    /// visible in the branch DB after the re-merge, auto-committed on the
+    /// project branch, and never creating the legacy `apg/specs/`/`apg/notes/`
+    /// paths.
+    #[test]
+    fn node_add_lands_one_file_per_node_with_identity_and_branch_db_visibility() {
+        let (wt_apg, repo, wt) = mutation_fixture("node-add");
+        // `apg node add requirements requirement timer`.
+        let nf = node("requirements", "requirement", "timer");
+        layers::write_project(&wt_apg, &[nf], &[]).unwrap();
+
+        // One file per node at the derived path; the file name is the identity.
+        let path = wt_apg
+            .join(layers::LAYERS_DIR)
+            .join("requirements")
+            .join("requirement")
+            .join("timer.json");
+        assert!(path.exists(), "{} must exist", path.display());
+        let back =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "timer").unwrap();
+        assert_eq!(back.name, "timer");
+        assert_eq!(
+            fqn(Layer::Requirements, "requirement", "timer"),
+            "requirements.requirement.timer"
+        );
+
+        // Visible in the branch DB (the mutation re-merged the layers tree).
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        assert!(db.has_node("requirements.requirement.timer"));
+        drop(db);
+
+        // Never touches the legacy durable paths.
+        assert!(
+            !wt_apg.join("specs").exists(),
+            "apg/specs must not be created by a node add"
+        );
+        assert!(
+            !wt_apg.join("notes").exists(),
+            "apg/notes must not be created by a node add"
+        );
+
+        // The node file auto-committed on the project branch (R8).
+        let wt_repo = git2::Repository::open(&wt).unwrap();
+        let head = wt_repo.head().unwrap().peel_to_commit().unwrap();
+        assert!(
+            head.tree()
+                .unwrap()
+                .get_path(Path::new("apg/layers/requirements/requirement/timer.json"))
+                .is_ok(),
+            "the node file must be committed on the project branch"
+        );
+        testutil::remove(&repo);
+    }
+
+    /// `apg edge add` (the command shape) writes BOTH endpoint files — the
+    /// out half in the source's file, the matching in half in the target's —
+    /// keeping the store pairing-consistent and landing the edge in the
+    /// branch DB.
+    #[test]
+    fn edge_add_writes_both_endpoint_files() {
+        let (wt_apg, repo, _wt) = mutation_fixture("edge-add");
+        layers::write_project(&wt_apg, &[node("requirements", "requirement", "r1")], &[]).unwrap();
+        layers::write_project(&wt_apg, &[node("requirements", "requirement", "r2")], &[]).unwrap();
+        // `apg edge add depends-on requirements.requirement.r1
+        // requirements.requirement.r2`.
+        let mut src =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        src.out.push(OutEdge {
+            kind: "depends-on".to_string(),
+            target: "requirements.requirement.r2".to_string(),
+            properties: BTreeMap::new(),
+        });
+        let mut dst =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
+        dst.in_edges.push(InEdge {
+            kind: "depends-on".to_string(),
+            source: "requirements.requirement.r1".to_string(),
+            properties: BTreeMap::new(),
+        });
+        layers::write_project(&wt_apg, &[src, dst], &[]).unwrap();
+
+        // Both halves landed: out in the source's file, in in the target's.
+        let src_back =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        let dst_back =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
+        assert_eq!(src_back.out.len(), 1);
+        assert_eq!(src_back.out[0].kind, "depends-on");
+        assert_eq!(src_back.out[0].target, "requirements.requirement.r2");
+        assert_eq!(dst_back.in_edges.len(), 1);
+        assert_eq!(dst_back.in_edges[0].kind, "depends-on");
+        assert_eq!(dst_back.in_edges[0].source, "requirements.requirement.r1");
+
+        // The store stays pairing-consistent, and the edge is in the branch DB.
+        layers::check_edge_pairing(&layers::read_existing_nodes(&wt_apg).unwrap()).unwrap();
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let out = db
+            .q("MATCH (a:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->(b:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)")
+            .unwrap();
+        assert_eq!(
+            out.lines().last().map(str::trim),
+            Some("1"),
+            "the DependsOn edge must be in the branch DB: {out}"
+        );
+        testutil::remove(&repo);
+    }
+
+    /// Reads see the node files: `read_existing_nodes` returns every written
+    /// node; `read_node_file`/`node_file_path` resolve the identity.
+    #[test]
+    fn reads_see_the_node_files() {
+        let (wt_apg, repo, _wt) = mutation_fixture("reads");
+        let mut ent = node("domain", "entity", "customer");
+        ent.properties
+            .insert("kind".to_string(), "entity".to_string());
+        layers::write_project(
+            &wt_apg,
+            &[node("requirements", "requirement", "r1"), ent],
+            &[],
+        )
+        .unwrap();
+
+        let all = layers::read_existing_nodes(&wt_apg).unwrap();
+        assert_eq!(all.len(), 2);
+        let fqns: BTreeSet<String> = all
+            .iter()
+            .map(|n| fqn(resolve_layer(&n.layer).unwrap(), &n.node_type, &n.name))
+            .collect();
+        assert!(fqns.contains("requirements.requirement.r1"));
+        assert!(fqns.contains("domain.entity.customer"));
+        let path = layers::node_file_path(&wt_apg, Layer::Domain, "entity", "customer");
+        assert!(path.exists(), "{} must exist", path.display());
+        let back = layers::read_node_file(&wt_apg, Layer::Domain, "entity", "customer").unwrap();
+        assert_eq!(back.name, "customer");
+        testutil::remove(&repo);
+    }
+
+    /// A failed multi-file mutation leaves NO partial state: the complete
+    /// change is validated before anything is written, so an invalid second
+    /// endpoint (allowlist-violating name, dangling authored edge, or a
+    /// constraint with an unresolvable `attaches-to`) writes nothing — the
+    /// pre-existing files stay byte-identical and no new file lands.
+    #[test]
+    fn failed_multi_file_mutation_leaves_no_partial_state() {
+        let (wt_apg, repo, _wt) = mutation_fixture("atomicity");
+        // Pre-existing state: one committed node file.
+        layers::write_project(
+            &wt_apg,
+            &[node("requirements", "requirement", "existing")],
+            &[],
+        )
+        .unwrap();
+        let existing_path =
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "existing");
+        let before = std::fs::read_to_string(&existing_path).unwrap();
+
+        // (a) An invalid second endpoint (allowlist-violating name) — neither
+        // file lands, the pre-existing state is untouched.
+        let bad = node("requirements", "requirement", "Bad Name");
+        let err = layers::write_project(
+            &wt_apg,
+            &[node("requirements", "requirement", "fresh"), bad],
+            &[],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("allowlist"), "{err}");
+        let fresh_path =
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "fresh");
+        assert!(
+            !fresh_path.exists(),
+            "a failed mutation must not write the valid half"
+        );
+        assert_eq!(std::fs::read_to_string(&existing_path).unwrap(), before);
+
+        // (b) A dangling authored edge endpoint — pairing fails validation,
+        // nothing is written.
+        let mut a = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "existing")
+            .unwrap();
+        a.out.push(OutEdge {
+            kind: "depends-on".to_string(),
+            target: "requirements.requirement.ghost".to_string(),
+            properties: BTreeMap::new(),
+        });
+        let victim = node("requirements", "requirement", "victim");
+        let err = layers::write_project(&wt_apg, &[a, victim], &[]).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("requirements.requirement.ghost"), "{msg}");
+        let victim_path =
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "victim");
+        assert!(!victim_path.exists());
+        assert_eq!(std::fs::read_to_string(&existing_path).unwrap(), before);
+
+        // (c) A constraint whose attaches-to does not resolve — refused at
+        // write time (R14), before anything lands; the positive control
+        // (resolving attachment) writes and re-merges.
+        let mut c = node("requirements", "constraint", "law");
+        c.properties.insert(
+            layers::PROP_ATTACHES_TO.to_string(),
+            "domain.entity.ghost".to_string(),
+        );
+        let err = layers::write_project(&wt_apg, &[c], &[]).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("never a non-thing"), "{msg}");
+        let law_path = layers::node_file_path(&wt_apg, Layer::Requirements, "constraint", "law");
+        assert!(
+            !law_path.exists(),
+            "a refused constraint write must not land a file"
+        );
+        assert_eq!(std::fs::read_to_string(&existing_path).unwrap(), before);
+        let mut c = node("requirements", "constraint", "law");
+        c.properties.insert(
+            layers::PROP_ATTACHES_TO.to_string(),
+            "requirements.requirement.existing".to_string(),
+        );
+        layers::write_project(&wt_apg, &[c], &[]).unwrap();
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        assert!(db.has_node("requirements.constraint.law"));
+
+        // The store still pairs cleanly throughout.
+        layers::check_edge_pairing(&layers::read_existing_nodes(&wt_apg).unwrap()).unwrap();
         testutil::remove(&repo);
     }
 }
