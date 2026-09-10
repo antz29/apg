@@ -5,14 +5,14 @@ class ApgJava < Formula
   desc "Java scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.10.4",
-      revision: "26040fd683655940e4d6e75bf0bd850d505fac00"
+      tag:      "v0.11.0",
+      revision: "6e374e92b0cd6ef9675bfcc9b9b66d24e1ab9d17"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.10.4"
-    rebuild 14
+    root_url "https://github.com/antz29/apg/releases/download/v0.11.0"
+    rebuild 15
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "0305888b7d2a322748d5a6f6432e7cabd54cddf8666a347c80e357f5fa045b9a"
   end
 
