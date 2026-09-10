@@ -39,6 +39,12 @@ if [ -n "$(git status --porcelain)" ]; then
   git status --short >&2
   exit 1
 fi
+# The release gate: the version-guard tests (RELEASE_VERSION literal, README
+# pins, Cargo.lock consistency) only run under `cargo test` — `cargo check`
+# never compiles the test module, so a release that skips this ships a red
+# suite (the 0.11.0 miss: RELEASE_VERSION stayed 0.10.4 at the tagged HEAD).
+echo "==> Gate: cargo test (release-version guards)"
+cargo test 2>&1 | tail -3
 
 RELEASE_SHA="$(git rev-parse HEAD)"
 echo "==> Release HEAD: $RELEASE_SHA"
