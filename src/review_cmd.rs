@@ -450,6 +450,31 @@ mod tests {
             },
         );
 
+        // One durable node per remaining file-backed tier (SPEC §3.1) — a
+        // domain Entity, a solution System, a global Constraint — so reviews
+        // of every tier route to their own `.trans` mirror.
+        g.nodes.insert(
+            "domain.entity.order".to_string(),
+            Node {
+                kind: NodeKind::Entity,
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(
+            "solution.system.checkout".to_string(),
+            Node {
+                kind: NodeKind::System,
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(
+            "global.constraint.law".to_string(),
+            Node {
+                kind: NodeKind::Constraint,
+                ..Node::default()
+            },
+        );
+
         let ldir = dir.join("apg").join(specs::TRANS).join("load");
         std::fs::create_dir_all(&ldir).unwrap();
         load::build_load_files(&g, &ldir).unwrap();
@@ -935,6 +960,171 @@ mod tests {
             repo.head_sha(),
             head_before,
             "feedback status writes are transient too"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// The worktree branch's HEAD sha — the branch an auto-commit would land
+    /// on. `repo.head_sha()` reads the main checkout's HEAD, which a worktree
+    /// commit could never move, so transience assertions must check this one.
+    fn wt_head(wt: &Path) -> String {
+        git2::Repository::open(wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string()
+    }
+
+    #[test]
+    fn review_all_tier_mirrors_and_status_verbs_never_commit() {
+        // Transience surface completion (SPEC §5): the task-1 test covers the
+        // requirements/implementation tier mirrors, the plan store, and one
+        // action; this closes the rest — a review of a domain, a solution,
+        // and a global target each land their Feedback + Reviews halves in
+        // that tier's `.trans` mirror, and the action/resolve/reject status
+        // verbs write through the same transient files. Review state dies
+        // with the branch: the project branch HEAD (where an auto-commit
+        // would land), the main HEAD, and the tree all stay untouched.
+        let (apg_root, repo, wt) = fixture("all-tiers");
+        let head_before = repo.head_sha();
+        let branch_head_before = wt_head(&wt);
+
+        // Seed the plan store (the realistic project shape — a plan exists
+        // before any review) so the shared feedback namespace starts at
+        // `feedback-1` (the task-1 fixture does the same).
+        let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &plan_path,
+            "foo",
+            &[Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "Foo".to_string(),
+                strategy: String::new(),
+            }],
+        )
+        .unwrap();
+
+        // One review per untested tier mirror (the fixture DB carries one
+        // durable node per file-backed tier).
+        for (target, tier, n) in [
+            ("domain.entity.order", "domain", 1u64),
+            ("solution.system.checkout", "solution", 2),
+            ("global.constraint.law", "global", 3),
+        ] {
+            let p = parse_args(&[
+                target.to_string(),
+                "--body".to_string(),
+                format!("{tier} review"),
+                "--project".to_string(),
+                "foo".to_string(),
+            ]);
+            apply_review_add(&apg_root, &p).unwrap();
+
+            // Both halves land in the tier dir of the attached node.
+            let mirror = apg_root.join(specs::TRANS).join(tier).join("foo.jsonl");
+            let recs = specs::read_jsonl(&mirror).unwrap();
+            assert!(
+                recs.iter().any(|r| matches!(
+                    r,
+                    Record::Feedback { fqn, .. } if fqn == &format!("foo/feedback-{n}")
+                )),
+                "{tier} mirror must carry feedback-{n}"
+            );
+            assert!(
+                recs.iter().any(|r| matches!(
+                    r,
+                    Record::Reviews { from, to }
+                        if from == &format!("foo/feedback-{n}") && to == target
+                )),
+                "{tier} mirror must carry the Reviews edge beside its Feedback"
+            );
+        }
+
+        // The status verbs find feedback across the mirrors and write through
+        // the same transient files: action, resolve (terminal), reject.
+        set_feedback_at(
+            &apg_root,
+            "foo/feedback-1",
+            "foo",
+            "actioned",
+            Some("fixed".to_string()),
+        )
+        .unwrap();
+        set_feedback_at(&apg_root, "foo/feedback-2", "foo", "resolved", None).unwrap();
+        set_feedback_at(
+            &apg_root,
+            "foo/feedback-3",
+            "foo",
+            "open",
+            Some("rejected".to_string()),
+        )
+        .unwrap();
+        let status_of = |recs: &[Record], fqn: &str| -> (String, String) {
+            recs.iter()
+                .find_map(|r| match r {
+                    Record::Feedback {
+                        fqn: f,
+                        status,
+                        disposition,
+                        ..
+                    } if f == fqn => Some((status.clone(), disposition.clone())),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let dom = specs::read_jsonl(&apg_root.join(specs::TRANS).join("domain").join("foo.jsonl"))
+            .unwrap();
+        let sol = specs::read_jsonl(
+            &apg_root
+                .join(specs::TRANS)
+                .join("solution")
+                .join("foo.jsonl"),
+        )
+        .unwrap();
+        let glo = specs::read_jsonl(&apg_root.join(specs::TRANS).join("global").join("foo.jsonl"))
+            .unwrap();
+        assert_eq!(
+            status_of(&dom, "foo/feedback-1"),
+            ("actioned".to_string(), "fixed".to_string())
+        );
+        assert_eq!(
+            status_of(&sol, "foo/feedback-2"),
+            ("resolved".to_string(), String::new())
+        );
+        assert_eq!(
+            status_of(&glo, "foo/feedback-3"),
+            ("open".to_string(), "rejected".to_string())
+        );
+
+        // Never in the legacy durable stores.
+        assert!(
+            !apg_root.join("specs").exists(),
+            "apg/specs must never be written"
+        );
+        assert!(
+            !apg_root.join("notes").exists(),
+            "apg/notes must never be written"
+        );
+
+        // Review state dies with the branch: nothing was committed.
+        assert_eq!(
+            wt_head(&wt),
+            branch_head_before,
+            "feedback writes are transient — the project branch HEAD must not move"
+        );
+        assert_eq!(
+            repo.head_sha(),
+            head_before,
+            "feedback writes must never move the main HEAD either"
+        );
+        assert!(
+            repo.is_clean(),
+            "the tree must stay clean — the mirrors are gitignored"
         );
 
         testutil::remove(&repo);

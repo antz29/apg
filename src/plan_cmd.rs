@@ -2724,4 +2724,156 @@ mod tests {
 
         testutil::remove(&repo);
     }
+
+    /// The worktree branch's HEAD sha — the branch an auto-commit would land
+    /// on. `repo.head_sha()` reads the main checkout's HEAD, which a worktree
+    /// commit could never move, so transience assertions must check this one.
+    fn wt_head(wt: &Path) -> String {
+        git2::Repository::open(wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string()
+    }
+
+    #[test]
+    fn plan_remaining_mutation_paths_never_commit() {
+        // Transience surface completion (SPEC §4.2/§5):
+        // `plan_mutations_never_commit` covers add-phase/done/note; this
+        // closes the rest of the mutation surface: init, task add (an
+        // accepted creates through the write-through funnel, and a refused
+        // modifies leaving the on-disk store byte-identical), planned-node
+        // declaration, link, complete (the durable milestone), and undone.
+        // Every mutation writes only the gitignored `.trans/plans/` store:
+        // the project branch HEAD (where an auto-commit would land), the main
+        // HEAD, and the tree all stay untouched.
+        let (apg_root, repo, wt) = fixture("never-commit-rest");
+        let head_before = repo.head_sha();
+        let branch_head_before = wt_head(&wt);
+
+        // init writes the Plan record into the transient store.
+        let has = plan_init_at(&apg_root, "foo", "P", "S").unwrap();
+        assert!(!has, "no requirement node files -> the warning path");
+        let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
+
+        // A phase add through the write-through funnel.
+        let mut records = specs::read_jsonl(&plan_path).unwrap();
+        plan_add_phase_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            "foo/plan",
+            1,
+            "P1",
+            "D1",
+            &[],
+            &[],
+        )
+        .unwrap();
+        write_through(&apg_root, "foo", &records).unwrap();
+
+        // A refused modifies (unresolvable FQN) leaves the on-disk store
+        // byte-identical — no partial Task record, no write, no commit.
+        let before_file = std::fs::read_to_string(&plan_path).unwrap();
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "modifies",
+            "github.com/x/y.Nope",
+            "",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("does not resolve in the scanned graph"),
+            "{err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&plan_path).unwrap(),
+            before_file,
+            "a refused task add must not touch the plan store"
+        );
+
+        // An accepted creates against an unplanned FQN lands through the
+        // funnel, verb + target on the task record.
+        plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T",
+            "source",
+            "",
+            "creates",
+            "github.com/x/y.Gateway",
+            "",
+        )
+        .unwrap();
+        write_through(&apg_root, "foo", &records).unwrap();
+
+        // The planned-node declaration (the `plan add planned` write).
+        records.push(Record::PlannedNode {
+            fqn: "github.com/x/y.Gateway".to_string(),
+            kind: "struct".to_string(),
+            name: "Gateway".to_string(),
+            parent: String::new(),
+        });
+        write_through(&apg_root, "foo", &records).unwrap();
+
+        // link (an edge refresh — still a write-through), then done →
+        // complete (the durable milestone) → undone.
+        plan_link_at(&apg_root, "foo", 1, &[], &[]).unwrap();
+        plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+        plan_complete_at(&apg_root, "foo", 1).unwrap();
+        plan_undone_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+
+        // The state landed in the transient store: the milestone, the task
+        // (undone) with its verb + target, and the planned node.
+        let recs = specs::read_jsonl(&plan_path).unwrap();
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::PlanPhase { fqn, status, .. }
+                if fqn == "foo/plan.phase-01" && status == "done"
+        )));
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Task { fqn, status, verb, target, .. }
+                if fqn == "foo/plan.phase-01.task-1"
+                    && status == "pending"
+                    && verb == "creates"
+                    && target == "github.com/x/y.Gateway"
+        )));
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::PlannedNode { fqn, .. } if fqn == "github.com/x/y.Gateway"
+        )));
+
+        // ...and nothing was committed: `.trans` is gitignored and transient.
+        assert_eq!(
+            wt_head(&wt),
+            branch_head_before,
+            "plan mutations must never auto-commit on the project branch"
+        );
+        assert_eq!(
+            repo.head_sha(),
+            head_before,
+            "plan mutations must never move the main HEAD either"
+        );
+        assert!(
+            repo.is_clean(),
+            "the tree must stay clean — plan files are gitignored"
+        );
+
+        testutil::remove(&repo);
+    }
 }
