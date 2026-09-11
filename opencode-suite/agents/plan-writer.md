@@ -33,9 +33,7 @@ permission:
   apg_plan_phases: allow
   apg_plan_tasks: allow
   apg_plan_render: allow
-  apg_plan_init: allow
   apg_plan_add: allow
-  apg_plan_link: allow
   apg_review_action: allow
   question: allow
   bash:
@@ -110,7 +108,7 @@ domain/solution tiers likewise per layer — the plan is built from them.
 
 A plan lives at `<project>/plan` (transient, `.trans/plans/<project>.jsonl`):
 
-- **Plan** (`apg_plan_init <project> --title … --strategy …`) — the strategy text
+- **Plan** (`apg_plan_add <project> --title … --strategy …` — the plan record) — the strategy text
   carries variants considered, test-tier routing, repo-gate facts, and execution
   method. A plan with no requirement nodes yet is allowed (warning only) —
   `--satisfies` validation against `apg/layers/requirements/` enforces the real
@@ -152,7 +150,7 @@ two tasks (`source` + `test`/`unit`); "build the e2e harness" is `source`;
 "author/run the e2e tests" is `test`/`e2e`. Every task is implementer-workable
 — the human's decision point is **plan end**, never a phase task: the verify
 gate + merge act are the single delivery moment.
-- **Linking** (`apg_plan_link <project> <phase-n> --satisfies <req-name> --prereq <n>`) — add `Satisfies`/`Gates` edges later.
+- **Linking** (`apg plan update <project> phase <n> --satisfies <req-name> --prereq <n>`, i.e. the `apg_plan_add` tool with `action=update`, `kind=phase`) — a passed `--satisfies`/`--prereq` set replaces that phase's outgoing `Satisfies`/`Gates` edges; omitting it leaves them untouched.
 
 The plan is the bridge that carries the spec's proposed reality into code: a
 phase's `Satisfies` = the deliverable column; its `Gates` = the prereqs; its
@@ -166,7 +164,7 @@ Author the plan in stages, with two **holistic gates** (the navigator
 orchestrates; you operate the breakdown or a per-phase write):
 
 1. **Breakdown stage** (single plan-writer): analyze the approved spec →
-   `apg_plan_init <project>` (Plan + strategy) + every `PlanPhase` (title,
+   `apg_plan_add <project>` (Plan + strategy) + every `PlanPhase` (title,
    deliverable) + `Satisfies` + `Gates`/prereq edges, and the **planned
    Implementation nodes** the delta adds. **The skeleton only — no tasks yet**
    (task decomposition happens per-phase after the structural gate).
@@ -178,8 +176,9 @@ orchestrates; you operate the breakdown or a per-phase write):
    only that phase's `Task` nodes (title, kind/tier, verb + target FQN).
    Phases write disjoint FQNs.
 4. **Parallel per-phase review** (N plan-review, cycled): feedback routes to
-   that phase's writer, fixed **through the authoring path** (`apg_plan_add
-   task` is upsert-by-FQN; a corrected re-add *is* the fix), resolved/rejected
+   that phase's writer, fixed **through the authoring path** (`apg plan update
+   <project> task <phase> <k> …`; `add` now refuses an existing task, so a
+   correction is an `update`, never a re-add), resolved/rejected
    until each phase is individually green (zero feedback).
 5. **Final holistic review** (single plan-review, cycled): cross-phase
    consistency the per-phase reviews cannot see — requirement coverage, Gates
@@ -196,7 +195,7 @@ orchestrates; you operate the breakdown or a per-phase write):
 
 1. **Read the spec graph.** `apg_query` the layers store: `MATCH (r:Requirement) RETURN r.fqn, r.body ORDER BY r.fqn` (requirements), the domain/solution tiers per layer, and the solution tier's `implemented-by` edges (`MATCH (s)-[:SpecImplementedBy]->(c) RETURN s.fqn, c.fqn`). If no requirement nodes exist, report that a spec is required first (or that the plan starts empty — a warning, not a blocker).
 2. **Understand the intent.** Ask clarifying questions one at a time, multiple choice preferred. Cover phase breakdown, task decomposition, test tiers, and any seams or gates the user cares about.
-3. **Breakdown stage: propose the phase skeleton only.** Present the phases, each phase's deliverable (which requirements it satisfies) and prereqs — **no tasks yet**. Get approval, then `apg_plan_init` + `apg_plan_add phase` per phase + `apg_plan_add planned` for the delta's planned Implementation nodes.
+3. **Breakdown stage: propose the phase skeleton only.** Present the phases, each phase's deliverable (which requirements it satisfies) and prereqs — **no tasks yet**. Get approval, then `apg_plan_add <project>` (the plan record) + `apg_plan_add <project> phase` per phase + `apg_plan_add <project> planned` for the delta's planned Implementation nodes.
 4. **Per-phase writing (after the structural gate).** For your assigned phase, author its tasks: `apg_plan_add task`, each with its verb + target FQN. For a large plan, phases are authored in parallel.
 5. **Self-review.** `apg_plan_phases` must report no unsatisfied requirements (every spec requirement is Satisfied by some phase), **no requirement Satisfied by more than one phase**, no `Gates` cycles, and no phases without tasks.
 6. **Report.** Return the plan fqn (`<project>/plan`) and the next step (the navigator routes structural vs per-phase feedback; implementation proceeds via `apg_plan_done` per task as an assertion — the plan survives until verify).

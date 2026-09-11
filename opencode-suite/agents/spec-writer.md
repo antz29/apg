@@ -122,7 +122,7 @@ the returned `start_line`/`end_line`.
 
 ## The spec graph (node-file model)
 
-You author **nodes** (`apg node add <layer> <type> <name> [--body …] [--property k=v]*`) and **edges** (`apg edge add <kind> <from> <to> [--property k=v]*`):
+You author **nodes** (`apg node add|update|rm <layer> <type> <name> [--body …] [--property k=v]* [--unset-property k]*`; the name is identity and is never updatable) and **edges** (`apg edge add|update|rm <kind> <from> <to> [--property k=v]* [--unset-property k]*`; `update` is properties-only; `add` refuses an existing FQN/edge — no implicit upsert):
 
 - **Requirements** (`apg node add requirements requirement <name> --body … [--property feature=<feature>]`) — FQN `requirements.requirement.<name>`; group by the `feature` metadata. The `contains` edge builds the requirement tree (`requirements.stakeholder.<name>` ⊃ `requirements.requirement.<name>` ⊃ …) — decompose until each requirement is atomic/testable.
 - **Stakeholders/Users** (`apg node add requirements stakeholder|user <name> --body …`) — a Stakeholder is anyone with an interest; a User ⊂ Stakeholder is "a thing that uses the system".

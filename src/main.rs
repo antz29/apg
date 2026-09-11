@@ -146,16 +146,8 @@ const SUITE_TOOLS: &[(&str, &str)] = &[
         include_str!("../opencode-suite/tools/apg_plan_render.ts"),
     ),
     (
-        "apg_plan_init.ts",
-        include_str!("../opencode-suite/tools/apg_plan_init.ts"),
-    ),
-    (
         "apg_plan_add.ts",
         include_str!("../opencode-suite/tools/apg_plan_add.ts"),
-    ),
-    (
-        "apg_plan_link.ts",
-        include_str!("../opencode-suite/tools/apg_plan_link.ts"),
     ),
     (
         "apg_plan_done.ts",
@@ -553,10 +545,12 @@ USAGE:
                                apg/.trans/db.lbug (found by walking up from
                                cwd); CSV by default, --json for JSON rows
   apg plan <sub> …            The phased execution plan (transient, branch-local):
-                              init/add/link/done/undone/note/complete/render/verify
-                              (add authors phases, tasks, and planned
-                              Implementation nodes — module/file/struct/function
-                              marked planned at the FQN where the code lands;
+                              add/update/rm/done/undone/note/complete/render/verify
+                              (add <project> creates the plan, then authors
+                              phases, tasks, and planned Implementation nodes —
+                              module/file/struct/function marked planned at the
+                              FQN where the code lands; update edits in place;
+                              rm refuses while dependents exist unless --force;
                               verify is the pre-merge coherence gate)
   apg project <sub> …         Project contexts (worktrees, git2-operated):
                               start <name> — worktree + branch + branch DB off
@@ -568,9 +562,11 @@ USAGE:
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
   apg node <sub> …            Durable node-file model mutations:
-                              add/rm (type-as-argument, writes apg/layers)
+                              add/update/rm (type-as-argument, writes apg/layers;
+                              the name is identity and is never updatable)
   apg edge <sub> …            Durable node-file model edge mutations:
-                              add/rm (kind/from/to)
+                              add/update/rm (kind/from/to; update is
+                              properties-only)
   apg --version               Print version
   apg --help                  Show this help
 
@@ -1658,6 +1654,58 @@ mod tests {
             !names.contains(&"apg_plan_apply.ts"),
             "apg_plan_apply was renamed verify"
         );
+
+        // R23 strict surface: the retired plan tools are gone from both the
+        // embed list and the installed set.
+        for name in ["apg_plan_init.ts", "apg_plan_link.ts"] {
+            assert!(
+                !names.contains(&name),
+                "retired {name} must not be embedded"
+            );
+            assert!(
+                !dir.join("tools").join(name).exists(),
+                "retired {name} must not install"
+            );
+        }
+
+        // The re-scoped/new wrappers dispatch the add|update|rm surface:
+        // apg_plan_add also creates the plan (no `kind`); node/edge expose
+        // update/rm.
+        for name in ["apg_plan_add.ts", "apg_node.ts", "apg_edge.ts"] {
+            let content = std::fs::read_to_string(dir.join("tools").join(name)).unwrap();
+            assert!(
+                content.contains("\"update\"") && content.contains("\"rm\""),
+                "{name} must expose the update/rm actions"
+            );
+        }
+        let plan_add = std::fs::read_to_string(dir.join("tools").join("apg_plan_add.ts")).unwrap();
+        assert!(
+            plan_add.contains("\"plan\"") && plan_add.contains("--force"),
+            "apg_plan_add.ts is the plan add/update/rm wrapper"
+        );
+
+        // Ripple consumers: no shipped tool, agent prompt, or AGENTS.md text
+        // names a retired verb.
+        let agents_md = include_str!("../AGENTS.md");
+        for banned in ["plan init", "plan link", "apg_plan_init", "apg_plan_link"] {
+            for (name, content) in SUITE_TOOLS {
+                assert!(
+                    !content.contains(banned),
+                    "tool {name} names the retired verb `{banned}`"
+                );
+            }
+            for (name, content) in AGENTS {
+                assert!(
+                    !content.contains(banned),
+                    "agent prompt {name} names the retired verb `{banned}`"
+                );
+            }
+            assert!(
+                !agents_md.contains(banned),
+                "AGENTS.md names the retired verb `{banned}`"
+            );
+        }
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

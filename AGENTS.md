@@ -114,14 +114,23 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   (found by walking up from cwd); CSV with header row by default, `--json` for
   JSON rows.
 - `apg node <sub> …` / `apg edge <sub> …` — the durable mutation surface:
-  `node add|rm <layer> <type> <name>` writes/removes one node file under
-  `apg/layers/` (the file name is the identity); `edge add|rm <kind> <from>
-  <to>` writes **both** endpoint files in one atomic, auto-committed mutation
-  (the out half in the source's file, the matching in half in the target's).
-  Guarded — refuses outside a project worktree.
+  `node add|update|rm <layer> <type> <name>` writes/updates/removes one node
+  file under `apg/layers/` (the file name is the identity; `add` refuses an
+  existing FQN, `update` merges body/properties and is edge-preserving — the
+  name is immutable); `edge add|update|rm <kind> <from> <to>` writes **both**
+  endpoint files in one atomic, auto-committed mutation (the out half in the
+  source's file, the matching in half in the target's; `add` refuses a
+  duplicate, `update` is properties-only). Guarded — refuses outside a project
+  worktree.
 - `apg plan <sub> …` — the phased execution plan (transient, serialized to
-  `apg/.trans/plans/<project>.jsonl`, branch-local): `init`, `add`
-  (phase/task/planned), `link`, `done`/`undone` (assertion-only), `note` (task notes), `complete`
+  `apg/.trans/plans/<project>.jsonl`, branch-local): `add`
+  (`add <project>` creates the plan, refusing when it exists; then
+  `phase`/`task`/`planned` refuse an existing entity), `update` (`<project>
+  [--title] [--strategy]`, or `phase <n>`/`task <phase> <k>`/`planned <fqn>`;
+  edge-preserving, and sets/replaces a phase's `Satisfies`/`Gates` via
+  `--satisfies`/`--prereq`), `rm`
+  (`<project>|phase|task|planned [--force]`; refuses while dependents exist),
+  `done`/`undone` (assertion-only), `note` (task notes), `complete`
   (milestone-only), `render`, `verify` (the pre-merge coherence gate; the old
   `apply` was renamed — the binary applies nothing).
 - `apg project <sub> …` — project contexts (worktrees, git2-operated):
@@ -140,8 +149,9 @@ abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
 `apg_unresolved`, `apg_hunk` — and the project/spec/plan/review suite:
 `apg_project` (start/verify/merge), `apg_node` / `apg_edge` (durable
-node-file mutations), `apg_plan` (+ phases/tasks/verify/init/add/link/done/
-undone/note/complete/render), `apg_review` (+ add/action/resolve/reject).
+node-file add/update/rm mutations), `apg_plan_add` (the plan add/update/rm
+authoring surface), `apg_plan` (+ phases/tasks/verify/done/undone/note/complete/
+render), `apg_review` (+ add/action/resolve/reject).
 Shared plumbing
 lives in `~/.opencode/lib/apg.ts`
 (root discovery, `apg query`/`apg project`/`apg node`/`apg edge`/`apg plan`/`apg review` subprocess,

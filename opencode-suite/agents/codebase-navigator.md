@@ -210,7 +210,7 @@ Authored edge kinds (SPEC §3.3): `contains`, `drives`, `realised-by`,
 | Plan / PlanPhase / Task | fqn, title/strategy/number/deliverable, tier/status | The transient plan (`<project>/plan…`) |
 | Feedback          | fqn, body, status, disposition          | A review item (open/actioned/resolved) — transient |
 
-Authoring is via the `apg node add|rm` / `apg edge add|rm` mutation surface
+Authoring is via the `apg node add|update|rm` / `apg edge add|update|rm` mutation surface
 (durable, auto-committed on the project branch) and the `apg plan …` /
 `apg review …` CLI (transient). A requirement is `delivered` when review
 concludes the spine reaches it — satisfaction is by review, not asserted by
@@ -355,7 +355,7 @@ subagents** via the `task` tool — you never author a plan inline. The flow has
 two holistic gates, with a stage sequence, parallel spawning, scoped routing,
 and a termination decision:
 
-1. **Breakdown** (single `plan-writer`): `apg plan init` + every `PlanPhase`
+1. **Breakdown** (single `plan-writer`): `apg plan add` + every `PlanPhase`
    (title, deliverable) + `Satisfies` + `Gates`/prereq + the **planned
    Implementation nodes** the delta adds. **Skeleton only — no tasks yet.**
 2. **Structural holistic review #1** (single `plan-review`): the breakdown

@@ -18,7 +18,7 @@ export default tool({
     const where = args.project ? ` WHERE p.fqn = ${lit(`${args.project}/plan`)}` : ""
     const plans = csvToRows(await runCypher(context, `MATCH (p:Plan)${where} RETURN p.fqn, p.title, p.strategy ORDER BY p.fqn`, args.directory))
     if (plans.length <= 1) {
-      return "No plans found. Author one with `apg plan init <project> --strategy ...` (or the apg_plan_init tool)."
+      return "No plans found. Author one with `apg plan add <project> --strategy ...` (or the apg_plan_add tool)."
     }
 
     const phases = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase) RETURN pp.fqn, pp.number, pp.title, pp.deliverable", args.directory))
