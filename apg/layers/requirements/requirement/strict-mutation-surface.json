@@ -111,6 +111,11 @@
       "kind": "contains",
       "target": "requirements.requirement.plan-update-title-strategy",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.coverage-spine-scoped",
+      "properties": {}
     }
   ],
   "in": [
