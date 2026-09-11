@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "no-internals-in-prose",
+  "body": "Agent prompts stop mentioning graph-state filesystem paths (`apg/.trans/**`, `apg/layers/**`) entirely. Agents are told to use the apg tools as the only interface to the graph — no \"the database lives at …\" prose, no filesystem paths for graph state. (AGENTS.md is repo-internal docs and out of scope.)",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
