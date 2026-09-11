@@ -4,7 +4,13 @@
   "name": "plan-store-atomic-rewrite",
   "body": "The atomic plan-store rewrite: the transient store is a single `apg/.trans/plans/<project>.jsonl`, so `plan rm --force` and every plan mutation go through `write_through`, which rewrites the whole-record set in one act. A cascade never leaves a half-deleted plan (no orphan task/phase/edge records); a mid-cascade error leaves the original file intact.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "apg.plan_cmd.write_through",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
