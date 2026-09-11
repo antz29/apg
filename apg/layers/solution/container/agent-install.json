@@ -38,6 +38,11 @@
       "kind": "realised-by",
       "source": "domain.entity.failure-report",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.embedded-template-anchor",
+      "properties": {}
     }
   ]
 }
