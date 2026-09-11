@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "atomic-plan-rm",
+  "body": "Atomic plan removal: the transient plan store is a single `apg/.trans/plans/<project>.jsonl`, so `apg plan rm <project> --force` (and every plan mutation) must be a whole-record rewrite through `write_through`. A cascade must never leave a half-deleted plan (no task without its phase, no edge to a removed record); a failure mid-removal leaves the original file exactly intact.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
