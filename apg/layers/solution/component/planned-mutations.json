@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "planned-mutations",
+  "body": "The planned-node arms. `add` refuses when the planned FQN is already declared (dropping the `remove_node` upsert in `plan_add_planned_at`). `update` adjusts name/parent and repoints the parent `Contains` edge. `rm` refuses (without `--force`) when a `creates` task targets the planned FQN.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
