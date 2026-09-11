@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "domain.value.edge-identity",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.property-map",
+      "properties": {}
     }
   ],
   "in": []
