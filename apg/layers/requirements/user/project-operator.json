@@ -4,6 +4,12 @@
   "name": "project-operator",
   "body": "A thing that uses the system: the CLI user (human or agent) invoking `apg project` subcommands. Uses start/merge and the new `delete`; delete is the discard act for abandoned (never-merged) projects.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.worktree-cleanup",
+      "properties": {}
+    }
+  ],
   "in": []
 }
