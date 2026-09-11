@@ -93,6 +93,37 @@ fn canonical(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
+/// Canonicalize a path whose leaf may no longer exist (a staged deletion):
+/// canonicalize the deepest existing ancestor and re-append the missing
+/// components. Falls back to the lexical path when nothing resolves. Needed
+/// because `std::fs::canonicalize` follows symlinks only through existing
+/// components — a removed file would otherwise compare un-canonicalized
+/// against the canonical workdir (the `/var` → `/private/var` macOS alias).
+fn canonical_allow_missing(path: &Path) -> PathBuf {
+    if let Ok(p) = std::fs::canonicalize(path) {
+        return p;
+    }
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = path.to_path_buf();
+    loop {
+        if let Ok(base) = std::fs::canonicalize(&cur) {
+            let mut out = base;
+            for name in tail.iter().rev() {
+                out.push(name);
+            }
+            return out;
+        }
+        let Some(name) = cur.file_name().map(|n| n.to_os_string()) else {
+            return path.to_path_buf();
+        };
+        tail.push(name);
+        match cur.parent() {
+            Some(parent) if parent != cur => cur = parent.to_path_buf(),
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
 /// The head commit sha of the repo, or `None` when HEAD is unborn or missing.
 fn head_sha(repo: &git2::Repository) -> Option<String> {
     let head = repo.head().ok()?;
@@ -540,7 +571,7 @@ fn repo_rel(apg_root: &Path, path: &Path) -> anyhow::Result<PathBuf> {
     let workdir = repo
         .workdir()
         .ok_or_else(|| anyhow::anyhow!("repository has no working directory"))?;
-    let path = canonical(path);
+    let path = canonical_allow_missing(path);
     let workdir = canonical(workdir);
     path.strip_prefix(&workdir)
         .map(|r| r.to_path_buf())
@@ -553,19 +584,31 @@ fn repo_rel(apg_root: &Path, path: &Path) -> anyhow::Result<PathBuf> {
         })
 }
 
-/// Commits all `paths` in one commit on the current branch of the checkout
-/// containing `apg_root` with a caller-supplied message (git2 only — the git
-/// CLI is never shelled out to). The multi-file generalization of
-/// [`commit_file`]: every path is staged, the trees are compared, and a single
+/// Commits all `writes` (created/modified paths) and `deletes` (removed
+/// paths) in one commit on the current branch of the checkout containing
+/// `apg_root` with a caller-supplied message (git2 only — the git CLI is never
+/// shelled out to). The multi-file generalization of [`commit_file`]: writes
+/// are staged with `index.add_path`, deletes with `index.remove_path`
+/// (`add_path` stats the file and cannot stage a deletion — a removed path
+/// fails with a libgit2 `NotFound`), the trees are compared, and a single
 /// commit is created when anything changed.
 ///
 /// Returns `Ok(Some(sha))` with the new HEAD sha when a commit was created, or
 /// `Ok(None)` when the staged tree already matches HEAD (nothing to commit —
 /// e.g. an idempotent re-write). Errors when any path sits outside the
 /// checkout or git refuses the commit.
-pub fn commit_files(apg_root: &Path, paths: &[&Path], msg: &str) -> anyhow::Result<Option<String>> {
+pub fn commit_files(
+    apg_root: &Path,
+    writes: &[&Path],
+    deletes: &[&Path],
+    msg: &str,
+) -> anyhow::Result<Option<String>> {
     let repo = discover_repo(apg_root)?;
-    let rels: Vec<PathBuf> = paths
+    let write_rels: Vec<PathBuf> = writes
+        .iter()
+        .map(|p| repo_rel(apg_root, p))
+        .collect::<anyhow::Result<_>>()?;
+    let delete_rels: Vec<PathBuf> = deletes
         .iter()
         .map(|p| repo_rel(apg_root, p))
         .collect::<anyhow::Result<_>>()?;
@@ -576,11 +619,17 @@ pub fn commit_files(apg_root: &Path, paths: &[&Path], msg: &str) -> anyhow::Resu
         .peel_to_commit()
         .map_err(|e| anyhow::anyhow!("cannot commit: {e}"))?;
 
-    // Stage every path and compare trees: an unchanged tree means nothing to
-    // commit (an idempotent mutation re-wrote identical content).
+    // Stage every write and delete and compare trees: an unchanged tree means
+    // nothing to commit (an idempotent mutation re-wrote identical content).
     let mut index = repo.index()?;
-    for rel in &rels {
+    for rel in &write_rels {
         index.add_path(rel)?;
+    }
+    for rel in &delete_rels {
+        // Drop the removed path from the index so `write_tree` records the
+        // deletion. A path that is not in the index has nothing to stage
+        // (e.g. an untracked file already gone from disk) — tolerate it.
+        let _ = index.remove_path(rel);
     }
     index.write()?;
     let tree_id = index.write_tree()?;
@@ -597,7 +646,7 @@ pub fn commit_files(apg_root: &Path, paths: &[&Path], msg: &str) -> anyhow::Resu
 
 /// `commit_files` for a single file — the single-file commit path.
 pub fn commit_file(apg_root: &Path, path: &Path, msg: &str) -> anyhow::Result<Option<String>> {
-    commit_files(apg_root, &[path], msg)
+    commit_files(apg_root, &[path], &[], msg)
 }
 
 /// The standard graph-mutation commit message for a set of touched paths:
@@ -1246,6 +1295,7 @@ mod tests {
         let Some(new_sha) = commit_files(
             &wt.join("apg"),
             &[a.as_path(), b.as_path()],
+            &[],
             "apg: graph mutation (apg/layers/...)",
         )
         .unwrap() else {
@@ -1272,6 +1322,50 @@ mod tests {
             diff.deltas().len(),
             2,
             "commit_files must commit all paths in one commit"
+        );
+        testutil::remove(&repo);
+    }
+
+    /// `commit_files` stages a removed path as a deletion (`remove_path`), not
+    /// an `add_path` — the latter stats the gone file and fails with a libgit2
+    /// NotFound, which is why a `node rm` used to roll back inside a real repo.
+    #[test]
+    fn commit_files_stages_a_deletion() {
+        let repo = fixture_repo("commitfiles-delete");
+        repo.start_project("foo");
+        let wt = repo.project_worktree_dir("foo");
+        let rel = "apg/layers/requirements/requirement/gone.json";
+        let path = wt.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "gone\n").unwrap();
+        let sha0 = wt_commit(&wt, &path, "seed");
+        // Remove it from disk and commit the deletion.
+        std::fs::remove_file(&path).unwrap();
+        let Some(new_sha) =
+            commit_files(&wt.join("apg"), &[], &[path.as_path()], "apg: rm").unwrap()
+        else {
+            panic!("expected a deletion commit");
+        };
+        assert_ne!(sha0, new_sha);
+        let wt_repo = git2::Repository::open(&wt).unwrap();
+        let head = wt_repo.head().unwrap().peel_to_commit().unwrap();
+        let parent = head.parent(0).unwrap();
+        let diff = wt_repo
+            .diff_tree_to_tree(
+                Some(&parent.tree().unwrap()),
+                Some(&head.tree().unwrap()),
+                None,
+            )
+            .unwrap();
+        let deleted: Vec<&str> = diff
+            .deltas()
+            .filter(|d| d.status() == git2::Delta::Deleted)
+            .map(|d| d.old_file().path().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(
+            deleted,
+            vec![rel],
+            "the removed path must be staged as a deletion"
         );
         testutil::remove(&repo);
     }

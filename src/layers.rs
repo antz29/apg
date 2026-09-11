@@ -1060,6 +1060,69 @@ pub fn read_node_file(
     serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))
 }
 
+/// The strict-add existence gate shared by the mutation commands (SPEC §1
+/// "no implicit upsert"): refuse an `add` whose target already exists rather
+/// than silently replacing the existing file (which would discard its
+/// incident edges). `entity` names the existing identity; `update`/`rm` name
+/// the correct follow-up commands, so the refusal tells the caller how to
+/// proceed. `exists` is supplied by the caller so the same gate serves both
+/// the node-FQN check and the edge-triple duplicate check.
+pub fn refuse_if_present(exists: bool, entity: &str, update: &str, rm: &str) -> anyhow::Result<()> {
+    if exists {
+        anyhow::bail!(
+            "`{entity}` already exists — use `{update}` to change it or `{rm}` to remove it"
+        );
+    }
+    Ok(())
+}
+
+/// MERGE a property edit over `base` (SPEC §4.1 property-map): the keys in
+/// `set` overwrite only what they carry, the keys in `unset` are deleted, and
+/// every other key is preserved — omitting `unset` never drops a key; there is
+/// no implicit unset. The shared merge helper behind [`update_node_file`] and
+/// the `node update` / `edge update` command surfaces.
+pub fn merge_properties(
+    base: &NodeProperties,
+    set: &BTreeMap<String, String>,
+    unset: &BTreeSet<String>,
+) -> NodeProperties {
+    let mut merged = base.clone();
+    for (k, v) in set {
+        merged.insert(k.clone(), v.clone());
+    }
+    for k in unset {
+        merged.remove(k);
+    }
+    merged
+}
+
+/// Compute the edge-preserving in-place update of a node file (SPEC §4.1):
+/// read `layer.type.name`, refuse when it is absent, set `body` when supplied,
+/// MERGE `set`/`unset` over its properties via [`merge_properties`], and leave
+/// the node's immutable identity (`layer`/`type`/`name`) and every out/in edge
+/// untouched. Pure — the caller persists the returned node through the guarded
+/// [`write_project`] funnel.
+pub fn update_node_file(
+    apg_root: &Path,
+    layer: Layer,
+    node_type: &str,
+    name: &str,
+    body: Option<&str>,
+    set: &BTreeMap<String, String>,
+    unset: &BTreeSet<String>,
+) -> anyhow::Result<NodeFile> {
+    let f = fqn(layer, node_type, name);
+    if !node_file_path(apg_root, layer, node_type, name).exists() {
+        anyhow::bail!("node `{f}` does not exist — use `apg node add` to create it");
+    }
+    let mut node = read_node_file(apg_root, layer, node_type, name)?;
+    if let Some(body) = body {
+        node.body = body.to_string();
+    }
+    node.properties = merge_properties(&node.properties, set, unset);
+    Ok(node)
+}
+
 // ---------------------------------------------------------------------------
 // SPEC §4.1 — in/out edge pairing (phase-3 task-9)
 // ---------------------------------------------------------------------------
@@ -1376,7 +1439,7 @@ pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()>
     if git::in_repo(apg_root) {
         let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
         let msg = git::graph_mutation_message(apg_root, &refs);
-        match git::commit_files(apg_root, &refs, &msg) {
+        match git::commit_files(apg_root, &refs, &[], &msg) {
             Ok(Some(_)) => {
                 // Re-anchor the staleness gate's recorded scan_meta (mirrors
                 // the JSONL funnel's auto-commit — DB and tree in sync by
@@ -1931,9 +1994,15 @@ fn write_through_with_deletes(
     // Commit once. Outside a git repo there is no commit; a commit failure
     // rolls back so a failed mutation never leaves mismatched files.
     if git::in_repo(apg_root) {
-        let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
-        let msg = git::graph_mutation_message(apg_root, &refs);
-        match git::commit_files(apg_root, &refs, &msg) {
+        let write_refs: Vec<&Path> = write_paths.iter().map(|p| p.as_path()).collect();
+        let delete_refs: Vec<&Path> = deletes.iter().map(|p| p.as_path()).collect();
+        let all_refs: Vec<&Path> = write_refs
+            .iter()
+            .chain(delete_refs.iter())
+            .copied()
+            .collect();
+        let msg = git::graph_mutation_message(apg_root, &all_refs);
+        match git::commit_files(apg_root, &write_refs, &delete_refs, &msg) {
             Ok(Some(_)) => {
                 // Re-anchor the staleness gate's recorded scan_meta (mirrors
                 // the JSONL funnel's auto-commit: DB and tree in sync by
@@ -3834,6 +3903,109 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The strict add/update primitives: `refuse_if_present` refuses a present
+    /// FQN and allows an absent one; `update_node_file` is edge-preserving — it
+    /// merges body/properties (set + explicit unset) while keeping the exact
+    /// count/content of the node's out/in edges — and refuses an absent node.
+    #[test]
+    fn update_node_file_preserves_edges_and_merges_body_and_properties() {
+        let root = temp_root("node-update");
+        let (mut a, b) = authored_pair("a", "b");
+        a.properties.insert("a".to_string(), "0".to_string());
+        a.properties.insert("b".to_string(), "2".to_string());
+        write_node(&root, &a).unwrap();
+        write_node(&root, &b).unwrap();
+
+        // refuse_if_present: a present FQN is refused, naming update/rm.
+        let a_path = node_file_path(&root, Layer::Requirements, "requirement", "a");
+        let err = refuse_if_present(
+            a_path.exists(),
+            &fqn(Layer::Requirements, "requirement", "a"),
+            "apg node update",
+            "apg node rm",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("already exists"), "{err}");
+        assert!(err.contains("apg node update"), "{err}");
+        assert!(err.contains("apg node rm"), "{err}");
+        // An absent FQN passes the same gate.
+        assert!(
+            refuse_if_present(
+                node_file_path(&root, Layer::Requirements, "requirement", "ghost").exists(),
+                "requirements.requirement.ghost",
+                "apg node update",
+                "apg node rm",
+            )
+            .is_ok()
+        );
+
+        // update_node_file: body set, properties MERGE ({a:0,b:2} ->
+        // --property a=1 -> {a:1,b:2} -> --unset-property b -> {a:1}), and the
+        // exact out/in edge content is untouched.
+        let set = BTreeMap::from([("a".to_string(), "1".to_string())]);
+        let updated = update_node_file(
+            &root,
+            Layer::Requirements,
+            "requirement",
+            "a",
+            Some("new body"),
+            &set,
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        assert_eq!(updated.body, "new body");
+        assert_eq!(
+            updated.properties,
+            BTreeMap::from([
+                ("a".to_string(), "1".to_string()),
+                ("b".to_string(), "2".to_string()),
+            ]),
+            "omitting --unset-property must never drop a key"
+        );
+        assert_eq!(updated.layer, "requirements");
+        assert_eq!(updated.node_type, "requirement");
+        assert_eq!(updated.name, "a");
+        assert_eq!(updated.out, a.out, "out-edges must be preserved");
+        assert_eq!(updated.in_edges, a.in_edges, "in-edges must be preserved");
+
+        // `update_node_file` is pure: persist the merged node before the next
+        // edit reads it back off disk.
+        write_node(&root, &updated).unwrap();
+        let unset = BTreeSet::from(["b".to_string()]);
+        let updated = update_node_file(
+            &root,
+            Layer::Requirements,
+            "requirement",
+            "a",
+            None,
+            &BTreeMap::new(),
+            &unset,
+        )
+        .unwrap();
+        assert_eq!(
+            updated.properties,
+            BTreeMap::from([("a".to_string(), "1".to_string())]),
+            "an explicit unset removes exactly the named key"
+        );
+        assert_eq!(updated.body, "new body", "omitted --body is preserved");
+
+        // An absent node is refused before any update is computed.
+        let err = update_node_file(
+            &root,
+            Layer::Requirements,
+            "requirement",
+            "ghost",
+            None,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("does not exist"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     // --- Tree ingestion (phase-3 task-15) ---
 
     /// Write a set of node files under `<root>/layers/…` at their derived
@@ -4212,31 +4384,74 @@ mod tests {
 
     /// The delete write-through removes the node file AND rewrites the
     /// referencing file (incident edge dropped), leaving a pairing-consistent
-    /// set — the §4.1 atomic delete.
+    /// set — the §4.1 atomic delete. Runs in a REAL git repo, because the
+    /// commit path is the whole point: a removed path must be staged as a
+    /// deletion (`index.remove_path`), not `add_path`-ed, which stats the gone
+    /// file and fails with a libgit2 NotFound (the latent bug the repo-less
+    /// test could never see).
     #[test]
     fn write_through_with_deletes_removes_file_and_rewrites_referencing() {
-        let root = temp_root("delete");
-        let mut a = node("requirements", "requirement", "a");
-        a.out
-            .push(out_edge("contains", "requirements.requirement.b"));
-        let mut b = node("requirements", "requirement", "b");
-        b.in_edges
-            .push(in_edge("contains", "requirements.requirement.a"));
-        write_through(&root, &[a.clone(), b.clone()]).unwrap();
+        // A real project worktree: `write_through` commits on the branch.
+        let repo = Repo::new("layers-delete-commit");
+        let wt = repo.start_project("foo");
+        let apg_root = wt.join(crate::specs::LAYOUT);
+        let wt_sha = |wt: &Path| {
+            git2::Repository::open(wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string()
+        };
 
+        // Author A --contains--> B (both halves) and commit both files once.
+        let (a, b) = authored_pair("a", "b");
+        write_through(&apg_root, &[a.clone(), b.clone()]).unwrap();
+        let first = wt_sha(&wt);
+
+        // The delete: A's out-edge is stripped and B's file is removed — one
+        // mutation, committed once.
         let mut a2 = a.clone();
         a2.out.clear();
-        let b_path = node_file_path(&root, Layer::Requirements, "requirement", "b");
-        write_through_with_deletes(&root, &[a2], std::slice::from_ref(&b_path)).unwrap();
+        let b_path = node_file_path(&apg_root, Layer::Requirements, "requirement", "b");
+        write_through_with_deletes(&apg_root, &[a2], std::slice::from_ref(&b_path)).unwrap();
 
         assert!(!b_path.exists(), "the deleted node file must be gone");
-        let a_read = read_node_file(&root, "requirements", "requirement", "a");
+        let a_read = read_node_file(&apg_root, "requirements", "requirement", "a");
         assert!(
             a_read.out.is_empty(),
             "the referencing file must drop the incident edge"
         );
         assert!(check_edge_pairing(&[a_read]).is_ok());
-        let _ = std::fs::remove_dir_all(&root);
+
+        // Exactly one commit landed, and its tree delta stages the deletion
+        // (Deleted) plus the rewrite (Modified) — no NotFound rollback.
+        let wt_repo = git2::Repository::open(&wt).unwrap();
+        let head = wt_repo.head().unwrap().peel_to_commit().unwrap();
+        let second = head.id().to_string();
+        assert_ne!(second, first, "the delete must commit");
+        assert_eq!(
+            head.parent(0).unwrap().id().to_string(),
+            first,
+            "the delete must be exactly one commit ahead"
+        );
+        let parent_tree = head.parent(0).unwrap().tree().unwrap();
+        let diff = wt_repo
+            .diff_tree_to_tree(Some(&parent_tree), Some(&head.tree().unwrap()), None)
+            .unwrap();
+        let deleted: Vec<&str> = diff
+            .deltas()
+            .filter(|d| d.status() == git2::Delta::Deleted)
+            .map(|d| d.old_file().path().unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(
+            deleted,
+            vec!["apg/layers/requirements/requirement/b.json"],
+            "the removed node file must be staged as a deletion"
+        );
+        testutil::remove(&repo);
     }
 
     // --- Scan wiring through the hermetic fixture (phase-3 task-14/17) ---

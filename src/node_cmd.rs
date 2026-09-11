@@ -4,7 +4,7 @@
 //! write → DB re-merge). These commands never touch the legacy `apg/specs/`,
 //! `_invariants.jsonl`, or `apg/notes/` paths.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::artifacts::{ParsedArgs, parse_args};
@@ -28,6 +28,20 @@ fn parse_properties(p: &ParsedArgs) -> BTreeMap<String, String> {
     props
 }
 
+/// `--unset-property k` (repeatable) → the property keys to delete.
+fn parse_unset_properties(p: &ParsedArgs) -> BTreeSet<String> {
+    p.all("unset-property").into_iter().collect()
+}
+
+/// The shared property-edit helper for the update surfaces: MERGE
+/// `--property k=v` (overwrite only the passed keys) and `--unset-property k`
+/// (delete exactly the named keys) over `base`, preserving every other key.
+/// Omitting `--unset-property` never drops a key. Reused by `node update` and
+/// `edge update`.
+fn edit_properties(base: &BTreeMap<String, String>, p: &ParsedArgs) -> BTreeMap<String, String> {
+    layers::merge_properties(base, &parse_properties(p), &parse_unset_properties(p))
+}
+
 /// Resolve a layer dir name to its [`Layer`] (closed catalog).
 fn resolve_layer(dir: &str) -> anyhow::Result<Layer> {
     Layer::ALL
@@ -39,35 +53,47 @@ fn resolve_layer(dir: &str) -> anyhow::Result<Layer> {
 
 pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg node <add|rm> …");
+        anyhow::bail!("usage: apg node <add|update|rm> …");
     };
+    let apg_root = require_apg_root()?;
     match sub {
-        "add" => node_add(&args[1..]),
-        "rm" => node_rm(&args[1..]),
+        "add" => node_add(&apg_root, &args[1..]),
+        "update" => node_update(&apg_root, &args[1..]),
+        "rm" => node_rm(&apg_root, &args[1..]),
         other => anyhow::bail!("unknown apg node subcommand: {other}"),
     }
 }
 
 pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg edge <add|rm> …");
+        anyhow::bail!("usage: apg edge <add|update|rm> …");
     };
+    let apg_root = require_apg_root()?;
     match sub {
-        "add" => edge_add(&args[1..]),
-        "rm" => edge_rm(&args[1..]),
+        "add" => edge_add(&apg_root, &args[1..]),
+        "update" => edge_update(&apg_root, &args[1..]),
+        "rm" => edge_rm(&apg_root, &args[1..]),
         other => anyhow::bail!("unknown apg edge subcommand: {other}"),
     }
 }
 
-/// `apg node add <layer> <type> <name> [--body B] [--property k=v]*`.
-fn node_add(args: &[String]) -> anyhow::Result<()> {
+/// `apg node add <layer> <type> <name> [--body B] [--property k=v]*` — refuses
+/// when the FQN already exists (existence is never an implicit upsert; a
+/// re-add full-replaces the file and drops its edges).
+fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
         anyhow::bail!("usage: apg node add <layer> <type> <name> [--body …] [--property k=v]*");
     }
-    let apg_root = require_apg_root()?;
     let layer = resolve_layer(&pos[0])?;
+    let f = fqn(layer, &pos[1], &pos[2]);
+    layers::refuse_if_present(
+        layers::node_file_path(apg_root, layer, &pos[1], &pos[2]).exists(),
+        &f,
+        "apg node update",
+        "apg node rm",
+    )?;
     let node = NodeFile {
         layer: layer.layer_dir().to_string(),
         node_type: pos[1].clone(),
@@ -77,27 +103,53 @@ fn node_add(args: &[String]) -> anyhow::Result<()> {
         out: Vec::new(),
         in_edges: Vec::new(),
     };
-    layers::write_project(&apg_root, &[node], &[])?;
-    let f = fqn(layer, &pos[1], &pos[2]);
+    layers::write_project(apg_root, &[node], &[])?;
     println!("Added node {f}");
+    Ok(())
+}
+
+/// `apg node update <layer> <type> <name> [--body B] [--property k=v]*
+/// [--unset-property k]*` — body/properties only, edge-preserving: the
+/// identity (`layer`/`type`/`name`) and every out/in edge are immutable;
+/// properties MERGE with an explicit unset. Refuses an absent node.
+fn node_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+    let p = parse_args(args);
+    let pos = &p.positional;
+    if pos.len() < 3 {
+        anyhow::bail!(
+            "usage: apg node update <layer> <type> <name> [--body …] [--property k=v]* [--unset-property k]*"
+        );
+    }
+    let layer = resolve_layer(&pos[0])?;
+    let body = p.get("body");
+    let updated = layers::update_node_file(
+        apg_root,
+        layer,
+        &pos[1],
+        &pos[2],
+        body.as_deref(),
+        &parse_properties(&p),
+        &parse_unset_properties(&p),
+    )?;
+    layers::write_project(apg_root, std::slice::from_ref(&updated), &[])?;
+    println!("Updated node {}", fqn(layer, &pos[1], &pos[2]));
     Ok(())
 }
 
 /// `apg node rm <layer> <type> <name>` — remove the node file and rewrite every
 /// file that references it (drop the incident edges), one atomic mutation.
-fn node_rm(args: &[String]) -> anyhow::Result<()> {
+fn node_rm(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
         anyhow::bail!("usage: apg node rm <layer> <type> <name>");
     }
-    let apg_root = require_apg_root()?;
     let layer = resolve_layer(&pos[0])?;
     let f = fqn(layer, &pos[1], &pos[2]);
 
-    let mut deletes = vec![layers::node_file_path(&apg_root, layer, &pos[1], &pos[2])];
+    let mut deletes = vec![layers::node_file_path(apg_root, layer, &pos[1], &pos[2])];
     let mut writes: Vec<NodeFile> = Vec::new();
-    for node in layers::read_existing_nodes(&apg_root)? {
+    for node in layers::read_existing_nodes(apg_root)? {
         let node_fqn = fqn(resolve_layer(&node.layer)?, &node.node_type, &node.name);
         if node_fqn == f {
             continue; // the deleted node itself — dropped, not rewritten.
@@ -120,7 +172,7 @@ fn node_rm(args: &[String]) -> anyhow::Result<()> {
     }
 
     let deletes: Vec<PathBuf> = std::mem::take(&mut deletes);
-    layers::write_project(&apg_root, &writes, &deletes)?;
+    layers::write_project(apg_root, &writes, &deletes)?;
     println!("Removed node {f}");
     Ok(())
 }
@@ -138,20 +190,30 @@ fn read_endpoint(apg_root: &Path, f: &str) -> anyhow::Result<Option<NodeFile>> {
 
 /// `apg edge add <kind> <from> <to> [--property k=v]*` — add the out-edge to the
 /// source's file and the matching in-edge to the target's file (both halves).
-fn edge_add(args: &[String]) -> anyhow::Result<()> {
+/// Refuses a duplicate `(kind, from, to)` on the source's out-half (the edge is
+/// identified by that triple; re-adding duplicates both halves).
+fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
         anyhow::bail!("usage: apg edge add <kind> <from> <to> [--property k=v]*");
     }
-    let apg_root = require_apg_root()?;
     let kind = pos[0].as_str();
     let from = pos[1].as_str();
     let to = pos[2].as_str();
     let props = parse_properties(&p);
 
     let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
-    let mut source = layers::read_node_file(&apg_root, src_layer, &src_type, &src_name)?;
+    let mut source = layers::read_node_file(apg_root, src_layer, &src_type, &src_name)?;
+    layers::refuse_if_present(
+        source
+            .out
+            .iter()
+            .any(|oe| oe.kind == kind && oe.target == to),
+        &format!("edge {kind} {from} -> {to}"),
+        "apg edge update",
+        "apg edge rm",
+    )?;
     source.out.push(OutEdge {
         kind: kind.to_string(),
         target: to.to_string(),
@@ -159,7 +221,7 @@ fn edge_add(args: &[String]) -> anyhow::Result<()> {
     });
 
     let mut writes = vec![source];
-    if let Some(mut target) = read_endpoint(&apg_root, to)? {
+    if let Some(mut target) = read_endpoint(apg_root, to)? {
         target.in_edges.push(InEdge {
             kind: kind.to_string(),
             source: from.to_string(),
@@ -168,39 +230,90 @@ fn edge_add(args: &[String]) -> anyhow::Result<()> {
         writes.push(target);
     }
 
-    layers::write_project(&apg_root, &writes, &[])?;
+    layers::write_project(apg_root, &writes, &[])?;
     println!("Added edge {kind} {from} -> {to}");
     Ok(())
 }
 
-/// `apg edge rm <kind> <from> <to>` — drop the out-edge from the source and the
-/// in-edge from the target, one atomic mutation.
-fn edge_rm(args: &[String]) -> anyhow::Result<()> {
+/// `apg edge update <kind> <from> <to> --property k=v [--unset-property k]*` —
+/// properties only: `kind`/`from`/`to` are immutable identity. Rewrites the
+/// source out-half and the target in-half to the same MERGEd property map in
+/// one atomic mutation. Refuses an absent edge.
+fn edge_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
-        anyhow::bail!("usage: apg edge rm <kind> <from> <to>");
+        anyhow::bail!(
+            "usage: apg edge update <kind> <from> <to> [--property k=v]* [--unset-property k]*"
+        );
     }
-    let apg_root = require_apg_root()?;
     let kind = pos[0].as_str();
     let from = pos[1].as_str();
     let to = pos[2].as_str();
 
     let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
-    let mut source = layers::read_node_file(&apg_root, src_layer, &src_type, &src_name)?;
+    let mut source = layers::read_node_file(apg_root, src_layer, &src_type, &src_name)?;
+    let idx = source
+        .out
+        .iter()
+        .position(|oe| oe.kind == kind && oe.target == to)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "edge {kind} {from} -> {to} does not exist — use `apg edge add` to create it"
+            )
+        })?;
+    // MERGE the passed keys over the edge's current out-half properties; both
+    // halves must end up with the identical map (pairing requires it).
+    let merged = edit_properties(&source.out[idx].properties, &p);
+    source.out[idx].properties = merged.clone();
+
+    let mut writes = vec![source];
+    if let Some(mut target) = read_endpoint(apg_root, to)? {
+        let Some(in_edge) = target
+            .in_edges
+            .iter_mut()
+            .find(|ie| ie.kind == kind && ie.source == from)
+        else {
+            anyhow::bail!(
+                "edge {kind} {from} -> {to}: the target `{to}` has no matching in-half — the store is not pairing-consistent"
+            );
+        };
+        in_edge.properties = merged;
+        writes.push(target);
+    }
+
+    layers::write_project(apg_root, &writes, &[])?;
+    println!("Updated edge {kind} {from} -> {to}");
+    Ok(())
+}
+
+/// `apg edge rm <kind> <from> <to>` — drop the out-edge from the source and the
+/// in-edge from the target, one atomic mutation.
+fn edge_rm(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+    let p = parse_args(args);
+    let pos = &p.positional;
+    if pos.len() < 3 {
+        anyhow::bail!("usage: apg edge rm <kind> <from> <to>");
+    }
+    let kind = pos[0].as_str();
+    let from = pos[1].as_str();
+    let to = pos[2].as_str();
+
+    let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
+    let mut source = layers::read_node_file(apg_root, src_layer, &src_type, &src_name)?;
     source
         .out
         .retain(|oe| !(oe.kind == kind && oe.target == to));
 
     let mut writes = vec![source];
-    if let Some(mut target) = read_endpoint(&apg_root, to)? {
+    if let Some(mut target) = read_endpoint(apg_root, to)? {
         target
             .in_edges
             .retain(|ie| !(ie.kind == kind && ie.source == from));
         writes.push(target);
     }
 
-    layers::write_project(&apg_root, &writes, &[])?;
+    layers::write_project(apg_root, &writes, &[])?;
     println!("Removed edge {kind} {from} -> {to}");
     Ok(())
 }
@@ -645,6 +758,237 @@ mod tests {
 
         // The store still pairs cleanly throughout.
         layers::check_edge_pairing(&layers::read_existing_nodes(&wt_apg).unwrap()).unwrap();
+        testutil::remove(&repo);
+    }
+
+    /// The CLI-args shape the command arms take (positionals + repeatable
+    /// flags).
+    fn av(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The shared property-edit helper MERGEs and unsets: `{a:0,b:2}` with
+    /// `--property a=1` yields `{a:1,b:2}`; adding `--unset-property b` yields
+    /// `{a:1}`; omitting `--unset-property` never drops a key. `edge_update`
+    /// reuses this helper.
+    #[test]
+    fn edit_properties_merges_and_unsets() {
+        let base = BTreeMap::from([
+            ("a".to_string(), "0".to_string()),
+            ("b".to_string(), "2".to_string()),
+        ]);
+        let set_only = edit_properties(&base, &parse_args(&av(&["--property", "a=1"])));
+        assert_eq!(
+            set_only,
+            BTreeMap::from([
+                ("a".to_string(), "1".to_string()),
+                ("b".to_string(), "2".to_string()),
+            ]),
+            "MERGE overwrites only the passed key"
+        );
+        let with_unset = edit_properties(
+            &base,
+            &parse_args(&av(&["--property", "a=1", "--unset-property", "b"])),
+        );
+        assert_eq!(
+            with_unset,
+            BTreeMap::from([("a".to_string(), "1".to_string())]),
+            "an explicit unset removes exactly the named key"
+        );
+        // Omitting --unset-property leaves every existing key alone.
+        assert_eq!(
+            edit_properties(&base, &parse_args(&av(&[]))),
+            base,
+            "no edit must not drop a key"
+        );
+    }
+
+    /// Strict node surface against a real repo/branch DB: `node add` refuses an
+    /// existing FQN (naming update/rm) and writes nothing; `node update` is
+    /// edge-preserving (body/properties merge, incident edges identical) and is
+    /// refused when the node is absent.
+    #[test]
+    fn node_add_refuses_existing_and_node_update_preserves_edges() {
+        let (wt_apg, repo, _wt) = mutation_fixture("node-strict");
+        // Author r1 --depends-on--> r2 through the real CLI arms.
+        node_add(&wt_apg, &av(&["requirements", "requirement", "r1"])).unwrap();
+        node_add(&wt_apg, &av(&["requirements", "requirement", "r2"])).unwrap();
+        edge_add(
+            &wt_apg,
+            &av(&[
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ]),
+        )
+        .unwrap();
+        let before =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        assert_eq!(before.out.len(), 1);
+        let path = layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "r1");
+        let bytes_before = std::fs::read_to_string(&path).unwrap();
+
+        // Re-adding r1 is refused, naming both follow-ups; nothing is written.
+        let err = node_add(&wt_apg, &av(&["requirements", "requirement", "r1"])).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(msg.contains("apg node update"), "{msg}");
+        assert!(msg.contains("apg node rm"), "{msg}");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            bytes_before,
+            "a refused re-add must write nothing"
+        );
+
+        // node update: body + merged property; every incident edge is identical.
+        node_update(
+            &wt_apg,
+            &av(&[
+                "requirements",
+                "requirement",
+                "r1",
+                "--body",
+                "updated body",
+                "--property",
+                "a=1",
+            ]),
+        )
+        .unwrap();
+        let after =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        assert_eq!(after.body, "updated body");
+        assert_eq!(after.properties.get("a").map(String::as_str), Some("1"));
+        assert_eq!(
+            after.out, before.out,
+            "out-edges must survive a node update"
+        );
+        assert_eq!(
+            after.in_edges, before.in_edges,
+            "in-edges must survive a node update"
+        );
+
+        // Updating an absent node is refused.
+        let err = node_update(&wt_apg, &av(&["requirements", "requirement", "ghost"])).unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "{err}");
+        testutil::remove(&repo);
+    }
+
+    /// Strict edge surface against a real repo/branch DB: `edge add` refuses an
+    /// identical `(kind, from, to)`; `edge update` rewrites the source out-half
+    /// AND the target in-half to the same MERGEd property map, with an explicit
+    /// `--unset-property` the only way to drop a key.
+    #[test]
+    fn edge_add_refuses_duplicate_and_edge_update_merges_both_halves() {
+        let (wt_apg, repo, _wt) = mutation_fixture("edge-strict");
+        node_add(&wt_apg, &av(&["requirements", "requirement", "r1"])).unwrap();
+        node_add(&wt_apg, &av(&["requirements", "requirement", "r2"])).unwrap();
+        edge_add(
+            &wt_apg,
+            &av(&[
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+                "--property",
+                "a=0",
+                "--property",
+                "b=2",
+            ]),
+        )
+        .unwrap();
+
+        // A duplicate triple is refused, naming both follow-ups; both halves
+        // still number exactly one.
+        let err = edge_add(
+            &wt_apg,
+            &av(&[
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ]),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(msg.contains("apg edge update"), "{msg}");
+        assert!(msg.contains("apg edge rm"), "{msg}");
+        let r1 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        let r2 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
+        assert_eq!(r1.out.len(), 1, "the duplicate must not add an out-half");
+        assert_eq!(
+            r2.in_edges.len(),
+            1,
+            "the duplicate must not add an in-half"
+        );
+
+        // edge update --property a=1 MERGEs on BOTH halves: {a:1,b:2}.
+        edge_update(
+            &wt_apg,
+            &av(&[
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+                "--property",
+                "a=1",
+            ]),
+        )
+        .unwrap();
+        let r1 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        let r2 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
+        let expect = BTreeMap::from([
+            ("a".to_string(), "1".to_string()),
+            ("b".to_string(), "2".to_string()),
+        ]);
+        assert_eq!(r1.out[0].properties, expect);
+        assert_eq!(
+            r2.in_edges[0].properties, expect,
+            "the target in-half must carry the same map"
+        );
+
+        // --unset-property b drops exactly b on both halves: {a:1}.
+        edge_update(
+            &wt_apg,
+            &av(&[
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+                "--unset-property",
+                "b",
+            ]),
+        )
+        .unwrap();
+        let r1 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        let r2 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
+        let expect = BTreeMap::from([("a".to_string(), "1".to_string())]);
+        assert_eq!(r1.out[0].properties, expect);
+        assert_eq!(r2.in_edges[0].properties, expect);
+
+        // Omitting --unset-property keeps every key.
+        edge_update(
+            &wt_apg,
+            &av(&[
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+                "--property",
+                "c=3",
+            ]),
+        )
+        .unwrap();
+        let r1 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        assert_eq!(r1.out[0].properties.get("a").map(String::as_str), Some("1"));
+        assert_eq!(r1.out[0].properties.get("c").map(String::as_str), Some("3"));
+
+        // Updating an absent edge is refused.
+        let err = edge_update(
+            &wt_apg,
+            &av(&[
+                "drives",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ]),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "{err}");
         testutil::remove(&repo);
     }
 }
