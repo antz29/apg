@@ -61,6 +61,11 @@
       "kind": "contains",
       "target": "requirements.requirement.everything-addable-is-rmable",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.rm-refuses-with-force-escape",
+      "properties": {}
     }
   ],
   "in": []
