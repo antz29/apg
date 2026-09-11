@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "markdown-anchoring",
+  "body": "Markdown is not scanned code. The distributed agent prompts (opencode-suite/agents/*.md) and the root AGENTS.md are prose shipped by `apg init` through the embedded suite in src/main.rs — they have no Function/Struct/File node in the code graph. A solution component covering them must therefore anchor its `implemented-by` edge to the embedding/install Rust (`apg.main`, and the init install path in src/main.rs), NEVER to a `.md` path — a `.md` target would fail write-time as a drift/nonexistent code FQN. This note records that consideration for the `agent-prompt-text` component.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
