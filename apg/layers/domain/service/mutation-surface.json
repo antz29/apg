@@ -20,6 +20,11 @@
       "kind": "drives",
       "source": "requirements.requirement.rm-refuses-with-force-escape",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.ripple-consumers-updated",
+      "properties": {}
     }
   ]
 }
