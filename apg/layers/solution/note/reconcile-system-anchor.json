@@ -4,6 +4,12 @@
   "name": "reconcile-system-anchor",
   "body": "source: holistic-review feedback — plan coverage rule requires every implemented-by FQN to be touched by a plan task; the system node anchored to `apg.main` which no task modifies, while the plan's phase-02 task-4 edits `apg.print_help` (src/main.rs:537-585, carries the `apg project <sub>` help text). inconsistency: implemented-by edge pointed at code the plan never touches → verify gate refuse. resolution: repointed `solution.system.apg-cli` implemented-by from `apg.main` to `apg.print_help` — the function the help-text task actually modifies, so coverage is legitimate (a fake \"modify apg.main\" task would be nonsense) [with user].",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.system.apg-cli",
+      "properties": {}
+    }
+  ],
   "in": []
 }
