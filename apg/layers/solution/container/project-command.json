@@ -12,6 +12,11 @@
       "kind": "realised-by",
       "source": "domain.entity.project",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.project-lifecycle",
+      "properties": {}
     }
   ]
 }
