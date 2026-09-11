@@ -23,6 +23,11 @@
       "kind": "drives",
       "source": "requirements.requirement.no-internals-in-prose",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "domain.note.rewrite-clusters",
+      "properties": {}
     }
   ]
 }
