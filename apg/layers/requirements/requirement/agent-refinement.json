@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "requirements.requirement.opencode-suite-is-source",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.agent-suite",
+      "properties": {}
     }
   ],
   "in": [

@@ -28,5 +28,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.agent-refinement",
+      "properties": {}
+    }
+  ]
 }
