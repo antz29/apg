@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "graph-state",
+  "body": "The code-graph state an agent reaches only through the apg tools: the transient database/export and the durable layer node-files. Agents never address these by filesystem path; the tools are the only interface.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
