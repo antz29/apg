@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "solution.system.agent-suite",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.agent-prose",
+      "properties": {}
     }
   ]
 }
