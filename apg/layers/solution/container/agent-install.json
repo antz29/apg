@@ -11,6 +11,11 @@
       "kind": "implemented-by",
       "target": "apg.cmd_init",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.install_suite",
+      "properties": {}
     }
   ],
   "in": [
