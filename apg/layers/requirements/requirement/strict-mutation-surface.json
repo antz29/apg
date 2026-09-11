@@ -108,6 +108,11 @@
       "kind": "details",
       "source": "requirements.note.spec-resolutions",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "global.note.session-continuity",
+      "properties": {}
     }
   ]
 }

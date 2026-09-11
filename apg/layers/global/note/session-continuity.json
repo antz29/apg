@@ -4,6 +4,12 @@
   "name": "session-continuity",
   "body": "Session continuity (context, not scope — do not conflate with tooling-review):\n- `worktree-cleanup` is MERGED; its spec nodes (requirements.requirement.worktree-cleanup, domain.group.project-lifecycle, solution.system.apg-cli, solution.container.project-command, etc.) already live in the durable layers store and are extended, not replaced, by this spec.\n- `agent-refinement` is a SEPARATE in-flight project (agents reach the graph only through apg tools; read-guard denies on .trans/layers; tool-failure = stop-and-report; `question` restricted; opencode-suite becomes implementer-editable). Not merged. Full handoff in SPEC-agent-refinement.md. Do NOT conflate.\n- Known unrelated suite-tool bug (out of scope): `apg_plan_phases` throws a binder exception querying a `name` property that Requirement/relation records do not carry.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.strict-mutation-surface",
+      "properties": {}
+    }
+  ],
   "in": []
 }
