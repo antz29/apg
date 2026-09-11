@@ -56,6 +56,11 @@
       "kind": "contains",
       "target": "requirements.requirement.planned-update-preserves-edges",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.everything-addable-is-rmable",
+      "properties": {}
     }
   ],
   "in": []
