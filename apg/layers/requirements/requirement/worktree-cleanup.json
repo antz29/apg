@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "worktree-cleanup",
+  "body": "Project lifecycle must be self-cleaning: `apg project merge <name>` removes its worktree and deletes its branch after a successful merge, and abandoned (never-merged) projects can be explicitly deleted via a new `apg project delete <name>` subcommand. Safety is a hard law: cleanup never touches the default branch or the main checkout.",
+  "properties": {
+    "feature": "project-lifecycle"
+  },
+  "out": [],
+  "in": []
+}
