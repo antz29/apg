@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "system",
+  "name": "apg-cli",
+  "body": "The apg binary — a single Rust CLI; the project lifecycle is git2-operated (git is never shelled out to).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
