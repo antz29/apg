@@ -18,11 +18,6 @@
       "properties": {}
     },
     {
-      "kind": "contains",
-      "target": "solution.component.node-file-primitive",
-      "properties": {}
-    },
-    {
       "kind": "implemented-by",
       "target": "apg.node_cmd.cmd_node",
       "properties": {}
