@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "rm-refuses-with-force-escape",
+  "body": "`rm` refuses while dependents exist, with `--force` as the escape: it exits non-zero naming the dependent and the `--force` flag when a plan has any phase/task/planned node, a phase has any task, a task is `done` or has ANY incident Feedback, or a planned node is targeted by a `creates` task. `--force` overrides and cascades (removes the entity and its children). No refusal may leave a partial removal.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
