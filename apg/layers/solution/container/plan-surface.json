@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.plan-record-mutations",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.phase-mutations",
+      "properties": {}
     }
   ],
   "in": [
