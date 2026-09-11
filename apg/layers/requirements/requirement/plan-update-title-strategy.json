@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "plan-update-title-strategy",
+  "body": "`apg plan update <project> [--title T] [--strategy S]` must exist and fix the stale-strategy gap. It refuses when the plan is absent; it merges/overwrites the passed `--title`/`--strategy` values (omitted flags leave that field unchanged); and it leaves the phase/task/planned record set — and every plan edge (Contains/Gates/Satisfies/Reviews) — intact. Acceptance: on an existing plan, `apg plan update <project> --strategy <new>` changes the strategy and `--title` changes the title; an absent plan exits non-zero; the plan's phases/tasks/planned nodes are unchanged afterwards.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
