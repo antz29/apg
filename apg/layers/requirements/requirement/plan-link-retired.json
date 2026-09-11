@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "plan-link-retired",
+  "body": "`apg plan link` retires. Its Satisfies/Gates set-semantics fold into `apg plan update <project> phase <n> --satisfies … --prereq …`, which reuses `link_phase_edges` (src/plan_cmd.rs:591) and `push_gate`'s cycle check. Acceptance: `apg plan link` is removed from dispatch/help; the equivalent update-phase invocation produces the same Satisfies/Gates edges (set-semantics, cycle-refusing) that `link` produced.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
