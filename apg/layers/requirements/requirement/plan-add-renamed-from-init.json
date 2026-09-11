@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "plan-add-renamed-from-init",
+  "body": "Standardize the create verb on `add`: `apg plan init` → `apg plan add <project>` (with no second positional meaning the plan itself). The top-level `apg init` (the durable layout/suite installer) stays `init`, and `apg project start` stays `start` — both are genuinely different acts, not entity creates. Acceptance: `apg plan add <project>` creates the plan and refuses if it exists; `apg plan init` is retired; top-level `apg init` and `apg project start` are unchanged.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
