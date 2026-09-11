@@ -6,7 +6,13 @@
   "properties": {
     "feature": "project-lifecycle"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "depends-on",
+      "target": "requirements.requirement.merge-self-cleanup",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
