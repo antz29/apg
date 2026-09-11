@@ -6,6 +6,12 @@
   "properties": {
     "feature": "tooling-review"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.node-add-refuses-existing",
+      "properties": {}
+    }
+  ],
   "in": []
 }
