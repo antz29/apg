@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "cli-surface",
+  "body": "The CLI dispatch/help surface (`main` in src/main.rs plus `cmd_node`/`cmd_edge`/`cmd_plan`): the `add|update|rm` subcommand routing and the `print_help` text that documents the new surface and no longer names `plan init`/`plan link`. Container of the CLI system.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
