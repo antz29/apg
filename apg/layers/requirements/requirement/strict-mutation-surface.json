@@ -123,6 +123,11 @@
       "kind": "details",
       "source": "requirements.note.spec-resolutions",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "requirements.user.project-operator",
+      "properties": {}
     }
   ]
 }
