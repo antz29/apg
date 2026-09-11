@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "planned-update-preserves-edges",
+  "body": "`apg plan update <project> planned <fqn> [--name N] [--parent P]` must exist and be edge-preserving: it updates the planned node's name/parent and its parent `Contains` edge (set-semantics for parent) while leaving unrelated incident edges intact. Refuse if the planned FQN is not declared. Acceptance: updating a planned node's parent repoints the parent `Contains` edge without touching other plan edges.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
