@@ -7,5 +7,11 @@
     "feature": "project-lifecycle"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.stakeholder.repo-owner",
+      "properties": {}
+    }
+  ]
 }
