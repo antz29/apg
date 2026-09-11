@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "delete-refuses-unsafe",
+  "body": "`apg project delete <name>` must be safe: every refusal names the actual state and one fix command (the `refuse_start` pattern). ACs: (a) refuses for an invalid project name; (b) refuses when `<name>` is the default branch or the main checkout's current branch (a checked-out branch cannot be deleted); (c) refuses when the project does not exist (no branch, no worktree at the fixed location); (d) refuses when the branch exists but is not hosted in the project worktree at the fixed location (leftover-branch / mismatched-worktree states — manual fix, never guessed); (e) refuses when the project worktree has tracked uncommitted changes (commit/stash first, mirroring merge's dirty refusal); (f) never touches the default branch or an unrelated project.",
+  "properties": {
+    "feature": "project-lifecycle"
+  },
+  "out": [],
+  "in": []
+}
