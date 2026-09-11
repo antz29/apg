@@ -12,6 +12,11 @@
       "kind": "contains",
       "target": "domain.entity.project",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.project-branch",
+      "properties": {}
     }
   ],
   "in": [

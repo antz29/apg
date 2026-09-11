@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.delete-subcommand",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.project-lifecycle",
+      "properties": {}
     }
   ]
 }
