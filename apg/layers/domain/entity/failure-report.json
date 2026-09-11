@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "failure-report",
+  "body": "The full, cause-free failure report an agent returns to the coordinator when a tool fails: which tool, what invocation, what it returned/errored, and what state. No retry, no workaround, no file read, no diagnosis of the cause.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
