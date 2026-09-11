@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "task-update-revalidates-preserves",
+  "body": "`apg plan update <project> task <phase> <k> …same fields as add…` must preserve the task's `status` (done/undone state) and every incident `Reviews` edge (review feedback). It must re-validate `--verb`/`--fqn`/`--to` against the scanned graph exactly as `add` does, by reusing `validate_task_verb` (src/plan_cmd.rs:431) and the kind/tier validation, so an update can never introduce an invalid verb/target. Acceptance: updating a done task's title keeps `status: done`; its Reviews edges are unchanged; an invalid `--verb`/`--fqn` update is refused before any write.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
