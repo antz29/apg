@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "requirements.requirement.node-update-preserves-edges",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.edge-update-properties-only",
+      "properties": {}
     }
   ],
   "in": []
