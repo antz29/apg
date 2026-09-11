@@ -41,6 +41,11 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.cmd_plan",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.coverage-spine-validation",
+      "properties": {}
     }
   ],
   "in": [
