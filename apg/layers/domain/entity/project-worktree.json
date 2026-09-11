@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "project-worktree",
+  "body": "The git linked worktree at `<main>/apg/.worktrees/<name>` that hosts the project branch; gitignored under the layout. The residue merged/abandoned projects leave behind.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
