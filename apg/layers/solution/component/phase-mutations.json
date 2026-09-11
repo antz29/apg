@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "phase-mutations",
+  "body": "The phase arms. `add` refuses when the phase FQN exists (dropping the `remove_node` + re-add upsert in `plan_add_phase_at`), so a phase's task `Contains` edges are never orphaned. `update` preserves the phase's tasks and applies Satisfies/Gates with set-semantics by reusing `link_phase_edges` (and the gate cycle check). `rm` requires `--force` when the phase has tasks.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
