@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "solution.container.project-command",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.print_help",
+      "properties": {}
     }
   ],
   "in": [
