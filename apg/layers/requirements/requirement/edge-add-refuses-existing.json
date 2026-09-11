@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "edge-add-refuses-existing",
+  "body": "`apg edge add <kind> <from> <to> …` must refuse when the source node's file already carries an out-edge with the same `(kind, from, to)`, with an error naming the duplicate and the correct follow-up (`apg edge update` for properties, `apg edge rm` to remove). Today `edge_add` (src/node_cmd.rs:139–174) unconditionally pushes an OutEdge onto the source and a matching InEdge onto the target with no dedup, so re-adding duplicates the edge on both halves. Acceptance: re-adding an identical `(kind, from, to)` exits non-zero and writes nothing; the source still has exactly one out-half and the target exactly one in-half.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
