@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "agent-refinement",
+  "body": "Refine the apg agent suite — the six distributed agents, the agent-builder template, and the generated project agents — so that every agent reaches the code graph only through the apg tools (never raw files), tool failures are terminal and reported up, the `question` tool is coordinator/agent-builder-only, and the implementer may edit `opencode-suite/**` while `.opencode/**` stays agent-builder-only.",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
