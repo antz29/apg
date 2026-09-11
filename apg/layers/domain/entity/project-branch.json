@@ -7,5 +7,11 @@
     "kind": "entity"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.merge-self-cleanup",
+      "properties": {}
+    }
+  ]
 }

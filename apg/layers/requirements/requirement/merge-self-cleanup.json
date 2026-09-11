@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.project-worktree",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.project-branch",
+      "properties": {}
     }
   ],
   "in": [
