@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "review-surface-unchanged",
+  "body": "Out of scope: `apg review` is a closed writer↔reviewer state machine (`add`/`action`/`resolve`/`reject`), not create/update/rm; feedback bodies are immutable by design. It is not touched by this change and must keep its current semantics. Acceptance: no `apg review` subcommand changes.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
