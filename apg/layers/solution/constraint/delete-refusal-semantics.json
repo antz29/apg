@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "delete-refusal-semantics",
+  "body": "`apg project delete <name>` must refuse — naming the actual state and one fix command — unless the project's branch is safe to remove: `<name>` is a valid project name; the branch exists and is not the default branch; the branch is not the main checkout's current branch; the branch is checked out in the project's own worktree at `<main>/apg/.worktrees/<name>` (leftover-branch and mismatched-worktree states are refused with a manual fix, never guessed); and the worktree has no tracked uncommitted changes (commit/stash first). Delete does NOT require the branch to be merged — discarding an unmerged branch is its purpose.",
+  "properties": {
+    "attaches-to": "solution.component.project-delete"
+  },
+  "out": [],
+  "in": []
+}
