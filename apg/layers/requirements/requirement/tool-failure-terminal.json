@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "tool-failure-terminal",
+  "body": "Replace the existing \"if a plan tool errors, read the JSONL directly\" fallback (present in the generated implementer and implementation-phase-reviewer) with: on any tool failure, stop immediately and report the exact failure — which tool, what invocation, what it returned/errored, what state — to the coordinator. No retry, no workaround, no reading files, and no diagnosis of the cause (the coordinator decides the cause, don't speculate).",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
