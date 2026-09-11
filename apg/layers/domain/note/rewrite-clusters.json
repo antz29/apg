@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "note",
+  "name": "rewrite-clusters",
+  "body": "The four rewrite clusters across the agent files: (A) JSONL-fallback → stop-and-report; (B) \"ask the user one at a time\" → route questions through the coordinator (including agent-builder's interview workflow, which now interviews via the coordinator); (C) \"if the graph is stale, fall back to read/glob/grep\" → report the stale graph to the coordinator (the navigator runs the scan — a coordinator action, not a file read); (D) strip all `.trans`/`layers` path references and drop the \"read `.opencode/agents/codebase-navigator.md` for the schema\" hint (wrong for downstream + a path leak).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
