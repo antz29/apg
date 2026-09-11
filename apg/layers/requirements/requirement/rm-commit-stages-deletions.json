@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "rm-commit-stages-deletions",
+  "body": "Mutations that delete a path must successfully commit: the commit path must stage a removed path as a deletion (git index `remove_path`/`remove_all`, or equivalent) rather than `add_path`, which stats the file and cannot stage a deletion. `apg node rm <layer> <type> <name>` must LAND — the node file is removed, incident out/in edges are stripped from every referencing file, and the change commits in one atomic mutation. Today `node_rm` (src/node_cmd.rs:86–126) passes the deleted path in `deletes`; `write_through_with_deletes` (src/layers.rs:1844) builds `paths = write_paths + deletes` and commits ALL of them via `git::commit_files`, whose `index.add_path(rel)` (src/git.rs:583) stats and fails with a libgit2 `NotFound`, rolling the mutation back (src/layers.rs:1950–1952). Acceptance: `apg node rm` on a node with incident edges exits 0, the node file is gone, every referencing file's incident edges are dropped, and a single commit lands. Latent today because `write_through_with_deletes`' test runs outside a git repo (no commit path).",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
