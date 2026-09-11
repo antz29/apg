@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "solution.component.suite-tool-wrappers",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.agent-prompt-text",
+      "properties": {}
     }
   ],
   "in": [
