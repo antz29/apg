@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.read-guard",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.question-scoped-to-coordinators",
+      "properties": {}
     }
   ]
 }
