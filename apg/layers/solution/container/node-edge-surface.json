@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "solution.component.mutation-commit-staging",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.node-file-primitive",
+      "properties": {}
     }
   ],
   "in": [
