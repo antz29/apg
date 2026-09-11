@@ -73,6 +73,11 @@
       "kind": "drives",
       "source": "requirements.requirement.plan-update-title-strategy",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.coverage-spine-scoped",
+      "properties": {}
     }
   ]
 }
