@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "rm-refuses-with-force-escape",
+  "body": "`rm` must refuse (exit 1, naming the dependent entity and the `--force` escape) when the entity still has children/dependents:\n- `plan` with any PlanPhase (or task/planned node),\n- `phase` with any Task,\n- `task` with `status: done` or ANY incident `Feedback` (stricter §4 scope — a removed task would otherwise strand its resolved Feedback mirror),\n- `planned` node referenced by a `creates` task.\n`--force` overrides the refusal and removes the entity AND its children (cascade). `rm plan --force` removes the whole plan. Acceptance: each refusal case exits non-zero and leaves the store unchanged; the same rm with `--force` succeeds and cascades.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
