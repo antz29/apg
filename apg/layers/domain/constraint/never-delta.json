@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "never-delta",
+  "body": "Agent prose must describe how to work with the grants as they currently are; it must never say an agent \"used to be denied X\" or \"gained/lost Y\".",
+  "properties": {
+    "attaches-to": "domain.entity.agent-prose"
+  },
+  "out": [],
+  "in": []
+}
