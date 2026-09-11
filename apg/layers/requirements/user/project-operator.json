@@ -4,6 +4,12 @@
   "name": "project-operator",
   "body": "A thing that uses the system: the CLI user (human or agent) invoking the `apg` mutation surface. Uses `apg project start/merge/delete` for project lifecycle (delete is the discard act for abandoned, never-merged projects), and the `apg node`/`apg edge`/`apg plan` add|update|rm commands whose strictness this requirement tree specifies. Interest in tooling-review: `add` refuses on an existing entity, `update` preserves every incident edge, and `rm` actually lands (stages its deletions) without silently replacing records.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.worktree-cleanup",
+      "properties": {}
+    }
+  ],
   "in": []
 }
