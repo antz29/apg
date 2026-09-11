@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "plan-record",
+  "body": "The transient plan aggregate in apg/.trans/plans/<project>.jsonl: the Plan record itself plus its PlanPhases, Tasks, and planned-node declarations, joined by Contains edges. It is branch-local and dies with the branch. A plan removal is a whole-record JSONL rewrite — there is no partial plan.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
