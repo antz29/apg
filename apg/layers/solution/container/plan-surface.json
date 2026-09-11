@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "solution.component.plan-store-atomic-rewrite",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.plan_cmd.cmd_plan",
+      "properties": {}
     }
   ],
   "in": [
