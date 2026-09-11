@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "opencode-suite-is-source",
+  "body": "The implementer gains an edit grant for `opencode-suite/**` (repo root + `apg/.worktrees/*/` mirror). `.opencode/**` remains agent-builder-only. The grant change (removing the `opencode-suite/**` deny from the implementer) is itself applied via agent-builder before the implementer edits the templates.",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
