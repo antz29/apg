@@ -15,6 +15,11 @@
       "kind": "drives",
       "source": "requirements.requirement.everything-addable-is-rmable",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.rm-refuses-with-force-escape",
+      "properties": {}
     }
   ]
 }

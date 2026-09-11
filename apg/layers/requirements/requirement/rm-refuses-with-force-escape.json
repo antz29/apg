@@ -6,7 +6,13 @@
   "properties": {
     "feature": "tooling-review"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.service.mutation-surface",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
