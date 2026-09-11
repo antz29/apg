@@ -5,5 +5,11 @@
   "body": "The opencode suite tool wrappers in opencode-suite/tools/*.ts, embedded into the binary by `src/main.rs` via `include_str!` and installed by `apg init`. `apg_plan_init.ts` becomes a plan-`add` tool; `apg_plan_add.ts` treats `kind` as optional (= the plan itself); new node/edge update/rm variants; new plan update/rm tools; `apg_plan_link.ts` retired. Because the .ts files are embedded (not scanned code in this graph), coverage anchors to the embedding Rust (`apg.main`).",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.cli-surface",
+      "properties": {}
+    }
+  ]
 }

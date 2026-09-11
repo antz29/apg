@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.command-dispatch-and-help",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.suite-tool-wrappers",
+      "properties": {}
     }
   ],
   "in": [
