@@ -6,7 +6,13 @@
   "properties": {
     "feature": "project-lifecycle"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.project-worktree",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
