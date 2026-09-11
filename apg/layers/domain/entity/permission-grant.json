@@ -22,6 +22,11 @@
       "kind": "drives",
       "source": "requirements.requirement.question-scoped-to-coordinators",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.opencode-suite-is-source",
+      "properties": {}
     }
   ]
 }
