@@ -11,6 +11,11 @@
       "kind": "depends-on",
       "target": "requirements.requirement.merge-self-cleanup",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.project",
+      "properties": {}
     }
   ],
   "in": [
