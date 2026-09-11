@@ -96,6 +96,11 @@
       "kind": "contains",
       "target": "requirements.requirement.review-surface-unchanged",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.mutation-surface",
+      "properties": {}
     }
   ],
   "in": []

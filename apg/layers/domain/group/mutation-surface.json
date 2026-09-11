@@ -38,5 +38,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.strict-mutation-surface",
+      "properties": {}
+    }
+  ]
 }
