@@ -6,7 +6,13 @@
   "properties": {
     "feature": "project-lifecycle"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "depends-on",
+      "target": "requirements.requirement.delete-subcommand",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

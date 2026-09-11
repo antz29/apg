@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "requirements.requirement.worktree-cleanup",
       "properties": {}
+    },
+    {
+      "kind": "depends-on",
+      "source": "requirements.requirement.delete-refuses-unsafe",
+      "properties": {}
     }
   ]
 }
