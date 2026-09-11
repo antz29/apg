@@ -24,6 +24,11 @@
       "kind": "contains",
       "target": "solution.container.plan-surface",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.cli-surface",
+      "properties": {}
     }
   ],
   "in": [
