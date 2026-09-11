@@ -7,5 +7,11 @@
     "kind": "entity"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.delete-refuses-unsafe",
+      "properties": {}
+    }
+  ]
 }

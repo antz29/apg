@@ -11,6 +11,11 @@
       "kind": "depends-on",
       "target": "requirements.requirement.delete-subcommand",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.default-branch",
+      "properties": {}
     }
   ],
   "in": [
