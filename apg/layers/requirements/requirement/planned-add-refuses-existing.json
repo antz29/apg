@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "planned-add-refuses-existing",
+  "body": "`apg plan add <project> planned <kind> <fqn> …` must refuse when the planned FQN is already declared in the plan, naming the entity and pointing at `apg plan update <project> planned <fqn>` or `apg plan rm`. Today `plan_add_planned_at` (src/plan_cmd.rs:342–402) calls `artifacts::remove_node(records, fqn)` (line 393) then re-appends — a silent upsert. Acceptance: re-declaring an existing planned FQN exits non-zero with no plan-file change.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
