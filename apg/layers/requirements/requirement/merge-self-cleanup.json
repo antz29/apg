@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "merge-self-cleanup",
+  "body": "`apg project merge <name>` must clean up after itself. ACs: (a) after the verify gate passes and the merge + main rebuild succeed, the merged project's worktree at `<main>/apg/.worktrees/<name>` is removed and its branch `refs/heads/<name>` is deleted (git2 `Worktree::remove` + `Repository::delete_branch`); (b) cleanup runs only on the success path — any refusal or failed merge leaves the worktree and branch untouched; (c) deleting the branch is safe because the merged branch is by definition merged into the default branch.",
+  "properties": {
+    "feature": "project-lifecycle"
+  },
+  "out": [],
+  "in": []
+}
