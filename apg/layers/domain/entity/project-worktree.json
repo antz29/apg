@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.project-merge",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",
