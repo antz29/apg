@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.coverage_check",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.plan_cmd.plan_verify_at",
+      "properties": {}
     }
   ],
   "in": [
