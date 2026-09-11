@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "embedded-template-anchor",
+  "body": "Anchoring consideration: the tier-4 content change is to agent markdown templates embedded into the binary via `include_str!` (the SUITE_TOOLS/AGENTS constants in src/main.rs). Markdown is NOT scanned code and is not a graph node. The `implemented-by` spine therefore anchors to the Rust install path that delivers those templates (`apg.main`, `apg.cmd_init`, `apg.install_suite`). The plan-writer must express \"edit these embedded templates\" (the `opencode-suite/**` source-of-truth + its worktree mirror) as the tier-4 delta rather than point `implemented-by` at a markdown path (which will not resolve).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
