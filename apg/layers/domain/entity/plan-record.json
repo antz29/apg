@@ -37,6 +37,11 @@
       "kind": "drives",
       "source": "requirements.requirement.task-update-revalidates-preserves",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.planned-update-preserves-edges",
+      "properties": {}
     }
   ]
 }
