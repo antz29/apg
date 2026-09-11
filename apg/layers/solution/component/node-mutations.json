@@ -4,7 +4,13 @@
   "name": "node-mutations",
   "body": "The `apg node add|update|rm` arms in src/node_cmd.rs (`cmd_node` dispatches them). `add` refuses when the FQN already exists; `update` reads the existing node, mutates only body/properties (name immutable), and writes while keeping all out/in edges; `rm` removes the file and strips incident edges from every referencing file in one atomic mutation.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "apg.node_cmd.node_add",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
