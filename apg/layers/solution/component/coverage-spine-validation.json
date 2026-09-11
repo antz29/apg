@@ -4,7 +4,13 @@
   "name": "coverage-spine-validation",
   "body": "The spine-scoped coverage gate. `coverage_check` (src/plan_cmd.rs:1097) is rewritten to walk the spine from each requirement a `PlanPhase` `Satisfies` (Requirement → Drives → Domain → RealisedBy → Solution → SpecImplementedBy) and require every reached solution node's `implemented-by` FQN to be touched by at least one plan task, plus every solution node ADDED ON THIS BRANCH (default-branch delta). Pre-existing solution nodes unreachable from a satisfied requirement are exempt, so prior projects' implemented code no longer forces fake `modifies` tasks. `plan_verify_at` (src/plan_cmd.rs:947) is the caller that must supply the satisfied-requirement set and the branch delta; it may compare against `apg.git.origin_default_branch` (src/git.rs:340) to compute the delta, but does not modify that function.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "apg.plan_cmd.coverage_check",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
