@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "agent-suite",
+  "body": "The apg agent suite: the six distributed agents (codebase-navigator, spec-writer, plan-writer, spec-review, plan-review, agent-builder), the agent-builder template that scaffolds project agents, and the generated project agents (implementer, tiered test-implementers, implementation-phase-reviewer, optional coordinator).",
+  "properties": {
+    "attribute": "core"
+  },
+  "out": [],
+  "in": []
+}
