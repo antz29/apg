@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "solution.component.phase-mutations",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.task-mutations",
+      "properties": {}
     }
   ],
   "in": [
