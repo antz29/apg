@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "project-merge",
+  "body": "The merge flow: verify gate → merge the project branch into the default branch → main rebuild → self-cleanup: remove the merged project's worktree and delete its branch. Hosted by `project_merge_at` (the core the CLI wrapper `project_merge` delegates to); the cleanup step is the change.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
