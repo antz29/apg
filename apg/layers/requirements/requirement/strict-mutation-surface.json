@@ -86,6 +86,11 @@
       "kind": "contains",
       "target": "requirements.requirement.plan-rm-atomic",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ripple-consumers-updated",
+      "properties": {}
     }
   ],
   "in": []
