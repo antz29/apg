@@ -32,6 +32,11 @@
       "kind": "drives",
       "source": "requirements.requirement.phase-update-preserves-tasks",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.task-update-revalidates-preserves",
+      "properties": {}
     }
   ]
 }
