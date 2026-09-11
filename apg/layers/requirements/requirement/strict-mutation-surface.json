@@ -91,6 +91,11 @@
       "kind": "contains",
       "target": "requirements.requirement.ripple-consumers-updated",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.review-surface-unchanged",
+      "properties": {}
     }
   ],
   "in": []
