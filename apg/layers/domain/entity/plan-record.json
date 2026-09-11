@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.plan-record-mutations",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.coverage-spine-validation",
+      "properties": {}
     }
   ],
   "in": [
