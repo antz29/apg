@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "agent-prompt-text",
+  "body": "The distributed agent prompts in opencode-suite/agents/*.md (plan-writer, spec-writer, codebase-navigator reference `apg plan init` / `apg_plan_init` / `apg_plan_link`; also agent-builder/spec-review/plan-review) and the root AGENTS.md CLI reference block, updated to the new verbs. These are MARKDOWN, not scanned code — they are installed by `apg init` through `src/main.rs`'s embedded suite, so this component is covered by anchoring to the embedding Rust (`apg.main`), never to a .md path (which would be a write-time error).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
