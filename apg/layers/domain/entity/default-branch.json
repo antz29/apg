@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "default-branch",
+  "body": "The repo's default branch — the main checkout's symbolic HEAD — and the main checkout itself. Never a mutation place and never deleted: lifecycle cleanup must not remove the main checkout's worktree nor delete `refs/heads/<default>`.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
