@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.tool-failure-terminal",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.question-scoped-to-coordinators",
+      "properties": {}
     }
   ],
   "in": [
