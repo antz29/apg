@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.value.property-map",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.authored-node",
+      "properties": {}
     }
   ],
   "in": [

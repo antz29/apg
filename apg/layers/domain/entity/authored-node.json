@@ -33,6 +33,11 @@
       "kind": "drives",
       "source": "requirements.requirement.node-update-preserves-edges",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.property-merge-with-unset",
+      "properties": {}
     }
   ]
 }
