@@ -4,6 +4,12 @@
   "name": "agent-suite",
   "body": "The apg agent suite as delivered by the apg binary: the six distributed agents installed into the user-level opencode dir by `apg init`, single-sourced from the repo's `opencode-suite/` tree and embedded at compile time via `include_str!`.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.container.agent-install",
+      "properties": {}
+    }
+  ],
   "in": []
 }

@@ -7,5 +7,11 @@
     "kind": "service"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.system.agent-suite",
+      "properties": {}
+    }
+  ]
 }
