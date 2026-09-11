@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "solution.component.task-mutations",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.planned-mutations",
+      "properties": {}
     }
   ],
   "in": [
