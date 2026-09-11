@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "opencode-suite-is-src",
+  "body": "`opencode-suite/**` must be an implementer edit source (root + worktree mirror); `.opencode/**` must remain agent-builder-only.",
+  "properties": {
+    "attaches-to": "domain.entity.permission-grant"
+  },
+  "out": [],
+  "in": []
+}
