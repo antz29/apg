@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "phase-update-preserves-tasks",
+  "body": "`apg plan update <project> phase <n> [--title T] [--deliverable D] [--prereq <n>]* [--satisfies <req>]*` must preserve the phase's tasks — i.e. its outgoing `Contains` edges to Task records must survive the update. Satisfies and Gates are set-semantics: the passed `--satisfies`/`--prereq` sets replace the phase's outgoing bridge edges (this is the behavior `apg plan link` provided, folded in). Because `link_phase_edges` (src/plan_cmd.rs:591) already implements the set-semantics bridge rewrite, the update arm must reuse it rather than reimplement. Acceptance: updating a phase's title leaves its task `Contains` edges intact; updating Satisfies replaces (not appends to) the phase's Satisfies set.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
