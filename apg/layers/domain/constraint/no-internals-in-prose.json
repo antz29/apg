@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "no-internals-in-prose",
+  "body": "Agent prose must not mention graph-state filesystem paths (the transient database/export or the durable layer node-files); the apg tools are the only interface named.",
+  "properties": {
+    "attaches-to": "domain.entity.agent-prose"
+  },
+  "out": [],
+  "in": []
+}
