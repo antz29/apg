@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "domain.entity.permission-grant",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.graph-state",
+      "properties": {}
     }
   ],
   "in": []
