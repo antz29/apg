@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "node-edge-surface",
-  "body": "The `apg node` / `apg edge` durable mutation surface: strict add / update / rm over node files and both edge halves, with no implicit upsert, plus the edge-preserving node/edge write primitive. Container of the CLI system.\n\nSolution container with no `kind` is set; use kind=app.",
+  "body": "The `apg node` / `apg edge` durable mutation surface: strict add / update / rm over node files and both edge halves, with no implicit upsert, plus the edge-preserving node/edge write primitive. Container of the CLI system.",
   "properties": {
     "kind": "app"
   },
