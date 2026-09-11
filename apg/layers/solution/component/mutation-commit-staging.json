@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.git.commit_file",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.layers.write_through_with_deletes",
       "properties": {}
     }
