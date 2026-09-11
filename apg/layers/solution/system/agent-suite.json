@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "source": "domain.group.agent-suite",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.graph-state",
+      "properties": {}
     }
   ]
 }
