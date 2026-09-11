@@ -52,6 +52,11 @@
       "kind": "drives",
       "source": "requirements.requirement.plan-link-retired",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.plan-rm-atomic",
+      "properties": {}
     }
   ]
 }
