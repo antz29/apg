@@ -35,11 +35,6 @@
       "properties": {}
     },
     {
-      "kind": "contains",
-      "source": "requirements.user.project-operator",
-      "properties": {}
-    },
-    {
       "kind": "details",
       "source": "requirements.note.leftover-worktrees",
       "properties": {}
