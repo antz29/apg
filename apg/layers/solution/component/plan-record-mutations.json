@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.write_through",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.artifacts.remove_node",
+      "properties": {}
     }
   ],
   "in": [
