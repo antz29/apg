@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.git.commit_files",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.git.commit_file",
+      "properties": {}
     }
   ],
   "in": [
