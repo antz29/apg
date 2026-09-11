@@ -47,6 +47,11 @@
       "kind": "drives",
       "source": "requirements.requirement.plan-add-renamed-from-init",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.plan-link-retired",
+      "properties": {}
     }
   ]
 }
