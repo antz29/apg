@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "project",
+  "body": "A project context: a git local branch `refs/heads/<name>` + a linked worktree at `<main>/apg/.worktrees/<name>` + the branch DB at `<worktree>/apg/.trans/db.lbug`. Created by `start`; ended by `merge` (into the default branch) or `delete` (discard).",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
