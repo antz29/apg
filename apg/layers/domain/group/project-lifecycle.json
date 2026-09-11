@@ -1,0 +1,12 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "project-lifecycle",
+  "body": "The project lifecycle — the context shape and the operations over it. Core attribute; aggregate root is the project entity.",
+  "properties": {
+    "attribute": "core",
+    "root": "project"
+  },
+  "out": [],
+  "in": []
+}
