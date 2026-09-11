@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.container.plan-surface",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.plan-record-mutations",
+      "properties": {}
     }
   ],
   "in": [
