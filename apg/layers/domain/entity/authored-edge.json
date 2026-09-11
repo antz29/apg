@@ -28,6 +28,11 @@
       "kind": "drives",
       "source": "requirements.requirement.edge-add-refuses-existing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.edge-update-properties-only",
+      "properties": {}
     }
   ]
 }
