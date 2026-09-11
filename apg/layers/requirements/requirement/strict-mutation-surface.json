@@ -101,6 +101,11 @@
       "kind": "drives",
       "target": "domain.group.mutation-surface",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.rm-commit-stages-deletions",
+      "properties": {}
     }
   ],
   "in": [
