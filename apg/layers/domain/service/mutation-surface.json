@@ -25,6 +25,11 @@
       "kind": "drives",
       "source": "requirements.requirement.ripple-consumers-updated",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.review-surface-unchanged",
+      "properties": {}
     }
   ]
 }
