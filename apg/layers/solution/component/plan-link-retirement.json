@@ -14,11 +14,6 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.plan_link_at",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "apg.plan_cmd.link_phase_edges",
-      "properties": {}
     }
   ],
   "in": [
