@@ -14,11 +14,6 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.plan_add",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "apg.plan_cmd.write_through",
-      "properties": {}
     }
   ],
   "in": [
