@@ -7,5 +7,11 @@
     "kind": "app"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.system.apg-cli",
+      "properties": {}
+    }
+  ]
 }

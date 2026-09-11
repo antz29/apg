@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "apg.print_help",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.node-edge-surface",
+      "properties": {}
     }
   ],
   "in": [
