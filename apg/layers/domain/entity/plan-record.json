@@ -63,6 +63,11 @@
       "kind": "drives",
       "source": "requirements.requirement.plan-rm-atomic",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.plan-update-title-strategy",
+      "properties": {}
     }
   ]
 }
