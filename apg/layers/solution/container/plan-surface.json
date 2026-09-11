@@ -6,7 +6,13 @@
   "properties": {
     "kind": "app"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.plan-record-mutations",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
