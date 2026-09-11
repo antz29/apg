@@ -11,8 +11,9 @@
 //! those are assertion + milestone only; a branch scan **replaces realized
 //! planned nodes**. The plan survives until the apply act, whose coherence gate (every
 //! planned node realized, all feedback resolved, derived solution coverage
-//! holds — SPEC §5: every solution node's `implemented-by` FQN touched by a
-//! plan task) precedes the merge + rebuild of `main`'s graph
+//! holds — SPEC §5: every solution node reached from a satisfied requirement,
+//! plus every solution node added on this branch, has its `implemented-by` FQN
+//! touched by a plan task) precedes the merge + rebuild of `main`'s graph
 //! (PlanCompletion-SPEC.md).
 
 use std::collections::BTreeSet;
@@ -1550,8 +1551,10 @@ fn plan_complete_at(apg_root: &Path, project: &str, phase: u32) -> anyhow::Resul
 /// - every planned Implementation node is realized in the code graph (a
 ///   planned node with no real code at its FQN blocks verify);
 /// - every phase and the whole-plan review are green (all `Feedback` resolved);
-/// - derived solution coverage holds (SPEC §5): every solution node's
-///   `implemented-by` FQN is touched by at least one plan task ([`coverage_check`]);
+/// - spine-scoped derived solution coverage holds (SPEC §5): every solution
+///   node reached from a satisfied requirement, plus every solution node added
+///   on this branch, has its `implemented-by` FQN touched by a plan task
+///   ([`coverage_check`]);
 /// - the human gate has passed (the navigator's summary; outside the CLI).
 ///
 /// The gate is all this command checks — it performs NO merge and NO graph
@@ -1649,16 +1652,29 @@ pub(crate) fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<(
         ));
     }
 
-    // 3. Derived solution coverage (SPEC §5): every solution node's
-    // `implemented-by` FQN must be touched by at least one plan task — the
-    // plan is the HOW for the whole solution, and the bridge is complete iff
-    // coverage holds. Task targets come from the transient plan records
-    // (note-26: the DB's Task table is static — the plan JSONL is the source
-    // of truth), the solution nodes from the durable layers store. The
-    // suggestion names the verb the uncovered FQN's status calls for: a
-    // `modifies` over code that already resolves, a `creates` over a planned
-    // or still-absent FQN.
-    let coverage = coverage_check(&records, &crate::layers::read_existing_nodes(apg_root)?);
+    // 3. Spine-scoped derived solution coverage (SPEC §5, requirement
+    // coverage-spine-scoped): coverage is scoped to the plan's OWN spine plus
+    // this branch's delta. For every requirement a phase `Satisfies`, walk
+    // Requirement `Drives` Domain `RealisedBy` Solution and require each
+    // reached solution node's `implemented-by` FQNs to be touched by a plan
+    // task; PLUS every solution node added on this branch (the default-branch
+    // delta). Pre-existing nodes unreachable from a satisfied requirement are
+    // exempt — a prior project's implemented nodes force no fake `modifies`
+    // tasks. Task targets come from the transient plan records (note-26: the
+    // DB's Task table is static — the plan JSONL is the source of truth), the
+    // solution nodes from the durable layers store. The suggestion names the
+    // verb the uncovered FQN's status calls for: a `modifies` over code that
+    // already resolves, a `creates` over a planned or still-absent FQN.
+    let nodes = crate::layers::read_existing_nodes(apg_root)?;
+    let satisfied: BTreeSet<String> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Satisfies { to, .. } => Some(to.clone()),
+            _ => None,
+        })
+        .collect();
+    let branch_added = solution_nodes_added_on_branch(apg_root, &nodes)?;
+    let coverage = coverage_check(&records, &nodes, &satisfied, &branch_added);
     if !coverage.gaps.is_empty() {
         let (scanned, planned) = artifacts::code_universes(apg_root)?;
         let mut lines: Vec<String> = coverage
@@ -1712,23 +1728,92 @@ pub(crate) struct CoverageGap {
     pub fqn: String,
 }
 
-/// The derived-coverage verdict (SPEC §5): whether every solution node's
-/// `implemented-by` FQN is touched by at least one plan task.
+/// The derived-coverage verdict (SPEC §5): whether every in-scope solution
+/// node's `implemented-by` FQN is touched by at least one plan task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CoverageReport {
     /// The uncovered `implemented-by` FQNs with their owning solution node —
     /// non-empty iff coverage does NOT hold (the coherence gate refuses).
     pub gaps: Vec<CoverageGap>,
-    /// Solution nodes declaring NO `implemented-by` edge — exempt from the
-    /// coverage rule (with no FQN there is nothing to touch), surfaced as a
-    /// warning so the bridge gap ("no code claims this node") stays visible.
+    /// In-scope solution nodes declaring NO `implemented-by` edge — exempt
+    /// from the coverage rule (with no FQN there is nothing to touch),
+    /// surfaced as a warning so the bridge gap ("no code claims this node")
+    /// stays visible.
     pub no_claims: Vec<String>,
 }
 
-/// Derived solution coverage (SPEC §5): every solution-layer node's
-/// (System/Container/Component) `implemented-by` code FQN must be touched by
-/// at least one plan task — the plan is the HOW for the whole solution, and
-/// the bridge is complete iff coverage holds.
+/// The **branch delta** — the solution-layer node FQNs present on the current
+/// branch but NOT on the repo's default branch. The default branch is read
+/// from the public [`crate::git::repo_identity`] (`default_branch`); the
+/// private `origin_default_branch` helper is never consulted here.
+///
+/// This is the one impure piece of the coverage rule (it opens the repo's
+/// object database); it returns a plain FQN set the pure [`coverage_check`]
+/// consumes. When no default branch resolves (a detached/unborn main
+/// checkout), the delta is empty and coverage falls back to spine
+/// reachability alone.
+fn solution_nodes_added_on_branch(
+    apg_root: &Path,
+    nodes: &[crate::layers::NodeFile],
+) -> anyhow::Result<BTreeSet<String>> {
+    let identity = crate::git::repo_identity(apg_root)?;
+    let Some(default) = identity.default_branch.as_deref() else {
+        return Ok(BTreeSet::new());
+    };
+    // The default branch lives in the main checkout's ref store (shared with
+    // every linked worktree), so resolve it from `main_root`.
+    let repo = git2::Repository::open(&identity.main_root)?;
+    let default_ref = repo
+        .find_reference(&format!("refs/heads/{default}"))
+        .or_else(|_| repo.find_reference(&format!("refs/remotes/origin/{default}")))
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "cannot compute the branch delta: default branch `{default}` is not a local ref"
+            )
+        })?;
+    let default_tree = default_ref.peel_to_commit()?.tree()?;
+    // The repo-relative layout dir (`apg`), so the layer files resolve inside
+    // the default branch's tree. Canonicalized on both sides so a symlinked
+    // temp dir does not produce a spurious prefix mismatch.
+    let layout = std::fs::canonicalize(apg_root)
+        .ok()
+        .and_then(|p| {
+            p.strip_prefix(&identity.checkout_root)
+                .ok()
+                .map(Path::to_path_buf)
+        })
+        .unwrap_or_else(|| PathBuf::from(specs::LAYOUT));
+    let mut added = BTreeSet::new();
+    for n in nodes.iter().filter(|n| n.layer == "solution") {
+        let rel = layout
+            .join(crate::layers::LAYERS_DIR)
+            .join(&n.layer)
+            .join(&n.node_type)
+            .join(format!("{}.json", n.name));
+        if default_tree.get_path(&rel).is_err() {
+            added.insert(crate::layers::fqn(
+                crate::layers::Layer::Solution,
+                &n.node_type,
+                &n.name,
+            ));
+        }
+    }
+    Ok(added)
+}
+
+/// Spine-scoped derived solution coverage (SPEC §5, requirement
+/// coverage-spine-scoped). The solution nodes in scope are:
+///
+/// 1. every solution node reached from a satisfied requirement (`satisfied`,
+///    a PlanPhase's `Satisfies` targets) through the spine — Requirement
+///    `Drives` Domain, Domain `RealisedBy` Solution; and
+/// 2. every solution node added on this branch (`branch_added`, the
+///    default-branch delta [`solution_nodes_added_on_branch`] computes).
+///
+/// Each in-scope solution node's `implemented-by` code FQNs must be touched
+/// by at least one plan task. A pre-existing solution node unreachable from a
+/// satisfied requirement is EXEMPT — it belongs to an earlier project's spine
+/// and must not force a fake `modifies` task.
 ///
 /// A task touches an FQN when its verb's subject equals it: `target` for
 /// every verb, plus `new_fqn` for a renames/moves pair (the destination FQN
@@ -1740,16 +1825,18 @@ pub(crate) struct CoverageReport {
 /// A solution node with NO `implemented-by` edge is exempt — the rule is over
 /// the node's implemented-by FQNs, and with none there is nothing to touch —
 /// but it is reported in [`CoverageReport::no_claims`] (a warning, never a
-/// blocker): the bridge has a gap the spec-writer should close by authoring
-/// the edge.
+/// blocker), whether it is spine-reached or branch-added.
 ///
 /// Pure — no I/O. The caller supplies the transient plan records (note-26:
 /// the `.trans/plans/<project>.jsonl`, not the DB's static Task table, is the
-/// task source of truth) and the durable node files
-/// ([`crate::layers::read_existing_nodes`]).
+/// task source of truth), the durable node files
+/// ([`crate::layers::read_existing_nodes`]), the satisfied requirement FQNs,
+/// and the branch-added solution FQNs.
 pub(crate) fn coverage_check(
     records: &[Record],
     nodes: &[crate::layers::NodeFile],
+    satisfied: &BTreeSet<String>,
+    branch_added: &BTreeSet<String>,
 ) -> CoverageReport {
     let mut touched: BTreeSet<&str> = BTreeSet::new();
     for r in records {
@@ -1768,6 +1855,41 @@ pub(crate) fn coverage_check(
             }
         }
     }
+
+    // Resolve every loaded node by its derived FQN so the spine walk can
+    // follow `out` edges between node files.
+    let mut by_fqn: std::collections::BTreeMap<String, &crate::layers::NodeFile> =
+        std::collections::BTreeMap::new();
+    for n in nodes {
+        let Some(layer) = crate::layers::Layer::ALL
+            .iter()
+            .find(|l| l.layer_dir() == n.layer)
+            .copied()
+        else {
+            continue;
+        };
+        let fqn = crate::layers::fqn(layer, &n.node_type, &n.name);
+        by_fqn.insert(fqn, n);
+    }
+
+    // The spine: from each satisfied requirement follow Drives to its domain
+    // node(s), then RealisedBy to the solution node(s) they are realised by.
+    let mut required: BTreeSet<String> = BTreeSet::new();
+    for req in satisfied {
+        let Some(req_node) = by_fqn.get(req) else {
+            continue;
+        };
+        for d in req_node.out.iter().filter(|e| e.kind == "drives") {
+            let Some(domain) = by_fqn.get(&d.target) else {
+                continue;
+            };
+            for rb in domain.out.iter().filter(|e| e.kind == "realised-by") {
+                required.insert(rb.target.clone());
+            }
+        }
+    }
+    required.extend(branch_added.iter().cloned());
+
     let mut gaps: Vec<CoverageGap> = Vec::new();
     let mut no_claims: Vec<String> = Vec::new();
     for n in nodes {
@@ -1777,6 +1899,11 @@ pub(crate) fn coverage_check(
             continue;
         }
         let solution = crate::layers::fqn(crate::layers::Layer::Solution, &n.node_type, &n.name);
+        if !required.contains(&solution) {
+            // A pre-existing solution node outside this plan's spine (and not
+            // added on this branch) is exempt.
+            continue;
+        }
         let refs: Vec<&str> = n
             .out
             .iter()
@@ -4287,9 +4414,10 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // task-4 (coverage_check): derived solution coverage in plan verify —
-    // every solution node's implemented-by FQN must be touched by at least
-    // one plan task (SPEC §5); the coherence gate refuses when it does not.
+    // coverage_check: derived solution coverage in plan verify — every
+    // in-scope solution node's implemented-by FQN (reached from a satisfied
+    // requirement, or added on this branch) must be touched by at least one
+    // plan task (SPEC §5); the coherence gate refuses when it does not.
     // ------------------------------------------------------------------
 
     /// Writes one solution-layer node file under `apg/layers/solution/` with
@@ -4321,6 +4449,71 @@ mod tests {
         );
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, serde_json::to_string_pretty(&nf).unwrap()).unwrap();
+    }
+
+    /// A node file with the given identity and `(kind, target)` out-edges — the
+    /// building block for the pure `coverage_check` tests and the spine
+    /// fixtures.
+    fn nf(
+        layer: &str,
+        node_type: &str,
+        name: &str,
+        edges: &[(&str, &str)],
+    ) -> crate::layers::NodeFile {
+        crate::layers::NodeFile {
+            layer: layer.to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            body: String::new(),
+            properties: std::collections::BTreeMap::new(),
+            out: edges
+                .iter()
+                .map(|(k, t)| crate::layers::OutEdge {
+                    kind: k.to_string(),
+                    target: t.to_string(),
+                    properties: std::collections::BTreeMap::new(),
+                })
+                .collect(),
+            in_edges: Vec::new(),
+        }
+    }
+
+    /// A single-task record (phase-01/task-1) with the given verb and
+    /// target(s) — the coverage touch source.
+    fn task_rec(verb: &str, target: &str, new_fqn: &str) -> Record {
+        Record::Task {
+            fqn: "foo/plan.phase-01.task-1".to_string(),
+            title: "T".to_string(),
+            kind: "source".to_string(),
+            tier: String::new(),
+            status: "pending".to_string(),
+            verb: verb.to_string(),
+            target: target.to_string(),
+            new_fqn: new_fqn.to_string(),
+        }
+    }
+
+    /// Writes an arbitrary layers node file with the given `(kind, target)`
+    /// out-edges (raw file write; the fixture commits it).
+    fn write_node_file(
+        apg_root: &Path,
+        layer: &str,
+        node_type: &str,
+        name: &str,
+        edges: &[(&str, &str)],
+    ) {
+        let l = match layer {
+            "requirements" => crate::layers::Layer::Requirements,
+            "domain" => crate::layers::Layer::Domain,
+            "solution" => crate::layers::Layer::Solution,
+            "implementation" => crate::layers::Layer::Implementation,
+            "global" => crate::layers::Layer::Global,
+            other => panic!("bad layer `{other}`"),
+        };
+        let node = nf(layer, node_type, name, edges);
+        let path = crate::layers::node_file_path(apg_root, l, node_type, name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(&node).unwrap()).unwrap();
     }
 
     /// Commits the given repo-relative paths on the worktree's branch (git2
@@ -4371,7 +4564,10 @@ mod tests {
         // One solution node whose implemented-by FQNs are a real scanned
         // Struct (covered by a modifies task) and an absent FQN (covered by a
         // creates task — the planned-node case: a creates over a still-absent
-        // FQN counts exactly like a modifies over real code).
+        // FQN counts exactly like a modifies over real code). The node is
+        // ADDED ON THIS BRANCH, so it is in scope even though no satisfied
+        // requirement reaches it; there is no cumulative-store assumption —
+        // a pre-existing unreachable node would be exempt (task-7's int test).
         let (apg_root, repo, wt) = fixture("coverage-ok");
         write_solution_node(
             &apg_root,
@@ -4425,9 +4621,9 @@ mod tests {
 
     #[test]
     fn coverage_refuses_when_an_implemented_by_fqn_is_untouched() {
-        // Two solution nodes; the plan touches only the real Struct — the
-        // container's absent Gateway FQN is uncovered, so verify refuses,
-        // naming the FQN, its solution node, and the matching creates
+        // Two branch-added solution nodes; the plan touches only the real
+        // Struct — the container's absent Gateway FQN is uncovered, so verify
+        // refuses, naming the FQN, its solution node, and the matching creates
         // suggestion.
         let (apg_root, repo, wt) = fixture("coverage-gap");
         write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
@@ -4479,8 +4675,9 @@ mod tests {
 
     #[test]
     fn coverage_renames_moves_destination_counts() {
-        // A renames task whose destination equals the implemented-by FQN
-        // touches it (the new_fqn half of the pair) — the bridge holds.
+        // A branch-added node whose renames task destination equals the
+        // implemented-by FQN touches it (the new_fqn half of the pair) — the
+        // bridge holds under branch-delta scoping.
         let (apg_root, repo, wt) = fixture("coverage-rename");
         write_solution_node(
             &apg_root,
@@ -4519,8 +4716,9 @@ mod tests {
 
     #[test]
     fn coverage_trivially_holds_with_no_solution_nodes() {
-        // No solution-layer node files at all — coverage is a no-op (there
-        // is nothing to touch) and verify passes on the other gates alone.
+        // No solution-layer node files at all — nothing is spine-reached and
+        // the branch delta is empty, so coverage is a no-op and verify passes
+        // on the other gates alone.
         let (apg_root, repo, _wt) = fixture("coverage-empty");
         let _path = write_plan(&apg_root);
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
@@ -4529,11 +4727,11 @@ mod tests {
 
     #[test]
     fn coverage_exempts_solution_node_without_implemented_by_edge() {
-        // A solution node with NO implemented-by edge is exempt from the
-        // coverage rule — the SPEC's rule is over the node's implemented-by
-        // FQNs, and with none there is nothing to touch (nothing blocks).
-        // The gap is surfaced as a warning (no code claims the node), never a
-        // blocker: the no-claims list is part of the report.
+        // A BRANCH-ADDED solution node with NO implemented-by edge stays
+        // exempt — the rule is over the node's implemented-by FQNs, and with
+        // none there is nothing to touch (nothing blocks). The gap is surfaced
+        // as a warning (no code claims the node), never a blocker: the
+        // no-claims list is part of the report.
         let (apg_root, repo, wt) = fixture("coverage-no-claim");
         write_solution_node(&apg_root, "system", "payments", &[]);
         let sha = wt_commit_paths(
@@ -4549,9 +4747,18 @@ mod tests {
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
         let nodes = crate::layers::read_existing_nodes(&apg_root).unwrap();
-        let report = coverage_check(&records, &nodes);
+        let branch_added: BTreeSet<String> = ["solution.system.payments".to_string()]
+            .into_iter()
+            .collect();
+        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
         assert_eq!(report.no_claims, vec!["solution.system.payments"]);
         assert!(report.gaps.is_empty());
+
+        // The same node, neither branch-added nor spine-reached, is ignored
+        // entirely (the pre-existing exemption).
+        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &BTreeSet::new());
+        assert!(report.no_claims.is_empty(), "{report:?}");
+        assert!(report.gaps.is_empty(), "{report:?}");
 
         testutil::remove(&repo);
     }
@@ -4562,7 +4769,8 @@ mod tests {
         // task touches what it deletes), a renames/moves new_fqn covering the
         // destination, a creates covering a planned FQN, empty-target tasks
         // touching nothing, and non-solution nodes (person, solution notes)
-        // ignored.
+        // ignored. The solution nodes are branch-added; the delta is supplied
+        // directly here (the git compare is exercised by the int test).
         let records = vec![
             Record::Plan {
                 fqn: "foo/plan".to_string(),
@@ -4674,7 +4882,18 @@ mod tests {
                 in_edges: Vec::new(),
             },
         ];
-        let report = coverage_check(&records, &nodes);
+        // The nodes are branch-added (the pure test supplies the delta
+        // directly — the git half is exercised by the int test).
+        let branch_added: BTreeSet<String> = [
+            "solution.system.payments",
+            "solution.container.api",
+            "solution.component.reporting",
+            "solution.component.checkout",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
         // Only the reporting component's FQN is untouched: Store is touched
         // (modifies AND deletes — verb-agnostic), Gateway by the creates,
         // Store2 by the rename's new_fqn.
@@ -4689,6 +4908,280 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
+    // phase-06 (spine-scoped coverage): the pure coverage_check semantics —
+    // spine reachability, the branch delta, the pre-existing exemption, and
+    // the no-claims exemption — plus the plan_verify_at int path that supplies
+    // the real satisfied set and default-branch delta.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn coverage_spine_reachability_scopes_required_solution_nodes() {
+        // Only solution nodes reached from a SATISFIED requirement through
+        // Requirement Drives Domain RealisedBy Solution are required; an
+        // unrelated (non-branch-added) solution node is ignored — even an
+        // untouched implemented-by FQN on it yields no gap.
+        let nodes = vec![
+            nf(
+                "requirements",
+                "requirement",
+                "cr",
+                &[("drives", "domain.entity.plan-record")],
+            ),
+            nf(
+                "domain",
+                "entity",
+                "plan-record",
+                &[("realised-by", "solution.component.reached")],
+            ),
+            nf(
+                "solution",
+                "component",
+                "reached",
+                &[("implemented-by", "github.com/x/y.Store")],
+            ),
+            nf(
+                "solution",
+                "component",
+                "unrelated",
+                &[("implemented-by", "github.com/x/y.Untouched")],
+            ),
+        ];
+        let satisfied: BTreeSet<String> = ["requirements.requirement.cr".to_string()]
+            .into_iter()
+            .collect();
+
+        // The reached node's FQN is touched -> no gap; the unrelated node's
+        // untouched FQN is never considered.
+        let records = vec![task_rec("modifies", "github.com/x/y.Store", "")];
+        let report = coverage_check(&records, &nodes, &satisfied, &BTreeSet::new());
+        assert!(report.gaps.is_empty(), "{report:?}");
+
+        // Leave the reached node's FQN untouched -> exactly that gap (the
+        // unrelated node stays out of scope).
+        let records = vec![task_rec("creates", "github.com/x/y.Other", "")];
+        let report = coverage_check(&records, &nodes, &satisfied, &BTreeSet::new());
+        assert_eq!(
+            report.gaps,
+            vec![CoverageGap {
+                solution: "solution.component.reached".to_string(),
+                fqn: "github.com/x/y.Store".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn coverage_branch_added_solution_nodes_are_required_without_a_spine() {
+        // A branch-added solution node's implemented-by FQN is required even
+        // when no satisfied requirement reaches it; a branch-added node with
+        // NO implemented-by edge stays exempt via CoverageReport::no_claims
+        // (the branch-added plan-store-atomic-rewrite forces no fake task).
+        let nodes = vec![
+            nf(
+                "solution",
+                "component",
+                "added",
+                &[("implemented-by", "github.com/x/y.Store")],
+            ),
+            nf("solution", "component", "plan-store-atomic-rewrite", &[]),
+        ];
+        let branch_added: BTreeSet<String> = [
+            "solution.component.added".to_string(),
+            "solution.component.plan-store-atomic-rewrite".to_string(),
+        ]
+        .into_iter()
+        .collect();
+
+        let records = vec![task_rec("modifies", "github.com/x/y.Store", "")];
+        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
+        assert!(report.gaps.is_empty(), "{report:?}");
+        assert_eq!(
+            report.no_claims,
+            vec!["solution.component.plan-store-atomic-rewrite"]
+        );
+
+        // The branch-added node's FQN untouched -> a gap even with no spine.
+        let records = vec![task_rec("creates", "github.com/x/y.Other", "")];
+        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
+        assert_eq!(
+            report.gaps,
+            vec![CoverageGap {
+                solution: "solution.component.added".to_string(),
+                fqn: "github.com/x/y.Store".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn coverage_exempts_unreachable_pre_existing_solution_nodes() {
+        // The merged worktree-cleanup nodes are pre-existing (present on the
+        // default branch) and unreachable from any satisfied requirement, so
+        // they yield no gaps and force no fake modifies tasks.
+        let nodes = vec![
+            nf(
+                "solution",
+                "component",
+                "project-delete",
+                &[("implemented-by", "apg.project_cmd.delete_project")],
+            ),
+            nf(
+                "solution",
+                "component",
+                "project-dispatch",
+                &[("implemented-by", "apg.project_cmd.cmd_project")],
+            ),
+            nf(
+                "solution",
+                "component",
+                "project-merge",
+                &[("implemented-by", "apg.project_cmd.project_merge_at")],
+            ),
+            nf(
+                "solution",
+                "container",
+                "project-command",
+                &[("implemented-by", "apg.project_cmd.cmd_project")],
+            ),
+        ];
+        let records = vec![task_rec("creates", "github.com/x/y.Gateway", "")];
+        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &BTreeSet::new());
+        assert!(report.gaps.is_empty(), "{report:?}");
+        assert!(report.no_claims.is_empty(), "{report:?}");
+    }
+
+    #[test]
+    fn plan_verify_at_supplies_spine_and_branch_delta() {
+        // plan_verify_at computes the satisfied-requirement set from the
+        // plan's Satisfies edges and the branch delta against the repo's
+        // default branch (the public repo_identity default_branch). A
+        // pre-existing unreachable node (committed on `main` BEFORE the
+        // project branch) forces no gap; the reached + branch-added nodes'
+        // implemented-by FQNs must be touched.
+        let repo = Repo::new("verify-spine");
+        // The pre-existing worktree-cleanup nodes: present on `main` before the
+        // branch is cut, so they are not part of the branch delta and — being
+        // unreachable from the plan's satisfied requirement — must force no
+        // gap and no fake `modifies` task.
+        for (node_type, name, code) in [
+            (
+                "component",
+                "project-delete",
+                "apg.project_cmd.delete_project",
+            ),
+            (
+                "component",
+                "project-dispatch",
+                "apg.project_cmd.cmd_project",
+            ),
+            (
+                "component",
+                "project-merge",
+                "apg.project_cmd.project_merge_at",
+            ),
+            (
+                "container",
+                "project-command",
+                "apg.project_cmd.cmd_project",
+            ),
+        ] {
+            repo.write(
+                &format!("apg/layers/solution/{node_type}/{name}.json"),
+                &serde_json::to_string_pretty(&nf(
+                    "solution",
+                    node_type,
+                    name,
+                    &[("implemented-by", code)],
+                ))
+                .unwrap(),
+            );
+        }
+        repo.commit_all("author pre-existing worktree-cleanup nodes");
+        let wt = repo.start_project("foo");
+        db_at(&wt);
+        let apg_root = wt.join(specs::LAYOUT);
+
+        // The branch's spine + branch-added solution nodes.
+        write_node_file(
+            &apg_root,
+            "requirements",
+            "requirement",
+            "cr",
+            &[("drives", "domain.entity.plan-record")],
+        );
+        write_node_file(
+            &apg_root,
+            "domain",
+            "entity",
+            "plan-record",
+            &[(
+                "realised-by",
+                "solution.component.coverage-spine-validation",
+            )],
+        );
+        write_solution_node(
+            &apg_root,
+            "component",
+            "coverage-spine-validation",
+            &["github.com/x/y.Store"],
+        );
+        write_solution_node(&apg_root, "component", "plan-store-atomic-rewrite", &[]);
+        let sha = wt_commit_paths(
+            &wt,
+            &[
+                "apg/layers/requirements/requirement/cr.json",
+                "apg/layers/domain/entity/plan-record.json",
+                "apg/layers/solution/component/coverage-spine-validation.json",
+                "apg/layers/solution/component/plan-store-atomic-rewrite.json",
+            ],
+            "author the branch spine and solution nodes",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        // Green: the reached/branch-added FQN is touched; the pre-existing
+        // unreachable node and the no-claim node force no gap.
+        let mut records = bare_plan();
+        records.push(Record::Satisfies {
+            from: "foo/plan.phase-01".to_string(),
+            to: "requirements.requirement.cr".to_string(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        records.push(task_rec("modifies", "github.com/x/y.Store", ""));
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
+
+        // Refusal: drop the touching task -> the reached node's FQN is a gap,
+        // named with its solution node; the pre-existing node is still not
+        // named (no false gap).
+        let mut records = bare_plan();
+        records.push(Record::Satisfies {
+            from: "foo/plan.phase-01".to_string(),
+            to: "requirements.requirement.cr".to_string(),
+        });
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("coverage incomplete"), "{msg}");
+        assert!(
+            msg.contains("solution.component.coverage-spine-validation"),
+            "{msg}"
+        );
+        assert!(msg.contains("github.com/x/y.Store"), "{msg}");
+        // None of the pre-existing unreachable worktree-cleanup nodes is named.
+        for name in [
+            "project-delete",
+            "project-dispatch",
+            "project-merge",
+            "project-command",
+        ] {
+            assert!(!msg.contains(name), "{name} named in: {msg}");
+        }
+
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
     // task-5 (coverage tests): the task-text audit gaps — the green path
     // across MULTIPLE solution nodes, both halves of a renames/moves pair as
     // touches, and a refusal that names ONLY the uncovered node.
@@ -4696,12 +5189,12 @@ mod tests {
 
     #[test]
     fn coverage_holds_across_multiple_solution_nodes() {
-        // The bridge is complete only when EVERY solution node's implemented-by
-        // FQNs are touched — this is the green end-to-end path through
-        // plan_verify_at across MULTIPLE solution nodes (two containers; one
-        // real FQN, one still-absent FQN), not just several FQNs on a single
-        // node. Verify returns its green verdict and the derived report agrees:
-        // no gaps, no no-claims warnings.
+        // The bridge is complete only when EVERY in-scope solution node's
+        // implemented-by FQNs are touched — this is the green end-to-end path
+        // through plan_verify_at across MULTIPLE branch-added solution nodes
+        // (two containers; one real FQN, one still-absent FQN), not just
+        // several FQNs on a single node. Verify returns its green verdict and
+        // the derived report agrees: no gaps, no no-claims warnings.
         let (apg_root, repo, wt) = fixture("coverage-multi-ok");
         write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
         write_solution_node(
@@ -4751,10 +5244,16 @@ mod tests {
         });
         specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
 
-        // Every solution node's every implemented-by FQN is touched -> green.
+        // Every in-scope solution node's every implemented-by FQN is touched
+        // -> green.
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
         let nodes = crate::layers::read_existing_nodes(&apg_root).unwrap();
-        let report = coverage_check(&records, &nodes);
+        let branch_added: BTreeSet<String> =
+            ["solution.container.api", "solution.component.checkout"]
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
         assert!(report.gaps.is_empty(), "{report:?}");
         assert!(report.no_claims.is_empty(), "{report:?}");
 
@@ -4763,11 +5262,11 @@ mod tests {
 
     #[test]
     fn coverage_refusal_names_only_the_uncovered_solution() {
-        // Mixed coverage: the component's real FQN is covered by a modifies
-        // task, the container's absent FQN is not. The refusal names the
-        // uncovered node/FQN only — the covered node and its claim appear
-        // nowhere in the message (no false positives for a partially-covered
-        // bridge).
+        // Mixed coverage across two branch-added nodes: the component's real
+        // FQN is covered by a modifies task, the container's absent FQN is
+        // not. The refusal names the uncovered node/FQN only — the covered
+        // node and its claim appear nowhere in the message (no false positives
+        // for a partially-covered bridge).
         let (apg_root, repo, wt) = fixture("coverage-mixed-names");
         write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
         write_solution_node(
@@ -4819,11 +5318,12 @@ mod tests {
     fn coverage_moves_touches_source_and_destination_halves() {
         // A renames/moves task claims the code at BOTH FQNs: `target` (the
         // source, where the code was) and `new_fqn` (the destination, where it
-        // lands). Here the two halves are different solution nodes'
-        // implemented-by targets, so the single `moves` covers both and the
-        // bridge holds. (coverage_check counts `target` for every verb plus
-        // `new_fqn` for renames/moves — the pair is one claim across two
-        // locations; the existing renames test covers the destination half.)
+        // lands). Here the two halves are different branch-added solution
+        // nodes' implemented-by targets, so the single `moves` covers both and
+        // the bridge holds under branch-delta scoping. (coverage_check counts
+        // `target` for every verb plus `new_fqn` for renames/moves — the pair
+        // is one claim across two locations; the existing renames test covers
+        // the destination half.)
         let (apg_root, repo, wt) = fixture("coverage-rename-both");
         write_solution_node(&apg_root, "system", "payments", &["github.com/x/y.Store"]);
         write_solution_node(
@@ -4861,7 +5361,12 @@ mod tests {
 
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
         let nodes = crate::layers::read_existing_nodes(&apg_root).unwrap();
-        let report = coverage_check(&records, &nodes);
+        let branch_added: BTreeSet<String> =
+            ["solution.system.payments", "solution.component.checkout"]
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
         assert!(report.gaps.is_empty(), "{report:?}");
 
         testutil::remove(&repo);
