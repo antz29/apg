@@ -12,6 +12,11 @@
       "kind": "drives",
       "source": "requirements.requirement.merge-self-cleanup",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.delete-subcommand",
+      "properties": {}
     }
   ]
 }
