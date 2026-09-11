@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "property-map",
+  "body": "A node's or edge's property map (k=v metadata): a merge-able set of keys. An update merges the passed keys over the existing map and leaves other keys untouched; only an explicit unset removes a key. There is no implicit unset.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
