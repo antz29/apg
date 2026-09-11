@@ -66,6 +66,11 @@
       "kind": "contains",
       "target": "requirements.requirement.rm-refuses-with-force-escape",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.plan-add-renamed-from-init",
+      "properties": {}
     }
   ],
   "in": []
