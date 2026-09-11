@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.node-mutations",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.mutation-commit-staging",
+      "properties": {}
     }
   ],
   "in": [
