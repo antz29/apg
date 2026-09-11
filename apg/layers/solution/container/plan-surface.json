@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "plan-surface",
+  "body": "The `apg plan` transient mutation surface: strict add / update / rm over the plan record and its phases, tasks, and planned nodes, with edge-preserving updates and a whole-record atomic cascade remove. Container of the CLI system.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
