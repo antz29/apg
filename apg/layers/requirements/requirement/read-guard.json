@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.permission-grant",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.graph-state",
+      "properties": {}
     }
   ],
   "in": [
