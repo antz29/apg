@@ -28,6 +28,11 @@
       "kind": "contains",
       "source": "solution.system.apg-cli",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.authored-node",
+      "properties": {}
     }
   ]
 }
