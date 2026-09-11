@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "project-lifecycle",
+  "body": "The lifecycle operations over a project, all main-checkout operations binary-operated via git2 (the git CLI is never shelled out to): `start` (branch + worktree + branch DB), `merge` (verify gate → merge into default → main rebuild → self-cleanup), `delete` (refuse unsafe states → remove worktree → delete branch).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
