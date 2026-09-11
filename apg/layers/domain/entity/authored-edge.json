@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.container.node-edge-surface",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.edge-mutations",
+      "properties": {}
     }
   ],
   "in": [

@@ -10,6 +10,11 @@
       "kind": "contains",
       "source": "solution.container.node-edge-surface",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.authored-edge",
+      "properties": {}
     }
   ]
 }
