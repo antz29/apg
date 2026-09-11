@@ -7,5 +7,11 @@
     "kind": "app"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.project",
+      "properties": {}
+    }
+  ]
 }

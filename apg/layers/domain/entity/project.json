@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.container.project-command",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",
