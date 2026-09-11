@@ -6,7 +6,13 @@
   "properties": {
     "kind": "app"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.project-dispatch",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "realised-by",
