@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.layers.refuse_if_present",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.layers.update_node_file",
+      "properties": {}
     }
   ],
   "in": [
