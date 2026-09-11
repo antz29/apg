@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "never-cause",
+  "body": "Agent prose must state the restriction and the sanctioned alternative, never the cause of the restriction.",
+  "properties": {
+    "attaches-to": "domain.entity.agent-prose"
+  },
+  "out": [],
+  "in": []
+}
