@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "leftover-worktrees",
+  "body": "source: navigator brief. `apg/.worktrees/` has accumulated feedback-0-fix, fix-planned-guard, fix-uses-edge, layers-bootstrap, suite-directory-arg, task-verb-db — merged/abandoned projects never got cleaned up. Root causes verified in code: `project_merge_at` returns right after the main rebuild — no worktree removal, no branch deletion (src/project_cmd.rs:416-419); `cmd_project` dispatches only start|merge (src/project_cmd.rs:37-40); `refuse_start` and `project_merge_at` even instruct the user to `git worktree remove` / `git branch -d` by hand. Resolution: merge self-cleanup + a new `delete` subcommand [autonomous].",
+  "properties": {},
+  "out": [],
+  "in": []
+}
