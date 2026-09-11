@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "delete-subcommand",
+  "body": "Add `apg project delete <name>` (the `cancel` alternative was considered and rejected: `delete` matches the node/edge `rm` vocabulary and `git branch -d` semantics). ACs: (a) it is a main-checkout operation dispatched from `cmd_project`, documented in `apg --help`; (b) it removes the abandoned project's worktree at `<main>/apg/.worktrees/<name>` and deletes its branch — for projects that are NOT merged; (c) the branch's commits are discarded — delete is the explicit abandon act and does not require the branch to be merged into the default branch.",
+  "properties": {
+    "feature": "project-lifecycle"
+  },
+  "out": [],
+  "in": []
+}
