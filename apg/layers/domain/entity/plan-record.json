@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.phase-add-refuses-existing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.task-add-refuses-existing",
+      "properties": {}
     }
   ]
 }
