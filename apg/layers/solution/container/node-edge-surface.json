@@ -33,6 +33,11 @@
       "kind": "realised-by",
       "source": "domain.entity.authored-node",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.authored-edge",
+      "properties": {}
     }
   ]
 }
