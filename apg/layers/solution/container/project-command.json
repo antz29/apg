@@ -17,6 +17,11 @@
       "kind": "realised-by",
       "source": "domain.service.project-lifecycle",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.system.apg-cli",
+      "properties": {}
     }
   ]
 }
