@@ -52,6 +52,7 @@ pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
     match sub {
         "add" => plan_add(&args[1..]),
         "update" => plan_update(&args[1..]),
+        "rm" => plan_rm(&args[1..]),
         "done" => plan_done(&args[1..]),
         "undone" => plan_undone(&args[1..]),
         "note" => plan_note(&args[1..]),
@@ -494,6 +495,271 @@ fn plan_update_planned_at(
         });
     }
     Ok(())
+}
+
+/// `apg plan rm <project> [phase <n>|task <phase> <k>|planned <fqn>] [--force]`
+/// — the remove arm of the strict add/update/rm plan surface. A missing second
+/// positional removes the plan itself; `phase`/`task`/`planned` remove one
+/// sub-entity. Without `--force` a remove refuses while the entity still has
+/// dependents (a plan with phases/tasks/planned nodes, a phase with tasks, a
+/// `done` or feedback-bearing task, a `planned` node targeted by a `creates`
+/// task), naming the dependent and the `--force` escape; `--force` cascades the
+/// entity and its dependents. A non-existent entity is a hard error, never a
+/// silent no-op. Every arm rewrites the whole-record JSONL exactly once (never
+/// a half-deleted plan) — the core functions do the load → in-memory cascade →
+/// single write-through, so a refusal or a mid-cascade failure leaves the store
+/// byte-identical.
+fn plan_rm(args: &[String]) -> anyhow::Result<()> {
+    let p = parse_args(args);
+    let Some(project) = p.positional.first() else {
+        anyhow::bail!(
+            "usage: apg plan rm <project> [phase <n>|task <phase> <k>|planned <fqn>] [--force]"
+        );
+    };
+    let force = p.has("force");
+    let apg_root = require_apg_root()?;
+    match p.positional.get(1).map(|s| s.as_str()) {
+        None => plan_rm_at(&apg_root, project, force),
+        Some("phase") => {
+            let Some(n) = p.positional.get(2).and_then(|s| s.parse::<u32>().ok()) else {
+                anyhow::bail!("usage: apg plan rm <project> phase <n> [--force]");
+            };
+            plan_rm_phase_at(&apg_root, project, n, force)
+        }
+        Some("task") => {
+            let (Some(phase), Some(k)) = (
+                p.positional.get(2).and_then(|s| s.parse::<u32>().ok()),
+                p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
+            ) else {
+                anyhow::bail!("usage: apg plan rm <project> task <phase> <k> [--force]");
+            };
+            plan_rm_task_at(&apg_root, project, phase, k, force)
+        }
+        Some("planned") => {
+            let Some(fqn) = p.positional.get(2) else {
+                anyhow::bail!("usage: apg plan rm <project> planned <fqn> [--force]");
+            };
+            plan_rm_planned_at(&apg_root, project, fqn, force)
+        }
+        Some(other) => anyhow::bail!("unknown plan rm kind `{other}` — phase|task|planned"),
+    }
+}
+
+/// Shared remove cascade: drop every node record at `fqns` plus every incident
+/// edge ([`artifacts::remove_node`]), then garbage-collect any `Feedback`/`Note`
+/// record left with no remaining incident `Reviews`/`Details` edge — so no edge
+/// points at a removed record and no orphan Feedback/Note survives. Pure: the
+/// caller rewrites the store exactly once ([`persist_rm`]), so all the cascade
+/// work is in memory and any failure before that single write leaves the
+/// on-disk plan untouched (plan-rm-atomic).
+fn cascade_remove(records: &mut Vec<Record>, fqns: &[String]) {
+    for fqn in fqns {
+        artifacts::remove_node(records, fqn);
+    }
+    // A Feedback/Note whose only attachment was a removed node is an orphan:
+    // its Reviews/Details edge is gone, so the record must go too.
+    let reviewed: BTreeSet<String> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Reviews { from, .. } => Some(from.clone()),
+            _ => None,
+        })
+        .collect();
+    let detailed: BTreeSet<String> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Details { from, .. } => Some(from.clone()),
+            _ => None,
+        })
+        .collect();
+    records.retain(|r| match r {
+        Record::Feedback { fqn, .. } => reviewed.contains(fqn.as_str()),
+        Record::Note { fqn, .. } => detailed.contains(fqn.as_str()),
+        _ => true,
+    });
+}
+
+/// Commit one rm: a single whole-record write-through of `records`. An emptied
+/// store (a plan-level cascade removed every record) is DELETED rather than
+/// left as an empty file — an empty `<project>.jsonl` would make the next
+/// `apg plan add <project>` refuse as already-existing. The empty set is still
+/// re-ingested first so the branch DB drops the removed `<project>/…` nodes.
+fn persist_rm(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Result<()> {
+    write_through(apg_root, project, records)?;
+    if records.is_empty() {
+        let path = specs::plan_jsonl_path(apg_root, project);
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Core of the plan-level `rm` (`apg plan rm <project>`): refuse while the plan
+/// still carries any phase/task/planned node (naming every dependent and the
+/// `--force` escape); `--force` cascades the WHOLE plan — the Plan record,
+/// every phase, task and planned node, every dependent Feedback/Note, and all
+/// their incident Contains/Gates/Satisfies/Reviews/Details edges — in one
+/// in-memory pass. The emptied store is deleted ([`persist_rm`]), so a
+/// following `apg plan add <project>` recreates it. An absent plan is an error
+/// and the stored file is left untouched (nothing is written before the whole
+/// cascade is computed).
+fn plan_rm_at(apg_root: &Path, project: &str, force: bool) -> anyhow::Result<()> {
+    artifacts::acquire_spec_lock(apg_root)?;
+    let mut records = load_plan(apg_root, project)?;
+    let dependents: Vec<String> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::PlanPhase { fqn, .. }
+            | Record::Task { fqn, .. }
+            | Record::PlannedNode { fqn, .. } => Some(fqn.clone()),
+            _ => None,
+        })
+        .collect();
+    if !dependents.is_empty() && !force {
+        anyhow::bail!(
+            "plan `{project}` still has dependent nodes: {} — pass --force to cascade the whole plan (phases, tasks, planned nodes, and every dependent feedback/note)",
+            dependents.join(", ")
+        );
+    }
+    let plan_nodes: Vec<String> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Plan { fqn, .. }
+            | Record::PlanPhase { fqn, .. }
+            | Record::Task { fqn, .. }
+            | Record::PlannedNode { fqn, .. } => Some(fqn.clone()),
+            _ => None,
+        })
+        .collect();
+    cascade_remove(&mut records, &plan_nodes);
+    persist_rm(apg_root, project, &records)
+}
+
+/// Core of the `rm phase` arm: refuse while the phase still has any task
+/// (naming the task and the `--force` escape). BOTH paths cascade the phase plus
+/// every incident edge and the dependent Feedback/Note records; the `--force`
+/// path also removes the phase's tasks. A phase whose only dependents are
+/// Feedback/Note is removable WITHOUT `--force`. An absent phase is an error.
+fn plan_rm_phase_at(apg_root: &Path, project: &str, n: u32, force: bool) -> anyhow::Result<()> {
+    artifacts::acquire_spec_lock(apg_root)?;
+    let mut records = load_plan(apg_root, project)?;
+    let phase_fqn = format!("{project}/plan.phase-{n:02}");
+    if !records
+        .iter()
+        .any(|r| matches!(r, Record::PlanPhase { fqn, .. } if fqn == &phase_fqn))
+    {
+        anyhow::bail!("no phase {n} in plan `{project}` — nothing to remove (`{phase_fqn}`)");
+    }
+    let task_prefix = format!("{phase_fqn}.task-");
+    let tasks: Vec<String> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Task { fqn, .. } if fqn.starts_with(&task_prefix) => Some(fqn.clone()),
+            _ => None,
+        })
+        .collect();
+    if !tasks.is_empty() && !force {
+        anyhow::bail!(
+            "phase {n} of `{project}` still has dependent tasks: {} — pass --force to cascade the phase and its tasks (plus dependent feedback/notes)",
+            tasks.join(", ")
+        );
+    }
+    let mut remove = vec![phase_fqn];
+    if force {
+        remove.extend(tasks);
+    }
+    cascade_remove(&mut records, &remove);
+    persist_rm(apg_root, project, &records)
+}
+
+/// Core of the `rm task` arm: refuse when the task is `done` or has ANY
+/// incident Feedback (naming the status/Feedback and the `--force` escape — a
+/// removed task would otherwise strand its resolved Feedback mirror); `--force`
+/// cascades the task, its Contains edge, its incident Notes/Reviews edges and
+/// any Feedback/Note left orphaned. An absent task is an error.
+fn plan_rm_task_at(
+    apg_root: &Path,
+    project: &str,
+    phase: u32,
+    k: u32,
+    force: bool,
+) -> anyhow::Result<()> {
+    artifacts::acquire_spec_lock(apg_root)?;
+    let mut records = load_plan(apg_root, project)?;
+    let fqn = format!("{project}/plan.phase-{phase:02}.task-{k}");
+    let Some(status) = records.iter().find_map(|r| match r {
+        Record::Task {
+            fqn: tf, status, ..
+        } if tf == &fqn => Some(status.clone()),
+        _ => None,
+    }) else {
+        anyhow::bail!("no task {k} in phase {phase} of `{project}` — nothing to remove (`{fqn}`)");
+    };
+    let feedback: Vec<String> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Reviews { from, to } if to == &fqn => Some(from.clone()),
+            _ => None,
+        })
+        .collect();
+    if !force {
+        let mut reasons: Vec<String> = Vec::new();
+        if status == "done" {
+            reasons.push(format!("it is `{status}`"));
+        }
+        if !feedback.is_empty() {
+            reasons.push(format!("it has incident feedback: {}", feedback.join(", ")));
+        }
+        if !reasons.is_empty() {
+            anyhow::bail!(
+                "task `{fqn}` cannot be removed — {}; pass --force to cascade the task and its incident feedback/notes",
+                reasons.join("; ")
+            );
+        }
+    }
+    cascade_remove(&mut records, &[fqn]);
+    persist_rm(apg_root, project, &records)
+}
+
+/// Core of the `rm planned` arm: refuse while a `creates` task still targets
+/// the FQN (naming the task and the `--force` escape); `--force` removes the
+/// PlannedNode plus its parent Contains edge (and every other incident edge).
+/// An absent planned node is an error.
+fn plan_rm_planned_at(
+    apg_root: &Path,
+    project: &str,
+    fqn: &str,
+    force: bool,
+) -> anyhow::Result<()> {
+    artifacts::acquire_spec_lock(apg_root)?;
+    let mut records = load_plan(apg_root, project)?;
+    if !records
+        .iter()
+        .any(|r| matches!(r, Record::PlannedNode { fqn: pf, .. } if pf == fqn))
+    {
+        anyhow::bail!("no planned node `{fqn}` in plan `{project}` — nothing to remove");
+    }
+    let creators: Vec<String> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Task {
+                fqn: tf,
+                verb,
+                target,
+                ..
+            } if target == fqn && (verb.is_empty() || verb == "creates") => Some(tf.clone()),
+            _ => None,
+        })
+        .collect();
+    if !creators.is_empty() && !force {
+        anyhow::bail!(
+            "planned node `{fqn}` is targeted by a creates task: {} — pass --force to remove the planned node and its parent Contains edge",
+            creators.join(", ")
+        );
+    }
+    cascade_remove(&mut records, &[fqn.to_string()]);
+    persist_rm(apg_root, project, &records)
 }
 
 /// `apg plan add <project>` (the plan itself — no second positional) /
@@ -5185,6 +5451,493 @@ mod tests {
             .unwrap_err()
         });
         assert!(err.to_string().contains("apg plan add ghost"), "{err}");
+
+        testutil::remove(&repo);
+    }
+
+    /// No `Feedback`/`Note` record is orphaned (each still has its
+    /// `Reviews`/`Details` edge) and no plan-family edge points at a record
+    /// that no longer exists.
+    fn assert_no_orphans(records: &[Record]) {
+        let node_fqns: BTreeSet<&str> = records.iter().filter_map(artifacts::node_fqn).collect();
+        for r in records {
+            if let Record::Feedback { fqn, .. } = r {
+                assert!(
+                    records
+                        .iter()
+                        .any(|e| matches!(e, Record::Reviews { from, .. } if from == fqn)),
+                    "orphan Feedback `{fqn}` (no Reviews edge)"
+                );
+            }
+            if let Record::Note { fqn, .. } = r {
+                assert!(
+                    records
+                        .iter()
+                        .any(|e| matches!(e, Record::Details { from, .. } if from == fqn)),
+                    "orphan Note `{fqn}` (no Details edge)"
+                );
+            }
+            if let Some((from, to)) = artifacts::edge_endpoints(r) {
+                for endpoint in [from, to] {
+                    // Durable requirement FQNs are not in the transient plan
+                    // store; every plan-family endpoint must resolve.
+                    if endpoint.starts_with("foo/plan") || endpoint.starts_with("foo/feedback-") {
+                        assert!(
+                            node_fqns.contains(endpoint),
+                            "edge endpoint `{endpoint}` points at a removed record"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Unit: every plan/phase/task/planned rm refuses while the entity still
+    /// has a dependent (plan-with-phases, phase-with-tasks, `done` or
+    /// feedback-bearing task, creates-targeted planned node), naming the
+    /// dependent plus the `--force` escape; a non-existent entity is a hard
+    /// error; every refusal leaves the on-disk JSONL byte-identical.
+    #[test]
+    fn plan_rm_refusals_name_dependents_and_leave_the_store_intact() {
+        let (apg_root, repo, _wt) = fixture("rm-refusal");
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
+                title: "T".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: "creates".to_string(),
+                target: "github.com/x/y.Store".to_string(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Store".to_string(),
+                kind: "struct".to_string(),
+                name: "Store".to_string(),
+                parent: "github.com/x/y".to_string(),
+            },
+            Record::Contains {
+                from: "github.com/x/y".to_string(),
+                to: "github.com/x/y.Store".to_string(),
+            },
+        ];
+        specs::write_jsonl(&path, &records).unwrap();
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        // A plan with a phase refuses, naming the phase + --force.
+        let err = plan_rm_at(&apg_root, "foo", false).unwrap_err().to_string();
+        assert!(err.contains("foo/plan.phase-01"), "{err}");
+        assert!(err.contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        // A phase with a task refuses, naming the task + --force.
+        let err = plan_rm_phase_at(&apg_root, "foo", 1, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("foo/plan.phase-01.task-1"), "{err}");
+        assert!(err.contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        // A done task refuses, naming the status + --force.
+        plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+        let before_done = std::fs::read_to_string(&path).unwrap();
+        let err = plan_rm_task_at(&apg_root, "foo", 1, 1, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("done"), "{err}");
+        assert!(err.contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before_done);
+
+        // A pending task with incident feedback refuses, naming the feedback.
+        plan_undone_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+        let mut recs = specs::read_jsonl(&path).unwrap();
+        recs.push(Record::Feedback {
+            fqn: "foo/feedback-1".to_string(),
+            body: "b".to_string(),
+            status: "open".to_string(),
+            disposition: String::new(),
+        });
+        recs.push(Record::Reviews {
+            from: "foo/feedback-1".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        specs::write_jsonl(&path, &recs).unwrap();
+        let before_fb = std::fs::read_to_string(&path).unwrap();
+        let err = plan_rm_task_at(&apg_root, "foo", 1, 1, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("foo/feedback-1"), "{err}");
+        assert!(err.contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before_fb);
+
+        // A creates-targeted planned node refuses, naming the task + --force.
+        let err = plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Store", false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("foo/plan.phase-01.task-1"), "{err}");
+        assert!(err.contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before_fb);
+
+        // Non-existent entities are hard errors, never a silent no-op.
+        assert!(plan_rm_at(&apg_root, "ghost", true).is_err());
+        assert!(plan_rm_phase_at(&apg_root, "foo", 9, false).is_err());
+        assert!(plan_rm_task_at(&apg_root, "foo", 1, 9, false).is_err());
+        assert!(plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Nope", false).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before_fb);
+
+        testutil::remove(&repo);
+    }
+
+    /// Unit: `--force` cascades leave no orphan records — no task without its
+    /// phase, no edge to a removed plan/phase/task/planned/Feedback/Note; a
+    /// phase whose only dependents are Feedback/Note is removable WITHOUT
+    /// `--force` (its Reviews/Details edges and the dependent Feedback/Note
+    /// records go with it); a plan `--force` cascade removes the plan-level
+    /// Feedback/Note records and deletes the emptied store.
+    #[test]
+    fn plan_rm_cascades_leave_no_orphan_records() {
+        let (apg_root, repo, _wt) = fixture("rm-cascade");
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            // Plan-level (structural) feedback: removed only by the plan rm.
+            Record::Feedback {
+                fqn: "foo/feedback-plan".to_string(),
+                body: "structural".to_string(),
+                status: "open".to_string(),
+                disposition: String::new(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-plan".to_string(),
+                to: "foo/plan".to_string(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-02".to_string(),
+                number: 2,
+                title: "P2".to_string(),
+                deliverable: "D2".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-02".to_string(),
+            },
+            Record::Gates {
+                from: "foo/plan.phase-02".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+            Record::Satisfies {
+                from: "foo/plan.phase-01".to_string(),
+                to: "requirements.requirement.r1".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
+                title: "T".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: "creates".to_string(),
+                target: "github.com/x/y.Store".to_string(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Store".to_string(),
+                kind: "struct".to_string(),
+                name: "Store".to_string(),
+                parent: "github.com/x/y".to_string(),
+            },
+            Record::Contains {
+                from: "github.com/x/y".to_string(),
+                to: "github.com/x/y.Store".to_string(),
+            },
+            // Task-level feedback: removed by the task cascade.
+            Record::Feedback {
+                fqn: "foo/feedback-task".to_string(),
+                body: "task issue".to_string(),
+                status: "open".to_string(),
+                disposition: String::new(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-task".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
+            },
+            // Phase-level feedback + a task note: both removed by a phase rm.
+            Record::Feedback {
+                fqn: "foo/feedback-1".to_string(),
+                body: "phase issue".to_string(),
+                status: "open".to_string(),
+                disposition: String::new(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-1".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+            Record::Note {
+                fqn: "foo/plan.note-1".to_string(),
+                body: "note".to_string(),
+                kind: "note".to_string(),
+            },
+            Record::Details {
+                from: "foo/plan.note-1".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+        ];
+        specs::write_jsonl(&path, &records).unwrap();
+
+        // The creates-targeted planned node refuses without --force; --force
+        // removes it plus its parent Contains edge, leaving no dangling edge.
+        assert!(plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Store", false).is_err());
+        plan_rm_planned_at(&apg_root, "foo", "github.com/x/y.Store", true).unwrap();
+        let recs = specs::read_jsonl(&path).unwrap();
+        assert!(!recs.iter().any(
+            |r| matches!(r, Record::PlannedNode { fqn, .. } if fqn == "github.com/x/y.Store")
+        ));
+        assert!(
+            !recs
+                .iter()
+                .any(|r| matches!(r, Record::Contains { to, .. } if to == "github.com/x/y.Store"))
+        );
+        assert_no_orphans(&recs);
+
+        // The feedback-bearing task refuses without --force; --force removes
+        // the task, its phase Contains edge and the now-orphaned task feedback.
+        assert!(plan_rm_task_at(&apg_root, "foo", 1, 1, false).is_err());
+        plan_rm_task_at(&apg_root, "foo", 1, 1, true).unwrap();
+        let recs = specs::read_jsonl(&path).unwrap();
+        assert!(
+            !recs.iter().any(|r| matches!(r, Record::Task { .. })),
+            "no task may survive its phase's task cascade"
+        );
+        assert!(
+            !recs
+                .iter()
+                .any(|r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-task")),
+            "the task's feedback must not survive as an orphan"
+        );
+        assert_no_orphans(&recs);
+
+        // A phase whose only dependents are Feedback/Note is removable WITHOUT
+        // --force: its incident edges and the dependent records go with it.
+        plan_rm_phase_at(&apg_root, "foo", 1, false).unwrap();
+        let recs = specs::read_jsonl(&path).unwrap();
+        assert!(
+            !recs
+                .iter()
+                .any(|r| matches!(r, Record::PlanPhase { fqn, .. } if fqn == "foo/plan.phase-01"))
+        );
+        assert!(
+            !recs
+                .iter()
+                .any(|r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-1"))
+        );
+        assert!(
+            !recs
+                .iter()
+                .any(|r| matches!(r, Record::Note { fqn, .. } if fqn == "foo/plan.note-1"))
+        );
+        assert!(
+            !recs
+                .iter()
+                .any(|r| matches!(r, Record::Gates { from, .. } if from == "foo/plan.phase-02")),
+            "the phase-02 gate on the removed phase must go too"
+        );
+        assert_no_orphans(&recs);
+
+        // The plan still carries phase-02, so a plain plan rm refuses...
+        assert!(plan_rm_at(&apg_root, "foo", false).is_err());
+
+        // ...and a plan --force cascade removes the plan-level Feedback too and
+        // deletes the emptied store (an empty file would block `plan add`).
+        plan_rm_at(&apg_root, "foo", true).unwrap();
+        assert!(!path.exists(), "an emptied plan store must be deleted");
+        assert!(
+            plan_rm_at(&apg_root, "foo", true).is_err(),
+            "rm of the now-absent plan is a hard error"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Unit: an error mid-cascade leaves the original plan file exactly as it
+    /// was — the whole-record rewrite is atomic, never a half-deleted plan.
+    #[test]
+    fn plan_rm_error_mid_cascade_leaves_the_store_untouched() {
+        let (apg_root, repo, _wt) = fixture("rm-atomic");
+        let path = write_plan(&apg_root);
+        let before = std::fs::read(&path).unwrap();
+
+        // Force the single write-through to fail: record a scan_meta that does
+        // not match the live git state, so the stale gate refuses the re-ingest
+        // after the whole cascade has been computed in memory.
+        testutil::write_scan_meta(
+            &apg_root,
+            Some("0000000000000000000000000000000000000000"),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+
+        let err = plan_rm_at(&apg_root, "foo", true).unwrap_err();
+        assert!(err.to_string().contains("stale"), "{err}");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "a mid-cascade failure must leave the plan store byte-identical"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Int (fixture repo/branch DB): the `apg plan rm` CLI surface — a
+    /// dependent-bearing plan/phase refuses (non-zero, naming the dependent
+    /// plus the `--force` escape), the same rm with `--force` cascades, an
+    /// absent entity is a hard error, and `rm plan --force` deletes the JSONL
+    /// so a following `apg plan add` recreates it (rm→add round-trip).
+    #[test]
+    fn plan_rm_cli_refusal_force_and_rm_add_roundtrip() {
+        let (apg_root, repo, wt) = fixture("rm-cli");
+        let path = write_plan(&apg_root);
+
+        // A plan with a phase refuses, naming the phase + --force.
+        let err = with_cwd(&wt, || {
+            cmd_plan(&["rm".to_string(), "foo".to_string()]).unwrap_err()
+        });
+        assert!(err.to_string().contains("foo/plan.phase-01"), "{err}");
+        assert!(err.to_string().contains("--force"), "{err}");
+        assert!(path.exists());
+
+        // A phase with a task refuses, naming the task + --force.
+        let err = with_cwd(&wt, || {
+            cmd_plan(&[
+                "rm".to_string(),
+                "foo".to_string(),
+                "phase".to_string(),
+                "1".to_string(),
+            ])
+            .unwrap_err()
+        });
+        assert!(
+            err.to_string().contains("foo/plan.phase-01.task-1"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("--force"), "{err}");
+
+        // A done task refuses without --force, cascades with it.
+        plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+        let err = with_cwd(&wt, || {
+            cmd_plan(&[
+                "rm".to_string(),
+                "foo".to_string(),
+                "task".to_string(),
+                "1".to_string(),
+                "1".to_string(),
+            ])
+            .unwrap_err()
+        });
+        assert!(err.to_string().contains("done"), "{err}");
+        with_cwd(&wt, || {
+            cmd_plan(&[
+                "rm".to_string(),
+                "foo".to_string(),
+                "task".to_string(),
+                "1".to_string(),
+                "1".to_string(),
+                "--force".to_string(),
+            ])
+        })
+        .unwrap();
+        let recs = specs::read_jsonl(&path).unwrap();
+        assert!(!recs.iter().any(|r| matches!(r, Record::Task { .. })));
+
+        // A phase with no tasks removes without --force.
+        with_cwd(&wt, || {
+            cmd_plan(&[
+                "rm".to_string(),
+                "foo".to_string(),
+                "phase".to_string(),
+                "1".to_string(),
+            ])
+        })
+        .unwrap();
+        assert!(
+            !specs::read_jsonl(&path)
+                .unwrap()
+                .iter()
+                .any(|r| matches!(r, Record::PlanPhase { .. }))
+        );
+
+        // `rm foo --force` deletes the whole plan JSONL...
+        with_cwd(&wt, || {
+            cmd_plan(&["rm".to_string(), "foo".to_string(), "--force".to_string()])
+        })
+        .unwrap();
+        assert!(
+            !path.exists(),
+            "a plan --force rm must delete the plan JSONL"
+        );
+
+        // ...so the following `apg plan add foo` recreates it (rm→add).
+        with_cwd(&wt, || cmd_plan(&["add".to_string(), "foo".to_string()])).unwrap();
+        assert!(path.exists(), "apg plan add must recreate the removed plan");
+
+        // A non-existent entity is a hard error.
+        let err = with_cwd(&wt, || {
+            cmd_plan(&[
+                "rm".to_string(),
+                "foo".to_string(),
+                "phase".to_string(),
+                "9".to_string(),
+            ])
+            .unwrap_err()
+        });
+        assert!(err.to_string().contains("no phase 9"), "{err}");
+        let err = with_cwd(&wt, || {
+            cmd_plan(&["rm".to_string(), "ghost".to_string()]).unwrap_err()
+        });
+        assert!(
+            err.to_string().contains("no plan for project `ghost`"),
+            "{err}"
+        );
 
         testutil::remove(&repo);
     }
