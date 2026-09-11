@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "edge-preserving-update",
+  "body": "Edge-preserving update: every entity has an `update` that reads the existing record, mutates only its allowed fields (identity — layer/type/name, or edge kind/from/to — is never mutable), and writes back with all existing out/in (or plan) edges intact. Concretely: a node body/property update keeps its incident authored edges; a phase update keeps its task Contains edges; a task update keeps its status and Reviews edges; an edge property update rewrites both halves in agreement.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
