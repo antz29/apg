@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "permission-grant",
+  "body": "A scoped capability an agent holds — read/glob/grep/edit/question/bash (or their denials). The set of grants defines what an agent may touch: graph-state paths are denied to file tools, `question` is coordinator/agent-builder-only, and `opencode-suite/**` is an implementer edit source while `.opencode/**` stays agent-builder-only.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
