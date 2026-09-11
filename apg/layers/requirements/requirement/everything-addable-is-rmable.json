@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "everything-addable-is-rmable",
+  "body": "Every entity that can be added must be removable. Add `rm` for the plan entities that currently lack it: `apg plan rm <project>`, `apg plan rm <project> phase <n>`, `apg plan rm <project> task <phase> <k>`, `apg plan rm <project> planned <fqn>` (node/edge rm already exist). `rm` on a non-existent entity is an error, never a silent no-op. Acceptance: each listed entity can be removed; removing an absent one exits non-zero.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
