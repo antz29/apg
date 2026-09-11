@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "strict-mutation-surface",
+  "body": "The CLI's mutation surface must be strict add / update / rm with NO implicit upsert. Re-adding an existing entity must refuse, naming the exact state and the correct follow-up (`update` or `rm`); every entity must have an edge-preserving `update`; every add-able entity must be removable; and `rm` must refuse while dependents exist unless `--force` cascades. Today `apg node add` builds a bare NodeFile that `layers::write_project` full-replaces, dropping all out/in edges; `apg edge add` pushes both halves with no dedup (duplicate edge); and the plan add arms call `artifacts::remove_node` + re-add, orphaning phases' tasks and dropping tasks' Reviews edges. Root of the tooling-review requirement tree.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
