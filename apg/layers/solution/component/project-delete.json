@@ -15,6 +15,11 @@
       "kind": "realised-by",
       "source": "domain.entity.project-branch",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.default-branch",
+      "properties": {}
     }
   ]
 }
