@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "solution.component.planned-mutations",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.plan-link-retirement",
+      "properties": {}
     }
   ],
   "in": [

@@ -5,5 +5,11 @@
   "body": "The retirement of `apg plan link` (and `plan_link_at`): its Satisfies/Gates set-semantics move into `apg plan update phase`, which reuses `link_phase_edges` and the `push_gate` cycle check. `cmd_plan` no longer dispatches `link`, and help no longer names it.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.plan-surface",
+      "properties": {}
+    }
+  ]
 }
