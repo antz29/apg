@@ -18,7 +18,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::artifacts::{self, parse_args, remove_node};
+use crate::artifacts::{self, parse_args};
 use crate::schema::Record;
 use crate::specs;
 
@@ -47,15 +47,11 @@ fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::
 
 pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg plan <add|update|done|undone|note|complete|render|verify> …");
+        anyhow::bail!("usage: apg plan <add|update|rm|done|undone|note|complete|render|verify> …");
     };
     match sub {
         "add" => plan_add(&args[1..]),
         "update" => plan_update(&args[1..]),
-        // `link` is no longer named in the usage; the arm stays dispatchable
-        // only until its retirement lands (dropping it here would orphan the
-        // `plan_link` wrapper as dead code).
-        "link" => plan_link(&args[1..]),
         "done" => plan_done(&args[1..]),
         "undone" => plan_undone(&args[1..]),
         "note" => plan_note(&args[1..]),
@@ -145,24 +141,358 @@ fn plan_update_at(
     Ok(())
 }
 
-/// `apg plan update <project> [--title T] [--strategy S]` — MERGE the plan
-/// record's title/strategy (an omitted flag leaves that field unchanged).
-/// Refuses an absent plan; the plan's phases/tasks/planned nodes and every
-/// plan edge are left intact.
+/// `apg plan update <project> [--title T] [--strategy S]` /
+/// `apg plan update <project> phase <n> [--title …] [--deliverable …]
+/// [--prereq <n>]* [--satisfies <req>]*` /
+/// `apg plan update <project> task <phase> <k> [--title …] [--kind …]
+/// [--tier …] [--verb …] [--fqn …] [--to …]` /
+/// `apg plan update <project> planned <fqn> [--kind …] [--name …] [--parent …]`.
+///
+/// A missing flag leaves that field unchanged: the plan-record arm MERGEs
+/// title/strategy, the phase/task arms update in place (every phase/task and
+/// every edge survives — except the phase's replaced Satisfies/Gates sets),
+/// and the planned arm repoints the parent `Contains` edge. Every arm refuses
+/// an absent target. `apg plan link` is retired: its bridge set-semantics live
+/// here (`phase` + `--satisfies`/`--prereq`).
 fn plan_update(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(project) = p.positional.first() else {
-        anyhow::bail!("usage: apg plan update <project> [--title T] [--strategy S]");
+        anyhow::bail!(
+            "usage: apg plan update <project> [phase <n>|task <phase> <k>|planned <fqn>] [--title T] [--strategy S] …"
+        );
     };
     let apg_root = require_apg_root()?;
     artifacts::acquire_spec_lock(&apg_root)?;
-    plan_update_at(
-        &apg_root,
-        project,
-        p.get("title").as_deref(),
-        p.get("strategy").as_deref(),
-    )?;
-    println!("Updated plan {project}");
+    let Some(kind) = p.positional.get(1).map(|s| s.as_str()) else {
+        // The plan-record arm: no second positional means "the plan itself".
+        plan_update_at(
+            &apg_root,
+            project,
+            p.get("title").as_deref(),
+            p.get("strategy").as_deref(),
+        )?;
+        println!("Updated plan {project}");
+        return Ok(());
+    };
+    let mut records = load_plan(&apg_root, project)?;
+    match kind {
+        "phase" => {
+            let Some(n) = p.positional.get(2).and_then(|s| s.parse::<u32>().ok()) else {
+                anyhow::bail!(
+                    "usage: apg plan update <project> phase <n> [--title …] [--deliverable …] [--prereq <n>]* [--satisfies <req>]*"
+                );
+            };
+            let prereqs = p.has("prereq").then(|| p.all("prereq"));
+            let satisfies = p.has("satisfies").then(|| p.all("satisfies"));
+            plan_update_phase_at(
+                &apg_root,
+                project,
+                &mut records,
+                n,
+                p.get("title").as_deref(),
+                p.get("deliverable").as_deref(),
+                prereqs.as_deref(),
+                satisfies.as_deref(),
+            )?;
+            write_through(&apg_root, project, &records)?;
+            println!("Updated phase {n} of plan {project}");
+        }
+        "task" => {
+            let (Some(phase), Some(k)) = (
+                p.positional.get(2).and_then(|s| s.parse::<u32>().ok()),
+                p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
+            ) else {
+                anyhow::bail!(
+                    "usage: apg plan update <project> task <phase> <k> [--title …] [--kind …] [--tier …] [--verb …] [--fqn …] [--to …]"
+                );
+            };
+            plan_update_task_at(
+                &apg_root,
+                project,
+                &mut records,
+                phase,
+                k,
+                p.get("title").as_deref(),
+                p.get("kind").as_deref(),
+                p.get("tier").as_deref(),
+                p.get("verb").as_deref(),
+                p.get("fqn").as_deref(),
+                p.get("to").as_deref(),
+            )?;
+            write_through(&apg_root, project, &records)?;
+            println!("Updated task {k} in plan.phase-{phase} of {project}");
+        }
+        "planned" => {
+            let Some(fqn) = p.positional.get(2) else {
+                anyhow::bail!(
+                    "usage: apg plan update <project> planned <fqn> [--kind module|file|struct|function] [--name <name>] [--parent <parent-fqn>]"
+                );
+            };
+            plan_update_planned_at(
+                &apg_root,
+                &mut records,
+                fqn,
+                p.get("kind").as_deref(),
+                p.get("name").as_deref(),
+                p.get("parent").as_deref(),
+            )?;
+            write_through(&apg_root, project, &records)?;
+            println!("Updated planned `{fqn}` in plan {project}");
+        }
+        other => anyhow::bail!("unknown plan update kind `{other}` — phase|task|planned"),
+    }
+    Ok(())
+}
+
+/// Core of the `update phase` arm: update a phase's title/deliverable IN PLACE
+/// (the phase record + the plan `Contains` edge + every task `Contains` edge
+/// survive) and fold `apg plan link`'s set-semantics into the same surface.
+///
+/// `satisfies`/`prereqs` are `Option` so an omitted flag leaves that bridge
+/// dimension untouched while a passed set replaces the phase's outgoing edges
+/// (via [`link_phase_edges`], unchanged). `--satisfies` targets are validated
+/// against the layers requirement store BEFORE `link_phase_edges` runs, so a
+/// bogus target refuses before any mutation. An absent phase is refused.
+#[allow(clippy::too_many_arguments)]
+fn plan_update_phase_at(
+    apg_root: &Path,
+    project: &str,
+    records: &mut Vec<Record>,
+    n: u32,
+    title: Option<&str>,
+    deliverable: Option<&str>,
+    prereqs: Option<&[String]>,
+    satisfies: Option<&[String]>,
+) -> anyhow::Result<()> {
+    let fqn = format!("{project}/plan.phase-{n:02}");
+    if !records
+        .iter()
+        .any(|r| matches!(r, Record::PlanPhase { fqn: pf, .. } if pf == &fqn))
+    {
+        anyhow::bail!(
+            "update phase: `{fqn}` is not a phase of `{project}` (author it first with `apg plan add {project} phase {n} …`)"
+        );
+    }
+    // Validate the requirements before mutating anything — `link_phase_edges`
+    // does not check them itself.
+    if let Some(reqs) = satisfies {
+        for req in reqs {
+            let req_fqn = format!("requirements.requirement.{req}");
+            if !spec_has_requirement(apg_root, project, &req_fqn)? {
+                anyhow::bail!(
+                    "satisfies target `{req}` is not a requirement of `{project}` — requirements live in apg/layers/requirements/"
+                );
+            }
+        }
+    }
+    // In-place title/deliverable update: no remove/re-add, so the phase record
+    // and every task `Contains` edge survive.
+    for r in records.iter_mut() {
+        if let Record::PlanPhase {
+            fqn: pf,
+            title: t,
+            deliverable: d,
+            ..
+        } = r
+            && pf == &fqn
+        {
+            if let Some(t2) = title {
+                *t = t2.to_string();
+            }
+            if let Some(d2) = deliverable {
+                *d = d2.to_string();
+            }
+        }
+    }
+    // Bridge edges only when a set was passed: an omitted dimension keeps the
+    // phase's current outgoing edges by reconstructing them and handing both
+    // dimensions to `link_phase_edges` (its set-semantics rewrite is unchanged).
+    if satisfies.is_some() || prereqs.is_some() {
+        let phase_prefix = format!("{project}/plan.phase-");
+        let req_prefix = "requirements.requirement.";
+        let cur_reqs: Vec<String> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::Satisfies { from, to } if from == &fqn => {
+                    to.strip_prefix(req_prefix).map(str::to_string)
+                }
+                _ => None,
+            })
+            .collect();
+        let cur_prereqs: Vec<String> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::Gates { from, to } if from == &fqn => {
+                    to.strip_prefix(&phase_prefix).map(str::to_string)
+                }
+                _ => None,
+            })
+            .collect();
+        let reqs = satisfies.unwrap_or(&cur_reqs);
+        let prs = prereqs.unwrap_or(&cur_prereqs);
+        link_phase_edges(&fqn, reqs, prs, records)?;
+    }
+    Ok(())
+}
+
+/// Core of the `update task` arm: update a task's fields IN PLACE, preserving
+/// its `status` and every incident `Reviews` edge. The effective `(kind,
+/// tier)` and `(verb, target, new_fqn)` triples (each supplied value or the
+/// existing one) are re-validated exactly as `add` does, so an update can
+/// never introduce an invalid classification or verb/target. An absent task is
+/// refused before any mutation.
+#[allow(clippy::too_many_arguments)]
+fn plan_update_task_at(
+    apg_root: &Path,
+    project: &str,
+    records: &mut [Record],
+    phase: u32,
+    k: u32,
+    title: Option<&str>,
+    kind: Option<&str>,
+    tier: Option<&str>,
+    verb: Option<&str>,
+    target: Option<&str>,
+    new_fqn: Option<&str>,
+) -> anyhow::Result<()> {
+    let fqn = format!("{project}/plan.phase-{phase:02}.task-{k}");
+    let Some((cur_kind, cur_tier, cur_verb, cur_target, cur_new_fqn)) =
+        records.iter().find_map(|r| match r {
+            Record::Task {
+                fqn: tf,
+                kind,
+                tier,
+                verb,
+                target,
+                new_fqn,
+                ..
+            } if tf == &fqn => Some((
+                kind.clone(),
+                tier.clone(),
+                verb.clone(),
+                target.clone(),
+                new_fqn.clone(),
+            )),
+            _ => None,
+        })
+    else {
+        anyhow::bail!(
+            "update task: `{fqn}` is not a task of `{project}` (author it first with `apg plan add {project} task {phase} {k} …`)"
+        );
+    };
+    let eff_kind = kind.unwrap_or(cur_kind.as_str());
+    let eff_tier = tier.unwrap_or(cur_tier.as_str());
+    validate_task_kind_tier(eff_kind, eff_tier)?;
+    let eff_verb = verb.unwrap_or(cur_verb.as_str());
+    let eff_target = target.unwrap_or(cur_target.as_str());
+    let eff_new_fqn = new_fqn.unwrap_or(cur_new_fqn.as_str());
+    let (scanned, planned) = task_verb_universes(apg_root, records)?;
+    validate_task_verb(eff_verb, eff_target, eff_new_fqn, &scanned, &planned)?;
+    for r in records.iter_mut() {
+        if let Record::Task {
+            fqn: tf,
+            title: t,
+            kind: kd,
+            tier: tr,
+            verb: vb,
+            target: tg,
+            new_fqn: nf,
+            ..
+        } = r
+            && tf == &fqn
+        {
+            if let Some(x) = title {
+                *t = x.to_string();
+            }
+            if let Some(x) = kind {
+                *kd = x.to_string();
+            }
+            if let Some(x) = tier {
+                *tr = x.to_string();
+            }
+            if let Some(x) = verb {
+                *vb = x.to_string();
+            }
+            if let Some(x) = target {
+                *tg = x.to_string();
+            }
+            if let Some(x) = new_fqn {
+                *nf = x.to_string();
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Core of the `update planned` arm: update a planned node's kind/name/parent
+/// IN PLACE, repointing the parent `Contains` edge (set-semantics for parent)
+/// while preserving every other incident edge. Refuses a real code FQN (a
+/// realized placeholder is no longer a plan) and an absent planned node.
+fn plan_update_planned_at(
+    apg_root: &Path,
+    records: &mut Vec<Record>,
+    fqn: &str,
+    node_kind: Option<&str>,
+    name: Option<&str>,
+    parent: Option<&str>,
+) -> anyhow::Result<()> {
+    let Some((cur_kind, cur_name, cur_parent)) = records.iter().find_map(|r| match r {
+        Record::PlannedNode {
+            fqn: pf,
+            kind,
+            name,
+            parent,
+        } if pf == fqn => Some((kind.clone(), name.clone(), parent.clone())),
+        _ => None,
+    }) else {
+        anyhow::bail!(
+            "update planned: `{fqn}` is not declared in this plan (declare it first with `apg plan add <project> planned <kind> {fqn}`)"
+        );
+    };
+    let eff_kind = node_kind.unwrap_or(cur_kind.as_str());
+    if !["module", "file", "struct", "function"].contains(&eff_kind) {
+        anyhow::bail!("planned node kind must be module/file/struct/function, got `{eff_kind}`");
+    }
+    // A planned FQN that has since become real scanned code is no longer a
+    // placeholder — the scanner-replace superseded the plan's claim on it.
+    let (scanned, planned) = task_verb_universes(apg_root, records)?;
+    if crate::layers::classify_code_ref(fqn, &scanned, &planned)
+        == crate::layers::CodeRefStatus::Real
+    {
+        let label = artifacts::ArtifactDb::open(apg_root)
+            .ok()
+            .and_then(|db| db.impl_label(fqn))
+            .unwrap_or("code");
+        anyhow::bail!(
+            "planned node `{fqn}` already resolves to a `{label}` code node — a plan never plans existing code (plan the delta, not the present)"
+        );
+    }
+    let eff_name = name.unwrap_or(cur_name.as_str());
+    let eff_parent = parent.unwrap_or(cur_parent.as_str());
+    for r in records.iter_mut() {
+        if let Record::PlannedNode {
+            fqn: pf,
+            kind,
+            name,
+            parent,
+        } = r
+            && pf == fqn
+        {
+            *kind = eff_kind.to_string();
+            *name = eff_name.to_string();
+            *parent = eff_parent.to_string();
+        }
+    }
+    // Repoint the parent `Contains` edge (set semantics): drop every Contains
+    // edge targeting this planned node, then add the new parent when one is
+    // set. No other incident edge is touched.
+    records.retain(|r| !matches!(r, Record::Contains { to, .. } if to == fqn));
+    if !eff_parent.is_empty() {
+        records.push(Record::Contains {
+            from: eff_parent.to_string(),
+            to: fqn.to_string(),
+        });
+    }
     Ok(())
 }
 
@@ -289,13 +619,12 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Core of the `phase` add arm (extracted for tests): appends the PlanPhase +
-/// Contains + Satisfies records and every prereq `Gates` edge — each gated
-/// through the same cycle check `plan link` uses (a self-gate or transitive
-/// Gates cycle is rejected before any write). Re-add is an upsert: the
-/// phase's old incident edges are dropped BEFORE the cycle check, so a
-/// retired edge can't resurrect as a false cycle (mirrors `apg spec add
-/// phase`).
+/// Core of the `phase` add arm (extracted for tests): refuses an existing
+/// phase (no implicit upsert — the strict surface is add/update/rm), then
+/// appends the PlanPhase + Contains + Satisfies records and every prereq
+/// `Gates` edge — each gated through the same cycle check `apg plan update
+/// phase` uses (a self-gate or transitive Gates cycle is rejected before any
+/// write).
 #[allow(clippy::too_many_arguments)]
 fn plan_add_phase_at(
     apg_root: &Path,
@@ -309,7 +638,14 @@ fn plan_add_phase_at(
     satisfies: &[String],
 ) -> anyhow::Result<()> {
     let fqn = format!("{project}/plan.phase-{n:02}");
-    remove_node(records, &fqn);
+    crate::layers::refuse_if_present(
+        records
+            .iter()
+            .any(|r| matches!(r, Record::PlanPhase { fqn: pf, .. } if pf == &fqn)),
+        &fqn,
+        &format!("apg plan update {project} phase {n}"),
+        &format!("apg plan rm {project} phase {n}"),
+    )?;
     let mut recs = vec![Record::PlanPhase {
         fqn: fqn.clone(),
         number: n,
@@ -348,9 +684,10 @@ fn plan_add_phase_at(
 
 /// Core of the `task` add arm (extracted for tests): verifies the target
 /// phase exists (a task under a nonexistent `plan.phase-NN` is rejected
-/// before any write), validates kind/tier, validates the Task→Implementation
-/// verb + target FQN(s) against the scanned graph and the planned-node
-/// universe, and appends the Task + Contains records.
+/// before any write), refuses an existing task (no implicit upsert), validates
+/// kind/tier, validates the Task→Implementation verb + target FQN(s) against
+/// the scanned graph and the planned-node universe, and appends the Task +
+/// Contains records.
 #[allow(clippy::too_many_arguments)]
 fn plan_add_task_at(
     apg_root: &Path,
@@ -375,6 +712,14 @@ fn plan_add_task_at(
             "task under phase {phase} of `{project}` — no such phase: `{phase_fqn}` (author the phase first with `apg plan add {project} phase {phase} …`)"
         );
     }
+    crate::layers::refuse_if_present(
+        records
+            .iter()
+            .any(|r| matches!(r, Record::Task { fqn: tf, .. } if tf == &fqn)),
+        &fqn,
+        &format!("apg plan update {project} task {phase} {k}"),
+        &format!("apg plan rm {project} task {phase} {k}"),
+    )?;
     validate_task_kind_tier(kind, tier)?;
     let verb = if verb.is_empty() { "creates" } else { verb };
     let (scanned, planned) = task_verb_universes(apg_root, records)?;
@@ -393,30 +738,40 @@ fn plan_add_task_at(
         from: phase_fqn,
         to: fqn.clone(),
     });
-    remove_node(records, &fqn);
     records.extend(recs);
     Ok(())
 }
 
+/// The project a plan record set belongs to — the `{project}` segment of the
+/// Plan record's `{project}/plan` FQN. Names the follow-up `update`/`rm`
+/// commands in [`plan_add_planned_at`]'s refusal (that core takes no separate
+/// `project` argument).
+fn plan_project(records: &[Record]) -> String {
+    records
+        .iter()
+        .find_map(|r| match r {
+            Record::Plan { fqn, .. } => fqn.strip_suffix("/plan").map(str::to_string),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 /// Core of the `planned` add arm (extracted for tests): validates the node
-/// kind, refuses only a FQN that is **real scanned code**, then upserts the
-/// `Record::PlannedNode` + its parent `Contains` edge (the plan-file side of
-/// re-declaration — `remove_node` drops the old record and its incident edges
-/// first).
+/// kind, refuses a FQN that is **real scanned code** and a FQN the plan
+/// already declares (no implicit upsert — the strict surface is add/update/rm),
+/// then appends the `Record::PlannedNode` + its parent `Contains` edge.
 ///
 /// The refusal reuses the task verbs' two code-reference universes
 /// (`task_verb_universes`): `scanned` = every real code FQN the last scan
 /// produced, `planned` = the planned-node universe (DB `status: planned`
-/// nodes UNION the plan records' `Record::PlannedNode` FQNs). Only a
-/// `CodeRefStatus::Real` FQN is refused — the plan's own placeholder is
-/// `Pending`, because the write-through re-ingests every declared planned
-/// node as a `status: planned` DB row (planned FQNs carry no `<project>/`
-/// detach prefix, so they persist); a `code_label`-style "any row" probe
-/// would therefore block the plan's own re-declaration (the field bug: an
-/// upsert parent-correction). An absent FQN is `Drift` (a planned node may
-/// be declared before anything exists), and an `UnresolvedTarget` at the FQN
-/// is never read (`code_universes` reads only the four Implementation
-/// labels — an unresolved reference is not code).
+/// nodes UNION the plan records' `Record::PlannedNode` FQNs). A
+/// `CodeRefStatus::Real` FQN is refused (a plan never plans existing code);
+/// a `CodeRefStatus::Pending` FQN is already declared and is refused too (the
+/// re-declaration parent correction now lives in `plan update planned`). An
+/// absent FQN is `Drift` (a planned node may be declared before anything
+/// exists), and an `UnresolvedTarget` at the FQN is never read
+/// (`code_universes` reads only the four Implementation labels — an unresolved
+/// reference is not code).
 fn plan_add_planned_at(
     apg_root: &Path,
     records: &mut Vec<Record>,
@@ -432,9 +787,8 @@ fn plan_add_planned_at(
     // to REAL scanned code makes the planned placeholder incoherent (the
     // scanner-replace only ever supersedes, never the reverse).
     let (scanned, planned) = task_verb_universes(apg_root, records)?;
-    if crate::layers::classify_code_ref(fqn, &scanned, &planned)
-        == crate::layers::CodeRefStatus::Real
-    {
+    let status = crate::layers::classify_code_ref(fqn, &scanned, &planned);
+    if status == crate::layers::CodeRefStatus::Real {
         let label = artifacts::ArtifactDb::open(apg_root)
             .ok()
             .and_then(|db| db.impl_label(fqn))
@@ -443,13 +797,19 @@ fn plan_add_planned_at(
             "planned node `{fqn}` already resolves to a `{label}` code node — a plan never plans existing code (plan the delta, not the present)"
         );
     }
+    let project = plan_project(records);
+    crate::layers::refuse_if_present(
+        status == crate::layers::CodeRefStatus::Pending,
+        fqn,
+        &format!("apg plan update {project} planned {fqn}"),
+        &format!("apg plan rm {project} planned {fqn}"),
+    )?;
     let rec = Record::PlannedNode {
         fqn: fqn.to_string(),
         kind: node_kind.to_string(),
         name: name.to_string(),
         parent: parent.unwrap_or_default().to_string(),
     };
-    remove_node(records, fqn);
     records.push(rec);
     if let Some(parent) = parent {
         records.push(Record::Contains {
@@ -587,65 +947,10 @@ fn task_verb_universes(
     Ok((scanned, planned))
 }
 
-/// `apg plan link <project> <phase-n> [--satisfies <req-id>]* [--prereq <n>]*`
-/// — add/refresh the phase's bridge edges.
-fn plan_link(args: &[String]) -> anyhow::Result<()> {
-    let p = parse_args(args);
-    let (Some(project), Some(phase)) = (
-        p.positional.first(),
-        p.positional.get(1).and_then(|s| s.parse::<u32>().ok()),
-    ) else {
-        anyhow::bail!(
-            "usage: apg plan link <project> <phase-n> [--satisfies <req-id>]* [--prereq <n>]*"
-        );
-    };
-    let apg_root = require_apg_root()?;
-    artifacts::acquire_spec_lock(&apg_root)?;
-    plan_link_at(
-        &apg_root,
-        project,
-        phase,
-        &p.all("satisfies"),
-        &p.all("prereq"),
-    )?;
-    println!("Linked plan.phase-{phase} of {project}");
-    Ok(())
-}
-
-/// Core of `plan_link` (extracted for tests): verifies the target phase
-/// exists (a link to a nonexistent `plan.phase-NN` is rejected before any
-/// write — CLI-envelope, PlanCreation-SPEC "structure is valid"), validates
-/// Satisfies targets, then sets the phase's bridge edges.
-fn plan_link_at(
-    apg_root: &Path,
-    project: &str,
-    phase: u32,
-    satisfies: &[String],
-    prereqs: &[String],
-) -> anyhow::Result<()> {
-    let mut records = load_plan(apg_root, project)?;
-    let phase_fqn = format!("{project}/plan.phase-{phase:02}");
-    if !records
-        .iter()
-        .any(|r| matches!(r, Record::PlanPhase { fqn: pf, .. } if pf == &phase_fqn))
-    {
-        anyhow::bail!(
-            "link target `{phase_fqn}` is not a phase of `{project}` (author the phase first with `apg plan add {project} phase {phase} …`)"
-        );
-    }
-    for req in satisfies {
-        // Requirements live in the layers store: FQN `requirements.requirement.<name>`.
-        let req_fqn = format!("requirements.requirement.{req}");
-        if !spec_has_requirement(apg_root, project, &req_fqn)? {
-            anyhow::bail!(
-                "satisfies target `{req}` is not a requirement of `{project}` — requirements live in apg/layers/requirements/"
-            );
-        }
-    }
-    link_phase_edges(&phase_fqn, satisfies, prereqs, &mut records)?;
-    write_through(apg_root, project, &records)?;
-    Ok(())
-}
+// `apg plan link` is retired: its bridge set-semantics live in
+// `plan_update_phase_at` (`apg plan update <project> phase <n> --satisfies …
+// --prereq …`), which validates the Satisfies targets and then reuses
+// `link_phase_edges` unchanged.
 
 /// Set semantics for a phase's edges: replaces the phase's own outgoing
 /// Satisfies/Gates once, then adds every target. The removal is scoped to
@@ -690,10 +995,11 @@ fn link_phase_edges(
 
 /// Validates one `Gates` edge `from → to` against the plan's current records:
 /// rejects a self-gate and any transitive Gates cycle (the same
-/// `cycle_closing_path` machinery `apg spec add phase` / `apg plan link` use)
-/// before the edge is ever accumulated into the records — so the JSONL/DB
-/// write-through never runs on a cycle. `records` must already have the
-/// phase's stale incident edges removed (the add/link callers do this).
+/// `cycle_closing_path` machinery `apg spec add phase` / `apg plan update
+/// phase` use) before the edge is ever accumulated into the records — so the
+/// JSONL/DB write-through never runs on a cycle. `records` must already have
+/// the phase's stale outgoing gates removed (the phase add/update callers do
+/// this).
 fn push_gate(from: &str, to: &str, records: &[Record]) -> anyhow::Result<()> {
     let project = from
         .split('/')
@@ -1541,6 +1847,23 @@ mod tests {
         path
     }
 
+    /// Writes one requirement node file (`requirements.requirement.<name>`)
+    /// under the layers store so `--satisfies <name>` resolves in the update
+    /// phase unit tests.
+    fn write_requirement(apg_root: &Path, name: &str) {
+        let path = crate::layers::node_file_path(
+            apg_root,
+            crate::layers::Layer::Requirements,
+            "requirement",
+            name,
+        );
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let body = format!(
+            r#"{{"name":"{name}","type":"requirement","layer":"requirements","body":"x","properties":{{}},"out":[],"in":[]}}"#
+        );
+        std::fs::write(&path, body).unwrap();
+    }
+
     #[test]
     fn plan_done_is_assertion_only_and_undone_reverses() {
         let (apg_root, repo, _wt) = fixture("assertion-done");
@@ -1929,6 +2252,477 @@ mod tests {
         assert_eq!(satisfies, vec!["requirements.requirement.R9"]);
     }
 
+    /// Unit: `plan_update_phase_at` updates a phase in place — its task
+    /// Contains edges survive — while `--satisfies`/`--prereq` fold `link`'s
+    /// set-semantics (a passed set replaces the phase's own outgoing bridge
+    /// edges, an omitted dimension is preserved). A bogus `--satisfies` is
+    /// refused before any mutation, and an absent target is refused for all
+    /// three update cores with the record set left byte-identical.
+    #[test]
+    fn plan_update_phase_at_preserves_tasks_validates_satisfies_and_sets_bridge_edges() {
+        let (apg_root, repo, _wt) = fixture("update-phase");
+        write_requirement(&apg_root, "R1");
+        write_requirement(&apg_root, "R2");
+        write_requirement(&apg_root, "R3");
+
+        let mut records = vec![
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "P".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "D1".into(),
+                status: "pending".into(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-02".into(),
+                number: 2,
+                title: "P2".into(),
+                deliverable: "D2".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".into(),
+                title: "T".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "pending".into(),
+                verb: "creates".into(),
+                target: String::new(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+            Record::Satisfies {
+                from: "foo/plan.phase-01".into(),
+                to: "requirements.requirement.R1".into(),
+            },
+            Record::Gates {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-02".into(),
+            },
+            // An unrelated phase's own Satisfies must never be touched.
+            Record::Satisfies {
+                from: "foo/plan.phase-02".into(),
+                to: "requirements.requirement.R3".into(),
+            },
+        ];
+        let snapshot = |recs: &[Record]| -> Vec<String> {
+            recs.iter()
+                .map(|r| serde_json::to_string(r).unwrap())
+                .collect()
+        };
+
+        // Title/deliverable only: the task Contains edge and both bridge edges
+        // survive; phase-02's Satisfies is untouched.
+        plan_update_phase_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            Some("P1b"),
+            Some("D1b"),
+            None,
+            None,
+        )
+        .unwrap();
+        let phase = records
+            .iter()
+            .find_map(|r| match r {
+                Record::PlanPhase {
+                    fqn,
+                    title,
+                    deliverable,
+                    ..
+                } if fqn == "foo/plan.phase-01" => Some((title.as_str(), deliverable.as_str())),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(phase, ("P1b", "D1b"));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Contains { from, to }
+                if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Satisfies { from, to }
+                if from == "foo/plan.phase-01" && to == "requirements.requirement.R1"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Gates { from, to }
+                if from == "foo/plan.phase-01" && to == "foo/plan.phase-02"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Satisfies { from, to }
+                if from == "foo/plan.phase-02" && to == "requirements.requirement.R3"
+        )));
+
+        // A passed set replaces only the phase's own outgoing bridge edges;
+        // the task Contains edge and the unrelated phase's edge survive.
+        let satisfies = vec!["R2".to_string()];
+        let prereqs = vec!["02".to_string()];
+        plan_update_phase_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            None,
+            None,
+            Some(&prereqs),
+            Some(&satisfies),
+        )
+        .unwrap();
+        let s: Vec<&str> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::Satisfies { from, to } if from == "foo/plan.phase-01" => Some(to.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(s, vec!["requirements.requirement.R2"]);
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Satisfies { from, to }
+                if from == "foo/plan.phase-02" && to == "requirements.requirement.R3"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Contains { from, to }
+                if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
+        )));
+
+        // A bogus --satisfies is refused before any mutation (the passed title
+        // must not land).
+        let before = snapshot(&records);
+        let err = plan_update_phase_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            Some("NOPE"),
+            None,
+            None,
+            Some(&["ghost".to_string()]),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not a requirement"), "{err}");
+        assert_eq!(
+            snapshot(&records),
+            before,
+            "a refused satisfies must not mutate the records"
+        );
+
+        // Refuse-absent for all three update cores: no bytes change.
+        let before = snapshot(&records);
+        assert!(
+            plan_update_phase_at(
+                &apg_root,
+                "foo",
+                &mut records,
+                9,
+                Some("X"),
+                None,
+                None,
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            plan_update_task_at(
+                &apg_root,
+                "foo",
+                &mut records,
+                1,
+                9,
+                Some("X"),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .is_err()
+        );
+        assert!(
+            plan_update_planned_at(&apg_root, &mut records, "/nope.ts", None, Some("X"), None)
+                .is_err()
+        );
+        assert_eq!(
+            snapshot(&records),
+            before,
+            "every absent-target refusal must leave the store byte-identical"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Unit: `plan_update_task_at` preserves `status` + incident `Reviews` and
+    /// re-validates kind/tier (`validate_task_kind_tier`) and verb/target
+    /// (`validate_task_verb`). Every invalid classification, verb, or
+    /// creates-over-real-code is refused before any write.
+    #[test]
+    fn plan_update_task_at_preserves_status_reviews_and_revalidates() {
+        let (apg_root, repo, _wt) = fixture("update-task");
+        let mut records = vec![
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "P".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "D".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".into(),
+                title: "T".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "done".into(),
+                verb: "modifies".into(),
+                target: "github.com/x/y.Store".into(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-1".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+            Record::Feedback {
+                fqn: "foo/feedback-1".into(),
+                body: "b".into(),
+                status: "open".into(),
+                disposition: String::new(),
+            },
+        ];
+        let snapshot = |recs: &[Record]| -> Vec<String> {
+            recs.iter()
+                .map(|r| serde_json::to_string(r).unwrap())
+                .collect()
+        };
+
+        // A title-only update preserves `status` + the incident Reviews edge.
+        plan_update_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            Some("T2"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let task = records
+            .iter()
+            .find_map(|r| match r {
+                Record::Task {
+                    fqn, title, status, ..
+                } if fqn == "foo/plan.phase-01.task-1" => Some((title.as_str(), status.as_str())),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(task, ("T2", "done"));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Reviews { from, to }
+                if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1"
+        )));
+
+        // A re-validated classification change (source -> test/unit) lands.
+        plan_update_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            None,
+            Some("test"),
+            Some("unit"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Negatives — each refused before any write.
+        let before = snapshot(&records);
+        let mut try_case = |label: &str,
+                            kind: Option<&str>,
+                            tier: Option<&str>,
+                            verb: Option<&str>,
+                            target: Option<&str>| {
+            let err = plan_update_task_at(
+                &apg_root,
+                "foo",
+                &mut records,
+                1,
+                1,
+                None,
+                kind,
+                tier,
+                verb,
+                target,
+                None,
+            )
+            .unwrap_err();
+            assert!(!err.to_string().is_empty(), "{label}");
+            assert_eq!(snapshot(&records), before, "{label}: no partial write");
+        };
+        try_case("invalid kind", Some("qa"), None, None, None);
+        try_case("test needs a tier", Some("test"), Some(""), None, None);
+        try_case(
+            "tier only for test",
+            Some("source"),
+            Some("unit"),
+            None,
+            None,
+        );
+        try_case("invalid verb", None, None, Some("explodes"), None);
+        try_case(
+            "creates over real code",
+            None,
+            None,
+            Some("creates"),
+            Some("github.com/x/y.Store"),
+        );
+
+        // The valid classification landed and status/Reviews still survive.
+        let status = records
+            .iter()
+            .find_map(|r| match r {
+                Record::Task { fqn, status, .. } if fqn == "foo/plan.phase-01.task-1" => {
+                    Some(status.as_str())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(status, "done");
+
+        testutil::remove(&repo);
+    }
+
+    /// Unit: `plan_update_planned_at` repoints the parent `Contains` edge while
+    /// preserving every other incident edge.
+    #[test]
+    fn plan_update_planned_at_repoints_parent_and_preserves_other_edges() {
+        let (apg_root, repo, _wt) = fixture("update-planned");
+        let mut records = vec![
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "P".into(),
+                strategy: String::new(),
+            },
+            Record::PlannedNode {
+                fqn: "/todo/app.ts".into(),
+                kind: "file".into(),
+                name: "app.ts".into(),
+                parent: "github.com/x/y.Missing".into(),
+            },
+            Record::Contains {
+                from: "github.com/x/y.Missing".into(),
+                to: "/todo/app.ts".into(),
+            },
+            // A non-Contains incident edge must survive the repoint.
+            Record::Reviews {
+                from: "foo/feedback-1".into(),
+                to: "/todo/app.ts".into(),
+            },
+            Record::Gates {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-02".into(),
+            },
+        ];
+
+        plan_update_planned_at(
+            &apg_root,
+            &mut records,
+            "/todo/app.ts",
+            Some("function"),
+            Some("app2.ts"),
+            Some("github.com/x/y"),
+        )
+        .unwrap();
+
+        let planned = records
+            .iter()
+            .find_map(|r| match r {
+                Record::PlannedNode {
+                    fqn,
+                    kind,
+                    name,
+                    parent,
+                } if fqn == "/todo/app.ts" => Some((kind.as_str(), name.as_str(), parent.as_str())),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(planned, ("function", "app2.ts", "github.com/x/y"));
+        let contains: Vec<&str> = records
+            .iter()
+            .filter_map(|r| match r {
+                Record::Contains { from, to } if to == "/todo/app.ts" => Some(from.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            contains,
+            vec!["github.com/x/y"],
+            "exactly the repointed parent Contains edge"
+        );
+        assert!(
+            records.iter().any(|r| matches!(
+                r,
+                Record::Reviews { from, to }
+                    if from == "foo/feedback-1" && to == "/todo/app.ts"
+            )),
+            "the non-Contains incident edge survives"
+        );
+        assert!(
+            records.iter().any(|r| matches!(
+                r,
+                Record::Gates { from, to }
+                    if from == "foo/plan.phase-01" && to == "foo/plan.phase-02"
+            )),
+            "unrelated edges are untouched"
+        );
+
+        // An absent planned node is refused (no record count change).
+        let before = records.len();
+        assert!(
+            plan_update_planned_at(&apg_root, &mut records, "/nope.ts", None, Some("x"), None)
+                .is_err()
+        );
+        assert_eq!(records.len(), before);
+
+        testutil::remove(&repo);
+    }
+
     #[test]
     fn task_kind_tier_validation() {
         // Default kind is source.
@@ -2098,15 +2892,15 @@ mod tests {
         testutil::remove(&repo);
     }
 
-    /// Field repro: the plan's own `status: planned` placeholder (re-ingested
-    /// by the write-through, and no `<project>/` detach prefix) must not block
-    /// re-declaring the SAME FQN — the upsert path a parent correction takes.
-    /// The old guard's `code_label` probe matched the placeholder as a `File`
-    /// code node and refused while zero real code existed.
+    /// Strict-surface repro: the plan's own `status: planned` placeholder must
+    /// NOT be silently re-declared. Re-declaring the SAME FQN is refused
+    /// (naming `apg plan update`/`apg plan rm`); the parent correction the old
+    /// upsert performed now goes through `plan_update_planned_at`, which
+    /// repoints the parent `Contains` edge in place.
     #[test]
     fn plan_add_planned_redeclares_own_placeholder_with_corrected_parent() {
         let (apg_root, repo, _wt) = fixture("planned-redeclare");
-        let _path = write_plan(&apg_root);
+        let plan_path = write_plan(&apg_root);
         let mut records = load_plan(&apg_root, "foo").unwrap();
 
         // First declaration: a planned File whose parent is an UnresolvedTarget
@@ -2124,10 +2918,10 @@ mod tests {
         .unwrap();
         write_through(&apg_root, "foo", &records).unwrap();
 
-        // The second declaration of the SAME FQN with the corrected parent
-        // must succeed: the only DB match is the plan's own planned
-        // placeholder (Pending), not real scanned code.
-        plan_add_planned_at(
+        // Re-declaring the SAME FQN is refused (no implicit upsert), naming the
+        // update/rm follow-ups, and the on-disk store is byte-identical.
+        let before = std::fs::read_to_string(&plan_path).unwrap();
+        let err = plan_add_planned_at(
             &apg_root,
             &mut records,
             "file",
@@ -2135,11 +2929,39 @@ mod tests {
             "app.ts",
             Some("github.com/x/y"),
         )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(
+            msg.contains("apg plan update foo planned /todo/app.ts"),
+            "{msg}"
+        );
+        assert!(
+            msg.contains("apg plan rm foo planned /todo/app.ts"),
+            "{msg}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&plan_path).unwrap(),
+            before,
+            "a refused planned re-declaration must not touch the plan store"
+        );
+
+        // The parent correction goes through the update core, which repoints
+        // the parent Contains edge in place (set-semantics for parent).
+        plan_update_planned_at(
+            &apg_root,
+            &mut records,
+            "/todo/app.ts",
+            None,
+            None,
+            Some("github.com/x/y"),
+        )
         .unwrap();
         write_through(&apg_root, "foo", &records).unwrap();
 
         // Plan records: one PlannedNode at the FQN with the corrected parent,
-        // and exactly one Contains record to it (the upsert dropped the old).
+        // and exactly one Contains record to it (the old parent edge was
+        // repointed, not duplicated).
         let recs = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "foo")).unwrap();
         let parents: Vec<&str> = recs
             .iter()
@@ -2803,19 +3625,302 @@ mod tests {
         testutil::remove(&repo);
     }
 
+    /// `apg plan link` is retired along with `plan_link_at`; the set-semantics
+    /// now live in `plan_update_phase_at`, which refuses an absent phase before
+    /// any write — the plan store stays untouched.
     #[test]
     fn plan_link_rejects_nonexistent_phase() {
         let (apg_root, repo, _wt) = fixture("link-no-phase");
-        let _path = write_plan(&apg_root); // plan has phase-01 only
+        let plan_path = write_plan(&apg_root); // plan has phase-01 only
+        let before = std::fs::read_to_string(&plan_path).unwrap();
 
-        let err = plan_link_at(&apg_root, "foo", 2, &["R1".into()], &[]).unwrap_err();
+        let err = plan_update_phase_at(
+            &apg_root,
+            "foo",
+            &mut load_plan(&apg_root, "foo").unwrap(),
+            2,
+            Some("ghost"),
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("not a phase of `foo`"), "{err}");
         // The plan JSONL is untouched (no partial write).
-        let recs = specs::read_jsonl(&specs::plan_jsonl_path(&apg_root, "foo")).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&plan_path).unwrap(),
+            before,
+            "an absent-phase update must not touch the plan store"
+        );
+        let recs = specs::read_jsonl(&plan_path).unwrap();
         assert!(
             recs.iter().all(|r| !matches!(r, Record::Satisfies { .. })),
-            "a rejected link must not write Satisfies"
+            "a rejected update must not write Satisfies"
         );
+
+        testutil::remove(&repo);
+    }
+
+    /// Int (fixture repo/branch DB): `plan add phase|task|planned` refuses an
+    /// existing entity (naming `update`/`rm`), leaving the existing
+    /// Contains/Reviews edges intact and the plan store untouched.
+    #[test]
+    fn plan_add_subentities_refuse_existing_and_preserve_edges() {
+        let (apg_root, repo, _wt) = fixture("add-refuse-existing");
+        let plan_path = write_plan(&apg_root);
+        let mut records = load_plan(&apg_root, "foo").unwrap();
+        records.push(Record::PlannedNode {
+            fqn: "/todo/app.ts".into(),
+            kind: "file".into(),
+            name: "app.ts".into(),
+            parent: "github.com/x/y".into(),
+        });
+        records.push(Record::Contains {
+            from: "github.com/x/y".into(),
+            to: "/todo/app.ts".into(),
+        });
+        records.push(Record::Reviews {
+            from: "foo/feedback-1".into(),
+            to: "foo/plan.phase-01.task-1".into(),
+        });
+        specs::write_jsonl(&plan_path, &records).unwrap();
+        let before = std::fs::read_to_string(&plan_path).unwrap();
+
+        // Re-adding the existing phase is refused, naming update/rm.
+        let err = plan_add_phase_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            "foo/plan",
+            1,
+            "P1b",
+            "D",
+            &[],
+            &[],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert!(
+            err.to_string().contains("apg plan update foo phase 1"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("apg plan rm foo phase 1"), "{err}");
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
+
+        // Re-adding the existing task is refused; its phase Contains edge and
+        // incident Reviews edge survive.
+        let err = plan_add_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            "T2",
+            "source",
+            "",
+            "creates",
+            "",
+            "",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert!(
+            err.to_string().contains("apg plan update foo task 1 1"),
+            "{err}"
+        );
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Contains { from, to }
+                if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Reviews { from, to }
+                if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1"
+        )));
+
+        // Re-adding the existing planned node is refused; its parent Contains
+        // edge survives.
+        let err = plan_add_planned_at(
+            &apg_root,
+            &mut records,
+            "file",
+            "/todo/app.ts",
+            "app.ts",
+            Some("github.com/x/y"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("apg plan update foo planned /todo/app.ts"),
+            "{err}"
+        );
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Contains { from, to }
+                if from == "github.com/x/y" && to == "/todo/app.ts"
+        )));
+        assert_eq!(
+            std::fs::read_to_string(&plan_path).unwrap(),
+            before,
+            "every refused add leaves the plan store untouched"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Int: `apg plan link` is retired (unknown subcommand); `apg plan update
+    /// <project> phase <n> --satisfies/--prereq` replaces only that phase's
+    /// outgoing Satisfies/Gates edges (set-semantics), leaving other phases and
+    /// incoming edges intact.
+    #[test]
+    fn plan_link_retired_and_update_phase_sets_bridge_edges() {
+        let (apg_root, repo, wt) = fixture("link-retired");
+        // A `--satisfies` target must resolve in the layers store; author one
+        // and re-anchor the recorded scan_meta dirty (the untracked node file
+        // makes the tree dirty, which the write-through's staleness gate sees).
+        let req = "phase-update-preserves-tasks";
+        let req_fqn = format!("requirements.requirement.{req}");
+        write_requirement(&apg_root, req);
+        testutil::write_scan_meta(
+            &apg_root,
+            Some(&repo.head_sha()),
+            false,
+            "2026-09-07T00:00:00Z",
+        );
+        let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "P".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "D".into(),
+                status: "pending".into(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-02".into(),
+                number: 2,
+                title: "P2".into(),
+                deliverable: "D".into(),
+                status: "pending".into(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-03".into(),
+                number: 3,
+                title: "P3".into(),
+                deliverable: "D".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".into(),
+                title: "T".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "pending".into(),
+                verb: "creates".into(),
+                target: String::new(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+            Record::Satisfies {
+                from: "foo/plan.phase-01".into(),
+                to: "requirements.requirement.R1".into(),
+            },
+            Record::Gates {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-02".into(),
+            },
+            // A later phase gating phase-01: an incoming edge, must survive.
+            Record::Gates {
+                from: "foo/plan.phase-03".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            // An unrelated phase's own Satisfies must survive.
+            Record::Satisfies {
+                from: "foo/plan.phase-02".into(),
+                to: "requirements.requirement.R3".into(),
+            },
+        ];
+        specs::write_jsonl(&plan_path, &records).unwrap();
+
+        // `apg plan link` is retired at dispatch: an unknown subcommand.
+        let err = cmd_plan(&["link".to_string(), "foo".to_string(), "1".to_string()]).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown apg plan subcommand: link"),
+            "{err}"
+        );
+
+        // The update-phase arm folds link's set-semantics through cmd_plan.
+        with_cwd(&wt, || {
+            cmd_plan(&[
+                "update".to_string(),
+                "foo".to_string(),
+                "phase".to_string(),
+                "1".to_string(),
+                "--satisfies".to_string(),
+                req.to_string(),
+                "--prereq".to_string(),
+                "2".to_string(),
+            ])
+        })
+        .unwrap();
+
+        let recs = specs::read_jsonl(&plan_path).unwrap();
+        let satisfies: Vec<&str> = recs
+            .iter()
+            .filter_map(|r| match r {
+                Record::Satisfies { from, to } if from == "foo/plan.phase-01" => Some(to.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            satisfies,
+            vec![req_fqn.as_str()],
+            "the passed --satisfies replaces phase-01's outgoing set"
+        );
+        let gates: Vec<&str> = recs
+            .iter()
+            .filter_map(|r| match r {
+                Record::Gates { from, to } if from == "foo/plan.phase-01" => Some(to.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            gates,
+            vec!["foo/plan.phase-02"],
+            "the passed --prereq replaces phase-01's outgoing gate set"
+        );
+        // Incoming gate + unrelated phase Satisfies + the task Contains edge
+        // survive the set-semantics rewrite.
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Gates { from, to }
+                if from == "foo/plan.phase-03" && to == "foo/plan.phase-01"
+        )));
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Satisfies { from, to }
+                if from == "foo/plan.phase-02" && to == "requirements.requirement.R3"
+        )));
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Contains { from, to }
+                if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
+        )));
 
         testutil::remove(&repo);
     }
@@ -3726,7 +4831,8 @@ mod tests {
         // closes the rest of the mutation surface: init, task add (an
         // accepted creates through the write-through funnel, and a refused
         // modifies leaving the on-disk store byte-identical), planned-node
-        // declaration, link, complete (the durable milestone), and undone.
+        // declaration, phase update (the retired link's successor), complete
+        // (the durable milestone), and undone.
         // Every mutation writes only the gitignored `.trans/plans/` store:
         // the project branch HEAD (where an auto-commit would land), the main
         // HEAD, and the tree all stay untouched.
@@ -3810,9 +4916,20 @@ mod tests {
         });
         write_through(&apg_root, "foo", &records).unwrap();
 
-        // link (an edge refresh — still a write-through), then done →
-        // complete (the durable milestone) → undone.
-        plan_link_at(&apg_root, "foo", 1, &[], &[]).unwrap();
+        // update phase (an in-place write-through — the retired link's
+        // successor), then done → complete (the durable milestone) → undone.
+        plan_update_phase_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            Some("P1b"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        write_through(&apg_root, "foo", &records).unwrap();
         plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
         plan_complete_at(&apg_root, "foo", 1).unwrap();
         plan_undone_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
