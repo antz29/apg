@@ -41,6 +41,11 @@
       "kind": "contains",
       "target": "requirements.requirement.edge-update-properties-only",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.phase-update-preserves-tasks",
+      "properties": {}
     }
   ],
   "in": []
