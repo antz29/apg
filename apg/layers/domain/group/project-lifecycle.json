@@ -8,5 +8,11 @@
     "root": "project"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.worktree-cleanup",
+      "properties": {}
+    }
+  ]
 }
