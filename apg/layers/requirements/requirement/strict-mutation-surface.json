@@ -46,6 +46,11 @@
       "kind": "contains",
       "target": "requirements.requirement.phase-update-preserves-tasks",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.task-update-revalidates-preserves",
+      "properties": {}
     }
   ],
   "in": []
