@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.component.project-merge",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.project-delete",
+      "properties": {}
     }
   ],
   "in": [

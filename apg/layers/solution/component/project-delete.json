@@ -5,5 +5,11 @@
   "body": "The delete flow: refuse unsafe states (invalid name, default branch, main checkout's current branch, missing/mismatched project, dirty worktree) → remove the project's worktree → delete its branch. Discards the branch's commits — the explicit abandon path for never-merged projects. Hosted by the `cmd_project` dispatch; the core (`project_delete`/`project_delete_at`) is a planned node the plan-writer will declare.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.project-worktree",
+      "properties": {}
+    }
+  ]
 }
