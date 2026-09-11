@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "requirements.requirement.planned-add-refuses-existing",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.node-update-preserves-edges",
+      "properties": {}
     }
   ],
   "in": []
