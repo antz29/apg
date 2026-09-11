@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "authored-edge",
+  "body": "A durable authored edge: an out-half in the source node file and a matching in-half in the target node file, identified by (kind, from, to). Its endpoints and kind are immutable; its properties are mutable. Both halves must always agree — an edge mutation rewrites both in one atomic act.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
