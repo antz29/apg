@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "question-scope",
+  "body": "The `question` tool must be granted only to coordinators and agent-builder; every other subagent must route questions through the coordinator.",
+  "properties": {
+    "attaches-to": "domain.entity.permission-grant"
+  },
+  "out": [],
+  "in": []
+}
