@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "merge-with-explicit-unset",
+  "body": "Merge with explicit unset: `update --property k=v` merges — it sets/overwrites only the passed keys and preserves every other existing key. Removing a key requires the explicit `--unset-property k` flag; there is no implicit unset. This applies to both `apg node update` and `apg edge update` (and their property maps).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
