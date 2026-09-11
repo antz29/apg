@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "project-branch",
+  "body": "The git local branch named after the project (`refs/heads/<name>`), checked out in the project's own worktree. After a successful merge it is merged into the default branch (safe to delete); `delete` discards it wholesale.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
