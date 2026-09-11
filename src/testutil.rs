@@ -19,6 +19,12 @@ use crate::load;
 use crate::schema;
 use crate::specs;
 
+/// Process-wide lock for tests that must mutate the process cwd (layout
+/// discovery walks up from cwd). Shared by `scan_checkout` and any
+/// CLI-dispatch test that temporarily chdirs into a fixture — concurrent
+/// `set_current_dir` calls would otherwise interleave.
+pub static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// A fresh git repo (main checkout on branch `main`) with an initial commit
 /// whose `.gitignore` covers `apg/.trans/` and `apg/.worktrees/`, and whose
 /// `apg/config.json` carries the binary-managed `version` field at the
@@ -293,8 +299,7 @@ pub fn payload_files(dir: &Path) -> Vec<PathBuf> {
 /// serialized behind a process-wide lock: concurrent scans (tests run in
 /// parallel) must never interleave their `set_current_dir`.
 pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
-    static SCAN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = SCAN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let apg_root = specs::find_or_create_apg_root(project_dir);
     let trans_dir = apg_root.join(specs::TRANS);
     std::fs::create_dir_all(&trans_dir)?;

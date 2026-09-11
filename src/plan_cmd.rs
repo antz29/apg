@@ -31,7 +31,7 @@ fn require_apg_root() -> anyhow::Result<PathBuf> {
 fn load_plan(apg_root: &Path, project: &str) -> anyhow::Result<Vec<Record>> {
     let path = specs::plan_jsonl_path(apg_root, project);
     if !path.exists() {
-        anyhow::bail!("no plan for project `{project}` — run `apg plan init {project}` first");
+        anyhow::bail!("no plan for project `{project}` — run `apg plan add {project}` first");
     }
     specs::read_jsonl(&path)
 }
@@ -47,11 +47,14 @@ fn write_through(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::
 
 pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg plan <init|add|link|done|undone|note|complete|render|verify> …");
+        anyhow::bail!("usage: apg plan <add|update|done|undone|note|complete|render|verify> …");
     };
     match sub {
-        "init" => plan_init(&args[1..]),
         "add" => plan_add(&args[1..]),
+        "update" => plan_update(&args[1..]),
+        // `link` is no longer named in the usage; the arm stays dispatchable
+        // only until its retirement lands (dropping it here would orphan the
+        // `plan_link` wrapper as dead code).
         "link" => plan_link(&args[1..]),
         "done" => plan_done(&args[1..]),
         "undone" => plan_undone(&args[1..]),
@@ -68,42 +71,18 @@ pub fn cmd_plan(args: &[String]) -> anyhow::Result<()> {
     }
 }
 
-/// `apg plan init <project> [--title T] [--strategy S]` — the plan is the
-/// tier-4 bridge for a project whose requirements live in the layers store
-/// (`apg/layers/requirements/`, SPEC §5). The legacy spec-exists gate (the
-/// old `apg/specs/<project>.jsonl` and `apg spec init`) is gone: a plan
-/// without any requirement node files yet is allowed, but the empty spec is
-/// surfaced as a warning — phases added with `--satisfies` validate against
-/// the layers store and will refuse until the requirement tier exists.
-fn plan_init(args: &[String]) -> anyhow::Result<()> {
-    let p = parse_args(args);
-    let Some(project) = p.positional.first() else {
-        anyhow::bail!("usage: apg plan init <project> [--title T] [--strategy S]");
-    };
-    let apg_root = require_apg_root()?;
-    artifacts::acquire_spec_lock(&apg_root)?;
-    let has_requirements = plan_init_at(
-        &apg_root,
-        project,
-        &p.get("title")
-            .unwrap_or_else(|| format!("Plan for {project}")),
-        &p.get("strategy").unwrap_or_default(),
-    )?;
-    if !has_requirements {
-        eprintln!(
-            "apg: warning: no requirements under apg/layers/requirements/ — the plan for `{project}` has nothing to satisfy yet; author the requirement tier before adding phases with --satisfies"
-        );
-    }
-    let path = specs::plan_jsonl_path(&apg_root, project);
-    println!("Created plan {project} at {}", path.display());
-    Ok(())
-}
-
-/// Core of `plan_init`: writes the Plan record into the transient plan store
-/// (`.trans/plans/<project>.jsonl`). Returns whether the layers store holds
-/// any requirement node file — the spec-exists gate, resolved against the
-/// layers store (never the legacy spec JSONL); the CLI wrapper surfaces a
-/// warning when no requirements exist yet (a warning, never a blocker).
+/// Core of the plan-record `add` arm (`apg plan add <project>` — no second
+/// positional): writes the Plan record into the transient plan store
+/// (`.trans/plans/<project>.jsonl`) and refuses when that store already
+/// exists. The plan is the tier-4 bridge for a project whose requirements
+/// live in the layers store (`apg/layers/requirements/`, SPEC §5). The legacy
+/// spec-exists gate (the old `apg/specs/<project>.jsonl` and `apg spec init`)
+/// is gone: a plan without any requirement node files yet is allowed, but the
+/// empty spec is surfaced as a warning — phases added with `--satisfies`
+/// validate against the layers store and will refuse until the requirement
+/// tier exists. Returns whether the layers store holds any requirement node
+/// file; the CLI wrapper surfaces the warning when none exists yet (a
+/// warning, never a blocker).
 fn plan_init_at(
     apg_root: &Path,
     project: &str,
@@ -126,18 +105,98 @@ fn plan_init_at(
     Ok(has_requirements)
 }
 
-/// `apg plan add <project> phase <n> …` / `task <phase> <k> …` /
-/// `planned <kind> <fqn> …` (R23, PHASE_02).
-fn plan_add(args: &[String]) -> anyhow::Result<()> {
+/// Core of the plan-record `update` arm: MERGE the plan's `--title`/
+/// `--strategy` in place. An omitted flag leaves that field unchanged; an
+/// absent plan is refused (creation is `apg plan add <project>`). Only the
+/// `Record::Plan`'s two text fields change — every phase/task/planned record
+/// and every plan edge (`Contains`/`Gates`/`Satisfies`/`Reviews`) is
+/// preserved byte-for-byte through the whole-record rewrite.
+fn plan_update_at(
+    apg_root: &Path,
+    project: &str,
+    title: Option<&str>,
+    strategy: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut records = load_plan(apg_root, project)?;
+    let plan_fqn = format!("{project}/plan");
+    let mut found = false;
+    for r in records.iter_mut() {
+        if let Record::Plan {
+            fqn,
+            title: rec_title,
+            strategy: rec_strategy,
+        } = r
+            && fqn == &plan_fqn
+        {
+            if let Some(new_title) = title {
+                *rec_title = new_title.to_string();
+            }
+            if let Some(new_strategy) = strategy {
+                *rec_strategy = new_strategy.to_string();
+            }
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        anyhow::bail!("no plan for project `{project}` — run `apg plan add {project}` first");
+    }
+    write_through(apg_root, project, &records)?;
+    Ok(())
+}
+
+/// `apg plan update <project> [--title T] [--strategy S]` — MERGE the plan
+/// record's title/strategy (an omitted flag leaves that field unchanged).
+/// Refuses an absent plan; the plan's phases/tasks/planned nodes and every
+/// plan edge are left intact.
+fn plan_update(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(project) = p.positional.first() else {
-        anyhow::bail!("usage: apg plan add <project> <phase|task|planned> …");
-    };
-    let Some(kind) = p.positional.get(1).map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg plan add <project> <phase|task|planned> …");
+        anyhow::bail!("usage: apg plan update <project> [--title T] [--strategy S]");
     };
     let apg_root = require_apg_root()?;
     artifacts::acquire_spec_lock(&apg_root)?;
+    plan_update_at(
+        &apg_root,
+        project,
+        p.get("title").as_deref(),
+        p.get("strategy").as_deref(),
+    )?;
+    println!("Updated plan {project}");
+    Ok(())
+}
+
+/// `apg plan add <project>` (the plan itself — no second positional) /
+/// `apg plan add <project> phase <n> …` / `task <phase> <k> …` /
+/// `planned <kind> <fqn> …` (R23, PHASE_02). The create arm refuses when the
+/// plan already exists and warns when the requirement tier is empty.
+fn plan_add(args: &[String]) -> anyhow::Result<()> {
+    let p = parse_args(args);
+    let Some(project) = p.positional.first() else {
+        anyhow::bail!("usage: apg plan add <project> [phase|task|planned] …");
+    };
+    let apg_root = require_apg_root()?;
+    artifacts::acquire_spec_lock(&apg_root)?;
+    let Some(kind) = p.positional.get(1).map(|s| s.as_str()) else {
+        // The plan-record create arm: `apg plan add <project>` (no second
+        // positional) creates the plan itself — the surface formerly spelled
+        // `apg plan init`. It refuses when the plan already exists.
+        let has_requirements = plan_init_at(
+            &apg_root,
+            project,
+            &p.get("title")
+                .unwrap_or_else(|| format!("Plan for {project}")),
+            &p.get("strategy").unwrap_or_default(),
+        )?;
+        if !has_requirements {
+            eprintln!(
+                "apg: warning: no requirements under apg/layers/requirements/ — the plan for `{project}` has nothing to satisfy yet; author the requirement tier before adding phases with --satisfies"
+            );
+        }
+        let path = specs::plan_jsonl_path(&apg_root, project);
+        println!("Added plan {project} at {}", path.display());
+        return Ok(());
+    };
     let mut records = load_plan(&apg_root, project)?;
     let plan_fqn = format!("{project}/plan");
     match kind {
@@ -225,7 +284,7 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
             write_through(&apg_root, project, &records)?;
             println!("Added task {k} to plan.phase-{phase} of {project}");
         }
-        other => anyhow::bail!("unknown plan add kind `{other}` — phase|task"),
+        other => anyhow::bail!("unknown plan add kind `{other}` — phase|task|planned"),
     }
     Ok(())
 }
@@ -3794,6 +3853,221 @@ mod tests {
             repo.is_clean(),
             "the tree must stay clean — plan files are gitignored"
         );
+
+        testutil::remove(&repo);
+    }
+
+    /// Runs `f` with the process cwd temporarily set to `dir` — the CLI
+    /// wrappers resolve `apg/` by walking up from cwd. Serialized behind the
+    /// shared cwd lock so it never interleaves with `scan_checkout`.
+    fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir).unwrap();
+        let out = f();
+        std::env::set_current_dir(old).unwrap();
+        out
+    }
+
+    /// The `foo` plan record's `(title, strategy)` pair, read back from the
+    /// transient store.
+    fn plan_fields(apg_root: &Path) -> (String, String) {
+        specs::read_jsonl(&specs::plan_jsonl_path(apg_root, "foo"))
+            .unwrap()
+            .iter()
+            .find_map(|r| match r {
+                Record::Plan {
+                    fqn,
+                    title,
+                    strategy,
+                } if fqn == "foo/plan" => Some((title.clone(), strategy.clone())),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    /// Unit: `plan_update_at` MERGEs title/strategy independently and preserves
+    /// every phase/task/planned record and every plan edge
+    /// (`Contains`/`Gates`/`Satisfies`/`Reviews`); an absent plan is refused.
+    #[test]
+    fn plan_update_at_merges_and_preserves_every_record_and_edge() {
+        let (apg_root, repo, _wt) = fixture("plan-update-merge");
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: "S0".to_string(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
+                title: "T".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: "creates".to_string(),
+                target: "github.com/x/y.Gateway".to_string(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Gateway".to_string(),
+                kind: "struct".to_string(),
+                name: "Gateway".to_string(),
+                parent: String::new(),
+            },
+            Record::Satisfies {
+                from: "foo/plan.phase-01".to_string(),
+                to: "requirements.requirement.r1".to_string(),
+            },
+            Record::Gates {
+                from: "foo/plan.phase-01".to_string(),
+                to: "foo/plan.phase-00".to_string(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-1".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
+            },
+            Record::Feedback {
+                fqn: "foo/feedback-1".to_string(),
+                body: "b".to_string(),
+                status: "open".to_string(),
+                disposition: String::new(),
+            },
+        ];
+        specs::write_jsonl(&path, &records).unwrap();
+
+        // Every non-Plan record, serialized — must be byte-identical before
+        // and after each update (phase/task/planned records + all plan edges).
+        let others = |recs: &[Record]| -> Vec<String> {
+            recs.iter()
+                .filter(|r| !matches!(r, Record::Plan { .. }))
+                .map(|r| serde_json::to_string(r).unwrap())
+                .collect()
+        };
+        let others_before = others(&records);
+
+        // `--title` alone: strategy unchanged.
+        plan_update_at(&apg_root, "foo", Some("New"), None).unwrap();
+        assert_eq!(
+            plan_fields(&apg_root),
+            ("New".to_string(), "S0".to_string())
+        );
+        assert_eq!(
+            others(&specs::read_jsonl(&path).unwrap()),
+            others_before,
+            "a title-only update must preserve every record and edge"
+        );
+
+        // `--strategy` alone: title unchanged.
+        plan_update_at(&apg_root, "foo", None, Some("S2")).unwrap();
+        assert_eq!(
+            plan_fields(&apg_root),
+            ("New".to_string(), "S2".to_string())
+        );
+        assert_eq!(
+            others(&specs::read_jsonl(&path).unwrap()),
+            others_before,
+            "a strategy-only update must preserve every record and edge"
+        );
+
+        // Both flags merge together.
+        plan_update_at(&apg_root, "foo", Some("T3"), Some("S3")).unwrap();
+        assert_eq!(plan_fields(&apg_root), ("T3".to_string(), "S3".to_string()));
+
+        // An absent plan is refused, naming `apg plan add`.
+        let err = plan_update_at(&apg_root, "ghost", Some("X"), None).unwrap_err();
+        assert!(err.to_string().contains("apg plan add ghost"), "{err}");
+
+        testutil::remove(&repo);
+    }
+
+    /// Int (fixture repo/branch DB): the plan-record CLI surface — `apg plan
+    /// add <project>` creates and refuses an existing plan; `apg plan update`
+    /// MERGEs title/strategy independently and refuses an absent plan; the
+    /// retired `apg plan init` is an unknown subcommand.
+    #[test]
+    fn plan_add_update_cli_and_init_retirement() {
+        let (apg_root, repo, wt) = fixture("plan-add-update-cli");
+
+        // `apg plan init` is retired at dispatch: an unknown subcommand. The
+        // match fails before any root resolution, so no cwd is needed.
+        let err = cmd_plan(&["init".to_string(), "foo".to_string()]).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unknown apg plan subcommand: init"),
+            "{err}"
+        );
+
+        // `apg plan add <project>` (no second positional) creates the plan.
+        with_cwd(&wt, || {
+            cmd_plan(&[
+                "add".to_string(),
+                "foo".to_string(),
+                "--title".to_string(),
+                "T1".to_string(),
+                "--strategy".to_string(),
+                "S1".to_string(),
+            ])
+        })
+        .unwrap();
+        assert_eq!(plan_fields(&apg_root), ("T1".to_string(), "S1".to_string()));
+
+        // `apg plan add <project>` refuses when the plan already exists.
+        let err = with_cwd(&wt, || {
+            cmd_plan(&["add".to_string(), "foo".to_string()]).unwrap_err()
+        });
+        assert!(err.to_string().contains("already exists"), "{err}");
+
+        // `apg plan update`: `--title` alone preserves strategy.
+        with_cwd(&wt, || {
+            cmd_plan(&[
+                "update".to_string(),
+                "foo".to_string(),
+                "--title".to_string(),
+                "T2".to_string(),
+            ])
+        })
+        .unwrap();
+        assert_eq!(plan_fields(&apg_root), ("T2".to_string(), "S1".to_string()));
+
+        // `--strategy` alone preserves title.
+        with_cwd(&wt, || {
+            cmd_plan(&[
+                "update".to_string(),
+                "foo".to_string(),
+                "--strategy".to_string(),
+                "S2".to_string(),
+            ])
+        })
+        .unwrap();
+        assert_eq!(plan_fields(&apg_root), ("T2".to_string(), "S2".to_string()));
+
+        // Updating an absent plan is refused, naming `apg plan add`.
+        let err = with_cwd(&wt, || {
+            cmd_plan(&[
+                "update".to_string(),
+                "ghost".to_string(),
+                "--title".to_string(),
+                "X".to_string(),
+            ])
+            .unwrap_err()
+        });
+        assert!(err.to_string().contains("apg plan add ghost"), "{err}");
 
         testutil::remove(&repo);
     }
