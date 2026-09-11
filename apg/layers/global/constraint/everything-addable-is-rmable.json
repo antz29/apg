@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "everything-addable-is-rmable",
+  "body": "Everything add-able is rm-able: every entity that can be created has a working `rm` — node, edge, plan, phase, task, planned. `rm` on a non-existent entity is an error, never a silent no-op. This is the completeness half of the strict surface; without it a caller cannot undo a create.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
