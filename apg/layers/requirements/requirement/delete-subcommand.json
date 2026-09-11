@@ -26,6 +26,11 @@
       "kind": "drives",
       "target": "domain.service.project-lifecycle",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.project-worktree",
+      "properties": {}
     }
   ],
   "in": [
