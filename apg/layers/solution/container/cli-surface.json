@@ -6,7 +6,13 @@
   "properties": {
     "kind": "app"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.command-dispatch-and-help",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
