@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-refinement"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.read-guard",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
