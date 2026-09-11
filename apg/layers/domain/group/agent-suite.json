@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "domain.entity.agent-prose",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.permission-grant",
+      "properties": {}
     }
   ],
   "in": []
