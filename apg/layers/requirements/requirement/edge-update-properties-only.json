@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "edge-update-properties-only",
+  "body": "`apg edge update <kind> <from> <to> --property k=v [--unset-property k]*` must exist as a separate command that changes edge properties ONLY. `kind`, `from`, `to` are immutable identity. It must rewrite BOTH halves — the source file's out-edge and the target file's in-edge — in one atomic mutation so the pairing never diverges. Refuse if the edge is absent. Acceptance: after `edge update`, the source out-half and target in-half carry the same updated property map; `edge rm` + `edge add` is not required for a property change.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
