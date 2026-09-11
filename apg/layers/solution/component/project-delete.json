@@ -20,6 +20,11 @@
       "kind": "realised-by",
       "source": "domain.entity.default-branch",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.project-command",
+      "properties": {}
     }
   ]
 }
