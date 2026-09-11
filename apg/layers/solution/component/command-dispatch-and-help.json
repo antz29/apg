@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "command-dispatch-and-help",
+  "body": "The dispatch and help surface: `cmd_node`/`cmd_edge` route `add|update|rm`; `cmd_plan` routes `add|update|rm|done|undone|note|complete|render|verify`; `main` (`print_help`) documents the new surface and drops `plan init`/`plan link`. Uses the existing `plan apply`→`verify` rename message as-is.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
