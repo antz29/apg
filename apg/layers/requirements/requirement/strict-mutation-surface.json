@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.task-add-refuses-existing",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.planned-add-refuses-existing",
+      "properties": {}
     }
   ],
   "in": []
