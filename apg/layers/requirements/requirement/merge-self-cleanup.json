@@ -16,6 +16,11 @@
       "kind": "drives",
       "target": "domain.entity.project-branch",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.service.project-lifecycle",
+      "properties": {}
     }
   ],
   "in": [
