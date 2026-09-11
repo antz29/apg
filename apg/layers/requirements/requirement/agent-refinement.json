@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.question-scoped-to-coordinators",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.opencode-suite-is-source",
+      "properties": {}
     }
   ],
   "in": [
