@@ -27,6 +27,11 @@
       "kind": "drives",
       "source": "requirements.requirement.planned-add-refuses-existing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.phase-update-preserves-tasks",
+      "properties": {}
     }
   ]
 }
