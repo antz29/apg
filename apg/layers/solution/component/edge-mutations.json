@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.node_cmd.edge_add",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.node_cmd.cmd_edge",
+      "properties": {}
     }
   ],
   "in": [
