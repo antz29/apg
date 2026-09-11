@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "domain.entity.authored-edge",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.plan-record",
+      "properties": {}
     }
   ],
   "in": []
