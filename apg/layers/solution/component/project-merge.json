@@ -10,6 +10,11 @@
       "kind": "realised-by",
       "source": "domain.entity.project-worktree",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.project-branch",
+      "properties": {}
     }
   ]
 }
