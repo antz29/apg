@@ -4,6 +4,12 @@
   "name": "cli-operator",
   "body": "The C4 view of the project operator — the human or agent at the `apg project` CLI.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "uses",
+      "target": "solution.system.apg-cli",
+      "properties": {}
+    }
+  ],
   "in": []
 }

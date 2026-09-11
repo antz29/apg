@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "source": "domain.group.project-lifecycle",
       "properties": {}
+    },
+    {
+      "kind": "uses",
+      "source": "solution.person.cli-operator",
+      "properties": {}
     }
   ]
 }
