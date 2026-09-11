@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "project-command",
+  "body": "The `apg project` subcommand group (`cmd_project` in src/project_cmd.rs): start, merge, and the new delete — each a main-checkout operation with hard refusals that name the actual state and one fix command. Dispatched from `main` (src/main.rs:599); help text in `print_help`.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
