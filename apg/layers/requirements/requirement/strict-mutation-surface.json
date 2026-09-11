@@ -128,6 +128,11 @@
       "kind": "contains",
       "source": "requirements.user.project-operator",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "requirements.stakeholder.repo-owner",
+      "properties": {}
     }
   ]
 }

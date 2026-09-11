@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.worktree-cleanup",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.strict-mutation-surface",
+      "properties": {}
     }
   ],
   "in": []
