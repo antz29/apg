@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "node-update-preserves-edges",
+  "body": "`apg node update <layer> <type> <name> [--body B] [--property k=v]*` must exist and be edge-preserving: read the existing NodeFile, mutate only the allowed fields (body, properties), keep every existing out-edge and in-edge, then write. The node's `layer`/`type`/`name` are its immutable identity — name is never updatable. Refuse if the node is absent. This is the capability whose absence (SPEC §1 root cause) makes re-add the only correction path. Acceptance: after `node update`, the node's body/properties changed and the count and content of its out/in edges are identical to before.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
