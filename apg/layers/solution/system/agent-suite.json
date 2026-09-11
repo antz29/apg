@@ -11,5 +11,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.group.agent-suite",
+      "properties": {}
+    }
+  ]
 }

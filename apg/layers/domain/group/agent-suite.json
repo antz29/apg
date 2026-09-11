@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "domain.entity.failure-report",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.system.agent-suite",
+      "properties": {}
     }
   ],
   "in": [
