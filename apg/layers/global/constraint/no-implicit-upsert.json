@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "no-implicit-upsert",
+  "body": "No implicit upsert: every `add`/create on an existing entity must refuse (exit non-zero, naming the entity and the correct follow-up `update` or `rm`) and write nothing. Re-adding an existing node FQN, edge (kind,from,to), phase, task, or planned FQN must never full-replace the existing record. The current `apg node add` (bare NodeFile + write_project overwrite exemption) and the plan add arms (`artifacts::remove_node` + re-add) violate this law.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
