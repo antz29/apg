@@ -6,6 +6,12 @@
   "properties": {
     "attribute": "core"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.agent-prose",
+      "properties": {}
+    }
+  ],
   "in": []
 }
