@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.delete-subcommand",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.delete-refuses-unsafe",
+      "properties": {}
     }
   ],
   "in": [
