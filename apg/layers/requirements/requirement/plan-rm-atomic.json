@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "plan-rm-atomic",
+  "body": "`apg plan rm <project> --force` (cascade) must be atomic: the transient plan store is a single `apg/.trans/plans/<project>.jsonl`, so the cascade must be a whole-record JSONL rewrite — never a half-deleted plan. A failed or partial removal must leave the plan file exactly as it was. Acceptance: after a `--force` cascade the JSONL holds no orphan records (no task without its phase, no edge to a removed record); an error mid-cascade leaves the original file intact.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
