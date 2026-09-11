@@ -17,6 +17,11 @@
       "kind": "realised-by",
       "source": "domain.entity.agent-prose",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.permission-grant",
+      "properties": {}
     }
   ]
 }
