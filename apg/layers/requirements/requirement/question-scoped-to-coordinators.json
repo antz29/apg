@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "question-scoped-to-coordinators",
+  "body": "The `question` tool is allowed only for coordinators and agent-builder. Every other subagent (spec-writer, plan-writer, spec-review, plan-review, implementer, implementation-phase-reviewer) loses `question: allow` and instead routes questions through the coordinator (report back to the coordinator with the question). Agent-builder keeps `question` (its scaffold interview is a sanctioned user interaction, reworded to interview via the coordinator).",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
