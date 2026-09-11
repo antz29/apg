@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "stakeholder",
+  "name": "apg-maintainer",
+  "body": "The apg project maintainer who ships the opencode agent suite via `apg init` and relies on every distributed and generated agent being correctly permission-scoped: agents reach the code graph only through the apg tools (never raw files), tool failures are terminal and reported up, and graph-state internals never leak into agent prose.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
