@@ -51,6 +51,11 @@
       "kind": "contains",
       "target": "requirements.requirement.task-update-revalidates-preserves",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.planned-update-preserves-edges",
+      "properties": {}
     }
   ],
   "in": []
