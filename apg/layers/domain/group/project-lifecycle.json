@@ -27,6 +27,11 @@
       "kind": "contains",
       "target": "domain.entity.default-branch",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.project-lifecycle",
+      "properties": {}
     }
   ],
   "in": [
