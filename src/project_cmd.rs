@@ -18,8 +18,11 @@
 //!   verify gate (plan verify against the branch graph: every planned node
 //!   realized, no dangling targets, all feedback resolved) → merge the
 //!   project branch into the default branch → rebuild main's graph with a
-//!   plain unguarded scan. Binary-operated via git2 from the main checkout;
-//!   the git CLI is never shelled out to (R6); push/tag remain human acts.
+//!   plain unguarded scan → **self-cleanup**: on that success path only, the
+//!   project's worktree at `<main>/apg/.worktrees/<name>` is removed and its
+//!   branch deleted (never the default branch). Binary-operated via git2
+//!   from the main checkout; the git CLI is never shelled out to (R6);
+//!   push/tag remain human acts.
 
 use std::path::{Path, PathBuf};
 
@@ -289,7 +292,11 @@ fn project_merge(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// Core of `project merge` (split for tests). The default `rebuild` is a real
-/// unguarded `apg scan` of the main checkout; tests override it.
+/// unguarded `apg scan` of the main checkout; tests override it. After the
+/// verify gate → merge → rebuild succeed, the merged project cleans up after
+/// itself: its worktree is removed and its branch deleted (self-cleanup;
+/// never the default branch). Any refusal or failure before the success path
+/// leaves both untouched.
 fn project_merge_at(
     main_apg_root: &Path,
     name: &str,
@@ -413,9 +420,16 @@ fn project_merge_at(
         repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))?;
     }
 
-    // Main rebuild: a plain unguarded scan on main.
+    // Main rebuild: a plain unguarded scan on main. Cleanup runs ONLY on the
+    // success path — any refusal or failure before this point leaves the
+    // worktree and branch untouched. The worktree is unregistered + removed
+    // and the project branch deleted (safe: the merged branch is by
+    // definition merged into the default branch; the default branch itself is
+    // hard-refused inside delete_branch).
     let rebuild = rebuild.unwrap_or(&real_scan);
     rebuild(&identity.main_root)?;
+    git::remove_worktree(&identity.main_root, name)?;
+    git::delete_branch(&identity.main_root, name)?;
     Ok(())
 }
 
@@ -2120,21 +2134,95 @@ mod tests {
 
     #[test]
     fn merge_keeps_worktree_and_branch_cleanup_deletes_no_branch() {
-        // SPEC §6: "Test worktree apg/.worktrees/test stays until before
-        // shipping ... cleanup deletes no branch." The guard: neither the
-        // merge act nor a subsequent project start may remove the test
-        // worktree or its branch.
-        let repo = Repo::new("dogfood-guard");
+        // merge-self-cleanup: `apg project merge <name>` cleans up after
+        // itself. AC (a): a full verify → merge → main rebuild round-trip
+        // removes the merged project's worktree at
+        // `<main>/apg/.worktrees/<name>` and deletes its branch
+        // `refs/heads/<name>`; AC (b): a refused/failed merge leaves both
+        // untouched; AC (c): the default branch and the main checkout are
+        // preserved (never-touch-default-branch).
+        let repo = Repo::new("self-cleanup");
         repo.write(
             "code/seed.scan.jsonl",
             &testutil::code_payload(MOD, FILE, &["Store"]),
         );
         repo.commit_all("seed code");
 
+        // Refusal path first (AC-b): a merge of a project whose verify gate
+        // fails — a planned node that the branch scan never realized — must
+        // refuse before anything is merged, leaving the worktree, the branch,
+        // and the main checkout untouched.
+        let wt = project_start_at(&repo.apg_root(), "fail", Some(&start_scan)).unwrap();
+        let wt_apg = wt.join(specs::LAYOUT);
+        // A transient plan carrying an unrealized planned node makes the
+        // verify gate refuse (`fixture.mod.Widget` never becomes real code —
+        // the fixture payload only has `Store`).
+        let plan_path = wt_apg.join(specs::TRANS).join("plans").join("fail.jsonl");
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &plan_path,
+            "fail",
+            &[
+                Record::Plan {
+                    fqn: "fail/plan".to_string(),
+                    title: "fail plan".to_string(),
+                    strategy: String::new(),
+                },
+                Record::PlanPhase {
+                    fqn: "fail/plan.phase-01".to_string(),
+                    number: 1,
+                    title: "P1".to_string(),
+                    deliverable: "D".to_string(),
+                    status: "pending".to_string(),
+                },
+                Record::Contains {
+                    from: "fail/plan".to_string(),
+                    to: "fail/plan.phase-01".to_string(),
+                },
+                Record::PlannedNode {
+                    fqn: format!("{MOD}.Widget"),
+                    kind: "struct".into(),
+                    name: "Widget".into(),
+                    parent: MOD.into(),
+                },
+            ],
+        )
+        .unwrap();
+        start_scan(&wt).unwrap();
+        let err = plan_cmd::plan_verify_at(&wt_apg, "fail").unwrap_err();
+        assert!(
+            format!("{err:#}").contains("not realized"),
+            "verify must report the unrealized planned node: {err:#}"
+        );
+        let main_tip_before_refusal = repo.head_sha();
+        let err = project_merge_at(&repo.apg_root(), "fail", Some(&start_scan)).unwrap_err();
+        assert!(format!("{err:#}").contains("not realized"), "{err:#}");
+        assert_eq!(
+            repo.head_sha(),
+            main_tip_before_refusal,
+            "a refused merge must not move the main checkout"
+        );
+        assert!(
+            wt.is_dir(),
+            "a refused merge must leave the worktree at apg/.worktrees/fail in place"
+        );
+        let main_repo = git2::Repository::open(&repo.root).unwrap();
+        assert!(
+            main_repo.find_worktree("fail").is_ok(),
+            "a refused merge must leave the worktree registered"
+        );
+        assert!(
+            main_repo
+                .find_branch("fail", git2::BranchType::Local)
+                .is_ok(),
+            "a refused merge must leave the project branch in place"
+        );
+
+        // Success path (AC-a): a project with durable content + a minimal
+        // plan (no planned nodes, no feedback) passes the verify gate, merges,
+        // rebuilds main, and then cleans up after itself.
         let wt = project_start_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
         let wt_apg = wt.join(specs::LAYOUT);
-        // Durable content (a node file, auto-committed) + a minimal transient
-        // plan (no planned nodes, no feedback) so the verify gate passes.
         write_spec_node(&wt_apg);
         let plan_path = wt_apg.join(specs::TRANS).join("plans").join("test.jsonl");
         artifacts::write_jsonl_and_reingest(
@@ -2164,39 +2252,56 @@ mod tests {
         start_scan(&wt).unwrap();
         plan_cmd::plan_verify_at(&wt_apg, "test").unwrap();
 
-        // Merge: the terminal lifecycle act — and it must NOT clean up the
-        // project behind itself.
+        let tip_before_merge = main_repo.head().unwrap().peel_to_commit().unwrap().id();
         project_merge_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
 
-        let main_repo = git2::Repository::open(&repo.root).unwrap();
-        assert!(
-            wt.is_dir(),
-            "the test worktree apg/.worktrees/test must survive the merge (SPEC §6)"
+        // The merge landed main at the project tip (fast-forward), the main
+        // rebuild is fresh, and the merged project cleaned up after itself.
+        assert_ne!(
+            main_repo.head().unwrap().peel_to_commit().unwrap().id(),
+            tip_before_merge,
+            "the merge must advance the default branch to the project tip"
         );
         assert!(
-            main_repo.find_worktree("test").is_ok(),
-            "the test worktree must stay registered after the merge"
+            !wt.exists(),
+            "the merged project's worktree apg/.worktrees/test must be removed (AC-a)"
+        );
+        assert!(
+            main_repo.find_worktree("test").is_err(),
+            "the merged project's worktree must be unregistered (AC-a)"
         );
         assert!(
             main_repo
                 .find_branch("test", git2::BranchType::Local)
-                .is_ok(),
-            "cleanup deletes no branch — branch `test` must survive the merge"
+                .is_err(),
+            "the merged project's branch refs/heads/test must be deleted (AC-a)"
+        );
+        assert!(
+            !git::is_stale(&repo.apg_root()),
+            "main's scan_meta must be fresh"
+        );
+        assert!(
+            repo.is_clean(),
+            "after merge self-cleanup the main checkout must be clean"
         );
 
-        // A second project start (a fresh dogfood cycle) must not sweep the
-        // test worktree away either.
-        let wt2 = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
-        assert!(wt2.is_dir());
-        assert!(
-            wt.is_dir(),
-            "starting another project must not delete the test worktree"
-        );
+        // AC (c): the default branch and the main checkout are preserved.
         assert!(
             main_repo
-                .find_branch("test", git2::BranchType::Local)
+                .find_branch("main", git2::BranchType::Local)
                 .is_ok(),
-            "starting another project must not delete the test branch"
+            "the default branch must survive merge self-cleanup"
+        );
+        assert!(repo.root.is_dir(), "the main checkout must survive");
+        assert!(
+            main_repo.head().unwrap().shorthand() == Some("main"),
+            "the main checkout must stay on the default branch"
+        );
+        assert!(
+            repo.root
+                .join("apg/layers/requirements/requirement/timer.json")
+                .exists(),
+            "the merged main checkout carries the merged tier node file"
         );
         testutil::remove(&repo);
     }

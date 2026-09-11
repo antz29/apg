@@ -67,7 +67,10 @@ internals:
    coherence gate — every planned node realized, all feedback resolved,
    derived solution coverage holds — and prints the merge handoff.
    `apg project merge <name>` from the main checkout runs verify → merge →
-   unguarded main rebuild. Cleanup deletes no branch; push/tag remain human.
+   unguarded main rebuild, then **self-cleans** on that success path:
+   the merged project's worktree is removed and its branch deleted (the
+   default branch and the main checkout are never touched); push/tag remain
+   human acts.
 6. **Version gate + `apg init`.** `apg/config.json` carries the
    binary-managed `version` field; `apg scan`/`apg project start` **block**
    unless the layout and the binary share major.minor. **`apg init` is the

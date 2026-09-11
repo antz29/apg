@@ -29,6 +29,12 @@
 //!    scan_meta to the new state so consecutive mutations do not each demand
 //!    a rescan. Plan mutations never commit: `apg/.trans` is gitignored and
 //!    transient by design.
+//!
+//! 4. **Lifecycle self-cleanup** (merge self-cleanup / delete subcommand):
+//!    [`remove_worktree`] + [`delete_branch`] — the shared git2 primitives
+//!    `apg project merge`'s success path and `apg project delete` use to
+//!    remove a project's worktree and delete its branch. The
+//!    never-touch-default-branch law lives in [`delete_branch`].
 
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -364,6 +370,80 @@ pub const WORKTREES: &str = ".worktrees";
 /// The canonical project worktree location: `<main>/apg/.worktrees/<project>`.
 pub fn project_worktree_dir(main_root: &Path, project: &str) -> PathBuf {
     main_root.join(specs::LAYOUT).join(WORKTREES).join(project)
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle self-cleanup (merge self-cleanup / delete subcommand): the
+// shared git2 helpers the lifecycle flows call. Both tolerate "already gone"
+// states — the merge success path cleans up only after a fully successful
+// verify → merge → rebuild; a partially-gone project must not turn a
+// successful merge into a failure.
+// ---------------------------------------------------------------------------
+
+/// Removes the project worktree `project` of the repo containing `main_root`:
+/// its registration (the admin gitdir under `<main>/.git/worktrees/<name>`)
+/// and its working directory at `<main>/apg/.worktrees/<project>`. Wired to
+/// libgit2's `git_worktree_prune` with `prune.valid` set (a merged worktree is
+/// valid — the branch still exists until [`delete_branch`] runs) and
+/// `prune.working_tree` set (remove the working directory). Tolerates missing,
+/// unregistered, or already-pruned worktrees as safe no-ops: a project whose
+/// worktree is already gone must still merge cleanly.
+///
+/// Never touches the main checkout's own worktree — this removes the **linked**
+/// worktree named `project`, and the name is validated to be a single-segment
+/// local branch name first (callers additionally refuse the default branch
+/// before this ever runs).
+pub fn remove_worktree(main_root: &Path, project: &str) -> anyhow::Result<()> {
+    if !git2::Reference::is_valid_name(&format!("refs/heads/{project}"))
+        || project.contains('/')
+        || project == "HEAD"
+    {
+        anyhow::bail!(
+            "refused: `{project}` is not a valid project (branch) name — nothing was removed. Fix: use the name `apg project start` accepted."
+        );
+    }
+    let repo = git2::Repository::open(main_root)?;
+    let Some(wt) = repo.find_worktree(project).ok() else {
+        // No registration to remove; the working dir (if any) is untracked
+        // leftovers at the fixed location.
+        return Ok(());
+    };
+    let mut opts = git2::WorktreePruneOptions::new();
+    opts.valid(true).working_tree(true);
+    if let Err(e) = wt.prune(Some(&mut opts)) {
+        // A locked or in-use worktree blocks pruning; a merged-then-failed
+        // cleanup must not look like a merge failure.
+        anyhow::bail!(
+            "cleanup failed: could not remove worktree `{project}` at {} ({e}). Fix: remove it manually (`git worktree remove {project}` or delete {}), then re-run `apg project merge {project}` to finish the cleanup.",
+            wt.path().display(),
+            project_worktree_dir(main_root, project).display()
+        );
+    }
+    Ok(())
+}
+
+/// Deletes the local project branch `refs/heads/<name>` in the repo containing
+/// `main_root`. Hard-refuses when `name` equals the repo's default branch —
+/// the never-touch-default-branch law: `apg project merge`'s self-cleanup (and
+/// `apg project delete`) may never delete `refs/heads/<default>`. Tolerates an
+/// already-deleted branch as a safe no-op (a merged branch's ref may already
+/// be gone). Callers must remove the project's worktree first — libgit2
+/// refuses to delete a branch that is still a linked worktree's HEAD (mirrors
+/// `git branch -d`).
+pub fn delete_branch(main_root: &Path, name: &str) -> anyhow::Result<()> {
+    let identity = repo_identity(main_root)?;
+    if identity.default_branch.as_deref() == Some(name) {
+        anyhow::bail!(
+            "refused: `{name}` is the repo's default branch and is never deleted by lifecycle cleanup. Fix: merge it manually (`git checkout {name} && git merge main`) instead."
+        );
+    }
+    let repo = git2::Repository::open(main_root)?;
+    let mut branch = match repo.find_branch(name, git2::BranchType::Local) {
+        Ok(b) => b,
+        Err(_) => return Ok(()),
+    };
+    branch.delete()?;
+    Ok(())
 }
 
 /// The two membership halves (R3):
@@ -944,6 +1024,125 @@ mod tests {
         assert!(msg.contains("not inside a git repository"), "{msg}");
         assert!(msg.contains("apg init"), "{msg}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ------------------------------------------------------------------
+    // Lifecycle cleanup helpers (merge self-cleanup / delete): the shared
+    // git2 worktree-removal + branch-deletion primitives.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn remove_worktree_unregisters_and_removes_working_dir() {
+        let repo = fixture_repo("rm-wt");
+        let wt = repo.start_project("foo");
+        assert!(wt.is_dir());
+        let main_repo = git2_repo(&repo);
+        assert!(main_repo.find_worktree("foo").is_ok());
+
+        remove_worktree(&repo.root, "foo").unwrap();
+
+        assert!(!wt.exists(), "the worktree working dir must be removed");
+        assert!(
+            main_repo.find_worktree("foo").is_err(),
+            "the worktree registration must be pruned"
+        );
+        assert!(
+            main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .is_ok(),
+            "remove_worktree must leave the branch alone"
+        );
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn remove_worktree_tolerates_missing_or_unregistered_worktrees() {
+        let repo = fixture_repo("rm-wt-gone");
+        repo.start_project("foo");
+        let main_repo = git2_repo(&repo);
+        // Simulate an already-pruned worktree: registration gone, leftover dir
+        // (or no dir at all) — both must be safe no-ops. (`valid` is required
+        // to prune a still-valid worktree; `working_tree` off keeps the dir.)
+        let mut opts = git2::WorktreePruneOptions::new();
+        opts.valid(true).working_tree(false);
+        main_repo
+            .find_worktree("foo")
+            .unwrap()
+            .prune(Some(&mut opts))
+            .unwrap();
+        assert!(main_repo.find_worktree("foo").is_err());
+        remove_worktree(&repo.root, "foo").unwrap();
+
+        // A name that never existed is also a no-op.
+        remove_worktree(&repo.root, "never-existed").unwrap();
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn delete_branch_removes_local_project_branch() {
+        let repo = fixture_repo("del-br");
+        repo.start_project("foo");
+        let main_repo = git2_repo(&repo);
+        assert!(
+            main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .is_ok()
+        );
+
+        // The lifecycle ordering: the worktree is removed FIRST — a branch
+        // that is still a linked worktree's HEAD cannot be deleted (libgit2
+        // mirrors `git branch -d`) — then the branch.
+        remove_worktree(&repo.root, "foo").unwrap();
+        delete_branch(&repo.root, "foo").unwrap();
+
+        assert!(
+            main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .is_err(),
+            "the local project branch must be deleted"
+        );
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn delete_branch_never_touches_the_default_branch() {
+        // The never-touch-default-branch law: deleting <default> is a hard
+        // refusal, and the main checkout (default branch checked out) must
+        // survive untouched.
+        let repo = fixture_repo("del-default");
+        let err = delete_branch(&repo.root, "main").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("refused"), "{msg}");
+        assert!(msg.contains("default branch"), "{msg}");
+        assert!(
+            git2_repo(&repo)
+                .find_branch("main", git2::BranchType::Local)
+                .is_ok(),
+            "the default branch must survive"
+        );
+        assert!(repo.root.is_dir(), "the main checkout must survive");
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn delete_branch_tolerates_an_already_deleted_branch() {
+        let repo = fixture_repo("del-br-gone");
+        repo.start_project("foo");
+        let main_repo = git2_repo(&repo);
+        // Lifecycle ordering again: remove the worktree first so the branch is
+        // deletable, then delete it out from under the helper.
+        remove_worktree(&repo.root, "foo").unwrap();
+        let mut branch = main_repo
+            .find_branch("foo", git2::BranchType::Local)
+            .unwrap();
+        branch.delete().unwrap();
+        assert!(
+            main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .is_err()
+        );
+        delete_branch(&repo.root, "foo").unwrap();
+        testutil::remove(&repo);
     }
 
     // ------------------------------------------------------------------
