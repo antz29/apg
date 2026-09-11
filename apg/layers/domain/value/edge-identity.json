@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "edge-identity",
+  "body": "The identity value of an authored edge: the immutable triple (kind, from, to). Two edge adds with the same triple are the same edge — adding a duplicate is refused; changing an edge's properties must not change its identity.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
