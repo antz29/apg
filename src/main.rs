@@ -561,7 +561,10 @@ USAGE:
   apg project <sub> …         Project contexts (worktrees, git2-operated):
                               start <name> — worktree + branch + branch DB off
                               the default branch (apg/.worktrees/<name>);
-                              merge <name> — verify gate → merge → main rebuild
+                              merge <name> — verify gate → merge → main rebuild;
+                              delete <name> — abandon a project: remove its
+                              worktree + delete its branch (commits discarded;
+                              refuses unsafe states, never the default branch)
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
   apg node <sub> …            Durable node-file model mutations:

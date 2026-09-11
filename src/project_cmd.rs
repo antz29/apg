@@ -23,6 +23,15 @@
 //!   branch deleted (never the default branch). Binary-operated via git2
 //!   from the main checkout; the git CLI is never shelled out to (R6);
 //!   push/tag remain human acts.
+//!
+//! - `apg project delete <name>` — the explicit abandon act for projects
+//!   that are NOT merged. Every refusal names the actual state + one fix
+//!   command (the refuse_start pattern); the branch's commits are discarded —
+//!   delete does NOT require the branch to be merged (delete-refuses-unsafe).
+//!   On the success path the project's worktree at
+//!   `<main>/apg/.worktrees/<name>` is removed and its branch deleted via the
+//!   shared phase-1 helpers; the default branch and the main checkout are
+//!   never touched (never-touch-default-branch).
 
 use std::path::{Path, PathBuf};
 
@@ -32,14 +41,15 @@ use crate::plan_cmd;
 use crate::specs;
 use crate::version_gate;
 
-/// `apg project <start|merge> …`.
+/// `apg project <start|merge|delete> …`.
 pub fn cmd_project(args: &[String]) -> anyhow::Result<()> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg project <start|merge> …");
+        anyhow::bail!("usage: apg project <start|merge|delete> …");
     };
     match sub {
         "start" => project_start(&args[1..]),
         "merge" => project_merge(&args[1..]),
+        "delete" => project_delete(&args[1..]),
         other => anyhow::bail!("unknown apg project subcommand: {other}"),
     }
 }
@@ -428,6 +438,129 @@ fn project_merge_at(
     // hard-refused inside delete_branch).
     let rebuild = rebuild.unwrap_or(&real_scan);
     rebuild(&identity.main_root)?;
+    git::remove_worktree(&identity.main_root, name)?;
+    git::delete_branch(&identity.main_root, name)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// project delete
+// ---------------------------------------------------------------------------
+
+/// `apg project delete <name>` — the explicit abandon act for a project that
+/// is NOT merged. Refuses (naming the actual state + one fix command) unless
+/// deleting the branch is safe; on success removes the project's worktree at
+/// `<main>/apg/.worktrees/<name>` and deletes `refs/heads/<name>` via the
+/// shared phase-1 helpers. Discarding the branch's commits is the point —
+/// delete does NOT require the branch to be merged.
+fn project_delete(args: &[String]) -> anyhow::Result<()> {
+    let p = parse_args(args);
+    let Some(name) = p.positional.first() else {
+        anyhow::bail!("usage: apg project delete <name>");
+    };
+    let apg_root = require_apg_root()?;
+    project_delete_at(&apg_root, name)?;
+    println!(
+        "Deleted project `{name}`: removed its worktree and deleted branch `{name}` (its commits were discarded)."
+    );
+    Ok(())
+}
+
+/// Core of `project delete` (split from the CLI wrapper so tests drive it
+/// against a fixture root). The refusal preflight mirrors `refuse_start`: each
+/// refusal names the actual state and one fix command (delete-refuses-unsafe).
+/// Safe-to-delete means: valid project name; the branch is NOT the default
+/// branch; the branch is NOT the main checkout's current branch (there is
+/// nothing to delete from here); the branch IS hosted in the project's own
+/// worktree at the fixed location `<main>/apg/.worktrees/<name>` (leftover
+/// branch / mismatched worktree states are refused with a manual fix, never
+/// guessed); and the worktree has no tracked uncommitted changes (commit or
+/// stash first, mirroring merge's dirty refusal). The branch may be unmerged —
+/// delete is the abandon path. On success `git::remove_worktree` +
+/// `git::delete_branch` remove the project; the default branch and the main
+/// checkout are never touched.
+fn project_delete_at(main_apg_root: &Path, name: &str) -> anyhow::Result<()> {
+    let identity = git::repo_identity(main_apg_root)?;
+    if identity.is_worktree {
+        anyhow::bail!(
+            "refused: `apg project delete` is a main-checkout operation (binary-operated from the main checkout). Fix: run `apg project delete {name}` from the main checkout."
+        );
+    }
+
+    // Name validity (delete-refuses-unsafe AC-a: refuses for an invalid name).
+    validate_project_name(name)?;
+
+    // Safety law: the default branch and the main checkout are never touched
+    // (never-touch-default-branch). Deleting the default branch itself is a
+    // hard refusal, before anything else looks at the project.
+    let Some(default) = identity.default_branch.as_deref() else {
+        anyhow::bail!(
+            "refused: the repo has no default branch (no origin/HEAD and the main checkout is detached). Fix: check out the default branch first."
+        );
+    };
+    if default == name {
+        anyhow::bail!(
+            "refused: `{name}` is the repo's default branch and is never deleted by lifecycle cleanup. Fix: work on it where it is (`git checkout {default}`), and abandon projects with `apg project delete <name>`."
+        );
+    }
+
+    // The main checkout's current branch cannot be deleted (a checked-out
+    // branch cannot be removed — delete-refuses-unsafe AC-b); there is
+    // nothing to delete from here anyway.
+    if identity.branch.as_deref() == Some(name) {
+        anyhow::bail!(
+            "refused: project `{name}` cannot be deleted from here — branch `{name}` is the main checkout's current branch (the branch-without-worktree state). Fix: `git checkout {default}`, then re-run `apg project delete {name}`.",
+            default = default
+        );
+    }
+
+    // The project must exist: the branch exists and is hosted in the project's
+    // own worktree at the fixed location. A missing branch is a hard refusal
+    // (AC-c — no project); a branch not hosted in the fixed worktree is a
+    // leftover-branch / mismatched-worktree state, refused with a manual fix
+    // (AC-d), never guessed.
+    let wt_dir = git::project_worktree_dir(&identity.main_root, name);
+    let repo = git2::Repository::open(&identity.main_root)?;
+    if repo.find_branch(name, git2::BranchType::Local).is_err() {
+        anyhow::bail!(
+            "no project `{name}`: branch `{name}` does not exist. Fix: `apg project start {name}` from the main checkout."
+        );
+    }
+    if !wt_dir.is_dir() {
+        anyhow::bail!(
+            "no project `{name}`: expected worktree {} does not exist. Fix: `apg project start {name}` from the main checkout (a project worktree lives at the fixed location).",
+            wt_dir.display()
+        );
+    }
+    let wt_repo = git2::Repository::open(&wt_dir)?;
+    let on_branch = wt_repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(str::to_string));
+    if on_branch.as_deref() != Some(name) {
+        anyhow::bail!(
+            "refused: {} is not branch `{name}`'s worktree (it holds `{}`) — a mismatched-worktree state is never guessed. Fix: decide manually (remove the stale directory or check out the branch into it: `git worktree remove {name}` / `git worktree add {} {name}`), then re-run `apg project delete {name}`.",
+            wt_dir.display(),
+            on_branch.as_deref().unwrap_or("<none>"),
+            wt_dir.display()
+        );
+    }
+
+    // The worktree must have no tracked uncommitted changes: delete discards
+    // the branch's commits, and uncommitted work in the worktree would be
+    // destroyed with them (delete-refuses-unsafe AC-e).
+    if !git::checkout_clean(&wt_dir) {
+        anyhow::bail!(
+            "refused: the project worktree has tracked uncommitted changes — deleting the project would discard them (the branch's commits are already the abandon act; this would destroy work not in any commit). Fix: commit or stash them (`git status` inside {}), then re-run `apg project delete {name}`.",
+            wt_dir.display()
+        );
+    }
+
+    // The branch may be unmerged — delete is the explicit abandon path and
+    // discarding the branch's commits is its purpose (delete-subcommand AC-c).
+    // Worktree first, then the branch: libgit2 refuses to delete a branch
+    // that is still a linked worktree's HEAD. delete_branch hard-refuses the
+    // default branch again (the safety law's last line of defense).
     git::remove_worktree(&identity.main_root, name)?;
     git::delete_branch(&identity.main_root, name)?;
     Ok(())
@@ -2302,6 +2435,276 @@ mod tests {
                 .join("apg/layers/requirements/requirement/timer.json")
                 .exists(),
             "the merged main checkout carries the merged tier node file"
+        );
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
+    // phase-02: `apg project delete <name>` — the abandon path. Every
+    // refusal names the actual state + one fix command; success removes the
+    // worktree + deletes the branch (commits discarded); never the default
+    // branch or the main checkout.
+    // ------------------------------------------------------------------
+
+    /// Opens the project worktree's repository, mutates one tracked path in a
+    /// new commit, and returns its head sha — the "project work in progress"
+    /// state a delete abandons.
+    fn wt_append_commit(wt: &Path, rel: &str, content: &str, msg: &str) -> String {
+        let p = wt.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, content).unwrap();
+        wt_commit(wt, rel, msg)
+    }
+
+    /// Asserts the project `name` of the fixture `repo` is fully present:
+    /// branch exists, worktree registered, worktree dir exists.
+    fn assert_project_present(repo: &testutil::Repo, name: &str) {
+        let main_repo = git2_repo_test(repo);
+        assert!(
+            main_repo.find_branch(name, git2::BranchType::Local).is_ok(),
+            "project `{name}` branch must exist"
+        );
+        assert!(
+            main_repo.find_worktree(name).is_ok(),
+            "project `{name}` worktree must be registered"
+        );
+        assert!(
+            repo.project_worktree_dir(name).is_dir(),
+            "project `{name}` worktree dir must exist"
+        );
+    }
+
+    /// Asserts the project `name` of the fixture `repo` is fully gone:
+    /// branch deleted, worktree unregistered, worktree dir removed.
+    fn assert_project_gone(repo: &testutil::Repo, name: &str) {
+        let main_repo = git2_repo_test(repo);
+        assert!(
+            main_repo
+                .find_branch(name, git2::BranchType::Local)
+                .is_err(),
+            "project `{name}` branch must be deleted"
+        );
+        assert!(
+            main_repo.find_worktree(name).is_err(),
+            "project `{name}` worktree must be unregistered"
+        );
+        assert!(
+            !repo.project_worktree_dir(name).exists(),
+            "project `{name}` worktree dir must be removed"
+        );
+    }
+
+    fn git2_repo_test(repo: &testutil::Repo) -> git2::Repository {
+        git2::Repository::open(&repo.root).unwrap()
+    }
+
+    #[test]
+    fn delete_refuses_invalid_name_and_default_branch() {
+        // delete-refuses-unsafe AC-(a) + never-touch-default-branch: an
+        // invalid project name and `<name>` equal to the default branch are
+        // hard refusals naming the actual state + one fix command.
+        let repo = Repo::new("del-invalid");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+
+        let err = project_delete_at(&repo.apg_root(), "bad/name").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("not a valid project name"), "{msg}");
+        assert!(msg.contains("apg project start"), "{msg}");
+
+        let err = project_delete_at(&repo.apg_root(), "main").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("default branch"), "{msg}");
+        assert!(msg.contains("never deleted"), "{msg}");
+
+        // Nothing was removed.
+        assert!(repo.is_clean(), "refusals must not dirty the main checkout");
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn delete_refuses_missing_and_mismatched_projects() {
+        // delete-refuses-unsafe AC-(c) and AC-(d): a project that does not
+        // exist (no branch), and a leftover branch / mismatched-worktree
+        // state, are refused with a manual fix — never guessed.
+        let repo = Repo::new("del-missing");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+
+        // AC-(c): no branch, no worktree at the fixed location.
+        let err = project_delete_at(&repo.apg_root(), "ghost").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("branch `ghost` does not exist"), "{msg}");
+        assert!(msg.contains("apg project start ghost"), "{msg}");
+
+        // AC-(d): branch exists but no worktree dir at the fixed location
+        // (leftover branch — the state refuse_start already reports).
+        let main_repo = git2_repo_test(&repo);
+        main_repo
+            .branch(
+                "leftover",
+                &main_repo.head().unwrap().peel_to_commit().unwrap(),
+                false,
+            )
+            .unwrap();
+        let err = project_delete_at(&repo.apg_root(), "leftover").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("expected worktree"), "{msg}");
+        assert!(msg.contains("apg project start leftover"), "{msg}");
+        assert!(
+            main_repo
+                .find_branch("leftover", git2::BranchType::Local)
+                .is_ok(),
+            "a refused delete must leave the leftover branch in place"
+        );
+
+        // AC-(d): worktree dir exists but hosts a DIFFERENT branch (a
+        // mismatched-worktree state). Start project `first`, then check out a
+        // different branch inside its worktree so the worktree at the fixed
+        // location for `first` holds `injected` instead.
+        let wt_first = repo.start_project("first");
+        let wt_repo = git2::Repository::open(&wt_first).unwrap();
+        wt_repo
+            .branch(
+                "injected",
+                &wt_repo.head().unwrap().peel_to_commit().unwrap(),
+                false,
+            )
+            .unwrap();
+        wt_repo.set_head("refs/heads/injected").unwrap();
+        wt_repo
+            .checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        let err = project_delete_at(&repo.apg_root(), "first").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("not branch `first`'s worktree"),
+            "the mismatched-worktree refusal must name the actual state: {msg}"
+        );
+        assert!(msg.contains("never guessed"), "{msg}");
+        assert_project_present(&repo, "first");
+        assert!(
+            repo.is_clean(),
+            "the refusal must leave the main checkout clean"
+        );
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn delete_refuses_dirty_worktree_naming_commit_or_stash() {
+        // delete-refuses-unsafe AC-(e): a project worktree with tracked
+        // uncommitted changes is refused (commit/stash first).
+        let repo = Repo::new("del-dirty");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        let wt = repo.start_project("dirty");
+        // A tracked uncommitted change: modify a committed file, do not commit.
+        let p = wt.join("code/seed.scan.jsonl");
+        let cur = std::fs::read_to_string(&p).unwrap();
+        std::fs::write(&p, format!("{cur}\n// dirty\n")).unwrap();
+
+        let err = project_delete_at(&repo.apg_root(), "dirty").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("tracked uncommitted changes"), "{msg}");
+        assert!(msg.contains("commit or stash"), "{msg}");
+        assert_project_present(&repo, "dirty");
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn delete_abandons_an_unmerged_project() {
+        // delete-subcommand AC-(b)/(c): delete is the abandon path — it
+        // removes the worktree at <main>/apg/.worktrees/<name> and deletes
+        // the branch, discarding the branch's unmerged commits; the default
+        // branch and the main checkout are untouched.
+        let repo = Repo::new("del-success");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        let wt = repo.start_project("abandon");
+        // Seed the worktree's branch graph (a started project has a DB).
+        testutil::scan_checkout(&wt).unwrap();
+        // Make the project's branch DIVERGE from default (unmerged by design):
+        // a committed project change that delete will discard.
+        wt_append_commit(&wt, "code/extra.txt", "unmerged work\n", "project work");
+        let main_tip_before = repo.head_sha();
+        let main_repo = git2_repo_test(&repo);
+
+        project_delete_at(&repo.apg_root(), "abandon").unwrap();
+
+        // The project is gone: worktree unregistered + dir removed, branch
+        // deleted (its unmerged commits discarded).
+        assert_project_gone(&repo, "abandon");
+        assert!(!wt.exists(), "the abandoned worktree dir must be removed");
+        // The default branch and the main checkout survive untouched.
+        assert_eq!(repo.head_sha(), main_tip_before, "main must not move");
+        assert!(
+            main_repo
+                .find_branch("main", git2::BranchType::Local)
+                .is_ok(),
+            "the default branch must survive delete"
+        );
+        assert!(
+            main_repo.head().unwrap().shorthand() == Some("main"),
+            "the main checkout must stay on the default branch"
+        );
+        assert!(repo.is_clean(), "the main checkout must stay clean");
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn delete_refuses_when_branch_is_main_checkouts_current() {
+        // delete-refuses-unsafe AC-(b): a branch that is the main checkout's
+        // current branch is refused (nothing to delete from here) — the
+        // branch-without-worktree bootstrap state. origin/HEAD pins the
+        // default to `main` while the main checkout holds `current` (like a
+        // real remote-backed repo), so the refusal is the current-branch
+        // refusal, not the default-branch one.
+        let repo = Repo::new("del-current");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        let main_repo = git2_repo_test(&repo);
+        let head = main_repo.head().unwrap().peel_to_commit().unwrap();
+        main_repo
+            .reference("refs/remotes/origin/main", head.id(), true, "origin main")
+            .unwrap();
+        main_repo
+            .reference_symbolic(
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+                true,
+                "origin head",
+            )
+            .unwrap();
+        main_repo.branch("current", &head, false).unwrap();
+        main_repo.set_head("refs/heads/current").unwrap();
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.force();
+        main_repo.checkout_head(Some(&mut checkout)).unwrap();
+
+        let err = project_delete_at(&repo.apg_root(), "current").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("main checkout's current branch"), "{msg}");
+        assert!(msg.contains("git checkout main"), "{msg}");
+        assert!(
+            main_repo
+                .find_branch("current", git2::BranchType::Local)
+                .is_ok(),
+            "a refused delete must leave the current branch in place"
         );
         testutil::remove(&repo);
     }
