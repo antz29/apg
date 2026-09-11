@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "domain.service.mutation-surface",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.system.apg-cli",
+      "properties": {}
     }
   ],
   "in": [

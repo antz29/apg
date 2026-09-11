@@ -46,6 +46,11 @@
       "kind": "details",
       "source": "solution.note.reconcile-system-anchor",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.mutation-surface",
+      "properties": {}
     }
   ]
 }
