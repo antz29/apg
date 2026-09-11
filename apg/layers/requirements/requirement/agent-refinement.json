@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.read-guard",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.no-internals-in-prose",
+      "properties": {}
     }
   ],
   "in": [
