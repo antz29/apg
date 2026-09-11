@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-refinement"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.failure-report",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

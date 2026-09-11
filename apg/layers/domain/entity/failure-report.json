@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.agent-suite",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.tool-failure-terminal",
+      "properties": {}
     }
   ]
 }
