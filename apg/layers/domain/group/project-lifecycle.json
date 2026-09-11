@@ -17,6 +17,11 @@
       "kind": "contains",
       "target": "domain.entity.project-branch",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.project-worktree",
+      "properties": {}
     }
   ],
   "in": [
