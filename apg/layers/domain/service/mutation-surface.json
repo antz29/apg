@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "mutation-surface",
+  "body": "The CLI mutation behavior over the authored graph: an `add` refuses on an existing entity; an `update` is edge-preserving (read → mutate allowed fields → write); an `rm` refuses while dependents exist and cascades only under `--force`; a missing entity is an error. This is the domain service every requirement drives.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
