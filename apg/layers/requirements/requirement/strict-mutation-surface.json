@@ -103,5 +103,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "requirements.note.spec-resolutions",
+      "properties": {}
+    }
+  ]
 }
