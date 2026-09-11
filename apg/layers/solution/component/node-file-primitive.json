@@ -4,7 +4,13 @@
   "name": "node-file-primitive",
   "body": "The edge-preserving durable write primitive in src/layers.rs: `write_project` / `validate_change` / `write_through_with_deletes`. It is the shared plumbing an `update` uses — read the existing NodeFile, mutate only allowed fields, keep out/in edges, validate the complete change, write atomically, commit once, re-merge the DB. The refuse-on-existing check for `add` belongs beside `validate_change` (which today exempts an overwritten FQN from its uniqueness universe).",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "apg.layers.write_project",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
