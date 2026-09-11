@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "phase-add-refuses-existing",
+  "body": "`apg plan add <project> phase <n> …` must refuse when phase `<n>` already exists in the plan, naming the entity and pointing at `apg plan update <project> phase <n>` or `apg plan rm`. Today `plan_add_phase_at` (src/plan_cmd.rs:233–288) calls `artifacts::remove_node(records, &fqn)` (line 253) then re-appends the phase — an upsert that drops the phase's `Contains` edges to its tasks, orphaning them. Acceptance: re-adding an existing phase exits non-zero with no plan-file change; the phase's existing task `Contains` edges survive.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
