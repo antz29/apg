@@ -133,6 +133,11 @@
       "kind": "contains",
       "source": "requirements.stakeholder.repo-owner",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.spec-resolutions",
+      "properties": {}
     }
   ]
 }
