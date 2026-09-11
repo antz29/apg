@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.node-add-refuses-existing",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.edge-add-refuses-existing",
+      "properties": {}
     }
   ],
   "in": []
