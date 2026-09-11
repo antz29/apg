@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "task-add-refuses-existing",
+  "body": "`apg plan add <project> task <phase> <k> …` must refuse when task `<k>` already exists in phase `<phase>`, naming the entity and pointing at `apg plan update <project> task <phase> <k>` or `apg plan rm`. Today `plan_add_task_at` (src/plan_cmd.rs:290–340) calls `artifacts::remove_node(records, &fqn)` (line 337) then re-appends — dropping the task's incident `Reviews` edges, detaching review feedback from the task. Acceptance: re-adding an existing task exits non-zero; its status and incident Reviews edges survive unchanged.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
