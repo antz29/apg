@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "apg.node_cmd.cmd_edge",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.plan_cmd.cmd_plan",
+      "properties": {}
     }
   ],
   "in": [
