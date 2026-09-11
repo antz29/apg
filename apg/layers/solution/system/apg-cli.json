@@ -19,6 +19,11 @@
       "kind": "contains",
       "target": "solution.container.node-edge-surface",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.plan-surface",
+      "properties": {}
     }
   ],
   "in": [
