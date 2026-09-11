@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.mutation-surface",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.phase-add-refuses-existing",
+      "properties": {}
     }
   ]
 }
