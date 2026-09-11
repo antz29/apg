@@ -7,7 +7,13 @@
     "attribute": "core",
     "root": "project"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.project",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",
