@@ -4,6 +4,12 @@
   "name": "repo-owner",
   "body": "The apg operator — a human or the codebase-navigator agent — who runs `apg project start|merge` from the main checkout and owns the repo's lifecycle hygiene. Interest: a merged or abandoned project leaves no residue — no leftover worktrees under `apg/.worktrees/`, no orphan branches — and nothing unsafe is ever deleted (the default branch and the main checkout are untouchable). Further interest in tooling-review: the durable spec/graph mutation surface is strict — no implicit upsert, every update preserves edges, every add-able entity is removable, and a removal commits for real.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.worktree-cleanup",
+      "properties": {}
+    }
+  ],
   "in": []
 }
