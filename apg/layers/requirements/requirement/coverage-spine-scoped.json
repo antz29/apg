@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "coverage-spine-scoped",
+  "body": "Plan coverage must be scoped to the plan's own spine, not the whole cumulative layers store. Acceptance criteria:\n1. Spine-scoped coverage: for every requirement a `PlanPhase` `Satisfies`, walk Requirement → Drives → Domain → RealisedBy → Solution → SpecImplementedBy and require every reached solution node's `implemented-by` FQN to be touched by at least one plan task.\n2. Branch-delta coverage: every solution node ADDED ON THIS BRANCH (not present on the repo default branch) must be touched by at least one plan task, whether or not it is reachable from a satisfied requirement.\n3. Pre-existing solution nodes that are not reachable from a satisfied requirement are EXEMPT — no fake coverage tasks. In particular the merged worktree-cleanup nodes (`solution.component.project-delete` / `project-dispatch` / `project-merge` / `solution.container.project-command`, anchored to `apg.project_cmd.cmd_project` / `apg.project_cmd.project_merge_at`) must not force a new plan to fabricate `modifies` tasks.\nToday `coverage_check` (src/plan_cmd.rs:1097–1172), called by `plan_verify_at` (src/plan_cmd.rs:947–1071, at line 1030 via `read_existing_nodes`), requires EVERY durable solution node's `implemented-by` FQN to be touched, globally over the cumulative `apg/layers/` store with no requirement-reachability filter — so an already-implemented node still shows a \"gap\" if this plan has no task claiming its FQN. The branch-delta compare can use `apg.git.origin_default_branch` (src/git.rs:340).",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
