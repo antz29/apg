@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "domain.entity.authored-node",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.authored-edge",
+      "properties": {}
     }
   ],
   "in": []
