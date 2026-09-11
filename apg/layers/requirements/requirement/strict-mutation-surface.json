@@ -71,6 +71,11 @@
       "kind": "contains",
       "target": "requirements.requirement.plan-add-renamed-from-init",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.plan-link-retired",
+      "properties": {}
     }
   ],
   "in": []
