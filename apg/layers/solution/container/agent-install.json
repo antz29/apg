@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "agent-install",
+  "body": "The `apg init` install path: embeds the agent/tool templates at compile time and installs them into the user-level opencode dir (agents, tools, shared lib), with stale-file pruning and duplicate-shadow warnings.",
+  "properties": {
+    "kind": "service"
+  },
+  "out": [],
+  "in": []
+}
