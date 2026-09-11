@@ -6,6 +6,12 @@
   "properties": {
     "attribute": "core"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.authored-node",
+      "properties": {}
+    }
+  ],
   "in": []
 }
