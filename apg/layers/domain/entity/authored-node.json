@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "authored-node",
+  "body": "A durable authored node file under apg/layers/: identity is (layer, type, name) — the file name is the identity — carrying a prose body, a property map, and incident out/in edges. Its name is immutable; its body and properties are mutable. Mutation must never silently replace it (which discards its edges).",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
