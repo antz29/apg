@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "agent-prose",
+  "body": "The markdown prose of an agent — the body text that tells the agent how to behave and what it may touch. Refinement rewrites this prose to state the restriction plus the sanctioned alternative, never the cause and never the delta from a prior state.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
