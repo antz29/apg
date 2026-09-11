@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ripple-consumers-updated",
+  "body": "The ripple consumers must stay in sync with the new surface (SPEC §6):\n- Suite tools `opencode-suite/tools/*.ts` (embedded in `src/main.rs` via `include_str!`): `apg_plan_init.ts` → a plan-`add` tool; `apg_plan_add.ts` must treat `kind` as optional (= the plan itself); new `apg_node`/`apg_edge` update/rm variants; new plan update/rm tools; retire `apg_plan_link.ts`.\n- Distributed agent prompts `opencode-suite/agents/*.md` (plan-writer, spec-writer, codebase-navigator) reference `apg plan init` / `apg_plan_init` / `apg_plan_link` — update to the new verbs.\n- Root `AGENTS.md` CLI reference block lists `apg plan <sub> … init/add/link/…` — update to `add/update/rm/…`.\nAcceptance: no shipped tool/agent/AGENTS.md text names the retired verbs; the renamed/new tools dispatch the new CLI surface. NOTE: agent prompts are `.md` (not scanned code), so their solution coverage must anchor to the embedding Rust (`apg.main` / the init install path), never to a `.md` path.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
