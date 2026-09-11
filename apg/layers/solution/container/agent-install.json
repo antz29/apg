@@ -6,7 +6,13 @@
   "properties": {
     "kind": "service"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "apg.cmd_init",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
