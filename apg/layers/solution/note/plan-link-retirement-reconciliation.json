@@ -4,6 +4,12 @@
   "name": "plan-link-retirement-reconciliation",
   "body": "Reconciliation [autonomous]: the `implemented-by` edges from solution.component.plan-link-retirement to `apg.plan_cmd.plan_link` and `apg.plan_cmd.plan_link_at` were removed — execution phase 3 (commit 626505c) deliberately deleted both functions as part of retiring `apg plan link`. The component now points at the code that performs the retirement: `apg.plan_cmd.cmd_plan` (no longer dispatches `link`) and `apg.plan_cmd.plan_update_phase_at` (where link's set-semantics landed, reusing `link_phase_edges`). Without this the branch scan failed with `spec drift: code FQN apg.plan_cmd.plan_link is gone from the scanned graph`.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.component.plan-link-retirement",
+      "properties": {}
+    }
+  ],
   "in": []
 }
