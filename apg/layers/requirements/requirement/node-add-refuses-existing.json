@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "node-add-refuses-existing",
+  "body": "`apg node add <layer> <type> <name> …` must refuse when the node FQN already exists, with an error naming the entity and the correct follow-up (`apg node update` to change it, or `apg node rm` to remove it). Today `node_add` (src/node_cmd.rs:62–84) constructs a bare NodeFile and calls `layers::write_project`, whose validation explicitly exempts an overwritten FQN from the uniqueness universe (validate_change, layers.rs:1757) — so a re-add full-replaces the file and silently drops every out/in edge. Acceptance: re-adding an existing FQN exits non-zero, no file is written, and the pre-existing node's edges are untouched.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
