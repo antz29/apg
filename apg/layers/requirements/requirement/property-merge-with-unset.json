@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "property-merge-with-unset",
+  "body": "`update --property` semantics are MERGE: set/overwrite only the keys passed, preserve all other existing keys. Deleting a key requires the new explicit `--unset-property k` flag; there is NO implicit unset. This applies to both `apg node update` and `apg edge update`. Acceptance: `update --property a=1` on a node with `{a:0,b:2}` yields `{a:1,b:2}`; `update --unset-property b` yields `{a:1}`; omitting `--unset-property` never removes a key.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
