@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.merge-self-cleanup",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.delete-subcommand",
+      "properties": {}
     }
   ],
   "in": [
