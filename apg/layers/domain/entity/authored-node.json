@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.node-add-refuses-existing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.node-update-preserves-edges",
+      "properties": {}
     }
   ]
 }
