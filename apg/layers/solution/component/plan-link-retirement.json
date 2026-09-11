@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "apg.plan_cmd.plan_link",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.plan_cmd.plan_link_at",
       "properties": {}
     }
