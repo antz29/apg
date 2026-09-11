@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "never-touch-default-branch",
+  "body": "The default branch and the main checkout must never be deleted or removed by lifecycle cleanup: neither `apg project merge`'s self-cleanup nor `apg project delete <name>` may delete `refs/heads/<default>` or remove the main checkout's worktree; `<name>` equal to the default branch is a hard refusal.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
