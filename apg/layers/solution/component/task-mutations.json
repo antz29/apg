@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.plan_add_task_at",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.plan_cmd.validate_task_verb",
+      "properties": {}
     }
   ],
   "in": [
