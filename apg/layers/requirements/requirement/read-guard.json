@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "read-guard",
+  "body": "Every agent (including the navigator/coordinator) denies `read`/`glob`/`grep` on graph-state paths (`apg/.trans/**`, `apg/layers/**`, and worktree mirrors `apg/.worktrees/*/apg/.trans/**`, `apg/.worktrees/*/apg/layers/**`) and drops the bash file-read commands (`cat *`, `head *`, `tail *`, `dd *`, `rg *`, `grep *`) so bash cannot reach those files. `apg/**` is NOT blocked wholesale: `apg/.worktrees/**` stays readable/editable and `apg/config.json` stays readable.",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
