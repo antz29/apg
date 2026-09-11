@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "task-mutations",
+  "body": "The task arms. `add` refuses when the task FQN exists (dropping the `remove_node` upsert in `plan_add_task_at`), so status and incident `Reviews` edges survive. `update` re-validates `--verb`/`--fqn`/`--to` against the scanned graph by reusing `validate_task_verb` (and `validate_task_kind_tier`), and preserves status + Reviews. `rm` refuses (without `--force`) when the task is `done` or has ANY incident Feedback.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
