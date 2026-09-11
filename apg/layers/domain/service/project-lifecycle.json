@@ -15,6 +15,11 @@
       "kind": "drives",
       "source": "requirements.requirement.delete-subcommand",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.delete-refuses-unsafe",
+      "properties": {}
     }
   ]
 }
