@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "plan-record-mutations",
+  "body": "The plan-record arms: `apg plan add <project>` (was `init`) refuses when the plan file exists; `apg plan update <project> [--title] [--strategy]` mutates title/strategy (fixing the stale-strategy gap); `apg plan rm <project>` removes the whole transient plan, requiring `--force` when it has phases. Built on the existing `plan_init_at` refusal pattern and the `write_through` JSONL funnel.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
