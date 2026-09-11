@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "domain.value.property-map",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.mutation-surface",
+      "properties": {}
     }
   ],
   "in": []
