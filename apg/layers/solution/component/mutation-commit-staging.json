@@ -5,5 +5,11 @@
   "body": "The commit-staging path that must distinguish writes from deletions. `git::commit_files` (src/git.rs:556) currently stages every path with `index.add_path(rel)` (line 583), which stats the file and fails on a deletion; it must stage a path that no longer exists on disk with `index.remove_path` (or equivalent) so a `node rm` mutation mixing writes (referencing files whose incident edges were stripped) and deletes (the removed node file) commits atomically. `commit_file` (src/git.rs:598) delegates here. `write_through_with_deletes` (src/layers.rs:1838) is the caller that keeps building the combined write+delete path set, now committed correctly.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.node-edge-surface",
+      "properties": {}
+    }
+  ]
 }

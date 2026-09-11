@@ -26,6 +26,11 @@
       "kind": "implemented-by",
       "target": "apg.node_cmd.cmd_node",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.mutation-commit-staging",
+      "properties": {}
     }
   ],
   "in": [
