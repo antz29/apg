@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "mutation-surface",
+  "body": "The durable authored graph as a mutation domain: the entities a caller can create, change, and remove through the CLI, the identity/property values that distinguish them, and the surface behavior (refuse / update / cascade-remove) that governs them. Aggregate root of the tooling-review domain.",
+  "properties": {
+    "attribute": "core"
+  },
+  "out": [],
+  "in": []
+}
