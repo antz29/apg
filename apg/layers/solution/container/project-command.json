@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.project-dispatch",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.project-merge",
+      "properties": {}
     }
   ],
   "in": [
