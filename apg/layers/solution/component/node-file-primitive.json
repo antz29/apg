@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.layers.write_project",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.layers.validate_change",
+      "properties": {}
     }
   ],
   "in": [
