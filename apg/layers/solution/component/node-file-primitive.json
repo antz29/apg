@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "node-file-primitive",
-  "body": "The edge-preserving durable write primitive in src/layers.rs: `write_project` / `validate_change` / `write_through_with_deletes`. It is the shared plumbing an `update` uses — read the existing NodeFile, mutate only allowed fields, keep out/in edges, validate the complete change, write atomically, commit once, re-merge the DB. The refuse-on-existing check for `add` belongs beside `validate_change` (which today exempts an overwritten FQN from its uniqueness universe).",
+  "body": "The edge-preserving node-file write primitives in src/layers.rs that this change builds: `refuse_if_present` — the refuse-on-existing guard `apg node add` runs before any write (replacing today's overwrite-exempting re-add); and `update_node_file` — read the existing NodeFile, mutate only the allowed fields (body/properties; name immutable), keep every out/in edge, and write atomically. Both are invoked by `node_add`/`node_update`, which call the existing write/validate/commit plumbing unchanged; `validate_change` itself is NOT modified by this change.",
   "properties": {},
   "out": [],
   "in": []
