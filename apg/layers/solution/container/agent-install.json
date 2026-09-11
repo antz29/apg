@@ -22,6 +22,11 @@
       "kind": "realised-by",
       "source": "domain.entity.permission-grant",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.failure-report",
+      "properties": {}
     }
   ]
 }
