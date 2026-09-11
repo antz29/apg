@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.node-mutations",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.edge-mutations",
+      "properties": {}
     }
   ],
   "in": [

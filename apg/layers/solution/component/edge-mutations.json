@@ -5,5 +5,11 @@
   "body": "The `apg edge add|update|rm` arms in src/node_cmd.rs (`cmd_edge` dispatches them). `add` refuses when the source already carries the same (kind,from,to); `update` changes properties only and rewrites BOTH halves (source out + target in) in one atomic mutation so the pairing never diverges; `rm` drops both halves atomically.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.node-edge-surface",
+      "properties": {}
+    }
+  ]
 }
