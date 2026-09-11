@@ -81,6 +81,11 @@
       "kind": "contains",
       "target": "requirements.requirement.property-merge-with-unset",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.plan-rm-atomic",
+      "properties": {}
     }
   ],
   "in": []
