@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.coordinator-transparent-routing",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.coordinator-lifecycle-exclusivity",
+      "properties": {}
     }
   ],
   "in": [
