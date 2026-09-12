@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "coordinator-transparent-routing",
+  "body": "Routing is transparent. `apg node` / `apg edge` auto-detect a live session by a Unix socket under `apg/.trans/` and forward the mutation to it; when no session is running they fall back to today's direct path. The `apg_node` / `apg_edge` tool surface, the CLI arguments, and every agent prompt are unchanged — the agents cannot tell whether a coordinator is running. Acceptance: the same command works identically with and without a live session, and no tool/agent surface changes.",
+  "properties": {
+    "feature": "mutation-coordinator"
+  },
+  "out": [],
+  "in": []
+}
