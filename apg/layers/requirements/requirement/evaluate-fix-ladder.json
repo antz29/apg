@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "evaluate-fix-ladder",
+  "body": "Evaluate the fix ladder and let the plan choose from evidence, not assumption. The design space that must be assessed: (a) serialize ALL DB opens under one wait-not-fail lock (extend the `apg.artifacts.acquire_spec_lock` flock so the node/edge path participates); (b) bounded retry/backoff around a contended open; (c) remove DB access from the mutation path entirely — validate structural references from the node files and code-FQN references from a cached symbol index or `apg/.trans/graph.jsonl` — which is structurally impossible to race; (d) a session-scoped mutation coordinator. Each option is scored on the project laws (durable-state authority, one-commit-per-mutation, unchanged tool surface) and the acceptance criteria. Preference order is stated by the project, not decided here: prefer the structurally-impossible-to-race fix (c); the coordinator (d) is justified by amortization + batching, not merely by lock avoidance. Acceptance: a recorded evaluation covering all four options with a chosen primary path, and a fallback to (d) only if (c) alone is insufficient.",
+  "properties": {
+    "feature": "lock-race"
+  },
+  "out": [],
+  "in": []
+}
