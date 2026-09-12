@@ -41,6 +41,11 @@
       "kind": "drives",
       "source": "requirements.requirement.concurrent-bursts-reliable",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.lock-race-acceptance",
+      "properties": {}
     }
   ]
 }
