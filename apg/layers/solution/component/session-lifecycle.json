@@ -5,5 +5,11 @@
   "body": "Session lifecycle and exclusivity: `apg session start` launches the coordinator and binds the worktree socket; `apg session end` flushes the derived projection and exits; a stale socket left by a crash is reclaimed by the next command/session; one session per worktree DB; a live session and `apg scan` / `apg project merge` are mutually exclusive. (Not yet built — planned code.)",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.mutation-coordinator",
+      "properties": {}
+    }
+  ]
 }

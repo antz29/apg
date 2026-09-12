@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.session-routing",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.session-lifecycle",
+      "properties": {}
     }
   ],
   "in": [
