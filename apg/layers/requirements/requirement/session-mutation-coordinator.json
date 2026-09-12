@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.coordinator-single-writer",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.coordinator-amortized-flush",
+      "properties": {}
     }
   ],
   "in": [
