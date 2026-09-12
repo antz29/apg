@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "mutation-db-decoupling",
+  "body": "The structural decoupling of the durable mutation path from the DB (fix-ladder option c): validate structural references (edge endpoints, constraint `attaches-to`, contains/depends-on acyclicity, pairing) from the node files alone, and resolve code-FQN `implemented-by` refs from a cached symbol index or `apg/.trans/graph.jsonl` instead of opening `db.lbug` read-write. The mutation path must perform zero exclusive DB opens — removing the `apg.artifacts.code_universes` open during validation, the `apg.artifacts.reingest_layers` open during re-merge, and the `apg.git.reanchor_scan_meta` read-write open — so the race becomes structurally impossible rather than merely coordinated. `apg.layers.write_project` is the orchestrator to reshape; a missing/stale DB is already tolerated, and the next scan rebuilds the projection. (Not yet built; anchored to the code that today opens the DB on this path.)",
+  "properties": {},
+  "out": [],
+  "in": []
+}
