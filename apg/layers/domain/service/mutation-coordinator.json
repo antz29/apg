@@ -15,6 +15,11 @@
       "kind": "drives",
       "source": "requirements.requirement.session-mutation-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.coordinator-amortized-flush",
+      "properties": {}
     }
   ]
 }
