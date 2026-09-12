@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "derived-projection-rebuildable",
+  "body": "The query index is a derived projection: `apg/.trans/db.lbug` may be deleted, stale, or absent at any time and the next `apg scan` must rebuild it from the durable layers tree plus the code. No mutation, guard, or acceptance decision may require a fresh DB — absence of the DB is a valid state, not a failure.",
+  "properties": {
+    "attaches-to": "domain.entity.derived-projection"
+  },
+  "out": [],
+  "in": []
+}
