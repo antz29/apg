@@ -31,7 +31,6 @@ permission:
     "*": deny
     "ls *": allow
     "find *": allow
-    "git grep *": allow
     "pwd": allow
     "cd *": allow
     "git status *": allow
@@ -78,7 +77,9 @@ never a mutation place.
   and `apg/.worktrees/*/apg/layers/**` — while `"*": allow` keeps every other
   path readable. Never deny `apg/**` wholesale: `apg/.worktrees/**` is the
   working tree and `apg/config.json` stays readable. Drop the bash file-read
-  commands (`cat *`, `head *`, `tail *`, `dd *`, `rg *`, `grep *`).
+  commands (`cat *`, `head *`, `tail *`, `dd *`, `rg *`, `grep *`, and
+  `git grep *` — `git grep` reads tracked files, and `apg/layers/**` is
+  tracked).
 - **Question-drop.** No generated agent carries `question: allow` — the
   implementer and the reviewer both route questions through the coordinator.
 - **Stop-and-report.** Tool-failure prose is terminal: when a graph tool
@@ -240,10 +241,13 @@ never a mutation place.
    allowlist (deny-all default, named allows).
 6. **Verify.** Re-read each generated file; confirm the permission blocks match
    the detected layout and the coordinator's stated gates; confirm no allowed
-   pattern contains `&&`, `|`, `;`, `$()`, or redirection; confirm the common
-   shape (read-guard denies on the graph-state paths, no `question` grant,
-   stop-and-report tool-failure prose, no `.trans`/`layers` paths in the body,
-   and the reviewer's `edit` block is `"*": deny` with no allow entries);
+   pattern contains `&&`, `|`, `;`, `$()`, or redirection, and that no
+   graph-state read slips through a path-less reader — `git grep *` in
+   particular (it reads tracked files, and `apg/layers/**` is tracked);
+   confirm the common shape (read-guard denies on the graph-state paths, no
+   `question` grant, stop-and-report tool-failure prose, no `.trans`/`layers`
+   paths in the body, and the reviewer's `edit` block is `"*": deny` with no
+   allow entries);
    confirm `generated: true` is present and the navigator allowlist covers
    every generated agent. Confirm the **worktree mirroring** (rule 10): for
    every edit allow/deny at the repo root, the matching `apg/.worktrees/*/`

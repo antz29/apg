@@ -51,7 +51,6 @@ permission:
     "*": deny
     "ls *": allow
     "find *": allow
-    "git grep *": allow
     "pwd": allow
     "cd *": allow
 ---
