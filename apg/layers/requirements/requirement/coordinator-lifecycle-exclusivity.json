@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "coordinator-lifecycle-exclusivity",
+  "body": "Session lifecycle and exclusivity. `apg session start` launches the coordinator; `apg session end` flushes and exits cleanly; one session per worktree DB (a second start refuses or joins, never a second writer). A crash leaves a stale socket, which the next command/session cleans up (no live process behind it). A session is exclusive with `apg scan` and `apg project merge`, which replace `db.lbug` (the session flushes/ends first, or those refuse while a session is live). Acceptance: start→mutations→end round-trips; a killed session leaves no process holding the DB and its stale socket is reclaimed; scan/merge and a live session never contend.",
+  "properties": {
+    "feature": "mutation-coordinator"
+  },
+  "out": [],
+  "in": []
+}
