@@ -41,6 +41,11 @@
       "kind": "realised-by",
       "target": "solution.system.apg-cli",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.mutation-attempt",
+      "properties": {}
     }
   ],
   "in": [
