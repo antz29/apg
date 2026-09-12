@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "apg.git.reanchor_scan_meta",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.layers.write_project",
+      "properties": {}
     }
   ],
   "in": [
