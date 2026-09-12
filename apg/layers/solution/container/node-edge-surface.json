@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "solution.component.node-file-primitive",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.mutation-db-decoupling",
+      "properties": {}
     }
   ],
   "in": [
