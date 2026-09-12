@@ -45,7 +45,8 @@ permission:
     "apg/.worktrees/*/src/rustlib/**": deny
     "apg/.worktrees/*/src/tslib/**": deny
     "apg/.worktrees/*/src/csharplib/**": deny
-    "opencode-suite/**": deny
+    "opencode-suite/**": allow
+    "apg/.worktrees/*/opencode-suite/**": allow
     ".opencode/**": deny
   external_directory:
     "*": deny
