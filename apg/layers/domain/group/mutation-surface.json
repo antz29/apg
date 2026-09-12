@@ -56,6 +56,11 @@
       "kind": "contains",
       "target": "domain.entity.derived-projection",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.mutation-session",
+      "properties": {}
     }
   ],
   "in": [
