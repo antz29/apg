@@ -43,6 +43,11 @@
       "kind": "realised-by",
       "source": "domain.service.mutation-surface",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.coordinator-planned-anchoring",
+      "properties": {}
     }
   ]
 }

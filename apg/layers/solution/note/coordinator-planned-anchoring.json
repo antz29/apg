@@ -4,6 +4,12 @@
   "name": "coordinator-planned-anchoring",
   "body": "Anchoring note for the session coordinator. `solution.container.mutation-coordinator` and its components (`session-routing`, `session-lifecycle`, `derived-projection-buffer`) are NOT yet built, so they carry no `implemented-by` edges — the plan-writer declares their real code FQNs as planned Implementation nodes (`apg plan add <project> planned …`) and the spine is wired to those at plan/reconciliation time. Only `solution.component.mutation-db-decoupling` is anchored today: `apg.artifacts.code_universes`, `apg.artifacts.reingest_layers`, `apg.git.reanchor_scan_meta`, and `apg.layers.write_project` resolve in the scanned graph as the DB-opening code this component must reshape. Whether the coordinator is built at all is a plan decision (`prefer-structural-fix`): if the structural decoupling alone wins, the coordinator nodes stay unrealized and the plan must not be required to cover them.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.container.mutation-coordinator",
+      "properties": {}
+    }
+  ],
   "in": []
 }
