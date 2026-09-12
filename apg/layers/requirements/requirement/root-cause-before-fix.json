@@ -6,7 +6,13 @@
   "properties": {
     "feature": "lock-race"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.file-lock",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
