@@ -172,6 +172,76 @@ plus `sha256sums.txt` per tag.
 In the repo itself, run it via `cargo run -- scan <dir>` or
 `target/debug/apg scan <dir>`.
 
+## Testing a new binary (scratch repo in /tmp)
+
+**Never point a freshly built `apg` at the apg repo** (or any project you care
+about). A candidate binary is exercised against a throwaway git repo under
+`/tmp`, so `init` / `scan` / `project` / `merge` mutations never touch real
+state; the apg repo's own graph is only ever rebuilt by the installed (released)
+binary.
+
+1. **Build the candidate.** `cargo build` produces `target/debug/apg` and
+   stages the frontends to `target/debug/frontends`, so the binary finds them
+   automatically (no `APG_FRONTEND_DIR` needed). Always invoke it by full path
+   (`"$BIN"`) — never a bare `apg`, which resolves to the brew-installed
+   release:
+
+   ```sh
+   BIN="$PWD/target/debug/apg"
+   ```
+
+2. **Spin up a scratch repo with at least one real source file.** The source
+   matters: `apg project merge` rebuilds the main graph and **self-cleans only
+   on success**, so a source-less repo makes the rebuild fail and skips
+   worktree/branch removal.
+
+   ```sh
+   BASE=/tmp/apg-spin              # throwaway; rm -rf when done
+   rm -rf "$BASE"; mkdir -p "$BASE"; cd "$BASE"
+   git init -q -b main
+   git config user.email apg@localhost; git config user.name apg
+   printf 'package main\n\nfunc main() {}\n' > main.go
+   git add -A && git commit -q -m init
+   ```
+
+3. **Init with an isolated HOME** so the suite install `apg init` performs
+   lands in a scratch `~/.opencode` instead of your real one, then commit the
+   scaffold:
+
+   ```sh
+   HOME=/tmp/apg-home "$BIN" init .   # writes apg/config.json at the binary's version
+   git add -A && git commit -q -m "apg init"
+   ```
+
+   The new `apg/config.json` carries the binary's version; the version gate
+   (`apg scan` / `apg project start`) **blocks unless layout and binary share
+   major.minor**, so re-run `apg init` after a version bump.
+
+4. **Exercise the lifecycle** exactly as the flow section describes — the
+   scratch repo is a real project:
+
+   ```sh
+   "$BIN" project start demo                 # worktree + branch + branch DB, auto-scan
+   cd apg/.worktrees/demo
+   "$BIN" node add requirements requirement demo-req --body "…"
+   "$BIN" node add domain value demo-val --body "…"
+   "$BIN" edge add drives requirements.requirement.demo-req domain.value.demo-val
+   "$BIN" node add requirements requirement demo-req --body dup  # must refuse (use update/rm)
+   "$BIN" plan add demo --title Demo --strategy "…"
+   "$BIN" plan add demo phase 1 --title P1 --deliverable "…" --satisfies demo-req
+   "$BIN" plan verify demo                   # pre-merge coherence gate
+   cd ../..
+   "$BIN" project merge demo                 # verify → merge → main rebuild → self-clean
+   ```
+
+5. **Clean up.** `rm -rf /tmp/apg-spin /tmp/apg-home` — nothing in the apg repo
+   was touched.
+
+Traps the gate enforces that surprise first-timers: `project merge` refuses with
+*"no plan for project …"* until `apg plan add <project>` has run; durable
+`node`/`edge` mutations refuse on the default branch (author **inside** the
+worktree); and a refused/failed merge leaves the worktree and branch untouched.
+
 ## Deploying a release (cutting a tag)
 
 Releases are cut by pushing an annotated `vX.Y.Z` tag; `bottle.yml` (ARM bottle)
