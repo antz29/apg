@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "mutation-coordinator",
+  "body": "The session-scoped mutation coordinator process: a short-lived `apg session start` … `apg session end` service that owns the worktree `db.lbug` as sole writer and exposes a Unix socket under `apg/.trans/` for routed mutations. It amortizes one DB open/parse across the session and batches the derived-projection flush at session end. C4 container of the apg CLI system. (Not yet built — its implementation nodes are declared by the plan as planned code.)",
+  "properties": {
+    "kind": "service"
+  },
+  "out": [],
+  "in": []
+}
