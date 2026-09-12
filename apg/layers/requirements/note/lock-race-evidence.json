@@ -4,6 +4,12 @@
   "name": "lock-race-evidence",
   "body": "Evidence gathered before the fix (facts verified against the branch scan; hypotheses to confirm by root-cause-before-fix).\n\nObserved: a burst of `apg node` / `apg edge` mutations issued in parallel fails ~half the time with lbug's \"Could not set lock … Resource temporarily unavailable\"; the author had to re-issue strictly serially.\n\nTwo locks [fact]: (1) a purpose-built `flock` — `apg.artifacts.acquire_spec_lock` (src/artifacts.rs:25-52, \"held for the life of the process\") on `apg/.trans/specs.lock`; (2) lbug's own exclusive file lock on `db.lbug`. The error string is lbug's.\n\nDB open sites [fact]: read-only at `apg.cmd_query` (src/main.rs:963, `SystemConfig::default().read_only(true)`); read-write (`SystemConfig::default()`) at `apg.artifacts.ArtifactDb.open` (src/artifacts.rs:240, used by `apg.artifacts.code_universes` and `apg.artifacts.reingest_layers`), `apg.git.reanchor_scan_meta` (src/git.rs:720), and a test path (src/main.rs:1483). DB-existence gates at src/layers.rs:1868 (code-ref validation), :2051 (staleness), :2064 (re-merge).\n\nLock call sites [fact]: `acquire_spec_lock` is called by the plan and review commands (src/plan_cmd.rs and src/review_cmd.rs) but NOT anywhere in src/node_cmd.rs.\n\nHypothesis A (primary): the `apg node` / `apg edge` path never acquires `specs.lock`, so its read-write DB opens (code_universes, reingest_layers, reanchor_scan_meta) escape the flock and race each other — exactly the user-visible burst.\n\nHypothesis B: reads escape too — `apg query` / the query tools open the DB read-only without the flock, so a read concurrent with a mutation (or two reads) can also contend.\n\nResolution: root-cause-before-fix must confirm which open(s) fail and why the flock misses them before the fix is chosen.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.root-cause-before-fix",
+      "properties": {}
+    }
+  ],
   "in": []
 }
