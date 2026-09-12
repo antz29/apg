@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "durable-state-authoritative",
+  "body": "Durable state is never lost or corrupted. The authoritative state is the `apg/layers/**` node files plus their per-logical-mutation git commits; every mutation that reports success must have landed both halves and committed. A crash mid-session must not lose authored spec: after restart the durable store reflects every mutation that reported success, and no node file is left half-written or a paired edge half mismatched. The derived `db.lbug` may be lost; the durable spec may not. Acceptance: a crash/kill test between mutations loses nothing durable and leaves no partial file, and re-running the mutation after restart is coherent.",
+  "properties": {
+    "feature": "lock-race"
+  },
+  "out": [],
+  "in": []
+}
