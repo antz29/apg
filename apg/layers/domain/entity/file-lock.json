@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "file-lock",
+  "body": "An exclusive OS file lock held by a process while it opens or mutates a shared resource. Two distinct locks are in play for a durable mutation: the apg-authored flock on `apg/.trans/specs.lock` (intended to serialize the read-modify-write sequence) and lbug's own exclusive lock on `apg/.trans/db.lbug`. A mutation attempt that takes only one of them races any other opener of the same DB — the failure the project must eliminate.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
