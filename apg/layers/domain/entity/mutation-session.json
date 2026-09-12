@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "mutation-session",
+  "body": "A session-scoped process that owns one worktree DB for the duration of an update session (`apg session start` … `apg session end`). It is ephemeral, not a daemon: it lives only for the session, holds the DB as single writer, applies mutation attempts in order, and flushes/rebuilds the derived projection in a batch. It is reachable only through a Unix socket under `apg/.trans/`. Because it owns the DB exclusively, no other opener can race it.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
