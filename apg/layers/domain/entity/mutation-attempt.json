@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "mutation-attempt",
+  "body": "One logical durable mutation as issued by a caller: a single `apg node` add|update|rm or `apg edge` add|update|rm, covering exactly the set of node files the mutation touches (and, for a remove, the incident-edge rewrites). It is the unit that must be serialized, validated, written atomically, committed once, and reflected in the derived projection. Under concurrency, many mutation attempts contend for the same resources.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
