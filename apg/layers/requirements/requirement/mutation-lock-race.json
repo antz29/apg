@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.durable-state-authoritative",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.db-rebuildable-projection",
+      "properties": {}
     }
   ],
   "in": [
