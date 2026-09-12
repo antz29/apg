@@ -68,6 +68,14 @@ never a mutation place.
   files — `**/*_test.go`, `**/*.test.ts`, `**/test/**`). Where tests are inline
   (Rust `#[cfg(test)]`), a glob cannot separate them — the implementer owns
   source and its inline tests.
+- **In-tree suite distribution**: when the repo ships the apg suite in-tree at
+  `opencode-suite/` (the apg repository itself), the implementer's edit scope
+  also includes `opencode-suite/**`, worktree-mirrored as
+  `apg/.worktrees/*/opencode-suite/**` — the suite tools/lib/distributed-agent
+  templates are product source embedded in the binary via `include_str!`.
+  Never scaffold an `opencode-suite/**` deny for the implementer;
+  `.opencode/**` stays denied (the implementer never edits its own generated
+  agents).
 - **Worktree mirroring (MANDATORY)**: the agent works inside the project
   worktree at `<main>/apg/.worktrees/<name>/`, and the permission engine
   resolves edit globs relative to the session workspace root (the main
@@ -196,7 +204,9 @@ never a mutation place.
    present and the navigator allowlist covers every generated agent. Confirm
    the **worktree mirroring** (rule 10): for every edit allow/deny at the repo
    root, the matching `apg/.worktrees/*/` entry exists — read the worktree
-   path shape off `project_cmd.rs` (`apg/.worktrees/<name>`) if unsure.
+   path shape off `project_cmd.rs` (`apg/.worktrees/<name>`) if unsure. When the
+   repo ships the suite in-tree, confirm the implementer's `opencode-suite/**` +
+   `apg/.worktrees/*/opencode-suite/**` allows are present (mirroring rule 10).
 
 ## What to tell the user at the end
 

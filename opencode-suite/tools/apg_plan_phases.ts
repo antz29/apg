@@ -25,7 +25,7 @@ export default tool({
     // `requirements.requirement.<name>`, no project prefix); the plan's
     // Satisfies edges point at them by FQN.
     const reqs = csvToRows(
-      await runCypher(context, `MATCH (r:Requirement) RETURN r.fqn, r.name`, args.directory),
+      await runCypher(context, `MATCH (r:Requirement) RETURN r.fqn`, args.directory),
     )
     // Satisfying phase per requirement — count, not membership: the spec
     // requires every requirement Satisfied by EXACTLY one phase, so >1 is a
