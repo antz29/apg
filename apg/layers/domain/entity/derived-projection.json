@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.db-rebuildable-projection",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.lock-race-acceptance",
+      "properties": {}
     }
   ]
 }
