@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.mutation-attempt",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.service.mutation-surface",
+      "properties": {}
     }
   ],
   "in": [
