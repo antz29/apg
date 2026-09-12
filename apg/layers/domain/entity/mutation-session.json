@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.session-mutation-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.coordinator-single-writer",
+      "properties": {}
     }
   ]
 }
