@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.concurrent-bursts-reliable",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.durable-state-authoritative",
+      "properties": {}
     }
   ],
   "in": [
