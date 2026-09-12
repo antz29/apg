@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.root-cause-before-fix",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.concurrent-bursts-reliable",
+      "properties": {}
     }
   ],
   "in": [
