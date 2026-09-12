@@ -6,7 +6,13 @@
   "properties": {
     "feature": "mutation-coordinator"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.coordinator-single-writer",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
