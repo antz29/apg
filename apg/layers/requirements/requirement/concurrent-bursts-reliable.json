@@ -6,7 +6,13 @@
   "properties": {
     "feature": "lock-race"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.mutation-attempt",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
