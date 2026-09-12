@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "file-lock",
-  "body": "An exclusive OS file lock held by a process while it opens or mutates a shared resource. Two distinct locks are in play for a durable mutation: the apg-authored flock on `apg/.trans/specs.lock` (intended to serialize the read-modify-write sequence) and lbug's own exclusive lock on `apg/.trans/db.lbug`. A mutation attempt that takes only one of them races any other opener of the same DB — the failure the project must eliminate.",
+  "body": "An exclusive OS lock held by a process while it opens or mutates a shared resource. THREE locks are in play for a durable mutation: (1) the apg-authored flock on `apg/.trans/specs.lock` (intended to serialize the read-modify-write sequence); (2) lbug's own exclusive lock on `apg/.trans/db.lbug`; and (3) git's `.git/index.lock`, created and held by `git::commit_files` (src/git.rs:587-645) for the per-mutation commit. A mutation attempt that takes only some of them races other processes on the rest — the failure the project must eliminate. The node-file read-modify-write itself (e.g. `edge_add`, src/node_cmd.rs:207: read source → push out-edge → write; `node_rm` rewrites every referencing file) is also unsynchronized and must be covered by the same serialization scope.",
   "properties": {
     "kind": "entity"
   },
