@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "coordinator-amortized-flush",
+  "body": "The coordinator amortizes DB work across the session: one open/parse serves N mutations, and the derived-projection flush is batched into a single re-ingest (or a bounded number) at `apg session end` rather than one ingest per mutation. Acceptance: an N-mutation session performs materially fewer DB opens/ingests than the current per-mutation path, and the final DB matches a fresh re-ingest of the durable layers tree.",
+  "properties": {
+    "feature": "mutation-coordinator"
+  },
+  "out": [],
+  "in": []
+}
