@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "db-rebuildable-projection",
+  "body": "The DB stays a rebuildable projection. Correctness must never depend on a fresh `apg/.trans/db.lbug`: the next scan can rebuild it from the code, and the durable layers tree can be re-ingested into it. Mutations that do not strictly need the DB must not open it, and must not contend on it. Acceptance: a node/edge mutation path that performs its structural and code-FQN reference validation without an exclusive/read-write DB open (or that provably does not contend), plus a test showing a mutation is correct with the DB absent and the projection reconstructible by scan.",
+  "properties": {
+    "feature": "lock-race"
+  },
+  "out": [],
+  "in": []
+}
