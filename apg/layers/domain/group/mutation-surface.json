@@ -61,6 +61,11 @@
       "kind": "contains",
       "target": "domain.entity.mutation-session",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.mutation-coordinator",
+      "properties": {}
     }
   ],
   "in": [

@@ -5,5 +5,11 @@
   "body": "The domain service that makes concurrent mutation attempts safe and cheap: it serializes DB access under one writer, amortizes the DB open/parse across the session, batches the derived-projection flush, and routes mutations transparently (auto-detect → forward → fall back to the direct path). It is the coordinator's behaviour, independent of process mechanics.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.mutation-surface",
+      "properties": {}
+    }
+  ]
 }
