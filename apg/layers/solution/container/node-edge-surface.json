@@ -58,6 +58,11 @@
       "kind": "realised-by",
       "source": "domain.entity.file-lock",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.mutation-surface",
+      "properties": {}
     }
   ]
 }
