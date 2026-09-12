@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "one-commit-per-mutation",
+  "body": "One logical mutation → one commit. Every `apg node` / `apg edge` mutation keeps its atomic write-and-commit envelope; batching the derived-projection flush is free, but batching commits is not, unless a deliberate decision changes this contract.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
