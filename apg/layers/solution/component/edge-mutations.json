@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.entity.authored-edge",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.mutation-attempt",
+      "properties": {}
     }
   ]
 }

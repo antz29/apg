@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.component.node-mutations",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.edge-mutations",
+      "properties": {}
     }
   ],
   "in": [
