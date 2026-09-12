@@ -35,18 +35,17 @@ permission:
   apg_plan_verify: allow
   apg_review: allow
   question: allow
-  read: allow
+  read:
+    "*": allow
+    "apg/.trans/**": deny
+    "apg/layers/**": deny
+    "apg/.worktrees/*/apg/.trans/**": deny
+    "apg/.worktrees/*/apg/layers/**": deny
   external_directory:
     "*": deny
     "/tmp/**": allow
   bash:
     "*": deny
-    "dd *": allow
-    "cat *": allow
-    "head *": allow
-    "tail *": allow
-    "grep *": allow
-    "rg *": allow
     "ls *": allow
     "wc *": allow
     "find *": allow
@@ -111,13 +110,11 @@ no exceptions:
 
 ## The database
 
-The database lives at `apg/.trans/db.lbug` in the workspace root. The
-committed `apg/` dir holds the layout config (`apg/config.json`) and the
-durable **node-file store** (`apg/layers/` — one JSON file per authored node);
-everything transient — the db, the export, plans, feedback mirrors, renders —
-lives in the gitignored `apg/.trans/`. Query it through the **apg tool suite**
-(see below) — most lookups have a dedicated tool. Use the generic `apg_query`
-tool only for ad-hoc or aggregate Cypher the suite doesn't cover.
+The graph is queried through the **apg tool suite** (see below) — most lookups
+have a dedicated tool. Use the generic `apg_query` tool only for ad-hoc or
+aggregate Cypher the suite doesn't cover. The durable spec and the transient
+plan/review state are reached through those tools too, never by reading raw
+files.
 
 ## Project flow (operational)
 
@@ -133,9 +130,9 @@ A change-set is a **project** = a git branch + worktree:
   printed path.
 - **Main is never a mutation place.** Node/edge/plan/review mutations are
   guarded: they run only inside a project worktree, on the project branch.
-- The plan (`apg/.trans/plans/<project>.jsonl`) and all feedback
-  (`.trans/<tier>/<project>.jsonl` mirrors) are **transient** — branch-local,
-  never committed; review state dies with the branch.
+- The **plan** and all **feedback** are **transient** — branch-local, never
+  committed; review state dies with the branch. Reach them through the
+  `apg_plan_*` / `apg_review*` tools.
 - **`apg plan verify <project>`** is the pre-merge coherence gate (every
   planned node realized, all feedback resolved, derived solution coverage
   holds) — read-only, prints the merge handoff. **`apg project merge <name>`**
@@ -161,7 +158,7 @@ file `src/components/Button.tsx`, class `Button`, method `onClick`; the doubled 
 is package.`relpath`.class, and top-level functions are `@co/ui.src.app.go`.
 Overloaded functions and constructors carry their erased parameter types: `pkg.Calc.add(int,int)`
 vs `pkg.Calc.add(java.lang.String,java.lang.String)`, `pkg.Cls.<init>(java.lang.String)`;
-Go `init` functions are `pkg.init#<file.go>`. `start` and `end` are 0-based byte offsets — use them to extract source code from the file at `path` with `dd if=<path> bs=1 skip=<start> count=<end-start>` if needed. Every located node also has `start_line` and `end_line` (**1-based inclusive line numbers**) — use those to join against diffs and hunks or to slice the file's source lines.
+Go `init` functions are `pkg.init#<file.go>`. `start` and `end` are 0-based byte offsets; every located node also has `start_line` and `end_line` (**1-based inclusive line numbers**) — use those to join against diffs and hunks or to slice the file's source lines.
 
 ### Code edge types
 
@@ -175,9 +172,9 @@ Go `init` functions are `pkg.init#<file.go>`. `start` and `end` are 0-based byte
 
 ### The authored graph (durable node files + transient plan/review)
 
-The **durable spec** is a node-file store, not a JSONL: one file per node under
-`apg/layers/`, FQN = **`<layer>.<type>.<name>`** (no project prefix; the file
-name IS the identity). The six layers:
+The **durable spec** is a node-file store, not a JSONL: one authored node per
+identity, FQN = **`<layer>.<type>.<name>`** (no project prefix; the name IS the
+identity). The six layers:
 
 | layer | types |
 |---|---|
@@ -224,7 +221,7 @@ at a planned FQN replaces it.
 - **C++ edges are heuristic** (tree-sitter). Unresolvable refs become `UnresolvedCall`/`UnresolvedUse`, never guessed FQNs.
 - **All code is included** (tests, generated, vendored). Filter by `code_type` instead: `MATCH (n) WHERE n.code_type = 'test'` (or `'generated'`, `'external'`, etc.; default `'src'`). An `apg/config.json` config file can override the classification rules.
 - **Multi-module repos** (Go workspaces, C++ monorepos, Cargo workspaces, npm workspaces): each module is a top-level `Module` node; FQNs are module-prefixed (`modA.util.Foo` vs `modB.util.Foo`, `@co/ui.src.Button` vs `@co/web.src.Button`). Pass `--module dir1 --module dir2` to `apg scan` to restrict scanning.
-- **Multi-language repos** (e.g. a Go backend + TS frontend): `apg scan` auto-detects every language present and merges their graphs into one database — Go and TS modules, functions, and edges all live in the same `apg/.trans/db.lbug`.
+- **Multi-language repos** (e.g. a Go backend + TS frontend): `apg scan` auto-detects every language present and merges their graphs into one database — Go and TS modules, functions, and edges all live in the same merged graph.
 - To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
 ### Common query patterns
@@ -270,7 +267,7 @@ apg_query "MATCH (s:Struct) RETURN count(*) as total_structs"
 
 ### Scanning a project
 
-The graph database (`apg/.trans/db.lbug`) is built by the `apg` CLI. You can trigger
+The graph database is built by the `apg` CLI. You can trigger
 a rescan in-chat with the `apg_scan` tool (it shells out to `apg scan`, so it
 needs the `apg` binary on PATH). If the database is missing or stale, **ask the
 user before running a scan** — scans can take a long time on large codebases,

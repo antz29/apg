@@ -6,12 +6,24 @@ permission:
   "*": deny
   read:
     "*": allow
+    "apg/.trans/**": deny
+    "apg/layers/**": deny
+    "apg/.worktrees/*/apg/.trans/**": deny
+    "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
   glob:
     "*": allow
+    "apg/.trans/**": deny
+    "apg/layers/**": deny
+    "apg/.worktrees/*/apg/.trans/**": deny
+    "apg/.worktrees/*/apg/layers/**": deny
   grep:
     "*": allow
+    "apg/.trans/**": deny
+    "apg/layers/**": deny
+    "apg/.worktrees/*/apg/.trans/**": deny
+    "apg/.worktrees/*/apg/layers/**": deny
   external_directory:
     "*": deny
     "/tmp/**": allow
@@ -37,15 +49,11 @@ permission:
   apg_review_add: allow
   apg_review_resolve: allow
   apg_review_reject: allow
-  question: allow
   bash:
     "*": deny
     "ls *": allow
     "find *": allow
-    "rg *": allow
-    "grep *": allow
     "git grep *": allow
-    "cat *": allow
     "pwd": allow
     "cd *": allow
 ---
@@ -72,9 +80,9 @@ You review in four scopes:
 
 You operate **inside the project worktree** — cwd inside it, so the suite
 tools' walk-up discovery finds the worktree's own `apg/` (its branch DB). The
-plan and all feedback are **transient** (`.trans/plans/<project>.jsonl` +
-`.trans` tier mirrors) — branch-local, never committed; review state dies with
-the branch. The reviewed plan nodes persist for the branch's life.
+plan and all feedback are **transient** — branch-local, never committed;
+review state dies with the branch. The reviewed plan nodes persist for the
+branch's life.
 
 ## Re-entry rule
 
@@ -136,7 +144,7 @@ reviewer: apg_review_reject <f>                       → status = open     (reo
 - A task marked `done` whose `creates` verb's planned-node target does not exist in the code graph (the verify gate will reject it — flag it early).
 - **Task classification integrity** (`apg_plan_tasks`): every task carries one `kind` (source/test/gate/docs); a `test` task must have a `tier` (unit/int/e2e) and no non-test task may. Flag tasks that shoehorn two kinds into one ("implement + unit-test X" should be two tasks).
 - **Verbs**: a `creates` verb must name a **declared planned node** (never auto-created); `modifies`/`deletes` must name code that exists in the branch graph; `renames`/`moves` must carry `--to` and claim both FQNs. A task with no target at all is review-worthy unless it is genuinely target-less (docs/gate).
-- **Satisfies claims**: every spec requirement (in `apg/layers/requirements/`) is Satisfied by **exactly one** phase (flag a requirement with zero or more than one Satisfies), and the phase's deliverable actually implements the requirement.
+- **Satisfies claims**: every spec requirement (an authored requirement node) is Satisfied by **exactly one** phase (flag a requirement with zero or more than one Satisfies), and the phase's deliverable actually implements the requirement.
 - **Derived solution coverage**: every solution node's `implemented-by` FQN must be touched by at least one plan task — `apg_plan_phases`/`apg_plan_tasks` against `MATCH (s)-[:SpecImplementedBy]->(c) RETURN s.fqn, c.fqn`; an uncovered solution node blocks the verify gate.
 - Acceptance criteria and verification items for the phase; seam contracts carried by notes.
 - Unresolved feedback left over from earlier review rounds.
