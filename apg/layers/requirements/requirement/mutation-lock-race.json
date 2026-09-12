@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "requirements.requirement.lock-race-acceptance",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.session-mutation-coordinator",
+      "properties": {}
     }
   ],
   "in": [
