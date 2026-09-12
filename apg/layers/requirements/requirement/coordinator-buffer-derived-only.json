@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "coordinator-buffer-derived-only",
+  "body": "The coordinator buffers only the derived projection. Durable node files and their per-logical-mutation commits are written as they are today (directly, one commit per mutation) unless a deliberate write-ahead-log design is chosen; only the derived DB flush is deferred/batched. Durable writes are never buffered in memory without a WAL. Acceptance: killing the session between mutations loses no durable write; only a rebuildable DB flush is outstanding, and one logical mutation → one commit still holds.",
+  "properties": {
+    "feature": "mutation-coordinator"
+  },
+  "out": [],
+  "in": []
+}
