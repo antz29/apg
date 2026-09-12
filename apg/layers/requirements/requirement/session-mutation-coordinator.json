@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "session-mutation-coordinator",
+  "body": "Session-scoped mutation coordinator — the human's preferred direction if the structural fix (evaluate-fix-ladder option c) alone is insufficient. NOT a persistent daemon: `apg session start` launches a process for the duration of an update session; writes are routed to it; `apg session end` flushes the buffer and exits. It owns the worktree DB exclusively (single writer, so the lbug race is structurally gone), amortizes the DB open/parse across N mutations, batches the derived-projection flush (one ingest/flush instead of N), and keeps mutations ordered. This is a requirement only because of the amortization + batching win; it must not be adopted merely to avoid a lock. Decomposed into the five child requirements below.",
+  "properties": {
+    "feature": "mutation-coordinator"
+  },
+  "out": [],
+  "in": []
+}
