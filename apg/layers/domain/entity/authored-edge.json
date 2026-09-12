@@ -33,6 +33,11 @@
       "kind": "drives",
       "source": "requirements.requirement.edge-update-properties-only",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.durable-state-authoritative",
+      "properties": {}
     }
   ]
 }
