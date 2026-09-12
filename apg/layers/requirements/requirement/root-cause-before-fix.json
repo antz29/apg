@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.file-lock",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.mutation-attempt",
+      "properties": {}
     }
   ],
   "in": [
