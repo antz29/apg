@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "prefer-structural-fix",
+  "body": "Prefer the structurally-impossible-to-race fix. Removing DB access from the mutation path (or otherwise making contention impossible) is preferred over coordination machinery (locks, retry, a coordinator); a session coordinator must be justified by amortization + batching, not merely by lock avoidance.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
