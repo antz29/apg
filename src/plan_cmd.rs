@@ -89,7 +89,10 @@ fn plan_init_at(
 ) -> anyhow::Result<bool> {
     let path = specs::plan_jsonl_path(apg_root, project);
     if path.exists() {
-        anyhow::bail!("plan for `{project}` already exists at {}", path.display());
+        anyhow::bail!(
+            "plan for `{project}` already exists at {} — use `apg plan update {project}` to change it or `apg plan rm {project}` to remove it",
+            path.display()
+        );
     }
     let has_requirements = crate::layers::read_existing_nodes(apg_root)?
         .iter()
@@ -6442,6 +6445,534 @@ mod tests {
         assert!(
             err.to_string().contains("no plan for project `ghost`"),
             "{err}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// The `Vec<String>` argv shape `cmd_plan` takes (the slice `main` hands
+    /// the top-level dispatch).
+    fn av(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Phase-7 task-3 (E2E, top-level dispatch): `apg plan update` preservation
+    /// — a phase title/deliverable update keeps its task `Contains` edges and
+    /// replaces `Satisfies`/`Gates` with set-semantics (cycle-refusing); a task
+    /// update keeps `status` + incident `Reviews` and re-validates
+    /// `--verb`/`--fqn`; a planned update repoints the parent `Contains` edge.
+    #[test]
+    fn strict_plan_update_preservation_through_dispatch() {
+        let (apg_root, repo, wt) = fixture("dispatch-update");
+        write_requirement(&apg_root, "R1");
+        write_requirement(&apg_root, "R2");
+        // The untracked requirement node files dirty the tree; re-anchor the
+        // recorded scan_meta so the update write-through's stale gate passes.
+        testutil::write_scan_meta(
+            &apg_root,
+            Some(&repo.head_sha()),
+            false,
+            "2026-09-07T00:00:00Z",
+        );
+        let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "P".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "D1".into(),
+                status: "pending".into(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-02".into(),
+                number: 2,
+                title: "P2".into(),
+                deliverable: "D2".into(),
+                status: "pending".into(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-03".into(),
+                number: 3,
+                title: "P3".into(),
+                deliverable: "D3".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".into(),
+                title: "T".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "done".into(),
+                verb: "modifies".into(),
+                target: "github.com/x/y.Store".into(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+            Record::Satisfies {
+                from: "foo/plan.phase-01".into(),
+                to: "requirements.requirement.R1".into(),
+            },
+            Record::Satisfies {
+                from: "foo/plan.phase-02".into(),
+                to: "requirements.requirement.R2".into(),
+            },
+            // phase-01's outgoing gate; phase-03 gates into phase-01.
+            Record::Gates {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-02".into(),
+            },
+            Record::Gates {
+                from: "foo/plan.phase-03".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-1".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+            Record::Feedback {
+                fqn: "foo/feedback-1".into(),
+                body: "task issue".into(),
+                status: "open".into(),
+                disposition: String::new(),
+            },
+            Record::PlannedNode {
+                fqn: "/todo/app.ts".into(),
+                kind: "file".into(),
+                name: "app.ts".into(),
+                parent: "github.com/x/y".into(),
+            },
+            Record::Contains {
+                from: "github.com/x/y".into(),
+                to: "/todo/app.ts".into(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-2".into(),
+                to: "/todo/app.ts".into(),
+            },
+        ];
+        specs::write_jsonl(&plan_path, &records).unwrap();
+
+        let task_contains = |recs: &[Record]| {
+            recs.iter().any(|r| {
+                matches!(
+                    r,
+                    Record::Contains { from, to }
+                        if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
+                )
+            })
+        };
+
+        // A title/deliverable-only phase update: the task Contains edge and both
+        // outgoing bridge edges survive.
+        with_cwd(&wt, || {
+            cmd_plan(&av(&[
+                "update",
+                "foo",
+                "phase",
+                "1",
+                "--title",
+                "P1b",
+                "--deliverable",
+                "D1b",
+            ]))
+        })
+        .unwrap();
+        let recs = specs::read_jsonl(&plan_path).unwrap();
+        assert!(
+            recs.iter().any(|r| matches!(
+                r,
+                Record::PlanPhase { fqn, title, deliverable, .. }
+                    if fqn == "foo/plan.phase-01" && title == "P1b" && deliverable == "D1b"
+            )),
+            "phase title/deliverable updated in place"
+        );
+        assert!(
+            task_contains(&recs),
+            "task Contains survives a phase update"
+        );
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Satisfies { from, to }
+                if from == "foo/plan.phase-01" && to == "requirements.requirement.R1"
+        )));
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Gates { from, to }
+                if from == "foo/plan.phase-01" && to == "foo/plan.phase-02"
+        )));
+
+        // `--satisfies`/`--prereq` replace only phase-01's OWN outgoing sets; the
+        // task Contains, the incoming gate, and phase-02's Satisfies survive.
+        with_cwd(&wt, || {
+            cmd_plan(&av(&[
+                "update",
+                "foo",
+                "phase",
+                "1",
+                "--satisfies",
+                "R2",
+                "--prereq",
+                "2",
+            ]))
+        })
+        .unwrap();
+        let recs = specs::read_jsonl(&plan_path).unwrap();
+        let sat: Vec<&str> = recs
+            .iter()
+            .filter_map(|r| match r {
+                Record::Satisfies { from, to } if from == "foo/plan.phase-01" => Some(to.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            sat,
+            vec!["requirements.requirement.R2"],
+            "the passed --satisfies replaces phase-01's outgoing set"
+        );
+        let gates: Vec<&str> = recs
+            .iter()
+            .filter_map(|r| match r {
+                Record::Gates { from, to } if from == "foo/plan.phase-01" => Some(to.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            gates,
+            vec!["foo/plan.phase-02"],
+            "the passed --prereq replaces phase-01's outgoing gate set"
+        );
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Gates { from, to }
+                if from == "foo/plan.phase-03" && to == "foo/plan.phase-01"
+        )));
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Satisfies { from, to }
+                if from == "foo/plan.phase-02" && to == "requirements.requirement.R2"
+        )));
+        assert!(task_contains(&recs));
+
+        // A cycle-forming gate is refused before any write (phase-02 gating
+        // phase-01 closes the phase-01 → phase-02 → phase-01 loop).
+        let before = std::fs::read_to_string(&plan_path).unwrap();
+        let err = with_cwd(&wt, || {
+            cmd_plan(&av(&["update", "foo", "phase", "2", "--prereq", "1"])).unwrap_err()
+        });
+        assert!(
+            err.to_string().to_lowercase().contains("cycle")
+                || err.to_string().to_lowercase().contains("gate"),
+            "{err}"
+        );
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
+
+        // A task update (title only) keeps status: done and the Reviews edge.
+        with_cwd(&wt, || {
+            cmd_plan(&av(&["update", "foo", "task", "1", "1", "--title", "T2"]))
+        })
+        .unwrap();
+        let recs = specs::read_jsonl(&plan_path).unwrap();
+        assert!(
+            recs.iter().any(|r| matches!(
+                r,
+                Record::Task { fqn, title, status, .. }
+                    if fqn == "foo/plan.phase-01.task-1" && title == "T2" && status == "done"
+            )),
+            "the done status survives a task update"
+        );
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Reviews { from, to }
+                if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1"
+        )));
+
+        // Re-validation: an invalid verb and a creates-over-real-code are both
+        // refused before any write.
+        let before = std::fs::read_to_string(&plan_path).unwrap();
+        let err = with_cwd(&wt, || {
+            cmd_plan(&av(&[
+                "update", "foo", "task", "1", "1", "--verb", "explodes",
+            ]))
+            .unwrap_err()
+        });
+        assert!(!err.to_string().is_empty(), "{err}");
+        let err = with_cwd(&wt, || {
+            cmd_plan(&av(&[
+                "update",
+                "foo",
+                "task",
+                "1",
+                "1",
+                "--verb",
+                "creates",
+                "--fqn",
+                "github.com/x/y.Store",
+            ]))
+            .unwrap_err()
+        });
+        assert!(!err.to_string().is_empty(), "{err}");
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
+
+        // A planned update repoints the parent Contains edge and preserves the
+        // unrelated Reviews edge.
+        with_cwd(&wt, || {
+            cmd_plan(&av(&[
+                "update",
+                "foo",
+                "planned",
+                "/todo/app.ts",
+                "--kind",
+                "function",
+                "--name",
+                "app2.ts",
+                "--parent",
+                "github.com/x/y.Store",
+            ]))
+        })
+        .unwrap();
+        let recs = specs::read_jsonl(&plan_path).unwrap();
+        assert!(
+            recs.iter().any(|r| matches!(
+                r,
+                Record::PlannedNode { fqn, kind, name, parent }
+                    if fqn == "/todo/app.ts" && kind == "function" && name == "app2.ts" && parent == "github.com/x/y.Store"
+            )),
+            "planned node updated in place"
+        );
+        let contains: Vec<&str> = recs
+            .iter()
+            .filter_map(|r| match r {
+                Record::Contains { from, to } if to == "/todo/app.ts" => Some(from.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            contains,
+            vec!["github.com/x/y.Store"],
+            "exactly the repointed parent Contains edge"
+        );
+        assert!(recs.iter().any(|r| matches!(
+            r,
+            Record::Reviews { from, to }
+                if from == "foo/feedback-2" && to == "/todo/app.ts"
+        )));
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-7 task-4 (E2E, top-level dispatch): `apg plan rm` refusal +
+    /// `--force` cascade. A plan with phases, a phase with tasks, a `done` task,
+    /// a Feedback-bearing task, and a `creates`-targeted planned node each
+    /// refuse (non-zero, naming the dependent + the `--force` escape); the
+    /// forced cascades remove the children with no orphan JSONL records; a
+    /// mid-cascade error leaves the plan file intact.
+    #[test]
+    fn strict_plan_rm_refusal_and_force_cascade_through_dispatch() {
+        let (apg_root, repo, wt) = fixture("dispatch-rm");
+        let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "P".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "D".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".into(),
+                title: "T".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "pending".into(),
+                verb: "creates".into(),
+                target: "github.com/x/y.Gateway".into(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Gateway".into(),
+                kind: "struct".into(),
+                name: "Gateway".into(),
+                parent: "github.com/x/y".into(),
+            },
+            Record::Contains {
+                from: "github.com/x/y".into(),
+                to: "github.com/x/y.Gateway".into(),
+            },
+        ];
+        specs::write_jsonl(&plan_path, &records).unwrap();
+        let before = std::fs::read_to_string(&plan_path).unwrap();
+
+        // A plan with a phase refuses, naming the phase + --force.
+        let err = with_cwd(&wt, || cmd_plan(&av(&["rm", "foo"])).unwrap_err());
+        assert!(err.to_string().contains("foo/plan.phase-01"), "{err}");
+        assert!(err.to_string().contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
+
+        // A phase with a task refuses, naming the task + --force.
+        let err = with_cwd(&wt, || {
+            cmd_plan(&av(&["rm", "foo", "phase", "1"])).unwrap_err()
+        });
+        assert!(
+            err.to_string().contains("foo/plan.phase-01.task-1"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
+
+        // A `done` task refuses, naming the status + --force.
+        plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+        let done_before = std::fs::read_to_string(&plan_path).unwrap();
+        let err = with_cwd(&wt, || {
+            cmd_plan(&av(&["rm", "foo", "task", "1", "1"])).unwrap_err()
+        });
+        assert!(err.to_string().contains("done"), "{err}");
+        assert!(err.to_string().contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), done_before);
+
+        // A pending task with incident Feedback refuses, naming the feedback.
+        plan_undone_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+        let mut recs = specs::read_jsonl(&plan_path).unwrap();
+        recs.push(Record::Feedback {
+            fqn: "foo/feedback-1".into(),
+            body: "b".into(),
+            status: "open".into(),
+            disposition: String::new(),
+        });
+        recs.push(Record::Reviews {
+            from: "foo/feedback-1".into(),
+            to: "foo/plan.phase-01.task-1".into(),
+        });
+        specs::write_jsonl(&plan_path, &recs).unwrap();
+        let fb_before = std::fs::read_to_string(&plan_path).unwrap();
+        let err = with_cwd(&wt, || {
+            cmd_plan(&av(&["rm", "foo", "task", "1", "1"])).unwrap_err()
+        });
+        assert!(err.to_string().contains("foo/feedback-1"), "{err}");
+        assert!(err.to_string().contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), fb_before);
+
+        // A creates-targeted planned node refuses, naming the task + --force.
+        let err = with_cwd(&wt, || {
+            cmd_plan(&av(&["rm", "foo", "planned", "github.com/x/y.Gateway"])).unwrap_err()
+        });
+        assert!(
+            err.to_string().contains("foo/plan.phase-01.task-1"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("--force"), "{err}");
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), fb_before);
+
+        // The forced planned cascade removes the node + its parent Contains.
+        with_cwd(&wt, || {
+            cmd_plan(&av(&[
+                "rm",
+                "foo",
+                "planned",
+                "github.com/x/y.Gateway",
+                "--force",
+            ]))
+        })
+        .unwrap();
+        let recs = specs::read_jsonl(&plan_path).unwrap();
+        assert!(
+            !recs.iter().any(|r| matches!(r, Record::PlannedNode { .. })),
+            "the planned node is gone"
+        );
+        assert_no_orphans(&recs);
+
+        // The forced task cascade removes the task + its orphan feedback.
+        with_cwd(&wt, || {
+            cmd_plan(&av(&["rm", "foo", "task", "1", "1", "--force"]))
+        })
+        .unwrap();
+        let recs = specs::read_jsonl(&plan_path).unwrap();
+        assert!(!recs.iter().any(|r| matches!(r, Record::Task { .. })));
+        assert!(
+            !recs
+                .iter()
+                .any(|r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-1")),
+            "the task's feedback must not survive as an orphan"
+        );
+        assert_no_orphans(&recs);
+
+        // The phase now has no tasks: a plain (no --force) rm removes it.
+        with_cwd(&wt, || cmd_plan(&av(&["rm", "foo", "phase", "1"]))).unwrap();
+        assert!(
+            !specs::read_jsonl(&plan_path)
+                .unwrap()
+                .iter()
+                .any(|r| matches!(r, Record::PlanPhase { .. }))
+        );
+
+        // `rm foo --force` deletes the emptied store; a following rm is a hard
+        // error and a following `plan add` recreates the plan.
+        with_cwd(&wt, || cmd_plan(&av(&["rm", "foo", "--force"]))).unwrap();
+        assert!(!plan_path.exists(), "the emptied store must be deleted");
+        let err = with_cwd(&wt, || {
+            cmd_plan(&av(&["rm", "foo", "--force"])).unwrap_err()
+        });
+        assert!(
+            err.to_string().contains("no plan for project `foo`"),
+            "{err}"
+        );
+        with_cwd(&wt, || cmd_plan(&av(&["add", "foo"]))).unwrap();
+        assert!(plan_path.exists(), "rm→add round-trips");
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-7 task-4 (E2E, top-level dispatch): a mid-cascade failure during
+    /// `apg plan rm --force` leaves the on-disk plan file byte-identical — the
+    /// whole-record rewrite is atomic, never a half-deleted plan.
+    #[test]
+    fn strict_plan_rm_mid_cascade_error_leaves_store_intact_through_dispatch() {
+        let (apg_root, repo, wt) = fixture("dispatch-rm-atomic");
+        let plan_path = write_plan(&apg_root);
+        let before = std::fs::read(&plan_path).unwrap();
+
+        // Force the single write-through to fail: record a scan_meta that does
+        // not match the live git state, so the stale gate refuses the re-ingest
+        // after the whole cascade has been computed in memory.
+        testutil::write_scan_meta(
+            &apg_root,
+            Some("0000000000000000000000000000000000000000"),
+            true,
+            "2026-09-07T00:00:00Z",
+        );
+
+        let err = with_cwd(&wt, || {
+            cmd_plan(&av(&["rm", "foo", "--force"])).unwrap_err()
+        });
+        assert!(err.to_string().contains("stale"), "{err}");
+        assert_eq!(
+            std::fs::read(&plan_path).unwrap(),
+            before,
+            "a mid-cascade failure must leave the plan store byte-identical"
         );
 
         testutil::remove(&repo);

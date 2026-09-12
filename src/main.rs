@@ -526,9 +526,11 @@ fn temp_dir() -> PathBuf {
     std::env::temp_dir().join(format!("apg-load-{}-{nanos}", std::process::id()))
 }
 
-fn print_help() {
-    println!(
-        "apg — program graph scanner + LadybugDB query CLI for opencode
+/// The `apg --help` text. Split from [`print_help`] so the strict add|update|rm
+/// surface and the unchanged `apg review` line can be asserted directly by the
+/// Phase-7 help/dispatch acceptance test (no stdout capture).
+fn help_text() -> String {
+    "apg — program graph scanner + LadybugDB query CLI for opencode
 
 USAGE:
   apg init [dir]              Set up apg/ (config.json carrying the binary
@@ -580,7 +582,11 @@ SCAN OPTIONS:
   --no-build-scripts          Rust only: skip cargo build scripts and the
                               proc-macro server (hermetic scans)
   <blacklist...>              FQN prefixes to exclude from the graph"
-    );
+        .to_string()
+}
+
+fn print_help() {
+    println!("{}", help_text());
 }
 
 fn main() {
@@ -1837,5 +1843,321 @@ mod tests {
         // No stale release records: the previous versions must be fully replaced.
         assert!(!readme.contains("0.9.3"), "README must not reference 0.9.3");
         assert!(!readme.contains("0.10"), "README must not reference 0.10");
+    }
+
+    /// `&[&str]` → the `Vec<String>` argv shape `cmd_node`/`cmd_edge`/`cmd_plan`
+    /// take (the top-level dispatch slice `main` would hand them).
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Runs `f` with the process cwd temporarily set to `dir` — the top-level
+    /// `cmd_*` dispatch functions resolve `apg/` by walking up from cwd.
+    /// Serialized behind the shared cwd lock so it never interleaves with a
+    /// concurrent `scan_checkout`.
+    fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir).unwrap();
+        let out = f();
+        std::env::set_current_dir(old).unwrap();
+        out
+    }
+
+    /// A real project context for the strict-surface acceptance sweep: a git
+    /// repo whose worktree `foo` on branch `foo` carries a real branch DB
+    /// (scanned from a committed hermetic payload) and a fresh scan_meta — so
+    /// the top-level `cmd_node`/`cmd_edge`/`cmd_plan` dispatch runs exactly as
+    /// it does inside a project. Returns `(wt_apg_root, repo, wt_root)`.
+    fn strict_surface_fixture(tag: &str) -> (PathBuf, testutil::Repo, PathBuf) {
+        let repo = testutil::Repo::new(&format!("strict-{tag}"));
+        let wt = repo.start_project("foo");
+        let seed = wt.join("code/seed.scan.jsonl");
+        std::fs::create_dir_all(seed.parent().unwrap()).unwrap();
+        std::fs::write(
+            &seed,
+            testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]),
+        )
+        .unwrap();
+        {
+            let r = git2::Repository::open(&wt).unwrap();
+            let mut index = r.index().unwrap();
+            index.add_path(Path::new("code/seed.scan.jsonl")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = r.find_tree(tree_id).unwrap();
+            let sig = r.signature().unwrap();
+            let head = r.head().unwrap().peel_to_commit().unwrap();
+            r.commit(Some("HEAD"), &sig, &sig, "seed code", &tree, &[&head])
+                .unwrap();
+        }
+        testutil::scan_checkout(&wt).unwrap();
+        (wt.join(specs::LAYOUT), repo, wt)
+    }
+
+    /// Phase-7 task-1 (E2E, top-level dispatch): the strict-mutation surface's
+    /// refusal sweep. Every create arm — `node add`, `edge add`, `plan add`
+    /// (the plan itself), and `plan add phase|task|planned` — refuses an
+    /// existing entity (non-zero, error naming the `update`/`rm` follow-up, no
+    /// store change); `rm` on an absent entity is non-zero, never a silent
+    /// no-op.
+    #[test]
+    fn strict_surface_top_level_dispatch_refuses_existing_and_absent_rm() {
+        let (apg_root, repo, wt) = strict_surface_fixture("dispatch-refusal");
+
+        // --- node add refuses an existing FQN (naming update/rm) ---
+        with_cwd(&wt, || {
+            node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"]))
+        })
+        .unwrap();
+        let r1_path =
+            layers::node_file_path(&apg_root, layers::Layer::Requirements, "requirement", "r1");
+        let r1_before = std::fs::read_to_string(&r1_path).unwrap();
+        let err = with_cwd(&wt, || {
+            node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"])).unwrap_err()
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(msg.contains("apg node update"), "{msg}");
+        assert!(msg.contains("apg node rm"), "{msg}");
+        assert_eq!(
+            std::fs::read_to_string(&r1_path).unwrap(),
+            r1_before,
+            "a refused re-add must write nothing"
+        );
+
+        // --- edge add refuses a duplicate (kind, from, to) ---
+        with_cwd(&wt, || {
+            node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r2"]))
+        })
+        .unwrap();
+        let edge = argv(&[
+            "add",
+            "depends-on",
+            "requirements.requirement.r1",
+            "requirements.requirement.r2",
+        ]);
+        with_cwd(&wt, || node_cmd::cmd_edge(&edge)).unwrap();
+        let r1_after_edge = std::fs::read_to_string(&r1_path).unwrap();
+        let err = with_cwd(&wt, || node_cmd::cmd_edge(&edge).unwrap_err());
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(msg.contains("apg edge update"), "{msg}");
+        assert!(msg.contains("apg edge rm"), "{msg}");
+        assert_eq!(
+            std::fs::read_to_string(&r1_path).unwrap(),
+            r1_after_edge,
+            "a refused duplicate must not add a second out-half"
+        );
+        let r2 =
+            layers::read_node_file(&apg_root, layers::Layer::Requirements, "requirement", "r2")
+                .unwrap();
+        assert_eq!(
+            r2.in_edges.len(),
+            1,
+            "the duplicate must not add an in-half"
+        );
+
+        // --- rm on an absent node is non-zero (never a silent no-op) ---
+        let err = with_cwd(&wt, || {
+            node_cmd::cmd_node(&argv(&["rm", "requirements", "requirement", "ghost"])).unwrap_err()
+        });
+        assert!(!err.to_string().is_empty(), "{err}");
+
+        // --- plan add refuses an existing plan, naming update/rm ---
+        with_cwd(&wt, || plan_cmd::cmd_plan(&argv(&["add", "foo"]))).unwrap();
+        let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
+        let plan_before = std::fs::read_to_string(&plan_path).unwrap();
+        let err = with_cwd(&wt, || {
+            plan_cmd::cmd_plan(&argv(&["add", "foo"])).unwrap_err()
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(msg.contains("apg plan update foo"), "{msg}");
+        assert!(msg.contains("apg plan rm foo"), "{msg}");
+        assert_eq!(
+            std::fs::read_to_string(&plan_path).unwrap(),
+            plan_before,
+            "a refused plan re-add must leave the store untouched"
+        );
+
+        // --- plan add phase refuses an existing phase, naming update/rm ---
+        with_cwd(&wt, || {
+            plan_cmd::cmd_plan(&argv(&[
+                "add",
+                "foo",
+                "phase",
+                "1",
+                "--title",
+                "P1",
+                "--deliverable",
+                "D",
+            ]))
+        })
+        .unwrap();
+        let phase_before = std::fs::read_to_string(&plan_path).unwrap();
+        let err = with_cwd(&wt, || {
+            plan_cmd::cmd_plan(&argv(&[
+                "add",
+                "foo",
+                "phase",
+                "1",
+                "--title",
+                "P1b",
+                "--deliverable",
+                "D",
+            ]))
+            .unwrap_err()
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(msg.contains("apg plan update foo phase 1"), "{msg}");
+        assert!(msg.contains("apg plan rm foo phase 1"), "{msg}");
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), phase_before);
+
+        // --- plan add task refuses an existing task, naming update/rm ---
+        with_cwd(&wt, || {
+            plan_cmd::cmd_plan(&argv(&[
+                "add",
+                "foo",
+                "task",
+                "1",
+                "1",
+                "--title",
+                "T",
+                "--kind",
+                "source",
+                "--verb",
+                "creates",
+                "--fqn",
+                "/todo/new.ts",
+            ]))
+        })
+        .unwrap();
+        let task_before = std::fs::read_to_string(&plan_path).unwrap();
+        let err = with_cwd(&wt, || {
+            plan_cmd::cmd_plan(&argv(&[
+                "add",
+                "foo",
+                "task",
+                "1",
+                "1",
+                "--title",
+                "T2",
+                "--kind",
+                "source",
+                "--verb",
+                "creates",
+                "--fqn",
+                "/todo/new.ts",
+            ]))
+            .unwrap_err()
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(msg.contains("apg plan update foo task 1 1"), "{msg}");
+        assert!(msg.contains("apg plan rm foo task 1 1"), "{msg}");
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), task_before);
+
+        // --- plan add planned refuses an existing planned node, naming update/rm ---
+        with_cwd(&wt, || {
+            plan_cmd::cmd_plan(&argv(&[
+                "add",
+                "foo",
+                "planned",
+                "file",
+                "/todo/new.ts",
+                "--name",
+                "new.ts",
+                "--parent",
+                "fixture.mod",
+            ]))
+        })
+        .unwrap();
+        let planned_before = std::fs::read_to_string(&plan_path).unwrap();
+        let err = with_cwd(&wt, || {
+            plan_cmd::cmd_plan(&argv(&[
+                "add",
+                "foo",
+                "planned",
+                "file",
+                "/todo/new.ts",
+                "--name",
+                "new.ts",
+                "--parent",
+                "fixture.mod",
+            ]))
+            .unwrap_err()
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(
+            msg.contains("apg plan update foo planned /todo/new.ts"),
+            "{msg}"
+        );
+        assert!(
+            msg.contains("apg plan rm foo planned /todo/new.ts"),
+            "{msg}"
+        );
+        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), planned_before);
+
+        // --- rm on absent plan entities is non-zero ---
+        let err = with_cwd(&wt, || {
+            plan_cmd::cmd_plan(&argv(&["rm", "foo", "phase", "9"])).unwrap_err()
+        });
+        assert!(err.to_string().contains("no phase 9"), "{err}");
+        let err = with_cwd(&wt, || {
+            plan_cmd::cmd_plan(&argv(&["rm", "ghost"])).unwrap_err()
+        });
+        assert!(
+            err.to_string().contains("no plan for project `ghost`"),
+            "{err}"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-7 task-7 (gate): the `apg --help` text documents the strict
+    /// `add|update|rm` surface for node/edge/plan, no longer names the retired
+    /// `plan init`/`plan link` verbs, and leaves the `apg review` line
+    /// unchanged.
+    #[test]
+    fn help_text_documents_strict_surface_and_preserves_review() {
+        let help = help_text();
+        // node/edge/plan all document add|update|rm.
+        assert!(help.contains("apg node <sub>"), "node block present");
+        assert!(help.contains("apg edge <sub>"), "edge block present");
+        assert!(help.contains("apg plan <sub>"), "plan block present");
+        assert!(
+            help.contains("add/update/rm/done/undone/note/complete/render/verify"),
+            "the plan subcommand surface names add/update/rm progress verbs"
+        );
+        assert!(
+            help.contains("add/update/rm (type-as-argument"),
+            "the node surface names add/update/rm"
+        );
+        assert!(
+            help.contains("add/update/rm (kind/from/to"),
+            "the edge surface names add/update/rm"
+        );
+        // The retired plan verbs are gone.
+        assert!(!help.contains("plan init"), "plan init is retired: {help}");
+        assert!(!help.contains("plan link"), "plan link is retired: {help}");
+        // The review block is untouched: the same header + the exact five-verb
+        // dispatch line.
+        let review_block = help
+            .lines()
+            .skip_while(|l| !l.contains("apg review <sub>"))
+            .take(2)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            review_block.contains("Writer↔reviewer feedback cycle:"),
+            "the apg review header must be unchanged: {review_block}"
+        );
+        assert!(
+            review_block.contains("add/action/resolve/reject/list"),
+            "the apg review verbs must be unchanged: {review_block}"
+        );
     }
 }

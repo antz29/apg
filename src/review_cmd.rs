@@ -1230,4 +1230,166 @@ mod tests {
 
         testutil::remove(&repo);
     }
+
+    /// The `Vec<String>` argv shape `cmd_review` takes (the slice the top-level
+    /// dispatch hands it).
+    fn av(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Runs `f` with the process cwd set to `dir` so `cmd_review` resolves the
+    /// worktree's `apg/` by walking up from cwd. Serialized behind the shared
+    /// cwd lock so it never interleaves with a concurrent `scan_checkout`.
+    fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir).unwrap();
+        let out = f();
+        std::env::set_current_dir(old).unwrap();
+        out
+    }
+
+    /// Phase-7 task-5 (E2E, top-level dispatch): the `apg review` surface is
+    /// unchanged — `cmd_review` dispatches exactly
+    /// `add`/`action`/`resolve`/`reject`/`list`, rejects any other subcommand,
+    /// and the feedback body is immutable across the status verbs (only
+    /// status/disposition change). Review writes stay transient.
+    #[test]
+    fn review_surface_dispatch_unchanged() {
+        let (apg_root, repo, wt) = fixture("surface");
+
+        // No subcommand: usage names exactly the five verbs.
+        let err = cmd_review(&[]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("add|action|resolve|reject|list"), "{msg}");
+
+        // Any other subcommand is rejected (no create/update/rm vocabulary).
+        for bogus in ["update", "rm", "create", "attach"] {
+            let err = cmd_review(&av(&[bogus])).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains(&format!("unknown apg review subcommand: {bogus}")),
+                "{err}"
+            );
+        }
+
+        let head_before = repo.head_sha();
+        let branch_head_before = wt_head(&wt);
+
+        // `add` dispatches and routes the Feedback + Reviews halves to the
+        // attached node's tier mirror.
+        with_cwd(&wt, || {
+            cmd_review(&av(&[
+                "add",
+                "domain.entity.order",
+                "--body",
+                "surface body",
+                "--project",
+                "foo",
+            ]))
+        })
+        .unwrap();
+        let mirror = apg_root.join(specs::TRANS).join("domain").join("foo.jsonl");
+        let (feedback_fqn, body) = {
+            let recs = specs::read_jsonl(&mirror).unwrap();
+            let feedback = recs
+                .iter()
+                .find_map(|r| match r {
+                    Record::Feedback {
+                        fqn, body, status, ..
+                    } => Some((fqn.clone(), body.clone(), status.clone())),
+                    _ => None,
+                })
+                .expect("add lands a Feedback record");
+            assert_eq!(feedback.2, "open", "a new Feedback starts open");
+            assert!(
+                recs.iter().any(|r| matches!(
+                    r,
+                    Record::Reviews { from, to }
+                        if from == &feedback.0 && to == "domain.entity.order"
+                )),
+                "the Reviews edge lands beside its Feedback"
+            );
+            (feedback.0, feedback.1)
+        };
+        assert_eq!(body, "surface body");
+
+        // `list` dispatches (read-only) — no store change.
+        let mirror_before = std::fs::read_to_string(&mirror).unwrap();
+        with_cwd(&wt, || cmd_review(&av(&["list", "domain.entity.order"]))).unwrap();
+        assert_eq!(std::fs::read_to_string(&mirror).unwrap(), mirror_before);
+
+        // `action` → `actioned`/`fixed`; the body never changes.
+        with_cwd(&wt, || cmd_review(&av(&["action", &feedback_fqn, "--fix"]))).unwrap();
+        assert_eq!(
+            feedback_status(&mirror, &feedback_fqn),
+            ("actioned".to_string(), "fixed".to_string())
+        );
+        assert_eq!(
+            feedback_body(&mirror, &feedback_fqn),
+            "surface body",
+            "the feedback body is immutable across action"
+        );
+
+        // `reject` → back to `open`/`rejected`; body still immutable.
+        with_cwd(&wt, || cmd_review(&av(&["reject", &feedback_fqn]))).unwrap();
+        assert_eq!(
+            feedback_status(&mirror, &feedback_fqn),
+            ("open".to_string(), "rejected".to_string())
+        );
+        assert_eq!(feedback_body(&mirror, &feedback_fqn), "surface body");
+
+        // `resolve` → terminal `resolved`; the prior disposition is preserved
+        // (resolve passes no disposition — unchanged semantics); body immutable.
+        with_cwd(&wt, || cmd_review(&av(&["resolve", &feedback_fqn]))).unwrap();
+        assert_eq!(
+            feedback_status(&mirror, &feedback_fqn),
+            ("resolved".to_string(), "rejected".to_string())
+        );
+        assert_eq!(feedback_body(&mirror, &feedback_fqn), "surface body");
+
+        // Review writes stay transient: neither the main nor the project branch
+        // HEAD moves and the tree stays clean.
+        assert_eq!(repo.head_sha(), head_before, "the main HEAD must not move");
+        assert_eq!(
+            wt_head(&wt),
+            branch_head_before,
+            "the project branch HEAD must not move"
+        );
+        assert!(
+            repo.is_clean(),
+            "the mirror is gitignored — tree stays clean"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// The `(status, disposition)` of `fqn` in a transient mirror.
+    fn feedback_status(mirror: &Path, fqn: &str) -> (String, String) {
+        specs::read_jsonl(mirror)
+            .unwrap()
+            .iter()
+            .find_map(|r| match r {
+                Record::Feedback {
+                    fqn: f,
+                    status,
+                    disposition,
+                    ..
+                } if f == fqn => Some((status.clone(), disposition.clone())),
+                _ => None,
+            })
+            .expect("feedback record present")
+    }
+
+    /// The body of `fqn` in a transient mirror.
+    fn feedback_body(mirror: &Path, fqn: &str) -> String {
+        specs::read_jsonl(mirror)
+            .unwrap()
+            .iter()
+            .find_map(|r| match r {
+                Record::Feedback { fqn: f, body, .. } if f == fqn => Some(body.clone()),
+                _ => None,
+            })
+            .expect("feedback record present")
+    }
 }

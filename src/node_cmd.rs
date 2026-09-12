@@ -991,4 +991,182 @@ mod tests {
         assert!(err.to_string().contains("does not exist"), "{err}");
         testutil::remove(&repo);
     }
+
+    /// Runs `f` with the process cwd set to `dir` so the top-level
+    /// `cmd_node`/`cmd_edge` dispatch resolves the worktree's `apg/` by
+    /// walking up from cwd. Serialized behind the shared cwd lock.
+    fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir).unwrap();
+        let out = f();
+        std::env::set_current_dir(old).unwrap();
+        out
+    }
+
+    /// Phase-7 task-2 (E2E, top-level dispatch): `apg node update` is
+    /// edge-preserving and MERGEs body/properties (only an explicit
+    /// `--unset-property` drops a key); `apg edge update` rewrites BOTH the
+    /// source out-half and the target in-half to the same MERGEd map; `apg
+    /// edge add` refuses a duplicate `(kind, from, to)`.
+    #[test]
+    fn strict_node_and_edge_update_preserve_edges_through_dispatch() {
+        let (wt_apg, repo, wt) = mutation_fixture("dispatch-strict");
+
+        // r1 carries its own properties + one in-edge (r0 -> r1) and one
+        // out-edge (r1 -> r2) so a node update can be checked edge-for-edge.
+        with_cwd(&wt, || {
+            cmd_node(&av(&["add", "requirements", "requirement", "r0"]))
+        })
+        .unwrap();
+        with_cwd(&wt, || {
+            cmd_node(&av(&[
+                "add",
+                "requirements",
+                "requirement",
+                "r1",
+                "--property",
+                "a=0",
+                "--property",
+                "b=2",
+            ]))
+        })
+        .unwrap();
+        with_cwd(&wt, || {
+            cmd_node(&av(&["add", "requirements", "requirement", "r2"]))
+        })
+        .unwrap();
+        with_cwd(&wt, || {
+            cmd_edge(&av(&[
+                "add",
+                "depends-on",
+                "requirements.requirement.r0",
+                "requirements.requirement.r1",
+            ]))
+        })
+        .unwrap();
+        let edge = av(&[
+            "add",
+            "depends-on",
+            "requirements.requirement.r1",
+            "requirements.requirement.r2",
+        ]);
+        with_cwd(&wt, || cmd_edge(&edge)).unwrap();
+
+        let before =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        assert_eq!(before.out.len(), 1, "one out-edge before the update");
+        assert_eq!(before.in_edges.len(), 1, "one in-edge before the update");
+
+        // `node update --body` + `--property a=1` MERGEs {a:1,b:2} and keeps
+        // every incident edge identical.
+        with_cwd(&wt, || {
+            cmd_node(&av(&[
+                "update",
+                "requirements",
+                "requirement",
+                "r1",
+                "--body",
+                "updated",
+                "--property",
+                "a=1",
+            ]))
+        })
+        .unwrap();
+        let after =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        assert_eq!(after.body, "updated");
+        assert_eq!(after.properties.get("a").map(String::as_str), Some("1"));
+        assert_eq!(
+            after.properties.get("b").map(String::as_str),
+            Some("2"),
+            "omitting --unset-property must never drop a key"
+        );
+        assert_eq!(after.out, before.out, "out-edges survive a node update");
+        assert_eq!(
+            after.in_edges, before.in_edges,
+            "in-edges survive a node update"
+        );
+
+        // Only the explicit `--unset-property b` drops b.
+        with_cwd(&wt, || {
+            cmd_node(&av(&[
+                "update",
+                "requirements",
+                "requirement",
+                "r1",
+                "--unset-property",
+                "b",
+            ]))
+        })
+        .unwrap();
+        let unset =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        assert_eq!(unset.properties.get("b"), None, "b was explicitly unset");
+        assert_eq!(unset.properties.get("a").map(String::as_str), Some("1"));
+        assert_eq!(unset.out, before.out);
+        assert_eq!(unset.in_edges, before.in_edges);
+
+        // A duplicate `(kind, from, to)` is refused, naming update/rm; no half
+        // is duplicated.
+        let err = with_cwd(&wt, || cmd_edge(&edge).unwrap_err());
+        let msg = err.to_string();
+        assert!(msg.contains("already exists"), "{msg}");
+        assert!(msg.contains("apg edge update"), "{msg}");
+        assert!(msg.contains("apg edge rm"), "{msg}");
+        let r1 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        let r2 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
+        assert_eq!(r1.out.len(), 1, "the duplicate must not add an out-half");
+        assert_eq!(
+            r2.in_edges.len(),
+            1,
+            "the duplicate must not add an in-half"
+        );
+
+        // `edge update --property` MERGEs the same map onto BOTH halves.
+        with_cwd(&wt, || {
+            cmd_edge(&av(&[
+                "update",
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+                "--property",
+                "a=1",
+                "--property",
+                "b=2",
+            ]))
+        })
+        .unwrap();
+        let r1 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        let r2 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
+        let expect = BTreeMap::from([
+            ("a".to_string(), "1".to_string()),
+            ("b".to_string(), "2".to_string()),
+        ]);
+        assert_eq!(r1.out[0].properties, expect, "source out-half map");
+        assert_eq!(
+            r2.in_edges[0].properties, expect,
+            "target in-half carries the identical map"
+        );
+
+        // The explicit unset reaches both halves too.
+        with_cwd(&wt, || {
+            cmd_edge(&av(&[
+                "update",
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+                "--unset-property",
+                "b",
+            ]))
+        })
+        .unwrap();
+        let r1 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
+        let r2 = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
+        let expect = BTreeMap::from([("a".to_string(), "1".to_string())]);
+        assert_eq!(r1.out[0].properties, expect);
+        assert_eq!(r2.in_edges[0].properties, expect);
+
+        testutil::remove(&repo);
+    }
 }
