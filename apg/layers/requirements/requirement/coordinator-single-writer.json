@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "coordinator-single-writer",
+  "body": "The session coordinator is the single writer of the worktree DB: while a session is live, it owns `apg/.trans/db.lbug` exclusively (one writer → no concurrent lbug open), and it applies routed mutations in the order it receives them. Any other would-be DB opener either routes through the session or waits. Acceptance: with a live session, no competing process opens the DB read-write; the resulting store equals the serial application of the same mutations.",
+  "properties": {
+    "feature": "mutation-coordinator"
+  },
+  "out": [],
+  "in": []
+}
