@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.db-rebuildable-projection",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.evaluate-fix-ladder",
+      "properties": {}
     }
   ],
   "in": [
