@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "mutation-surface-unchanged",
+  "body": "The mutation surface is unchanged. `apg node` / `apg edge` arguments, the `apg_node` / `apg_edge` tool surface, and every agent prompt that calls them keep working identically whether or not a session coordinator is live; session routing is transparent, never a new required flag or a changed contract.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
