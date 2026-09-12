@@ -58,6 +58,11 @@
       "kind": "contains",
       "source": "requirements.user.suite-agent",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.lock-race-reconciliation",
+      "properties": {}
     }
   ]
 }
