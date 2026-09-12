@@ -41,6 +41,11 @@
       "kind": "contains",
       "target": "requirements.requirement.session-mutation-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.mutation-surface",
+      "properties": {}
     }
   ],
   "in": [

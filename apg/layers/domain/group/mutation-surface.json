@@ -78,6 +78,11 @@
       "kind": "drives",
       "source": "requirements.requirement.evaluate-fix-ladder",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.mutation-lock-race",
+      "properties": {}
     }
   ]
 }
