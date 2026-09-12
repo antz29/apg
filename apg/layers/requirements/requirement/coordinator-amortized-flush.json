@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.service.mutation-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.derived-projection",
+      "properties": {}
     }
   ],
   "in": [
