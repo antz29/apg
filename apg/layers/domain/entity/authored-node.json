@@ -48,6 +48,11 @@
       "kind": "drives",
       "source": "requirements.requirement.rm-commit-stages-deletions",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.durable-state-authoritative",
+      "properties": {}
     }
   ]
 }
