@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.agent-refinement",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.mutation-lock-race",
+      "properties": {}
     }
   ],
   "in": []
