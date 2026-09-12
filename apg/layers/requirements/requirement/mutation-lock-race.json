@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "mutation-lock-race",
-  "body": "Durable spec authoring must be reliable under concurrency. Today a burst of `apg node` / `apg edge` mutations issued in parallel fails with lbug's exclusive file-lock error (\"Could not set lock … Resource temporarily unavailable\") for roughly half the calls, so the authoring agent must retry strictly serially. This tree captures the why, the root cause, the durable-state invariants, the fix ladder, and the optional session-scoped mutation coordinator. Decomposed into the seven child requirements below: root-cause-before-fix, concurrent-bursts-reliable, durable-state-authoritative, db-rebuildable-projection, evaluate-fix-ladder, lock-race-acceptance, and session-mutation-coordinator.",
+  "body": "Durable spec authoring must be reliable under concurrency. Today a burst of `apg node` / `apg edge` mutations issued in parallel fails with lbug's exclusive file-lock error (\"Could not set lock … Resource temporarily unavailable\") for roughly half the calls, so the authoring agent must retry strictly serially. This tree captures the why, the root cause (ALL three contended locks: lbug's DB lock, the `specs.lock` flock, and git's `.git/index.lock`), the durable-state invariants, the fix ladder, and the mandatory session-scoped mutation coordinator. Decomposed into the seven child requirements below: root-cause-before-fix, concurrent-bursts-reliable, durable-state-authoritative, db-rebuildable-projection, evaluate-fix-ladder, lock-race-acceptance, and session-mutation-coordinator.",
   "properties": {
     "feature": "lock-race"
   },
