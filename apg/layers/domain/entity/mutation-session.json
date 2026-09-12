@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.container.mutation-coordinator",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
