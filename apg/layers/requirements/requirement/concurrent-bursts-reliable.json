@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "concurrent-bursts-reliable",
+  "body": "Concurrent mutation bursts are reliable. N concurrent `apg node` / `apg edge` add|update|rm mutations (exactly what an agent issues in parallel) must never fail with a lock error: the loser either waits for the winner or the contention is removed entirely. The reference scenario is the spec-writer's parallel authoring burst — it must complete with zero lock errors, and the durable store must end up exactly as if the same mutations had run serially (no lost node, no lost edge half, no false \"success\"). Acceptance: a concurrent-burst test asserting zero lock failures and a store equal to the serial equivalent.",
+  "properties": {
+    "feature": "lock-race"
+  },
+  "out": [],
+  "in": []
+}
