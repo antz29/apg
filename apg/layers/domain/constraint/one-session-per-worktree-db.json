@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "one-session-per-worktree-db",
+  "body": "One live session per worktree DB. Two sessions must never write the same `apg/.trans/db.lbug`; a second `apg session start` either joins the live session or refuses, never starts a second writer. A live session is exclusive with `apg scan` / `apg project merge`, which replace the DB.",
+  "properties": {
+    "attaches-to": "domain.entity.mutation-session"
+  },
+  "out": [],
+  "in": []
+}
