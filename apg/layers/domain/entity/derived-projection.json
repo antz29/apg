@@ -7,5 +7,11 @@
     "kind": "entity"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.mutation-surface",
+      "properties": {}
+    }
+  ]
 }
