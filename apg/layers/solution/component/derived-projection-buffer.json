@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "derived-projection-buffer",
+  "body": "The coordinator's derived-projection buffer: accumulate mutation records during the session and flush them into `db.lbug` in a single batched re-ingest (or bounded flushes) at session end, amortizing the DB open/parse across N mutations. Buffers only the derived projection — durable node files and their per-mutation commits are written directly as today; durable writes are never buffered without a WAL. (Not yet built — planned code.)",
+  "properties": {},
+  "out": [],
+  "in": []
+}
