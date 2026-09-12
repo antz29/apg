@@ -6,7 +6,13 @@
   "properties": {
     "kind": "service"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.session-routing",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
