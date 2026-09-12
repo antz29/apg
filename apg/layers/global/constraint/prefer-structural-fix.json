@@ -2,7 +2,7 @@
   "layer": "global",
   "type": "constraint",
   "name": "prefer-structural-fix",
-  "body": "Prefer the structurally-impossible-to-race fix. Removing DB access from the mutation path (or otherwise making contention impossible) is preferred over coordination machinery (locks, retry, a coordinator); a session coordinator must be justified by amortization + batching, not merely by lock avoidance.",
+  "body": "Prefer making the durable mutation structurally serial to retrying it. Removing DB access from the mutation path (evaluate-fix-ladder option c) removes DB contention only; it does NOT make the mutation race-free — the node-file read-modify-write (`edge_add`, src/node_cmd.rs:207) and the git index commit (`git::commit_files`, src/git.rs:587-645) still race — so it is a complement, never a standalone fix. The durable sequence (node-file RMW + DB opens + commit) must be serialized by construction: file-level serialization (option a, extended flock) on the direct path, and the single-writer session coordinator (option d) when a session is live. Bounded retry (option b) is never the primary fix. The session coordinator is a mandatory deliverable, justified by amortization + batching as well as by serialization, not by lock avoidance alone.",
   "properties": {},
   "out": [],
   "in": []
