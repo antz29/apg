@@ -46,6 +46,11 @@
       "kind": "drives",
       "source": "requirements.requirement.lock-race-acceptance",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.coordinator-transparent-routing",
+      "properties": {}
     }
   ]
 }
