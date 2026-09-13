@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.value.code-type",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.source-file",
+      "properties": {}
     }
   ],
   "in": [
