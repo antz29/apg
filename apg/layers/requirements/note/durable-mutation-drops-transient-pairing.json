@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.durable-mutation-preserves-transient-pairing",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.projection-delta-applier",
+      "properties": {}
     }
   ],
   "in": []
