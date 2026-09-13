@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.scan-cache",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.content-addressed-manifest",
+      "properties": {}
     }
   ]
 }
