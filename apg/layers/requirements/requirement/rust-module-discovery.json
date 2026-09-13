@@ -6,6 +6,12 @@
   "properties": {
     "feature": "rust-module-discovery"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.rust-discover-all-manifests",
+      "properties": {}
+    }
+  ],
   "in": []
 }
