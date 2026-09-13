@@ -4,7 +4,13 @@
   "name": "write-through-projection",
   "body": "The write-through projection — SUPERSEDES the write-back/batched buffer model (`solution.component.derived-projection-buffer`, removed). Every completed mutation applies its exact node/edge delta to `apg/.trans/db.lbug` synchronously as part of the mutation: the durable file write + git commit first (commit-then-project), then the delta — with no accumulation, no deferred flush, and no session-end dependency.\n\nWhen a session is live the coordinator applies each routed mutation's delta through this component before acknowledging; the direct path applies it inline. Amortization keeps one DB open/parse across the session but never defers visibility: `coordinator-amortized-flush` is amortization of the open, not batching of visibility.\n\nIt anchors to the real synchronous write paths — `apg.layers.write_project` (durable node/edge path) and `apg.plan_cmd.write_through` (transient plan/feedback path) — and to `solution.component.projection-delta-applier` for the exact-delta deletion semantics. New session code (a synchronous apply inside `apg.session.Coordinator`) is declared by the plan as planned nodes. (Not yet built — planned code.)",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "apg.layers.write_project",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "realised-by",
