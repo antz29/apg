@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.markdown-sections-as-symbols",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.markdown-links-as-edges",
+      "properties": {}
     }
   ],
   "in": [
