@@ -15,6 +15,11 @@
       "kind": "details",
       "source": "requirements.note.frontend-coverage-open-points",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.js-ts-frontend-evidence",
+      "properties": {}
     }
   ]
 }
