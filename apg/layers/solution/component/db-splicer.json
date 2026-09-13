@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "db-splicer",
+  "body": "Seeds the next DB from the previous DB and applies the delta (splice) rather than rebuilding from scratch, atomically. Must produce a DB exactly equivalent to a full rebuild. Open design point: seed-from-previous vs overlay.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
