@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "projection-delta",
+  "body": "The exact set of node and edge additions and removals a single metadata mutation produces — the difference the mutation must apply to `db.lbug` so the projection matches the changed sources. It is produced by the mutation (a durable node/edge file write, or a transient plan/feedback store write) and applied atomically to the live DB. Distinct from the full record set a re-scan rebuilds: it is scoped to exactly what the mutation touched, so planned code FQNs with no project prefix are handled by identity, not by a `<project>/` prefix scan.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
