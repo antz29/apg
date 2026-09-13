@@ -8,14 +8,14 @@ class Scanner < Formula
   desc "Program graph scanner + LadybugDB query CLI for opencode"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.12.0",
-      revision: "da65cb3f4280b81de06ebd25c78c5f12ee36d629"
+      tag:      "v0.12.1",
+      revision: "f3e40115d1b413baef87fe41f1bf77edc2600cbc"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.12.0"
-    rebuild 21
+    root_url "https://github.com/antz29/apg/releases/download/v0.12.1"
+    rebuild 22
     sha256 cellar: :any, arm64_sonoma: "956d45f7aeb3d8b1d44d5a69c15304f34855c4623ba481ab1a0574e12b391676"
   end
 
