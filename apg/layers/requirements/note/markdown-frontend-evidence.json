@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "markdown-frontend-evidence",
+  "body": "Verified this session (code graph + source read): there is no markdown language id anywhere. `auto_detect_languages` (src/main.rs:488-504) lists java/go/cpp/rust/ts/csharp and no md; `id_prefix_for` (src/main.rs:510-520) has no md arm; `frontend_cmd` (src/main.rs:406-455) resolves no md frontend; `builtin_code_type` (src/classify.rs:78-185) has no md arm, so a .md path would fall to the `_ => \"\"src\"\"` default and markdown sources are not scanned at all today. build.rs stages each frontend to target/<profile>/frontends with a per-language block (build.rs:9-23, 55, 213-244) and emits APG_LANGUAGES. The markdown frontend is new: it has no code in the scanned graph, so its solution component carries no implemented-by — the plan declares it as planned Implementation nodes (same state as solution.component.js-ts-frontend / rust-manifest-discovery). verified.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
