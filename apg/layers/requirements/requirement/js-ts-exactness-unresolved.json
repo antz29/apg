@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "js-ts-exactness-unresolved",
+  "body": "The JS/TS unification must preserve the never-guess rule: an edge is emitted only where the checker resolves to a project symbol. Dynamic JavaScript — untyped params, computed access, monkey-patching, dynamic require(expr) — yields an UnresolvedTarget (with a category), never a fabricated FQN. A higher unresolved ratio than typed TS is expected and acceptable. AC: a dynamic-require fixture produces only unresolved_call/unresolved_use edges and no guessed calls/uses edge.",
+  "properties": {
+    "feature": "js-ts-frontend"
+  },
+  "out": [],
+  "in": []
+}
