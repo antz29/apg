@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.rust-discover-all-manifests",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.rust-isolation-preserved",
+      "properties": {}
     }
   ]
 }

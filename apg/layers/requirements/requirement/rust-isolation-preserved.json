@@ -6,7 +6,13 @@
   "properties": {
     "feature": "rust-module-discovery"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.cargo-manifest",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
