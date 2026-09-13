@@ -20,6 +20,11 @@
       "kind": "realised-by",
       "source": "domain.service.projection-update",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.mutation-coordinator",
+      "properties": {}
     }
   ]
 }

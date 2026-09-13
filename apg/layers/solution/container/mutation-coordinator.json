@@ -36,6 +36,11 @@
       "kind": "implemented-by",
       "target": "apg.session.Coordinator.handle_mutation",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.write-through-projection",
+      "properties": {}
     }
   ],
   "in": [
