@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.code-type-classifier",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.db-splicer",
+      "properties": {}
     }
   ],
   "in": [
