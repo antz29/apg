@@ -6,7 +6,13 @@
   "properties": {
     "feature": "tooling-review"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.feedback-note-reviews-round-trip",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
