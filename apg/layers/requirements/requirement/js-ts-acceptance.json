@@ -6,7 +6,13 @@
   "properties": {
     "feature": "js-ts-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.group.frontend-coverage",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

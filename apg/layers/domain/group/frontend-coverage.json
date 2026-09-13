@@ -59,5 +59,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.js-ts-acceptance",
+      "properties": {}
+    }
+  ]
 }
