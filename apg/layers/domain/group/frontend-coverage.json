@@ -104,6 +104,11 @@
       "kind": "drives",
       "source": "requirements.requirement.markdown-frontend",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.markdown-build-and-acceptance",
+      "properties": {}
     }
   ]
 }
