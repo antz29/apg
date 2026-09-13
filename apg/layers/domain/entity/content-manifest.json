@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.content-addressed-manifest",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.freshness-content-key",
+      "properties": {}
     }
   ]
 }

@@ -6,7 +6,13 @@
   "properties": {
     "feature": "scan-freshness"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.content-manifest",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
