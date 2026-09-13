@@ -57,6 +57,11 @@
       "kind": "contains",
       "target": "domain.value.module-fqn-prefix",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.frontend-process",
+      "properties": {}
     }
   ],
   "in": [

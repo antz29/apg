@@ -28,6 +28,11 @@
       "kind": "realised-by",
       "source": "domain.entity.scan-exclusion",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.frontend-coverage",
+      "properties": {}
     }
   ]
 }
