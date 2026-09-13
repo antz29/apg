@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "requirements.requirement.markdown-code-type",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.markdown-exactness-unresolved",
+      "properties": {}
     }
   ],
   "in": [
