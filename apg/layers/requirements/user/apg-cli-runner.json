@@ -26,5 +26,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "requirements.note.scanner-optimisation-reconciliation",
+      "properties": {}
+    }
+  ]
 }
