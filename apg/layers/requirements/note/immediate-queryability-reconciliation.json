@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "requirements.requirement.write-through-projection",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.write-through-projection",
+      "properties": {}
     }
   ],
   "in": []

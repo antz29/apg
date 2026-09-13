@@ -36,6 +36,11 @@
       "kind": "contains",
       "source": "solution.container.mutation-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.immediate-queryability-reconciliation",
+      "properties": {}
     }
   ]
 }
