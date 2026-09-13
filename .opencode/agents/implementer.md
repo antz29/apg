@@ -170,6 +170,26 @@ the graph state — to the coordinator. There is no fallback: no raw file reads,
 no reading the transient plan or feedback stores directly, no retry, no cause
 diagnosis. The coordinator runs the scan and re-dispatches you.
 
+## File access (strict)
+
+- All graph state is reached only through the apg tools you hold: the read-only
+  code suite (`apg_query`, `apg_find_symbol`, `apg_modules`, `apg_module_files`,
+  `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`,
+  `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`, `apg_unresolved`,
+  `apg_hunk`); the transient plan store via `apg_plan`, `apg_plan_tasks`,
+  `apg_plan_phases`, `apg_plan_render`, `apg_plan_done`, `apg_plan_undone`, and
+  `apg_plan_note`; and the transient feedback store via `apg_review` and
+  `apg_review_action`.
+- The durable spec node files and the transient plan/feedback files are **never
+  read directly** — they are reached only via the tools above. Your `read`,
+  `glob`, and `grep` grants reach the working tree, but the graph-state paths
+  are denied.
+- Ordinary source files behind code FQNs remain readable with the `read` tool.
+- You write code and its inline tests through your scoped edit grant. You never
+  touch the graph-state files and you never author or edit spec/plan/review
+  nodes — the spec-writer owns the durable tiers through `apg_node`/`apg_edge`,
+  which are not in your grant.
+
 ## The repo you implement in
 
 - **Language/layout**: Rust, edition 2024, flat `src/*.rs` — `main.rs`,
