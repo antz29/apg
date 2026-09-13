@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.js-ts-frontend",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.rust-manifest-discovery",
+      "properties": {}
     }
   ],
   "in": [
