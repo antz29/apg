@@ -33,6 +33,11 @@
       "kind": "contains",
       "source": "domain.group.incremental-scan",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.incremental-content",
+      "properties": {}
     }
   ]
 }
