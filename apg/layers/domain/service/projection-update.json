@@ -31,11 +31,6 @@
       "kind": "drives",
       "source": "requirements.requirement.write-through-projection",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.durable-mutation-preserves-transient-pairing",
-      "properties": {}
     }
   ]
 }

@@ -9,11 +9,6 @@
   "out": [
     {
       "kind": "drives",
-      "target": "domain.service.projection-update",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
       "target": "domain.service.transient-pairing-preservation",
       "properties": {}
     }
