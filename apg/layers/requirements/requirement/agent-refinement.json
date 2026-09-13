@@ -36,6 +36,11 @@
       "kind": "drives",
       "target": "domain.group.agent-suite",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.read-guard-prose",
+      "properties": {}
     }
   ],
   "in": [
