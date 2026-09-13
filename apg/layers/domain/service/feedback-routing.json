@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "feedback-routing",
+  "body": "The behaviour that mediates the closed feedback cycle across the coordinator, the writers, and the reviewers: the coordinator dispatches one feedback item to one writer; the writer returns an ACTIONED/WONT-FIX claim; the coordinator performs a shallow consistency check of the claim, actions the item (`--fix`/`--wont-fix`), or re-dispatches it; the reviewer retains the terminal resolve/reject. It never batches items and never lets the writer move feedback state. Realised by the coordinator-mediated feedback routing in the distributed agent prompts and the `apg_review_action` tool text.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
