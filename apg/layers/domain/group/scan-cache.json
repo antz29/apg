@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "scan-cache",
+  "body": "The scan-cache subdomain: the shared, content-addressed store of prior scanner facts and the keying/invalidation rules that decide reuse. Contains the content manifest (path -> git blob OID), the per-file fact cache, the cache key (binary/format/config version), and the freshness check that decides the fast-path.",
+  "properties": {
+    "attribute": "core"
+  },
+  "out": [],
+  "in": []
+}
