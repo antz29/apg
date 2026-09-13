@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "ingestor",
+  "body": "The Rust ingestor/assembler (src/ingest.rs + src/load.rs): merges reused cached facts with newly emitted facts, runs the global projection, and seeds/splices the LadybugDB instead of a full rebuild.",
+  "properties": {
+    "kind": "service"
+  },
+  "out": [],
+  "in": []
+}
