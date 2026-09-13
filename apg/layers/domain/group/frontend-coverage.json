@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "frontend-coverage",
-  "body": "The frontend-coverage domain: what source a scan actually sees and emits. Covers the set of projects and source files a frontend discovers (Cargo manifests including nested non-workspace projects; JS/TS source files across the accepted extension set), the exclusions that keep generated/dependency trees out, the discovery/detection/emission services, and the identity values (manifest root, module FQN prefix, language id, code type) that make discovery deterministic and FQN-safe. Aggregate root: frontend-coverage.",
+  "body": "The frontend-coverage domain: what source a scan actually sees and emits. Covers the set of projects and source files a frontend discovers (Cargo manifests including nested non-workspace projects; JS/TS source files across the accepted extension set; markdown documents across the accepted extension set), the exclusions that keep generated/dependency trees out, the discovery/detection/emission services, and the identity values (manifest root, module FQN prefix, language id, code type) that make discovery deterministic and FQN-safe. Aggregate root: frontend-coverage.",
   "properties": {
     "attribute": "core",
     "root": "frontend-coverage"
