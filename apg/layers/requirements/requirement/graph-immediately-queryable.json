@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.metadata-mutation-graph-consistency",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.write-through-projection",
+      "properties": {}
     }
   ],
   "in": [
