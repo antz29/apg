@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "solution.component.file-access-guard-prose",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.constraint.prose-matches-grant",
+      "properties": {}
     }
   ],
   "in": []
