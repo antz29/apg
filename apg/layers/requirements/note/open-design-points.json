@@ -4,6 +4,12 @@
   "name": "open-design-points",
   "body": "Open design points for the plan (do NOT invent decisions here): (1) per-language granularity — package vs module vs crate — and what \"signature\" means for early cutoff; (2) where the shared content-addressed fact store lives and how worktrees/DBs project from it; (3) the DB splice mechanism (seed-from-previous vs overlay) and its atomicity; (4) re-anchor/fallback thresholds — purely correctness/version gates, never heuristics.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.full-context-targeted-emission",
+      "properties": {}
+    }
+  ],
   "in": []
 }
