@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "review-feedback-projection",
+  "body": "The Reviews rel-table declaration and write-through admission path. `apg.load.spec_rel_pairs` (src/load.rs:867–943) enumerates the `(table, from, to)` pairs; `apg.load.create_schema` (src/load.rs:1091–1175) emits the matching `CREATE REL TABLE` statements; `apg.load.rel_table_pairs` (src/load.rs:993–1014) exposes the union. `apg.artifacts.rel_pair_allowed` (src/artifacts.rs:822–832) consults that union, and `apg.artifacts.ArtifactDb.merge_edge` (src/artifacts.rs:497–555) MERGEs the edge or skips it. The `Reviews` target list must include `Note` (while `Details` keeps excluding it), so `(Reviews, Feedback, Note)` is declared end to end and a legal review edge is admitted rather than silently dropped.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
