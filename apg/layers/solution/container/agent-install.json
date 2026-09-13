@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "solution.component.file-access-guard-prose",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.coordinator-feedback-routing",
+      "properties": {}
     }
   ],
   "in": [
