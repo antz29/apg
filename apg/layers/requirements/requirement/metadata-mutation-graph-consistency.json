@@ -48,6 +48,11 @@
       "kind": "details",
       "source": "requirements.note.metadata-mutation-staleness-evidence",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.graph-immediately-queryable",
+      "properties": {}
     }
   ]
 }
