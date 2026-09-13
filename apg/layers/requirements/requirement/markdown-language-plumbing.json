@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "markdown-language-plumbing",
-  "body": "Add an `md` language id and wire it into the scanner plumbing: the auto-detection candidate list (matching .md/.markdown and not tripping on generated/dependency directories), the `lang_switch` control record that drives per-record code-type classification and FQN rendering, the `--id-prefix` namespacing entry so merged multi-language scans keep opaque ids unique, and the runtime frontend-command resolution for the md frontend. AC: a markdown-only repo auto-detects md; a mixed repo scans md alongside its code languages into one graph; the md stream carries its own id prefix and lang_switch record.",
+  "body": "PLACEHOLDER — read-only verification will follow before any update.",
   "properties": {
     "feature": "markdown-frontend"
   },
