@@ -4,6 +4,12 @@
   "name": "read-path-contract",
   "body": "Source: `lbug-lock-race/feedback-13` (phase-level) — `read-access-during-session` was under-specified for a non-routing reader and offered an unrealizable \"open the DB without contending\" alternative; `read-your-writes` carried \"no shared session state\" wording that conflicts with read-through routing.\n\nChosen contract [with user] — feedback option (a), routing is the read mechanism while a session is live:\n1. While a session owns `db.lbug`, the coordinator owns the DB and reads are served by routing to the live session (`apg query` / suite tools detect it and forward). This is what `global.constraint.immediate-queryability` guarantees for a routed reader.\n2. A non-routing reader that opens `db.lbug` directly during a live session is OUT of contract: lbug's contended open ERRORS (\"Could not set lock\"), it does not wait. It must route via the tool or be retried after the session ends. The spec no longer implies a non-contending direct open.\n3. When no session is live, the DB file is not held and any reader opens it normally and sees committed mutations — the direct path that `read-your-writes` covers. The \"no shared session state\" phrasing is reconciled: read-through routing is transparent and is not prior coordination the caller supplies.\n4. `coordinator-single-writer`'s read-only-opener wording is scoped to ROUTED readers (routed reads keep working); it no longer claims a direct contended open \"waits\".\n\nNodes revised: `requirements.requirement.read-access-during-session`, `requirements.requirement.read-your-writes`, `requirements.requirement.coordinator-single-writer`, `solution.component.session-routing`, `domain.service.graph-read`, and `global.constraint.one-commit-per-mutation` (residual \"batching the derived-projection flush is free\" removed — the law is now purely about commit batching and defers projection visibility to `immediate-queryability`). The plan-writer aligns `plan.phase-03.task-22` and adds the non-routing case to task-23. [with user]",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.read-access-during-session",
+      "properties": {}
+    }
+  ],
   "in": []
 }
