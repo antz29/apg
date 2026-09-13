@@ -4,7 +4,13 @@
   "name": "graph-loader",
   "body": "The existing full load path (src/load.rs: build_load_files, create_schema, copy_from, write_graph_jsonl). Retained as the fallback full-scan loader and the correctness reference the spliced DB must match.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "apg.load.build_load_files",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
