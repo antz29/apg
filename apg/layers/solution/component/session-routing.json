@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "session-routing",
-  "body": "Transparent session routing in the `apg node` / `apg edge` dispatch AND the read path: detect a live session socket under `apg/.trans/`, forward mutations to it, and route reads (`apg query` / suite query tools) through the live session as well (read-through), so an external reader sees applied mutations while the session owns `db.lbug`; when no session is running, fall back to the direct path — mutations serialized by the extended flock, reads opening the DB read-only. The CLI arguments, the `apg_node` / `apg_edge` tool surface, and every agent prompt stay unchanged. (Not yet built — planned code.)",
+  "body": "Transparent session routing in the `apg node` / `apg edge` dispatch AND the read path: detect a live session socket under `apg/.trans/`, forward mutations to it, and route reads (`apg query` / suite query tools) through the live session as well (read-through), so an external reader sees applied mutations while the session owns `db.lbug`. While a session is live, routing is the read mechanism: a reader that cannot route (a direct `db.lbug` open, or a failed/stale-socket detection) is out of contract — lbug's contended open errors rather than waits — and must route via the tool or be retried after the session ends. When no session is running (the direct path), mutations are serialized by the extended flock and reads open the DB directly (read-only). The CLI arguments, the `apg_node` / `apg_edge` tool surface, and every agent prompt stay unchanged. (Not yet built — planned code.)",
   "properties": {},
   "out": [
     {
