@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.session.Coordinator.forward_mutation",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.cmd_query",
+      "properties": {}
     }
   ],
   "in": [
