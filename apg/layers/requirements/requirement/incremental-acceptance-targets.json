@@ -3,7 +3,9 @@
   "type": "requirement",
   "name": "incremental-acceptance-targets",
   "body": "The design is validated against two reference workloads: ~/jgrapht (fast CI baseline) and ~/netbeans (stress case, ~1h+ full scan). Recorded jgrapht full-scan baseline: ~16s wall (12s logged) — Java frontend 9s (~70%), graph assembly 1s, DB load 2s, startup/overhead 3–4s; 21,334 nodes, 153k edges, 18 MB DB. Acceptance shape: a fresh worktree is near-instant; a small (1–5 file) localized edit on netbeans re-scans in single-digit minutes; a signature change to a widely-depended-on symbol may legitimately approach a full scan. AC: the three scenarios are exercised on the reference workloads and measured with the per-phase timing report.",
-  "properties": {},
+  "properties": {
+    "feature": "incremental-content"
+  },
   "out": [
     {
       "kind": "drives",
