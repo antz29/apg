@@ -28,6 +28,11 @@
       "kind": "drives",
       "source": "requirements.requirement.projection-delta-atomic",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.write-through-projection",
+      "properties": {}
     }
   ]
 }
