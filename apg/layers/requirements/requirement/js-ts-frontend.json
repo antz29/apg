@@ -6,6 +6,12 @@
   "properties": {
     "feature": "js-ts-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.js-ts-accept-js-extensions",
+      "properties": {}
+    }
+  ],
   "in": []
 }
