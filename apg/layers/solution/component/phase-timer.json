@@ -5,5 +5,11 @@
   "body": "Measures and reports the per-phase timing breakdown (frontend / ingest-assembly / DB-load / startup) as first-class scan output.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scan-orchestrator",
+      "properties": {}
+    }
+  ]
 }
