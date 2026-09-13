@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "markdown-frontend",
+  "body": "The scan must cover markdown documents as a first-class frontend: a markdown source file is scanned as a document whose headings are section symbols and whose links are graph edges, under a new `md` language id, with the same exactness posture as the code frontends. This closes the documentation gap — today .md files are not scanned at all (no md language id, no detector, no code-type arm), so docs are absent from the graph and cannot be queried or linked to code. Decomposes into extension acceptance, sections-as-symbols, links-as-edges, language plumbing/detection, code-type classification, exactness/unresolved links, and build+acceptance. Feature markdown-frontend.",
+  "properties": {
+    "feature": "markdown-frontend"
+  },
+  "out": [],
+  "in": []
+}
