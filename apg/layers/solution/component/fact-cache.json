@@ -15,6 +15,11 @@
       "kind": "realised-by",
       "source": "domain.entity.fact-cache",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.scan-cache",
+      "properties": {}
     }
   ]
 }

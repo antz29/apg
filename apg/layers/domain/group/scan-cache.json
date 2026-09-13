@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "domain.value.cache-key",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.fact-cache",
+      "properties": {}
     }
   ],
   "in": [
