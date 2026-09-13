@@ -2118,9 +2118,12 @@ pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyho
 /// 6. **Projection delta** — apply the exact durable delta
 ///    ([`projection_deletes`] = removed ∪ changed FQNs, guarded for planned
 ///    code FQNs) to the live DB, in one transaction, AFTER the durable commit
-///    (commit-then-project). Skipped when no DB exists (the files are the
-///    durable form); a re-ingest failure leaves the committed durable state
-///    authoritative.
+///    (commit-then-project). The same transaction re-MERGEs the worktree's
+///    transient record set ([`append_transient_records`]: the plan store + the
+///    five feedback tier mirrors) so a changed-FQN DETACH cannot drop a
+///    pre-existing transient pairing (`Feedback -[:Reviews]-> <node>`).
+///    Skipped when no DB exists (the files are the durable form); a re-ingest
+///    failure leaves the committed durable state authoritative.
 pub fn write_project(
     apg_root: &Path,
     writes: &[NodeFile],
@@ -2207,9 +2210,47 @@ pub fn write_project_with(
                 }
             }
         }
-        let records = ingest_tree(apg_root, &scanned, &planned)?;
+        let mut records = ingest_tree(apg_root, &scanned, &planned)?;
+        // The durable tree is the only source of DURABLE records, but a durable
+        // mutation detaches every changed FQN — and with it any incident
+        // TRANSIENT edge. Here that is precisely `Feedback -[:Reviews]-> <node>`:
+        // `detach_delete_project` DETACH-deletes the changed node, taking the
+        // Reviews edge with it, and a MERGE of the durable records alone cannot
+        // put it back. Append the worktree's transient record set (the plan
+        // store + the five feedback tier mirrors) so the same transaction also
+        // re-MERGEs it — a durable mutation then leaves any pre-existing
+        // Feedback/Reviews pairing intact, with no later transient write needed.
+        //
+        // `.trans` is branch-local, so every file here is this project's
+        // transient state; this is an idempotent MERGE (the DETACH set above is
+        // durable-FQN-only), never a delete. It cannot resurrect an edge to a
+        // node removed by a `node rm`: `merge_edge`'s dangling-endpoint guard
+        // resolves each endpoint through `known` (this record set), the code
+        // graph, then the LIVE DB (`node_label`), and skips the MERGE when
+        // either endpoint is absent — a node already detached by this apply is
+        // gone from the DB, so its transient edges stay gone.
+        append_transient_records(apg_root, &mut records)?;
         let deletes = projection_deletes(apg_root, writes, deletes);
         project(&deletes, &records)?;
+    }
+    Ok(())
+}
+
+/// Appends the worktree's transient record set to `records`: the plan store
+/// (`.trans/plans/*.jsonl`) plus the five feedback tier mirrors
+/// (`.trans/<tier>/*.jsonl`), via the public enumerators
+/// [`specs::plan_files`](crate::specs::plan_files) /
+/// [`specs::trans_mirror_files`](crate::specs::trans_mirror_files). Used by
+/// [`write_project_with`]'s projection apply so a durable mutation re-MERGEs
+/// the transient nodes/edges (notably `Feedback -[:Reviews]-> <durable node>`)
+/// that its changed-FQN DETACH would otherwise drop. Errors loudly on a
+/// malformed transient file (never a silent skip).
+fn append_transient_records(apg_root: &Path, records: &mut Vec<Record>) -> anyhow::Result<()> {
+    for path in crate::specs::plan_files(apg_root)
+        .into_iter()
+        .chain(crate::specs::trans_mirror_files(apg_root))
+    {
+        records.extend(crate::specs::read_jsonl(&path)?);
     }
     Ok(())
 }
@@ -5350,6 +5391,113 @@ mod tests {
         assert_eq!(
             db_edges, expected_edges,
             "edges: db − sources and sources − db must both be empty"
+        );
+        drop(db);
+
+        testutil::remove(&repo);
+    }
+
+    /// A durable node/edge mutation must NOT drop a pre-existing transient
+    /// `Feedback -[:Reviews]-> <node>` pairing. The durable projection apply
+    /// DETACH-deletes every changed FQN; without re-merging the transient
+    /// records that DETACH takes the Reviews edge with it, and the pairing
+    /// stays gone until some later `apg plan`/`apg review` write (the
+    /// fix-reviews-edge bug). No `apg scan` and no transient write runs between
+    /// the durable mutation and the fresh read here.
+    #[test]
+    fn durable_mutation_preserves_transient_review_pairing() {
+        let (wt_apg, repo, _wt) = mutation_fixture("review-pairing");
+        let req_fqn = "requirements.requirement.timer";
+
+        // The durable node, via the real `apg node add` command shape.
+        let add = crate::node_cmd::build_change(
+            &wt_apg,
+            "node",
+            &[
+                "add".to_string(),
+                "requirements".to_string(),
+                "requirement".to_string(),
+                "timer".to_string(),
+            ],
+        )
+        .unwrap();
+        write_project(&wt_apg, &add.writes, &add.deletes).unwrap();
+
+        // A transient review of that durable node: both halves (the Feedback
+        // record AND its Reviews edge) live in the node's tier mirror —
+        // `.trans/requirements/foo.jsonl` (SPEC §5). The write-through merges
+        // the whole transient set, so the pairing is visible before the
+        // durable mutation under test.
+        let mirror = crate::specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &mirror,
+            "foo",
+            &[
+                Record::Feedback {
+                    fqn: "foo/feedback-1".to_string(),
+                    body: "review".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-1".to_string(),
+                    to: req_fqn.to_string(),
+                },
+            ],
+        )
+        .unwrap();
+        {
+            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert!(db.has_node("foo/feedback-1"));
+            let out = db
+                .q(&format!(
+                    "MATCH (:Feedback {{fqn: 'foo/feedback-1'}})-[:Reviews]->(:Requirement {{fqn: '{req_fqn}'}}) RETURN count(*)"
+                ))
+                .unwrap();
+            assert_eq!(
+                out.lines().last().map(str::trim),
+                Some("1"),
+                "the transient Reviews pairing must exist before the durable mutation: {out}"
+            );
+        }
+
+        // A DURABLE mutation on the same node (`apg node update`, the real
+        // command shape) — no plan/review write in between. Its changed-FQN
+        // DETACH removes the node and the incident Reviews edge; the projection
+        // apply must re-merge the transient records in the same transaction.
+        let update = crate::node_cmd::build_change(
+            &wt_apg,
+            "node",
+            &[
+                "update".to_string(),
+                "requirements".to_string(),
+                "requirement".to_string(),
+                "timer".to_string(),
+                "--body".to_string(),
+                "revised".to_string(),
+            ],
+        )
+        .unwrap();
+        write_project(&wt_apg, &update.writes, &update.deletes).unwrap();
+
+        // A fresh `ArtifactDb::open` — equivalent to a new `apg_query` process —
+        // still returns the Feedback node and its Reviews edge to the durable
+        // node.
+        let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        assert!(
+            db.has_node("foo/feedback-1"),
+            "the transient Feedback node must survive the durable mutation"
+        );
+        let out = db
+            .q(&format!(
+                "MATCH (:Feedback {{fqn: 'foo/feedback-1'}})-[:Reviews]->(:Requirement {{fqn: '{req_fqn}'}}) RETURN count(*)"
+            ))
+            .unwrap();
+        assert_eq!(
+            out.lines().last().map(str::trim),
+            Some("1"),
+            "the transient Reviews pairing must survive the durable mutation: {out}"
         );
         drop(db);
 
