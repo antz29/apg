@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "markdown-document",
+  "body": "A markdown source file scanned as a document: its headings are sections (symbols) nested by heading level, and its links are references (Uses edges) to other documents/sections. The document is the unit the markdown frontend discovers and emits. A section is a Struct because only Struct can contain Struct under the graph schema, so heading-level nesting is representable; a Function cannot contain and a File cannot contain a Module. Realised by the markdown frontend.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
