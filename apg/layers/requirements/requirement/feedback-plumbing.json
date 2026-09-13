@@ -21,6 +21,11 @@
       "kind": "drives",
       "target": "domain.entity.review-feedback",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.feedback-scope",
+      "properties": {}
     }
   ],
   "in": [
