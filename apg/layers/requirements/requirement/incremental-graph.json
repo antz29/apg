@@ -13,5 +13,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.stakeholder.apg-maintainer",
+      "properties": {}
+    }
+  ]
 }

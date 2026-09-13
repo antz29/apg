@@ -34,6 +34,11 @@
       "kind": "contains",
       "target": "requirements.requirement.incremental-content",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.incremental-graph",
+      "properties": {}
     }
   ],
   "in": []
