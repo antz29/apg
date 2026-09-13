@@ -6,6 +6,12 @@
   "properties": {
     "feature": "scan-freshness"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.fresh-rescan-fast-path",
+      "properties": {}
+    }
+  ],
   "in": []
 }
