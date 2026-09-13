@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "prose-grant-alignment",
+  "body": "The measure that an agent's prose statement of what it may read agrees with the permissions it actually holds: aligned when every capability the prose claims is permitted by the frontmatter grant — in particular, prose never claims it may read graph-state files (the durable spec node files or the transient plan/feedback stores) that the read-guard denies — and when the sanctioned interface (the apg tools) is the one the prose names. Distinct from domain.entity.agent-prose (the prose text itself) and domain.entity.permission-grant (the capability set): alignment is the relation between them, and the defect is its violation (prose says \"read any file\", grant denies graph-state paths). It is a measure, so it is deliberately not the source of a `realised-by` edge.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
