@@ -2,7 +2,7 @@
   "layer": "global",
   "type": "constraint",
   "name": "one-commit-per-mutation",
-  "body": "One logical mutation → one commit. Every `apg node` / `apg edge` mutation keeps its atomic write-and-commit envelope; batching the derived-projection flush is free, but batching commits is not, unless a deliberate decision changes this contract.",
+  "body": "One logical mutation → one commit. Every `apg node` / `apg edge` mutation keeps its atomic write-and-commit envelope: the mutation's durable write (its node/edge files) and its commit land as a single unit, and successive mutations each commit once. Batching commits across mutations is not permitted unless a deliberate decision changes this contract.\n\nThis law governs commits only. It says nothing that permits deferring or batching projection visibility: the projection delta is applied synchronously with the mutation and is never deferred, per `global.constraint.immediate-queryability`.",
   "properties": {},
   "out": [],
   "in": []
