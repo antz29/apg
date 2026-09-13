@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.incremental-acceptance-targets",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.incremental-content",
+      "properties": {}
     }
   ],
   "in": []
