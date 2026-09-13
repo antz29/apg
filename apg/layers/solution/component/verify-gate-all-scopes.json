@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "verify-gate-all-scopes",
-  "body": "The pre-merge coherence gate's feedback check. `apg.plan_cmd.plan_verify_at` (src/plan_cmd.rs:1584–1721) must load and require resolved every Feedback across the project's six transient stores, using `apg.specs.project_transient_files` (src/specs.rs:159–179) as the store set instead of `apg.plan_cmd.load_plan`'s plan-store-only view (src/plan_cmd.rs:32–38), and name each unresolved feedback FQN. Phase completion (`plan_complete_at`) stays phase-scoped.",
+  "body": "The pre-merge coherence gate's feedback check. The fix edits exactly one function: `apg.plan_cmd.plan_verify_at` (src/plan_cmd.rs:1584–1721) must load and require resolved every Feedback across the project's six transient stores, using `apg.specs.project_transient_files` as the store set instead of `apg.plan_cmd.load_plan`'s plan-store-only view, and name each unresolved feedback FQN. The reused helpers are unchanged and are not edited: `apg.specs.project_transient_files` (src/specs.rs:159–179) is called as-is to enumerate the six stores, and `apg.plan_cmd.load_plan` (src/plan_cmd.rs:32–38) stays plan-store-only because it is shared by `plan_done`/`plan_complete`/`plan_render`. Phase completion (`plan_complete_at`) stays phase-scoped.",
   "properties": {},
   "out": [
     {
