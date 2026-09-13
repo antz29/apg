@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "markdown-build-and-acceptance",
+  "body": "The markdown frontend must be a first-class build artifact staged like the other frontends: build.rs gains the md block (the APG_BUILD_FRONTENDS allowlist entry, the staged artifact under target/<profile>/frontends, the APG_FRONTEND_MD path, and the APG_LANGUAGES entry) and the runtime frontend lookup resolves it. Acceptance: a markdown fixture (one file with nested headings and an internal link), a multi-file link fixture, and a broken/external-link fixture scan cleanly on a scratch /tmp repo per no-real-project-test; the emitted module/file/section nodes and uses/unresolved edges match the exactness rule. AC: the fixtures scan and the asserted node/edge shapes hold.",
+  "properties": {
+    "feature": "markdown-frontend"
+  },
+  "out": [],
+  "in": []
+}
