@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "content-not-mtime",
+  "body": "Cache keys and reuse decisions must use content (git blob OID) and resolution inputs, never file mtime or size alone.",
+  "properties": {
+    "attaches-to": "domain.entity.content-manifest"
+  },
+  "out": [],
+  "in": []
+}
