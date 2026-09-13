@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "metadata-mutation-graph-consistency",
+  "body": "After ANY metadata mutation — a durable `apg node`/`apg edge` write (the node/edge files) or a transient plan/task/planned/feedback write (`apg plan`/`apg review`, the plan store and its mirrors) — the queryable graph (`apg/.trans/db.lbug`) reflects the change immediately, with no code re-scan. Metadata-only changes keep the projection consistent in place. This is the human's law: a re-scan must only ever be necessary after source-code changes; unnecessary re-scans are blocking on large codebases. Acceptance: immediately after a durable node/edge add/update/rm AND after a plan/task/planned/feedback add/rm, an `apg_query` returns the post-mutation state — no stale rows, no missing rows — without running `apg scan`.",
+  "properties": {
+    "feature": "graph-consistency"
+  },
+  "out": [],
+  "in": []
+}
