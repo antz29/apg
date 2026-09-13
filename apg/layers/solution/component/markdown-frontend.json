@@ -30,6 +30,11 @@
       "kind": "details",
       "source": "requirements.note.markdown-frontend-evidence",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.markdown-frontend-open-points",
+      "properties": {}
     }
   ]
 }

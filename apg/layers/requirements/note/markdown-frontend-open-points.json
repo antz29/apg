@@ -4,6 +4,12 @@
   "name": "markdown-frontend-open-points",
   "body": "Open design points for the plan/user, not decidable from the graph: (1) section-name slug rule — how heading text becomes a name segment (case, whitespace, punctuation, unicode, duplicate headings in one file); the section FQN needs a deterministic, collision-free mapping. (2) frontend implementation — the md frontend's own language and artifact (a new src/mdlib standalone binary built by build.rs, vs a Node/Go script) and its JSONL emission shape. (3) accept set — whether the md id owns only .md/.markdown or also hybrid extensions such as .mdx (JSX-embedded, arguably the JS/TS frontend's concern). (4) link-resolution scope — how anchors (#heading) are handled, whether links to non-markdown files resolve to code symbols or stay unresolved, and file-relative vs repo-root-relative path resolution. (5) root-directory module identity — the directory-based module FQN for markdown living at the repo root (no directory path to name it). (6) heading forms — whether a section is always a Struct even for a single-section document, and how setext headings vs ATX headings map.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.component.markdown-frontend",
+      "properties": {}
+    }
+  ],
   "in": []
 }
