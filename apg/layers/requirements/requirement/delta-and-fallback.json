@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "delta-and-fallback",
+  "body": "The delta is `git diff --name-status -M <recorded>` for committed changes, PLUS working-tree/index/untracked state (`git status --porcelain`). Fall back to a full scan when the recorded commit is not an ancestor of HEAD, or when the binary/format/config cache key has drifted. These fallbacks are correctness/version gates, not heuristics. AC: each fallback condition has a test showing a correct full-scan result.",
+  "properties": {
+    "feature": "incremental-content"
+  },
+  "out": [],
+  "in": []
+}
