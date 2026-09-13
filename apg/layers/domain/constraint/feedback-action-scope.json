@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "constraint",
   "name": "feedback-action-scope",
-  "body": "The feedback-action capability (`apg_review_action`) is held only by the coordinator. Plan-writers, spec-writers, and implementers hold read-only feedback access (`apg_review`) and must never action, resolve, or reject feedback; reviewers attach, resolve, and reject but never action. A writer's disposition is a claim returned to the coordinator, not a state transition.",
+  "body": "The feedback-action capability (`apg_review_action`) is held only by the coordinator. Every writer agent the suite defines or scaffolds — the spec-writer, the plan-writer, the implementer, and every test-implementer the agent-builder scaffolds — holds read-only feedback access (`apg_review`) and must never action, resolve, or reject feedback; reviewers attach, resolve, and reject but never action. A writer's disposition is a claim returned to the coordinator, not a state transition.",
   "properties": {
     "attaches-to": "domain.entity.permission-grant"
   },
