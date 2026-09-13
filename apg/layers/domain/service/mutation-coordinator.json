@@ -14,6 +14,11 @@
       "kind": "realised-by",
       "target": "solution.component.session-lifecycle",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.session-routing",
+      "properties": {}
     }
   ],
   "in": [

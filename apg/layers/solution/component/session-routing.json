@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "source": "domain.entity.mutation-session",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.mutation-coordinator",
+      "properties": {}
     }
   ]
 }
