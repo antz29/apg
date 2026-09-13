@@ -6,7 +6,13 @@
   "properties": {
     "feature": "markdown-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.markdown-document",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
