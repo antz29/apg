@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.component.js-ts-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.code-type-classifier",
+      "properties": {}
     }
   ],
   "in": [
