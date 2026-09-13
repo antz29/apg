@@ -6,7 +6,13 @@
   "properties": {
     "kind": "service"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.js-ts-frontend",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
