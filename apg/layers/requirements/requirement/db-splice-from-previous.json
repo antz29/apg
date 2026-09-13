@@ -6,7 +6,13 @@
   "properties": {
     "feature": "incremental-graph"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.service.graph-projection",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
