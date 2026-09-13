@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.user.apg-cli-runner",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.user.suite-agent",
+      "properties": {}
     }
   ],
   "in": []
