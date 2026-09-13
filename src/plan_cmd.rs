@@ -1621,26 +1621,24 @@ pub(crate) fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<(
         }
     }
 
-    // 2. All feedback resolved — plan/phase/task scope.
-    let targets: Vec<String> = records
+    // 2. All feedback resolved — every scope. Feedback lives in the project's
+    // six transient files: the plan store plus the five tier mirrors (SPEC
+    // §5). Feedback attached to a durable layer node or a code node never
+    // lands in the plan store, so the gate reads every file itself — skipping
+    // absent mirrors (`specs::read_jsonl` errors on a missing path). Every
+    // unresolved Feedback (`open` or `actioned`) blocks verify, named by FQN;
+    // `apg plan complete` stays phase-scoped (it reads only the plan store).
+    let mut feedback_records: Vec<Record> = Vec::new();
+    for f in specs::project_transient_files(apg_root, project) {
+        if f.exists() {
+            feedback_records.extend(specs::read_jsonl(&f)?);
+        }
+    }
+    let unresolved: Vec<String> = feedback_records
         .iter()
         .filter_map(|r| match r {
-            Record::Plan { fqn, .. } | Record::PlanPhase { fqn, .. } | Record::Task { fqn, .. } => {
-                Some(fqn.clone())
-            }
+            Record::Feedback { fqn, status, .. } if status != "resolved" => Some(fqn.clone()),
             _ => None,
-        })
-        .collect();
-    let unresolved: Vec<String> = records
-        .iter()
-        .filter_map(|e| match e {
-            Record::Reviews { from, to } if targets.contains(to) => Some(from.clone()),
-            _ => None,
-        })
-        .filter(|f| {
-            records.iter().any(|r| {
-                matches!(r, Record::Feedback { fqn, status, .. } if fqn == f && status != "resolved")
-            })
         })
         .collect();
 
@@ -5463,6 +5461,118 @@ mod tests {
             "{err}"
         );
         assert!(err.to_string().contains("foo/feedback-structural"), "{err}");
+
+        testutil::remove(&repo);
+    }
+
+    /// The coherence gate spans every feedback scope: an open Feedback in a
+    /// project's tier mirror (here a durable-node review in
+    /// `.trans/requirements/foo.jsonl`) blocks verify and is named, while the
+    /// milestone-only `plan complete` stays phase-scoped (it reads only the
+    /// plan store).
+    #[test]
+    fn plan_verify_gates_feedback_in_tier_mirrors() {
+        let (apg_root, repo, _wt) = fixture("verify-tiers");
+
+        // Plan store: a plan, a completed phase/task, and a realized planned
+        // node so verify has no blocker of its own.
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let records = vec![
+            Record::Plan {
+                fqn: "foo/plan".to_string(),
+                title: "P".to_string(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".to_string(),
+                number: 1,
+                title: "P1".to_string(),
+                deliverable: "D".to_string(),
+                status: "pending".to_string(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".to_string(),
+                title: "T".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "done".to_string(),
+                verb: "creates".to_string(),
+                target: String::new(),
+                new_fqn: String::new(),
+            },
+            Record::PlannedNode {
+                fqn: "github.com/x/y.Store".to_string(),
+                kind: "struct".to_string(),
+                name: "Store".to_string(),
+                parent: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan".to_string(),
+                to: "foo/plan.phase-01".to_string(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".to_string(),
+                to: "foo/plan.phase-01.task-1".to_string(),
+            },
+        ];
+        specs::write_jsonl(&path, &records).unwrap();
+
+        // A durable-node review lands in the requirements tier mirror — NOT the
+        // plan store, so the old plan-store-only check never saw it.
+        let mirror =
+            specs::transient_feedback_path(&apg_root, "foo", crate::layers::Layer::Requirements);
+        let feedback = vec![
+            Record::Feedback {
+                fqn: "foo/feedback-durable".to_string(),
+                body: "durable issue".to_string(),
+                status: "open".to_string(),
+                disposition: String::new(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-durable".to_string(),
+                to: "requirements.requirement.timer".to_string(),
+            },
+        ];
+        specs::write_jsonl(&mirror, &feedback).unwrap();
+
+        // `plan complete` is phase-scoped: feedback outside the phase/its tasks
+        // does not gate the milestone.
+        assert!(
+            plan_complete_at(&apg_root, "foo", 1).is_ok(),
+            "phase milestone must ignore feedback outside its scope"
+        );
+
+        // The coherence gate DOES see it: verify refuses, naming the FQN.
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        assert!(
+            err.to_string().contains("unresolved review feedback"),
+            "{err}"
+        );
+        assert!(err.to_string().contains("foo/feedback-durable"), "{err}");
+
+        // Resolve it → verify passes.
+        let resolved: Vec<Record> = feedback
+            .iter()
+            .map(|r| match r {
+                Record::Feedback {
+                    fqn,
+                    body,
+                    disposition,
+                    ..
+                } => Record::Feedback {
+                    fqn: fqn.clone(),
+                    body: body.clone(),
+                    status: "resolved".to_string(),
+                    disposition: disposition.clone(),
+                },
+                other => other.clone(),
+            })
+            .collect();
+        specs::write_jsonl(&mirror, &resolved).unwrap();
+        assert!(
+            plan_verify_at(&apg_root, "foo").is_ok(),
+            "verify must pass once every tier-mirror Feedback is resolved"
+        );
 
         testutil::remove(&repo);
     }

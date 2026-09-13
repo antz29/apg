@@ -916,6 +916,11 @@ fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     ] {
         v.push(("Reviews", Feedback, to));
     }
+    // `Note` is reviewable — a reviewer can attach Feedback to a note — but it
+    // is deliberately NOT a `Details` target: `Note`→`Note` `Details` must stay
+    // refused, so the pair is added to `Reviews` only, never to the shared
+    // `Details` list above.
+    v.push(("Reviews", Feedback, Note));
     v.push(("Gates", PlanPhase, PlanPhase));
     v.push(("DependsOn", Requirement, Requirement));
     v.push(("Satisfies", PlanPhase, Requirement));
@@ -1154,7 +1159,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE Details(FROM Note TO Module, FROM Note TO Function, FROM Note TO Struct, FROM Note TO File, FROM Note TO Requirement, FROM Note TO Plan, FROM Note TO PlanPhase, FROM Note TO Task, FROM Note TO Stakeholder, FROM Note TO Entity, FROM Note TO System, FROM Note TO Container, FROM Note TO Component, FROM Note TO User, FROM Note TO DomainGroup, FROM Note TO Value, FROM Note TO Service, FROM Note TO Person, FROM Note TO Constraint)",
     )?;
     conn.query(
-        "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Requirement, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task, FROM Feedback TO Stakeholder, FROM Feedback TO Entity, FROM Feedback TO System, FROM Feedback TO Container, FROM Feedback TO Component, FROM Feedback TO User, FROM Feedback TO DomainGroup, FROM Feedback TO Value, FROM Feedback TO Service, FROM Feedback TO Person, FROM Feedback TO Constraint)",
+        "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Requirement, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task, FROM Feedback TO Stakeholder, FROM Feedback TO Entity, FROM Feedback TO System, FROM Feedback TO Container, FROM Feedback TO Component, FROM Feedback TO User, FROM Feedback TO DomainGroup, FROM Feedback TO Value, FROM Feedback TO Service, FROM Feedback TO Person, FROM Feedback TO Constraint, FROM Feedback TO Note)",
     )?;
     conn.query("CREATE REL TABLE DependsOn(FROM Requirement TO Requirement)")?;
     conn.query("CREATE REL TABLE Gates(FROM PlanPhase TO PlanPhase)")?;
@@ -3135,6 +3140,39 @@ mod tests {
                     || (*t == "Uses" && *f == NodeKind::Person && *to == NodeKind::System)
             }),
             "spec_rel_pairs feeds build_load_files/copy_from — the authored pairs must stay out"
+        );
+    }
+
+    /// `Note` is a reviewable artifact, so the `Reviews` target list admits
+    /// `(Feedback, Note)` (and therefore the schema + merge guard do too), while
+    /// `Note` stays out of the shared `Details` target list — `Note`→`Note`
+    /// `Details` must remain refused.
+    #[test]
+    fn reviews_pairs_admit_note_but_details_still_excludes_it() {
+        let pairs = rel_table_pairs();
+        assert!(
+            pairs.contains(&("Reviews", "Feedback", "Note")),
+            "Reviews must declare Feedback→Note: {pairs:?}"
+        );
+        assert!(
+            !pairs.contains(&("Details", "Note", "Note")),
+            "Note→Note Details must stay refused: {pairs:?}"
+        );
+
+        // The enumeration itself: the Reviews pair is present, the Details pair
+        // is not.
+        let spec = spec_rel_pairs();
+        assert!(
+            spec.iter().any(|(t, f, to)| {
+                *t == "Reviews" && *f == NodeKind::Feedback && *to == NodeKind::Note
+            }),
+            "spec_rel_pairs must declare the Reviews Feedback→Note pair: {spec:?}"
+        );
+        assert!(
+            !spec.iter().any(|(t, f, to)| {
+                *t == "Details" && *f == NodeKind::Note && *to == NodeKind::Note
+            }),
+            "spec_rel_pairs must NOT declare a Details Note→Note pair: {spec:?}"
         );
     }
 }

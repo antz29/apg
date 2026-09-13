@@ -491,6 +491,17 @@ mod tests {
             },
         );
 
+        // A durable Note (SPEC §3.1) — reviewable, but deliberately absent from
+        // the shared `Details` target list. A review on it exercises the
+        // Reviews-only `(Feedback, Note)` pair.
+        g.nodes.insert(
+            "requirements.note.design".to_string(),
+            Node {
+                kind: NodeKind::Note,
+                ..Node::default()
+            },
+        );
+
         let ldir = dir.join("apg").join(specs::TRANS).join("load");
         std::fs::create_dir_all(&ldir).unwrap();
         load::build_load_files(&g, &ldir).unwrap();
@@ -843,6 +854,59 @@ mod tests {
         assert!(
             !apg_root.join("notes").exists(),
             "apg/notes must never be written"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    fn review_add_roundtrips_reviews_edge_to_note() {
+        // A review of a durable `Note` target must land a
+        // `Feedback-[:Reviews]->Note` edge in db.lbug. Before the Reviews-only
+        // `(Feedback, Note)` pair existed, `rel_pair_allowed` refused the pair
+        // and `merge_edge` silently dropped the edge — the Feedback survived
+        // but `apg review list` could not show it.
+        let (apg_root, repo, _wt) = fixture("note-roundtrip");
+
+        let p = parse_args(&[
+            "requirements.note.design".to_string(),
+            "--body".to_string(),
+            "note review".to_string(),
+            "--project".to_string(),
+            "foo".to_string(),
+        ]);
+        apply_review_add(&apg_root, &p).unwrap();
+
+        // A fresh DB read (equivalent to a new apg_query process) sees both the
+        // Feedback node and the Reviews edge to the Note.
+        let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+        assert!(db.has_node("foo/feedback-1"), "feedback-1 node dropped");
+        let out = db
+            .conn()
+            .unwrap()
+            .query("MATCH (:Feedback {fqn: 'foo/feedback-1'})-[:Reviews]->(n:Note) RETURN n.fqn")
+            .unwrap()
+            .to_string();
+        assert!(
+            out.contains("requirements.note.design"),
+            "note reviews edge dropped: {out}"
+        );
+        drop(db);
+
+        // Both halves live in the requirements tier mirror (the reviewed
+        // node's tier), not the plan store.
+        let mirror = apg_root
+            .join(specs::TRANS)
+            .join("requirements")
+            .join("foo.jsonl");
+        let recs = specs::read_jsonl(&mirror).unwrap();
+        assert!(
+            recs.iter().any(|r| matches!(
+                r,
+                Record::Reviews { from, to }
+                    if from == "foo/feedback-1" && to == "requirements.note.design"
+            )),
+            "the note review must land in the requirements tier mirror"
         );
 
         testutil::remove(&repo);
