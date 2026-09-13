@@ -5,5 +5,11 @@
   "body": "The module prefix rendered for a discovered project (a Cargo package name — root apg vs nested apg-rustfrontend; or an npm package name for JS/TS). Distinct prefixes keep nested-project FQNs disjoint and collision-free.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.frontend-coverage",
+      "properties": {}
+    }
+  ]
 }
