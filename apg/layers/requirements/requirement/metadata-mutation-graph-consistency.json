@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.rescan-only-on-code-change",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.projection-equals-sources",
+      "properties": {}
     }
   ],
   "in": [
