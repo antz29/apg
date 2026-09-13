@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.writers-read-only-feedback",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.coordinator-single-item-dispatch",
+      "properties": {}
     }
   ],
   "in": [
