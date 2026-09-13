@@ -33,6 +33,11 @@
       "kind": "contains",
       "source": "solution.system.apg-scan",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.frontend-coverage",
+      "properties": {}
     }
   ]
 }
