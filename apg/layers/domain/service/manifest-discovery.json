@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "manifest-discovery",
+  "body": "Enumerating every Cargo manifest under the scan root, loading each project/workspace with rust-analyzer, and merging the emitted facts — so nested non-workspace crates are covered. Dedupes workspace discovery by manifest root and skips generated/dependency trees.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
