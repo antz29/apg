@@ -4,7 +4,13 @@
   "name": "durable-projection-transient-remerge",
   "body": "The durable mutation's projection apply, extended to preserve transient pairings: `apg.layers.write_project_with` (src/layers.rs:2140) re-merges the assembled transient record set — the plan store plus all transient tier mirrors, the same assembly `apg.artifacts.assembled_records` builds for the transient path — after the DETACH of the mutation's exact FQN delta (the `solution.component.projection-delta-applier` deletion semantics), so a pre-existing `Feedback-[:Reviews]` edge on a changed FQN survives with no transient write in between. The durable path's record set is otherwise `apg.layers.ingest_tree` alone.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "apg.layers.write_project_with",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "realised-by",
