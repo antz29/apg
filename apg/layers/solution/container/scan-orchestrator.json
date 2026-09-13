@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "solution.component.impact-closure",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.language-detector",
+      "properties": {}
     }
   ],
   "in": [

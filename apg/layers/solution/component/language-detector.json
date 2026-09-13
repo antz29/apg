@@ -5,5 +5,11 @@
   "body": "The scan-orchestrator language detector: maps repo source extensions to language ids (including the new js) and forwards module directories to the frontends, skipping generated/dependency directories and not double-running the unified JS/TS frontend over a TS repo that also contains JavaScript. Implemented today by auto_detect_languages / has_extension / id_prefix_for / frontend_cmd in src/main.rs; extended with the js id.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scan-orchestrator",
+      "properties": {}
+    }
+  ]
 }
