@@ -6,7 +6,13 @@
   "properties": {
     "feature": "tooling-review"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.feedback-scope",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

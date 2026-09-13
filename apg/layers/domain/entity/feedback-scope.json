@@ -12,6 +12,11 @@
       "kind": "drives",
       "source": "requirements.requirement.feedback-plumbing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.verify-gate-all-feedback-scopes",
+      "properties": {}
     }
   ]
 }
