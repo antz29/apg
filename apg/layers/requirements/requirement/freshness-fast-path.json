@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "freshness-fast-path",
+  "body": "Feature scan-freshness (win A). When the scan's recorded git/content state matches the current tree exactly, `apg scan` must reuse the existing DB and skip the language frontends entirely, so a no-op re-scan is effectively instant. The fast-path is pure APG-level and reuses the existing scan_meta / Scan node state. This capability decomposes into the no-op fast-path and the content-identity rule it depends on.",
+  "properties": {
+    "feature": "scan-freshness"
+  },
+  "out": [],
+  "in": []
+}
