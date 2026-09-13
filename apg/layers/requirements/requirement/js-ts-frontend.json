@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.js-ts-exactness-unresolved",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.js-ts-language-plumbing",
+      "properties": {}
     }
   ],
   "in": []
