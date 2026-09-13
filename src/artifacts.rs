@@ -2203,4 +2203,68 @@ mod tests {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-04 task-3 (acceptance): the next scan rebuilds `db.lbug` from
+    /// source and every metadata mutation stays visible in the query index.
+    ///
+    /// The mutation is projected write-through first (immediately queryable),
+    /// then the index is deleted and the real post-code scan leg re-run: the
+    /// rebuilt DB is a fresh file carrying both the scanned code and the
+    /// durable node-file mutation — no re-scan is needed for the metadata, and
+    /// the scan never loses it.
+    #[test]
+    fn acceptance_next_scan_rebuilds_db_from_source_and_keeps_mutations_visible() {
+        use std::os::unix::fs::MetadataExt;
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("accept-scan-rebuild");
+
+        // A durable mutation lands write-through: immediately queryable with no
+        // scan.
+        layers::write_project(
+            &wt_apg,
+            &[layers::NodeFile {
+                layer: "requirements".to_string(),
+                node_type: "requirement".to_string(),
+                name: "rebuilt".to_string(),
+                body: "survives the rebuild".to_string(),
+                properties: std::collections::BTreeMap::new(),
+                out: Vec::new(),
+                in_edges: Vec::new(),
+            }],
+            &[],
+        )
+        .unwrap();
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            assert!(db.has_node("requirements.requirement.rebuilt"));
+            assert!(db.has_node("fixture.mod.Store"));
+        }
+
+        // The next scan REBUILDS `db.lbug` from source: remove the index (a
+        // scan unlinks and recreates it) and run the real post-code scan leg.
+        let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
+        let inode_before = std::fs::metadata(&db_path).unwrap().ino();
+        std::fs::remove_file(&db_path).unwrap();
+        testutil::scan_checkout(&wt).unwrap();
+        let inode_after = std::fs::metadata(&db_path).unwrap().ino();
+        assert_ne!(
+            inode_before, inode_after,
+            "the scan must rebuild db.lbug as a fresh file"
+        );
+
+        // Every mutation remains visible in the rebuilt index, alongside the
+        // freshly scanned code.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        assert!(
+            db.has_node("requirements.requirement.rebuilt"),
+            "the metadata mutation must survive the scan rebuild"
+        );
+        assert!(
+            db.has_node("fixture.mod.Store"),
+            "the scanned code must be rebuilt from source"
+        );
+        drop(db);
+
+        testutil::remove(&repo);
+    }
 }

@@ -687,4 +687,124 @@ mod tests {
 
         remove(&repo);
     }
+
+    /// Phase-04 task-2 (acceptance): a REAL long-running `apg session start`,
+    /// SIGKILLed (NOT gracefully ended) mid-life, loses nothing durable and
+    /// leaves no partial store:
+    ///
+    /// (a) no node file left half-written — every expected file parses with the
+    ///     right identity;
+    /// (b) no paired edge half mismatched — the store still pairs and both the
+    ///     source out-half and target in-half of the routed edge are present;
+    /// (c) no process holds `db.lbug` — a direct read-write open succeeds;
+    /// (d) the stale socket is reclaimed by the next `apg session start` with
+    ///     no live process behind it.
+    ///
+    /// The routed mutations deliberately write a node AND an edge (both
+    /// endpoint files), so a crash between the two halves of the edge would be
+    /// caught by (b) — the node-only phase-03 regression cannot see that.
+    #[test]
+    fn acceptance_crash_durability_no_partial_files_no_db_holder_and_socket_reclaim() {
+        let (repo, wt, wt_apg) = project_with_db("accept-crash");
+        let home = repo.root.join("home");
+        let session = start_session_process(&wt, &home);
+
+        // Two routed node adds and the routed edge between them.
+        for name in ["crash-a", "crash-b"] {
+            let add = ApgCommand::new(&["node", "add", "requirements", "requirement", name])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                add.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&add.stderr)
+            );
+        }
+        let edge = ApgCommand::new(&[
+            "edge",
+            "add",
+            "depends-on",
+            "requirements.requirement.crash-a",
+            "requirements.requirement.crash-b",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            edge.status.success(),
+            "{}",
+            String::from_utf8_lossy(&edge.stderr)
+        );
+
+        // SIGKILL — deliberately NOT a graceful `end`.
+        let pid = session.child.id() as i32;
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            !out.status.success(),
+            "the session was killed, not ended cleanly"
+        );
+
+        // (a) no half-written node file: every expected file parses with its
+        // identity intact.
+        for name in ["crash-a", "crash-b"] {
+            let nf =
+                layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", name).unwrap();
+            assert_eq!(nf.name, name, "node file {name} must be complete");
+        }
+
+        // (b) no paired edge half mismatched: the store pairs cleanly AND both
+        // halves of the routed edge are present.
+        let all = layers::read_existing_nodes(&wt_apg).unwrap();
+        layers::check_edge_pairing(&all).unwrap();
+        let a =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "crash-a").unwrap();
+        assert!(
+            a.out.iter().any(
+                |oe| oe.kind == "depends-on" && oe.target == "requirements.requirement.crash-b"
+            ),
+            "the source out-half must be present and complete"
+        );
+        let b =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "crash-b").unwrap();
+        assert!(
+            b.in_edges.iter().any(
+                |ie| ie.kind == "depends-on" && ie.source == "requirements.requirement.crash-a"
+            ),
+            "the target in-half must be present and match the out-half"
+        );
+
+        // (c) no process holds db.lbug: a direct read-write open succeeds now
+        // (the SIGKILL released the OS lock).
+        let db = crate::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        assert!(db.has_node("requirements.requirement.crash-a"));
+        assert!(db.has_node("requirements.requirement.crash-b"));
+        drop(db);
+
+        // (d) the SIGKILL left the socket file behind; the next start reclaims
+        // it (no live process behind it) and serves normally.
+        let socket = crate::session::socket_path(&wt_apg);
+        assert!(socket.exists(), "SIGKILL leaves the stale socket behind");
+        let session2 = start_session_process(&wt, &home);
+        let end = spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out2 = session2.child.wait_with_output().unwrap();
+        assert!(
+            out2.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out2.stderr)
+        );
+        let stderr2 = String::from_utf8_lossy(&out2.stderr);
+        assert!(
+            stderr2.contains("reclaimed stale socket"),
+            "the next start must reclaim the stale socket: {stderr2}"
+        );
+
+        remove(&repo);
+    }
 }

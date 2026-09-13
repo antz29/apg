@@ -2241,6 +2241,92 @@ mod tests {
         );
     }
 
+    /// Phase-04 task-4 (acceptance): the `apg node` / `apg edge` command
+    /// surface is transparent — the SAME literal forms the CLI documents appear
+    /// in `help_text`, the node/edge suite tools, and the distributed agent
+    /// prompts.
+    ///
+    /// The expected strings are PINNED here as literals, not read back from the
+    /// consts: a test that compares `AGENTS`/`SUITE_TOOLS` to themselves is a
+    /// tautology and would pass even after a surface drift.
+    #[test]
+    fn acceptance_node_edge_surface_is_transparent_and_pinned_in_help_tools_and_agents() {
+        // 1. `apg --help` documents the exact command surface (literal lines).
+        let help = help_text();
+        for needle in [
+            "apg node <sub> …",
+            "apg edge <sub> …",
+            "Durable node-file model mutations:",
+            "add/update/rm (type-as-argument, writes apg/layers;",
+            "add/update/rm (kind/from/to;",
+        ] {
+            assert!(
+                help.contains(needle),
+                "help must contain {needle:?}: {help}"
+            );
+        }
+
+        // 2. The embedded suite tools carry the exact mutating command forms.
+        let tool = |name: &str| -> &'static str {
+            SUITE_TOOLS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("SUITE_TOOLS must embed {name}"))
+        };
+        assert!(
+            tool("apg_node.ts").contains("apg node add|update|rm <layer> <type> <name>"),
+            "apg_node.ts must carry the pinned node command form"
+        );
+        assert!(
+            tool("apg_edge.ts").contains("apg edge add|update|rm <kind> <from> <to>"),
+            "apg_edge.ts must carry the pinned edge command form"
+        );
+
+        // 3. The distributed agent prompts: the authoring prompts carry the
+        // exact command forms; the reviewer/builder prompts name the tools.
+        let agent = |name: &str| -> &'static str {
+            AGENTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("AGENTS must embed {name}"))
+        };
+        let pinned: &[(&str, &str)] = &[
+            (
+                "spec-writer.md",
+                "apg node add|update|rm <layer> <type> <name> [--body …] [--property k=v]* [--unset-property k]*",
+            ),
+            (
+                "spec-writer.md",
+                "apg edge add|update|rm <kind> <from> <to> [--property k=v]* [--unset-property k]*",
+            ),
+            (
+                "codebase-navigator.md",
+                "`apg node add|update|rm` / `apg edge add|update|rm`",
+            ),
+            ("spec-review.md", "`apg_node`/`apg_edge`"),
+            ("agent-builder.md", "`apg_node`/`apg_edge`/`apg_plan_add`"),
+        ];
+        for (name, needle) in pinned {
+            assert!(
+                agent(name).contains(needle),
+                "agent prompt {name} must contain {needle:?}"
+            );
+        }
+
+        // Every embedded agent prompt is scanned: none may name a retired
+        // surface (the pinned forms above are the only accepted vocabulary).
+        for (name, content) in AGENTS {
+            for retired in ["plan init", "plan link", "apg_plan_init", "apg_plan_link"] {
+                assert!(
+                    !content.contains(retired),
+                    "agent prompt {name} must not name the retired `{retired}`"
+                );
+            }
+        }
+    }
+
     /// Phase-03 task-23: with a session live, a separate routed `apg query`
     /// process returns the post-mutation state with no lock error and without
     /// waiting for the session to end. A NON-routing direct `db.lbug` open is
@@ -2529,5 +2615,358 @@ mod tests {
         );
 
         testutil::remove(&repo);
+    }
+
+    /// Phase-04 task-7 (acceptance, feedback-30): immediate queryability /
+    /// read-your-writes across the real CLI. A spawned `apg node add
+    /// requirements requirement foo` returns, then a NEW `apg query` process
+    /// resolves foo — no re-scan, no explicit flush, no session-end step — and
+    /// the test asserts NO `apg scan` was invoked: `db.lbug`'s inode never
+    /// changes (a scan unlinks and recreates it), the scan's `scanned_at`
+    /// scan-meta is never restamped, and the scan pipeline's
+    /// `apg-frontend.log` is never recreated.
+    #[test]
+    fn acceptance_read_your_writes_across_the_real_cli_without_a_scan() {
+        use std::os::unix::fs::MetadataExt;
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("accept-ryw");
+        let home = repo.root.join("home");
+
+        let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
+        let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
+        let log_path = wt_apg.join(specs::TRANS).join("apg-frontend.log");
+        let scanned_at = |graph: &Path| -> String {
+            let text = std::fs::read_to_string(graph).unwrap();
+            let first = text.lines().next().unwrap_or_default().to_string();
+            serde_json::from_str::<serde_json::Value>(&first)
+                .ok()
+                .and_then(|v| {
+                    v.get("scanned_at")
+                        .and_then(|s| s.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_default()
+        };
+        let inode_before = std::fs::metadata(&db_path).unwrap().ino();
+        let scan_meta_before = scanned_at(&graph_path);
+        // A scan would recreate this; a metadata mutation never enters the scan
+        // pipeline.
+        let _ = std::fs::remove_file(&log_path);
+
+        // (1) `apg node add requirements requirement foo` returns.
+        let add = testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "foo"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+
+        // (2) A NEW `apg query` process resolves foo — no flush/session-end.
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(q.status.success(), "{}", String::from_utf8_lossy(&q.stderr));
+        assert_eq!(
+            String::from_utf8_lossy(&q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "a NEW process must read the mutation immediately"
+        );
+
+        // (3) No `apg scan` was invoked.
+        assert_eq!(
+            std::fs::metadata(&db_path).unwrap().ino(),
+            inode_before,
+            "db.lbug must never be re-created by a metadata mutation"
+        );
+        assert_eq!(
+            scanned_at(&graph_path),
+            scan_meta_before,
+            "a metadata mutation must never restamp the scan_meta (no scan ran)"
+        );
+        assert!(
+            !log_path.exists(),
+            "a metadata mutation must not enter the scan pipeline"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Initializes a bare scratch git repo at `dir` (branch `main`) with the
+    /// test identity configured — the fresh NON-FIXTURE target of the
+    /// external-project acceptance (no `apg/` layout: the real `apg init` is
+    /// part of the test).
+    fn scratch_repo_init(dir: &Path) -> git2::Repository {
+        std::fs::create_dir_all(dir).unwrap();
+        let mut opts = git2::RepositoryInitOptions::new();
+        opts.initial_head("refs/heads/main");
+        let repo = git2::Repository::init_opts(dir, &opts).unwrap();
+        {
+            let mut cfg = repo.config().unwrap();
+            cfg.set_str("user.name", "apg scratch test").unwrap();
+            cfg.set_str("user.email", "apg-scratch@example.com")
+                .unwrap();
+        }
+        repo
+    }
+
+    /// Commits every change under `dir` (git2 — the git CLI is never shelled
+    /// out to anywhere in src). Tolerates an unborn HEAD (the first commit).
+    fn scratch_commit_all(dir: &Path, msg: &str) {
+        let repo = git2::Repository::open(dir).unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo.head().ok().map(|h| h.peel_to_commit().unwrap());
+        let parents: Vec<&git2::Commit> = head.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, parents.as_slice())
+            .unwrap();
+    }
+
+    /// Phase-04 task-8 (acceptance): the hermetic external-project scratch-repo
+    /// acceptance — a FRESH NON-FIXTURE repo driven by a REAL `apg init` + REAL
+    /// `apg scan` (the genuine added dimension; every other test uses the
+    /// hermetic `scan_checkout` payload fixture).
+    ///
+    /// The already-built artifact is resolved through the `apg.testutil`
+    /// binary-locating helper (`ApgCommand`) — no nested `cargo build`. Each
+    /// spawned child gets its own isolated `HOME` via `Command::env` (edition
+    /// 2024 forbids process-wide `env::set_var`, and `apg init` installs the
+    /// suite into `$HOME/.opencode`). A real source file is committed BEFORE
+    /// scanning so `auto_detect_languages` selects just the Go frontend. The
+    /// project context is established with `apg project start`, and every
+    /// durable-write assertion runs with cwd inside
+    /// `<scratch>/apg/.worktrees/<name>`. Both the `/tmp` scratch repo and the
+    /// isolated HOME are torn down at the end.
+    #[test]
+    fn acceptance_scratch_repo_real_init_scan_burst_read_your_writes_and_session() {
+        let base = std::env::temp_dir().join(format!("apg-accept-scratch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // Pre-create the opencode dependency dir so `apg init` never shells out
+        // to npm (`cmd_init` skips npm when this path already exists) — keeps
+        // the test hermetic and fast.
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        // A fresh real git repo with a committed Go source file + manifest
+        // BEFORE scanning.
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let repo_dir_s = repo_dir.clone();
+        let home_for = home_s.clone();
+        let run_in = move |dir: &Path, args: &[&str]| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(dir)
+                .env("HOME", &home_for)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        // Real `apg init` in the scratch main checkout, then commit the scaffold
+        // (so the main checkout is clean for `project start`).
+        run_in(&repo_dir_s, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+
+        // Real `apg scan` in the scratch main checkout.
+        run_in(&repo_dir_s, &["scan", "."]);
+
+        // `apg project start <name>` from the main checkout: worktree + branch +
+        // branch DB (auto-scanned).
+        run_in(&repo_dir_s, &["project", "start", "accept"]);
+        let wt = repo_dir.join("apg").join(".worktrees").join("accept");
+        assert!(
+            wt.is_dir(),
+            "the project worktree must exist at {}",
+            wt.display()
+        );
+        let wt_apg = wt.join(specs::LAYOUT);
+
+        // ---- (a) cross-process burst == serial application, zero lock errors ----
+        const N: usize = 6;
+        run_in(&wt, &["node", "add", "requirements", "requirement", "hub"]);
+        for i in 0..N {
+            let name = format!("leaf-{i}");
+            run_in(
+                &wt,
+                &["node", "add", "requirements", "requirement", name.as_str()],
+            );
+        }
+        let home_burst = home_s.clone();
+        let mut kids = Vec::with_capacity(N);
+        for i in 0..N {
+            let to = format!("requirements.requirement.leaf-{i}");
+            let child = testutil::ApgCommand::new(&[
+                "edge",
+                "add",
+                "depends-on",
+                "requirements.requirement.hub",
+                to.as_str(),
+            ])
+            .cwd(&wt)
+            .env("HOME", &home_burst)
+            .spawn();
+            kids.push((i, child));
+        }
+        for (i, child) in kids {
+            let out = child.wait_with_output().unwrap();
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success(), "burst[{i}] lost a lock: {stderr}");
+            assert!(
+                !stderr.contains("Could not set lock on file"),
+                "burst[{i}] hit the lbug lock: {stderr}"
+            );
+            assert!(
+                !stderr.contains("index.lock"),
+                "burst[{i}] hit the git index lock: {stderr}"
+            );
+            assert!(
+                !stderr.contains("specs.lock"),
+                "burst[{i}] hit the specs.lock flock: {stderr}"
+            );
+        }
+        let hub =
+            layers::read_node_file(&wt_apg, layers::Layer::Requirements, "requirement", "hub")
+                .unwrap();
+        assert_eq!(
+            hub.out.len(),
+            N,
+            "the burst store must equal the serial application"
+        );
+
+        // ---- (b) immediate read-your-writes across the real CLI ----
+        run_in(&wt, &["node", "add", "requirements", "requirement", "foo"]);
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(q.status.success(), "{}", String::from_utf8_lossy(&q.stderr));
+        assert_eq!(
+            String::from_utf8_lossy(&q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "a NEW apg query process must read foo with no scan/flush"
+        );
+
+        // ---- (c) full session lifecycle: start → routed mutation/read → end → direct read ----
+        let session = testutil::start_session_process(&wt, &home);
+        run_in(
+            &wt,
+            &["node", "add", "requirements", "requirement", "routed"],
+        );
+        let routed = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.routed'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            routed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&routed.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "a routed read must see the routed mutation before session end"
+        );
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let sout = session.child.wait_with_output().unwrap();
+        assert!(
+            sout.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sout.stderr)
+        );
+
+        // After `session end`, a direct read sees the same state, and db.lbug is
+        // consistent with the durable node files (every requirement node file
+        // has its row; the row count matches).
+        let direct = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.routed'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            direct.status.success(),
+            "{}",
+            String::from_utf8_lossy(&direct.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&direct.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "after session end the direct reader sees the routed mutation"
+        );
+        {
+            let db = crate::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            let node_files = layers::read_existing_nodes(&wt_apg).unwrap();
+            let requirements: Vec<_> = node_files
+                .iter()
+                .filter(|n| n.layer == "requirements" && n.node_type == "requirement")
+                .collect();
+            for n in &requirements {
+                let f = layers::fqn(layers::Layer::Requirements, &n.node_type, &n.name);
+                assert!(db.has_node(&f), "db.lbug must be consistent with {f}");
+            }
+            let rows = db
+                .q("MATCH (n:Requirement) RETURN count(*)")
+                .unwrap()
+                .lines()
+                .last()
+                .and_then(|l| l.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            assert_eq!(
+                rows,
+                requirements.len(),
+                "db.lbug Requirement rows must match the node files"
+            );
+        }
+
+        // ---- teardown: the scratch repo AND the isolated HOME ----
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -2013,4 +2013,181 @@ mod tests {
         );
         testutil::remove(&repo);
     }
+
+    /// Records the per-lock outcome of EVERY burst child (successes included as
+    /// `"ok"`), so the acceptance test can assert zero lock errors on each named
+    /// lock rather than only counting failures. Starts N separate `apg edge add
+    /// hub -> leaf-i` processes back-to-back and classifies each by its stderr.
+    fn run_edge_burst_attributed(
+        wt: &Path,
+        home: &Path,
+        n: usize,
+    ) -> BTreeMap<&'static str, usize> {
+        std::fs::create_dir_all(home).unwrap();
+        let mut children = Vec::with_capacity(n);
+        for i in 0..n {
+            let to = format!("requirements.requirement.leaf-{i}");
+            let child = testutil::ApgCommand::new(&[
+                "edge",
+                "add",
+                "depends-on",
+                "requirements.requirement.hub",
+                to.as_str(),
+            ])
+            .cwd(wt)
+            .env("HOME", home.to_str().unwrap())
+            .spawn();
+            children.push((i, child));
+        }
+        let mut hist: BTreeMap<&'static str, usize> = BTreeMap::new();
+        for (i, child) in children {
+            let out = child.wait_with_output().unwrap();
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let key = if out.status.success() {
+                "ok"
+            } else {
+                let lock = classify_lock(&stderr);
+                eprintln!("accept-burst[{i}] FAILED ({lock}): {stderr}");
+                lock
+            };
+            *hist.entry(key).or_default() += 1;
+        }
+        hist
+    }
+
+    /// Phase-04 task-1 (acceptance): the cross-process parallel node/edge burst
+    /// of N SEPARATE `apg` binaries completes with ZERO lock errors on every
+    /// named lock — the lbug `apg/.trans/db.lbug` read-write open, the
+    /// `apg/.trans/specs.lock` flock, and git's `.git/index.lock` — and the
+    /// durable store equals the serial application.
+    ///
+    /// Cross-process by construction (`ApgCommand`/`spawn_apg`): `SPEC_LOCK`
+    /// is a process-lifetime `OnceLock` flock, so an in-process thread burst
+    /// would pass with the lock absent and false-green exactly the race this
+    /// test exists to catch.
+    ///
+    /// Stage A (DB present) exercises all three locks; stage B (DB removed)
+    /// isolates the `.git/index.lock` + specs.lock + the shared hub-file
+    /// read-modify-write that a DB-only fix cannot reach; stage C drives the
+    /// node path's own existence-check + write + commit burst.
+    #[test]
+    fn acceptance_cross_process_burst_has_zero_lock_errors_and_serial_store() {
+        const N: usize = 8;
+        const NAMED_LOCKS: [&str; 4] = [
+            "lbug apg/.trans/db.lbug",
+            "git .git/index.lock",
+            "specs.lock flock",
+            "node-file RMW (pairing mismatch)",
+        ];
+
+        // Stage A — the real project state (DB present).
+        let (wt_apg, repo, wt) = mutation_fixture("accept-burst-db");
+        setup_hub_and_leaves(&wt, N);
+        let hist_a = run_edge_burst_attributed(&wt, &repo.root.join("home"), N);
+        eprintln!("acceptance stage A per-lock: {hist_a:?}");
+        assert_eq!(
+            hist_a.get("ok"),
+            Some(&N),
+            "stage A must complete every mutation: {hist_a:?}"
+        );
+        for lock in NAMED_LOCKS {
+            assert_eq!(hist_a.get(lock), None, "stage A hit {lock}: {hist_a:?}");
+        }
+        assert_eq!(
+            hub_out_edges(&wt_apg),
+            N,
+            "stage A: the shared hub lost edges"
+        );
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            let out = db
+                .q("MATCH (:Requirement {fqn: 'requirements.requirement.hub'})-[:DependsOn]->(b) RETURN count(*)")
+                .unwrap();
+            let expected = N.to_string();
+            assert_eq!(
+                out.lines().last().map(str::trim),
+                Some(expected.as_str()),
+                "stage A DB must equal the serial application: {out}"
+            );
+        }
+
+        // Stage B — DB absent: isolates git `.git/index.lock`, the specs.lock
+        // flock, and the shared hub-file read-modify-write.
+        let (wt_apg_b, repo_b, wt_b) = mutation_fixture("accept-burst-nodb");
+        std::fs::remove_file(wt_apg_b.join(specs::TRANS).join("db.lbug")).unwrap();
+        setup_hub_and_leaves(&wt_b, N);
+        let hist_b = run_edge_burst_attributed(&wt_b, &repo_b.root.join("home"), N);
+        eprintln!("acceptance stage B per-lock: {hist_b:?}");
+        assert_eq!(
+            hist_b.get("ok"),
+            Some(&N),
+            "stage B must complete every mutation: {hist_b:?}"
+        );
+        for lock in NAMED_LOCKS {
+            assert_eq!(hist_b.get(lock), None, "stage B hit {lock}: {hist_b:?}");
+        }
+        assert_eq!(
+            hub_out_edges(&wt_apg_b),
+            N,
+            "stage B: the shared hub lost edges"
+        );
+
+        // Stage C — N separate `apg node add` processes: the node path's own
+        // burst (existence check + write + commit) behind the same entry flock.
+        let (wt_apg_c, repo_c, wt_c) = mutation_fixture("accept-burst-node");
+        let home_c = repo_c.root.join("home");
+        std::fs::create_dir_all(&home_c).unwrap();
+        let mut hist_c: BTreeMap<&'static str, usize> = BTreeMap::new();
+        let mut kids = Vec::with_capacity(N);
+        for i in 0..N {
+            let name = format!("accept-{i}");
+            kids.push(
+                testutil::ApgCommand::new(&[
+                    "node",
+                    "add",
+                    "requirements",
+                    "requirement",
+                    name.as_str(),
+                ])
+                .cwd(&wt_c)
+                .env("HOME", home_c.to_str().unwrap())
+                .spawn(),
+            );
+        }
+        for child in kids {
+            let out = child.wait_with_output().unwrap();
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let key = if out.status.success() {
+                "ok"
+            } else {
+                let lock = classify_lock(&stderr);
+                eprintln!("accept-node-burst FAILED ({lock}): {stderr}");
+                lock
+            };
+            *hist_c.entry(key).or_default() += 1;
+        }
+        eprintln!("acceptance stage C per-lock: {hist_c:?}");
+        assert_eq!(
+            hist_c.get("ok"),
+            Some(&N),
+            "stage C must complete every add: {hist_c:?}"
+        );
+        for lock in NAMED_LOCKS {
+            assert_eq!(hist_c.get(lock), None, "stage C hit {lock}: {hist_c:?}");
+        }
+        let stored = layers::read_existing_nodes(&wt_apg_c)
+            .unwrap()
+            .iter()
+            .filter(|n| {
+                n.layer == "requirements"
+                    && n.node_type == "requirement"
+                    && n.name.starts_with("accept-")
+            })
+            .count();
+        assert_eq!(stored, N, "stage C store must equal the serial adds");
+
+        testutil::remove(&repo);
+        testutil::remove(&repo_b);
+        testutil::remove(&repo_c);
+    }
 }

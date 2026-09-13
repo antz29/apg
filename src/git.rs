@@ -1433,6 +1433,99 @@ mod tests {
         assert!(now.as_bytes()[10] == b'T');
     }
 
+    /// Phase-04 task-5 (acceptance): one logical node/edge mutation produces
+    /// exactly ONE commit, and that commit stages durable files only — never
+    /// `apg/.trans` (the gitignored transient store).
+    #[test]
+    fn acceptance_one_logical_mutation_is_exactly_one_durable_commit() {
+        let (repo, wt, _wt_apg) = testutil::project_with_db("accept-one-commit");
+        let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let run = |args: &[&str]| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        // The paths the HEAD commit's tree diff touched.
+        let head_diff_paths = || -> Vec<String> {
+            let r = git2::Repository::open(&wt).unwrap();
+            let head = r.head().unwrap().peel_to_commit().unwrap();
+            let parent = head.parent(0).unwrap();
+            let diff = r
+                .diff_tree_to_tree(
+                    Some(&parent.tree().unwrap()),
+                    Some(&head.tree().unwrap()),
+                    None,
+                )
+                .unwrap();
+            diff.deltas()
+                .map(|d| d.new_file().path().unwrap().to_string_lossy().into_owned())
+                .collect()
+        };
+
+        let base = testutil::commit_count(&wt);
+
+        // Logical mutation 1 + 2: each `apg node add` is exactly one commit.
+        run(&["node", "add", "requirements", "requirement", "one-a"]);
+        assert_eq!(
+            testutil::commit_count(&wt),
+            base + 1,
+            "node add one-a must be exactly one commit"
+        );
+        run(&["node", "add", "requirements", "requirement", "one-b"]);
+        assert_eq!(
+            testutil::commit_count(&wt),
+            base + 2,
+            "node add one-b must be exactly one commit"
+        );
+
+        // Logical mutation 3: the edge add rewrites BOTH endpoint files in ONE
+        // commit whose diff is the two durable layer files.
+        run(&[
+            "edge",
+            "add",
+            "depends-on",
+            "requirements.requirement.one-a",
+            "requirements.requirement.one-b",
+        ]);
+        assert_eq!(
+            testutil::commit_count(&wt),
+            base + 3,
+            "the edge add must be exactly one commit"
+        );
+        let edge_paths = head_diff_paths();
+        assert_eq!(
+            edge_paths.len(),
+            2,
+            "the edge commit stages both endpoint files: {edge_paths:?}"
+        );
+        for p in &edge_paths {
+            assert!(p.starts_with("apg/layers/"), "durable only: {p}");
+            assert!(!p.starts_with("apg/.trans/"), "never .trans: {p}");
+        }
+
+        // Logical mutation 4: `node rm` rewrites the referring file and deletes
+        // the node in ONE commit, still durable-only.
+        run(&["node", "rm", "requirements", "requirement", "one-b"]);
+        assert_eq!(
+            testutil::commit_count(&wt),
+            base + 4,
+            "node rm must be exactly one commit"
+        );
+        for p in head_diff_paths() {
+            assert!(p.starts_with("apg/layers/"), "durable only: {p}");
+            assert!(!p.starts_with("apg/.trans/"), "never .trans: {p}");
+        }
+
+        testutil::remove(&repo);
+    }
+
     // ------------------------------------------------------------------
     // R6 VI: the git CLI is never shelled out to anywhere in the apg binary
     // (git2, default-features = false; push/tag remain human acts).
