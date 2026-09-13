@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "solution.component.graph-loader",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.ingest.ingest",
+      "properties": {}
     }
   ],
   "in": [
