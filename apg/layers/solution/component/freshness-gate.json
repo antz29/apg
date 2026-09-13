@@ -15,6 +15,11 @@
       "kind": "realised-by",
       "source": "domain.entity.scan-record",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.freshness-check",
+      "properties": {}
     }
   ]
 }
