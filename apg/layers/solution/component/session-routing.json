@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.service.mutation-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.graph-read",
+      "properties": {}
     }
   ]
 }
