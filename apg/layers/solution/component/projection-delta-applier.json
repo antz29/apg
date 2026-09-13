@@ -29,11 +29,6 @@
       "kind": "implemented-by",
       "target": "apg.layers.write_project",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "apg.artifacts.ArtifactDb.reingest_layers_on",
-      "properties": {}
     }
   ],
   "in": [
