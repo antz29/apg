@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "solution.container.frontend-process",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.ingestor",
+      "properties": {}
     }
   ],
   "in": []
