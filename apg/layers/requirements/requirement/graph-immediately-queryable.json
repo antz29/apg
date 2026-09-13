@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.write-through-projection",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.read-your-writes",
+      "properties": {}
     }
   ],
   "in": [
