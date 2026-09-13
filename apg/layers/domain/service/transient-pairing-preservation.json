@@ -4,7 +4,13 @@
   "name": "transient-pairing-preservation",
   "body": "Preserving transient pairings across a durable mutation. A durable node/edge mutation's projection apply must, after deleting the mutation's exact FQN/edge delta, re-merge the assembled transient record set — the plan store plus every transient tier mirror — not the durable record set alone. Every pre-existing transient pairing incident to a changed FQN (in particular a `Feedback-[:Reviews]` edge) must survive the mutation with no transient write in between, so the projection remains equal to the durable layers plus the plan store plus all transient mirrors, and neither `apg review list` nor the verify gate's resolved-feedback and attachment checks are skewed. No code re-scan is involved.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.durable-projection-transient-remerge",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",
