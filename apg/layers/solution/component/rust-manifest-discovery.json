@@ -15,6 +15,11 @@
       "kind": "details",
       "source": "requirements.note.frontend-coverage-open-points",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.cargo-manifest",
+      "properties": {}
     }
   ]
 }
