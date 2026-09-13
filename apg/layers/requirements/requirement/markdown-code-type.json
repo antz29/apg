@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "markdown-code-type",
+  "body": "Extend code-type classification for markdown so documents are in the graph and filterable rather than dropped: the md frontend's files and section symbols classify as a docs provenance class for ordinary markdown, with the existing generated/external segment rules still winning (for example a generated-doc tree classifies generated, a vendored tree classifies external). All-code-included holds: every accepted markdown file is scanned and filtered by code_type, never excluded. AC: an ordinary README.md classifies docs; a markdown file under gen/ classifies generated; both remain in the graph.",
+  "properties": {
+    "feature": "markdown-frontend"
+  },
+  "out": [],
+  "in": []
+}
