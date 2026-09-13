@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.rust-discovery-exclusions",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.rust-isolation-preserved",
+      "properties": {}
     }
   ],
   "in": []
