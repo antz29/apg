@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "freshness-gate",
+  "body": "The freshness decision inside src/git.rs: compares the recorded scan_meta / Scan state against the current tree by content identity and answers FRESH (fast-path) or STALE (proceed incrementally). Extends today's staleness guard (is_stale, recorded_scan, reanchor_scan_meta) from a mutation gate into a scan fast-path.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
