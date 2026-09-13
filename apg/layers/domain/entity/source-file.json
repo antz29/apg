@@ -33,6 +33,11 @@
       "kind": "drives",
       "source": "requirements.requirement.js-ts-code-type",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.markdown-accept-extensions",
+      "properties": {}
     }
   ]
 }
