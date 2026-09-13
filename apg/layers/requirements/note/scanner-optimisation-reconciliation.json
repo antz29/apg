@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "requirements.user.suite-agent",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.system.apg-cli",
+      "properties": {}
     }
   ],
   "in": []

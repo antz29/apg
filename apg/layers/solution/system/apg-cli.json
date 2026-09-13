@@ -56,6 +56,11 @@
       "kind": "realised-by",
       "source": "domain.group.mutation-surface",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.scanner-optimisation-reconciliation",
+      "properties": {}
     }
   ]
 }
