@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "stakeholder",
+  "name": "large-repo-team",
+  "body": "A team that runs apg over very large repositories (the netbeans-scale stress case: an hour-plus full scan). Pays the wall-clock cost of every scan and needs re-scans after small edits to be cheap.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
