@@ -99,6 +99,11 @@
       "kind": "drives",
       "source": "requirements.requirement.rust-nested-fqn-clean",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.markdown-frontend",
+      "properties": {}
     }
   ]
 }
