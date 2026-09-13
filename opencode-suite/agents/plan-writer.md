@@ -46,7 +46,7 @@ permission:
   apg_plan_tasks: allow
   apg_plan_render: allow
   apg_plan_add: allow
-  apg_review_action: allow
+  apg_review: allow
   bash:
     "*": deny
     "ls *": allow
@@ -87,10 +87,13 @@ with the branch unless the project merges.
 - All graph state is reached only through the apg tools you hold: `apg_query`
   (the durable spec), `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`,
   `apg_plan_render`, and `apg_plan_add` (the transient plan store), and
-  `apg_review_action` (the transient feedback store).
+  `apg_review` (reading the transient feedback store — read-only).
 - The durable spec node files are never read directly — they are reached via
   `apg_query`; the transient plan and feedback stores are never read directly —
-  they are reached via the plan and review tools above.
+  they are reached via the plan tools above and the read-only `apg_review`.
+  You never action Feedback: when you address an item you return a claim
+  (ACTIONED/WONT-FIX) to the coordinator, who performs the shallow
+  claim-vs-change check and then actions the item.
 - Ordinary source files behind code FQNs remain readable with the `read` tool.
 - You never modify any file and you never commit anything.
 

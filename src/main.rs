@@ -828,9 +828,13 @@ fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
 /// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`
 /// files that duplicate the installed suite (never deletes anything).
 /// Project-specific implementer/reviewer agents are installed into the
-/// project `.opencode/` by the agent-builder, not by init. Init is the
-/// layout's versioning/upgrade act (R9/R10): it re-runs idempotently and
-/// writes the binary version into `apg/config.json` (user code_type rules
+/// project `.opencode/` by the agent-builder, not by init; that template
+/// delivers the coordinator-mediated writer/reviewer grant shape — writers
+/// hold the read-only `apg_review` channel and return a claim, and the
+/// coordinator performs the shallow claim-vs-change check and then actions the
+/// item — so a scaffolded reviewer never inherits writer-action wording. Init
+/// is the layout's versioning/upgrade act (R9/R10): it re-runs idempotently
+/// and writes the binary version into `apg/config.json` (user code_type rules
 /// untouched) — `apg scan` and `apg project start` refuse to touch a layout
 /// whose version is missing or does not share the binary's major.minor.
 fn cmd_init(args: &[String]) -> anyhow::Result<()> {
@@ -1939,6 +1943,72 @@ mod tests {
             !tool.contains("Only the writer side does this"),
             "the apg_review_action tool must not say only the writer actions"
         );
+    }
+
+    /// The coordinator-mediated cycle's writer side is read-only: the embedded
+    /// spec-writer and plan-writer prompts hold the read-only `apg_review`
+    /// channel and no longer carry the `apg_review_action` literal anywhere
+    /// (they read the transient store and return an ACTIONED/WONT-FIX claim;
+    /// the coordinator actions the item), and the agent-builder template
+    /// re-points the implementer and every test-implementer it scaffolds to
+    /// that same read-only/claim-only grant shape.
+    #[test]
+    fn writer_and_test_implementer_agents_hold_read_only_feedback() {
+        fn agent(name: &str) -> &'static str {
+            AGENTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+        }
+
+        // The two writer prompts: the WHOLE embedded prompt text (not a single
+        // frontmatter key) must be free of the action grant and must carry the
+        // read-only review channel.
+        for name in ["spec-writer.md", "plan-writer.md"] {
+            let prompt = agent(name);
+            assert!(
+                !prompt.contains("apg_review_action"),
+                "{name} must not carry the apg_review_action literal anywhere"
+            );
+            assert!(
+                prompt.contains("apg_review"),
+                "{name} must hold the read-only apg_review channel"
+            );
+        }
+
+        // The agent-builder template: the implementer grant description and
+        // every test-implementer grant description point at the read-only
+        // channel and a claim, never the action tool.
+        let builder = agent("agent-builder.md");
+        fn section<'a>(doc: &'a str, heading: &str) -> &'a str {
+            let start = doc
+                .find(heading)
+                .unwrap_or_else(|| panic!("agent-builder.md must carry the `{heading}` heading"));
+            let rest = &doc[start + heading.len()..];
+            match rest.find("\n### ") {
+                Some(end) => &rest[..end],
+                None => rest,
+            }
+        }
+        for heading in [
+            "### implementer (always)",
+            "### unit/int/e2e-test-implementer(s) (per detected tier)",
+        ] {
+            let grant = section(builder, heading);
+            assert!(
+                !grant.contains("apg_review_action"),
+                "{heading} must not grant apg_review_action"
+            );
+            assert!(
+                grant.contains("apg_review"),
+                "{heading} must grant the read-only apg_review channel"
+            );
+            assert!(
+                grant.contains("claim"),
+                "{heading} must return a claim rather than action the item"
+            );
+        }
     }
 
     #[test]

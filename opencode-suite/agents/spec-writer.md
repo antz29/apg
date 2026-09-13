@@ -43,7 +43,7 @@ permission:
   apg_hunk: allow
   apg_node: allow
   apg_edge: allow
-  apg_review_action: allow
+  apg_review: allow
   bash:
     "*": deny
     "ls *": allow
@@ -99,12 +99,15 @@ invent laws the spec doesn't need.
 
 - All graph state is reached only through the apg tools you hold: `apg_query`
   (reading the durable spec through the graph), `apg_node` / `apg_edge`
-  (authoring and updating the durable spec node files), and `apg_review_action`
-  (acting on the transient feedback store).
+  (authoring and updating the durable spec node files), and `apg_review`
+  (reading the transient feedback store — read-only).
 - The durable spec node files are never read directly — they are authored and
   updated only via `apg_node` / `apg_edge`; the transient feedback store is
-  never read directly — it is acted on via `apg_review_action` and read via
-  `apg_query`. The transient plan store is outside this agent's remit.
+  never read directly — it is read via the read-only `apg_review` (and
+  `apg_query`). You never action Feedback: when you address an item you return
+  a claim (ACTIONED/WONT-FIX) to the coordinator, who performs the shallow
+  claim-vs-change check and then actions the item. The transient plan store is
+  outside this agent's remit.
 - Ordinary source files behind code FQNs remain readable with the `read` tool.
 - You never modify any file and you never commit anything. Node-file mutations
   auto-commit on the project branch.

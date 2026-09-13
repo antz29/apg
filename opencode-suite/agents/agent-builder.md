@@ -120,7 +120,10 @@ never a mutation place.
   scaffold (the 0.11.0 feedback-0-fix miss).
 - **`apg_plan_done` / `apg_plan_undone`** — marks plan tasks done as it
   completes them.
-- **`apg_review_action`** — actions Feedback on its work (`--fix|--wont-fix`).
+- **`apg_review`** — reads the transient feedback store (read-only). The
+  implementer never actions Feedback: when it addresses an item it returns a
+  claim (fixed/wont-fix) to the coordinator, who performs the shallow
+  claim-vs-change check and then actions the item.
 - **git: `add` + `commit`**, with `push` and `tag` human-approved (`ask`) —
   they prompt for explicit human approval before running. (Git commands run
   with cwd inside the worktree via the allowed `cd *`; they need no path
@@ -130,9 +133,11 @@ never a mutation place.
 
 ### unit/int/e2e-test-implementer(s) (per detected tier)
 - **Edit** scoped to the tier's test-file globs; **source denied**.
-- Same grant shape as the implementer (plan_done/review_action/git add+commit/
-  verified gates), **including the worktree mirroring**: every test glob also
-  granted under `apg/.worktrees/*/`, every deny mirrored.
+- Same grant shape as the implementer (plan_done/read-only apg_review/git
+  add+commit/verified gates), **including the worktree mirroring**: every test
+  glob also granted under `apg/.worktrees/*/`, every deny mirrored. Like the
+  implementer, it never actions Feedback — it returns a claim and the
+  coordinator actions the item.
 - Cross-denied against the implementer's globs.
 - **Skip a tier's test-implementer when the tier is not file-separable** (e.g.
   Rust inline unit tests): a glob cannot separate them, so the implementer owns
@@ -150,6 +155,11 @@ never a mutation place.
   (`apg_node`/`apg_edge`/`apg_plan_add`).** It either attaches/approves
   Feedback or marks the phase complete; it never writes code and never marks
   tasks done.
+- **Never actions Feedback.** The reviewer attaches, resolves, or rejects
+  items; the implementing writer returns an ACTIONED/WONT-FIX claim and the
+  **coordinator** performs the shallow claim-vs-change check and then actions
+  the item (`apg_review_action`). A scaffolded reviewer never holds
+  `apg_review_action`.
 - **Reviewer no-grant / no leak**: its `edit` block is exactly `"*": deny`
   with no allow entries. It gains no `opencode-suite/**` grant and no
   `.opencode/**` grant, and the implementer's `opencode-suite/**` grant must
