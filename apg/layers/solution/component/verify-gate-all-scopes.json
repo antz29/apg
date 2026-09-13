@@ -9,11 +9,6 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.plan_verify_at",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "apg.specs.project_transient_files",
-      "properties": {}
     }
   ],
   "in": [
