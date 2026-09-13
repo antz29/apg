@@ -12,6 +12,11 @@
       "kind": "drives",
       "source": "requirements.requirement.metadata-mutation-graph-consistency",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.planned-node-removal-reflected",
+      "properties": {}
     }
   ]
 }
