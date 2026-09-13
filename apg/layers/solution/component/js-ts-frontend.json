@@ -20,6 +20,11 @@
       "kind": "details",
       "source": "requirements.note.js-ts-frontend-evidence",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.source-file",
+      "properties": {}
     }
   ]
 }
