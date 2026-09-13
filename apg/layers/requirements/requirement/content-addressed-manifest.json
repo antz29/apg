@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "content-addressed-manifest",
+  "body": "The cache must be keyed by content: a manifest of path -> git blob OID recorded with each scan. Delta and reuse decisions compare blob OIDs, not timestamps. AC: touching a file without changing bytes reuses its cached facts; editing bytes changes its OID and invalidates them.",
+  "properties": {
+    "feature": "incremental-content"
+  },
+  "out": [],
+  "in": []
+}
