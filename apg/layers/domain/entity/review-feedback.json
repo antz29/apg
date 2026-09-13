@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "review-feedback",
+  "body": "A Feedback review item and the artifact it reviews, joined by a `Reviews` edge. The rel-table schema must declare every reviewable artifact label — including `Note` — as a `Reviews` target, so the projection admits a legal `Feedback`→`Note` review instead of silently dropping it; `Note`→`Note` `Details` stays outside the declared pairs. This is the business reality behind `feedback-note-reviews-round-trip`: a review is only observable if its artifact label is representable.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
