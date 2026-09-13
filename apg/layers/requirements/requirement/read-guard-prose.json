@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.generated-agents-inherit-file-access-rule",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.agent-prose",
+      "properties": {}
     }
   ],
   "in": [

@@ -28,6 +28,11 @@
       "kind": "details",
       "source": "domain.note.rewrite-clusters",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.read-guard-prose",
+      "properties": {}
     }
   ]
 }
