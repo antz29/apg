@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "projection-consistency",
+  "body": "The invariant measure between `db.lbug` and its sources: consistent when the projection contains exactly the nodes/edges derivable from (durable layers + plan store + the last code scan), with no stale or orphan rows. A metadata mutation must leave this value at consistent; only a source-code change may make a re-scan necessary. It is the value the `projection-equals-sources` requirement asserts and that `db-rebuildable-projection` deliberately does not cover (that requirement permits staleness relative to unwritten code, not inconsistency relative to metadata).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
