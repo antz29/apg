@@ -6,7 +6,13 @@
   "properties": {
     "feature": "incremental-content"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.impact-set",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

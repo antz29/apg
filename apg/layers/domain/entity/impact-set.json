@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.change-set",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.full-context-targeted-emission",
+      "properties": {}
     }
   ]
 }
