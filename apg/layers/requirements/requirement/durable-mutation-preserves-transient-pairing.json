@@ -6,7 +6,13 @@
   "properties": {
     "feature": "graph-consistency"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.service.projection-update",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
