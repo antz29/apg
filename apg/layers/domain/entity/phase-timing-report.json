@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.phase-timer",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
