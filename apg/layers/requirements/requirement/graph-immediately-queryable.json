@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "graph-immediately-queryable",
+  "body": "The graph must be immediately queryable after a completed mutation. Once a mutation returns, any subsequent read by a new process sees the post-mutation state — with no re-scan, no explicit flush, and no session-end step. The acceptance scenario is, verbatim:\n\n    add requirement \"foo\"\n    immediately query and find \"foo\"\n\ni.e. after `apg node add … foo` returns, an immediate `apg query` (a new process) returns `foo` — with no re-scan, no explicit flush, and no session-end step.\n\nThis requirement ROOTS the immediate-queryability contract. Its children `write-through-projection`, `read-your-writes`, `read-access-during-session`, and `commit-then-project` refine it, and it contains the existing `metadata-mutation-graph-consistency` tree (`no-rescan-for-metadata`, `planned-node-removal-reflected`, `projection-delta-atomic`, `rescan-only-on-code-change`, `projection-equals-sources`) so the \"immediately queryable\" and \"no re-scan + exact projection\" work read as one tree.",
+  "properties": {
+    "feature": "graph-consistency"
+  },
+  "out": [],
+  "in": []
+}
