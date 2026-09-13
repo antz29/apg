@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.git.git_state",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.git.is_stale",
+      "properties": {}
     }
   ],
   "in": [
