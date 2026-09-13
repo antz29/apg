@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.read-guard-prose",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.file-access-guard-prose",
+      "properties": {}
     }
   ],
   "in": []

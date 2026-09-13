@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.entity.agent-prose",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.read-guard-prose-defect",
+      "properties": {}
     }
   ]
 }
