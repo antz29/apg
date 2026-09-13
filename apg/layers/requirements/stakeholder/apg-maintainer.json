@@ -14,6 +14,11 @@
       "kind": "contains",
       "target": "requirements.requirement.mutation-lock-race",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.graph-immediately-queryable",
+      "properties": {}
     }
   ],
   "in": []
