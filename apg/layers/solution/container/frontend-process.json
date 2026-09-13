@@ -41,6 +41,11 @@
       "kind": "implemented-by",
       "target": "cpplib.main",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.markdown-frontend",
+      "properties": {}
     }
   ],
   "in": [
