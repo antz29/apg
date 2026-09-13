@@ -1,0 +1,12 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "incremental-scan",
+  "body": "The aggregate domain capability: running an exact scan incrementally over an evolving repository. Root of the scan-cache domain; contains the recorded scan state, the change set, and the shared content-addressed cache that together let a scan reuse prior work without losing exactness.",
+  "properties": {
+    "attribute": "core",
+    "root": "incremental-scan"
+  },
+  "out": [],
+  "in": []
+}
