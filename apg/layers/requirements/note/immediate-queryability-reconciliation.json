@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.graph-immediately-queryable",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.write-through-projection",
+      "properties": {}
     }
   ],
   "in": []
