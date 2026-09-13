@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-refinement"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.writers-read-only-feedback",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
