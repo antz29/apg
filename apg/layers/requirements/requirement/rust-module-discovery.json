@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.rust-discover-all-manifests",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.rust-discover-fixture-tests",
+      "properties": {}
     }
   ],
   "in": []
