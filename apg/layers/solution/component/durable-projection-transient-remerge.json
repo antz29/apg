@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "source": "domain.service.transient-pairing-preservation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.durable-mutation-drops-transient-pairing",
+      "properties": {}
     }
   ]
 }

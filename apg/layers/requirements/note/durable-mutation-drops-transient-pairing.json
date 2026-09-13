@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "solution.component.projection-delta-applier",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.durable-projection-transient-remerge",
+      "properties": {}
     }
   ],
   "in": []
