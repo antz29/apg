@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.cross-worktree-cache-sharing",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.delta-and-fallback",
+      "properties": {}
     }
   ],
   "in": []
