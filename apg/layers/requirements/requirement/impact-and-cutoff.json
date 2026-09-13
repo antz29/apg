@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "impact-and-cutoff",
+  "body": "The re-emission target set is NOT just the changed files: it is changed files ∪ their reverse-dependency closure (derived from the cached graph, the file-level dep index) ∪ overload-group peers (adding/removing an overload re-suffixes sibling FQNs). A signature-based early cutoff applies: a body-only change whose exported signature is unchanged does not cascade to dependents. Content is reused only when the file's bytes AND its resolution inputs are unchanged; the reverse-dep closure plus global ingestor/version/config keys cover every case where an unchanged file's output can still change. AC: changing a leaf emits the leaf and its dependents; editing a body without changing the exported signature reuses dependents; changing an overload emits the whole overload group.",
+  "properties": {
+    "feature": "incremental-content"
+  },
+  "out": [],
+  "in": []
+}
