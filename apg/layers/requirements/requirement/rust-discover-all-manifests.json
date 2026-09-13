@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "rust-discover-all-manifests",
+  "body": "The Rust frontend must discover all Cargo manifests under the scan root (not just one), load each project/workspace, emit facts for all of them, and merge the streams into one graph. Discovery is frontend-side — the frontend decides what a project is — consistent with the existing multi-module Go handling and the module-directory forwarding in src/main.rs (cmd_scan). AC: scanning a repo root that contains a nested standalone crate produces that crate's module node and its symbols, in addition to the root package's.",
+  "properties": {
+    "feature": "rust-module-discovery"
+  },
+  "out": [],
+  "in": []
+}
