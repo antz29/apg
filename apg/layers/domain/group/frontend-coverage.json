@@ -17,6 +17,11 @@
       "kind": "contains",
       "target": "domain.entity.scan-exclusion",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.source-file",
+      "properties": {}
     }
   ],
   "in": []
