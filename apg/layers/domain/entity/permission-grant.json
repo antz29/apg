@@ -33,6 +33,11 @@
       "kind": "drives",
       "source": "requirements.requirement.opencode-suite-is-source",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.prose-matches-read-grant",
+      "properties": {}
     }
   ]
 }

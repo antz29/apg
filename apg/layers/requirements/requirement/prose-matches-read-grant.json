@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-refinement"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.permission-grant",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
