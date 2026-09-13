@@ -67,6 +67,11 @@
       "kind": "realised-by",
       "target": "solution.container.ingestor",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.scan-orchestrator",
+      "properties": {}
     }
   ],
   "in": [
