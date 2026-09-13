@@ -11,6 +11,7 @@ mod plan_cmd;
 mod project_cmd;
 mod review_cmd;
 mod schema;
+mod session;
 mod specs;
 #[cfg(test)]
 mod testutil;
@@ -569,6 +570,13 @@ USAGE:
   apg edge <sub> …            Durable node-file model edge mutations:
                               add/update/rm (kind/from/to; update is
                               properties-only)
+  apg session <sub> …         Session-scoped single-writer coordinator
+                              (apg/.trans/session.sock):
+                              start — own db.lbug exclusively, perform routed
+                              node/edge mutations and serve routed reads in
+                              receive order (write-through, no buffered flush);
+                              end — signal the live session to release the
+                              DB/socket and exit
   apg --version               Print version
   apg --help                  Show this help
 
@@ -589,6 +597,24 @@ fn print_help() {
     println!("{}", help_text());
 }
 
+/// `apg session <start|end>` (phase-03): `start` launches the session-scoped
+/// single-writer coordinator (bind socket, own `db.lbug`, serve routed
+/// mutations/reads); `end` signals the running session — the server-side
+/// shutdown releases the DB/socket and `serve` exits. Every mutation's
+/// projection delta was already applied write-through, so `end` performs no
+/// flush.
+fn session_cmd(args: &[String]) -> anyhow::Result<()> {
+    let apg_root = session::require_apg_root()?;
+    match args.first().map(|s| s.as_str()) {
+        Some("start") => session::Coordinator::start(&apg_root),
+        Some("end") => session::Coordinator::signal_end(&apg_root),
+        other => anyhow::bail!(
+            "usage: apg session <start|end> (got `{}`)",
+            other.unwrap_or("<none>")
+        ),
+    }
+}
+
 fn main() {
     let raw: Vec<String> = std::env::args().collect();
     if raw.len() < 2 {
@@ -604,6 +630,7 @@ fn main() {
         "project" => project_cmd::cmd_project(&raw[2..]),
         "node" => node_cmd::cmd_node(&raw[2..]),
         "edge" => node_cmd::cmd_edge(&raw[2..]),
+        "session" => session_cmd(&raw[2..]),
         "--version" | "-V" => {
             println!("apg {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -947,6 +974,24 @@ fn cmd_query(args: &[String]) -> anyhow::Result<()> {
     let start = std::env::current_dir()?;
     let apg_root = find_apg_root(&start)
         .ok_or_else(|| anyhow::anyhow!("no apg/ directory found from {}", start.display()))?;
+
+    let query = if query.trim_end().ends_with(';') {
+        query
+    } else {
+        format!("{query};")
+    };
+
+    // Read routing (phase-03): while a session owns db.lbug, route the read
+    // through it so a separate reader sees the current state with no lock error
+    // and without waiting for the session to end. With no live session the DB
+    // file is not held and a normal (read-only) direct open serves the read —
+    // that is the read-your-writes guarantee.
+    if session::live_session(&apg_root) {
+        let output = session::forward_query(&apg_root, &query, json)?;
+        println!("{output}");
+        return Ok(());
+    }
+
     let db_path = apg_root.join(specs::TRANS).join("db.lbug");
     if !db_path.exists() {
         anyhow::bail!(
@@ -954,27 +999,37 @@ fn cmd_query(args: &[String]) -> anyhow::Result<()> {
             db_path.display()
         );
     }
-
-    let query = if query.trim_end().ends_with(';') {
-        query
-    } else {
-        format!("{query};")
-    };
     let db = Database::new(&db_path, SystemConfig::default().read_only(true))?;
-    let conn = Connection::new(&db)?;
-    let result = conn.query(&query)?;
-    if json {
-        println!("{}", emit_json_rows(result));
-    } else {
-        let names = result.get_column_names();
-        let header: Vec<String> = names.iter().map(|n| csv_escape(n)).collect();
-        println!("{}", header.join(","));
-        for row in result {
-            let cells: Vec<String> = row.iter().map(|v| csv_escape(&v.to_string())).collect();
-            println!("{}", cells.join(","));
-        }
-    }
+    println!("{}", render_query(&db, &query, json)?);
     Ok(())
+}
+
+/// Render a query result exactly as `apg query` prints it: JSON rows for
+/// `--json`, otherwise CSV with a header row (no trailing newline). Shared by
+/// the direct path and the session coordinator's routed-read branch, so both
+/// produce byte-identical output.
+pub(crate) fn render_query(db: &Database, query: &str, json: bool) -> anyhow::Result<String> {
+    let conn = Connection::new(db)?;
+    let result = conn.query(query)?;
+    if json {
+        return Ok(emit_json_rows(result));
+    }
+    let names = result.get_column_names();
+    let mut out = names
+        .iter()
+        .map(|n| csv_escape(n))
+        .collect::<Vec<_>>()
+        .join(",");
+    for row in result {
+        out.push('\n');
+        out.push_str(
+            &row.iter()
+                .map(|v| csv_escape(&v.to_string()))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    Ok(out)
 }
 
 /// Renders a query result as a JSON array of objects, one per row, keyed by
@@ -1125,6 +1180,15 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // apg-frontend.log all land there (the committed `apg/` data — config,
     // specs, notes — stays in the root).
     let apg_root = find_or_create_apg_root(&project_dir);
+    // Lifecycle exclusivity (phase-03): a scan replaces `db.lbug` (it unlinks
+    // and rebuilds it), which would silently diverge the graph a live session
+    // holds open. Refuse BEFORE any of that work — the session must end first.
+    if session::live_session(&apg_root) {
+        anyhow::bail!(
+            "refused: a live `apg session` owns {} — end it first (`apg session end` inside the project worktree) before scanning",
+            apg_root.join(specs::TRANS).join("db.lbug").display()
+        );
+    }
     let trans_dir = apg_root.join(specs::TRANS);
     std::fs::create_dir_all(&trans_dir)?;
     std::env::set_current_dir(&trans_dir)?;
@@ -1410,6 +1474,17 @@ pub(crate) fn run_pipeline(
     load::build_load_files(&graph, &dir).unwrap();
     log.ln("[load] parquet files written");
 
+    // Defense in depth (phase-03 lifecycle exclusivity): never unlink a DB a
+    // live session holds. `cmd_scan` refuses earlier; this guard catches a
+    // session that started mid-scan before the projected DB is replaced.
+    if let Ok(cwd) = std::env::current_dir()
+        && let Some(apg_root) = cwd.parent()
+        && session::live_session(apg_root)
+    {
+        panic!(
+            "refused: a live apg session owns this db.lbug — run `apg session end` before scanning"
+        );
+    }
     let _ = std::fs::remove_file("db.lbug");
     if std::path::Path::new("db.lbug").exists() {
         panic!(
@@ -2127,6 +2202,11 @@ mod tests {
         // node/edge/plan all document add|update|rm.
         assert!(help.contains("apg node <sub>"), "node block present");
         assert!(help.contains("apg edge <sub>"), "edge block present");
+        assert!(help.contains("apg session <sub>"), "session block present");
+        assert!(
+            help.contains("single-writer coordinator"),
+            "the session block documents the coordinator"
+        );
         assert!(help.contains("apg plan <sub>"), "plan block present");
         assert!(
             help.contains("add/update/rm/done/undone/note/complete/render/verify"),
@@ -2159,5 +2239,81 @@ mod tests {
             review_block.contains("add/action/resolve/reject/list"),
             "the apg review verbs must be unchanged: {review_block}"
         );
+    }
+
+    /// Phase-03 task-23: with a session live, a separate routed `apg query`
+    /// process returns the post-mutation state with no lock error and without
+    /// waiting for the session to end. A NON-routing direct `db.lbug` open is
+    /// out of contract — lbug errors rather than waiting. After `apg session
+    /// end` a fresh query opens the DB directly and reads the same state.
+    #[test]
+    fn read_access_during_a_live_session_routes_and_after_end_reads_directly() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("read-access");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        // A routed mutation lands and is projected write-through.
+        let add = testutil::spawn_apg(&["node", "add", "requirements", "requirement", "live"], &wt);
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+
+        // Routed read: post-mutation state, no lock error, no wait for end.
+        let query = "MATCH (n:Requirement {fqn: 'requirements.requirement.live'}) RETURN count(n)";
+        let routed = testutil::spawn_apg(&["query", query], &wt);
+        assert!(
+            routed.status.success(),
+            "a routed read must succeed while the session is live: {}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&routed.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1")
+        );
+
+        // Non-routing direct open: out of contract (errors, never waits).
+        let err = match crate::artifacts::ArtifactDb::open(&wt_apg) {
+            Ok(_) => {
+                panic!("a non-routing direct DB open must fail while the session holds the DB")
+            }
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(err.contains("Could not set lock on file"), "{err}");
+
+        // End the session; a fresh query opens the DB directly, same state.
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        let fresh = testutil::spawn_apg(&["query", query], &wt);
+        assert!(
+            fresh.status.success(),
+            "{}",
+            String::from_utf8_lossy(&fresh.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&fresh.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "after `session end` the direct reader sees the same state"
+        );
+
+        testutil::remove(&repo);
     }
 }

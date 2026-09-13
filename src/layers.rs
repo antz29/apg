@@ -2045,6 +2045,23 @@ pub fn write_project(
     writes: &[NodeFile],
     deletes: &[PathBuf],
 ) -> anyhow::Result<()> {
+    write_project_with(apg_root, writes, deletes, &|records| {
+        artifacts::reingest_layers(apg_root, records)
+    })
+}
+
+/// [`write_project`] with an injectable projection apply. The direct path uses
+/// the default (open `db.lbug`, apply, close); the phase-03 session coordinator
+/// passes a closure that applies the records through the DB handle it already
+/// owns, so the session amortizes ONE open/parse across N mutations while every
+/// mutation's projection delta still lands synchronously as the mutation
+/// completes (the open is amortized, visibility never is).
+pub fn write_project_with(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+    project: &dyn Fn(&[Record]) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
     // 1. Membership guard (writes only happen inside a project context).
     git::require_project_context(apg_root)?;
 
@@ -2098,7 +2115,7 @@ pub fn write_project(
             }
         }
         let records = ingest_tree(apg_root, &scanned, &planned)?;
-        artifacts::reingest_layers(apg_root, &records)?;
+        project(&records)?;
     }
     Ok(())
 }

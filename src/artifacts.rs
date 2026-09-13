@@ -1057,32 +1057,50 @@ pub fn code_universes_from_export(
 /// A failed merge rolls back, so the DB keeps its prior committed state.
 pub fn reingest_layers(apg_root: &Path, records: &[Record]) -> anyhow::Result<()> {
     let db = ArtifactDb::open(apg_root)?;
-    let conn = db.conn()?;
-    conn.query("BEGIN TRANSACTION")?;
-    let result = (|| -> anyhow::Result<()> {
-        for layer_dir in [
-            "requirements",
-            "domain",
-            "solution",
-            "implementation",
-            "global",
-        ] {
-            conn.query(&format!(
-                "MATCH (n) WHERE n.fqn STARTS WITH '{}.' DETACH DELETE n",
-                layer_dir
-            ))?;
-        }
-        db.merge_records(&conn, records)?;
-        Ok(())
-    })();
-    match result {
-        Ok(()) => {
-            conn.query("COMMIT")?;
+    db.reingest_layers_on(records)
+}
+
+impl ArtifactDb {
+    /// The write-through projection apply for the durable layers tree, run
+    /// against an **already-held** database handle: detach every node-file node
+    /// (FQN prefix `<layer>.` for the five durable layer dirs) and re-merge the
+    /// caller-supplied `records` (the `layers::ingest_tree` output) — nodes
+    /// first, then edges, in one transaction. A failed merge rolls back, so the
+    /// DB keeps its prior committed state.
+    ///
+    /// Split from the free [`reingest_layers`](crate::artifacts::reingest_layers)
+    /// so the phase-03 session coordinator can amortize ONE DB open across N
+    /// routed mutations: the coordinator owns the handle for the session's life
+    /// and applies every mutation's projection delta synchronously through it —
+    /// the open is amortized, visibility never is.
+    pub fn reingest_layers_on(&self, records: &[Record]) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        conn.query("BEGIN TRANSACTION")?;
+        let result = (|| -> anyhow::Result<()> {
+            for layer_dir in [
+                "requirements",
+                "domain",
+                "solution",
+                "implementation",
+                "global",
+            ] {
+                conn.query(&format!(
+                    "MATCH (n) WHERE n.fqn STARTS WITH '{}.' DETACH DELETE n",
+                    layer_dir
+                ))?;
+            }
+            self.merge_records(&conn, records)?;
             Ok(())
-        }
-        Err(e) => {
-            let _ = conn.query("ROLLBACK");
-            Err(e)
+        })();
+        match result {
+            Ok(()) => {
+                conn.query("COMMIT")?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = conn.query("ROLLBACK");
+                Err(e)
+            }
         }
     }
 }
@@ -1091,6 +1109,7 @@ pub fn reingest_layers(apg_root: &Path, records: &[Record]) -> anyhow::Result<()
 mod tests {
     use super::*;
     use crate::graph::{Graph, Location, Node, NodeKind};
+    use crate::layers::{self, Layer};
     use crate::load;
     use crate::testutil::{self, Repo};
 
@@ -1633,5 +1652,85 @@ mod tests {
         assert!(planned2.contains("apg.session.Coordinator"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase-03 task-17: a routed mutation is written THROUGH — the durable
+    /// write lands with exactly one commit and its projection delta is applied
+    /// synchronously, so a mutation that reported success is already queryable
+    /// by a separate routed reader, before session end. Nothing is buffered
+    /// and there is no end-of-session flush.
+    #[test]
+    fn session_routed_write_is_committed_once_and_immediately_projected() {
+        let (wt_apg, repo, wt) = project_fixture("session-write-through");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        let before = testutil::commit_count(&wt);
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "writethrough",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+
+        // (a) Exactly one commit for the one logical mutation.
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before + 1,
+            "one logical mutation → one commit"
+        );
+
+        // (b) The projection delta was applied synchronously: a NEW routed
+        // reader (separate process) sees it BEFORE the session ends.
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.writethrough'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "routed read: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the mutation must be queryable immediately, not at session end"
+        );
+
+        // (c) The durable node file is the system of record.
+        assert!(
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "writethrough")
+                .exists()
+        );
+
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        testutil::remove(&repo);
     }
 }

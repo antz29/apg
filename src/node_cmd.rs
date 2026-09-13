@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::artifacts::{ParsedArgs, acquire_spec_lock, parse_args};
 use crate::layers::{self, InEdge, Layer, NodeFile, OutEdge, fqn};
+use crate::session;
 use crate::specs;
 
 fn require_apg_root() -> anyhow::Result<PathBuf> {
@@ -52,10 +53,21 @@ fn resolve_layer(dir: &str) -> anyhow::Result<Layer> {
 }
 
 pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
-    let Some(sub) = args.first().map(|s| s.as_str()) else {
+    let Some(_sub) = args.first().map(|s| s.as_str()) else {
         anyhow::bail!("usage: apg node <add|update|rm> …");
     };
     let apg_root = require_apg_root()?;
+    // Transparent routing (phase-03): when a session is live it owns the DB AND
+    // performs the whole durable write in receive order, so the mutation is
+    // forwarded and the flock is never acquired here (the session holds it for
+    // its life). A failed forward is an ERROR — there is no silent mid-flight
+    // fallback, which could double-apply a mutation that already landed. With
+    // no live session we take the serialized direct path below.
+    if session::live_session(&apg_root) {
+        let out = session::Coordinator::forward_mutation(&apg_root, "node", args)?;
+        println!("{out}");
+        return Ok(());
+    }
     // The extended whole-durable-sequence flock: acquired exactly ONCE here,
     // before any node-file read, and held through add/update/rm's
     // validate → write → single commit → projection. This is the single
@@ -63,37 +75,73 @@ pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
     // never acquire internally, so there is no double-lock). The flock is
     // released when this command returns (the guard drops).
     let _lock = acquire_spec_lock(&apg_root)?;
-    match sub {
-        "add" => node_add(&apg_root, &args[1..]),
-        "update" => node_update(&apg_root, &args[1..]),
-        "rm" => node_rm(&apg_root, &args[1..]),
-        other => anyhow::bail!("unknown apg node subcommand: {other}"),
-    }
+    let change = build_change(&apg_root, "node", args)?;
+    apply_change(&apg_root, change)
 }
 
 pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
-    let Some(sub) = args.first().map(|s| s.as_str()) else {
+    let Some(_sub) = args.first().map(|s| s.as_str()) else {
         anyhow::bail!("usage: apg edge <add|update|rm> …");
     };
     let apg_root = require_apg_root()?;
+    // Transparent routing (phase-03) — identical to `cmd_node`: forward to the
+    // live single writer, else the serialized direct path; never a silent
+    // fallback.
+    if session::live_session(&apg_root) {
+        let out = session::Coordinator::forward_mutation(&apg_root, "edge", args)?;
+        println!("{out}");
+        return Ok(());
+    }
     // The extended whole-durable-sequence flock: acquired exactly ONCE here,
     // before ANY source-file read, and held through add/update/rm's
     // validate → write → single commit → projection. This is the single
     // acquisition site for the edge path (`edge_add`/`edge_update`/`edge_rm`
     // never acquire internally, so there is no double-lock).
     let _lock = acquire_spec_lock(&apg_root)?;
-    match sub {
-        "add" => edge_add(&apg_root, &args[1..]),
-        "update" => edge_update(&apg_root, &args[1..]),
-        "rm" => edge_rm(&apg_root, &args[1..]),
-        other => anyhow::bail!("unknown apg edge subcommand: {other}"),
+    let change = build_change(&apg_root, "edge", args)?;
+    apply_change(&apg_root, change)
+}
+
+/// A complete logical mutation: the node files to write, the paths to delete,
+/// and the human message the command prints. Building the change only READS the
+/// store (existence checks + RMW); applying it is the durable sequence. The
+/// phase-03 session coordinator builds a change and applies it itself (single
+/// writer), so this one builder serves both the direct and the routed path.
+pub(crate) struct Change {
+    pub writes: Vec<NodeFile>,
+    pub deletes: Vec<PathBuf>,
+    pub message: String,
+}
+
+/// Build the complete change for one `node`/`edge` mutation (the shared
+/// read-modify-write the direct command and the session coordinator both run).
+pub(crate) fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Result<Change> {
+    let Some(sub) = args.first().map(|s| s.as_str()) else {
+        anyhow::bail!("usage: apg {kind} <add|update|rm> …");
+    };
+    let rest = &args[1..];
+    match (kind, sub) {
+        ("node", "add") => node_add_change(apg_root, rest),
+        ("node", "update") => node_update_change(apg_root, rest),
+        ("node", "rm") => node_rm_change(apg_root, rest),
+        ("edge", "add") => edge_add_change(apg_root, rest),
+        ("edge", "update") => edge_update_change(apg_root, rest),
+        ("edge", "rm") => edge_rm_change(apg_root, rest),
+        (_, other) => anyhow::bail!("unknown apg {kind} subcommand: {other}"),
     }
+}
+
+/// Persist a built change through the direct path and print its message.
+fn apply_change(apg_root: &Path, change: Change) -> anyhow::Result<()> {
+    layers::write_project(apg_root, &change.writes, &change.deletes)?;
+    println!("{}", change.message);
+    Ok(())
 }
 
 /// `apg node add <layer> <type> <name> [--body B] [--property k=v]*` — refuses
 /// when the FQN already exists (existence is never an implicit upsert; a
 /// re-add full-replaces the file and drops its edges).
-fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+fn node_add_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -119,16 +167,18 @@ fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
         out: Vec::new(),
         in_edges: Vec::new(),
     };
-    layers::write_project(apg_root, &[node], &[])?;
-    println!("Added node {f}");
-    Ok(())
+    Ok(Change {
+        writes: vec![node],
+        deletes: Vec::new(),
+        message: format!("Added node {f}"),
+    })
 }
 
 /// `apg node update <layer> <type> <name> [--body B] [--property k=v]*
 /// [--unset-property k]*` — body/properties only, edge-preserving: the
 /// identity (`layer`/`type`/`name`) and every out/in edge are immutable;
 /// properties MERGE with an explicit unset. Refuses an absent node.
-fn node_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+fn node_update_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -147,14 +197,16 @@ fn node_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
         &parse_properties(&p),
         &parse_unset_properties(&p),
     )?;
-    layers::write_project(apg_root, std::slice::from_ref(&updated), &[])?;
-    println!("Updated node {}", fqn(layer, &pos[1], &pos[2]));
-    Ok(())
+    Ok(Change {
+        writes: vec![updated],
+        deletes: Vec::new(),
+        message: format!("Updated node {}", fqn(layer, &pos[1], &pos[2])),
+    })
 }
 
 /// `apg node rm <layer> <type> <name>` — remove the node file and rewrite every
 /// file that references it (drop the incident edges), one atomic mutation.
-fn node_rm(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+fn node_rm_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -188,9 +240,11 @@ fn node_rm(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     }
 
     let deletes: Vec<PathBuf> = std::mem::take(&mut deletes);
-    layers::write_project(apg_root, &writes, &deletes)?;
-    println!("Removed node {f}");
-    Ok(())
+    Ok(Change {
+        writes,
+        deletes,
+        message: format!("Removed node {f}"),
+    })
 }
 
 /// Read an edge endpoint: an authored node (`<layer>.<type>.<name>`) or, when it
@@ -208,7 +262,7 @@ fn read_endpoint(apg_root: &Path, f: &str) -> anyhow::Result<Option<NodeFile>> {
 /// source's file and the matching in-edge to the target's file (both halves).
 /// Refuses a duplicate `(kind, from, to)` on the source's out-half (the edge is
 /// identified by that triple; re-adding duplicates both halves).
-fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+fn edge_add_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -250,16 +304,18 @@ fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
         writes.push(target);
     }
 
-    layers::write_project(apg_root, &writes, &[])?;
-    println!("Added edge {kind} {from} -> {to}");
-    Ok(())
+    Ok(Change {
+        writes,
+        deletes: Vec::new(),
+        message: format!("Added edge {kind} {from} -> {to}"),
+    })
 }
 
 /// `apg edge update <kind> <from> <to> --property k=v [--unset-property k]*` —
 /// properties only: `kind`/`from`/`to` are immutable identity. Rewrites the
 /// source out-half and the target in-half to the same MERGEd property map in
 /// one atomic mutation. Refuses an absent edge.
-fn edge_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+fn edge_update_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -302,14 +358,16 @@ fn edge_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
         writes.push(target);
     }
 
-    layers::write_project(apg_root, &writes, &[])?;
-    println!("Updated edge {kind} {from} -> {to}");
-    Ok(())
+    Ok(Change {
+        writes,
+        deletes: Vec::new(),
+        message: format!("Updated edge {kind} {from} -> {to}"),
+    })
 }
 
 /// `apg edge rm <kind> <from> <to>` — drop the out-edge from the source and the
 /// in-edge from the target, one atomic mutation.
-fn edge_rm(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+fn edge_rm_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -333,9 +391,39 @@ fn edge_rm(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
         writes.push(target);
     }
 
-    layers::write_project(apg_root, &writes, &[])?;
-    println!("Removed edge {kind} {from} -> {to}");
-    Ok(())
+    Ok(Change {
+        writes,
+        deletes: Vec::new(),
+        message: format!("Removed edge {kind} {from} -> {to}"),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Test-facing direct-path wrappers: the pre-refactor `node_add`/`edge_add`
+// command shapes (build the change, persist it through `write_project`, print).
+// The production dispatch uses `build_change` + `apply_change` directly so the
+// session coordinator can inject its own (already-held) DB handle; these keep
+// the existing direct-path unit tests unchanged.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+    apply_change(apg_root, node_add_change(apg_root, args)?)
+}
+
+#[cfg(test)]
+fn node_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+    apply_change(apg_root, node_update_change(apg_root, args)?)
+}
+
+#[cfg(test)]
+fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+    apply_change(apg_root, edge_add_change(apg_root, args)?)
+}
+
+#[cfg(test)]
+fn edge_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
+    apply_change(apg_root, edge_update_change(apg_root, args)?)
 }
 
 #[cfg(test)]
@@ -1512,6 +1600,321 @@ mod tests {
         assert_eq!(r1.out[0].properties, expect);
         assert_eq!(r2.in_edges[0].properties, expect);
 
+        testutil::remove(&repo);
+    }
+
+    /// Forwards a node mutation to the live session with a chosen client id (the
+    /// at-most-once replay primitive), panicking on transport errors.
+    fn session_forward_node(apg_root: &Path, client_id: &str, args: &[String]) -> String {
+        crate::session::Coordinator::forward_mutation_with_id(apg_root, client_id, "node", args)
+            .unwrap()
+    }
+
+    /// Ends a live session and returns its (captured) output.
+    fn end_session(wt: &Path, session: testutil::SessionProcess) -> std::process::Output {
+        let end = testutil::spawn_apg(&["session", "end"], wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        session.child.wait_with_output().unwrap()
+    }
+
+    /// Phase-03 task-15: with a live session, a parallel burst of N separate
+    /// routed `apg edge add` processes is applied by the ONE coordinator in
+    /// receive order — zero failures and the shared hub carries exactly N
+    /// out-edges (no lost update), and the DB equals the serial application.
+    #[test]
+    fn live_session_applies_routed_mutations_in_receive_order_as_single_writer() {
+        const N: usize = 10;
+        let (wt_apg, repo, wt) = mutation_fixture("session-order");
+        setup_hub_and_leaves(&wt, N);
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        let (failed, by_lock) = run_edge_burst(&wt, &home, N);
+        assert_eq!(
+            failed, 0,
+            "routed burst lost {failed}/{N} mutations ({by_lock:?})"
+        );
+        assert_eq!(hub_out_edges(&wt_apg), N, "the single writer lost an edge");
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        // Store == serial application, now visible in the DB (session released).
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let q = db
+            .q("MATCH (:Requirement {fqn: 'requirements.requirement.hub'})-[:DependsOn]->(b) RETURN count(*)")
+            .unwrap();
+        assert_eq!(q.lines().last().map(str::trim), Some("10"), "{q}");
+        drop(db);
+        testutil::remove(&repo);
+    }
+
+    /// Phase-03 task-16: the session amortizes ONE DB open across N routed
+    /// mutations (the observable open counter is materially fewer than N), AND
+    /// every mutation is visible to a separate routed reader as it returns —
+    /// there is no end-of-session flush.
+    #[test]
+    fn live_session_amortizes_the_db_open_and_keeps_every_mutation_visible() {
+        const N: usize = 6;
+        let (_wt_apg, repo, wt) = mutation_fixture("session-amortize");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        for i in 0..N {
+            let name = format!("amort-{i}");
+            let add = testutil::ApgCommand::new(&[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                name.as_str(),
+            ])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+            assert!(
+                add.status.success(),
+                "mutation {i}: {}",
+                String::from_utf8_lossy(&add.stderr)
+            );
+
+            // A SEPARATE routed reader sees the mutation as soon as it returns.
+            let query = format!(
+                "MATCH (n:Requirement {{fqn: 'requirements.requirement.{name}'}}) RETURN count(n)"
+            );
+            let q = testutil::spawn_apg(&["query", query.as_str()], &wt);
+            assert!(
+                q.status.success(),
+                "routed read {i}: {}",
+                String::from_utf8_lossy(&q.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&q.stdout)
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1"),
+                "mutation {i} must be visible immediately (no end-of-session flush)"
+            );
+        }
+
+        let out = end_session(&wt, session);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let opens = stderr.matches(crate::session::DB_OPEN_MARKER).count();
+        assert!(opens >= 1, "the session must open the DB: {stderr}");
+        assert!(
+            opens < N,
+            "the session must amortize the DB open: {opens} opens for {N} mutations\n{stderr}"
+        );
+        testutil::remove(&repo);
+    }
+
+    /// Phase-03 task-18: routing is transparent — the same command works with
+    /// and without a live session, producing the identical message; the CLI
+    /// surface is unchanged.
+    #[test]
+    fn routing_is_transparent_with_and_without_a_live_session() {
+        let (_wt_apg, repo, wt) = mutation_fixture("session-transparent");
+        let home = repo.root.join("home");
+        // (a) No session: the serialized direct path.
+        let direct =
+            testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "direct-1"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            direct.status.success(),
+            "{}",
+            String::from_utf8_lossy(&direct.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&direct.stdout).trim(),
+            "Added node requirements.requirement.direct-1"
+        );
+
+        // (b) Live session: the same command is routed with the same output.
+        let session = testutil::start_session_process(&wt, &home);
+        let routed =
+            testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "routed-1"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            routed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&routed.stdout).trim(),
+            "Added node requirements.requirement.routed-1"
+        );
+        let edge = testutil::ApgCommand::new(&[
+            "edge",
+            "add",
+            "depends-on",
+            "requirements.requirement.routed-1",
+            "requirements.requirement.direct-1",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            edge.status.success(),
+            "{}",
+            String::from_utf8_lossy(&edge.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&edge.stdout).trim(),
+            "Added edge depends-on requirements.requirement.routed-1 -> requirements.requirement.direct-1"
+        );
+
+        // (c) The documented surface is unchanged.
+        let help = testutil::spawn_apg(&["--help"], &wt);
+        let text = String::from_utf8_lossy(&help.stdout);
+        assert!(text.contains("apg node <sub>"), "{text}");
+        assert!(text.contains("apg edge <sub>"), "{text}");
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        testutil::remove(&repo);
+    }
+
+    /// Phase-03 task-20: a forwarded mutation carries a client id and is applied
+    /// AT MOST ONCE — replaying the same id returns the cached reply with no
+    /// second commit — and a forward that cannot reach the coordinator ERRORS
+    /// rather than silently falling back to the direct path.
+    #[test]
+    fn forwarded_mutations_apply_at_most_once_and_never_fall_back() {
+        let (wt_apg, repo, wt) = mutation_fixture("session-at-most-once");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        let args = av(&["add", "requirements", "requirement", "once"]);
+        let first = session_forward_node(&wt_apg, "dup-1", &args);
+        assert_eq!(first, "Added node requirements.requirement.once");
+        let before = testutil::commit_count(&wt);
+
+        // Replay the SAME client id: cached reply, no re-apply.
+        let replay = session_forward_node(&wt_apg, "dup-1", &args);
+        assert_eq!(replay, first, "a replayed id must return the cached reply");
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before,
+            "a replay must not create a second commit"
+        );
+        assert_eq!(
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "once")
+                .unwrap()
+                .name,
+            "once"
+        );
+
+        // End the session. A forward now ERRORS — no direct-path fallback — and
+        // nothing lands locally.
+        let _ = crate::session::Coordinator::signal_end(&wt_apg);
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let ghost = av(&["add", "requirements", "requirement", "ghost"]);
+        let err = crate::session::Coordinator::forward_mutation_with_id(
+            &wt_apg,
+            "after-end",
+            "node",
+            &ghost,
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("session forward failed"),
+            "{err:#}"
+        );
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "ghost").exists(),
+            "a failed forward must not fall back to the direct path"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-03 task-21: session lifecycle exclusivity — one session per
+    /// worktree DB; a second start refuses; `apg scan` and `apg project merge`
+    /// refuse while a session is live; routed reads keep working and a
+    /// non-routing direct DB open is out of contract.
+    #[test]
+    fn session_lifecycle_is_exclusive_with_scan_and_merge() {
+        let (wt_apg, repo, wt) = mutation_fixture("session-exclusive");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        // (a) One session per DB: a second start refuses.
+        let second = testutil::ApgCommand::new(&["session", "start"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(!second.status.success(), "a second session must refuse");
+        assert!(
+            String::from_utf8_lossy(&second.stderr).contains("already live"),
+            "{}",
+            String::from_utf8_lossy(&second.stderr)
+        );
+
+        // (b) `apg scan` refuses while the session owns db.lbug.
+        let scan = testutil::ApgCommand::new(&["scan", wt.to_str().unwrap()])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(!scan.status.success(), "scan must refuse a live session");
+        assert!(
+            String::from_utf8_lossy(&scan.stderr).contains("live `apg session`"),
+            "{}",
+            String::from_utf8_lossy(&scan.stderr)
+        );
+
+        // (c) `apg project merge` refuses while the session owns the branch DB.
+        let merge = testutil::ApgCommand::new(&["project", "merge", "foo"])
+            .cwd(&repo.root)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(!merge.status.success(), "merge must refuse a live session");
+        assert!(
+            String::from_utf8_lossy(&merge.stderr).contains("live `apg session`"),
+            "{}",
+            String::from_utf8_lossy(&merge.stderr)
+        );
+
+        // (d) Routed reads keep working; a non-routing direct open is OUT of
+        // contract (lbug errors while the session holds the DB).
+        let q = testutil::spawn_apg(&["query", "MATCH (n:Module) RETURN count(n)"], &wt);
+        assert!(
+            q.status.success(),
+            "routed read: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        assert!(
+            ArtifactDb::open(&wt_apg).is_err(),
+            "a non-routing direct DB open must fail while the session holds it"
+        );
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         testutil::remove(&repo);
     }
 }

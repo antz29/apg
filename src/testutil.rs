@@ -14,6 +14,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::graph::{Graph, Node, NodeKind};
 use crate::load;
@@ -330,6 +331,100 @@ pub fn spawn_apg(args: &[&str], cwd: &Path) -> Output {
 }
 
 // ---------------------------------------------------------------------------
+// Session harness (phase-03): drive a real long-running `apg session start`
+// process. The coordinator must be a genuinely separate process — it owns the
+// DB and the extended flock for its life — so session tests spawn it, wait
+// until its socket answers, route mutations/reads through it, and end it (or
+// SIGKILL it, for the crash/reclaim case).
+// ---------------------------------------------------------------------------
+
+/// A live `apg session start` process under test.
+pub struct SessionProcess {
+    pub child: Child,
+}
+
+/// Spawns `apg session start` in `wt` with an isolated `HOME`, then waits until
+/// the session socket answers (or panics, dumping the child's output).
+pub fn start_session_process(wt: &Path, home: &Path) -> SessionProcess {
+    std::fs::create_dir_all(home).unwrap();
+    let apg_root = specs::find_apg_root(wt).expect("fixture layout root");
+    let mut child = ApgCommand::new(&["session", "start"])
+        .cwd(wt)
+        .env("HOME", home.to_str().unwrap())
+        .spawn();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if crate::session::live_session(&apg_root) {
+            return SessionProcess { child };
+        }
+        if let Some(status) = child.try_wait().unwrap() {
+            let out = child.wait_with_output().unwrap();
+            panic!(
+                "session exited early ({status}): {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let out = child.wait_with_output().unwrap();
+            panic!(
+                "session did not become live: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// Commits `rels` on `wt`'s current branch (git2 — the same mechanics
+/// `git::commit_files` uses).
+pub fn wt_commit(wt: &Path, rels: &[&str], msg: &str) {
+    let repo = git2::Repository::open(wt).unwrap();
+    let mut index = repo.index().unwrap();
+    for rel in rels {
+        index.add_path(Path::new(rel)).unwrap();
+    }
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &[&head])
+        .unwrap();
+}
+
+/// The number of commits reachable from the checkout's HEAD — used to assert
+/// one-commit-per-mutation (and no commit on an at-most-once replay).
+pub fn commit_count(dir: &Path) -> usize {
+    let repo = git2::Repository::open(dir).unwrap();
+    let mut walk = repo.revwalk().unwrap();
+    walk.push_head().unwrap();
+    walk.count()
+}
+
+/// A real project worktree carrying a code graph: main repo + worktree `foo` on
+/// branch `foo` with a committed source payload scanned into
+/// `<wt>/apg/.trans/db.lbug`. Returns `(repo, wt, wt_apg)` — the state a
+/// session coordinator owns.
+pub fn project_with_db(tag: &str) -> (Repo, PathBuf, PathBuf) {
+    let repo = Repo::new(tag);
+    let wt = repo.start_project("foo");
+    let wt_apg = wt.join(specs::LAYOUT);
+    let seed = wt.join("code/seed.scan.jsonl");
+    std::fs::create_dir_all(seed.parent().unwrap()).unwrap();
+    std::fs::write(
+        &seed,
+        code_payload("fixture.mod", "/abs/store.go", &["Store"]),
+    )
+    .unwrap();
+    wt_commit(&wt, &["code/seed.scan.jsonl"], "seed code");
+    scan_checkout(&wt).unwrap();
+    (repo, wt, wt_apg)
+}
+
+// ---------------------------------------------------------------------------
 // Hermetic scans: tests never spawn frontends, so a fixture checkout's "code"
 // is whatever `*.scan.jsonl` payload files it carries (scanner-shaped records,
 // piped through the real ingest pipeline exactly like a frontend spool), plus
@@ -520,4 +615,76 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
     };
     std::env::set_current_dir(old)?;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layers::{self, Layer};
+
+    /// Phase-03 task-19: a SIGKILLed session leaves NO half-written durable
+    /// state and no process holding `db.lbug`, and the stale socket it leaves
+    /// behind (no live process) is reclaimed by the next `apg session start`.
+    #[test]
+    fn killed_session_loses_nothing_and_its_stale_socket_is_reclaimed() {
+        let (repo, wt, wt_apg) = project_with_db("session-crash");
+        let home = repo.root.join("home");
+        let session = start_session_process(&wt, &home);
+
+        // One routed mutation so there is durable state to inspect.
+        let add = ApgCommand::new(&["node", "add", "requirements", "requirement", "survivor"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+
+        // SIGKILL — deliberately NOT a graceful `end`.
+        let pid = session.child.id() as i32;
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            !out.status.success(),
+            "the session was killed, not ended cleanly"
+        );
+
+        // (a) no half-written node file: the survivor parses.
+        let nf = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "survivor")
+            .unwrap();
+        assert_eq!(nf.name, "survivor");
+        // (b) no paired edge half mismatched (the store still pairs cleanly).
+        layers::check_edge_pairing(&layers::read_existing_nodes(&wt_apg).unwrap()).unwrap();
+        // (c) no process holds db.lbug: a direct read-write open succeeds now.
+        let db = crate::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        assert!(db.has_node("requirements.requirement.survivor"));
+        drop(db);
+
+        // (d) the SIGKILL left the socket file behind; the next start reclaims
+        // it (no live process behind it) and serves normally.
+        let socket = crate::session::socket_path(&wt_apg);
+        assert!(socket.exists(), "SIGKILL leaves the stale socket behind");
+        let session2 = start_session_process(&wt, &home);
+        let end = spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out2 = session2.child.wait_with_output().unwrap();
+        assert!(
+            out2.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out2.stderr)
+        );
+        let stderr2 = String::from_utf8_lossy(&out2.stderr);
+        assert!(
+            stderr2.contains("reclaimed stale socket"),
+            "the next start must reclaim the stale socket: {stderr2}"
+        );
+
+        remove(&repo);
+    }
 }
