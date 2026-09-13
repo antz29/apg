@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.file-access-guard-prose",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.coordinator-feedback-routing",
+      "properties": {}
     }
   ],
   "in": [
