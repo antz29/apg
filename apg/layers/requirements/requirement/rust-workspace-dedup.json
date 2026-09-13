@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "rust-workspace-dedup",
+  "body": "A repo whose root Cargo.toml declares [workspace] members=[...] must yield each workspace project exactly once: loading the workspace root must not also load each member as a separate top-level project, so discovery yields the workspace root once rather than root + members. AC: a workspace fixture yields each project once; the discovered-project count equals the workspace's project count with no duplicates.",
+  "properties": {
+    "feature": "rust-module-discovery"
+  },
+  "out": [],
+  "in": []
+}
