@@ -9,6 +9,11 @@
       "kind": "drives",
       "target": "domain.value.phase-timing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.phase-timing-report",
+      "properties": {}
     }
   ],
   "in": [

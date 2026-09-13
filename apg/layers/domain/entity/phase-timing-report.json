@@ -23,6 +23,11 @@
       "kind": "drives",
       "source": "requirements.requirement.per-phase-timing-report",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.incremental-acceptance-targets",
+      "properties": {}
     }
   ]
 }
