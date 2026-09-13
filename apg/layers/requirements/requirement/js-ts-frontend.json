@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "js-ts-frontend",
+  "body": "Unify the TypeScript frontend into a JS/TS frontend: accept .js, .jsx, .mjs, .cjs in addition to .ts/.tsx, so apg can scan JavaScript repos (a large class of real code) and so the frontend's own JavaScript source (src/tslib/scanner.mjs) is scanned. The TypeScript compiler already handles JS as a subset via allowJs; the work is module/extension policy, detection, classification, and a build step — not a new parser. The exactness posture is unchanged: exact where the checker resolves, UnresolvedTarget otherwise. Feature js-ts-frontend.",
+  "properties": {
+    "feature": "js-ts-frontend"
+  },
+  "out": [],
+  "in": []
+}
