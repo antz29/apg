@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "incremental-graph",
+  "body": "Feature incremental-graph (win C). At netbeans scale the DB build (parquet + copy_from + schema) is no longer negligible — it is a multi-minute floor. The ingestor must seed/splice the DB from the previous one instead of rebuilding it from scratch, while allowing a global projection pass over cached + re-emitted facts that never requires re-running the frontends. This is the part that must not be skipped on huge graphs.",
+  "properties": {
+    "feature": "incremental-graph"
+  },
+  "out": [],
+  "in": []
+}
