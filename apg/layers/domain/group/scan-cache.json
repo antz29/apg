@@ -36,6 +36,11 @@
       "kind": "realised-by",
       "target": "solution.component.delta-analyzer",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.freshness-gate",
+      "properties": {}
     }
   ],
   "in": [

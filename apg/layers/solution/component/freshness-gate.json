@@ -46,6 +46,11 @@
       "kind": "realised-by",
       "source": "domain.service.freshness-check",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.scan-cache",
+      "properties": {}
     }
   ]
 }
