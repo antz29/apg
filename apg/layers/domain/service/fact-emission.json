@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "fact-emission",
+  "body": "A frontend resolving against the full compilation context and emitting facts for its discovered projects/files — declarations, references, and edges — with anything unresolved emitted as an UnresolvedTarget, never guessed. Emission is per discovered project; the full context is never reduced.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
