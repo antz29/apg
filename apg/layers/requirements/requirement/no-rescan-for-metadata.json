@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "no-rescan-for-metadata",
+  "body": "A spec (`apg node`/`apg edge`) or plan (`apg plan`/`apg review`) mutation never triggers and never requires a full code re-scan. The mutation path updates the projection in place. Acceptance: a metadata mutation run on a scanned branch completes without invoking `apg scan`, and an `apg_query` issued immediately afterward reflects it.",
+  "properties": {
+    "feature": "graph-consistency"
+  },
+  "out": [],
+  "in": []
+}
