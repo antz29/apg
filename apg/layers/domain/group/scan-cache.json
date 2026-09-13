@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "domain.entity.fact-cache",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.freshness-check",
+      "properties": {}
     }
   ],
   "in": [
