@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "markdown-sections-as-symbols",
+  "body": "Markdown headings must map to graph symbols: each heading becomes a Struct section symbol, nested by heading level — a heading is contained by the file when it is the document's top level, or by the nearest lower-level heading otherwise (the schema nests symbols only through Struct, so a section is a Struct). The section FQN follows the per-language convention: the directory-based module prefix plus the file's dot-path stem plus the section name, with nested sections extending their parent section's FQN, so file/module prefixes stay disjoint and two same-named sections in different files never collide. The exact slug rule that turns heading text into a name segment is an open design point (see the open-points note). AC: a document with nested headings yields one Struct per heading, each contained by the correct parent, with disjoint collision-free FQNs.",
+  "properties": {
+    "feature": "markdown-frontend"
+  },
+  "out": [],
+  "in": []
+}
