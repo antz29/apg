@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "exact-ongoing-equivalence",
+  "body": "Incremental scanning must be exact-ongoing: every node and edge must be resolved against the full compilation context and be exactly as trustworthy as a full scan. The incremental graph must equal the full-scan graph — same node set, same edge set, same unresolved targets. There is NO heuristic resolution pass and NO provenance/confidence tier. Human decision recorded: Tier 2 — exact-ongoing; do not propose a reduced-resolution \"preview\" mode. Note: a signature change to a widely-depended-on symbol may legitimately approach a full scan; that is acceptable, inexactness is not.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
