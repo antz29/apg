@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.verify-gate-all-scopes",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",

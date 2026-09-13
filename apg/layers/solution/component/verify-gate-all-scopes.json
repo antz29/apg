@@ -5,5 +5,11 @@
   "body": "The pre-merge coherence gate's feedback check. `apg.plan_cmd.plan_verify_at` (src/plan_cmd.rs:1584–1721) must load and require resolved every Feedback across the project's six transient stores, using `apg.specs.project_transient_files` (src/specs.rs:159–179) as the store set instead of `apg.plan_cmd.load_plan`'s plan-store-only view (src/plan_cmd.rs:32–38), and name each unresolved feedback FQN. Phase completion (`plan_complete_at`) stays phase-scoped.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.feedback-scope",
+      "properties": {}
+    }
+  ]
 }
