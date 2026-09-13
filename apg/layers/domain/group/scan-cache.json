@@ -6,7 +6,13 @@
   "properties": {
     "attribute": "core"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.content-manifest",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
