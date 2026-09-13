@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "projection-equals-sources",
-  "body": "The invariant: after any mutation (metadata or code), `db.lbug` equals the projection of (durable layers + plan store + the last code scan) — no stale rows, no orphans, no missing rows. This refines `requirements.requirement.db-rebuildable-projection`: the DB stays derived and need not be fresh relative to unwritten code, but it MUST be consistent relative to the metadata sources after every mutation. Acceptance: for any metadata mutation, diffing `db.lbug`'s authored/transient nodes against the node files plus the plan store yields the empty set, without a scan.",
+  "body": "The invariant: after any mutation (metadata or code), `db.lbug` equals the projection of (durable layers + plan store + **all transient tier mirrors** + the last code scan) — no stale rows, no orphans, no missing rows. The transient tier mirrors are load-bearing, not incidental: a pre-existing `Feedback-[:Reviews]` pairing on a durable node is part of the projection and must survive ANY mutation, including a durable node/edge write (child requirement `requirements.requirement.durable-mutation-preserves-transient-pairing`). This refines `requirements.requirement.db-rebuildable-projection`: the DB stays derived and need not be fresh relative to unwritten code, but it MUST be consistent relative to the metadata sources after every mutation. Acceptance: for any metadata mutation, diffing `db.lbug`'s authored/transient nodes against the node files plus the plan store plus the transient tier mirrors yields the empty set, without a scan.",
   "properties": {
     "feature": "graph-consistency"
   },
