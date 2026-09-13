@@ -32,6 +32,11 @@
       "kind": "contains",
       "target": "domain.value.phase-timing",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.system.apg-scan",
+      "properties": {}
     }
   ],
   "in": [
