@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.rust-isolation-preserved",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.rust-nested-fqn-clean",
+      "properties": {}
     }
   ],
   "in": []
