@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "baseline-and-acceptance",
+  "body": "Measured full-scan baselines that define the wins. jgrapht (fast CI baseline): full scan ~16s wall (~12s logged) — Java frontend 9s (70%), graph assembly ~1s, DB load 2s, startup/overhead 3–4s; 21,334 nodes, 153k edges, 18 MB DB. netbeans: stress case, 1h+ full scan. Acceptance: fresh worktree near-instant; 1–5 file localized netbeans edit single-digit minutes; signature change to a widely-depended symbol may approach a full scan. Re-measure each phase via the per-phase timing report.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
