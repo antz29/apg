@@ -27,6 +27,11 @@
       "kind": "contains",
       "target": "domain.service.fact-emission",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.language-detection",
+      "properties": {}
     }
   ],
   "in": []
