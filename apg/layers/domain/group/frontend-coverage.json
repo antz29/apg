@@ -37,6 +37,11 @@
       "kind": "contains",
       "target": "domain.service.manifest-discovery",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.code-type",
+      "properties": {}
     }
   ],
   "in": []

@@ -5,5 +5,11 @@
   "body": "A source file's provenance class (src/test/generated/external or a project-defined value), computed by the ingestor from the path plus the project classification config. All code is included in the graph; code type is the filter.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.frontend-coverage",
+      "properties": {}
+    }
+  ]
 }
