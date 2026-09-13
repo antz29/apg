@@ -4,6 +4,12 @@
   "name": "rust-nested-discovery-evidence",
   "body": "Verified this session: src/rustlib is a separate Cargo project (apg-rustfrontend, own Cargo.lock + isolated src/rustlib/target/, edition = \"2021\", ra_ap_* deps pinned to a rust-analyzer git tag); the Rust frontend loads only one manifest via ProjectManifest::discover_single (src/rustlib/src/main.rs:513), so scanning from the repo root loads only the root apg package and src/rustlib produces no module and no symbols (confirmed in the branch DB: no rustlib / apg-rustfrontend module). The frontend can load a nested dir when pointed at it — the gap is discovery/orchestration only. Explicitly not the fix: joining the root workspace (isolation is deliberate, build.rs:183-208). Source: code graph + source read. verified.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.rust-module-discovery",
+      "properties": {}
+    }
+  ],
   "in": []
 }

@@ -53,6 +53,11 @@
       "kind": "contains",
       "source": "requirements.user.apg-cli-runner",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.rust-nested-discovery-evidence",
+      "properties": {}
     }
   ]
 }
