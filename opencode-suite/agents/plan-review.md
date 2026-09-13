@@ -108,9 +108,15 @@ anywhere.
 
 ## File access (strict)
 
-- You may read any file and query the code graph, but you **never modify any
-  file** and you never author plan nodes.
-- Never commit anything.
+- All graph state is reached only through the apg tools you hold: `apg_query`
+  (durable Requirement/domain/solution node bodies), the plan read tools
+  `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, and `apg_plan_render`
+  (transient plan state), and `apg_review`, `apg_review_add`,
+  `apg_review_resolve`, and `apg_review_reject` (transient feedback state).
+- Those node/transient files are never read directly.
+- Ordinary source files behind code FQNs remain readable with the `read` tool.
+- You never modify any file and you never author plan nodes. Never commit
+  anything.
 
 ## The review cycle (closed)
 

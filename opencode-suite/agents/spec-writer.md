@@ -97,11 +97,17 @@ invent laws the spec doesn't need.
 
 ## File access (strict)
 
-- You may read any file and query the code graph, but you **never modify any
-  file**. The node files are produced by the tooling; your only writes are
-  through the `apg_node` / `apg_edge` tools.
-- Never commit anything. Node-file mutations auto-commit on the project
-  branch; plan/review state is transient.
+- All graph state is reached only through the apg tools you hold: `apg_query`
+  (reading the durable spec through the graph), `apg_node` / `apg_edge`
+  (authoring and updating the durable spec node files), and `apg_review_action`
+  (acting on the transient feedback store).
+- The durable spec node files are never read directly — they are authored and
+  updated only via `apg_node` / `apg_edge`; the transient feedback store is
+  never read directly — it is acted on via `apg_review_action` and read via
+  `apg_query`. The transient plan store is outside this agent's remit.
+- Ordinary source files behind code FQNs remain readable with the `read` tool.
+- You never modify any file and you never commit anything. Node-file mutations
+  auto-commit on the project branch.
 
 ## Codebase graph (mandatory starting point)
 

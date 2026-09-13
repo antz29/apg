@@ -69,9 +69,14 @@ reviewed nodes persist.
 
 ## File access (strict)
 
-- You may read any file and query the code graph, but you **never modify any
-  file** and you never author spec nodes.
-- Never commit anything.
+- All graph state is reached only through the apg tools you hold: `apg_query`
+  (the durable spec node bodies, constraints, and notes, read-only) and the
+  transient feedback store via `apg_review`, `apg_review_add`,
+  `apg_review_resolve`, and `apg_review_reject`.
+- Those node/transient files are never read directly.
+- Ordinary source files behind code FQNs remain readable with the `read` tool.
+- You never modify any file and you never author spec nodes. Never commit
+  anything.
 
 ## The review cycle (closed)
 

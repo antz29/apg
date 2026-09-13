@@ -84,9 +84,15 @@ with the branch unless the project merges.
 
 ## File access (strict)
 
-- You may read any file and query the code graph, but you **never modify any
-  file**. The plan state is produced by the tooling.
-- Never commit anything.
+- All graph state is reached only through the apg tools you hold: `apg_query`
+  (the durable spec), `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`,
+  `apg_plan_render`, and `apg_plan_add` (the transient plan store), and
+  `apg_review_action` (the transient feedback store).
+- The durable spec node files are never read directly — they are reached via
+  `apg_query`; the transient plan and feedback stores are never read directly —
+  they are reached via the plan and review tools above.
+- Ordinary source files behind code FQNs remain readable with the `read` tool.
+- You never modify any file and you never commit anything.
 
 ## Codebase graph (mandatory starting point)
 
