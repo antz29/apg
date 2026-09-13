@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "freshness-check",
+  "body": "Decides whether the recorded scan state exactly matches the current tree (content identity, not mtime). On a match the scan takes the fast-path: skip the frontends and reuse the DB. This is where the existing staleness guard becomes a freshness fast-path.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
