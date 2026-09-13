@@ -34,6 +34,11 @@
       "kind": "implemented-by",
       "target": "apg.layers.write_project_with",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.artifacts.assembled_records",
+      "properties": {}
     }
   ],
   "in": [
