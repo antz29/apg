@@ -32,6 +32,11 @@
       "kind": "contains",
       "target": "domain.service.language-detection",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.manifest-discovery",
+      "properties": {}
     }
   ],
   "in": []
