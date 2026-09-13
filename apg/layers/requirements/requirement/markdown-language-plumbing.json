@@ -6,7 +6,13 @@
   "properties": {
     "feature": "markdown-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.service.language-detection",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
