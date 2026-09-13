@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "fact-cache",
+  "body": "The per-file cache of previously produced scanner facts (declarations, references, edges), keyed by content OID plus resolution inputs and the global cache key. A file's facts are reusable only when its bytes and its resolution inputs are unchanged. Open design point: whether facts are per-file or per-package/crate unit.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
