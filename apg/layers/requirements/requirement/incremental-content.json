@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "incremental-content",
+  "body": "Feature incremental-content (win B, the core of the project). On a changed tree, `apg scan` must reuse per-file scanner facts and run each language frontend only over the affected target set, while producing a graph that is exactly equivalent to a full scan. Tier 2 — exact-ongoing; no heuristic pass and no provenance/confidence tier. This capability covers the content-addressed manifest, cross-worktree cache sharing, the delta + fallback rules, the impact-set closure with signature early-cutoff, the full-context/targeted-emission frontend contract, and cache invalidation by resolution inputs and global keys.",
+  "properties": {
+    "feature": "incremental-content"
+  },
+  "out": [],
+  "in": []
+}
