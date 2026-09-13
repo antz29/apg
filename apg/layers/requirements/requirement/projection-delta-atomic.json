@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "projection-delta-atomic",
+  "body": "The mutation computes the exact node/edge delta it writes and applies that same delta to the projection deterministically, inside the same logical mutation/commit boundary as the durable/transient write. A re-ingest failure rolls the projection back and the mutation reports failure; a success leaves the projection equal to the new sources. Acceptance: add-then-remove and remove-then-add of the same node both converge to the correct projection without a scan; a forced mid-apply failure leaves the prior projection state intact.",
+  "properties": {
+    "feature": "graph-consistency"
+  },
+  "out": [],
+  "in": []
+}
