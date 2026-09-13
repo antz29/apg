@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "change-set",
+  "body": "The change-set subdomain: what changed between the recorded scan and the current tree, and what must be re-emitted as a result. Contains the file-level delta, the impact set (changed ∪ reverse-dependency closure ∪ overload peers), the exported-signature value that drives early cutoff, and the delta-computation service.",
+  "properties": {
+    "attribute": "core"
+  },
+  "out": [],
+  "in": []
+}
