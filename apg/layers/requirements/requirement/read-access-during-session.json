@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "read-access-during-session",
+  "body": "While a session owns `apg/.trans/db.lbug` with an exclusive lock, external readers must still be able to read immediately. Reads route through the live session over the same transparent socket as writes (read-through routing), or the DB is opened in a mode that admits concurrent readers (multi-reader/single-writer). This requirement constrains the observable behaviour, not the mechanism.\n\nAcceptance: with a live session that has applied a mutation, a separate `apg query` process returns the post-mutation state with no lock error and without waiting for the session to end.",
+  "properties": {
+    "feature": "graph-consistency"
+  },
+  "out": [],
+  "in": []
+}
