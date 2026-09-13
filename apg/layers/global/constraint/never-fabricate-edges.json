@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "never-fabricate-edges",
+  "body": "A frontend must never fabricate a code FQN or edge. Anything the checker cannot resolve to a project symbol becomes an UnresolvedTarget with a category, never a guessed edge. This holds for every language; JavaScript's dynamic constructs (untyped params, computed access, monkey-patching, dynamic require(expr)) are the expected high-unresolved case, not an exemption.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
