@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "writers-read-only-feedback",
+  "body": "Plan-writers, spec-writers, and implementers must hold no feedback-action capability: `apg_review_action` (and `apg_review_resolve`/`apg_review_reject`) is not granted to them, so a dispatched writer cannot move a feedback item's state. Each holds a read-only feedback channel (`apg_review`) and responds to the single item it was given with an ACTIONED or WONT-FIX claim returned to the coordinator — never by calling an action command.\n\nAcceptance: none of the spec-writer, plan-writer, or implementer agent grants (the distributed suite templates and this repo's generated agents) includes `apg_review_action`; each includes the read-only feedback channel; the agent-builder template states the same grant shape for the writers it scaffolds.",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
