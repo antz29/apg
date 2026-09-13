@@ -53,6 +53,11 @@
       "kind": "contains",
       "source": "requirements.user.suite-agent",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.immediate-queryability-reconciliation",
+      "properties": {}
     }
   ]
 }
