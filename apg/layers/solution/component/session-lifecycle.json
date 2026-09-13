@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.session.Coordinator.start",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.session.Coordinator.end",
+      "properties": {}
     }
   ],
   "in": [
