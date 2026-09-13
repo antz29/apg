@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "user",
   "name": "suite-agent",
-  "body": "A thing that uses the system: the opencode suite agent (spec-writer, plan-writer, agent-builder, and the repo-defined implementer/reviewer agents) that authors the durable spec through the apg_node / apg_edge tools. It issues bursts of node/edge mutations — sometimes as parallel tool calls — and must never see a lock failure, must never lose a mutation that reported success, and must not have to know whether a session coordinator is running: the tool surface is identical either way. Interest: a parallel authoring burst is as reliable as a serial one, and a crash mid-session leaves the durable spec intact.",
+  "body": "A thing that uses the system: the opencode suite agent (spec-writer, plan-writer, agent-builder, and the repo-defined implementer/reviewer agents) that authors the durable spec through the apg_node / apg_edge tools. It issues bursts of node/edge mutations — sometimes as parallel tool calls — and must never see a lock failure, must never lose a mutation that reported success, and must not have to know whether a session coordinator is running: the tool surface is identical either way. Interest: a parallel authoring burst is as reliable as a serial one, and a crash mid-session leaves the durable spec intact. Interest (scanner-optimisation): its tools query the branch DB, so it needs the DB to be fresh and to arrive quickly after each project worktree is scanned, because `apg project start` auto-scans before any spec/plan work can begin.",
   "properties": {},
   "out": [
     {
