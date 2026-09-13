@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "solution.component.db-splicer",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.fact-cache",
+      "properties": {}
     }
   ],
   "in": [
