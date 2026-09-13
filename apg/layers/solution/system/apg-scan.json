@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.group.incremental-scan",
       "properties": {}
+    },
+    {
+      "kind": "uses",
+      "source": "solution.person.cli-operator",
+      "properties": {}
     }
   ]
 }

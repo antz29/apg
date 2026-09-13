@@ -9,6 +9,11 @@
       "kind": "uses",
       "target": "solution.system.apg-cli",
       "properties": {}
+    },
+    {
+      "kind": "uses",
+      "target": "solution.system.apg-scan",
+      "properties": {}
     }
   ],
   "in": []
