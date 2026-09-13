@@ -9,6 +9,11 @@
       "kind": "realised-by",
       "target": "solution.component.projection-delta-applier",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.write-through-projection",
+      "properties": {}
     }
   ],
   "in": [
