@@ -12,6 +12,11 @@
       "kind": "contains",
       "target": "domain.entity.cargo-manifest",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.scan-exclusion",
+      "properties": {}
     }
   ],
   "in": []
