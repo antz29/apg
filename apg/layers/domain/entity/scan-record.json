@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "scan-record",
+  "body": "The recorded identity of the scan that built the live DB: the repo HEAD sha, the working-tree cleanliness/state, the content manifest digest, the cache key, and the timestamp. Materialised today as the scan_meta control record / DB Scan node (fqn scan/HEAD); it is what a later scan compares against.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
