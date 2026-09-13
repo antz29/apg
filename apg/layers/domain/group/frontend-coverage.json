@@ -89,6 +89,11 @@
       "kind": "drives",
       "source": "requirements.requirement.rust-module-discovery",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.rust-nested-fqn-clean",
+      "properties": {}
     }
   ]
 }

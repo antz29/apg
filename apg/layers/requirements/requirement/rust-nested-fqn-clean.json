@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.value.module-fqn-prefix",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.frontend-coverage",
+      "properties": {}
     }
   ],
   "in": [
