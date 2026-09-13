@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "code-type",
+  "body": "A source file's provenance class (src/test/generated/external or a project-defined value), computed by the ingestor from the path plus the project classification config. All code is included in the graph; code type is the filter.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
