@@ -13,6 +13,7 @@
 #![cfg(test)]
 
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Output, Stdio};
 
 use crate::graph::{Graph, Node, NodeKind};
 use crate::load;
@@ -202,6 +203,130 @@ pub fn touch_db(apg_root: &Path) {
 /// Removes the fixture repo's temp dir (each test cleans up after itself).
 pub fn remove(repo: &Repo) {
     let _ = std::fs::remove_dir_all(&repo.root);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-process CLI harness: concurrency and read-your-writes tests must drive
+// N separate `apg` processes, not in-process command calls. In-process calls
+// share process-wide state — above all the `specs.lock` flock (`SPEC_LOCK` is a
+// process-lifetime `OnceLock`) and the one lbug `Database` handle — so an
+// in-process "burst" false-greens exactly the lost-update race these tests
+// exist to catch.
+// ---------------------------------------------------------------------------
+
+/// Resolves the built `apg` binary this test process drives as a separate CLI.
+///
+/// Unit tests execute inside the *test-harness* binary
+/// (`target/<profile>/deps/apg-<hash>`), so `current_exe()` does not name the
+/// CLI, and Cargo only sets `CARGO_BIN_EXE_apg` for integration tests. The
+/// resolution order is:
+///
+/// 1. the compile-time `CARGO_BIN_EXE_apg`, when Cargo provided it;
+/// 2. the `apg` sibling of the profile dir, found by walking up from
+///    `current_exe()` (`target/<profile>/deps/apg-<hash>` →
+///    `target/<profile>/apg`) — the artifact `cargo build` leaves.
+///
+/// Panics with the search origin when neither resolves: run `cargo build`
+/// first.
+pub fn apg_bin() -> PathBuf {
+    if let Some(p) = option_env!("CARGO_BIN_EXE_apg") {
+        let p = PathBuf::from(p);
+        if p.is_file() {
+            return p;
+        }
+    }
+    let exe = std::env::current_exe().expect("current_exe");
+    let name = if cfg!(windows) { "apg.exe" } else { "apg" };
+    let mut dir = exe.parent();
+    while let Some(d) = dir {
+        let candidate = d.join(name);
+        if candidate.is_file() {
+            return candidate;
+        }
+        dir = d.parent();
+    }
+    panic!(
+        "could not locate the built `apg` binary from {} — run `cargo build` first",
+        exe.display()
+    );
+}
+
+/// A configured real-CLI `apg` invocation: the built binary at [`apg_bin`],
+/// the argument list, an optional cwd, and per-child environment overrides.
+///
+/// `edition = "2024"` makes process-wide `std::env::set_var` unsafe, so a child
+/// that needs an isolated environment (e.g. `apg init` installing into
+/// `$HOME/.opencode`) sets it per child with [`ApgCommand::env`] — never on the
+/// test process, where it would leak into every parallel test.
+pub struct ApgCommand {
+    bin: PathBuf,
+    args: Vec<String>,
+    cwd: Option<PathBuf>,
+    envs: Vec<(String, String)>,
+}
+
+impl ApgCommand {
+    pub fn new(args: &[&str]) -> ApgCommand {
+        ApgCommand {
+            bin: apg_bin(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            cwd: None,
+            envs: Vec::new(),
+        }
+    }
+
+    pub fn cwd(mut self, dir: &Path) -> ApgCommand {
+        self.cwd = Some(dir.to_path_buf());
+        self
+    }
+
+    /// A per-child environment override set on the child's `Command`
+    /// (`Command::env`), the safe way to isolate a spawned CLI.
+    pub fn env(mut self, key: &str, value: &str) -> ApgCommand {
+        self.envs.push((key.to_string(), value.to_string()));
+        self
+    }
+
+    /// The configured `Command`: stdout/stderr captured, so a test can
+    /// attribute a failure's lock by message and N parallel children never
+    /// interleave output into the harness log.
+    pub fn command(self) -> Command {
+        let mut c = Command::new(&self.bin);
+        c.args(&self.args);
+        if let Some(dir) = &self.cwd {
+            c.current_dir(dir);
+        }
+        for (k, v) in &self.envs {
+            c.env(k, v);
+        }
+        c.stdout(Stdio::piped()).stderr(Stdio::piped());
+        c
+    }
+
+    /// Starts the child without waiting — the N-way parallel-burst primitive.
+    pub fn spawn(self) -> Child {
+        let desc = format!("{:?}", self.args);
+        self.command()
+            .spawn()
+            .unwrap_or_else(|e| panic!("failed to spawn apg {desc}: {e}"))
+    }
+
+    /// Runs to completion and returns the captured [`Output`].
+    pub fn output(self) -> Output {
+        let desc = format!("{:?}", self.args);
+        self.command()
+            .output()
+            .unwrap_or_else(|e| panic!("failed to spawn apg {desc}: {e}"))
+    }
+}
+
+/// Spawns one real `apg` CLI process with `args` and cwd `dir`, waits for it,
+/// and returns its captured [`Output`] — a genuinely separate process, so
+/// process-wide state (the `specs.lock` flock, the lbug database handle, git's
+/// index lock) is exercised for real. Use [`ApgCommand`] for a per-child env
+/// override or a parallel [`ApgCommand::spawn`].
+pub fn spawn_apg(args: &[&str], cwd: &Path) -> Output {
+    ApgCommand::new(args).cwd(cwd).output()
 }
 
 // ---------------------------------------------------------------------------
