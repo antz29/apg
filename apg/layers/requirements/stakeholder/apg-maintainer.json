@@ -24,6 +24,11 @@
       "kind": "contains",
       "target": "requirements.requirement.exact-ongoing-equivalence",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.freshness-fast-path",
+      "properties": {}
     }
   ],
   "in": []
