@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "scan-exclusion",
+  "body": "A path excluded from discovery because it holds generated, dependency, or other-tree content: target/, vendor/, node_modules/, .worktrees/. Exclusions keep build artifacts and dependency crates from becoming scan roots.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
