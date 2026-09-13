@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.verify-gate-all-feedback-scopes",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.review-feedback",
+      "properties": {}
     }
   ],
   "in": [
