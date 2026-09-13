@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "mutation-session",
-  "body": "A session-scoped process that owns one worktree DB for the duration of an update session (`apg session start` … `apg session end`). It is ephemeral, not a daemon: it lives only for the session, holds the DB as single writer, applies mutation attempts in order, and flushes/rebuilds the derived projection in a batch. It is reachable only through a Unix socket under `apg/.trans/`. Its guarantee is ownership of the whole durable write — the node-file read-modify-write, the per-mutation commit, and the projection record, as well as the DB as single writer — so no other writer can race it, not merely no other DB opener.",
+  "body": "A session-scoped process that owns one worktree DB for the duration of an update session (`apg session start` … `apg session end`). It is ephemeral, not a daemon: it lives only for the session, holds the DB as single writer, applies mutation attempts in order, and applies each mutation's exact projection delta synchronously through the write-through projection (no deferred or batched flush); it also serves reads routed to it (read-through) so external readers see applied mutations. It is reachable only through a Unix socket under `apg/.trans/`. Its guarantee is ownership of the whole durable write — the node-file read-modify-write, the per-mutation commit, and the projection record, as well as the DB as single writer — so no other writer can race it, not merely no other DB opener.",
   "properties": {
     "kind": "entity"
   },
