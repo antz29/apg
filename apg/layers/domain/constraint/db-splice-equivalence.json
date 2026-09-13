@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "db-splice-equivalence",
+  "body": "The DB produced by seeding/splicing from the previous DB must be exactly equivalent to a full rebuild: same node set, same edge set, same unresolved targets, and it must answer the same queries.",
+  "properties": {
+    "attaches-to": "domain.service.graph-projection"
+  },
+  "out": [],
+  "in": []
+}
