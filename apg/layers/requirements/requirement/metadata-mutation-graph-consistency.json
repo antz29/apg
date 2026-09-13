@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.no-rescan-for-metadata",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.planned-node-removal-reflected",
+      "properties": {}
     }
   ],
   "in": [
