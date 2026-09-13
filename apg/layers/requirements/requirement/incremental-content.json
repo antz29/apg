@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.content-addressed-manifest",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cross-worktree-cache-sharing",
+      "properties": {}
     }
   ],
   "in": []
