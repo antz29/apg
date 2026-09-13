@@ -18,11 +18,6 @@
       "properties": {}
     },
     {
-      "kind": "contains",
-      "target": "solution.component.derived-projection-buffer",
-      "properties": {}
-    },
-    {
       "kind": "implemented-by",
       "target": "apg.session",
       "properties": {}

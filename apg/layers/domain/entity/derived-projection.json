@@ -11,11 +11,6 @@
       "kind": "realised-by",
       "target": "solution.component.mutation-db-decoupling",
       "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.derived-projection-buffer",
-      "properties": {}
     }
   ],
   "in": [
