@@ -64,6 +64,11 @@
       "kind": "drives",
       "source": "requirements.requirement.js-ts-acceptance",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.js-ts-frontend",
+      "properties": {}
     }
   ]
 }
