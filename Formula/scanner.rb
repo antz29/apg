@@ -15,8 +15,8 @@ class Scanner < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.12.3"
-    rebuild 23
-    sha256 cellar: :any, arm64_sonoma: "956d45f7aeb3d8b1d44d5a69c15304f34855c4623ba481ab1a0574e12b391676"
+    rebuild 24
+    sha256 cellar: :any, arm64_sonoma: "dc9fc51f4bc2d29a241362df939013d81d5856ee74722a7da1d6526ee02d9cde"
   end
 
   depends_on "rust" => :build
