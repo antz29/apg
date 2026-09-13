@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.prose-matches-read-grant",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.generated-agents-inherit-file-access-rule",
+      "properties": {}
     }
   ],
   "in": [
