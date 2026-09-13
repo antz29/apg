@@ -31,6 +31,11 @@
       "kind": "details",
       "source": "requirements.note.read-guard-prose-defect",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.file-access-guard-coverage-anchoring",
+      "properties": {}
     }
   ]
 }
