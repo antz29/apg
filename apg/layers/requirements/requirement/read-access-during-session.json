@@ -16,6 +16,11 @@
       "kind": "drives",
       "target": "domain.entity.mutation-session",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.service.graph-read",
+      "properties": {}
     }
   ],
   "in": [

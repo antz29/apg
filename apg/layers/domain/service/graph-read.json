@@ -10,6 +10,11 @@
       "kind": "drives",
       "source": "requirements.requirement.graph-immediately-queryable",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.read-access-during-session",
+      "properties": {}
     }
   ]
 }
