@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.coordinator-feedback-routing",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",

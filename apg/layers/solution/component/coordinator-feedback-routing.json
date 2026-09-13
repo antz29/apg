@@ -15,6 +15,11 @@
       "kind": "realised-by",
       "source": "domain.service.feedback-routing",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.feedback-item",
+      "properties": {}
     }
   ]
 }
