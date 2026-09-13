@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.fresh-rescan-fast-path",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.freshness-content-key",
+      "properties": {}
     }
   ],
   "in": []
