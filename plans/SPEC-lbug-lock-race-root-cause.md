@@ -6,7 +6,7 @@ lands here). Reproduce with plan tasks:
 
 - `plan.phase-01.task-4` — cross-process harness `apg.testutil.spawn_apg` (`src/testutil.rs`).
 - `plan.phase-01.task-2` — flock-gap + RO/RW DB-open taxonomy
-  (`parse` unit test `node_edge_entry_takes_no_spec_lock_and_db_open_taxonomy`, `src/node_cmd.rs`).
+  (unit test `node_edge_entry_takes_no_spec_lock_and_db_open_taxonomy`, `src/node_cmd.rs`).
 - `plan.phase-01.task-1` — the parallel burst
   (`#[ignore]` e2e test `parallel_node_edge_burst_is_serial_equivalent_with_per_lock_attribution`, `src/node_cmd.rs`).
 
