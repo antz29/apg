@@ -45,11 +45,6 @@
   ],
   "in": [
     {
-      "kind": "contains",
-      "source": "requirements.user.suite-agent",
-      "properties": {}
-    },
-    {
       "kind": "details",
       "source": "requirements.note.metadata-mutation-staleness-evidence",
       "properties": {}

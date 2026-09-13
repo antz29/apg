@@ -9,11 +9,6 @@
       "kind": "contains",
       "target": "requirements.requirement.mutation-lock-race",
       "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.metadata-mutation-graph-consistency",
-      "properties": {}
     }
   ],
   "in": []
