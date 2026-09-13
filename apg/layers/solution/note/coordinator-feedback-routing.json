@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "requirements.requirement.coordinator-mediated-feedback",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.review-surface-unchanged",
+      "properties": {}
     }
   ],
   "in": []
