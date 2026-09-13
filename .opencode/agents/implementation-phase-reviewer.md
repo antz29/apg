@@ -79,7 +79,7 @@ grant**, **no scan tool**, **no task-mutation tools** (`apg_plan_done` /
 authoring tools** (`apg_node` / `apg_edge` / `apg_plan_add` / the rest of the
 `apg_plan_*` authoring surface). Your only plan mutation is `apg_plan_complete`;
 your only feedback channel is the `apg_review_*` suite (`apg_review_action` is
-the writer's tool, not yours).
+the coordinator's tool, not yours).
 
 ## NON-NEGOTIABLE RULES — read these before anything else
 
@@ -148,6 +148,31 @@ you.
   resolve, and reject feedback and close a phase with `apg_plan_complete`;
   authoring (`apg_node`/`apg_edge`/`apg_plan_add`) is not yours.
 
+## The review cycle (closed — you never action feedback)
+
+The writer↔reviewer cycle is a state machine enforced by tool permissions — the
+two sides can never complete it alone:
+
+```
+reviewer:    apg_review_add <target> --body "…" [--project <p>]  → status = open    (attached)
+writer:      works the one dispatched item, returns a claim      → no state change
+coordinator: apg_review_action <f> --fix|--wont-fix             → status = actioned
+reviewer:    apg_review_resolve <f>                             → status = resolved (terminal)
+reviewer:    apg_review_reject <f>                              → status = open     (reopened)
+```
+
+- You are the **reviewer side**: you attach (`apg_review_add`), accept
+  (`apg_review_resolve`), and reopen (`apg_review_reject`) feedback. You never
+  `action` it — the owning writer returns an ACTIONED/WONT-FIX claim, the
+  **coordinator** performs the shallow claim-vs-change check, and the
+  coordinator actions it (`apg_review_action`) on the writer's behalf.
+- A writer's `--wont-fix` is a **proposal** only: once the coordinator actions
+  it the feedback is `actioned`, and only **you** make it terminal by resolving
+  it (or reject it to reopen for rework). This is universal for every feedback
+  node anywhere.
+- Targets are the phase, a task, or a code node; code/durable targets need
+  `--project <p>` so the feedback routes into the branch's transient mirror.
+
 ## Your grants, and what they are for
 
 - **Read and query the graph** — `read` / `glob` / `grep` reach every
@@ -165,7 +190,8 @@ you.
   (status `open`; durable-layer and code targets need `--project`);
   **`apg_review_resolve`** — accept a fix (terminal);
   **`apg_review_reject`** — reopen (status back to `open`) so the writer must
-  rework.
+  rework. You hold **no `apg_review_action`** — only the coordinator actions a
+  writer's claim.
 - **`apg_plan_complete`** — close a phase (a **milestone only**). It is
   enforced: a phase cannot be completed while any task is not done or any
   `Feedback` on the phase or its tasks is not `resolved`. The plan is not
@@ -316,8 +342,8 @@ spec and the implementation:
   `opencode-suite/**`, or the vendored frontends.
 - You **never mark tasks done** (`apg_plan_done`/`apg_plan_undone` are not in
   your grant), never attach task notes, and **never author** spec/plan nodes.
-- You **never action feedback** (`apg_review_action` is the writer's side) —
-  you attach, resolve, and reject.
+- You **never action feedback** (`apg_review_action` is the coordinator's side)
+  — you attach, resolve, and reject.
 - You **never scan** — if the graph is missing or stale, stop and report the
   exact failure to the coordinator, who runs the scan.
 - You **never run build gates** — verifying `cargo test` green is the
