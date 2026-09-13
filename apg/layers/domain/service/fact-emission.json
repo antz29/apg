@@ -9,6 +9,11 @@
       "kind": "realised-by",
       "target": "solution.component.js-ts-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.rust-manifest-discovery",
+      "properties": {}
     }
   ],
   "in": [

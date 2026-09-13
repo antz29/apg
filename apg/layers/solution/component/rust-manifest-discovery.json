@@ -20,6 +20,11 @@
       "kind": "realised-by",
       "source": "domain.entity.cargo-manifest",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.fact-emission",
+      "properties": {}
     }
   ]
 }
