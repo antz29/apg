@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.feedback-item",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.disposition-claim",
+      "properties": {}
     }
   ],
   "in": [

@@ -5,5 +5,11 @@
   "body": "The writer's response to the single feedback item it was dispatched: a claim of ACTIONED (the issue was fixed) or WONT-FIX (with justification), returned to the coordinator. It is a claim, not a state transition — the writer holds no feedback-action capability, so the claim is evaluated by the coordinator and the item's state is moved by the coordinator (action) and the reviewer (terminal resolve/reject). The claim's consistency with the observed change is what the coordinator's shallow check measures.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.coordinator-single-item-dispatch",
+      "properties": {}
+    }
+  ]
 }
