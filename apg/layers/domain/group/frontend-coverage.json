@@ -47,6 +47,11 @@
       "kind": "contains",
       "target": "domain.value.language-id",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.manifest-root",
+      "properties": {}
     }
   ],
   "in": []
