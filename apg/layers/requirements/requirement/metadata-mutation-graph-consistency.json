@@ -6,7 +6,13 @@
   "properties": {
     "feature": "graph-consistency"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.no-rescan-for-metadata",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
