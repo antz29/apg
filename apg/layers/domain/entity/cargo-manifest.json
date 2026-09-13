@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "cargo-manifest",
+  "body": "A Cargo project definition (Cargo.toml) under the scan root: the unit of Rust discovery and loading. May be a plain package or a workspace root, whose members are resolved through it rather than independently.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
