@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.container.agent-install",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.coordinator-feedback-routing",
+      "properties": {}
     }
   ],
   "in": [
