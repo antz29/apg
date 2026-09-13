@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "metadata-mutation-no-rescan",
+  "body": "A re-scan must only ever be necessary after source-code changes. A metadata-only mutation — a durable `apg node`/`apg edge` write, or a transient plan/task/planned/feedback write (`apg plan`/`apg review`) — must never require (nor trigger) a full code re-scan; it must leave `db.lbug` equal to the projection of its sources in place. Unnecessary re-scans are blocking on large codebases. Relationship to `global.constraint.durable-state-authoritative`: the durable node files stay authoritative and the DB stays derived — this law does not make the DB authoritative, it requires the derived DB to be kept consistent after each metadata mutation. Relationship to `requirements.requirement.db-rebuildable-projection` and `domain.constraint.derived-projection-rebuildable`: the DB remains rebuildable and optional, but 'rebuildable' never excuses leaving a metadata mutation invisible until the next scan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
