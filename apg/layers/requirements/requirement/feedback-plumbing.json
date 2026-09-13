@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "feedback-plumbing",
+  "body": "Feedback plumbing must be correct end to end. Two contracts:\n\n(A) Feedback→Note reviews round-trip. After `apg review add <note-fqn> --project <p>`, a fresh `apg_query` (and `apg review list`) returns the Feedback attached to the Note, i.e. the `Feedback-[:Reviews]->Note` edge is queryable in `db.lbug` with no scan. `Note`→`Note` `Details` stays refused.\n\n(B) The pre-merge verify gate spans every feedback scope. While any Feedback in the project's transient stores — the plan store plus the five tier mirrors — is `open`/`actioned`, `apg plan verify <project>` refuses and names that feedback FQN; once all are `resolved`, it passes (absent other blockers). `apg plan complete` remains phase-scoped (it gates only the phase and its tasks).\n\nContains the child requirements `feedback-note-reviews-round-trip` (A) and `verify-gate-all-feedback-scopes` (B). `review-surface-unchanged` continues to hold: no `apg review` subcommand changes.",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
