@@ -68,7 +68,7 @@ fn review_add(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("review add requires --body");
     }
     let apg_root = require_apg_root()?;
-    artifacts::acquire_spec_lock(&apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(&apg_root)?;
     apply_review_add(&apg_root, &p)
 }
 
@@ -298,7 +298,7 @@ fn set_feedback_at(
     status: &str,
     disposition: Option<String>,
 ) -> anyhow::Result<()> {
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
 
     let candidates = specs::project_transient_files(apg_root, project);
     let mut file: Option<PathBuf> = None;

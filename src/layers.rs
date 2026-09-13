@@ -1791,10 +1791,10 @@ fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, St
 /// contains/depends-on trees; `Entity (kind: event)` publishes/subscribes
 /// targets) and [`check_edge_pairing`], every written constraint's
 /// `attaches-to` reference resolves against the post-mutation universe
-/// ([`eval_constraint`], R14), and — when a DB exists — every assembled
-/// `implemented-by` target is Real or Pending against the scanned graph
-/// ([`validate_code_refs`]; a Drift target aborts before the write). Pure
-/// read — no write.
+/// ([`eval_constraint`], R14), and — when the `graph.jsonl` export exists —
+/// every assembled `implemented-by` target is Real or Pending against the
+/// exported scanned graph ([`validate_code_refs`]; a Drift target aborts before
+/// the write). Validation never opens `db.lbug`. Pure read — no write.
 fn validate_change(
     apg_root: &Path,
     writes: &[NodeFile],
@@ -1863,10 +1863,14 @@ fn validate_change(
     // Code-ref drift (SPEC §4.1): an `implemented-by` target gone from the
     // scanned graph must abort BEFORE anything is written — otherwise the
     // file lands and commits and only the step-5 re-merge fails (a committed
-    // partial mutation). Skipped when there is no DB: the files are the
-    // durable form and there is no scanned graph to check against.
-    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
-        let (scanned, planned) = artifacts::code_universes(apg_root)?;
+    // partial mutation). Decoupled from the DB: when `graph.jsonl` exists it is
+    // the sole code-identity source (real code FQNs UNION the plan store's
+    // planned FQNs), resolved WITHOUT opening `db.lbug`. When `graph.jsonl` is
+    // absent, code-FQN refs are recorded **unvalidated** even when `db.lbug`
+    // exists (deliberate: `db.lbug` is a derived projection and is never opened
+    // for validation); the next scan re-validates them.
+    if apg_root.join(TRANS_DIR).join("graph.jsonl").exists() {
+        let (scanned, planned) = artifacts::code_universes_from_export(apg_root)?;
         let refs: Vec<&str> = assembled
             .values()
             .flat_map(|n| n.out.iter())
@@ -2003,19 +2007,10 @@ fn write_through_with_deletes(
             .collect();
         let msg = git::graph_mutation_message(apg_root, &all_refs);
         match git::commit_files(apg_root, &write_refs, &delete_refs, &msg) {
-            Ok(Some(_)) => {
-                // Re-anchor the staleness gate's recorded scan_meta (mirrors
-                // the JSONL funnel's auto-commit: DB and tree in sync by
-                // construction, so consecutive node/edge mutations never trip
-                // the refuse-on-stale gate). A re-anchor failure degrades to a
-                // warning — the mutation already landed.
-                if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
-                    eprintln!(
-                        "apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}"
-                    );
-                }
-            }
-            Ok(None) => {}
+            // The durable write is now committed — the system-of-record
+            // durability point. The staleness re-anchor and the projection are
+            // the caller's (`write_project`), applied only AFTER this commit.
+            Ok(Some(_)) | Ok(None) => {}
             Err(e) => {
                 rollback(&paths, &prior);
                 return Err(e);
@@ -2035,10 +2030,16 @@ fn write_through_with_deletes(
 ///    project context satisfies the guard (`git::require_project_context`).
 /// 2. **Staleness gate** — refuse-on-stale when a DB exists, before any write.
 /// 3. **Validate the complete change** ([`validate_change`]) before writing.
-/// 4. **Atomic write + delete + single commit** ([`write_through_with_deletes`]).
-/// 5. **DB re-merge** — re-ingest the layers tree and merge it (detach + merge
-///    in one transaction), so the query index reflects the mutation. Skipped
-///    when no DB exists (the files are the durable form).
+/// 4. **Atomic write + delete + single commit** ([`write_through_with_deletes`])
+///    — the system-of-record durability point, and the ONLY step that controls
+///    the flock-guaranteed one-commit-per-mutation. No durable write is ever
+///    buffered: the files hit disk (and git) before anything is projected.
+/// 5. **Re-anchor the staleness gate's `scan_meta`** after the commit
+///    (graph.jsonl only — never opens `db.lbug`).
+/// 6. **Projection delta** — re-ingest the layers tree into the live DB and
+///    merge it in one transaction, AFTER the durable commit (commit-then-
+///    project). Skipped when no DB exists (the files are the durable form); a
+///    re-ingest failure leaves the committed durable state authoritative.
 pub fn write_project(
     apg_root: &Path,
     writes: &[NodeFile],
@@ -2057,12 +2058,45 @@ pub fn write_project(
     // 3. Validate the complete change before anything is written.
     validate_change(apg_root, writes, deletes)?;
 
-    // 4. Atomic write + delete + single commit (with rollback).
+    // 4. Atomic write + delete + single commit — the durability point. This is
+    //    the whole flock-held sequence's controlled commit.
     write_through_with_deletes(apg_root, writes, deletes)?;
 
-    // 5. DB re-merge (skipped when there is no query index yet).
+    // 5. Re-anchor the staleness gate's recorded scan_meta AFTER the commit
+    //    (mirrors the JSONL funnel's auto-commit: DB and tree in sync by
+    //    construction, so consecutive node/edge mutations never trip the
+    //    refuse-on-stale gate). graph.jsonl only — no db.lbug open. A re-anchor
+    //    failure degrades to a warning — the mutation already landed.
+    if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
+        eprintln!("apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}");
+    }
+
+    // 6. Projection delta — applied only AFTER the durable commit
+    //    (commit-then-project). Skipped when there is no query index yet.
     if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
-        let (scanned, planned) = artifacts::code_universes(apg_root)?;
+        let graph_jsonl = apg_root.join(TRANS_DIR).join("graph.jsonl");
+        let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root)?;
+        if !graph_jsonl.exists() {
+            // No code-identity source: the mutation still lands (the durable
+            // node files are authoritative), but its code-FQN refs are
+            // recorded UNVALIDATED. Treat every implemented-by target as
+            // pending so the projection re-merge records them instead of
+            // rejecting them as drift. The next scan re-validates.
+            for n in read_existing_nodes(apg_root)? {
+                for oe in &n.out {
+                    if oe.kind == "implemented-by" {
+                        planned.insert(oe.target.clone());
+                    }
+                }
+            }
+            for n in writes {
+                for oe in &n.out {
+                    if oe.kind == "implemented-by" {
+                        planned.insert(oe.target.clone());
+                    }
+                }
+            }
+        }
         let records = ingest_tree(apg_root, &scanned, &planned)?;
         artifacts::reingest_layers(apg_root, &records)?;
     }
@@ -4790,6 +4824,101 @@ mod tests {
             Some("1"),
             "the Reviews edge must pair feedback to the durable node: {out}"
         );
+        testutil::remove(&repo);
+    }
+
+    /// Phase-02 task-7: decoupled validation at the MUTATION level.
+    ///
+    /// - With BOTH `db.lbug` and `graph.jsonl` absent, a mutation succeeds:
+    ///   structural references are still validated (a dangling authored edge is
+    ///   refused), while an `implemented-by` code FQN is recorded UNVALIDATED.
+    /// - With `graph.jsonl` present, a drift/invalid code FQN is rejected
+    ///   WITHOUT opening `db.lbug` — proven by holding a read-write
+    ///   `ArtifactDb` and asserting the reported error is the drift, not the
+    ///   lbug write-lock collision.
+    /// - The projection delta is applied write-through when a DB exists.
+    #[test]
+    fn write_project_decoupled_from_db_validates_export_and_records_unvalidated() {
+        // (a) Both artifacts gone: structural refs still validated, code refs
+        // recorded unvalidated. A fresh fixture's db.lbug + graph.jsonl are
+        // removed before the mutations.
+        let (wt_apg, repo, _wt) = mutation_fixture("decoupled-gone");
+        let db_path = wt_apg.join(crate::specs::TRANS).join("db.lbug");
+        let export_path = wt_apg.join(crate::specs::TRANS).join("graph.jsonl");
+        std::fs::remove_file(&db_path).unwrap();
+        std::fs::remove_file(&export_path).unwrap();
+
+        // Structural reference validation still runs (no artifacts needed): a
+        // dangling authored `depends-on` target is refused (no file, no commit).
+        let mut dangling = node("requirements", "requirement", "dangling");
+        dangling
+            .out
+            .push(out_edge("depends-on", "requirements.requirement.ghost"));
+        let err = write_project(&wt_apg, &[dangling], &[]).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("ghost"),
+            "structural refs must validate from the node files alone: {msg}"
+        );
+        let dangling_path = node_file_path(&wt_apg, Layer::Requirements, "requirement", "dangling");
+        assert!(
+            !dangling_path.exists(),
+            "a refused structural mutation must not land a file"
+        );
+
+        // A code-FQN implemented-by to an unscanned FQN succeeds with both
+        // artifacts gone: recorded unvalidated (no export ⇒ no code identity).
+        let mut unvalidated = node("solution", "system", "unknown-sys");
+        unvalidated
+            .out
+            .push(out_edge("implemented-by", "fixture.mod.NotScanned"));
+        write_project(&wt_apg, &[unvalidated], &[]).unwrap();
+        let back = read_node_file(&wt_apg, "solution", "system", "unknown-sys");
+        assert!(
+            back.out
+                .iter()
+                .any(|oe| oe.kind == "implemented-by" && oe.target == "fixture.mod.NotScanned"),
+            "the unvalidated code ref must still be recorded durably"
+        );
+        testutil::remove(&repo);
+
+        // (b)/(c) graph.jsonl present: the drift check runs until it rejects,
+        // BEFORE any db.lbug open; a valid code ref is accepted and projected.
+        let (wt_apg, repo, _wt) = mutation_fixture("decoupled-export");
+
+        // Hold the DB read-write, so any DB open on the validation path would
+        // fail with an lbug lock error instead of the drift refusal.
+        let held = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        let mut drift = node("solution", "system", "drift-sys");
+        drift
+            .out
+            .push(out_edge("implemented-by", "fixture.mod.Gone"));
+        let err = write_project(&wt_apg, &[drift], &[]).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("spec drift"), "expected drift refusal: {msg}");
+        assert!(msg.contains("fixture.mod.Gone"), "{msg}");
+        assert!(
+            !msg.contains("Could not set lock"),
+            "validation must never open db.lbug: {msg}"
+        );
+        let drift_path = node_file_path(&wt_apg, Layer::Solution, "system", "drift-sys");
+        assert!(!drift_path.exists(), "a refused drift write lands nothing");
+        drop(held);
+
+        // A valid implemented-by to scanned code is accepted, and the
+        // projection delta is applied write-through to the live DB.
+        let mut known = node("solution", "system", "known-sys");
+        known
+            .out
+            .push(out_edge("implemented-by", "fixture.mod.Store"));
+        write_project(&wt_apg, &[known], &[]).unwrap();
+        let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        assert!(
+            db.has_node("solution.system.known-sys"),
+            "the projection delta must be applied write-through"
+        );
+        drop(db);
+
         testutil::remove(&repo);
     }
 }

@@ -17,28 +17,73 @@ use crate::load;
 use crate::schema::Record;
 use crate::specs;
 
-/// The process-wide reentrant spec/plan/review write lock (see
-/// `acquire_spec_lock`). Held for the life of the process, so the flock is
-/// released when the CLI process exits.
-static SPEC_LOCK: OnceLock<Mutex<Option<File>>> = OnceLock::new();
+/// The process-wide reentrant extended write lock (see `acquire_spec_lock`):
+/// one `LOCK_EX` flock per lock-file path, held while any live guard exists and
+/// released when the outermost guard drops (closing the fd).
+static SPEC_LOCK: OnceLock<Mutex<SpecLockState>> = OnceLock::new();
 
-/// Acquires the exclusive cross-process lock that serializes spec/plan/review
-/// read-modify-writes on the project's JSONL + DB. Called at the top of every
-/// mutating command; the lock spans the whole load → modify → write_through
-/// sequence, so concurrent tool calls (an agent issuing a batch in parallel)
-/// never lose each other's edges. Reentrant within the process — a second
-/// acquire is a no-op — so a command that loads both the plan and the spec
-/// (plan complete) does not deadlock. The flock lives on `apg/.trans/specs.lock`
-/// and is released at process exit.
-pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<()> {
-    let holder = SPEC_LOCK.get_or_init(|| Mutex::new(None));
-    let mut held = holder.lock().unwrap();
-    if held.is_some() {
-        return Ok(());
+/// The held flocks, keyed by lock-file path (a process can host several
+/// fixtures/projects; a test process holds more than one at a time). Each entry
+/// records the open `File` (the flock's open file description) and the nested
+/// acquisition depth.
+#[derive(Default)]
+struct SpecLockState {
+    held: HashMap<PathBuf, (File, usize)>,
+}
+
+/// A held acquisition of the extended write lock. Dropping the last live guard
+/// for a lock file releases its flock (the `File` is removed, closing the fd);
+/// nested acquisitions share the one fd, so a command that needs a second
+/// acquisition (plan complete loading both plan and spec) never self-deadlocks.
+#[must_use = "dropping the guard immediately releases the whole-durable-sequence lock"]
+pub struct SpecLockGuard {
+    lock_path: PathBuf,
+}
+
+impl Drop for SpecLockGuard {
+    fn drop(&mut self) {
+        let holder = SPEC_LOCK
+            .get()
+            .expect("a SpecLockGuard exists, so the state is initialized");
+        let mut state = holder.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, depth)) = state.held.get_mut(&self.lock_path) {
+            *depth -= 1;
+            if *depth == 0 {
+                // Dropping the File closes the fd, releasing the flock.
+                state.held.remove(&self.lock_path);
+            }
+        }
     }
-    let trans = apg_root.join(".trans");
-    std::fs::create_dir_all(&trans)?;
-    let lock_path = trans.join("specs.lock");
+}
+
+/// Acquires the exclusive cross-process lock that serializes a whole durable
+/// sequence on the project: the **extended** spec/plan/review write lock.
+///
+/// The direct `apg node` / `apg edge` path takes it exactly once at the
+/// `cmd_node`/`cmd_edge` dispatch entry, before any node-file read, and holds
+/// it across validate → write → the one-commit-per-mutation git commit → the
+/// write-through projection. That single flock is what serializes the three
+/// contended locks a parallel burst hits: the node-file read-modify-write, git's
+/// `.git/index.lock` (inside `git::commit_files`), and the read-write `db.lbug`
+/// projection apply. The plan/review JSONL funnel takes the same lock, so the
+/// direct path and the phase-03 session coordinator are mutually exclusive.
+///
+/// Reentrant within the process: a nested acquire returns a guard that shares
+/// the already-held fd (incrementing the depth), so a command that acquires
+/// twice does not deadlock; the flock is released only when the outermost guard
+/// drops. The flock lives on `apg/.trans/specs.lock`.
+pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<SpecLockGuard> {
+    let holder = SPEC_LOCK.get_or_init(|| Mutex::new(SpecLockState::default()));
+    let mut state = holder.lock().unwrap_or_else(|e| e.into_inner());
+    let lock_path = apg_root.join(".trans").join("specs.lock");
+    if let Some((_, depth)) = state.held.get_mut(&lock_path) {
+        // Reentrant: share the existing fd, just add a nesting level.
+        *depth += 1;
+        return Ok(SpecLockGuard { lock_path });
+    }
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let f = File::create(&lock_path)?;
     #[cfg(unix)]
     {
@@ -47,8 +92,8 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<()> {
             anyhow::bail!("could not acquire write lock {}", lock_path.display());
         }
     }
-    *held = Some(f);
-    Ok(())
+    state.held.insert(lock_path.clone(), (f, 1));
+    Ok(SpecLockGuard { lock_path })
 }
 
 /// Writes `records` to `path` and re-ingests the project into the live DB.
@@ -906,11 +951,15 @@ pub fn next_free(records: &[Record], kind: &str) -> u64 {
 }
 
 /// The two code-reference universes `layers::ingest_tree` validates
-/// `implemented-by` targets against: `scanned` = every code-node FQN the last
-/// scan produced (Module/File/Struct/Function without `status: planned`),
-/// `planned` = the planned-node FQNs still awaiting realization (`status:
-/// planned`). Read from the live DB, so a node/edge write re-merge can run the
-/// code-ref check against the scanned graph.
+/// `implemented-by` targets against, read from the **live DB**: `scanned` =
+/// every code-node FQN the last scan produced (Module/File/Struct/Function
+/// without `status: planned`), `planned` = the planned-node FQNs still awaiting
+/// realization (`status: planned`).
+///
+/// This opens `apg/.trans/db.lbug` read-write, so it must NOT be used on the
+/// direct node/edge mutation path (phase-02 decoupled that path onto
+/// [`code_universes_from_export`]); its remaining callers are the flock-guarded
+/// plan paths (`plan_cmd`), where an exclusive DB read is already serialized.
 pub fn code_universes(apg_root: &Path) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
     let db = ArtifactDb::open(apg_root)?;
     let conn = db.conn()?;
@@ -928,6 +977,76 @@ pub fn code_universes(apg_root: &Path) -> anyhow::Result<(BTreeSet<String>, BTre
             }
         }
     }
+    Ok((scanned, planned))
+}
+
+/// The two code-reference universes `layers::validate_change` / `ingest_tree`
+/// validate `implemented-by` targets against, resolved **without opening
+/// `db.lbug`** (phase-02 DB decoupling):
+///
+/// - `scanned` — the real code FQNs from the `apg/.trans/graph.jsonl` export
+///   (the sole code-identity source: a `module`/`file`/`struct`/`function`
+///   record without `status: planned`). `graph.jsonl` is written only by a
+///   scan, so a FQN absent from it is not called drift here while the export is
+///   missing — the caller gates on the export (see `layers::validate_change`).
+/// - `planned` — the FQNs the plan store declares still awaiting realization
+///   (`Record::PlannedNode` in every `apg/.trans/plans/<project>.jsonl`), UNION
+///   any `status: planned` code record already projected into the export. A
+///   declared-but-unscanned FQN (e.g. `apg.session.Coordinator` before its scan)
+///   therefore classifies Pending, never drift.
+///
+/// The export is parsed as generic JSON: only the four Implementation record
+/// types and their `fqn`/`status` fields are consulted, and the `scan_meta`
+/// control record on line 1 (or any spec/plan/edge record) is skipped.
+pub fn code_universes_from_export(
+    apg_root: &Path,
+) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
+    let mut scanned = BTreeSet::new();
+    let mut planned = BTreeSet::new();
+
+    let export = apg_root.join(specs::TRANS).join("graph.jsonl");
+    if export.exists() {
+        let text = std::fs::read_to_string(&export)?;
+        for (i, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let value: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+                anyhow::anyhow!(
+                    "{}:{}: bad graph.jsonl record: {e}",
+                    export.display(),
+                    i + 1
+                )
+            })?;
+            let Some(kind) = value.get("type").and_then(|t| t.as_str()) else {
+                continue;
+            };
+            if !matches!(kind, "module" | "file" | "struct" | "function") {
+                continue;
+            }
+            let Some(fqn) = value.get("fqn").and_then(|f| f.as_str()) else {
+                continue;
+            };
+            let status = value.get("status").and_then(|s| s.as_str()).unwrap_or("");
+            if status == "planned" {
+                planned.insert(fqn.to_string());
+            } else {
+                scanned.insert(fqn.to_string());
+            }
+        }
+    }
+
+    // The plan store's planned-node declarations. A plan store FQN already
+    // scanned stays in both sets; `classify_code_ref` prefers `scanned` (Real).
+    for f in specs::plan_files(apg_root) {
+        for record in specs::read_jsonl(&f)? {
+            if let Record::PlannedNode { fqn, .. } = record {
+                planned.insert(fqn);
+            }
+        }
+    }
+
     Ok((scanned, planned))
 }
 
@@ -1438,5 +1557,81 @@ mod tests {
         assert!(has_node("solution.system.portal"));
         assert!(has_node("domain.service.b"));
         assert!(has_edge("foo/note-1", "solution.system.portal"));
+    }
+
+    /// Phase-02 task-8: `code_universes_from_export` classifies Real
+    /// (graph.jsonl) / Planned (plan store) / absent with NO `db.lbug` open.
+    ///
+    /// The fixture deliberately writes a BOGUS `db.lbug` (not a database): if
+    /// the resolver opened it, decoding would fail — a passed test proves the
+    /// DB was never touched. A declared-but-unscanned planned FQN (the
+    /// `apg.session.Coordinator` example) classifies Planned, never drift.
+    #[test]
+    fn code_universes_from_export_classifies_real_planned_absent_without_db() {
+        let dir = std::env::temp_dir().join(format!("apg-cu-export-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let trans = dir.join(specs::TRANS);
+        std::fs::create_dir_all(trans.join("plans")).unwrap();
+
+        // graph.jsonl: a scan_meta lead, two real code nodes, and one node
+        // already projected with `status: planned` (a planned declaration that
+        // a scan carried through).
+        let graph = [
+            r#"{"type":"scan_meta","git_sha":"abc","git_clean":true,"scanned_at":"2026-09-07T00:00:00Z"}"#,
+            r#"{"type":"module","fqn":"github.com/x/y"}"#,
+            r#"{"type":"struct","fqn":"github.com/x/y.Store","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src"}"#,
+            r#"{"type":"function","fqn":"github.com/x/y.plannedFn","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src","status":"planned"}"#,
+        ]
+        .join("\n");
+        std::fs::write(trans.join("graph.jsonl"), format!("{graph}\n")).unwrap();
+
+        // The plan store declares a FQN that has not been scanned yet.
+        specs::write_jsonl(
+            &trans.join("plans").join("foo.jsonl"),
+            &[Record::PlannedNode {
+                fqn: "apg.session.Coordinator".into(),
+                kind: "struct".into(),
+                name: "Coordinator".into(),
+                parent: "apg.session".into(),
+            }],
+        )
+        .unwrap();
+
+        // A bogus DB — never opened by the resolver.
+        std::fs::write(trans.join("db.lbug"), b"this is definitely not a db").unwrap();
+
+        let (scanned, planned) = code_universes_from_export(&dir).unwrap();
+        assert!(scanned.contains("github.com/x/y"));
+        assert!(scanned.contains("github.com/x/y.Store"));
+        assert!(
+            !scanned.contains("github.com/x/y.plannedFn"),
+            "a status:planned export record is not real code"
+        );
+        assert!(planned.contains("github.com/x/y.plannedFn"));
+        assert!(planned.contains("apg.session.Coordinator"));
+
+        // The three-way classification: Real / Planned (never Drift) / Drift.
+        assert_eq!(
+            crate::layers::classify_code_ref("github.com/x/y.Store", &scanned, &planned),
+            crate::layers::CodeRefStatus::Real
+        );
+        assert_eq!(
+            crate::layers::classify_code_ref("apg.session.Coordinator", &scanned, &planned),
+            crate::layers::CodeRefStatus::Pending
+        );
+        assert_eq!(
+            crate::layers::classify_code_ref("apg.gone.Nope", &scanned, &planned),
+            crate::layers::CodeRefStatus::Drift
+        );
+
+        // graph.jsonl absent: the export contributes nothing; the plan store's
+        // planned FQNs remain — the caller's graph.jsonl gate decides whether
+        // code-FQN refs are validated at all.
+        std::fs::remove_file(trans.join("graph.jsonl")).unwrap();
+        let (scanned2, planned2) = code_universes_from_export(&dir).unwrap();
+        assert!(scanned2.is_empty(), "no export ⇒ no scanned universe");
+        assert!(planned2.contains("apg.session.Coordinator"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

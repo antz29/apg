@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::artifacts::{ParsedArgs, parse_args};
+use crate::artifacts::{ParsedArgs, acquire_spec_lock, parse_args};
 use crate::layers::{self, InEdge, Layer, NodeFile, OutEdge, fqn};
 use crate::specs;
 
@@ -56,6 +56,13 @@ pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg node <add|update|rm> …");
     };
     let apg_root = require_apg_root()?;
+    // The extended whole-durable-sequence flock: acquired exactly ONCE here,
+    // before any node-file read, and held through add/update/rm's
+    // validate → write → single commit → projection. This is the single
+    // acquisition site for the node path (`node_add`/`node_update`/`node_rm`
+    // never acquire internally, so there is no double-lock). The flock is
+    // released when this command returns (the guard drops).
+    let _lock = acquire_spec_lock(&apg_root)?;
     match sub {
         "add" => node_add(&apg_root, &args[1..]),
         "update" => node_update(&apg_root, &args[1..]),
@@ -69,6 +76,12 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg edge <add|update|rm> …");
     };
     let apg_root = require_apg_root()?;
+    // The extended whole-durable-sequence flock: acquired exactly ONCE here,
+    // before ANY source-file read, and held through add/update/rm's
+    // validate → write → single commit → projection. This is the single
+    // acquisition site for the edge path (`edge_add`/`edge_update`/`edge_rm`
+    // never acquire internally, so there is no double-lock).
+    let _lock = acquire_spec_lock(&apg_root)?;
     match sub {
         "add" => edge_add(&apg_root, &args[1..]),
         "update" => edge_update(&apg_root, &args[1..]),
@@ -88,6 +101,9 @@ fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     }
     let layer = resolve_layer(&pos[0])?;
     let f = fqn(layer, &pos[1], &pos[2]);
+    // Existence check + write are inside the whole-durable-sequence flock held
+    // by `cmd_node` (the single acquisition site) — no internal acquire, so the
+    // read-modify-write is serialized and `node add` never double-locks.
     layers::refuse_if_present(
         layers::node_file_path(apg_root, layer, &pos[1], &pos[2]).exists(),
         &f,
@@ -204,6 +220,10 @@ fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     let props = parse_properties(&p);
 
     let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
+    // This source-file read-push-write RMW (and the target in-half write below)
+    // runs inside the whole-durable-sequence flock held by `cmd_edge` (the
+    // single acquisition site) — no internal acquire, so no double-lock and the
+    // shared endpoint file is never read outside the serialization scope.
     let mut source = layers::read_node_file(apg_root, src_layer, &src_type, &src_name)?;
     layers::refuse_if_present(
         source
@@ -1009,35 +1029,39 @@ mod tests {
     /// `--unset-property` drops a key); `apg edge update` rewrites BOTH the
     /// source out-half and the target in-half to the same MERGEd map; `apg
     /// edge add` refuses a duplicate `(kind, from, to)`.
-    /// Phase-01 task-2 (ROOT-CAUSE characterization, unit): the node/edge
-    /// funnel takes **no** `apg/.trans/specs.lock` flock today, and the DB
-    /// opens it performs are the read-write class.
     ///
-    /// - The gap: `cmd_node`/`cmd_edge` drive the whole durable sequence and
-    ///   never create `apg/.trans/specs.lock` — the file `acquire_spec_lock`
-    ///   (`artifacts.rs:33`) creates and flocks. That flock exists (it gates
-    ///   the plan/review paths) but is never acquired on the node/edge path, so
-    ///   it cannot serialize this race.
+    /// Phase-01 task-2 (ROOT-CAUSE characterization) — updated by phase-02 for
+    /// the fixed tree: the node/edge funnel now takes the **extended**
+    /// whole-durable-sequence flock at the `cmd_node`/`cmd_edge` dispatch
+    /// entry, and its DB opens are exclusively the read-write projection class
+    /// (validation never opens the DB; the staleness re-anchor is
+    /// graph.jsonl-only).
+    ///
+    /// - The fix: `cmd_node`/`cmd_edge` acquire
+    ///   `apg.artifacts.acquire_spec_lock` once at dispatch, **before any
+    ///   node-file read**, and hold it across validate → write → the one-commit-
+    ///   per-mutation git commit → the projection. The lock file
+    ///   `apg/.trans/specs.lock` is created and observed below; it is released
+    ///   when the command returns (the guard drops), so a later spawned process
+    ///   can acquire it (step 5).
     /// - Read-only class: `apg query` opens with
     ///   `SystemConfig::default().read_only(true)` (`main.rs:963`).
-    /// - Read-write class: `ArtifactDb::open` (`artifacts.rs:232`, default
-    ///   config) via `code_universes` (`artifacts.rs:915`) /
-    ///   `reingest_layers` (`artifacts.rs:940`) — both called by
-    ///   `write_project` (validation's pre-write drift check at
-    ///   `layers.rs:1869` and the post-commit re-merge at `layers.rs:2065/2067`)
-    ///   — and `git::reanchor_scan_meta`'s `Database::new` (`git.rs:720`) after
-    ///   the commit.
+    /// - Read-write class: `ArtifactDb::open` (default config), now reached
+    ///   ONLY by the post-commit projection apply (`reingest_layers`) —
+    ///   validation resolves code FQNs from `graph.jsonl` via
+    ///   `code_universes_from_export` (no DB), and `git::reanchor_scan_meta`
+    ///   no longer opens `db.lbug`.
     /// - WHICH fails: a second read-write open of the same DB **fails** across
     ///   processes (`Could not set lock on file … Resource temporarily
     ///   unavailable`); the read-only `apg query` **coexists** with a live
-    ///   read-write handle (it is not the failing class — the pre-fix taxonomy).
+    ///   read-write handle (it is not the failing class).
     #[test]
-    fn node_edge_entry_takes_no_spec_lock_and_db_open_taxonomy() {
+    fn node_edge_entry_takes_extended_spec_lock_and_db_open_taxonomy() {
         let (wt_apg, repo, wt) = mutation_fixture("lock-taxonomy");
 
-        // (1) The gap: the node/edge entry takes no acquire_spec_lock. The lock
-        // file `acquire_spec_lock` creates never appears, however many node and
-        // edge mutations run.
+        // (1) The fix: the node/edge entry acquires the extended
+        // whole-durable-sequence flock, so the lock file `acquire_spec_lock`
+        // creates exists — and each command releases it on return.
         with_cwd(&wt, || {
             cmd_node(&av(&["add", "requirements", "requirement", "gap-a"]))
         })
@@ -1057,8 +1081,8 @@ mod tests {
         .unwrap();
         let spec_lock = wt_apg.join(specs::TRANS).join("specs.lock");
         assert!(
-            !spec_lock.exists(),
-            "the node/edge entry must take no acquire_spec_lock today (the gap): {} exists",
+            spec_lock.exists(),
+            "the node/edge entry must acquire the extended specs.lock flock: {} missing",
             spec_lock.display()
         );
 
@@ -1140,33 +1164,27 @@ mod tests {
     }
 
     /// Phase-01 task-1 (E2E): the deterministic cross-process parallel
-    /// node/edge burst, in two stages so BOTH non-DB races are visible:
+    /// node/edge burst, in two stages so BOTH non-DB races are covered:
     ///
     /// - **Stage A (DB present — the real project state):** N separate `apg`
     ///   processes each add one `depends-on` edge from a shared hub to its own
-    ///   leaf. The losers record the lbug `apg/.trans/db.lbug` read-write open
-    ///   (validation's pre-write `code_universes`, `layers.rs:1869`; the step-5
-    ///   reingest, `layers.rs:2065/2067`; and `reanchor_scan_meta` after the
-    ///   commit, `git.rs:720`).
+    ///   leaf.
     /// - **Stage B (DB absent):** the same burst with `db.lbug` removed — the
     ///   node path still writes the shared hub file and commits through
-    ///   `git::commit_files` (`git.rs:634`), so its losers record git's
-    ///   `.git/index.lock` and the shared hub loses edges to the unlocked
-    ///   read-modify-write. This is the evidence that DB-decoupling alone
-    ///   (fix-ladder option (c)) cannot fix the race.
+    ///   `git::commit_files`, so this isolates the `.git/index.lock` and the
+    ///   shared-file read-modify-write races that a DB-only fix cannot reach.
     ///
-    /// A correct implementation (phase-02's extended whole-sequence flock)
-    /// serializes them, so every process exits 0 and the store equals the
-    /// serial application. IGNORED and expected RED on the current tree: the
-    /// node/edge path holds no `specs.lock` flock (task-2), so no loser ever
-    /// records the `specs.lock` flock — the gap. The phase-02 race fix
-    /// (plan.phase-02 task-3/task-14) acquires the extended flock and
-    /// un-ignores this test.
+    /// Phase-02's extended whole-sequence flock serializes them: each process
+    /// acquires the same `apg/.trans/specs.lock` flock exactly once at the
+    /// `cmd_node`/`cmd_edge` entry (task-3/task-14) and holds it across
+    /// validate → write → the one-commit-per-mutation git commit → projection,
+    /// so every process exits 0 and the store equals the serial application.
+    /// The test now runs un-ignored as the phase-02 race regression.
     ///
-    /// Capture the evidence manually with:
-    /// `cargo test parallel_node_edge_burst -- --ignored --nocapture`
-    #[ignore = "RED on the unfixed tree — parallel node/edge processes lose calls to the \
-                lbug RW open / .git/index.lock; un-ignored by lbug-lock-race plan.phase-02 task-3/task-14"]
+    /// Cross-process by construction: N separate binaries via
+    /// `testutil::ApgCommand`/`spawn_apg`. An in-process thread burst would
+    /// false-green — the flock is process-wide reentrant (one fd per lock file,
+    /// shared by nested acquisitions).
     #[test]
     fn parallel_node_edge_burst_is_serial_equivalent_with_per_lock_attribution() {
         const N: usize = 10;
@@ -1190,6 +1208,22 @@ mod tests {
             "stage B (no db): {failed_b}/{N} failed; per-lock: {by_lock_b:?}; hub out-edges: {hub_b}"
         );
 
+        // Stage C: N separate `apg node add` processes — the node path's own
+        // burst (existence check + write + commit), serialized by the same
+        // entry flock.
+        let (wt_apg_c, repo_c, wt_c) = mutation_fixture("burst-node");
+        let failed_c = run_node_burst(&wt_c, &repo_c.root.join("home"), N);
+        let node_count = layers::read_existing_nodes(&wt_apg_c)
+            .unwrap()
+            .iter()
+            .filter(|n| {
+                n.layer == "requirements"
+                    && n.node_type == "requirement"
+                    && n.name.starts_with("burst-")
+            })
+            .count();
+        eprintln!("stage C (node adds): {failed_c}/{N} failed; burst nodes: {node_count}");
+
         // Store == serial application: every process succeeded and the shared
         // hub carries exactly N out-edges (the RMW never lost one).
         assert_eq!(
@@ -1202,6 +1236,14 @@ mod tests {
             "stage B (no db) lost {failed_b}/{N} mutations ({by_lock_b:?})"
         );
         assert_eq!(hub_b, N, "stage B: the shared hub lost edges");
+        assert_eq!(
+            failed_c, 0,
+            "stage C (node adds) lost {failed_c}/{N} mutations"
+        );
+        assert_eq!(
+            node_count, N,
+            "stage C: the store must equal the serial adds"
+        );
 
         // Stage A DB count matches the serial application.
         let db = ArtifactDb::open(&wt_apg).unwrap();
@@ -1218,6 +1260,7 @@ mod tests {
 
         testutil::remove(&repo);
         testutil::remove(&repo_b);
+        testutil::remove(&repo_c);
     }
 
     /// Creates `hub` + `leaf-0..n` requirement nodes through the real dispatch.
@@ -1274,6 +1317,41 @@ mod tests {
             .unwrap()
             .out
             .len()
+    }
+
+    /// Starts N separate `apg node add requirements requirement burst-i`
+    /// processes back-to-back, waits for all, and returns the failure count —
+    /// the node path's own cross-process burst.
+    fn run_node_burst(wt: &Path, home: &Path, n: usize) -> usize {
+        std::fs::create_dir_all(home).unwrap();
+        let mut children = Vec::with_capacity(n);
+        for i in 0..n {
+            let name = format!("burst-{i}");
+            let child = testutil::ApgCommand::new(&[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                name.as_str(),
+            ])
+            .cwd(wt)
+            .env("HOME", home.to_str().unwrap())
+            .spawn();
+            children.push((i, child));
+        }
+        let mut failed = 0usize;
+        for (i, child) in children {
+            let out = child.wait_with_output().unwrap();
+            if !out.status.success() {
+                failed += 1;
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                eprintln!(
+                    "node-burst[{i}] FAILED ({}): {stderr}",
+                    classify_lock(&stderr)
+                );
+            }
+        }
+        failed
     }
 
     #[test]

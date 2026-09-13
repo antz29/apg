@@ -39,8 +39,6 @@
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
-use lbug::{Connection, Database, SystemConfig};
-
 use crate::schema::Record;
 use crate::specs;
 
@@ -593,6 +591,13 @@ fn repo_rel(apg_root: &Path, path: &Path) -> anyhow::Result<PathBuf> {
 /// fails with a libgit2 `NotFound`), the trees are compared, and a single
 /// commit is created when anything changed.
 ///
+/// The index write (`repo.index()` / `index.write()`, i.e. `.git/index.lock`)
+/// is **already inside the caller's extended whole-durable-sequence flock**:
+/// `cmd_node`/`cmd_edge` hold [`crate::artifacts::acquire_spec_lock`] across
+/// validate → write → commit → projection, so no internal acquire is needed and
+/// a parallel burst never contends on `.git/index.lock`. Deletion-capable
+/// staging (`add_path` for writes, `remove_path` for deletes) is preserved.
+///
 /// Returns `Ok(Some(sha))` with the new HEAD sha when a commit was created, or
 /// `Ok(None)` when the staged tree already matches HEAD (nothing to commit —
 /// e.g. an idempotent re-write). Errors when any path sits outside the
@@ -682,10 +687,15 @@ pub fn in_repo(apg_root: &Path) -> bool {
 
 /// Re-anchors the staleness gate's recorded scan_meta after an auto-commit:
 /// rewrites the `scan_meta` control record on line 1 of `graph.jsonl` (the
-/// record `is_stale` compares against) and, when a DB exists, updates the DB's
-/// `Scan` node to match. The code graph itself is untouched — an auto-commit
-/// carries exactly the mutated JSONL, so the scan's code content is still
-/// exactly what the DB holds (R8: DB and tree in sync by construction).
+/// record `is_stale` compares against). The code graph itself is untouched —
+/// an auto-commit carries exactly the mutated node/JSONL content, so the scan's
+/// code content is still exactly what the projection holds (R8: DB and tree in
+/// sync by construction).
+///
+/// `graph.jsonl` is the SOLE code-identity and freshness source (phase-02
+/// decoupling): this NEVER opens `db.lbug` read-write, so no exclusive DB open
+/// precedes the mutation's durable commit. The DB's derived `Scan` node is
+/// reconciled by the write-through projection / the next scan, never here.
 pub fn reanchor_scan_meta(apg_root: &Path, state: &GitState) -> anyhow::Result<()> {
     let path = graph_jsonl_path(apg_root);
     if !path.exists() {
@@ -707,24 +717,6 @@ pub fn reanchor_scan_meta(apg_root: &Path, state: &GitState) -> anyhow::Result<(
         scanned_at,
     })?;
     std::fs::write(&path, format!("{new}{rest}"))?;
-
-    // Mirror the new state into the DB's Scan node when a DB exists (the Scan
-    // table stores git_clean as the STRING "true"/"false" — load.rs).
-    let dbp = db_path(apg_root);
-    if !dbp.exists() {
-        return Ok(());
-    }
-    let Some(sha) = state.sha.as_deref() else {
-        return Ok(());
-    };
-    let db = Database::new(&dbp, SystemConfig::default())?;
-    let conn = Connection::new(&db)?;
-    let clean = if state.clean { "true" } else { "false" };
-    conn.query(&format!(
-        "MATCH (n:Scan {{fqn: 'scan/HEAD'}}) SET n.git_sha = '{}', n.git_clean = '{}'",
-        sha.replace('\'', "\\'"),
-        clean
-    ))?;
     Ok(())
 }
 

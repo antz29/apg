@@ -167,7 +167,7 @@ fn plan_update(args: &[String]) -> anyhow::Result<()> {
         );
     };
     let apg_root = require_apg_root()?;
-    artifacts::acquire_spec_lock(&apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(&apg_root)?;
     let Some(kind) = p.positional.get(1).map(|s| s.as_str()) else {
         // The plan-record arm: no second positional means "the plan itself".
         plan_update_at(
@@ -609,7 +609,7 @@ fn persist_rm(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Res
 /// and the stored file is left untouched (nothing is written before the whole
 /// cascade is computed).
 fn plan_rm_at(apg_root: &Path, project: &str, force: bool) -> anyhow::Result<()> {
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
     let dependents: Vec<String> = records
         .iter()
@@ -646,7 +646,7 @@ fn plan_rm_at(apg_root: &Path, project: &str, force: bool) -> anyhow::Result<()>
 /// path also removes the phase's tasks. A phase whose only dependents are
 /// Feedback/Note is removable WITHOUT `--force`. An absent phase is an error.
 fn plan_rm_phase_at(apg_root: &Path, project: &str, n: u32, force: bool) -> anyhow::Result<()> {
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
     let phase_fqn = format!("{project}/plan.phase-{n:02}");
     if !records
@@ -689,7 +689,7 @@ fn plan_rm_task_at(
     k: u32,
     force: bool,
 ) -> anyhow::Result<()> {
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
     let fqn = format!("{project}/plan.phase-{phase:02}.task-{k}");
     let Some(status) = records.iter().find_map(|r| match r {
@@ -736,7 +736,7 @@ fn plan_rm_planned_at(
     fqn: &str,
     force: bool,
 ) -> anyhow::Result<()> {
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
     if !records
         .iter()
@@ -776,7 +776,7 @@ fn plan_add(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg plan add <project> [phase|task|planned] …");
     };
     let apg_root = require_apg_root()?;
-    artifacts::acquire_spec_lock(&apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(&apg_root)?;
     let Some(kind) = p.positional.get(1).map(|s| s.as_str()) else {
         // The plan-record create arm: `apg plan add <project>` (no second
         // positional) creates the plan itself — the surface formerly spelled
@@ -1320,7 +1320,7 @@ fn plan_done(args: &[String]) -> anyhow::Result<()> {
 /// Core of `plan_done`: flips a task's status to `done` in the transient plan
 /// JSONL (assertion only — no promotion, no graph verification).
 fn plan_done_at(apg_root: &Path, project: &str, task_fqn: &str) -> anyhow::Result<()> {
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
     let mut found = false;
     for r in &mut records {
@@ -1353,7 +1353,7 @@ fn plan_undone(args: &[String]) -> anyhow::Result<()> {
 
 /// Core of `plan_undone`: flips a task's status back to `pending`.
 fn plan_undone_at(apg_root: &Path, project: &str, task_fqn: &str) -> anyhow::Result<()> {
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
     let mut found = false;
     for r in &mut records {
@@ -1407,7 +1407,7 @@ fn plan_note_at(
     body: &str,
     kind: &str,
 ) -> anyhow::Result<()> {
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
     if !records
         .iter()
@@ -1466,7 +1466,7 @@ fn plan_complete(args: &[String]) -> anyhow::Result<()> {
 /// from an uncompleted phase whose tasks are all done and feedback resolved).
 /// NO `Implements` materialization and NO plan retirement.
 fn plan_complete_at(apg_root: &Path, project: &str, phase: u32) -> anyhow::Result<()> {
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
     let phase_fqn = format!("{project}/plan.phase-{phase:02}");
 
@@ -1593,7 +1593,7 @@ pub(crate) fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<(
             "cannot verify `{project}`: the branch graph is stale — run `apg scan` inside the project worktree first (a verdict is only meaningful against a fresh branch graph)"
         );
     }
-    artifacts::acquire_spec_lock(apg_root)?;
+    let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let records = load_plan(apg_root, project)?;
     let db = artifacts::ArtifactDb::open(apg_root)?;
 
