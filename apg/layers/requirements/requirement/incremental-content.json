@@ -6,6 +6,12 @@
   "properties": {
     "feature": "incremental-content"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.content-addressed-manifest",
+      "properties": {}
+    }
+  ],
   "in": []
 }
