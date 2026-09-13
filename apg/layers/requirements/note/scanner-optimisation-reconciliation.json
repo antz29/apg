@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "scanner-optimisation-reconciliation",
+  "body": "source: the source spec marks requirements.user.apg-cli-runner \"(modified)\" and requirements.stakeholder.apg-maintainer \"(modified)\"; the branch at 3de2dfc has no apg-cli-runner, and apg-maintainer's body already equals the spec's text verbatim. inconsistency: \"modified\" is impossible for a node that does not exist, and a no-op for one already current. resolution: apg-cli-runner was created fresh (its FQN is load-bearing throughout the spec's requirement tree and edges, and the existing requirements.user.project-operator is a distinct identity with its own untouched coverage of the mutation surface and project lifecycle); apg-maintainer was left unchanged (body already matches) [autonomous]. source: the spec marks requirements.user.suite-agent \"(modified — body + edges)\"; suite-agent's base body describes the mutation/lock-race interest, the spec body the DB-freshness interest. resolution: the body was updated by appending the freshness interest rather than replacing the base text (non-destructive; both interests hold on this branch) and the two new contains edges were added [autonomous]. source: the spec's uses edge cli-operator→apg-cli; the branch already has uses solution.person.cli-operator→solution.system.apg-cli. resolution: the existing edge was left as-is and only cli-operator→apg-scan was added, so the spec's \"apg-cli\" short name resolves to solution.system.apg-cli [autonomous]. source: the spec marks requirements.stakeholder.apg-maintainer as containing requirements.requirement.agent-refinement; that contains edge already exists on the branch. resolution: not re-added (a duplicate add would be refused) [autonomous].",
+  "properties": {},
+  "out": [],
+  "in": []
+}
