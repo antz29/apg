@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.js-ts-code-type",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.js-ts-exactness-unresolved",
+      "properties": {}
     }
   ],
   "in": []
