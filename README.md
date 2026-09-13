@@ -239,7 +239,7 @@ agent to explore the graph directly — it will pick the right tool:
 | `apg_project` | project lifecycle — `start` (main → worktree + branch + branch DB), `verify`, `merge` |
 | `apg_node` / `apg_edge` | durable spec mutations — node files under `apg/layers/`, paired edges |
 | `apg_plan` / `apg_plan_*` | plan phases/tasks/planned nodes, task notes, verify gate |
-| `apg_review` / `apg_review_*` | writer↔reviewer feedback cycle (transient mirrors) |
+| `apg_review` / `apg_review_*` | coordinator-mediated writer↔reviewer feedback cycle (transient mirrors) |
 
 The code-graph tools above return location data; the `apg_project`/`apg_node`/
 `apg_edge`/`apg_plan_*`/`apg_review_*` tools operate on the project's spec/plan
@@ -422,7 +422,7 @@ src/layers.rs        node-file model: layers, validation, ingestion of apg/layer
 src/node_cmd.rs      durable node-file mutations (apg node / apg edge)
 src/plan_cmd.rs      phased execution plan (apg plan, incl. the verify gate)
 src/project_cmd.rs   project contexts (apg project start / merge, git2)
-src/review_cmd.rs    writer↔reviewer feedback cycle (apg review)
+src/review_cmd.rs    coordinator-mediated writer↔reviewer feedback cycle (apg review)
 src/specs.rs         plan/feedback JSONL serialization + re-ingest on scan
 src/git.rs           git2 identity + worktree operations
 src/version_gate.rs  apg/config.json layout version gate

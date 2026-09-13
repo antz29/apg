@@ -1,8 +1,11 @@
-//! `apg review` — the closed writer↔reviewer feedback cycle (SPEC R25/R26).
-//! A reviewer attaches a `Feedback` (`open`); a writer actions or wont-fixes it
-//! (`actioned`); the reviewer then resolves (terminal) or rejects (reopens).
-//! The writer cannot resolve and the reviewer cannot action — enforced by tool
-//! permissions (R28), never by convention.
+//! `apg review` — the closed, coordinator-mediated writer↔reviewer feedback
+//! cycle (SPEC R25/R26). A reviewer attaches a `Feedback` (`open`); the owning
+//! writer works it and returns an ACTIONED/WONT-FIX claim; the coordinator
+//! performs the shallow claim-vs-change consistency check and then actions the
+//! item (`actioned`); the reviewer then resolves (terminal) or rejects
+//! (reopens). The writer cannot resolve and the reviewer cannot action —
+//! enforced by tool permissions (R28), never by convention; the coordinator is
+//! the only actor that runs `apg review action`.
 //!
 //! Feedback is **transient** (apg-projects SPEC §5): branch-lifecycle data,
 //! never committed. Both halves of the relationship — the `Feedback` record
@@ -240,8 +243,10 @@ fn feedback_number(apg_root: &Path, project: &str) -> anyhow::Result<u64> {
     Ok(n)
 }
 
-/// `apg review action <feedback-fqn> --fix|--wont-fix [--note …]` — the writer
-/// actions it (`actioned`, disposition set).
+/// `apg review action <feedback-fqn> --fix|--wont-fix [--note …]` — the
+/// coordinator actions the item (`actioned`, disposition set) after the owning
+/// writer returns an ACTIONED/WONT-FIX claim and the shallow claim-vs-change
+/// consistency check passes; reviewers never action.
 fn review_action(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(fqn) = p.positional.first() else {

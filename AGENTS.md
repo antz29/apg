@@ -137,8 +137,11 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   `start <name>` (from the main checkout: worktree + branch + branch DB off
   the default branch, prints `apg/.worktrees/<name>`), `merge <name>` (from
   the main checkout: verify gate → merge → unguarded main rebuild).
-- `apg review <sub> …` — the closed writer↔reviewer feedback cycle over the
-  transient `.trans` mirrors: `add`, `action`, `resolve`, `reject`, `list`.
+- `apg review <sub> …` — the closed, coordinator-mediated writer↔reviewer
+  feedback cycle over the transient `.trans` mirrors: `add`, `action`,
+  `resolve`, `reject`, `list`. The owning writer returns an ACTIONED/WONT-FIX
+  claim; the coordinator runs `action` after the shallow consistency check;
+  only the reviewer resolves/rejects.
 - `apg --version`, `apg --help`.
 
 `apg init` also installs the **apg opencode tool suite** into the user-level
@@ -490,15 +493,18 @@ asserted by the binary.
 - Query patterns: the spine `MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->(:Container)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn`; plan health via the suite tools (`apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
 - The six distributed agents (installed by `apg init`): `codebase-navigator`
   (orchestrates the flow — `apg project start` from main, per-branch DB
-  build, feedback routing, human-gate summary, and the merge act (verify
-  gate → merge → rebuild) on approval), `spec-writer` / `plan-writer` (author
-  through the `apg_node`/`apg_edge`/`apg_plan_*` tools, **no file writes**;
-  the spec-writer authors the layer tiers + spine + reconciliation mode, the
-  plan-writer the tier-4 delta with structural/holistic gates), `spec-review` /
-  `plan-review` (attach/resolve/reject feedback, **no authoring tools**;
-  approval-only wont-fix — a `--wont-fix` action is a proposal only the
-  reviewer makes terminal), and `agent-builder` (`mode: primary`, the only
-  write grant `.opencode/agents/**`, scaffolds a repo's code-writer agents).
+  build, coordinator-mediated feedback routing (dispatch one open item to its
+  owning writer, take the writer's ACTIONED/WONT-FIX claim, run the shallow
+  claim-vs-change check, then action it), human-gate summary, and the merge act
+  (verify gate → merge → rebuild) on approval), `spec-writer` / `plan-writer`
+  (author through the `apg_node`/`apg_edge`/`apg_plan_*` tools, **no file
+  writes**; the spec-writer authors the layer tiers + spine + reconciliation
+  mode, the plan-writer the tier-4 delta with structural/holistic gates),
+  `spec-review` / `plan-review` (attach/resolve/reject feedback, **no authoring
+  tools**; approval-only wont-fix — the coordinator actions the writer's
+  `--wont-fix` claim and only the reviewer makes it terminal), and
+  `agent-builder` (`mode: primary`, the only write grant
+  `.opencode/agents/**`, scaffolds a repo's code-writer agents).
   Repo-defined implementer / implementation-phase-reviewer agents are generated
   by `agent-builder` (assertion-only `plan done`, task notes, branch commits;
   phase review on branch scans + the final implementation review discovering
