@@ -32,11 +32,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.artifacts.assembled_records",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.artifacts.ArtifactDb.reingest_layers_on",
       "properties": {}
     }
