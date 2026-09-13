@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "phase-timing-report",
+  "body": "The per-phase timing breakdown emitted as first-class scan output: one measured duration per scan phase (frontend execution, ingest/graph assembly, DB load, startup/overhead) for a single scan, including the fast-path marker when the frontend phase was skipped. It is the report the `phase-timing` value measures and that the phase-timer component produces; it lets the incremental wins be compared against the recorded full-scan baseline.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
