@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.permission-grant",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.agent-prose",
+      "properties": {}
     }
   ],
   "in": [
