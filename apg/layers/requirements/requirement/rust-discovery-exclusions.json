@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "rust-discovery-exclusions",
+  "body": "Manifest discovery must not descend into generated, dependency, or other-tree directories: target/, vendor/, node_modules/, and .worktrees/ are never scan roots. In particular the generated build artifacts under src/rustlib/target/**/out/*.rs must not be scanned as source. AC: a fixture with a generated .rs under target/ produces no code node for it, and a nested Cargo project under .worktrees/ is not discovered.",
+  "properties": {
+    "feature": "rust-module-discovery"
+  },
+  "out": [],
+  "in": []
+}
