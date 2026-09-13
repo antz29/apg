@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.delta-and-fallback",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.full-context-targeted-emission",
+      "properties": {}
     }
   ],
   "in": []
