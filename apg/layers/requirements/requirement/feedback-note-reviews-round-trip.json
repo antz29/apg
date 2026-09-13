@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "feedback-note-reviews-round-trip",
+  "body": "`apg review add <note-fqn> --project <p>` must round-trip. Today the Feedback+Reviews halves are written to the tier mirror, but the `Feedback-[:Reviews]->Note` edge never lands in `db.lbug`, so `apg review list` cannot show it.\n\nRoot cause: `apg.load.spec_rel_pairs` (src/load.rs:867–943) builds the `Reviews` pairs over a `to` list that excludes `Note` (shared with `Details`, where `Note`→`Note` must remain illegal); `apg.load.create_schema`'s `CREATE REL TABLE Reviews(...)` (src/load.rs:1156–1158) has no `FROM Feedback TO Note` arm; `apg.load.rel_table_pairs` (src/load.rs:993–1014) derives from `spec_rel_pairs`, so `apg.artifacts.rel_pair_allowed` (src/artifacts.rs:822–832) returns false for `(Reviews, Feedback, Note)` and `apg.artifacts.ArtifactDb.merge_edge` (src/artifacts.rs:497–555) silently skips the edge (`return Ok(())`, l.542).\n\nContract: every reviewable artifact label — including `Note` — must be representable as a `Reviews` target, and a legal review edge must never be silently dropped. `Note`→`Note` `Details` remains refused (the `Details` target list must keep excluding `Note`).\n\nAcceptance:\n- After `apg review add <note-fqn> --project <p>`, a fresh `apg_query` (and `apg review list`) returns the Feedback with the `Feedback-[:Reviews]->Note` edge, with no scan.\n- `(Reviews, Feedback, Note)` is admitted by `rel_pair_allowed` and declared by the schema.\n- A `Note`→`Note` `Details` pair stays illegal (still excluded from `spec_rel_pairs` and the `Details` rel table).",
+  "properties": {
+    "feature": "tooling-review"
+  },
+  "out": [],
+  "in": []
+}
