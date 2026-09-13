@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.scan-cache",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.cross-worktree-cache-sharing",
+      "properties": {}
     }
   ]
 }
