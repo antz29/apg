@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "rust-nested-fqn-clean",
+  "body": "Nested projects must render clean, collision-free FQNs. Because a nested package's name differs from the root's (apg-rustfrontend vs apg), the ingestor's module-prefixed FQN rendering yields disjoint namespaces with no collision. AC: the nested crate's module FQN is apg-rustfrontend and its symbols are apg-rustfrontend.*; scanning the apg repo itself triggers no ingestor FQN-collision panic and the nested module appears exactly once.",
+  "properties": {
+    "feature": "rust-module-discovery"
+  },
+  "out": [],
+  "in": []
+}
