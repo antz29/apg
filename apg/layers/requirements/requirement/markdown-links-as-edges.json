@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "markdown-links-as-edges",
+  "body": "Markdown links between documents must become graph edges: a resolved link from one section to another document/section is a Uses edge (Struct→Struct), the reference relationship between the two symbols. A link that cannot be resolved to a project document — an external URL, or a relative path no scanned markdown file provides — becomes an UnresolvedUse edge to an UnresolvedTarget carrying a category (external for a URL, unknown for a dangling relative path), never a guessed FQN. Link resolution scope (anchors, non-markdown targets, file-relative vs repo-root-relative paths) is an open design point (see the open-points note). AC: a two-document fixture with a relative link yields a Uses edge; an external URL and a broken relative link yield UnresolvedUse → UnresolvedTarget with categories, and no fabricated edge.",
+  "properties": {
+    "feature": "markdown-frontend"
+  },
+  "out": [],
+  "in": []
+}
