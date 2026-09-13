@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.cargo-manifest",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.service.manifest-discovery",
+      "properties": {}
     }
   ],
   "in": [
