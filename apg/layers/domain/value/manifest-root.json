@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "manifest-root",
+  "body": "The directory a Cargo manifest governs — the identity used to dedupe workspace discovery: the workspace root is loaded once, and its members are not re-loaded as top-level projects.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
