@@ -33,6 +33,11 @@
       "kind": "drives",
       "source": "requirements.requirement.read-guard-prose",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.prose-forbids-graph-state-reads",
+      "properties": {}
     }
   ]
 }
