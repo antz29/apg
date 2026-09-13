@@ -23,6 +23,11 @@
       "kind": "contains",
       "source": "solution.system.apg-scan",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.scan-exclusion",
+      "properties": {}
     }
   ]
 }

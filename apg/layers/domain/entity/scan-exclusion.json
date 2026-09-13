@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.container.frontend-process",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
