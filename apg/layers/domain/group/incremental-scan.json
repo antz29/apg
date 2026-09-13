@@ -17,6 +17,11 @@
       "kind": "contains",
       "target": "domain.group.change-set",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.group.scan-cache",
+      "properties": {}
     }
   ],
   "in": []
