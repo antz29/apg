@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.freshness-fast-path",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.js-ts-frontend",
+      "properties": {}
     }
   ],
   "in": []
