@@ -26,6 +26,11 @@
       "kind": "drives",
       "target": "domain.service.feedback-routing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.agent-suite",
+      "properties": {}
     }
   ],
   "in": [
