@@ -39,6 +39,11 @@
       "kind": "contains",
       "target": "requirements.requirement.incremental-graph",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.js-ts-frontend",
+      "properties": {}
     }
   ],
   "in": []
