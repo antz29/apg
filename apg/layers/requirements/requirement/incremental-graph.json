@@ -6,6 +6,12 @@
   "properties": {
     "feature": "incremental-graph"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.db-splice-from-previous",
+      "properties": {}
+    }
+  ],
   "in": []
 }
