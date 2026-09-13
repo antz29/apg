@@ -41,6 +41,11 @@
       "kind": "contains",
       "target": "requirements.requirement.read-guard-prose",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.coordinator-mediated-feedback",
+      "properties": {}
     }
   ],
   "in": [
