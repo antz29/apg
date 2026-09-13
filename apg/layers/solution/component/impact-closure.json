@@ -20,6 +20,11 @@
       "kind": "realised-by",
       "source": "domain.service.impact-analysis",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.change-set",
+      "properties": {}
     }
   ]
 }
