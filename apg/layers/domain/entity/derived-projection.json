@@ -53,6 +53,11 @@
       "kind": "drives",
       "source": "requirements.requirement.projection-equals-sources",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.commit-then-project",
+      "properties": {}
     }
   ]
 }
