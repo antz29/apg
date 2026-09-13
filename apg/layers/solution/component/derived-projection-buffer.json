@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "apg.session.ProjectionBuffer.record",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.session.ProjectionBuffer.flush",
+      "properties": {}
     }
   ],
   "in": [
