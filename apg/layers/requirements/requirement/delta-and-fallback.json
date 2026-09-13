@@ -6,7 +6,13 @@
   "properties": {
     "feature": "incremental-content"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.service.delta-computation",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
