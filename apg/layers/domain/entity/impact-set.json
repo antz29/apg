@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "impact-set",
+  "body": "The set of files that must be re-emitted by the frontends and reassembled into the graph: changed files ∪ their reverse-dependency closure (from the cached graph) ∪ overload-group peers, after signature-based early cutoff. It is the unit the frontend emission filter and the scheduler operate on.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
