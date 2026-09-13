@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "coordinator-buffer-derived-only",
-  "body": "The coordinator buffers only the derived projection. The coordinator performs the durable write itself, directly, one commit per logical mutation — it owns the node-file read-modify-write and the `git::commit_files` commit (coordinator-single-writer), so durable node-file writes are NOT deferred or buffered; only the derived DB flush is deferred/batched into one ingest (or a bounded number) at `apg session end`. Durable writes are never buffered in memory without a WAL. Acceptance: killing the session between mutations loses no durable write; only a rebuildable DB flush is outstanding, and one logical mutation → one commit still holds.",
+  "body": "The coordinator never defers a mutation's visibility. The coordinator performs the durable write itself, directly, one commit per logical mutation — it owns the node-file read-modify-write and the `git::commit_files` commit (coordinator-single-writer), so durable node-file writes are NOT deferred or buffered; and the exact projection delta is applied write-through as the mutation completes, so the derived DB is NOT buffered or flushed in a batch at session end either. Amortization keeps one DB open/parse across the session; it does not batch visibility. Durable writes are never buffered in memory without a WAL. Acceptance: killing the session between mutations loses no durable write and leaves no unapplied projection delta for any mutation that reported success; one logical mutation → one commit still holds.",
   "properties": {
     "feature": "mutation-coordinator"
   },
