@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "read-your-writes",
+  "body": "A subsequent query in a NEW process sees the mutation immediately. The reader shares no in-memory state with the writer and needs no prior coordination: it may be a fresh `apg query` process started after the mutation returned. This is the read-your-writes guarantee for an external reader.\n\nAcceptance: `apg node add … foo` returns, then a new `apg query` process resolving `foo` returns it — no re-scan, no explicit flush, no session-end, no shared session state.",
+  "properties": {
+    "feature": "graph-consistency"
+  },
+  "out": [],
+  "in": []
+}
