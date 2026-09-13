@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "requirements.requirement.markdown-exactness-unresolved",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.markdown-build-and-acceptance",
+      "properties": {}
     }
   ],
   "in": [
