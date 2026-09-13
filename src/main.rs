@@ -2070,7 +2070,7 @@ mod tests {
     /// the `[package] version` line on every release: the assertions below fail
     /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
     /// advertised release), so a bump commit cannot silently skip it.
-    const RELEASE_VERSION: &str = "0.12.3";
+    const RELEASE_VERSION: &str = "0.13.0";
 
     /// The `version = "..."` declared directly under a Cargo.toml `[package]`
     /// header.
@@ -2128,12 +2128,12 @@ mod tests {
     fn readme_documents_release_version() {
         let readme =
             std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
-        // The README pins the 0.12.x line, not an exact patch, so patch releases
+        // The README pins the 0.13.x line, not an exact patch, so patch releases
         // don't require a README edit.
-        assert!(readme.contains("apg 0.12.x"), "README --version examples");
-        assert!(readme.contains("0.12.x"), "README tagged-release prose");
+        assert!(readme.contains("apg 0.13.x"), "README --version examples");
+        assert!(readme.contains("0.13.x"), "README tagged-release prose");
         assert!(
-            readme.contains("--version 0.12.x"),
+            readme.contains("--version 0.13.x"),
             "README Linux installer pin option"
         );
         // No stale release records: the previous versions must be fully replaced.
