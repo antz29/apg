@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.feedback-note-reviews-round-trip",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.verify-gate-all-feedback-scopes",
+      "properties": {}
     }
   ],
   "in": []
