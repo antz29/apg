@@ -4,7 +4,13 @@
   "name": "coordinator-feedback-routing",
   "body": "The coordinator-mediated feedback protocol as expressed in the distributed agent prompts and the review tool text — no Rust control flow changes, because the `apg review` subcommand surface is unchanged. The `codebase-navigator` prompt gains the feedback-action grant and the prose: dispatch one feedback item at a time to one plan/spec/implementer writer, receive the writer's ACTIONED/WONT-FIX claim, perform a shallow consistency check (ACTIONED with no change, or WONT-FIX with changes, is inconsistent), then action the item (`apg_review_action --fix|--wont-fix`) or re-dispatch it, leaving the terminal resolve/reject to the reviewer. The writer prompts (spec-writer, plan-writer, and the generated implementer) drop the action grant, keep the read-only feedback channel, and state that the writer returns a claim and never actions. The reviewer prompts (spec-review, plan-review, implementation-phase-reviewer) keep add/resolve/reject and never action. The `apg_review_action` tool description is re-pointed from the writer to the coordinator. The agent-builder template carries the same grant shape for the agents it scaffolds. Agent prompts and tool text are not scanned code — they are embedded via `include_str!` and delivered by `apg init`, so the `implemented-by` spine anchors to the install/embed Rust and the review CLI action path, never to a `.md`/`.ts` path.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "apg.install_suite",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
