@@ -41,6 +41,11 @@
       "kind": "contains",
       "target": "solution.component.projection-delta-applier",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.review-feedback-projection",
+      "properties": {}
     }
   ],
   "in": [

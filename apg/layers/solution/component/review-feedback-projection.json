@@ -10,6 +10,11 @@
       "kind": "realised-by",
       "source": "domain.entity.review-feedback",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.node-edge-surface",
+      "properties": {}
     }
   ]
 }
