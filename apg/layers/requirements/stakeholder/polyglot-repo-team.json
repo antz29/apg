@@ -4,6 +4,12 @@
   "name": "polyglot-repo-team",
   "body": "A team whose repository is not uniformly one language — it mixes JavaScript/TypeScript, or embeds a nested Cargo project the root workspace does not cover — and who need apg's graph to include all of it. Interest: language and module coverage follows the code, with the same exactness posture as the first-class languages.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.js-ts-frontend",
+      "properties": {}
+    }
+  ],
   "in": []
 }
