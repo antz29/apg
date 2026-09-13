@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "phase-timing",
+  "body": "A measured duration for one scan phase — frontend execution, ingest/graph assembly, DB load, or startup/overhead — reported first-class so incremental wins are measurable against the recorded baseline.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
