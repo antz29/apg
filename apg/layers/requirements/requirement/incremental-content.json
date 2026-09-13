@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.full-context-targeted-emission",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.impact-and-cutoff",
+      "properties": {}
     }
   ],
   "in": []
