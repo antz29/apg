@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "js-ts-language-plumbing",
+  "body": "Add a js language id and a detector for auto-detection, plus the lang_switch control record and the id_prefix entry. The detector must not trip on node_modules (dependency JavaScript) and must not run JS and TS as separate frontends over a TS repo that also contains JavaScript — the unified frontend scans both under one language id. AC: a JS-only repo auto-detects js; a TS repo with incidental JavaScript still scans once under the unified frontend; node_modules never triggers detection.",
+  "properties": {
+    "feature": "js-ts-frontend"
+  },
+  "out": [],
+  "in": []
+}
