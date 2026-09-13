@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.markdown-frontend",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
