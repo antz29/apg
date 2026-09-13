@@ -4,6 +4,12 @@
   "name": "apg-cli-runner",
   "body": "A developer or CI job running `apg scan` or `apg project start` on a checkout or project worktree. A User ⊂ Stakeholder: the person/process that invokes the scan and waits for it.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.freshness-fast-path",
+      "properties": {}
+    }
+  ],
   "in": []
 }
