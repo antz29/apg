@@ -10,6 +10,11 @@
       "kind": "drives",
       "source": "requirements.requirement.coordinator-single-item-dispatch",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.coordinator-claim-consistency-check",
+      "properties": {}
     }
   ]
 }
