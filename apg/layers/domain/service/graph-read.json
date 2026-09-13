@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "graph-read",
+  "body": "The behaviour that serves a graph read against the live projection: resolve the reader against `apg/.trans/db.lbug` — opening it read-only, sharing it with the single writer, or routing the read to a live session over the transparent socket — and return the current state. It is what makes read-your-writes hold for a new process and read-access-during-session hold while a session owns the DB.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
