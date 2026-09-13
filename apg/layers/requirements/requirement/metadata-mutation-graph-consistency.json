@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "requirements.requirement.projection-equals-sources",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.projection-delta",
+      "properties": {}
     }
   ],
   "in": [
