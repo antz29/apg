@@ -19,6 +19,11 @@
       "kind": "contains",
       "target": "requirements.requirement.freshness-fast-path",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.incremental-graph",
+      "properties": {}
     }
   ],
   "in": []
