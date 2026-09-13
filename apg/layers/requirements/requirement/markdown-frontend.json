@@ -6,7 +6,13 @@
   "properties": {
     "feature": "markdown-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.markdown-accept-extensions",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
