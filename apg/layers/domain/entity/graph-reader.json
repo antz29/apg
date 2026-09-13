@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "graph-reader",
+  "body": "A process that reads the graph — `apg query` or a suite query tool — separate from the writing mutation process and holding no session state. It must see every committed-and-projected mutation with no prior coordination, including while a session owns `db.lbug`.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
