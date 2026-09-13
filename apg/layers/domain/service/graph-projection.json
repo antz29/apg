@@ -20,6 +20,11 @@
       "kind": "drives",
       "source": "requirements.requirement.db-splice-from-previous",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.incremental-graph",
+      "properties": {}
     }
   ]
 }

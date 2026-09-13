@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.db-splice-from-previous",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.service.graph-projection",
+      "properties": {}
     }
   ],
   "in": [
