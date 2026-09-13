@@ -417,6 +417,10 @@ impl ArtifactDb {
     /// Deletes exactly the FQNs in `fqns`, together with their incident edges,
     /// guarded so a **realized** code FQN survives (phase-05 task-1).
     ///
+    /// The name is retained from the pre-phase-05 prefix delete (`modifies`
+    /// target `apg.artifacts.ArtifactDb.detach_delete_project`); the BEHAVIOR is
+    /// the exact-FQN delta below, no longer a `<project>/`-prefix delete.
+    ///
     /// The delete set a metadata mutation passes is its removed ∪ changed FQNs
     /// (see [`transient_delta`] and `layers::projection_deletes`), never a
     /// `<project>/` prefix: a planned code FQN carries no project prefix
@@ -436,7 +440,7 @@ impl ArtifactDb {
     /// per label per FQN: the delta is small (a mutation touches a handful of
     /// FQNs), and a per-label delete is the only form that can apply the
     /// planned guard without a `labels(n)` predicate.
-    pub fn detach_delete_fqns(
+    pub fn detach_delete_project(
         &self,
         conn: &Connection,
         fqns: &BTreeSet<String>,
@@ -1007,7 +1011,7 @@ fn reingest_project_with(
     let conn = db.conn()?;
     conn.query("BEGIN TRANSACTION")?;
     let result = (|| -> anyhow::Result<()> {
-        db.detach_delete_fqns(&conn, deletes)?;
+        db.detach_delete_project(&conn, deletes)?;
         // Test-only injection: prove a mid-apply failure rolls the projection
         // back to its prior state (phase-05 task-10).
         #[cfg(test)]
@@ -1226,7 +1230,7 @@ pub fn reingest_layers(
 impl ArtifactDb {
     /// The write-through projection apply for the durable layers tree, run
     /// against an **already-held** database handle: detach exactly the mutated
-    /// FQNs `deletes` ([`detach_delete_fqns`], with the planned-code guard) and
+    /// FQNs `deletes` ([`detach_delete_project`], with the planned-code guard) and
     /// re-merge the caller-supplied `records` (the `layers::ingest_tree`
     /// output) — nodes first, then edges, in one transaction. A failed merge
     /// rolls back, so the DB keeps its prior committed state.
@@ -1244,7 +1248,7 @@ impl ArtifactDb {
         let conn = self.conn()?;
         conn.query("BEGIN TRANSACTION")?;
         let result = (|| -> anyhow::Result<()> {
-            self.detach_delete_fqns(&conn, deletes)?;
+            self.detach_delete_project(&conn, deletes)?;
             self.merge_records(&conn, records)?;
             Ok(())
         })();
