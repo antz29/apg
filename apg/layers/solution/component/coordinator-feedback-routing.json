@@ -46,6 +46,11 @@
       "kind": "realised-by",
       "source": "domain.entity.agent-prose",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.coordinator-feedback-routing",
+      "properties": {}
     }
   ]
 }
