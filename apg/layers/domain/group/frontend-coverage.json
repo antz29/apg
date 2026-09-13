@@ -42,6 +42,11 @@
       "kind": "contains",
       "target": "domain.value.code-type",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.language-id",
+      "properties": {}
     }
   ],
   "in": []

@@ -5,5 +5,11 @@
   "body": "The stable id a frontend declares and the detector matches (go, java, cpp, rust, ts, js, csharp), used for auto-detection, --id-prefix namespacing of opaque ids, and the lang_switch control record that drives per-record FQN rendering and code-type classification.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.frontend-coverage",
+      "properties": {}
+    }
+  ]
 }
