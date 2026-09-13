@@ -6,7 +6,13 @@
   "properties": {
     "kind": "service"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "solution.component.code-type-classifier",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
