@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "requirements.requirement.rust-nested-fqn-clean",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.rust-workspace-dedup",
+      "properties": {}
     }
   ],
   "in": []
