@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "note",
+  "name": "cache-store-and-splice",
+  "body": "Open: the DB splice should seed the next DB from the previous one (preserving unaffected tables/rows) and apply only the delta, then atomically publish; overlay-on-a-fresh-empty-DB is the alternative. The choice must preserve exactness and must be measured on netbeans, where a full DB rebuild is a multi-minute floor. Decide in the plan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
