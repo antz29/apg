@@ -7,6 +7,12 @@
     "attribute": "core",
     "root": "incremental-scan"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.scan-record",
+      "properties": {}
+    }
+  ],
   "in": []
 }
