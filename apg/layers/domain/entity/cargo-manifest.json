@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.frontend-coverage",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.rust-discover-all-manifests",
+      "properties": {}
     }
   ]
 }
