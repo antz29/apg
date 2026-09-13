@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "markdown-accept-extensions",
+  "body": "The markdown frontend must accept the markdown extension set (.md, .markdown) and emit, for each accepted file, a Module node for its directory and a File node whose FQN is the absolute path — never dropping the file (all-code-included: filtering is by code_type, not by omission). The accepted set is an open design point for hybrid extensions such as .mdx (see the open-points note). AC: a repo containing .md and .markdown files produces a module and a file node for each, with no file absent from the graph.",
+  "properties": {
+    "feature": "markdown-frontend"
+  },
+  "out": [],
+  "in": []
+}
