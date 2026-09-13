@@ -34,5 +34,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.exact-ongoing-equivalence",
+      "properties": {}
+    }
+  ]
 }
