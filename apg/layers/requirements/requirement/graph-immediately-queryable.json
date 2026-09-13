@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "requirements.requirement.commit-then-project",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.read-visibility",
+      "properties": {}
     }
   ],
   "in": [
