@@ -4,7 +4,13 @@
   "name": "delta-computation",
   "body": "Computes the delta between the recorded scan and the current tree: git diff --name-status -M <recorded> for committed changes plus working-tree/index/untracked state. Raises the full-scan fallback when the recorded commit is not an ancestor of HEAD or the cache key drifted.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.delta-analyzer",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
