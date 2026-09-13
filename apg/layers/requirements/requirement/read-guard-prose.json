@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.prose-forbids-graph-state-reads",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.prose-matches-read-grant",
+      "properties": {}
     }
   ],
   "in": [
