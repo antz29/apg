@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "module-fqn-prefix",
+  "body": "The module prefix rendered for a discovered project (a Cargo package name — root apg vs nested apg-rustfrontend; or an npm package name for JS/TS). Distinct prefixes keep nested-project FQNs disjoint and collision-free.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
