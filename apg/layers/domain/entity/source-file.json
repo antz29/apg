@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.code-type-classifier",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.markdown-frontend",
+      "properties": {}
     }
   ],
   "in": [
