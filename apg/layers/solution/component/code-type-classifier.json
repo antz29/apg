@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "code-type-classifier",
-  "body": "The ingestor's code-type classifier: maps a source path plus language to a code type (src/test/generated/external), replacing built-ins with apg/config.json rules when present. Implemented today by classify_code_type / builtin_code_type in src/classify.rs; extended with .js/.jsx/.mjs/.cjs rules for JS generated/bundled output.",
+  "body": "The ingestor's code-type classifier: maps a source path plus language to a code type (src/test/generated/external), replacing built-ins with apg/config.json rules when present. Implemented today by classify_code_type / builtin_code_type in src/classify.rs; extended with .js/.jsx/.mjs/.cjs rules for JS generated/bundled output, and with .md/.markdown docs rules (a docs code type for ordinary markdown, generated/external segment rules still winning).",
   "properties": {},
   "out": [
     {
