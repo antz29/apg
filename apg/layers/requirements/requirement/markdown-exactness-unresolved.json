@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "markdown-exactness-unresolved",
+  "body": "The markdown frontend must preserve the exactness posture of the code frontends: an edge is emitted only where a link or a containment resolves to a project node. A link that cannot be resolved yields an UnresolvedTarget with a category, never a fabricated FQN, exactly as never-fabricate-edges and exactness-no-heuristic require; there is no heuristic link resolution and no provenance/confidence tier. AC: the broken-link fixture produces only unresolved_use edges to UnresolvedTargets and no guessed uses edge.",
+  "properties": {
+    "feature": "markdown-frontend"
+  },
+  "out": [],
+  "in": []
+}
