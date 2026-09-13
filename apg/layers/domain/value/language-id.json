@@ -20,6 +20,11 @@
       "kind": "drives",
       "source": "requirements.requirement.js-ts-language-plumbing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.markdown-language-plumbing",
+      "properties": {}
     }
   ]
 }
