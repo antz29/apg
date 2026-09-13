@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "js-ts-acceptance",
+  "body": "Acceptance for the unified frontend: a JavaScript repo (CJS and ESM, plus a dynamic-require case) and a mixed JS/TS repo scan cleanly; the frontend's own source (src/tslib) contributes symbols after the port; dynamic constructs produce unresolved targets only. Tests exercise a scratch /tmp repo per no-real-project-test. AC: the listed fixtures scan and the emitted edges match the exactness rule.",
+  "properties": {
+    "feature": "js-ts-frontend"
+  },
+  "out": [],
+  "in": []
+}
