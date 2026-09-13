@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.plan_cmd.load_plan",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.specs.project_transient_files",
       "properties": {}
     }
