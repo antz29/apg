@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "immediate-queryability",
+  "body": "The graph must reflect a completed mutation to any subsequent reader without a re-scan or explicit flush. After an `apg node` / `apg edge` (or `apg plan` / `apg review`) mutation returns success, a read by a new process (`apg query` or a suite query tool) must return the post-mutation state immediately — no re-scan, no flush command, no session-end step, no waiting for a batch.\n\nRelationship to `global.constraint.metadata-mutation-no-rescan`: that law forbids requiring a re-scan after a metadata mutation; this law adds that the projection must also be immediately READABLE — a projection that is consistent with its sources but locked, buffered, or not yet applied violates it.\n\nRelationship to `global.constraint.durable-state-authoritative`: the durable node files plus their per-mutation git commits remain the system of record. The projection delta is applied only AFTER the durable commit (commit-then-project), so read-visibility never comes at the cost of durable authority and no reader may observe uncommitted state.\n\nRelationship to `requirements.requirement.db-rebuildable-projection`: the DB stays derived, optional, and rebuildable from code + the layers tree; this law does not make it authoritative. It requires the derived DB to be kept consistent AND synchronously readable, so \"rebuildable\" never excuses leaving a completed mutation invisible until the next scan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
