@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.incremental-scan",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.per-phase-timing-report",
+      "properties": {}
     }
   ]
 }
