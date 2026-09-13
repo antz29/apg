@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "agent-prompt-text",
-  "body": "The distributed agent prompts in opencode-suite/agents/*.md (plan-writer, spec-writer, codebase-navigator reference `apg plan init` / `apg_plan_init` / `apg_plan_link`; also agent-builder/spec-review/plan-review) and the root AGENTS.md CLI reference block, updated to the new verbs. These are MARKDOWN, not scanned code — they are installed by `apg init` through `src/main.rs`'s embedded suite, so this component is covered by anchoring to the embedding Rust (`apg.main`), never to a .md path (which would be a write-time error).",
+  "body": "The distributed agent prompts in opencode-suite/agents/*.md (plan-writer, spec-writer, codebase-navigator reference `apg plan init` / `apg_plan_init` / `apg_plan_link`; also agent-builder/spec-review/plan-review) and the root AGENTS.md CLI reference block, updated to the new verbs. These templates are embedded constants in src/main.rs (`include_str!`) delivered to the user-level suite by `apg.install_suite`; the repo-tree `.md` sources are prose, and once the markdown frontend lands they are also scanned File nodes. The DELIVERED artifact is still the embedded constant, so this component is covered by anchoring to the embedding/install Rust (`apg.main`), never to a `.md` path. That anchor is deliberate for the delivery artifact, not a claim that a `.md` target is universally invalid: a scanned `.md` File FQN is a legitimate `implemented-by` target once the markdown frontend is active (see `solution.note.markdown-anchoring`; drift is checked against the code universe, src/main.rs:1342-1364).",
   "properties": {},
   "out": [
     {
