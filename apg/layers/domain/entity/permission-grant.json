@@ -38,6 +38,11 @@
       "kind": "drives",
       "source": "requirements.requirement.prose-matches-read-grant",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.generated-agents-inherit-file-access-rule",
+      "properties": {}
     }
   ]
 }
