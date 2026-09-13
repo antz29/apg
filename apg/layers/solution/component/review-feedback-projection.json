@@ -14,11 +14,6 @@
       "kind": "implemented-by",
       "target": "apg.load.create_schema",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "apg.artifacts.ArtifactDb.merge_edge",
-      "properties": {}
     }
   ],
   "in": [
