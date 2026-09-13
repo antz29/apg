@@ -1790,6 +1790,70 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The read-guard prose holds for exactly the five prompts this change
+    /// touches: the four distributed agents rewritten by read-guard-prose
+    /// (spec-review/spec-writer/plan-writer/plan-review) plus agent-builder.md,
+    /// whose common-shape and step-6 verify text make every generated agent
+    /// inherit the rule. `codebase-navigator.md` is deliberately excluded (see
+    /// below).
+    #[test]
+    fn installed_agent_prompts_state_file_access_read_guard() {
+        const RULE: &str = "graph state is reached only through the apg tools";
+        const NEVER_READ: &str = "never read directly";
+        const BLANKET: &str = "You may read any file";
+
+        for name in [
+            "spec-review.md",
+            "spec-writer.md",
+            "plan-writer.md",
+            "plan-review.md",
+            "agent-builder.md",
+        ] {
+            let content = AGENTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"));
+            assert!(
+                content.contains(RULE),
+                "{name} must state that graph state is reached only through the apg tools"
+            );
+            assert!(
+                content.contains(NEVER_READ),
+                "{name} must state that node/transient files are never read directly"
+            );
+            assert!(
+                !content.contains(BLANKET),
+                "{name} must not carry the blanket `{BLANKET}` claim"
+            );
+        }
+
+        // `codebase-navigator.md` is excluded from the assertion above: it is a
+        // sixth entry in the embedded AGENTS set that neither phase edits (it
+        // already reaches graph state through the tools and never reads raw
+        // files, per codebase-navigator.md's database section), so a literal
+        // whole-set guard would fail on an unchanged file. Only the five
+        // in-scope prompts are asserted.
+
+        // The inheritance half inspects the agent-builder.md TEMPLATE text
+        // (there is no generated-agent artifact to read): it must require the
+        // positive rule and fail a generated agent whose body claims broader
+        // read access than its grant.
+        let builder = AGENTS
+            .iter()
+            .find(|(n, _)| *n == "agent-builder.md")
+            .map(|(_, c)| *c)
+            .unwrap();
+        assert!(
+            builder.contains(RULE) && builder.contains(NEVER_READ),
+            "agent-builder.md must require the positive read-guard rule"
+        );
+        assert!(
+            builder.contains("claims broader read access than its grant"),
+            "agent-builder.md's verify checklist must fail a broader-than-grant body"
+        );
+    }
+
     #[test]
     fn scaffold_gitignore_adds_layout_entries_once() {
         let d = std::env::temp_dir().join(format!("apg-gitignore-{}", std::process::id()));

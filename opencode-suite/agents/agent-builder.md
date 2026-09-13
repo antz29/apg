@@ -80,6 +80,12 @@ never a mutation place.
   commands (`cat *`, `head *`, `tail *`, `dd *`, `rg *`, `grep *`, and
   `git grep *` — `git grep` reads tracked files, and `apg/layers/**` is
   tracked).
+- **Read-guard body prose (positive rule).** The deny blocks alone are not
+  enough: every generated agent's body must state the positive form of the
+  rule — graph state is reached only through the apg tools that agent is
+  granted, and the node/transient files are never read directly. A body that
+  omits the positive rule, or that claims broader read access, is a broken
+  scaffold.
 - **Question-drop.** No generated agent carries `question: allow` — the
   implementer and the reviewer both route questions through the coordinator.
 - **Stop-and-report.** Tool-failure prose is terminal: when a graph tool
@@ -248,6 +254,11 @@ never a mutation place.
    `question` grant, stop-and-report tool-failure prose, no `.trans`/`layers`
    paths in the body, and the reviewer's `edit` block is `"*": deny` with no
    allow entries);
+   confirm every generated body states the positive read-guard rule — graph
+   state is reached only through the apg tools the agent is granted, and the
+   node/transient files are never read directly — and **fail a generated agent
+   whose body claims broader read access than its grant**, regenerating it
+   deny-first;
    confirm `generated: true` is present and the navigator allowlist covers
    every generated agent. Confirm the **worktree mirroring** (rule 10): for
    every edit allow/deny at the repo root, the matching `apg/.worktrees/*/`
