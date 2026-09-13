@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "commit-then-project",
+  "body": "Ordering: the durable file write and its git commit happen FIRST — the commit is the system-of-record durability point — and only then is the exact projection delta applied. No query may ever observe uncommitted state that a crash plus rebuild would revert.\n\nAcceptance: a process that dies after the durable commit but before the projection apply is reproduced correctly by the next rebuild (the committed state, never the uncommitted projection); a process that dies before the commit shows the mutation in neither the durable store nor the projection.",
+  "properties": {
+    "feature": "graph-consistency"
+  },
+  "out": [],
+  "in": []
+}
