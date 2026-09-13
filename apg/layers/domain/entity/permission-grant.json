@@ -43,6 +43,11 @@
       "kind": "drives",
       "source": "requirements.requirement.generated-agents-inherit-file-access-rule",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.writers-read-only-feedback",
+      "properties": {}
     }
   ]
 }
