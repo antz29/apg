@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.projection-delta",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.service.projection-update",
+      "properties": {}
     }
   ],
   "in": [

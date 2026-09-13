@@ -21,6 +21,11 @@
       "kind": "drives",
       "source": "requirements.requirement.no-rescan-for-metadata",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.write-through-projection",
+      "properties": {}
     }
   ]
 }
