@@ -10,6 +10,11 @@
       "kind": "realised-by",
       "source": "domain.entity.feedback-scope",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.plan-surface",
+      "properties": {}
     }
   ]
 }
