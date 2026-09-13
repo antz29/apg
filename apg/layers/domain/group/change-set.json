@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "domain.entity.impact-set",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.delta-computation",
+      "properties": {}
     }
   ],
   "in": [
