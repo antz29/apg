@@ -16,6 +16,11 @@
       "kind": "implemented-by",
       "target": "apg.install_suite",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.file-access-guard-prose",
+      "properties": {}
     }
   ],
   "in": [
