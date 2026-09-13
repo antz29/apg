@@ -41,6 +41,11 @@
       "kind": "drives",
       "source": "requirements.requirement.markdown-exactness-unresolved",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.markdown-build-and-acceptance",
+      "properties": {}
     }
   ]
 }
