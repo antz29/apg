@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.delta-analyzer",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.freshness-gate",
+      "properties": {}
     }
   ],
   "in": [
