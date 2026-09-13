@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "code-type",
-  "body": "A source file's provenance class (src/test/generated/external or a project-defined value), computed by the ingestor from the path plus the project classification config. All code is included in the graph; code type is the filter.",
+  "body": "A source file's provenance class, computed by the ingestor from the path plus the project classification config. The built-in classes are `src`, `test`, `generated`, `external` and `docs` — `docs` is the markdown arm of the built-in classifier (ordinary markdown documents and their section symbols), not a project-defined value. A project may also define its own values via `apg/config.json`. An `apg/config.json` replaces the built-ins entirely: with a config present the first matching rule wins, else the config's `default` — so a config with no `docs` rule classifies markdown as that `default` (which itself defaults to `src`), never `docs`. All code is included in the graph; code type is the filter.",
   "properties": {},
   "out": [],
   "in": [
