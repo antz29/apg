@@ -5,5 +5,11 @@
   "body": "Computes the file delta and the fallback decision (git diff --name-status -M + git status --porcelain; full-scan fallback on non-ancestor recorded commit or cache-key drift).",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scan-orchestrator",
+      "properties": {}
+    }
+  ]
 }
