@@ -72,6 +72,11 @@
       "kind": "realised-by",
       "target": "solution.container.scan-orchestrator",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.markdown-document",
+      "properties": {}
     }
   ],
   "in": [
