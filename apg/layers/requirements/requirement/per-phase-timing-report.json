@@ -5,5 +5,11 @@
   "body": "`apg scan` must report a per-phase timing breakdown — frontend, ingest-assembly, DB-load, startup/overhead — as first-class output (log line and/or machine-readable), so wins B and C can be measured against the recorded full-scan baseline. AC: a scan prints each phase's duration; a no-op fast-path scan reports that the frontend phase was skipped.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.user.apg-cli-runner",
+      "properties": {}
+    }
+  ]
 }
