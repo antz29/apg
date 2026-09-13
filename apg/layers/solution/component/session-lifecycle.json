@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "session-lifecycle",
-  "body": "Session lifecycle and exclusivity: `apg session start` launches the coordinator and binds the worktree socket; `apg session end` flushes the derived projection and exits; a stale socket left by a crash is reclaimed by the next command/session; one session per worktree DB; a live session and `apg scan` / `apg project merge` are mutually exclusive. (Not yet built — planned code.)",
+  "body": "Session lifecycle and exclusivity: `apg session start` launches the coordinator and binds the worktree socket; `apg session end` releases the worktree DB and socket and exits — there is no accumulated projection flush to perform, because each mutation's exact delta was applied write-through as it completed; a stale socket left by a crash is reclaimed by the next command/session; one session per worktree DB; a live session and `apg scan` / `apg project merge` are mutually exclusive. (Not yet built — planned code.)",
   "properties": {},
   "out": [
     {
