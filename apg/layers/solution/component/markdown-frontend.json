@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "markdown-frontend",
+  "body": "The markdown document frontend: discovers .md/.markdown sources, emits each file as a File (FQN = the absolute path) under a directory-based Module, its headings as Struct section symbols nested by heading level, and its links as Uses edges between sections — unresolved or external links landing as UnresolvedUse → UnresolvedTarget with a category, never a guessed FQN. Its source does not exist yet and is not in the scanned graph, so this component carries NO implemented-by edge — the plan declares it as planned Implementation nodes, the same state as solution.component.js-ts-frontend and solution.component.rust-manifest-discovery.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
