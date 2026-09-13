@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.rust-discover-fixture-tests",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.rust-discovery-exclusions",
+      "properties": {}
     }
   ],
   "in": []
