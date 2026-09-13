@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "full-context-targeted-emission",
+  "body": "Frontends must always resolve against the FULL compilation context; only emission is filtered to the target set. The irreducible frontend contract is: accept a target set, resolve against full context, emit only the target, and use the frontend's native incremental/artifact cache. Per language: Java = compile only changed packages against a class dir of unchanged packages (javac resolves deps from bytecode — exact, and the big win); Go = package granularity + build-cache export data; Rust/TS/C# = their native incremental engines (rust-analyzer/salsa, TS build-info, Roslyn); C++ = already per-file/heuristic, so unaffected by the exactness rule. APG owns the manifest, impact closure, schedule, fact cache and DB splice; the per-frontend change is deliberately minimal.",
+  "properties": {
+    "feature": "incremental-content"
+  },
+  "out": [],
+  "in": []
+}
