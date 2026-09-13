@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "content-manifest",
+  "body": "The content-addressed map of every scanned path to its git blob OID, recorded with each scan. It is the identity of tree content (not mtime) and is the input to delta computation and cross-worktree reuse. Open design point: where the shared manifest lives and how worktrees/DBs project from it.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
