@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-refinement"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.prose-forbids-graph-state-reads",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
