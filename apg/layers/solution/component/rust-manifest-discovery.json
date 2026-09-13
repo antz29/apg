@@ -25,6 +25,11 @@
       "kind": "realised-by",
       "source": "domain.service.fact-emission",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.manifest-discovery",
+      "properties": {}
     }
   ]
 }
