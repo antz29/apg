@@ -49,6 +49,11 @@
       "kind": "contains",
       "target": "requirements.requirement.rust-module-discovery",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.markdown-frontend",
+      "properties": {}
     }
   ],
   "in": []
