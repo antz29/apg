@@ -7,6 +7,12 @@
     "attribute": "core",
     "root": "frontend-coverage"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.cargo-manifest",
+      "properties": {}
+    }
+  ],
   "in": []
 }
