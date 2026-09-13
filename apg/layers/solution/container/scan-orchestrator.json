@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "scan-orchestrator",
+  "body": "The Rust apg scan entrypoint container (src/main.rs): records the scan state, decides the freshness fast-path, computes the delta, and orchestrates per-language frontend execution + the ingestor.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
