@@ -25,6 +25,11 @@
       "kind": "realised-by",
       "source": "domain.group.change-set",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.scan-cache",
+      "properties": {}
     }
   ]
 }
