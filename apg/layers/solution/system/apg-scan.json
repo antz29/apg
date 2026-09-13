@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "system",
+  "name": "apg-scan",
+  "body": "The scan system: `apg scan` as a whole — freshness fast-path, incremental frontend execution, fact reuse, graph assembly, and DB splice. C4 system boundary for this capability; reuses the existing apg CLI and its frontends.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
