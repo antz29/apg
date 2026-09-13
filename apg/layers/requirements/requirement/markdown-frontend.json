@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.markdown-language-plumbing",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.markdown-code-type",
+      "properties": {}
     }
   ],
   "in": [
