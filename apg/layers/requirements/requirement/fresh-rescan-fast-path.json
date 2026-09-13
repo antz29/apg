@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "fresh-rescan-fast-path",
+  "body": "When the recorded scan state matches the current tree, `apg scan` skips the frontend processes and reuses the existing DB. AC: a no-op re-scan of an unchanged tree performs zero frontend work and does not rebuild the DB (the fast-path verdict is printed).",
+  "properties": {
+    "feature": "scan-freshness"
+  },
+  "out": [],
+  "in": []
+}
