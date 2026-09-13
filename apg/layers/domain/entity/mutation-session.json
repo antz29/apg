@@ -53,6 +53,11 @@
       "kind": "drives",
       "source": "requirements.requirement.coordinator-lifecycle-exclusivity",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.read-access-during-session",
+      "properties": {}
     }
   ]
 }
