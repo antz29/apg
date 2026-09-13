@@ -43,6 +43,11 @@
       "kind": "drives",
       "source": "requirements.requirement.coordinator-buffer-derived-only",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.planned-node-removal-reflected",
+      "properties": {}
     }
   ]
 }
