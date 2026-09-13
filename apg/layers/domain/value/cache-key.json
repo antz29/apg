@@ -5,5 +5,11 @@
   "body": "The version/format/config identity that invalidates the whole cache when it drifts: binary version, scanner JSONL schema/format, ingestor projection rules, and scan config (languages, excludes, modules). A cache-key mismatch forces a full scan for correctness, not as a heuristic.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.scan-cache",
+      "properties": {}
+    }
+  ]
 }

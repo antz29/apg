@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "domain.service.freshness-check",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.cache-key",
+      "properties": {}
     }
   ],
   "in": [
