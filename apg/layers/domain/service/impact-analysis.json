@@ -5,5 +5,11 @@
   "body": "Closes the changed set into the impact set: reverse-dependency closure over the cached graph ∪ overload-group peers, with signature-based early cutoff so body-only changes do not cascade. This is the domain service behind win B's \"less work\" guarantee.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.change-set",
+      "properties": {}
+    }
+  ]
 }
