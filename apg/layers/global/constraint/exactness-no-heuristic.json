@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "exactness-no-heuristic",
+  "body": "Incremental scanning must be exactly as trustworthy as a full scan: no heuristic resolution, and no provenance/confidence tier. Every emitted edge must be resolved against the full compilation context. (Tier 2 — exact-ongoing. Human decision.)",
+  "properties": {},
+  "out": [],
+  "in": []
+}
