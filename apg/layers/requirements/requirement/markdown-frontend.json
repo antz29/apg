@@ -17,6 +17,11 @@
       "kind": "contains",
       "source": "requirements.stakeholder.polyglot-repo-team",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "requirements.user.apg-cli-runner",
+      "properties": {}
     }
   ]
 }
