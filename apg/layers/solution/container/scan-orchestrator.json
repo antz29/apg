@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "solution.component.freshness-gate",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.impact-closure",
+      "properties": {}
     }
   ],
   "in": [
