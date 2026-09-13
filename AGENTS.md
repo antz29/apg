@@ -178,7 +178,9 @@ In the repo itself, run it via `cargo run -- scan <dir>` or
 about). A candidate binary is exercised against a throwaway git repo under
 `/tmp`, so `init` / `scan` / `project` / `merge` mutations never touch real
 state; the apg repo's own graph is only ever rebuilt by the installed (released)
-binary.
+binary. This covers generated agents too: the apg repo's own
+`.opencode/agents/**` are (re)generated with the installed release, not by an
+in-tree project.
 
 1. **Build the candidate.** `cargo build` produces `target/debug/apg` and
    stages the frontends to `target/debug/frontends`, so the binary finds them
@@ -501,6 +503,13 @@ asserted by the binary.
   by `agent-builder` (assertion-only `plan done`, task notes, branch commits;
   phase review on branch scans + the final implementation review discovering
   divergence — fix code or reconcile the spec).
+- `agent-builder` scaffolds agents **into the repo it is run against**. When
+  that repo is the apg repo itself, its `.opencode/agents/**` are consumer
+  artifacts refreshed out-of-band by the maintainer with the **installed
+  (released)** binary — never as a task in a feature change-set, and never by
+  pointing a candidate build at the apg repo. A change-set that changes the
+  agent-builder template edits `opencode-suite/agents/**` (product source,
+  embedded via `include_str!`); it does not regenerate the repo's own agents.
 
 ### `Struct.code_type` / `Function.code_type`
 
