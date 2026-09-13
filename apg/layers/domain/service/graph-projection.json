@@ -5,5 +5,11 @@
   "body": "Globally projects cached + re-emitted facts into the graph and splices the DB from the previous one instead of rebuilding it from scratch. The result must be exactly equivalent to a full rebuild. Open design point: seed-from-previous vs overlay, and the splice's atomicity.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.incremental-scan",
+      "properties": {}
+    }
+  ]
 }

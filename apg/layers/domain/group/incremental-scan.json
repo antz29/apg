@@ -22,6 +22,11 @@
       "kind": "contains",
       "target": "domain.group.scan-cache",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.graph-projection",
+      "properties": {}
     }
   ],
   "in": []
