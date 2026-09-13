@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "solution.component.coordinator-feedback-routing",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.coordinator-mediated-feedback",
+      "properties": {}
     }
   ],
   "in": []
