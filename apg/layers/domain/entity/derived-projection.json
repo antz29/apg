@@ -48,6 +48,11 @@
       "kind": "drives",
       "source": "requirements.requirement.planned-node-removal-reflected",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.rescan-only-on-code-change",
+      "properties": {}
     }
   ]
 }
