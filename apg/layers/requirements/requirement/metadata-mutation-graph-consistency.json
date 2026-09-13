@@ -46,11 +46,6 @@
   "in": [
     {
       "kind": "contains",
-      "source": "requirements.stakeholder.apg-maintainer",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "source": "requirements.user.suite-agent",
       "properties": {}
     },
