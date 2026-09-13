@@ -5,5 +5,11 @@
   "body": "The component that applies a metadata mutation's node/edge delta to the projection (`apg/.trans/db.lbug`) in place, with no code re-scan. It covers both paths: the durable node/edge path (`apg.layers.write_project` → `apg.artifacts.reingest_layers`) and the transient plan/feedback path (`apg.plan_cmd.write_through` → `apg.artifacts.write_jsonl_and_reingest` → `apg.artifacts.reingest_project_with`). Today `apg.artifacts.ArtifactDb.detach_delete_project` (src/artifacts.rs:336) deletes only nodes whose FQN `STARTS WITH '<project>/'`, so planned code FQNs without that prefix are never removed; the fix deletes exactly the FQNs/edges the mutation touched.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.node-edge-surface",
+      "properties": {}
+    }
+  ]
 }
