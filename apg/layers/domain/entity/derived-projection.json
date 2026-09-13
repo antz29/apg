@@ -53,6 +53,11 @@
       "kind": "drives",
       "source": "requirements.requirement.rescan-only-on-code-change",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.projection-equals-sources",
+      "properties": {}
     }
   ]
 }
