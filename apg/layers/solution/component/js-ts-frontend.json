@@ -10,6 +10,11 @@
       "kind": "contains",
       "source": "solution.container.frontend-process",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.frontend-coverage-open-points",
+      "properties": {}
     }
   ]
 }
