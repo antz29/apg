@@ -84,15 +84,18 @@ The writer↔reviewer cycle is a state machine enforced by tool permissions — 
 two sides can never complete it alone:
 
 ```
-reviewer: apg_review_add <target-fqn> --body "..." [--project <p>]  → status = open    (attached)
-writer:   apg_review_action <f> --fix|--wont-fix      → status = actioned
-reviewer: apg_review_resolve <f>                      → status = resolved (terminal)
-reviewer: apg_review_reject <f>                       → status = open     (reopened)
+reviewer:    apg_review_add <target-fqn> --body "..." [--project <p>]  → status = open    (attached)
+writer:      works the item and returns a claim (ACTIONED/WONT-FIX)   → no state change
+coordinator: apg_review_action <f> --fix|--wont-fix                  → status = actioned
+reviewer:    apg_review_resolve <f>                                  → status = resolved (terminal)
+reviewer:    apg_review_reject <f>                                   → status = open     (reopened)
 ```
 
 - You are the **reviewer side**: you attach (`apg_review_add`), accept
-  (`apg_review_resolve`), and reopen (`apg_review_reject`) feedback. You cannot
-  `action` it — the writer does that.
+  (`apg_review_resolve`), and reopen (`apg_review_reject`) feedback. You never
+  `action` it — the owning writer returns an ACTIONED/WONT-FIX claim, the
+  coordinator performs the shallow claim-vs-change check, and the coordinator
+  actions it (`apg_review_action`) on the writer's behalf.
 - Targets are the authored FQNs (`<layer>.<type>.<name>`, e.g.
   `requirements.requirement.place-order`) — durable layer nodes carry no
   project prefix, so pass **`--project <name>`** so the feedback routes into

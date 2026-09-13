@@ -615,6 +615,14 @@ fn session_cmd(args: &[String]) -> anyhow::Result<()> {
     }
 }
 
+/// The `apg` entry point: dispatches the CLI subcommands (`init`, `query`,
+/// `scan`, `plan`, `review`, `project`, `node`, `edge`, `session`), prints help
+/// for `--help`/no args, and turns a returned error into a non-zero exit. The
+/// binary embeds the apg opencode suite — the tool set (`SUITE_TOOLS`) and the
+/// six distributed agents (`AGENTS`) delivered by `apg init` — whose prompts
+/// carry the coordinator-mediated feedback cycle: the owning writer returns an
+/// ACTIONED/WONT-FIX claim and the coordinator performs the shallow
+/// claim-vs-change consistency check and then actions the item.
 fn main() {
     let raw: Vec<String> = std::env::args().collect();
     if raw.len() < 2 {
@@ -765,7 +773,11 @@ fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
 /// each written only when missing or changed — then prunes stale apg-owned
 /// files. Returns `(files written/updated, files pruned)`. `cmd_init` calls it
 /// against `~/.opencode`; tests call it against a temp dir. The package.json
-/// scaffold is only written when absent (never clobbered).
+/// scaffold is only written when absent (never clobbered). The embedded
+/// agent/tool prose it delivers carries the coordinator-mediated feedback
+/// cycle: the owning writer returns an ACTIONED/WONT-FIX claim and the
+/// coordinator performs the shallow claim-vs-change check and then actions the
+/// item (`apg_review_action`).
 fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
     let tools_dir = opencode_dir.join("tools");
     std::fs::create_dir_all(&tools_dir)?;
@@ -1851,6 +1863,81 @@ mod tests {
         assert!(
             builder.contains("claims broader read access than its grant"),
             "agent-builder.md's verify checklist must fail a broader-than-grant body"
+        );
+    }
+
+    /// The coordinator-mediated feedback cycle is embedded in the shipped
+    /// prose: the navigator holds the `apg_review_action` grant and carries the
+    /// dispatch protocol (dispatch one open item to its owning writer → receive
+    /// the single ACTIONED/WONT-FIX claim → shallow claim-vs-change check →
+    /// action or re-dispatch); the two reviewer prompts and the
+    /// `apg_review_action` tool point the action step at the coordinator, never
+    /// the writer.
+    #[test]
+    fn coordinator_agent_carries_review_action_and_dispatch_prose() {
+        fn agent(name: &str) -> &'static str {
+            AGENTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+        }
+
+        // The navigator is the coordinator: it gains the action grant in its
+        // permission frontmatter and the dispatch-protocol prose.
+        let navigator = agent("codebase-navigator.md");
+        assert!(
+            navigator.contains("apg_review_action: allow"),
+            "the navigator prompt must hold the apg_review_action grant"
+        );
+        for needle in [
+            "coordinator",
+            "ACTIONED/WONT-FIX claim",
+            "shallow",
+            "re-dispatch",
+        ] {
+            assert!(
+                navigator.contains(needle),
+                "the navigator prompt must carry the dispatch protocol ({needle})"
+            );
+        }
+        assert!(
+            !navigator.contains("and actions Feedback"),
+            "the navigator must no longer claim the implementer actions Feedback"
+        );
+
+        // The reviewer prompts point the action step at the coordinator: the
+        // writer returns a claim, the coordinator actions it.
+        for name in ["spec-review.md", "plan-review.md"] {
+            let prompt = agent(name);
+            assert!(
+                prompt.contains("coordinator: apg_review_action"),
+                "{name} must show the coordinator running apg_review_action"
+            );
+            assert!(
+                prompt.contains("ACTIONED/WONT-FIX"),
+                "{name} must state that the writer returns a claim"
+            );
+            assert!(
+                !prompt.contains("writer:   apg_review_action")
+                    && !prompt.contains("writer: apg_review_action"),
+                "{name} must not show the writer running apg_review_action"
+            );
+        }
+
+        // The action tool's own description names the coordinator as the actor.
+        let tool = SUITE_TOOLS
+            .iter()
+            .find(|(n, _)| *n == "apg_review_action.ts")
+            .map(|(_, c)| *c)
+            .expect("apg_review_action.ts is in SUITE_TOOLS");
+        assert!(
+            tool.contains("coordinator"),
+            "the apg_review_action tool must name the coordinator"
+        );
+        assert!(
+            !tool.contains("Only the writer side does this"),
+            "the apg_review_action tool must not say only the writer actions"
         );
     }
 

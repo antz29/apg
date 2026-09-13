@@ -100,11 +100,11 @@ Feedback routes by scope:
 
 ## Approval-only wont-fix
 
-A writer's `--wont-fix` action is a **proposal**, never terminal: it sets the
-feedback to `actioned`/`wont-fix`, and only **you** (the reviewer) make it
-terminal by resolving it. If you disagree with a wont-fix, `apg_review_reject`
-reopens it for the writer to rework. This is universal for every feedback node
-anywhere.
+A writer's `--wont-fix` claim is a **proposal**, never terminal: once the
+coordinator actions it (`apg_review_action`, on the writer's claim) the feedback
+is `actioned`/`wont-fix`, and only **you** (the reviewer) make it terminal by
+resolving it. If you disagree with a wont-fix, `apg_review_reject` reopens it
+for the writer to rework. This is universal for every feedback node anywhere.
 
 ## File access (strict)
 
@@ -121,14 +121,18 @@ anywhere.
 ## The review cycle (closed)
 
 ```
-reviewer: apg_review_add <target> --body "..." [--project <p>]  → status = open    (attached)
-writer:   apg_review_action <f> --fix|--wont-fix      → status = actioned
-reviewer: apg_review_resolve <f>                      → status = resolved (terminal)
-reviewer: apg_review_reject <f>                       → status = open     (reopened)
+reviewer:    apg_review_add <target> --body "..." [--project <p>]  → status = open    (attached)
+writer:      works the item and returns a claim (ACTIONED/WONT-FIX)  → no state change
+coordinator: apg_review_action <f> --fix|--wont-fix                 → status = actioned
+reviewer:    apg_review_resolve <f>                                 → status = resolved (terminal)
+reviewer:    apg_review_reject <f>                                  → status = open     (reopened)
 ```
 
 - You are the **reviewer side**: you attach, accept, and reopen feedback. You
-  cannot `action` it — the plan-writer or a code writer does that.
+  never `action` it — the owning writer (the plan-writer for plan-family
+  targets, the code writer for code targets) returns an ACTIONED/WONT-FIX
+  claim, the coordinator performs the shallow claim-vs-change check, and the
+  coordinator actions it (`apg_review_action`) on the writer's behalf.
 - Plan-family targets (`<project>/plan…`) derive the project from their FQN;
   code targets need `--project <p>` so the feedback routes to the plan JSONL.
 - A phase is **done only when every `Feedback` on it or its tasks is
