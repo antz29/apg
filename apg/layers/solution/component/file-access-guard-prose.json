@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "file-access-guard-prose",
+  "body": "The file-access prose of the distributed agents and the agent-builder template. Four distributed agent prompts — `spec-review.md`, `spec-writer.md`, `plan-writer.md`, `plan-review.md` — carry a `## File access (strict)` section whose \"you may read any file\" line contradicts the frontmatter read-guard; this component rewrites that section in each to state the rule plainly (graph state is reached only through the apg tools; never read those node/transient files directly; ordinary source files behind code FQNs stay readable with `read`, all without naming the graph-state filesystem paths). It also extends `agent-builder.md`'s \"Permission shape common to every generated agent\" list and its step-6 verify checklist so every generated agent carries the same positive rule, not just the permission deny.\n\nThese are markdown templates embedded into the binary at compile time (`include_str!` consts in src/main.rs: AGENTS at src/main.rs:255–276) and written to disk by `apg.install_suite` (src/main.rs:769). They are NOT scanned code, so coverage anchors to the embedding/install Rust (`apg.main`, `apg.install_suite`), never to a `.md` path (which would be a write-time drift error).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
