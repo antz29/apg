@@ -16,6 +16,11 @@
       "kind": "drives",
       "target": "domain.entity.derived-projection",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.durable-mutation-preserves-transient-pairing",
+      "properties": {}
     }
   ],
   "in": [
