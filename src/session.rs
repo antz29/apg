@@ -424,11 +424,12 @@ impl Coordinator {
             &self.apg_root,
             &change.writes,
             &change.deletes,
-            &|records| {
+            &|deletes, records| {
                 match db {
                     // Write-through through the ONE session-held handle: the
-                    // projection delta is applied as the mutation completes.
-                    Some(db) => db.reingest_layers_on(records),
+                    // projection delta (exact removed ∪ changed FQNs) is applied
+                    // as the mutation completes.
+                    Some(db) => db.reingest_layers_on(deletes, records),
                     None => Ok(()),
                 }
             },

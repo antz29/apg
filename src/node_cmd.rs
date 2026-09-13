@@ -1917,4 +1917,100 @@ mod tests {
         );
         testutil::remove(&repo);
     }
+
+    /// Phase-05 task-13 (e2e): genuine cross-process read-your-writes. A spawned
+    /// `apg node add requirements requirement foo` returns, then a NEW `apg
+    /// query` process (a separate binary) resolves `foo` — no re-scan, no
+    /// explicit flush, no session-end step. An in-process re-open does not prove
+    /// it.
+    ///
+    /// Both variants are asserted explicitly:
+    /// (a) **no live session** ⇒ the new query process opens `db.lbug` directly
+    /// (the direct-path read-your-writes);
+    /// (b) **live session** ⇒ it routes through the socket
+    /// (read-access-during-session).
+    #[test]
+    fn read_your_writes_cross_process_direct_and_session() {
+        let (_wt_apg, repo, wt) = mutation_fixture("read-your-writes");
+        let home = repo.root.join("home");
+
+        // (a) No live session: the direct path projects write-through, and a
+        // NEW query process reads it from a direct db.lbug open.
+        let add = testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "foo"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        assert!(
+            !crate::session::live_session(&wt.join(specs::LAYOUT)),
+            "variant (a) must run with no live session"
+        );
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "direct query: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "a NEW process must read the mutation without a scan/flush"
+        );
+
+        // (b) Live session: the same add is routed, and a NEW query process
+        // routes through the socket to the session-held DB.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(crate::session::live_session(&wt.join(specs::LAYOUT)));
+        let add2 =
+            testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "bar"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            add2.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add2.stderr)
+        );
+        let q2 = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.bar'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            q2.status.success(),
+            "routed query: {}",
+            String::from_utf8_lossy(&q2.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&q2.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "a NEW process must read the routed mutation before session end"
+        );
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        testutil::remove(&repo);
+    }
 }

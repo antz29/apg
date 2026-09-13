@@ -17,6 +17,26 @@ use crate::load;
 use crate::schema::Record;
 use crate::specs;
 
+/// The four Implementation labels a plan can declare as a **planned** node. A
+/// planned placeholder carries `status = 'planned'`; when a branch scan realizes
+/// the FQN as real code the row loses that marker (`status IS NULL`), and it
+/// must never be detached by a metadata-mutation delete (phase-05 task-1).
+const PLANNED_CODE_LABELS: [&str; 4] = ["Module", "File", "Struct", "Function"];
+
+/// Code-graph labels that are never metadata: the four Implementation labels
+/// (which can also hold a planned placeholder — see [`PLANNED_CODE_LABELS`]),
+/// the scan control node, and unresolved references. A metadata delta must
+/// never detach `UnresolvedTarget`/`Scan` by FQN — they are scanned code, not
+/// spec/plan state.
+const CODE_GRAPH_LABELS: [&str; 6] = [
+    "Module",
+    "File",
+    "Struct",
+    "Function",
+    "UnresolvedTarget",
+    "Scan",
+];
+
 /// The process-wide reentrant extended write lock (see `acquire_spec_lock`):
 /// one `LOCK_EX` flock per lock-file path, held while any live guard exists and
 /// released when the outermost guard drops (closing the fd).
@@ -121,23 +141,27 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<SpecLockGuard> {
 ///    Missing-DB and non-git paths stay allowed (non-git paths cannot pass
 ///    the membership guard anyway).
 ///
-/// **Auto-commit** (R8): after the write-through succeeds, a durable target
-/// (anything outside the gitignored `apg/.trans/`) is committed on the
-/// project branch via git2 — one commit per mutation, single-file diffs —
-/// and the staleness gate's recorded `scan_meta` is re-anchored to the new
-/// state (DB and tree in sync by construction; consecutive mutations do not
-/// each demand a rescan). Plan mutations never commit: `apg/.trans` is
-/// gitignored and transient by design. An auto-commit failure degrades to a
-/// warning on stderr: the mutation already landed, and the staleness gate
-/// will demand a scan before the next one (the same degradation as a
-/// hand-committed change).
+/// **Auto-commit** (R8): after the durable write lands (and before the
+/// projection), a durable target (anything outside the gitignored `apg/.trans/`)
+/// is committed on the project branch via git2 — one commit per mutation,
+/// single-file diffs — and the staleness gate's recorded `scan_meta` is
+/// re-anchored to the new state (DB and tree in sync by construction;
+/// consecutive mutations do not each demand a rescan). Plan mutations never
+/// commit: `apg/.trans` is gitignored and transient by design. An auto-commit
+/// failure degrades to a warning on stderr: the mutation already landed, and
+/// the staleness gate will demand a scan before the next one (the same
+/// degradation as a hand-committed change).
 ///
-/// Atomic by design (D1): the JSONL is never committed before the DB merge
-/// succeeds. The new records go to a sibling temp file first, the re-ingest
-/// runs against the live DB from the in-memory `records` (the committed file
-/// still holds the old content), and only then is the temp atomically renamed
-/// over `path` — a single commit point for the durable JSONL and the query
-/// index. On failure the temp is removed and the committed JSONL is untouched.
+/// **Commit-then-project** (phase-05 tasks 3/12): the durable/transient file
+/// write and its commit land FIRST — the system-of-record durability point —
+/// and only then is the exact projection delta applied to `db.lbug`. The delta
+/// is computed HERE, inside the funnel, from the assembled transient record set
+/// before and after this write (no per-caller threading): the delete set is
+/// exactly the removed ∪ changed FQNs plus the sources of vanished edges
+/// ([`transient_delta`]), never a `<project>/` prefix. A crash between the write
+/// and the projection is reproduced by the next rebuild as the committed state,
+/// never the uncommitted projection. The rename is still atomic (a sibling temp
+/// swapped over `path`), so a crash mid-write never leaves half a JSONL.
 pub fn write_jsonl_and_reingest(
     apg_root: &Path,
     path: &Path,
@@ -153,29 +177,34 @@ pub fn write_jsonl_and_reingest(
     } else {
         git::require_membership(apg_root, project)?;
     }
-    if apg_root.join(specs::TRANS).join("db.lbug").exists() {
-        if let Some(msg) = git::refusal_message(apg_root) {
-            anyhow::bail!("{msg}");
-        }
-        let mut tmp = path.as_os_str().to_owned();
-        tmp.push(".tmp");
-        let tmp = PathBuf::from(tmp);
-        specs::write_jsonl(&tmp, records)?;
-        match reingest_project_with(apg_root, project, Some((path, records))) {
-            Ok(()) => {
-                std::fs::rename(&tmp, path)?;
-            }
-            Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
-                return Err(e);
-            }
-        }
-    } else {
-        specs::write_jsonl(path, records)?;
+    let has_db = apg_root.join(specs::TRANS).join("db.lbug").exists();
+    if has_db && let Some(msg) = git::refusal_message(apg_root) {
+        anyhow::bail!("{msg}");
     }
-    // R8: auto-commit durable targets on the project branch; plan/review
-    // targets under apg/.trans never commit. Re-anchor the recorded scan_meta
-    // only when the commit actually moved the branch.
+
+    // The exact delta, computed while the committed file still holds the old
+    // content. `after` substitutes the in-memory records for this file; every
+    // other transient file is read as-is. A durable target (the shared
+    // `_invariants.jsonl` ledger) is not part of the transient set: merge
+    // exactly the records written.
+    let delta = if has_db && path.starts_with(apg_root.join(specs::TRANS)) {
+        let before = assembled_records(apg_root, project, None)?;
+        let after = assembled_records(apg_root, project, Some((path, records)))?;
+        Some((transient_delta(&before, &after), after))
+    } else if has_db {
+        Some((BTreeSet::new(), records.to_vec()))
+    } else {
+        None
+    };
+
+    // 1. Durable file write (the commit): atomic temp + rename.
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    specs::write_jsonl(&tmp, records)?;
+    std::fs::rename(&tmp, path)?;
+
+    // 2. Auto-commit durable targets, then re-anchor scan_meta.
     if !path.starts_with(apg_root.join(specs::TRANS)) {
         match git::auto_commit(apg_root, path) {
             Ok(Some(_)) => {
@@ -192,6 +221,13 @@ pub fn write_jsonl_and_reingest(
                 );
             }
         }
+    }
+
+    // 3. Projection delta AFTER the commit. A failure rolls the projection
+    //    transaction back and reports failure; the committed file is the system
+    //    of record and the next rebuild reproduces it.
+    if let Some((deletes, after)) = delta {
+        reingest_project_with(apg_root, &deletes, &after)?;
     }
     Ok(())
 }
@@ -378,15 +414,50 @@ impl ArtifactDb {
         false
     }
 
-    /// Deletes every node with fqn `<project>/…` and its incident
-    /// edges. Used to reset a project's spec/plan/feedback state before
-    /// re-merging its JSONL (code nodes are untouched). Runs on `conn` so the
-    /// deletion shares the caller's transaction.
-    pub fn detach_delete_project(&self, conn: &Connection, project: &str) -> anyhow::Result<()> {
-        conn.query(&format!(
-            "MATCH (n) WHERE n.fqn STARTS WITH {} DETACH DELETE n",
-            lit(&format!("{project}/"))
-        ))?;
+    /// Deletes exactly the FQNs in `fqns`, together with their incident edges,
+    /// guarded so a **realized** code FQN survives (phase-05 task-1).
+    ///
+    /// The delete set a metadata mutation passes is its removed ∪ changed FQNs
+    /// (see [`transient_delta`] and `layers::projection_deletes`), never a
+    /// `<project>/` prefix: a planned code FQN carries no project prefix
+    /// (`apg.session.Coordinator.start`), so a prefix delete leaves it behind.
+    ///
+    /// For the four Implementation labels the delete is guarded by
+    /// `status = 'planned'`: after a branch scan realizes a planned FQN as real
+    /// code there is no PlannedNode row left (the scan replaced it), so a naive
+    /// `DETACH DELETE` by FQN would drop the REAL code node and its incident
+    /// edges. Non-Implementation labels (Requirement, Plan, PlanPhase, Task,
+    /// Feedback, …) delete by FQN alone — several legitimately carry their own
+    /// `status` (`pending`/`done`/`open`/…), which must never be read as the
+    /// code planned marker. `UnresolvedTarget`/`Scan` are code-graph nodes,
+    /// never metadata, and are never touched.
+    ///
+    /// Runs on `conn` so the deletes share the caller's transaction. One query
+    /// per label per FQN: the delta is small (a mutation touches a handful of
+    /// FQNs), and a per-label delete is the only form that can apply the
+    /// planned guard without a `labels(n)` predicate.
+    pub fn detach_delete_fqns(
+        &self,
+        conn: &Connection,
+        fqns: &BTreeSet<String>,
+    ) -> anyhow::Result<()> {
+        for fqn in fqns {
+            for label in load::node_labels() {
+                if CODE_GRAPH_LABELS.contains(label) {
+                    continue;
+                }
+                conn.query(&format!(
+                    "MATCH (n:{label}) WHERE n.fqn = {} DETACH DELETE n",
+                    lit(fqn)
+                ))?;
+            }
+            for label in PLANNED_CODE_LABELS {
+                conn.query(&format!(
+                    "MATCH (n:{label}) WHERE n.fqn = {} AND n.status = 'planned' DETACH DELETE n",
+                    lit(fqn)
+                ))?;
+            }
+        }
         Ok(())
     }
 
@@ -724,7 +795,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
 /// pairs `apg edge add` can author). The merge guard
 /// ([`rel_pair_allowed`]) admits the authored pairs; the scanned pairs never
 /// reach this merge (they come from the load path, not a record set).
-fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str)> {
+pub(crate) fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str)> {
     match r {
         Record::Contains { from, to } => Some(("Contains", from, to)),
         Record::Calls { from, to } => Some(("Calls", from, to)),
@@ -779,6 +850,14 @@ pub fn node_fqn(r: &Record) -> Option<&str> {
         | Record::Constraint { fqn, .. } => Some(fqn),
         _ => None,
     }
+}
+
+/// The DB label and FQN of a node record — the exact pair [`merge_records`]
+/// MERGEs. The projection-equals-sources check (phase-05 task-9) uses it to
+/// derive the expected node set from the source record stream.
+#[cfg(test)]
+pub(crate) fn node_label_fqn(r: &Record) -> Option<(&'static str, &str)> {
+    node_merge(r).map(|(label, fqn, _)| (label, fqn))
 }
 
 /// The endpoints of an edge record, if it is one.
@@ -864,23 +943,76 @@ pub fn cycle_closing_path(
     Some(path)
 }
 
-/// Re-ingests with an optional substitute record set for one file `path`: the
-/// in-memory `records` a write-through is about to commit. This lets the
-/// re-ingest run BEFORE the new records hit the committed JSONL — the durable
-/// file is only swapped in after the merge succeeds (D1), so a re-ingest
-/// failure leaves the committed JSONL and the live DB both on the old state.
+/// The exact set of node FQNs a transient metadata mutation must detach before
+/// re-merging (phase-05 task-3): every FQN present before but gone now
+/// (removed), every FQN whose node record changed (changed), and the source of
+/// every edge that vanished — a MERGE-only re-merge never deletes a vanished
+/// edge, so its surviving source is detached and re-merged with its current
+/// out-edges. Detaching a node drops its incident edges; re-merging the full
+/// post-mutation record set restores the current node and its current edges, so
+/// the projection converges to the sources exactly.
+fn transient_delta(before: &[Record], after: &[Record]) -> BTreeSet<String> {
+    let before_nodes: HashMap<&str, &Record> = before
+        .iter()
+        .filter_map(|r| node_fqn(r).map(|f| (f, r)))
+        .collect();
+    let after_nodes: HashMap<&str, &Record> = after
+        .iter()
+        .filter_map(|r| node_fqn(r).map(|f| (f, r)))
+        .collect();
+
+    let mut deletes: BTreeSet<String> = BTreeSet::new();
+    for (fqn, prior) in &before_nodes {
+        match after_nodes.get(fqn) {
+            // Unchanged (same node record) — leave it and its edges in place.
+            Some(current) if current == prior => {}
+            // Removed, or changed (its dropped incident edges must not survive).
+            _ => {
+                deletes.insert((*fqn).to_string());
+            }
+        }
+    }
+
+    // A vanished edge is only a MERGE away from surviving. Detach its source
+    // (which is guaranteed to be part of the merged set — a transient record's
+    // source is itself transient) so the stale out-edge drops and the re-merge
+    // restores the current edge set.
+    let edge_key = |r: &Record| {
+        edge_merge(r).map(|(table, from, to)| (table.to_string(), from.to_string(), to.to_string()))
+    };
+    let before_edges: BTreeSet<(String, String, String)> =
+        before.iter().filter_map(edge_key).collect();
+    let after_edges: BTreeSet<(String, String, String)> =
+        after.iter().filter_map(edge_key).collect();
+    for (_, from, _) in before_edges.difference(&after_edges) {
+        if after_nodes.contains_key(from.as_str()) {
+            deletes.insert(from.clone());
+        }
+    }
+    deletes
+}
+
+/// Applies the exact transient projection delta in ONE transaction: detach
+/// exactly `deletes` (the removed ∪ changed FQNs plus vanished-edge sources),
+/// then re-merge `records` — nodes first, then edges. A removed planned FQN
+/// with no project prefix is deleted by exact FQN; an added node/edge is
+/// MERGEd. A failure rolls the whole transaction back, so the DB keeps its
+/// prior committed state.
 fn reingest_project_with(
     apg_root: &Path,
-    project: &str,
-    substitute: Option<(&Path, &[Record])>,
+    deletes: &BTreeSet<String>,
+    records: &[Record],
 ) -> anyhow::Result<()> {
     let db = ArtifactDb::open(apg_root)?;
     let conn = db.conn()?;
     conn.query("BEGIN TRANSACTION")?;
     let result = (|| -> anyhow::Result<()> {
-        db.detach_delete_project(&conn, project)?;
-        let records = assembled_records(apg_root, project, substitute)?;
-        db.merge_records(&conn, &records)?;
+        db.detach_delete_fqns(&conn, deletes)?;
+        // Test-only injection: prove a mid-apply failure rolls the projection
+        // back to its prior state (phase-05 task-10).
+        #[cfg(test)]
+        fire_projection_hook()?;
+        db.merge_records(&conn, records)?;
         Ok(())
     })();
     match result {
@@ -898,18 +1030,44 @@ fn reingest_project_with(
     }
 }
 
+// A test-only one-shot injection fired inside a transient projection apply,
+// after the delete set is detached and before the records are re-merged.
+// Tests use it to force a mid-apply failure and assert the transaction rolls
+// back to the prior projection (phase-05 task-10).
+#[cfg(test)]
+type ProjectionHook = Box<dyn FnOnce() -> anyhow::Result<()>>;
+
+#[cfg(test)]
+thread_local! {
+    static PROJECTION_HOOK: std::cell::RefCell<Option<ProjectionHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub fn install_projection_hook(hook: impl FnOnce() -> anyhow::Result<()> + 'static) {
+    PROJECTION_HOOK.with(|cell| *cell.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn fire_projection_hook() -> anyhow::Result<()> {
+    let hook = PROJECTION_HOOK.with(|cell| cell.borrow_mut().take());
+    match hook {
+        Some(hook) => hook(),
+        None => Ok(()),
+    }
+}
+
 /// Assembles the record set a re-ingest merges: the project's transient
 /// state — the plan store plus the five feedback tier mirrors (SPEC §5:
 /// `.trans/plans/<project>.jsonl` and `.trans/<tier>/<project>.jsonl`).
 /// Feedback on durable/code nodes lives in the mirrors, and every file shares
 /// the project's `<project>/feedback-<n>` namespace, so a re-ingest after ANY
-/// of them must merge ALL of them (`detach_delete_project` drops every
-/// `<project>/…` node first; a write-through that forgot the other mirrors
-/// would silently erase their feedback from the DB). The committed spec/note
+/// of them must merge ALL of them (the delta's delete set covers every changed
+/// or removed FQN; a write-through that forgot the other mirrors would silently
+/// erase their feedback from the DB). The committed spec/note
 /// durable halves are gone — spec data lives in the `apg/layers` tree,
 /// re-ingested separately. When `substitute` names one of the transient
-/// files, it contributes `records` instead of its on-disk content
-/// (write-through re-ingests the in-memory records before they are committed).
+/// files, it contributes `records` instead of its on-disk content.
 fn assembled_records(
     apg_root: &Path,
     project: &str,
@@ -1050,45 +1208,43 @@ pub fn code_universes_from_export(
     Ok((scanned, planned))
 }
 
-/// Re-ingests the durable layers tree into the live DB after a node/edge
-/// mutation: detaches every node-file node (FQN prefix `<layer>.` for the five
-/// durable layer dirs) and re-merges the caller-supplied `records` (the
-/// `layers::ingest_tree` output) — nodes first, then edges, in one transaction.
-/// A failed merge rolls back, so the DB keeps its prior committed state.
-pub fn reingest_layers(apg_root: &Path, records: &[Record]) -> anyhow::Result<()> {
+/// Re-ingests the durable layers delta into the live DB after a node/edge
+/// mutation: detaches exactly the mutated FQNs `deletes` (removed ∪ changed —
+/// never a whole layer-dir prefix) and re-merges the caller-supplied `records`
+/// (the `layers::ingest_tree` output) — nodes first, then edges, in one
+/// transaction. A failed merge rolls back, so the DB keeps its prior committed
+/// state.
+pub fn reingest_layers(
+    apg_root: &Path,
+    deletes: &BTreeSet<String>,
+    records: &[Record],
+) -> anyhow::Result<()> {
     let db = ArtifactDb::open(apg_root)?;
-    db.reingest_layers_on(records)
+    db.reingest_layers_on(deletes, records)
 }
 
 impl ArtifactDb {
     /// The write-through projection apply for the durable layers tree, run
-    /// against an **already-held** database handle: detach every node-file node
-    /// (FQN prefix `<layer>.` for the five durable layer dirs) and re-merge the
-    /// caller-supplied `records` (the `layers::ingest_tree` output) — nodes
-    /// first, then edges, in one transaction. A failed merge rolls back, so the
-    /// DB keeps its prior committed state.
+    /// against an **already-held** database handle: detach exactly the mutated
+    /// FQNs `deletes` ([`detach_delete_fqns`], with the planned-code guard) and
+    /// re-merge the caller-supplied `records` (the `layers::ingest_tree`
+    /// output) — nodes first, then edges, in one transaction. A failed merge
+    /// rolls back, so the DB keeps its prior committed state.
     ///
     /// Split from the free [`reingest_layers`](crate::artifacts::reingest_layers)
     /// so the phase-03 session coordinator can amortize ONE DB open across N
     /// routed mutations: the coordinator owns the handle for the session's life
     /// and applies every mutation's projection delta synchronously through it —
     /// the open is amortized, visibility never is.
-    pub fn reingest_layers_on(&self, records: &[Record]) -> anyhow::Result<()> {
+    pub fn reingest_layers_on(
+        &self,
+        deletes: &BTreeSet<String>,
+        records: &[Record],
+    ) -> anyhow::Result<()> {
         let conn = self.conn()?;
         conn.query("BEGIN TRANSACTION")?;
         let result = (|| -> anyhow::Result<()> {
-            for layer_dir in [
-                "requirements",
-                "domain",
-                "solution",
-                "implementation",
-                "global",
-            ] {
-                conn.query(&format!(
-                    "MATCH (n) WHERE n.fqn STARTS WITH '{}.' DETACH DELETE n",
-                    layer_dir
-                ))?;
-            }
+            self.detach_delete_fqns(&conn, deletes)?;
             self.merge_records(&conn, records)?;
             Ok(())
         })();
@@ -1730,6 +1886,316 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-7: pin the three planned-node states against the exact-FQN
+    /// projection delta.
+    ///
+    /// (1) A planned-only FQN with NO `<project>/` prefix disappears immediately
+    /// when the plan's planned declaration is removed, and the code graph is
+    /// otherwise untouched.
+    /// (2) That FQN AFTER a scan realized it — the delete is guarded by
+    /// `status = 'planned'`, so the REAL code node and its incident edges survive
+    /// removing the plan's placeholder declaration.
+    /// (3) An `implemented-by` to a declared-but-unscanned planned FQN stays
+    /// Pending (never drift) once `code_universes_from_export` reads the plan
+    /// store.
+    #[test]
+    fn planned_fqn_states_reflect_and_guard_realized_code() {
+        let (apg_root, repo, _wt) = project_fixture("planned-states");
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let planned = |fqn: &str, kind: &str, name: &str, parent: &str| Record::PlannedNode {
+            fqn: fqn.to_string(),
+            kind: kind.to_string(),
+            name: name.to_string(),
+            parent: parent.to_string(),
+        };
+
+        // The code-graph baseline: the real struct + the File→Struct Contains
+        // edge. It must be untouched by every planned-declaration mutation.
+        let code_contains = {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(db.has_node("github.com/x/y.Store"));
+            count(
+                &db.db,
+                "MATCH (:File)-[:Contains]->(:Struct) RETURN count(*)",
+            )
+        };
+        assert_eq!(code_contains, 1);
+
+        // (1) A planned-only FQN with no project prefix.
+        write_jsonl_and_reingest(
+            &apg_root,
+            &path,
+            "foo",
+            &[planned(
+                "apg.session.Coordinator.start",
+                "function",
+                "start",
+                "apg.session",
+            )],
+        )
+        .unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(db.has_node("apg.session.Coordinator.start"));
+            assert!(db.is_planned("apg.session.Coordinator.start"));
+        }
+
+        // Removing the declaration drops the un-prefixed planned FQN at once and
+        // leaves the code graph alone.
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &[]).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(
+                !db.has_node("apg.session.Coordinator.start"),
+                "a removed planned FQN without a project prefix must disappear immediately"
+            );
+            assert!(db.has_node("github.com/x/y.Store"));
+            assert_eq!(
+                count(
+                    &db.db,
+                    "MATCH (:File)-[:Contains]->(:Struct) RETURN count(*)"
+                ),
+                code_contains,
+                "the code graph must be otherwise untouched"
+            );
+        }
+
+        // (2) The FQN AFTER a scan realized it: declare a planned node at the
+        // REAL struct's FQN. `merge_records` skips the placeholder (real code
+        // wins), and removing the declaration must NOT detach the real node —
+        // the status='planned' guard.
+        write_jsonl_and_reingest(
+            &apg_root,
+            &path,
+            "foo",
+            &[planned(
+                "github.com/x/y.Store",
+                "struct",
+                "Store",
+                "github.com/x/y",
+            )],
+        )
+        .unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(db.has_node("github.com/x/y.Store"));
+            assert!(
+                !db.is_planned("github.com/x/y.Store"),
+                "the realized code node must keep status NULL"
+            );
+        }
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &[]).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(
+                db.has_node("github.com/x/y.Store"),
+                "removing a planned declaration must never drop the realized code node"
+            );
+            assert_eq!(
+                count(
+                    &db.db,
+                    "MATCH (:File)-[:Contains]->(:Struct) RETURN count(*)"
+                ),
+                1,
+                "the realized code node's incident edges must survive the guarded delete"
+            );
+        }
+
+        // (3) An implemented-by to a declared-but-unscanned planned FQN is
+        // Pending, never Drift — resolved from the plan store with no scan.
+        let candidate = "apg.session.Coordinator.wait";
+        write_jsonl_and_reingest(
+            &apg_root,
+            &path,
+            "foo",
+            &[planned(candidate, "function", "wait", "apg.session")],
+        )
+        .unwrap();
+        let (scanned, planned_fqns) = code_universes_from_export(&apg_root).unwrap();
+        assert_eq!(
+            layers::classify_code_ref(candidate, &scanned, &planned_fqns),
+            layers::CodeRefStatus::Pending,
+            "a declared-but-unscanned planned FQN is pending, never drift"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-8: the projection delta converges with no residue —
+    /// add-then-remove and remove-then-add of the same node both converge, with
+    /// no duplicate/stale rows and no orphan edges.
+    #[test]
+    fn projection_delta_converges_without_residue() {
+        let (apg_root, repo, _wt) = project_fixture("delta-converge");
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let baseline = baseline_records();
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+
+        let with_note2 = {
+            let mut r = baseline.clone();
+            r.push(Record::Note {
+                fqn: "foo/note-2".into(),
+                body: "second".into(),
+                kind: "background".into(),
+            });
+            r.push(Record::Details {
+                from: "foo/note-2".into(),
+                to: "foo/plan".into(),
+            });
+            r
+        };
+
+        // Add: exactly one row and one edge.
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &with_note2).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert_eq!(
+                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                1
+            );
+            assert_eq!(
+                count(
+                    &db.db,
+                    "MATCH (:Note {fqn: 'foo/note-2'})-[:Details]->(:Plan) RETURN count(*)"
+                ),
+                1
+            );
+            assert_eq!(orphan_notes(&db), 0);
+        }
+
+        // A changed node (its body) is re-projected without duplicating rows or
+        // dropping/re-adding its edges twice.
+        let changed = {
+            let mut r = with_note2.clone();
+            for x in &mut r {
+                if let Record::Note { fqn, body, .. } = x
+                    && fqn == "foo/note-1"
+                {
+                    *body = "first (edited)".into();
+                }
+            }
+            r
+        };
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &changed).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert_eq!(
+                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-1'}) RETURN count(*)"),
+                1,
+                "a changed node must not leave a stale duplicate row"
+            );
+            assert_eq!(
+                count(&db.db, "MATCH ()-[:Details]->() RETURN count(*)"),
+                2,
+                "both Details edges survive the changed-node re-merge"
+            );
+        }
+
+        // Remove: the node and its edge are gone, no orphan/duplicate residue.
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert_eq!(
+                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                0,
+                "a removed node must not linger"
+            );
+            assert_eq!(
+                count(&db.db, "MATCH ()-[:Details]->() RETURN count(*)"),
+                1,
+                "the removed node's edge must not linger"
+            );
+            assert_eq!(orphan_notes(&db), 0);
+        }
+
+        // Remove-then-add: re-adding converges to exactly one row/edge.
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &with_note2).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert_eq!(
+                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                1,
+                "remove-then-add must not duplicate the row"
+            );
+            assert_eq!(
+                count(
+                    &db.db,
+                    "MATCH (:Note {fqn: 'foo/note-2'})-[:Details]->(:Plan) RETURN count(*)"
+                ),
+                1,
+                "remove-then-add must not duplicate the edge"
+            );
+            assert_eq!(orphan_notes(&db), 0);
+        }
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-10 (int): a forced mid-apply re-ingest failure rolls the
+    /// projection back to the prior state and the mutation reports failure. The
+    /// durable file write landed FIRST (commit-then-project), so the committed
+    /// JSONL holds the new state while the projection stays prior — and the
+    /// next apply reproduces the committed state.
+    #[test]
+    fn projection_apply_failure_rolls_back_and_reports() {
+        let (apg_root, repo, _wt) = project_fixture("projection-rollback");
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let baseline = baseline_records();
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+
+        let mut mutated = baseline.clone();
+        mutated.push(Record::Note {
+            fqn: "foo/note-2".into(),
+            body: "second".into(),
+            kind: "background".into(),
+        });
+        mutated.push(Record::Details {
+            from: "foo/note-2".into(),
+            to: "foo/plan".into(),
+        });
+
+        install_projection_hook(|| anyhow::bail!("forced mid-apply re-ingest failure"));
+        let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap_err();
+        assert!(format!("{err:#}").contains("forced mid-apply"), "{err:#}");
+
+        // The projection rolled back to the prior state.
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert_eq!(
+                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                0,
+                "the failed mutation must not leave a projected row"
+            );
+            assert_eq!(
+                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-1'}) RETURN count(*)"),
+                1,
+                "the prior projection must survive the rollback"
+            );
+            assert_eq!(orphan_notes(&db), 0);
+        }
+        // The durable write landed FIRST: the committed JSONL is the new state.
+        assert_eq!(specs::read_jsonl(&path).unwrap(), mutated);
+        let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join(specs::TRANS).join("plans"))
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
+
+        // The failure was one-shot: the next apply reproduces the committed
+        // state.
+        write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert_eq!(
+                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                1,
+                "the committed state must be reproducible"
+            );
+        }
 
         testutil::remove(&repo);
     }

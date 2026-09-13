@@ -197,6 +197,12 @@ fn feedback_tier(target: &str, project: &str) -> Layer {
 /// the `Reviews` edge — live in `.trans`; never in committed node files,
 /// never in `apg/specs/` or `apg/notes/` (and `.trans` is gitignored, so the
 /// write-through never auto-commits). Returns the mirror path written.
+///
+/// **Commit-then-project** (phase-05 task-15): the mirror write lands FIRST
+/// (via `write_jsonl_and_reingest`) and the exact projection delta is applied
+/// only after it, so the newly attached Feedback is immediately queryable by a
+/// separate `apg query` process with no scan. The delta is computed inside the
+/// funnel (task-3) — this caller never threads a delete set.
 fn write_transient_feedback(
     apg_root: &Path,
     project: &str,
@@ -291,6 +297,12 @@ fn set_feedback(
 /// Core of `set_feedback`: update a feedback node's status/disposition in the
 /// transient file that carries it (the plan store or one of the five tier
 /// mirrors), write-through.
+///
+/// **Commit-then-project** (phase-05 task-16): the mutated mirror lands FIRST
+/// (via `write_jsonl_and_reingest`) and the exact projection delta — including
+/// the changed Feedback FQN — is applied only after it, so an
+/// actioned/resolved status is immediately queryable by a separate `apg query`
+/// process with no scan. The delta is computed inside the funnel (task-3).
 fn set_feedback_at(
     apg_root: &Path,
     fqn: &str,

@@ -2020,6 +2020,85 @@ fn write_through_with_deletes(
     Ok(())
 }
 
+/// A test-only failure-injection point on the durable mutation path, at the
+/// commit→project boundary (phase-05 task-14). The durable file write + its
+/// single commit land FIRST; the projection apply follows. A test installs a
+/// one-shot hook to force a failure at exactly one boundary — not a normal
+/// projection error path.
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MutationBoundary {
+    /// After validation, BEFORE the durable file write/commit: a failure here
+    /// leaves the mutation in neither the durable store nor the projection.
+    BeforeCommit,
+    /// AFTER the durable file write + commit, BEFORE the projection apply: a
+    /// failure here leaves the committed state durable while the projection
+    /// stays prior — the next rebuild reproduces the committed state.
+    BeforeProject,
+}
+
+#[cfg(test)]
+type MutationHook = (MutationBoundary, Box<dyn FnOnce() -> anyhow::Result<()>>);
+
+#[cfg(test)]
+thread_local! {
+    static MUTATION_HOOK: std::cell::RefCell<Option<MutationHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Install a one-shot hook that fires at `point` on the next `write_project`
+/// in THIS thread (tests run one per thread, so a hook never leaks across
+/// tests). A returned `Err` stands in for a crash at the boundary.
+#[cfg(test)]
+pub fn install_mutation_hook(
+    point: MutationBoundary,
+    hook: impl FnOnce() -> anyhow::Result<()> + 'static,
+) {
+    MUTATION_HOOK.with(|cell| *cell.borrow_mut() = Some((point, Box::new(hook))));
+}
+
+#[cfg(test)]
+fn fire_mutation_hook(point: MutationBoundary) -> anyhow::Result<()> {
+    let hook = MUTATION_HOOK.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        match slot.as_ref() {
+            Some((p, _)) if *p == point => slot.take().map(|(_, hook)| hook),
+            _ => None,
+        }
+    });
+    match hook {
+        Some(hook) => hook(),
+        None => Ok(()),
+    }
+}
+
+/// The exact FQN delete set a durable node/edge mutation applies to the
+/// projection (phase-05 tasks 4/6): every written FQN (removed ∪ changed —
+/// detaching a written node drops its old incident edges, so the MERGE-only
+/// re-merge cannot leave a vanished edge) plus every deleted FQN. Never a
+/// whole layer-dir prefix.
+fn projection_deletes(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for n in writes {
+        out.insert(fqn(layer_of(&n.layer), &n.node_type, &n.name));
+    }
+    for path in deletes {
+        if let Some((layer, node_type, name)) = identity_from_path(apg_root, path) {
+            out.insert(fqn(layer, &node_type, &name));
+        }
+    }
+    out
+}
+
+/// The injectable projection apply `write_project_with` threads through: given
+/// the exact FQN delete set (removed ∪ changed) and the source records, apply
+/// them to `db.lbug` in one transaction.
+pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyhow::Result<()>;
+
 /// The durable-mutation orchestrator (SPEC §2.2/§4.1/§4.2): one logical
 /// node/edge mutation — the full set of affected node files `writes` plus the
 /// paths `deletes` to remove — guarded, validated, written atomically, and
@@ -2036,31 +2115,33 @@ fn write_through_with_deletes(
 ///    buffered: the files hit disk (and git) before anything is projected.
 /// 5. **Re-anchor the staleness gate's `scan_meta`** after the commit
 ///    (graph.jsonl only — never opens `db.lbug`).
-/// 6. **Projection delta** — re-ingest the layers tree into the live DB and
-///    merge it in one transaction, AFTER the durable commit (commit-then-
-///    project). Skipped when no DB exists (the files are the durable form); a
-///    re-ingest failure leaves the committed durable state authoritative.
+/// 6. **Projection delta** — apply the exact durable delta
+///    ([`projection_deletes`] = removed ∪ changed FQNs, guarded for planned
+///    code FQNs) to the live DB, in one transaction, AFTER the durable commit
+///    (commit-then-project). Skipped when no DB exists (the files are the
+///    durable form); a re-ingest failure leaves the committed durable state
+///    authoritative.
 pub fn write_project(
     apg_root: &Path,
     writes: &[NodeFile],
     deletes: &[PathBuf],
 ) -> anyhow::Result<()> {
-    write_project_with(apg_root, writes, deletes, &|records| {
-        artifacts::reingest_layers(apg_root, records)
+    write_project_with(apg_root, writes, deletes, &|deletes, records| {
+        artifacts::reingest_layers(apg_root, deletes, records)
     })
 }
 
 /// [`write_project`] with an injectable projection apply. The direct path uses
-/// the default (open `db.lbug`, apply, close); the phase-03 session coordinator
-/// passes a closure that applies the records through the DB handle it already
-/// owns, so the session amortizes ONE open/parse across N mutations while every
-/// mutation's projection delta still lands synchronously as the mutation
-/// completes (the open is amortized, visibility never is).
+/// the default (open `db.lbug`, apply the delta, close); the phase-03 session
+/// coordinator passes a closure that applies the delta through the DB handle it
+/// already owns, so the session amortizes ONE open/parse across N mutations
+/// while every mutation's projection delta still lands synchronously as the
+/// mutation completes (the open is amortized, visibility never is).
 pub fn write_project_with(
     apg_root: &Path,
     writes: &[NodeFile],
     deletes: &[PathBuf],
-    project: &dyn Fn(&[Record]) -> anyhow::Result<()>,
+    project: ProjectionApply<'_>,
 ) -> anyhow::Result<()> {
     // 1. Membership guard (writes only happen inside a project context).
     git::require_project_context(apg_root)?;
@@ -2075,6 +2156,12 @@ pub fn write_project_with(
     // 3. Validate the complete change before anything is written.
     validate_change(apg_root, writes, deletes)?;
 
+    // Test-only injection at the BEFORE-COMMIT boundary (phase-05 task-14,
+    // window 2): a failure here must leave the mutation in neither the durable
+    // store nor the projection.
+    #[cfg(test)]
+    fire_mutation_hook(MutationBoundary::BeforeCommit)?;
+
     // 4. Atomic write + delete + single commit — the durability point. This is
     //    the whole flock-held sequence's controlled commit.
     write_through_with_deletes(apg_root, writes, deletes)?;
@@ -2087,6 +2174,12 @@ pub fn write_project_with(
     if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
         eprintln!("apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}");
     }
+
+    // Test-only injection at the commit→project boundary (phase-05 task-14,
+    // window 1): the durable write is committed by now; a failure here leaves
+    // the projection prior and the committed state reproducible by a rebuild.
+    #[cfg(test)]
+    fire_mutation_hook(MutationBoundary::BeforeProject)?;
 
     // 6. Projection delta — applied only AFTER the durable commit
     //    (commit-then-project). Skipped when there is no query index yet.
@@ -2115,7 +2208,8 @@ pub fn write_project_with(
             }
         }
         let records = ingest_tree(apg_root, &scanned, &planned)?;
-        project(&records)?;
+        let deletes = projection_deletes(apg_root, writes, deletes);
+        project(&deletes, &records)?;
     }
     Ok(())
 }
@@ -4933,6 +5027,329 @@ mod tests {
         assert!(
             db.has_node("solution.system.known-sys"),
             "the projection delta must be applied write-through"
+        );
+        drop(db);
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-14 (int): commit-then-project ordering — the SINGLE
+    /// ordering-test home (phase-02 task-5 points here). An injectable one-shot
+    /// hook fires at the commit→project boundary; a returned `Err` stands in
+    /// for a crash at that boundary.
+    ///
+    /// **Window 2 — die BEFORE the commit**: the mutation appears in NEITHER
+    /// the durable store NOR the projection, and no commit lands.
+    ///
+    /// **Window 1 — die AFTER the durable commit but BEFORE the projection
+    /// apply**: the durable store holds the committed mutation while the
+    /// projection stays prior; the next rebuild reproduces the committed state.
+    #[test]
+    fn commit_then_project_orders_durable_write_before_projection() {
+        let (wt_apg, repo, wt) = mutation_fixture("commit-project");
+        let r2_path = node_file_path(&wt_apg, Layer::Requirements, "requirement", "r2");
+        let r3_path = node_file_path(&wt_apg, Layer::Requirements, "requirement", "r3");
+
+        // Window 2: BEFORE the durable commit.
+        install_mutation_hook(MutationBoundary::BeforeCommit, || {
+            anyhow::bail!("forced failure before commit")
+        });
+        let head_before = testutil::commit_count(&wt);
+        let err =
+            write_project(&wt_apg, &[node("requirements", "requirement", "r2")], &[]).unwrap_err();
+        assert!(format!("{err:#}").contains("before commit"), "{err:#}");
+        assert!(
+            !r2_path.exists(),
+            "window 2: the mutation must not be durable"
+        );
+        {
+            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert!(
+                !db.has_node("requirements.requirement.r2"),
+                "window 2: the mutation must not be projected"
+            );
+        }
+        assert_eq!(
+            testutil::commit_count(&wt),
+            head_before,
+            "window 2: a failure before the commit must not commit"
+        );
+
+        // Window 1: AFTER the durable commit, BEFORE the projection apply.
+        install_mutation_hook(MutationBoundary::BeforeProject, || {
+            anyhow::bail!("forced failure before projection")
+        });
+        let err =
+            write_project(&wt_apg, &[node("requirements", "requirement", "r3")], &[]).unwrap_err();
+        assert!(format!("{err:#}").contains("before projection"), "{err:#}");
+        // The durable write is committed...
+        assert!(
+            r3_path.exists(),
+            "window 1: the durable write must be committed before the projection"
+        );
+        // ...while the projection stays prior.
+        {
+            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert!(
+                !db.has_node("requirements.requirement.r3"),
+                "window 1: the projection must NOT be applied before the hook"
+            );
+        }
+
+        // The next rebuild reproduces the committed state.
+        testutil::scan_checkout(&wt).unwrap();
+        {
+            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert!(
+                db.has_node("requirements.requirement.r3"),
+                "the next rebuild must reproduce the committed state"
+            );
+            assert!(
+                !db.has_node("requirements.requirement.r2"),
+                "window 2 left nothing for a rebuild to reproduce"
+            );
+        }
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-9: projection-equals-sources as a TWO-WAY equality over
+    /// NODES AND EDGES — `db − sources = ∅` AND `sources − db = ∅` — covering
+    /// every authored edge kind (Contains/Drives/RealisedBy/SpecImplementedBy/
+    /// Uses/Represents/Details/DependsOn) plus the transient Satisfies/Gates/
+    /// Reviews, with no duplicate rows per `(label, fqn)`. Scoped to BOTH the
+    /// durable (`write_project`) and transient (`write_jsonl_and_reingest`)
+    /// paths; **no scan runs** to reach this state.
+    #[test]
+    fn projection_equals_sources_two_way_nodes_and_edges() {
+        let (wt_apg, repo, _wt) = mutation_fixture("projection-eq");
+
+        // --- durable sources: one node file per kind, with paired edges ---
+        let mut user = node("requirements", "user", "customer");
+        let mut timer = node("requirements", "requirement", "timer");
+        let mut clock = node("requirements", "requirement", "clock");
+        let mut order = node("domain", "entity", "order");
+        order
+            .properties
+            .insert(PROP_KIND.to_string(), "entity".to_string());
+        let mut checkout = node("domain", "service", "checkout");
+        let mut portal = node("solution", "system", "portal");
+        let mut alice = node("solution", "person", "alice");
+        let mut notes = node("global", "note", "notes");
+
+        // contains: User ⊃ Requirement
+        user.out
+            .push(out_edge("contains", "requirements.requirement.timer"));
+        timer
+            .in_edges
+            .push(in_edge("contains", "requirements.user.customer"));
+        // depends-on: Requirement → Requirement
+        timer
+            .out
+            .push(out_edge("depends-on", "requirements.requirement.clock"));
+        clock
+            .in_edges
+            .push(in_edge("depends-on", "requirements.requirement.timer"));
+        // drives: Requirement → Service
+        timer
+            .out
+            .push(out_edge("drives", "domain.service.checkout"));
+        checkout
+            .in_edges
+            .push(in_edge("drives", "requirements.requirement.timer"));
+        // realised-by: Service → System
+        checkout
+            .out
+            .push(out_edge("realised-by", "solution.system.portal"));
+        portal
+            .in_edges
+            .push(in_edge("realised-by", "domain.service.checkout"));
+        // implemented-by: System → code (no in-half — code has no node file)
+        portal
+            .out
+            .push(out_edge("implemented-by", "fixture.mod.Store"));
+        // represents: User → Entity
+        user.out.push(out_edge("represents", "domain.entity.order"));
+        order
+            .in_edges
+            .push(in_edge("represents", "requirements.user.customer"));
+        // uses: Person → System
+        alice.out.push(out_edge("uses", "solution.system.portal"));
+        portal
+            .in_edges
+            .push(in_edge("uses", "solution.person.alice"));
+        // details: Note → Requirement
+        notes
+            .out
+            .push(out_edge("details", "requirements.requirement.timer"));
+        timer.in_edges.push(in_edge("details", "global.note.notes"));
+
+        write_project(
+            &wt_apg,
+            &[user, timer, clock, order, checkout, portal, alice, notes],
+            &[],
+        )
+        .unwrap();
+
+        // --- transient sources: plan store + feedback mirror ---
+        let plan_path = crate::specs::plan_jsonl_path(&wt_apg, "foo");
+        let plan_records = vec![
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "Foo".into(),
+                strategy: "S".into(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "D".into(),
+                status: "pending".into(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-02".into(),
+                number: 2,
+                title: "P2".into(),
+                deliverable: "D".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-02".into(),
+            },
+            Record::Gates {
+                from: "foo/plan.phase-02".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Satisfies {
+                from: "foo/plan.phase-01".into(),
+                to: "requirements.requirement.timer".into(),
+            },
+        ];
+        artifacts::write_jsonl_and_reingest(&wt_apg, &plan_path, "foo", &plan_records).unwrap();
+
+        let mirror = crate::specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
+        let feedback = vec![
+            Record::Feedback {
+                fqn: "foo/feedback-1".into(),
+                body: "review".into(),
+                status: "open".into(),
+                disposition: String::new(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-1".into(),
+                to: "requirements.requirement.timer".into(),
+            },
+        ];
+        artifacts::write_jsonl_and_reingest(&wt_apg, &mirror, "foo", &feedback).unwrap();
+
+        // --- sources → expected (label, fqn) and (table, from, to) sets ---
+        let (scanned, planned) = crate::artifacts::code_universes_from_export(&wt_apg).unwrap();
+        let mut source_records = crate::layers::ingest_tree(&wt_apg, &scanned, &planned).unwrap();
+        for f in crate::specs::plan_files(&wt_apg)
+            .into_iter()
+            .chain(crate::specs::trans_mirror_files(&wt_apg))
+        {
+            source_records.extend(crate::specs::read_jsonl(&f).unwrap());
+        }
+        let expected_nodes: BTreeSet<(String, String)> = source_records
+            .iter()
+            .filter_map(|r| {
+                crate::artifacts::node_label_fqn(r).map(|(l, f)| (l.to_string(), f.to_string()))
+            })
+            .collect();
+        let metadata_fqns: BTreeSet<&str> =
+            expected_nodes.iter().map(|(_, f)| f.as_str()).collect();
+        let expected_edges: BTreeSet<(String, String, String)> = source_records
+            .iter()
+            .filter_map(crate::artifacts::edge_merge)
+            .filter(|(_, from, _)| metadata_fqns.contains(from))
+            .map(|(t, f, to)| (t.to_string(), f.to_string(), to.to_string()))
+            .collect();
+
+        // --- db → observed sets, scoped to the metadata labels/tables ---
+        const METADATA_LABELS: [&str; 17] = [
+            "Requirement",
+            "Note",
+            "Feedback",
+            "Plan",
+            "PlanPhase",
+            "Task",
+            "Stakeholder",
+            "Entity",
+            "System",
+            "Container",
+            "Component",
+            "User",
+            "DomainGroup",
+            "Value",
+            "Service",
+            "Person",
+            "Constraint",
+        ];
+        let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        let mut db_rows: Vec<(String, String)> = Vec::new();
+        for label in METADATA_LABELS {
+            let conn = db.conn().unwrap();
+            let result = conn
+                .query(&format!("MATCH (n:{label}) RETURN n.fqn"))
+                .unwrap();
+            for row in result {
+                db_rows.push((
+                    label.to_string(),
+                    row.first().map(|v| v.to_string()).unwrap_or_default(),
+                ));
+            }
+        }
+        let db_nodes: BTreeSet<(String, String)> = db_rows.iter().cloned().collect();
+        assert_eq!(
+            db_rows.len(),
+            db_nodes.len(),
+            "no duplicate node row per (label, fqn): {db_rows:?}"
+        );
+
+        const EDGE_TABLES: [&str; 14] = [
+            "Contains",
+            "Drives",
+            "RealisedBy",
+            "SpecImplementedBy",
+            "Uses",
+            "Represents",
+            "Details",
+            "DependsOn",
+            "Gates",
+            "Satisfies",
+            "Reviews",
+            "Publishes",
+            "Subscribes",
+            "Calls",
+        ];
+        let mut db_edges: BTreeSet<(String, String, String)> = BTreeSet::new();
+        for table in EDGE_TABLES {
+            let conn = db.conn().unwrap();
+            let result = conn
+                .query(&format!("MATCH (a)-[:{table}]->(b) RETURN a.fqn, b.fqn"))
+                .unwrap();
+            for row in result {
+                let from = row.first().map(|v| v.to_string()).unwrap_or_default();
+                let to = row.get(1).map(|v| v.to_string()).unwrap_or_default();
+                if metadata_fqns.contains(from.as_str()) {
+                    db_edges.insert((table.to_string(), from, to));
+                }
+            }
+        }
+
+        assert_eq!(
+            db_nodes, expected_nodes,
+            "nodes: db − sources and sources − db must both be empty"
+        );
+        assert_eq!(
+            db_edges, expected_edges,
+            "edges: db − sources and sources − db must both be empty"
         );
         drop(db);
 

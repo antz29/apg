@@ -2316,4 +2316,218 @@ mod tests {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-05 task-11 (e2e): metadata mutations require NO code re-scan.
+    /// Durable `node add`/`node rm` and `edge add`/`edge rm`; transient `plan`
+    /// add/rm (task/planned) and `review` add/action/resolve — each observed by
+    /// a NEW `apg query` process. The "no scan invoked" evidence is concrete:
+    /// `db.lbug`'s inode never changes (a scan unlinks and recreates it), the
+    /// scan's `scanned_at` scan-meta is never restamped (a scan writes a new
+    /// timestamp; the mutation re-anchor preserves it), and the scan pipeline's
+    /// `apg-frontend.log` is never recreated.
+    #[test]
+    fn metadata_mutations_are_immediately_queryable_without_a_scan() {
+        use std::os::unix::fs::MetadataExt;
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("no-rescan");
+        let home = repo.root.join("home");
+
+        let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
+        let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
+        let inode_before = std::fs::metadata(&db_path).unwrap().ino();
+        let scanned_at = |graph: &Path| -> String {
+            let text = std::fs::read_to_string(graph).unwrap();
+            let first = text.lines().next().unwrap_or_default().to_string();
+            serde_json::from_str::<serde_json::Value>(&first)
+                .ok()
+                .and_then(|v| {
+                    v.get("scanned_at")
+                        .and_then(|s| s.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_default()
+        };
+        let scan_meta_before = scanned_at(&graph_path);
+        // A scan would recreate this; a metadata mutation never enters the scan
+        // pipeline.
+        let _ = std::fs::remove_file(wt_apg.join(specs::TRANS).join("apg-frontend.log"));
+
+        let mutate = |args: &[&str]| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        let query = |q: &str| -> String {
+            let out = testutil::spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "{q}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .last()
+                .map(|l| l.trim().to_string())
+                .unwrap_or_default()
+        };
+
+        // --- durable node add/rm + edge add/rm ---
+        mutate(&["node", "add", "requirements", "requirement", "r1"]);
+        assert_eq!(
+            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
+            "1"
+        );
+        mutate(&["node", "add", "requirements", "requirement", "r2"]);
+        assert_eq!(
+            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(n)"),
+            "1"
+        );
+        mutate(&[
+            "edge",
+            "add",
+            "depends-on",
+            "requirements.requirement.r1",
+            "requirements.requirement.r2",
+        ]);
+        assert_eq!(
+            query(
+                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->(:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)"
+            ),
+            "1"
+        );
+        mutate(&[
+            "edge",
+            "rm",
+            "depends-on",
+            "requirements.requirement.r1",
+            "requirements.requirement.r2",
+        ]);
+        assert_eq!(
+            query(
+                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->() RETURN count(*)"
+            ),
+            "0"
+        );
+        mutate(&["node", "rm", "requirements", "requirement", "r1"]);
+        assert_eq!(
+            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
+            "0"
+        );
+
+        // --- transient plan: phase/task/planned add + rm ---
+        mutate(&["plan", "add", "foo", "--title", "F", "--strategy", "S"]);
+        assert_eq!(
+            query("MATCH (p:Plan {fqn: 'foo/plan'}) RETURN count(p)"),
+            "1"
+        );
+        mutate(&[
+            "plan",
+            "add",
+            "foo",
+            "phase",
+            "1",
+            "--title",
+            "P1",
+            "--deliverable",
+            "D",
+        ]);
+        assert_eq!(
+            query("MATCH (n:PlanPhase {fqn: 'foo/plan.phase-01'}) RETURN count(n)"),
+            "1"
+        );
+        mutate(&[
+            "plan",
+            "add",
+            "foo",
+            "planned",
+            "struct",
+            "fixture.mod.Widget",
+            "--name",
+            "Widget",
+            "--parent",
+            "fixture.mod",
+        ]);
+        assert_eq!(
+            query("MATCH (n:Struct {fqn: 'fixture.mod.Widget'}) RETURN count(n)"),
+            "1"
+        );
+        mutate(&["plan", "rm", "foo", "planned", "fixture.mod.Widget"]);
+        assert_eq!(
+            query("MATCH (n:Struct {fqn: 'fixture.mod.Widget'}) RETURN count(n)"),
+            "0"
+        );
+        mutate(&[
+            "plan",
+            "add",
+            "foo",
+            "task",
+            "1",
+            "1",
+            "--title",
+            "T1",
+            "--verb",
+            "modifies",
+            "--fqn",
+            "fixture.mod.Store",
+        ]);
+        assert_eq!(
+            query("MATCH (n:Task {fqn: 'foo/plan.phase-01.task-1'}) RETURN count(n)"),
+            "1"
+        );
+        mutate(&["plan", "rm", "foo", "task", "1", "1"]);
+        assert_eq!(
+            query("MATCH (n:Task {fqn: 'foo/plan.phase-01.task-1'}) RETURN count(n)"),
+            "0"
+        );
+
+        // --- transient review: add/action/resolve ---
+        mutate(&["node", "add", "requirements", "requirement", "reviewed"]);
+        mutate(&[
+            "review",
+            "add",
+            "requirements.requirement.reviewed",
+            "--body",
+            "please fix",
+            "--project",
+            "foo",
+        ]);
+        assert_eq!(
+            query("MATCH (f:Feedback {fqn: 'foo/feedback-1'}) RETURN count(f)"),
+            "1"
+        );
+        mutate(&["review", "action", "foo/feedback-1", "--fix"]);
+        assert_eq!(
+            query("MATCH (f:Feedback {fqn: 'foo/feedback-1'}) RETURN f.status"),
+            "actioned"
+        );
+        mutate(&["review", "resolve", "foo/feedback-1"]);
+        assert_eq!(
+            query("MATCH (f:Feedback {fqn: 'foo/feedback-1'}) RETURN f.status"),
+            "resolved"
+        );
+
+        // --- no re-scan: projection inode, scan_meta, and the scan log are untouched ---
+        assert_eq!(
+            std::fs::metadata(&db_path).unwrap().ino(),
+            inode_before,
+            "db.lbug must never be re-created by a metadata mutation"
+        );
+        assert_eq!(
+            scanned_at(&graph_path),
+            scan_meta_before,
+            "a metadata mutation must never restamp the scan_meta (no scan ran)"
+        );
+        assert!(
+            !wt_apg.join(specs::TRANS).join("apg-frontend.log").exists(),
+            "a metadata mutation must not enter the scan pipeline"
+        );
+
+        testutil::remove(&repo);
+    }
 }
