@@ -12,6 +12,11 @@
       "kind": "drives",
       "source": "requirements.requirement.read-your-writes",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.read-access-during-session",
+      "properties": {}
     }
   ]
 }

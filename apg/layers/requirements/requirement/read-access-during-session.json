@@ -6,7 +6,13 @@
   "properties": {
     "feature": "graph-consistency"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.graph-reader",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
