@@ -10,6 +10,11 @@
       "kind": "realised-by",
       "source": "domain.entity.derived-projection",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.projection-delta",
+      "properties": {}
     }
   ]
 }
