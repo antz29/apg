@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "coordinator-single-item-dispatch",
+  "body": "The coordinator dispatches exactly one feedback item per writer invocation. It selects a single Feedback item (status `open`), gives one writer that item (its FQN and body), and that writer fixes or explores only that item and returns a claim of ACTIONED (with the change) or WONT-FIX (with justification). The coordinator must never batch multiple feedback items into one writer dispatch, and the writer's response is the claim alone — the writer does not action the item.\n\nAcceptance: one dispatch carries exactly one feedback FQN; a writer handed one item returns one claim; the coordinator never issues a dispatch covering two or more open items.",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
