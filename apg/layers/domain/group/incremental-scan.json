@@ -37,6 +37,11 @@
       "kind": "realised-by",
       "target": "solution.system.apg-scan",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.phase-timing-report",
+      "properties": {}
     }
   ],
   "in": [
