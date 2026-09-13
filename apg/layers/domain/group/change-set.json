@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "domain.value.exported-signature",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.delta-analyzer",
+      "properties": {}
     }
   ],
   "in": [

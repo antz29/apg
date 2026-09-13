@@ -20,6 +20,11 @@
       "kind": "realised-by",
       "source": "domain.service.delta-computation",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.change-set",
+      "properties": {}
     }
   ]
 }
