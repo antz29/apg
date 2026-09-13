@@ -26,6 +26,11 @@
       "kind": "implemented-by",
       "target": "CallGraphBuilder.main",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg/gofrontend.main",
+      "properties": {}
     }
   ],
   "in": [
