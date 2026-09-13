@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "solution.component.markdown-frontend",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.markdown-frontend",
+      "properties": {}
     }
   ],
   "in": []
