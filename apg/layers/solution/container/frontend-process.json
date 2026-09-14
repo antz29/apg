@@ -46,6 +46,11 @@
       "kind": "contains",
       "target": "solution.component.markdown-frontend",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.python-frontend",
+      "properties": {}
     }
   ],
   "in": [
