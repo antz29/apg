@@ -124,6 +124,11 @@
       "kind": "drives",
       "source": "requirements.requirement.python-build-and-deps",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.python-acceptance",
+      "properties": {}
     }
   ]
 }
