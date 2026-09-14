@@ -48,6 +48,11 @@
       "kind": "realised-by",
       "source": "domain.group.frontend-coverage",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.language-root",
+      "properties": {}
     }
   ]
 }
