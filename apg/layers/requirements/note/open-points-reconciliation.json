@@ -54,6 +54,11 @@
       "kind": "details",
       "target": "requirements.requirement.python-build-and-deps",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.note.open-design-points",
+      "properties": {}
     }
   ],
   "in": []
