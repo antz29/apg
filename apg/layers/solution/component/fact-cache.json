@@ -4,7 +4,13 @@
   "name": "fact-cache",
   "body": "The shared content-addressed fact store: reads/writes per-file facts keyed by content OID + resolution inputs + cache key, and serves them to the assembler for unaffected files. Shared across worktrees/branches of the same repo.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
