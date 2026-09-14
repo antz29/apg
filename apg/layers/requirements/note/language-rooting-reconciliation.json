@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "domain.entity.python-package",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.markdown-sections-as-symbols",
+      "properties": {}
     }
   ],
   "in": []
