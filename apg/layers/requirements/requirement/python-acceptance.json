@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-acceptance",
+  "body": "Acceptance for the Python frontend: fixtures scan cleanly on a scratch /tmp repo per no-real-project-test — a package fixture (a package with a sub-package), a flat-module fixture (files with no __init__.py), a cross-file call + base-class fixture, an unresolved-import fixture (third-party/vendored/dynamic), and a code-type fixture (*_test.py, .pyi, site-packages); a mixed-language repo scans py alongside another frontend into one graph without FQN collision. Tests assert the node/edge shapes and the unresolved categories. AC: the listed fixtures scan and the emitted nodes/edges match python-resolve-calls-uses, python-exactness-unresolved, python-package-identity and python-code-type; no ingestor FQN-collision panic on the mixed fixture.",
+  "properties": {
+    "feature": "python-frontend"
+  },
+  "out": [],
+  "in": []
+}
