@@ -20,6 +20,11 @@
       "kind": "drives",
       "source": "requirements.requirement.markdown-code-type",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.python-code-type",
+      "properties": {}
     }
   ]
 }
