@@ -56,6 +56,11 @@
       "kind": "drives",
       "source": "requirements.requirement.python-resolve-calls-uses",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.python-exactness-unresolved",
+      "properties": {}
     }
   ]
 }
