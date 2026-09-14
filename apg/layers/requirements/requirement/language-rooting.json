@@ -78,6 +78,11 @@
       "kind": "details",
       "source": "requirements.note.language-rooting-evidence",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.language-rooting-open-points",
+      "properties": {}
     }
   ]
 }
