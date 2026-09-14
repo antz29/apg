@@ -4,7 +4,13 @@
   "name": "language-rooting",
   "body": "The ingestor behaviour that roots the code graph in its languages. On each `lang_switch` record it materialises the `Language` node for that id (once per language actually scanned) and makes it the parent of every module that stream produces; it prefixes each module FQN with `<language-id>.` and renders every declaration whose `parent` is a module against the rooted module FQN, so symbols inherit the root through `parent.name`. It wires `Language —Contains→ Module` and leaves `code_type` classification and `UnresolvedTarget` FQNs untouched (foreign symbol names are not project identities).\n\nIt does NOT change the within-language collision handling: module-vs-type shadowing (`shadowed_modules`), function-vs-struct shadowing (`shadowed_functions`), and the loud `claim` panic for same-kind collisions all behave exactly as today. Language rooting removes only the cross-language case, which the disjoint roots make impossible by construction.\n\nOpen design point: the exact root id string (the `lang_switch` id verbatim, e.g. `py`) and the Language node's own FQN (bare id vs a `language.`-prefixed form) — see `requirements.note.language-rooting-open-points`.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.language-rooting",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",
