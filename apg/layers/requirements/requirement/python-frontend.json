@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.python-accept-extensions",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.python-package-identity",
+      "properties": {}
     }
   ],
   "in": []
