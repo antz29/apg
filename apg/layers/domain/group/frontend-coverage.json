@@ -77,6 +77,11 @@
       "kind": "contains",
       "target": "domain.entity.markdown-document",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.python-package",
+      "properties": {}
     }
   ],
   "in": [
