@@ -129,6 +129,11 @@
       "kind": "drives",
       "source": "requirements.requirement.python-acceptance",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.language-rooting",
+      "properties": {}
     }
   ]
 }
