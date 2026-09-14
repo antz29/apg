@@ -40,6 +40,11 @@
       "kind": "details",
       "source": "requirements.note.language-rooting-reconciliation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.open-points-reconciliation",
+      "properties": {}
     }
   ]
 }

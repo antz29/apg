@@ -59,6 +59,11 @@
       "kind": "details",
       "target": "requirements.note.open-design-points",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.value.module-fqn-prefix",
+      "properties": {}
     }
   ],
   "in": []
