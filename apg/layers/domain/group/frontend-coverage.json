@@ -87,6 +87,11 @@
       "kind": "contains",
       "target": "domain.entity.language-root",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.language-rooting",
+      "properties": {}
     }
   ],
   "in": [
