@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "role-minimal-tool-grants",
+  "body": "An agent is granted only the apg tools its role actually needs. A tool that is a purely human-facing projection of graph state — `apg_plan_render`, which writes the PLAN.md-style markdown rendering for the human gate — is held by the navigator/coordinator only, and never by a reviewer, writer, or implementer. A non-navigator role neither needs the projection nor may it hang on one; the phase-review run that advertised and held `apg_plan_render` burned its budget rather than review. The grant and the agent's File-access prose must agree: the prose names only tools the agent actually holds, so a removed grant leaves no stale sentence still advertising the tool.\n\nAcceptance (review-checked prose — never executed): after the change, `opencode-suite/agents/plan-review.md` and `opencode-suite/agents/plan-writer.md` grant no `apg_plan_render` and contain no prose naming it; `opencode-suite/agents/agent-builder.md` requires every generated reviewer/writer/implementer agent to be granted only its role's tools and never `apg_plan_render`, and its verify checklist confirms this; and `opencode-suite/agents/codebase-navigator.md` retains the `apg_plan_render` grant (it renders the plan for the human gate).",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
