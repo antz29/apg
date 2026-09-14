@@ -69,6 +69,11 @@
       "kind": "details",
       "target": "domain.constraint.python-exclusions",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.constraint.markdown-slug-rule",
+      "properties": {}
     }
   ],
   "in": []
