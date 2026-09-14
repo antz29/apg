@@ -39,6 +39,11 @@
       "kind": "details",
       "target": "requirements.requirement.markdown-accept-extensions",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.value.language-id",
+      "properties": {}
     }
   ],
   "in": []
