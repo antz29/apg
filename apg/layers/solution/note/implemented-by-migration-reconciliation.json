@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "solution.component.delta-analyzer",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.impact-closure",
+      "properties": {}
     }
   ],
   "in": []
