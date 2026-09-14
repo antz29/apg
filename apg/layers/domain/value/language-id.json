@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "language-id",
-  "body": "The stable id a frontend declares and the detector matches (go, java, cpp, rust, ts, js, csharp, md), used for auto-detection, --id-prefix namespacing of opaque ids, and the lang_switch control record that drives per-record FQN rendering and code-type classification.",
+  "body": "The stable id a frontend declares and the detector matches (go, java, cpp, rust, ts, js, csharp, md, py), used for auto-detection, --id-prefix namespacing of opaque ids, and the lang_switch control record that drives per-record FQN rendering and code-type classification. The Python id is `py` (artifact pyfrontend, accepted extensions .py/.pyi).",
   "properties": {},
   "out": [],
   "in": [
