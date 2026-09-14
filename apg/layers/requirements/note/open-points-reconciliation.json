@@ -44,6 +44,11 @@
       "kind": "details",
       "target": "requirements.note.python-frontend-open-points",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.python-incremental-contract",
+      "properties": {}
     }
   ],
   "in": []
