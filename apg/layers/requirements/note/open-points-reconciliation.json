@@ -27,11 +27,6 @@
     },
     {
       "kind": "details",
-      "target": "requirements.note.markdown-links-deferred",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.note.markdown-frontend-open-points",
       "properties": {}
     },
