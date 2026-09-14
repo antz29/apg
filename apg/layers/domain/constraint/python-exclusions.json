@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "python-exclusions",
+  "body": "Python package discovery must not descend into generated, dependency, or virtual-environment trees: __pycache__, .venv, venv, .tox, .git, .hg, .mypy_cache, .pytest_cache, .ruff_cache, node_modules, .eggs and *.egg-info are never scan roots. Consistent with domain.entity.scan-exclusion (target/, vendor/, node_modules/, .worktrees/) — these are the Python-specific additions to that exclusion set. Tension with import resolution: a virtualenv is excluded from discovery yet the `ty` engine may still need it as a resolution input; the environment model is an open point (requirements.note.python-frontend-open-points).",
+  "properties": {
+    "attaches-to": "domain.entity.scan-exclusion"
+  },
+  "out": [],
+  "in": []
+}
