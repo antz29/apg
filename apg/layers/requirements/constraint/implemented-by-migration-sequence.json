@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "implemented-by-migration-sequence",
+  "body": "The migration order is fixed: (1) the Language node + rooted FQNs land; (2) the branch is re-scanned so the rooted code FQNs exist in the code universe (`graph.jsonl`); (3) every authored `implemented-by` target is re-pointed via `apg edge rm implemented-by …` + `apg edge add implemented-by …` (atomic per edge, both halves rewritten); (4) validation / the next scan confirms no drift. Migrating before the re-scan cannot resolve (the rooted FQNs would not yet be real code nodes), and leaving any `implemented-by` target unrooted is a DRIFT defect, not an acceptable pending state.",
+  "properties": {
+    "attaches-to": "requirements.requirement.implemented-by-migration"
+  },
+  "out": [],
+  "in": []
+}
