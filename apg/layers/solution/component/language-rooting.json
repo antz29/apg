@@ -5,5 +5,11 @@
   "body": "Language rooting in the ingestor — the net-new code for the `Language` node and rooted FQNs. It adds `NodeKind::Language` (src/graph.rs) plus the DB label and the `Contains` rel pair `(Language, Module)` (src/load.rs `create_schema` / `spec_rel_pairs`, and the write-time pair check in src/ingest.rs `valid_contains_pair`); materialises one `Language` node per `lang_switch` stream in `apg.ingest.ingest` and roots each module FQN with `<language-id>.`; roots every declaration whose `parent` is a module before `render_function_fqns` / struct insertion so symbols inherit the root; wires `Language —Contains→ Module`; and lets the graph.jsonl export carry the Language records (`apg.load.write_graph_jsonl`).\n\nThe frontends are unchanged — they emit facts only and never a Language record. Within-language collision handling (module-vs-type shadowing, the same-kind `claim` panic, `shadowed_modules`/`shadowed_functions`) is untouched; only the cross-language case is removed, by the disjoint language roots.\n\nOpen design point: the Language node's own FQN (bare language id vs a `language.`-prefixed form) and the exact root id string (the `lang_switch` id verbatim) — see requirements.note.language-rooting-open-points.\n\nThis component does not exist yet and is not in the scanned graph, so it carries NO implemented-by edge — the plan declares it as planned Implementation nodes, the same state as solution.component.markdown-frontend / python-frontend / rust-manifest-discovery.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.ingestor",
+      "properties": {}
+    }
+  ]
 }
