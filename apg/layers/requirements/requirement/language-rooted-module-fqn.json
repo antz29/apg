@@ -6,7 +6,13 @@
   "properties": {
     "feature": "language-rooting"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.service.language-rooting",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
