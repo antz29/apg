@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.python-resolve-calls-uses",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.python-exactness-unresolved",
+      "properties": {}
     }
   ],
   "in": []
