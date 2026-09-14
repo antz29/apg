@@ -44,7 +44,6 @@ permission:
   apg_plan: allow
   apg_plan_phases: allow
   apg_plan_tasks: allow
-  apg_plan_render: allow
   apg_review: allow
   apg_review_add: allow
   apg_review_resolve: allow
@@ -110,7 +109,7 @@ for the writer to rework. This is universal for every feedback node anywhere.
 
 - All graph state is reached only through the apg tools you hold: `apg_query`
   (durable Requirement/domain/solution node bodies), the plan read tools
-  `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, and `apg_plan_render`
+  `apg_plan`, `apg_plan_phases`, and `apg_plan_tasks`
   (transient plan state), and `apg_review`, `apg_review_add`,
   `apg_review_resolve`, and `apg_review_reject` (transient feedback state).
 - Those node/transient files are never read directly.

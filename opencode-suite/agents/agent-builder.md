@@ -139,15 +139,24 @@ never a mutation place.
   with cwd inside the worktree via the allowed `cd *`; they need no path
   variants.)
 - **Build gates** as exact, verified bash patterns (the repo's real commands).
-- The full read-only apg suite + the codebase-navigator rules embedded in the body.
+- The read-only apg suite — `apg_query`, `apg_find_symbol`, `apg_modules`,
+  `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`,
+  `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
+  `apg_unresolved`, `apg_hunk` — plus the plan read tools `apg_plan`,
+  `apg_plan_phases`, `apg_plan_tasks`, plus the codebase-navigator rules
+  embedded in the body. **Enumerate every generated agent's grant explicitly —
+  never a vague "suite" — and never include `apg_plan_render`** — that
+  projection tool is navigator/coordinator-only.
 
 ### unit/int/e2e-test-implementer(s) (per detected tier, where a test tier is file-separable)
 - **Edit** scoped to the tier's test-file globs; **source denied**.
-- Same grant shape as the implementer (plan_done/read-only apg_review/git
-  add+commit/verified gates), **including the worktree mirroring**: every test
-  glob also granted under `apg/.worktrees/*/`, every deny mirrored. Like the
-  implementer, it never actions Feedback — it returns a claim and the
-  coordinator actions the item.
+- Same grant shape as the implementer (the explicit read-only apg suite
+  enumeration above, the plan read tools `apg_plan`/`apg_plan_phases`/
+  `apg_plan_tasks`, `apg_plan_done`/`apg_plan_undone`, read-only `apg_review`,
+  git add+commit, verified gates — **never `apg_plan_render`**), **including the
+  worktree mirroring**: every test glob also granted under `apg/.worktrees/*/`,
+  every deny mirrored. Like the implementer, it never actions Feedback — it
+  returns a claim and the coordinator actions the item.
 - Cross-denied against the implementer's globs.
 - **Skip a tier's test-implementer when the tier is not file-separable** (e.g.
   Rust inline unit tests): a glob cannot separate them, so the implementer owns
@@ -158,9 +167,15 @@ never a mutation place.
 - **Reviews the code implemented in a phase** against the plan + that phase's
   related spec: task verbs and their target FQNs, planned-node realization,
   acceptance criteria and verification items, `Satisfies` claims.
-- **Grants**: the read-only apg suite + `apg_review` / `apg_review_add` /
-  `apg_review_resolve` / `apg_review_reject` + **`apg_plan_complete`**. **No
-  `question` grant** — it routes questions through the coordinator.
+- **Grants**: the read-only apg suite — `apg_query`, `apg_find_symbol`,
+  `apg_modules`, `apg_module_files`, `apg_module_structs`, `apg_file_units`,
+  `apg_file_path`, `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`,
+  `apg_uses`, `apg_unresolved`, `apg_hunk` — plus the plan read tools
+  `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, plus `apg_review` /
+  `apg_review_add` / `apg_review_resolve` / `apg_review_reject` +
+  **`apg_plan_complete`**. **Never `apg_plan_render`** — that projection tool
+  is navigator/coordinator-only. **No `question` grant** — it routes questions
+  through the coordinator.
 - **No edit, no scan, no `apg_plan_done`/`undone`, no spec/plan authoring
   (`apg_node`/`apg_edge`/`apg_plan_add`).** It either attaches/approves
   Feedback or marks the phase complete; it never writes code and never marks
@@ -288,6 +303,9 @@ never a mutation place.
    `question` grant, stop-and-report tool-failure prose, no `.trans`/`layers`
    paths in the body, and the reviewer's `edit` block is `"*": deny` with no
    allow entries);
+   confirm every generated agent's apg-tool grant is the explicit role
+   enumeration and **never includes `apg_plan_render`** (the projection tool is
+   navigator/coordinator-only), regenerating any agent that still carries it;
    confirm every generated body states the positive read-guard rule — graph
    state is reached only through the apg tools the agent is granted, and the
    node/transient files are never read directly — and **fail a generated agent

@@ -44,7 +44,6 @@ permission:
   apg_plan: allow
   apg_plan_phases: allow
   apg_plan_tasks: allow
-  apg_plan_render: allow
   apg_plan_add: allow
   apg_review: allow
   bash:
@@ -85,9 +84,9 @@ with the branch unless the project merges.
 ## File access (strict)
 
 - All graph state is reached only through the apg tools you hold: `apg_query`
-  (the durable spec), `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`,
-  `apg_plan_render`, and `apg_plan_add` (the transient plan store), and
-  `apg_review` (reading the transient feedback store — read-only).
+  (the durable spec), `apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, and
+  `apg_plan_add` (the transient plan store), and `apg_review` (reading the
+  transient feedback store — read-only).
 - The durable spec node files are never read directly — they are reached via
   `apg_query`; the transient plan and feedback stores are never read directly —
   they are reached via the plan tools above and the read-only `apg_review`.
@@ -100,7 +99,7 @@ with the branch unless the project merges.
 ## Codebase graph (mandatory starting point)
 
 You have the read-only apg suite plus the plan read tools (`apg_plan`,
-`apg_plan_phases`, `apg_plan_tasks`, `apg_plan_render`). Start by reading the
+`apg_plan_phases`, `apg_plan_tasks`). Start by reading the
 spec's tier nodes — requirements are `apg_query "MATCH (r:Requirement) RETURN
 r.fqn, r.body ORDER BY r.fqn"` (FQNs `requirements.requirement.<name>`), the
 domain/solution tiers likewise per layer — the plan is built from them.
