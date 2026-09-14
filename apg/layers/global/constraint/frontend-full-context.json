@@ -2,7 +2,7 @@
   "layer": "global",
   "type": "constraint",
   "name": "frontend-full-context",
-  "body": "A frontend must never be handed a reduced resolution context — only a reduced emission target. It resolves against the full compilation context and emits only files in the target set.",
+  "body": "A frontend must never be handed a reduced resolution context — only a reduced emission target. It resolves against the full compilation context and emits only files in the target set. This binds every frontend, the Python frontend included: it resolves against the full `ty` project context and uses its native ty/salsa cache.",
   "properties": {},
   "out": [],
   "in": []
