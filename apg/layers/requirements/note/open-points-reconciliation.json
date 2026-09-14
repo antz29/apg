@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.markdown-frontend",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.markdown-sections-as-symbols",
+      "properties": {}
     }
   ],
   "in": []
