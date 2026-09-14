@@ -9,6 +9,11 @@
       "kind": "realised-by",
       "target": "solution.container.node-edge-surface",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.ingestor",
+      "properties": {}
     }
   ],
   "in": [

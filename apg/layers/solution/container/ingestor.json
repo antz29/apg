@@ -58,6 +58,11 @@
       "kind": "realised-by",
       "source": "domain.service.language-rooting",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.rooted-fqn-migration",
+      "properties": {}
     }
   ]
 }
