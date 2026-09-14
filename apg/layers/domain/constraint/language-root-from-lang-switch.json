@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "language-root-from-lang-switch",
+  "body": "The Language node is derived ingestor-side from the existing `lang_switch` control record — never scanner-emitted (frontends emit facts only; `lang_switch` is pipeline/plan-side, injected by `apg scan` between frontend streams). Exactly one Language node per language actually scanned, none for a language that was not scanned. Its FQN is the language id (domain.value.language-id), which is also the FQN root prefix, so the bare-id namespace is reserved for Language nodes and cannot collide with a module. UnresolvedTarget FQNs (foreign symbol names) and code_type (path-based) are unaffected.",
+  "properties": {
+    "attaches-to": "domain.entity.language-root"
+  },
+  "out": [],
+  "in": []
+}
