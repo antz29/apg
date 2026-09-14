@@ -54,6 +54,11 @@
       "kind": "contains",
       "target": "requirements.requirement.markdown-frontend",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.python-frontend",
+      "properties": {}
     }
   ],
   "in": []
