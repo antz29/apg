@@ -119,6 +119,11 @@
       "kind": "drives",
       "source": "requirements.requirement.python-frontend",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.python-build-and-deps",
+      "properties": {}
     }
   ]
 }
