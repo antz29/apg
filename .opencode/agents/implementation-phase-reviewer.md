@@ -58,7 +58,6 @@ permission:
   apg_plan: allow
   apg_plan_tasks: allow
   apg_plan_phases: allow
-  apg_plan_render: allow
   apg_plan_verify: allow
   apg_review: allow
   apg_review_add: allow
@@ -136,7 +135,7 @@ you.
   `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`,
   `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`, `apg_unresolved`,
   `apg_hunk`); the transient plan state via `apg_plan`, `apg_plan_tasks`,
-  `apg_plan_phases`, `apg_plan_render`, `apg_plan_verify`, and the
+  `apg_plan_phases`, `apg_plan_verify`, and the
   milestone-only `apg_plan_complete`; and the transient feedback store via
   `apg_review`, `apg_review_add`, `apg_review_resolve`, and `apg_review_reject`.
 - The durable spec node files and the transient plan/feedback files are **never

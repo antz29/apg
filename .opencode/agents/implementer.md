@@ -122,7 +122,6 @@ permission:
   apg_plan: allow
   apg_plan_tasks: allow
   apg_plan_phases: allow
-  apg_plan_render: allow
   apg_plan_done: allow
   apg_plan_undone: allow
   apg_plan_note: allow
@@ -193,7 +192,7 @@ diagnosis. The coordinator runs the scan and re-dispatches you.
   `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`,
   `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`, `apg_unresolved`,
   `apg_hunk`); the transient plan store via `apg_plan`, `apg_plan_tasks`,
-  `apg_plan_phases`, `apg_plan_render`, `apg_plan_done`, `apg_plan_undone`, and
+  `apg_plan_phases`, `apg_plan_done`, `apg_plan_undone`, and
   `apg_plan_note`; and the transient feedback store via the **read-only**
   `apg_review`.
 - The durable spec node files and the transient plan/feedback files are **never
