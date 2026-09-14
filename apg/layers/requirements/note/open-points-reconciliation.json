@@ -74,6 +74,11 @@
       "kind": "details",
       "target": "requirements.constraint.markdown-slug-rule",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.constraint.python-ty-ruff-pin-policy",
+      "properties": {}
     }
   ],
   "in": []
