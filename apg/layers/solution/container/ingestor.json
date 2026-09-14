@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "ingestor",
-  "body": "The Rust ingestor/assembler (src/ingest.rs + src/load.rs): merges reused cached facts with newly emitted facts, runs the global projection, and seeds/splices the LadybugDB instead of a full rebuild.",
+  "body": "The Rust ingestor/assembler (src/ingest.rs + src/load.rs): merges reused cached facts with newly emitted facts, runs the global projection, and seeds/splices the LadybugDB instead of a full rebuild. It also renders the code FQNs and inserts the Language nodes: `apg.ingest.ingest` derives one `Language` per `lang_switch` stream and roots every module/symbol FQN under its language id (`Language —Contains→ Module`; symbols inherit via `parent.name`), with the graph.jsonl export carrying the Language records — see solution.component.language-rooting. Within-language collision handling is retained; language rooting removes only the cross-language case.",
   "properties": {
     "kind": "service"
   },
