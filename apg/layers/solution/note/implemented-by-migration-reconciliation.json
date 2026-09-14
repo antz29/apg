@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.language-rooting",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.implemented-by-migration",
+      "properties": {}
     }
   ],
   "in": []

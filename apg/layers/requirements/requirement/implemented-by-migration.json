@@ -23,6 +23,11 @@
       "kind": "details",
       "source": "solution.note.rooted-fqn-migration",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.implemented-by-migration-reconciliation",
+      "properties": {}
     }
   ]
 }
