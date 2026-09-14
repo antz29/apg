@@ -82,6 +82,11 @@
       "kind": "contains",
       "target": "domain.entity.python-package",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.language-root",
+      "properties": {}
     }
   ],
   "in": [
