@@ -6,7 +6,13 @@
   "properties": {
     "feature": "language-rooting"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.language-node-kind",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
