@@ -178,7 +178,25 @@ impl Repo {
 /// Writes a graph.jsonl whose line 1 is the scan_meta control record for a
 /// scan at `sha`/`clean` (the real export writer; the DB Scan node is written
 /// by the same `load` path the fixture DB builders use).
+///
+/// The content-identity key is taken from the checkout's CURRENT git state, so
+/// a fixture that records the live sha/clean is genuinely fresh under the
+/// phase-01 content rule. Use [`write_scan_meta_keyed`] to record an explicit
+/// key (e.g. a stale or pre-hardening one).
 pub fn write_scan_meta(apg_root: &Path, sha: Option<&str>, clean: bool, at: &str) {
+    let key = crate::git::git_state(apg_root).content_key;
+    write_scan_meta_keyed(apg_root, sha, clean, at, key.as_deref());
+}
+
+/// [`write_scan_meta`] with an explicit content-identity key (`None` models a
+/// pre-hardening record whose freshness cannot be verified).
+pub fn write_scan_meta_keyed(
+    apg_root: &Path,
+    sha: Option<&str>,
+    clean: bool,
+    at: &str,
+    content_key: Option<&str>,
+) {
     let mut g = Graph::default();
     g.nodes.insert(
         schema::SCAN_HEAD.to_string(),
@@ -186,6 +204,7 @@ pub fn write_scan_meta(apg_root: &Path, sha: Option<&str>, clean: bool, at: &str
             kind: NodeKind::Scan,
             git_sha: sha.map(str::to_string),
             git_clean: sha.map(|_| clean),
+            content_key: content_key.map(str::to_string),
             scanned_at: Some(at.to_string()),
             ..Node::default()
         },
@@ -532,6 +551,7 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
     scanner_records.push(crate::schema::Record::ScanMeta {
         git_sha: state.sha.clone(),
         git_clean: state.sha.as_ref().map(|_| state.clean),
+        content_key: state.content_key.clone(),
         scanned_at: crate::git::now_iso8601(),
     });
     for p in payload_files(project_dir) {

@@ -81,11 +81,18 @@ pub enum Record {
     /// whether the live DB matches the tree. The git fields are absent when the
     /// scanned dir is not a git repo. The ingestor records it as the DB's
     /// `Scan` node (fqn [`SCAN_HEAD`]).
+    ///
+    /// `content_key` is the **content-identity** half of that state (win A):
+    /// a digest over the working tree + index + untracked file *content*, never
+    /// mtime. It is absent on a pre-hardening record, in which case freshness
+    /// cannot be verified (the fast-path/gate treats the DB as stale).
     ScanMeta {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_clean: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content_key: Option<String>,
         scanned_at: String,
     },
 
@@ -416,13 +423,14 @@ mod tests {
         // The scan_meta control record as `apg scan` emits it (line 1 of
         // graph.jsonl): git fields present in a git repo...
         let r: Record = serde_json::from_str(
-            r#"{"type":"scan_meta","git_sha":"abc123","git_clean":true,"scanned_at":"2026-09-07T00:00:00Z"}"#,
+            r#"{"type":"scan_meta","git_sha":"abc123","git_clean":true,"content_key":"deadbeef","scanned_at":"2026-09-07T00:00:00Z"}"#,
         )
         .unwrap();
         assert!(
-            matches!(r, Record::ScanMeta { ref git_sha, ref git_clean, ref scanned_at }
+            matches!(r, Record::ScanMeta { ref git_sha, ref git_clean, ref content_key, ref scanned_at }
                 if git_sha.as_deref() == Some("abc123")
                     && *git_clean == Some(true)
+                    && content_key.as_deref() == Some("deadbeef")
                     && scanned_at == "2026-09-07T00:00:00Z")
         );
         // ...and omitted when the scanned dir is not a git repo.
@@ -434,6 +442,7 @@ mod tests {
             Record::ScanMeta {
                 git_sha: None,
                 git_clean: None,
+                content_key: None,
                 ..
             }
         ));

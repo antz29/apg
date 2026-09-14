@@ -329,6 +329,7 @@ pub fn ingest(
                 Record::ScanMeta {
                     git_sha,
                     git_clean,
+                    content_key,
                     scanned_at,
                 } => insert_node(
                     &mut graph,
@@ -336,6 +337,7 @@ pub fn ingest(
                     Node {
                         git_sha,
                         git_clean,
+                        content_key,
                         scanned_at: Some(scanned_at),
                         ..spec_node(NodeKind::Scan)
                     },
@@ -1572,6 +1574,7 @@ mod tests {
             Record::ScanMeta {
                 git_sha: Some("abc123".to_string()),
                 git_clean: Some(true),
+                content_key: Some("deadbeef".to_string()),
                 scanned_at: "2026-09-07T00:00:00Z".to_string(),
             },
             Record::Module {
@@ -1590,6 +1593,11 @@ mod tests {
         assert_eq!(n.kind, NodeKind::Scan);
         assert_eq!(n.git_sha.as_deref(), Some("abc123"));
         assert_eq!(n.git_clean, Some(true));
+        assert_eq!(
+            n.content_key.as_deref(),
+            Some("deadbeef"),
+            "the stream's content-identity key must reach the DB Scan node"
+        );
         assert_eq!(n.scanned_at.as_deref(), Some("2026-09-07T00:00:00Z"));
 
         // A non-git scan emits a scan_meta with no git fields; the node still
@@ -1598,6 +1606,7 @@ mod tests {
             vec![Record::ScanMeta {
                 git_sha: None,
                 git_clean: None,
+                content_key: None,
                 scanned_at: "2026-09-07T00:00:00Z".to_string(),
             }],
             &IngestOptions {
@@ -1610,6 +1619,7 @@ mod tests {
         assert_eq!(n.kind, NodeKind::Scan);
         assert_eq!(n.git_sha, None);
         assert_eq!(n.git_clean, None);
+        assert_eq!(n.content_key, None);
     }
 
     #[test]

@@ -137,6 +137,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut scan_fqn = Vec::new();
     let mut scan_git_sha = Vec::new();
     let mut scan_git_clean = Vec::new();
+    let mut scan_content_key = Vec::new();
     let mut scan_scanned_at = Vec::new();
     let mut struct_fqn = Vec::new();
     let mut struct_path = Vec::new();
@@ -244,6 +245,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 // empty when not a git repo) — the load path's parquet writer
                 // has STRING/INT64 columns only.
                 scan_git_clean.push(node.git_clean.map(|c| c.to_string()).unwrap_or_default());
+                scan_content_key.push(node.content_key.clone().unwrap_or_default());
                 scan_scanned_at.push(node.scanned_at.clone().unwrap_or_default());
             }
             NodeKind::Struct => {
@@ -397,6 +399,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(scan_fqn)),
             ("git_sha", Col::Str(scan_git_sha)),
             ("git_clean", Col::Str(scan_git_clean)),
+            ("content_key", Col::Str(scan_content_key)),
             ("scanned_at", Col::Str(scan_scanned_at)),
         ],
     )?;
@@ -1099,7 +1102,7 @@ pub fn label_of(k: NodeKind) -> &'static str {
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY, status STRING)")?;
     conn.query(
-        "CREATE NODE TABLE Scan(fqn STRING PRIMARY KEY, git_sha STRING, git_clean STRING, scanned_at STRING)",
+        "CREATE NODE TABLE Scan(fqn STRING PRIMARY KEY, git_sha STRING, git_clean STRING, content_key STRING, scanned_at STRING)",
     )?;
     conn.query(
         "CREATE NODE TABLE Struct(fqn STRING PRIMARY KEY, path STRING, start INT64, `end` INT64, start_line INT64, end_line INT64, code_type STRING, status STRING)",
@@ -1185,6 +1188,10 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
     let p = |name: &str| dir.join(name).to_string_lossy().into_owned();
     let stmts = [
         format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
+        // The Scan row (SCAN_HEAD) carries the phase-01 content-identity key
+        // (`content_key`) beside git_sha/git_clean/scanned_at; the parquet
+        // columns are emitted in this exact DDL order, so the key lands in the
+        // live DB's Scan node with no extra statement.
         format!(r#"COPY Scan FROM "{}""#, p("scan.parquet")),
         format!(r#"COPY Struct FROM "{}""#, p("struct.parquet")),
         format!(r#"COPY Function FROM "{}""#, p("function.parquet")),
@@ -1314,12 +1321,16 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
 enum Export {
     /// The export control record, written as **line 1** of graph.jsonl from a
     /// `Scan` graph node (the git state the scan ran under). Git fields are
-    /// absent when the scan was not in a git repo.
+    /// absent when the scan was not in a git repo; `content_key` is the
+    /// phase-01 content-identity key (`recorded_scan` reads it on the next
+    /// scan to decide the fast-path).
     ScanMeta {
         #[serde(skip_serializing_if = "Option::is_none")]
         git_sha: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         git_clean: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content_key: Option<String>,
         scanned_at: String,
     },
     Module {
@@ -1592,6 +1603,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             &Export::ScanMeta {
                 git_sha: node.git_sha.clone(),
                 git_clean: node.git_clean,
+                content_key: node.content_key.clone(),
                 scanned_at: node.scanned_at.clone().unwrap_or_default(),
             },
         )?;
@@ -1935,6 +1947,7 @@ mod tests {
                     };
                     n.git_sha = o("git_sha");
                     n.git_clean = v.get("git_clean").and_then(|x| x.as_bool());
+                    n.content_key = o("content_key");
                     n.scanned_at = o("scanned_at");
                     g.nodes.insert(crate::schema::SCAN_HEAD.to_string(), n);
                 }
@@ -2783,6 +2796,7 @@ mod tests {
                 kind: NodeKind::Scan,
                 git_sha: Some("abc123".to_string()),
                 git_clean: Some(true),
+                content_key: Some("feedface".to_string()),
                 scanned_at: Some("2026-09-07T00:00:00Z".to_string()),
                 ..Node::default()
             },
@@ -2807,6 +2821,7 @@ mod tests {
         assert_eq!(first["type"], "scan_meta");
         assert_eq!(first["git_sha"], "abc123");
         assert_eq!(first["git_clean"], true);
+        assert_eq!(first["content_key"], "feedface");
         assert_eq!(first["scanned_at"], "2026-09-07T00:00:00Z");
         assert!(
             first.get("fqn").is_none(),
@@ -3002,6 +3017,12 @@ mod tests {
             assert_eq!(seen.kind, node.kind, "{fqn} kind");
         }
         assert_eq!(back.nodes.len(), g.nodes.len(), "node count");
+        // The Scan node's content-identity key round-trips through line 1 too.
+        assert_eq!(
+            back.nodes[crate::schema::SCAN_HEAD].content_key.as_deref(),
+            Some("feedface"),
+            "scan_meta content_key lost in round-trip"
+        );
         // Edge sets are identical — nothing projected away.
         assert_eq!(back.contains, g.contains, "contains edges");
         for (name, a, b) in [
@@ -3093,12 +3114,18 @@ mod tests {
         copy_from(&conn, &dir).unwrap();
 
         let out = conn
-            .query("MATCH (s:Scan) RETURN s.fqn, s.git_sha, s.git_clean, s.scanned_at")
+            .query(
+                "MATCH (s:Scan) RETURN s.fqn, s.git_sha, s.git_clean, s.content_key, s.scanned_at",
+            )
             .unwrap()
             .to_string();
         assert!(
             out.contains("scan/HEAD") && out.contains("abc123") && out.contains("true"),
             "scan rows: {out}"
+        );
+        assert!(
+            out.contains("feedface"),
+            "the content-identity key must round-trip into the DB Scan node: {out}"
         );
         assert!(
             out.contains("2026-09-07T00:00:00Z"),

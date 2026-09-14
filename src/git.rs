@@ -51,6 +51,10 @@ pub struct GitState {
     /// True when `git status --porcelain` is empty. Meaningful only when
     /// `sha` is `Some`.
     pub clean: bool,
+    /// The content-identity key of the tree (win A): a digest over the HEAD
+    /// sha plus the working-tree + index + untracked file **content**, never
+    /// mtime. `None` when there is no sha (not a git repo / unborn HEAD).
+    pub content_key: Option<String>,
 }
 
 fn db_path(apg_root: &Path) -> PathBuf {
@@ -157,25 +161,96 @@ pub fn git_state(dir: &Path) -> GitState {
         return GitState {
             sha: None,
             clean: false,
+            content_key: None,
         };
     };
     match head_sha(&repo) {
         Some(sha) => GitState {
             sha: Some(sha),
             clean: repo_is_clean(&repo),
+            content_key: Some(content_key(&repo)),
         },
         None => GitState {
             sha: None,
             clean: false,
+            content_key: None,
         },
     }
+}
+
+/// FNV-1a 64-bit over `bytes`, folded into `h` (a small, dependency-free,
+/// deterministic digest — equal bytes always give equal digests across
+/// processes; it is only ever compared within the same binary's rule).
+fn fnv1a(h: &mut u64, bytes: &[u8]) {
+    for &b in bytes {
+        *h ^= b as u64;
+        *h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+}
+
+/// The content-identity key of a repo's tree (win A): a digest over the HEAD
+/// sha, the staged (index) content, and the working-tree/untracked file
+/// **content**. mtime is never consulted — touching a file without changing a
+/// byte yields the same key; any byte edit changes it. Ignored content
+/// (`apg/.trans/`, `apg/.worktrees/`) never counts, so a scan's own writes do
+/// not invalidate the key.
+fn content_key(repo: &git2::Repository) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
+    fnv1a(&mut h, head_sha(repo).unwrap_or_default().as_bytes());
+
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
+        return format!("{h:016x}");
+    };
+    // Deterministic order: the status collection's iteration order is not
+    // specified, so sort before folding (the key must be stable).
+    let mut changed: Vec<(String, u32)> = statuses
+        .iter()
+        .map(|e| (e.path().unwrap_or_default().to_string(), e.status().bits()))
+        .collect();
+    changed.sort();
+
+    let workdir = repo.workdir().map(Path::to_path_buf);
+    let index = repo.index().ok();
+    for (path, bits) in changed {
+        fnv1a(&mut h, path.as_bytes());
+        fnv1a(&mut h, &bits.to_le_bytes());
+        // Staged content identity: the index blob oid (content-addressed).
+        if let Some(ie) = index.as_ref().and_then(|i| i.get_path(Path::new(&path), 0)) {
+            fnv1a(&mut h, ie.id.to_string().as_bytes());
+        }
+        // Working-tree content identity: hash the file bytes when it exists.
+        if let Some(wd) = &workdir {
+            let full = wd.join(&path);
+            if full.is_file()
+                && let Ok(bytes) = std::fs::read(&full)
+            {
+                fnv1a(&mut h, &bytes);
+            }
+        }
+    }
+    format!("{h:016x}")
+}
+
+/// The recorded state of the scan that built the live DB (`recorded_scan`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecordedScan {
+    sha: String,
+    clean: bool,
+    /// The content-identity key; `None` on a pre-hardening record (freshness
+    /// cannot be verified then).
+    content_key: Option<String>,
 }
 
 /// The recorded git state of the scan that built the live DB, read from the
 /// `scan_meta` control record on line 1 of `graph.jsonl`. `None` when there is
 /// no graph.jsonl, its first line is not a `scan_meta` record with both git
 /// fields (a pre-hardening export, a non-git scan, or a corrupted line).
-fn recorded_scan(apg_root: &Path) -> Option<(String, bool)> {
+/// `content_key` carries the phase-01 content-identity key when present.
+fn recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
     let f = std::fs::File::open(graph_jsonl_path(apg_root)).ok()?;
     let line = std::io::BufReader::new(f).lines().next()?.ok()?;
     let line = line.trim();
@@ -186,32 +261,69 @@ fn recorded_scan(apg_root: &Path) -> Option<(String, bool)> {
         Ok(Record::ScanMeta {
             git_sha: Some(sha),
             git_clean: Some(clean),
+            content_key,
             ..
-        }) => Some((sha, clean)),
+        }) => Some(RecordedScan {
+            sha,
+            clean,
+            content_key,
+        }),
         _ => None,
     }
+}
+
+/// The content-identity freshness predicate (win A): the live DB is reusable
+/// as-is iff it exists AND the current tree's content identity matches the
+/// recorded scan exactly — recorded HEAD sha, cleanliness and content-identity
+/// key all equal the current values. mtime is never consulted: a touch without
+/// a byte change stays fresh, a byte edit is stale.
+///
+/// The DB-existence precondition comes FIRST. The fast-path's action is "reuse
+/// the existing DB", so with no `db.lbug` at all (or a `graph.jsonl` without
+/// its DB) there is nothing to reuse → NOT fresh. A missing/pre-hardening
+/// recorded key means freshness cannot be verified → NOT fresh.
+///
+/// This is deliberately not `!is_stale`: `is_stale` is N/A (false) when there
+/// is no DB or the dir is not a git repo, so `is_stale != !is_fresh` there.
+pub fn is_fresh(apg_root: &Path) -> bool {
+    if !db_path(apg_root).exists() {
+        return false;
+    }
+    let Ok(repo) = git2::Repository::discover(apg_root) else {
+        return false;
+    };
+    let Some(cur_sha) = head_sha(&repo) else {
+        return false;
+    };
+    let Some(rec) = recorded_scan(apg_root) else {
+        return false;
+    };
+    let Some(rec_key) = rec.content_key.as_deref() else {
+        return false; // pre-hardening: freshness cannot be verified
+    };
+    rec.sha == cur_sha && rec.clean == repo_is_clean(&repo) && rec_key == content_key(&repo)
 }
 
 /// The refuse-on-stale predicate:
 ///
 /// - No DB (no `apg/.trans/db.lbug`) → **false** (N/A — nothing to be stale).
-/// - Not a git repo → **false** (N/A — no recorded state to compare).
-/// - DB exists in a git repo → **stale iff** `(current_sha, current_clean) !=
-///   (recorded_sha, recorded_clean)` — both fields, deliberately not sha-only:
-///   a dirty tree at the same sha has content the scan did not see. When no
-///   recorded scan_meta exists, freshness cannot be verified → **stale**.
+/// - Not a git repo (or an unborn HEAD) → **false** (N/A — no recorded state
+///   to compare). These two N/A short-circuits are why this is not simply
+///   `!is_fresh`.
+/// - DB exists in a git repo → **stale iff** `!is_fresh` — one shared
+///   content-identity rule with the scan fast-path. A missing/pre-hardening
+///   recorded key is stale (freshness cannot be verified).
 pub fn is_stale(apg_root: &Path) -> bool {
     if !db_path(apg_root).exists() {
         return false;
     }
-    let current = git_state(apg_root);
-    let Some(cur_sha) = current.sha.as_deref() else {
+    let Ok(repo) = git2::Repository::discover(apg_root) else {
         return false;
     };
-    match recorded_scan(apg_root) {
-        None => true,
-        Some((rec_sha, rec_clean)) => rec_sha != cur_sha || rec_clean != current.clean,
+    if head_sha(&repo).is_none() {
+        return false;
     }
+    !is_fresh(apg_root)
 }
 
 /// `<sha>@<clean>` for a git state, or `-@-` when there is no sha to display.
@@ -230,7 +342,7 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
     }
     let current = git_state(apg_root);
     let recorded = match recorded_scan(apg_root) {
-        Some((sha, clean)) => state_str(Some(&sha), clean),
+        Some(rec) => state_str(Some(&rec.sha), rec.clean),
         None => state_str(None, false),
     };
     let cur = state_str(current.sha.as_deref(), current.clean);
@@ -243,6 +355,11 @@ pub fn refusal_message(apg_root: &Path) -> Option<String> {
 /// `<sha>@<clean>` vs current `<sha>@<clean>` → `STALE`/`FRESH`, evaluated
 /// against the *pre-scan* DB before the new scan overwrites it. N/A when the
 /// scan is not in a git repo, or when there is no prior scan to be stale.
+///
+/// The verdict is the SAME content-identity rule [`is_fresh`] uses, so the
+/// printed line and the fast-path decision can never disagree (a recorded-dirty
+/// tree whose content digest changed at the same sha prints STALE, never FRESH
+/// followed by a full pipeline run).
 pub fn staleness_line(apg_root: &Path, current: &GitState) -> String {
     let Some(cur_sha) = current.sha.as_deref() else {
         return "Git state: N/A (not a git repo)".to_string();
@@ -259,13 +376,9 @@ pub fn staleness_line(apg_root: &Path, current: &GitState) -> String {
             "Git state: recorded {} vs current {cur} → STALE",
             state_str(None, false)
         ),
-        Some((rec_sha, rec_clean)) => {
-            let rec = state_str(Some(&rec_sha), rec_clean);
-            let verdict = if rec_sha == cur_sha && rec_clean == current.clean {
-                "FRESH"
-            } else {
-                "STALE"
-            };
+        Some(rec) => {
+            let rec = state_str(Some(&rec.sha), rec.clean);
+            let verdict = if is_fresh(apg_root) { "FRESH" } else { "STALE" };
             format!("Git state: recorded {rec} vs current {cur} → {verdict}")
         }
     }
@@ -714,6 +827,10 @@ pub fn reanchor_scan_meta(apg_root: &Path, state: &GitState) -> anyhow::Result<(
     let new = serde_json::to_string(&Record::ScanMeta {
         git_sha: state.sha.clone(),
         git_clean: state.sha.as_ref().map(|_| state.clean),
+        // The content-identity key of the post-mutation state, so the
+        // re-anchored record keeps the fast-path's rule intact (the mutation's
+        // auto-commit moved HEAD; the new state's key matches the new tree).
+        content_key: state.content_key.clone(),
         scanned_at,
     })?;
     std::fs::write(&path, format!("{new}{rest}"))?;
@@ -877,6 +994,8 @@ mod tests {
         std::fs::write(apg.join(specs::TRANS).join("db.lbug"), "").unwrap();
         testutil::write_scan_meta(&apg, None, false, "2026-09-07T00:00:00Z");
         assert!(!is_stale(&apg));
+        // The gate is N/A, but the fast-path is NOT fresh: is_stale != !is_fresh.
+        assert!(!is_fresh(&apg), "not a git repo → nothing to reuse");
         assert!(refusal_message(&apg).is_none());
         assert_eq!(
             staleness_line(&apg, &git_state(&apg)),
@@ -892,10 +1011,159 @@ mod tests {
         // Even a recorded mismatch is irrelevant when there is no DB to guard.
         testutil::write_scan_meta(&apg, Some("stale-sha"), false, "2026-09-07T00:00:00Z");
         assert!(!is_stale(&apg));
+        // No DB → the fast-path is NOT fresh (nothing to reuse): is_stale !=
+        // !is_fresh for this N/A gate case.
+        assert!(!is_fresh(&apg));
         assert_eq!(
             staleness_line(&apg, &git_state(&apg)),
             format!("Git state: no scan yet (current {}@true)", repo.head_sha())
         );
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase-01 task-9: content-identity freshness (win A)
+    // ------------------------------------------------------------------
+
+    /// The DB-existence precondition: with no `db.lbug`, or a `graph.jsonl`
+    /// without its DB, the fast-path is NOT fresh (there is nothing to reuse) —
+    /// even when the recorded scan_meta matches the tree.
+    #[test]
+    fn is_fresh_requires_the_live_db() {
+        let repo = fixture_repo("freshdb");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(!is_fresh(&apg), "no db.lbug → not fresh");
+        assert!(
+            !is_stale(&apg),
+            "the gate is N/A without a DB (is_stale != !is_fresh)"
+        );
+        // The DB appearing makes the matching recorded state fresh.
+        testutil::touch_db(&apg);
+        assert!(is_fresh(&apg), "matching recorded state + DB → fresh");
+        assert!(!is_stale(&apg));
+        // A DB but no recorded scan_meta (graph.jsonl removed) → not fresh.
+        std::fs::remove_file(apg.join(specs::TRANS).join("graph.jsonl")).unwrap();
+        assert!(!is_fresh(&apg), "no recorded scan → not fresh");
+        assert!(is_stale(&apg), "DB in a repo with no recorded scan → stale");
+        testutil::remove(&repo);
+    }
+
+    /// A pre-hardening scan_meta (no content-identity key) cannot be verified:
+    /// it is NOT fresh and the gate treats it as stale.
+    #[test]
+    fn pre_hardening_scan_meta_is_not_fresh() {
+        let repo = fixture_repo("prehard");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta_keyed(&apg, Some(&sha), true, "2026-09-07T00:00:00Z", None);
+        assert!(
+            !is_fresh(&apg),
+            "missing key → freshness cannot be verified"
+        );
+        assert!(is_stale(&apg));
+        testutil::remove(&repo);
+    }
+
+    /// mtime is never consulted: touching a tracked file forward without
+    /// changing a byte keeps the DB fresh.
+    #[test]
+    fn touch_without_byte_change_stays_fresh() {
+        let repo = fixture_repo("touch");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg));
+        // Bump the mtime far into the future — bytes unchanged.
+        let p = repo.root.join("apg/config.json");
+        let before = std::fs::read(&p).unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(3600))
+            .unwrap();
+        drop(f);
+        assert_eq!(
+            std::fs::read(&p).unwrap(),
+            before,
+            "bytes must be unchanged"
+        );
+        assert!(
+            is_fresh(&apg),
+            "a touch without a byte change must stay fresh"
+        );
+        assert!(!is_stale(&apg));
+        testutil::remove(&repo);
+    }
+
+    /// A byte edit at the same sha changes the content identity: the DB is not
+    /// fresh and the gate is stale.
+    #[test]
+    fn content_identity_byte_edit_invalidates() {
+        let repo = fixture_repo("byteedit");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg));
+        repo.write(
+            "apg/config.json",
+            "{\n  \"default\": \"edited\",\n  \"types\": []\n}\n",
+        );
+        assert!(!is_fresh(&apg), "a byte edit must invalidate freshness");
+        assert!(is_stale(&apg));
+        assert!(staleness_line(&apg, &git_state(&apg)).contains("→ STALE"));
+        testutil::remove(&repo);
+    }
+
+    /// A recorded DIRTY tree matched by content stays fresh; a content change
+    /// of that same dirty tree at the same sha invalidates it (recorded
+    /// `clean=false` alone is not enough — the digest must match too).
+    #[test]
+    fn recorded_dirty_content_change_invalidates() {
+        let repo = fixture_repo("dirtykey");
+        repo.write("scratch.txt", "one");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        testutil::write_scan_meta(&apg, Some(&sha), false, "2026-09-07T00:00:00Z");
+        assert!(
+            is_fresh(&apg),
+            "same dirty content at the same sha is fresh"
+        );
+        // Same sha, still dirty — but the dirty content changed.
+        repo.write("scratch.txt", "two");
+        assert!(!is_fresh(&apg), "changed dirty content must invalidate");
+        assert!(is_stale(&apg));
+        testutil::remove(&repo);
+    }
+
+    /// `staleness_line` prints the SAME verdict `is_fresh` returns — in both
+    /// directions. A recorded-dirty tree whose content digest changed at the
+    /// same sha prints STALE from BOTH (never FRESH followed by a full run).
+    #[test]
+    fn staleness_line_agrees_with_is_fresh() {
+        let repo = fixture_repo("verdict");
+        let sha = repo.head_sha();
+        let apg = repo.apg_root();
+        testutil::touch_db(&apg);
+        // FRESH: a matching clean tree.
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
+        assert_eq!(
+            is_fresh(&apg),
+            staleness_line(&apg, &git_state(&apg)).contains("→ FRESH")
+        );
+        // Recorded DIRTY tree, then its dirty content changes at the same sha.
+        repo.write("scratch.txt", "one");
+        testutil::write_scan_meta(&apg, Some(&sha), false, "2026-09-07T00:00:00Z");
+        assert!(is_fresh(&apg));
+        repo.write("scratch.txt", "two");
+        let line = staleness_line(&apg, &git_state(&apg));
+        assert!(!is_fresh(&apg), "content digest changed at the same sha");
+        assert!(line.contains("→ STALE"), "printed line: {line}");
+        assert!(!line.contains("→ FRESH"), "printed line: {line}");
+        assert_eq!(is_fresh(&apg), line.contains("→ FRESH"));
         testutil::remove(&repo);
     }
 
@@ -1391,6 +1659,7 @@ mod tests {
             &GitState {
                 sha: Some(new_sha.to_string()),
                 clean: false,
+                content_key: Some("reanchored-key".to_string()),
             },
         )
         .unwrap();
@@ -1406,8 +1675,20 @@ mod tests {
             first.contains("\"scanned_at\":\"2026-09-07T00:00:00Z\""),
             "line 1: {first}"
         );
+        // The content-identity key is preserved across the re-anchor.
+        assert!(
+            first.contains("\"content_key\":\"reanchored-key\""),
+            "line 1: {first}"
+        );
         // The recorded state now matches the new state → fresh.
-        assert_eq!(recorded_scan(&apg), Some((new_sha.to_string(), false)));
+        assert_eq!(
+            recorded_scan(&apg),
+            Some(RecordedScan {
+                sha: new_sha.to_string(),
+                clean: false,
+                content_key: Some("reanchored-key".to_string()),
+            })
+        );
         testutil::remove(&repo);
     }
 

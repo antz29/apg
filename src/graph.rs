@@ -177,6 +177,13 @@ pub struct Node {
     pub git_sha: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_clean: Option<bool>,
+    /// The content-identity key of the scanned tree (win A) — a digest over
+    /// the working tree + index + untracked content, never mtime. Carried
+    /// beside `git_sha`/`git_clean` on the `Scan` node so the DB round-trips
+    /// it to graph.jsonl line 1; `None` on every non-`Scan` node and on a
+    /// pre-hardening scan.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scanned_at: Option<String>,
 }
@@ -211,6 +218,7 @@ impl Default for Node {
             disposition: None,
             git_sha: None,
             git_clean: None,
+            content_key: None,
             scanned_at: None,
         }
     }

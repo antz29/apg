@@ -1112,6 +1112,7 @@ fn scanner_records<'a>(
     std::iter::once(schema::Record::ScanMeta {
         git_sha: git_state.sha.clone(),
         git_clean: git_state.sha.as_ref().map(|_| git_state.clean),
+        content_key: git_state.content_key.clone(),
         scanned_at: git::now_iso8601(),
     })
     .chain(records)
@@ -1213,6 +1214,20 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     log.ln(&format!("Project: {}", project_dir.display()));
     // Staleness of the pre-scan DB vs the tree (STALE/FRESH/N-A).
     log.ln(&git::staleness_line(&apg_root, &git_state));
+
+    // Win-A fast path (scan-freshness): when the pre-scan DB's recorded content
+    // identity matches the tree exactly, the existing DB is reusable and every
+    // language frontend is skipped — reuse the DB and return BEFORE any
+    // frontend spawn or DB rebuild. The predicate is content identity (never
+    // mtime) and is the same rule `is_stale`/`staleness_line` use, so the
+    // printed verdict and the fast-path decision can never disagree. A stale
+    // tree falls through to the full pipeline below.
+    if git::is_fresh(&apg_root) {
+        log.ln(
+            "[scan] fast-path: tree unchanged since the recorded scan — reusing db.lbug (frontends skipped)",
+        );
+        return Ok(());
+    }
 
     let available = available_languages();
     if available.is_empty() {
@@ -3349,5 +3364,128 @@ mod tests {
                 "{name} must return the verbatim guarded-parse error message"
             );
         }
+    }
+
+    /// Phase-01 task-10 (int, scratch /tmp repo, CANDIDATE binary only —
+    /// `global.constraint.no-real-project-test`): a second real `apg scan` of
+    /// an unchanged repo takes the freshness fast-path — the verdict is
+    /// printed, ZERO frontends run, and `db.lbug` is not rebuilt; a content
+    /// edit falls back to a full re-scan. The printed `staleness_line` verdict
+    /// agrees with the fast-path decision both ways: FRESH ⇒ fast-path, and a
+    /// recorded-dirty tree whose content digest changed at the SAME sha prints
+    /// STALE and falls through the full pipeline.
+    #[test]
+    fn acceptance_scan_freshness_fast_path_noop_and_content_edit_fallback() {
+        let base = std::env::temp_dir().join(format!("apg-freshness-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
+        // it never shells out to npm.
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        let home_s = home.to_str().unwrap().to_string();
+
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let run_in = |dir: &Path, args: &[&str]| -> std::process::Output {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(dir)
+                .env("HOME", &home_s)
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} in {}: {}{}",
+                dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        let err_of = |out: &std::process::Output| String::from_utf8_lossy(&out.stderr).into_owned();
+
+        // Real init + commit, then the first (cold) full scan.
+        run_in(&repo_dir, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+        let first = run_in(&repo_dir, &["scan", "."]);
+        assert!(
+            err_of(&first).contains("[scan] running go frontend"),
+            "the cold scan must run the go frontend: {}",
+            err_of(&first)
+        );
+        let db = repo_dir.join("apg/.trans/db.lbug");
+        let db_before = std::fs::read(&db).unwrap();
+
+        // ---- (1) no-op re-scan: FRESH ⇒ fast-path, zero frontends, no rebuild.
+        let second = run_in(&repo_dir, &["scan", "."]);
+        let second_err = err_of(&second);
+        assert!(
+            second_err.contains("→ FRESH"),
+            "the printed staleness verdict must be FRESH: {second_err}"
+        );
+        assert!(
+            second_err.contains("fast-path"),
+            "the fast-path verdict must be printed: {second_err}"
+        );
+        assert!(
+            !second_err.contains("[scan] running"),
+            "the fast-path must spawn no frontend: {second_err}"
+        );
+        assert_eq!(
+            std::fs::read(&db).unwrap(),
+            db_before,
+            "the fast-path must not rebuild db.lbug"
+        );
+
+        // ---- (2) an uncommitted content edit at the same sha ⇒ STALE + full run.
+        std::fs::write(
+            repo_dir.join("main.go"),
+            "package main\n\nfunc main() { helper() }\n\nfunc helper() {}\n",
+        )
+        .unwrap();
+        let third = run_in(&repo_dir, &["scan", "."]);
+        let third_err = err_of(&third);
+        assert!(
+            third_err.contains("→ STALE"),
+            "an uncommitted content edit must print STALE: {third_err}"
+        );
+        assert!(
+            !third_err.contains("fast-path"),
+            "a stale tree must fall through to the full pipeline: {third_err}"
+        );
+        assert!(
+            third_err.contains("[scan] running go frontend"),
+            "a stale tree must run the frontend: {third_err}"
+        );
+
+        // ---- (3) recorded-dirty tree, digest changes at the SAME sha ⇒ STALE
+        // from `staleness_line` and the full pipeline (never the fast-path).
+        // The scan above recorded the dirty tree (main.go modified, uncommitted)
+        // with its content digest; change the content again at the same sha.
+        std::fs::write(
+            repo_dir.join("main.go"),
+            "package main\n\nfunc main() { helper(); helper() }\n\nfunc helper() {}\n",
+        )
+        .unwrap();
+        let fourth = run_in(&repo_dir, &["scan", "."]);
+        let fourth_err = err_of(&fourth);
+        assert!(
+            fourth_err.contains("→ STALE"),
+            "a same-sha dirty-content change must print STALE: {fourth_err}"
+        );
+        assert!(
+            !fourth_err.contains("fast-path"),
+            "a same-sha dirty-content change must fall through: {fourth_err}"
+        );
+        assert!(
+            fourth_err.contains("[scan] running go frontend"),
+            "a same-sha dirty-content change must run the frontend: {fourth_err}"
+        );
+
+        // ---- teardown: the scratch repo AND the isolated HOME ----
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
