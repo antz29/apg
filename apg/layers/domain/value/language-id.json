@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "language-id",
-  "body": "The stable id a frontend declares and the detector matches (go, java, cpp, rust, ts, js, csharp, md, py), used for auto-detection, --id-prefix namespacing of opaque ids, and the lang_switch control record that drives per-record FQN rendering and code-type classification. The Python id is `py` (artifact pyfrontend, accepted extensions .py/.pyi).",
+  "body": "The stable id a frontend declares and the detector matches (go, java, cpp, rust, ts, js, csharp, md, py), used for auto-detection, --id-prefix namespacing of opaque ids, and the lang_switch control record that drives per-record FQN rendering and code-type classification. The Python id is `py` (artifact pyfrontend, accepted extensions .py/.pyi).\n\nUnder language rooting the id is also the FQN root prefix, used verbatim (not a display alias): a module scanned under `rust` renders `rust.<module-identity>`, a package under `py` renders `py.<dotted-identity>`, and the id alone names that language's `Language` root node (`domain.entity.language-root`). The unified JS/TS frontend carries one id per stream — `ts` for a TS repo and `js` for a JS-only repo — so the root is the id of the `lang_switch` stream that produced the module; a mixed repo scans once under one id (see `requirements.requirement.js-ts-language-plumbing`).",
   "properties": {},
   "out": [],
   "in": [
