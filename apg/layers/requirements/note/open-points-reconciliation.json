@@ -64,6 +64,11 @@
       "kind": "details",
       "target": "domain.value.module-fqn-prefix",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.constraint.python-exclusions",
+      "properties": {}
     }
   ],
   "in": []
