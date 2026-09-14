@@ -35,6 +35,11 @@
       "kind": "details",
       "source": "requirements.note.markdown-frontend-open-points",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.open-points-reconciliation",
+      "properties": {}
     }
   ]
 }

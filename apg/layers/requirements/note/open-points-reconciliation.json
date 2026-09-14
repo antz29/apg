@@ -79,6 +79,11 @@
       "kind": "details",
       "target": "requirements.constraint.python-ty-ruff-pin-policy",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.markdown-frontend",
+      "properties": {}
     }
   ],
   "in": []
