@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-incremental-contract",
+  "body": "The Python frontend must fit the scan-optimisation frontend contract exactly as global.constraint.frontend-full-context, requirements.requirement.full-context-targeted-emission, global.constraint.exactness-no-heuristic and global.constraint.never-fabricate-edges require — it is NOT a full-scan-only frontend. Per the contract it must: accept a target set, resolve every target against the FULL `ty` project context (imports and base classes cross files, so resolution needs the whole project, not just the changed files), emit ONLY the target's facts, and use the frontend's native incremental/artifact cache (the ty/salsa engine's own cache) rather than re-deriving the whole project per scan. Because cross-file resolution means an unchanged file's emitted facts can still change when a dependency changes (impact-and-cutoff), Python facts participate in the content-addressed manifest and fact cache (domain.entity.content-manifest, domain.entity.fact-cache): a file's facts are reusable only when its bytes AND its resolution inputs are unchanged. Python is explicitly named among the frontends subject to the contract (see the full-context-targeted-emission per-language list and global.constraint.frontend-full-context). AC: under incremental emission a re-scanned .py whose call target sits in an unchanged, un-emitted module still yields the resolved Calls edge; a changed target re-emits its dependents; the incremental Python graph equals the full-scan graph.",
+  "properties": {
+    "feature": "python-frontend"
+  },
+  "out": [],
+  "in": []
+}
