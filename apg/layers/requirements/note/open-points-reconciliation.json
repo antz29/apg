@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "requirements.requirement.markdown-build-and-acceptance",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.note.markdown-links-deferred",
+      "properties": {}
     }
   ],
   "in": []
