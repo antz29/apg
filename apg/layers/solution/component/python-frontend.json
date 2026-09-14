@@ -25,6 +25,11 @@
       "kind": "realised-by",
       "source": "domain.service.fact-emission",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.python-frontend-evidence",
+      "properties": {}
     }
   ]
 }
