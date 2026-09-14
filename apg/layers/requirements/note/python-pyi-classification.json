@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "python-pyi-classification",
+  "body": "Decision record (feedback-29). Source statement: the py code-type arm classified every `*.pyi` stub as `generated`. Inconsistency: `generated` in this project means tool-produced output (Go *.pb.go, Java gen/, C# *.g.cs); a blanket `.pyi` rule hid hand-written / typeshed API stubs from the default `src` filter, contradicting python-accept-extensions (`.pyi` is \"Python source that `ty` consumes like any module\") and python-frontend-evidence (every class/def in a `.pyi` carries full location fields, i.e. real symbol nodes), and diverging from the TS arm, which leaves the exact analog `.d.ts` as `src` (verified: src/classify.rs:144-162 has no `.d.ts` rule). Resolution: prefer the TS analog — a `.pyi` filename is never itself a generated marker and classifies `src`; `generated` stays scoped to genuine tool output by path segment (`__pycache__|gen|generated`, so a `.pyi` under a gen/generated tree still classifies generated). No dedicated stub code type is introduced. Applied consistently to requirements.requirement.python-code-type, domain.value.code-type (py arm) and solution.component.code-type-classifier. [with reviewer — feedback-29]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
