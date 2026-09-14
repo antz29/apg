@@ -34,6 +34,11 @@
       "kind": "details",
       "target": "solution.component.impact-closure",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.db-splicer",
+      "properties": {}
     }
   ],
   "in": []

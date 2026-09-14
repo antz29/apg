@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "source": "domain.service.graph-projection",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.implemented-by-migration-reconciliation",
+      "properties": {}
     }
   ]
 }
