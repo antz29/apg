@@ -4,7 +4,13 @@
   "name": "impact-closure",
   "body": "Computes the reverse-dependency closure over the cached graph, adds overload-group peers, and applies signature-based early cutoff to produce the re-emission target set.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.impact",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
