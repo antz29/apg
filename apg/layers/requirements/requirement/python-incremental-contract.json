@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.fact-cache",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.content-manifest",
+      "properties": {}
     }
   ],
   "in": [

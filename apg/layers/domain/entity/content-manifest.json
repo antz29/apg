@@ -28,6 +28,11 @@
       "kind": "drives",
       "source": "requirements.requirement.freshness-content-key",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.python-incremental-contract",
+      "properties": {}
     }
   ]
 }
