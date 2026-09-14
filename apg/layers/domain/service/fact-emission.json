@@ -19,6 +19,11 @@
       "kind": "realised-by",
       "target": "solution.component.markdown-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.python-frontend",
+      "properties": {}
     }
   ],
   "in": [
