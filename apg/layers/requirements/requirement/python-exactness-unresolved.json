@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-exactness-unresolved",
+  "body": "The Python frontend must preserve the never-guess rule exactly as global.constraint.never-fabricate-edges and global.constraint.exactness-no-heuristic require: an edge is emitted only where `ty` resolves to a project symbol. Anything `ty` cannot resolve becomes an UnresolvedTarget with a category, never a fabricated FQN or edge: a reference into vendored or stdlib Python resolves to category stdlib; a reference inside the scan root that is not a project symbol resolves to unknown; a reference outside the scan root resolves to external. Resolution is exact where `ty` resolves; there is no heuristic resolution pass and no reduced-resolution mode — under incremental emission the Python graph must equal the full-scan graph (exact-ongoing-equivalence). AC: an unresolved third-party import yields an unresolved_call or unresolved_use to an UnresolvedTarget with category external; a vendored/stdlib reference yields category stdlib; an in-root unresolvable/dynamic reference yields category unknown; no guessed calls/uses edge is emitted.",
+  "properties": {
+    "feature": "python-frontend"
+  },
+  "out": [],
+  "in": []
+}
