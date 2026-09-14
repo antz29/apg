@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "frontend-process",
-  "body": "The per-language scanner frontends (Go src/golib, Java src/javalib, C++ src/cpplib, Rust src/rustlib, TS src/tslib, C# src/csharplib). They must accept a target set, resolve against the full compilation context, emit only the target, and use their native incremental/artifact cache.",
+  "body": "The per-language scanner frontends (Go src/golib, Java src/javalib, C++ src/cpplib, Rust src/rustlib, TS src/tslib, C# src/csharplib, Python src/pylib — a planned addition). They must accept a target set, resolve against the full compilation context (for Python, the full `ty` project), emit only the target, and use their native incremental/artifact cache (for Python, the ty/salsa engine).",
   "properties": {
     "kind": "service"
   },
