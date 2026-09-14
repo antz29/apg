@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "language-rooting-docs",
+  "body": "The FQN convention is updated everywhere it is stated, because the observable FQN of every module and symbol changes: the AGENTS.md FQN table (its `module | fqn verbatim` row becomes the language-rooted form), README's FQN paragraph, SPEC §4 / the FQN-rule statements, and any suite-tool or agent-prompt example that shows a module or code FQN. Every documented example carries the language root; no doc or tool example shows a bare module/symbol FQN. The version/compatibility surface notes that the FQN rule change is an observable schema change (a major-version surface item per SPEC-1.0.0).\n\nAcceptance: the AGENTS.md table documents `module = <language-id>.<module-identity>` and the symbol rows as inheriting it; README's FQN examples are rooted; no suite-tool description or example uses an unrooted module/code FQN; a reader of the docs cannot form the expectation of a bare module FQN.",
+  "properties": {
+    "feature": "language-rooting"
+  },
+  "out": [],
+  "in": []
+}
