@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "python-package",
+  "body": "A Python package or module as discovered by the Python frontend: a directory containing __init__.py or __init__.pyi is a package; nested packages compose a dotted identity by walking up init-bearing ancestors; a source file with no init-bearing ancestor is a flat top-level module. The package/module is the unit of Python discovery and the parent of the files it contains — analogous to the Cargo manifest for Rust and the markdown document for Markdown. Its rendered Module FQN must be collision-free in the shared Module namespace (python-package-identity); realised by the Python frontend.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
