@@ -39,6 +39,11 @@
       "kind": "details",
       "target": "requirements.note.language-rooting-open-points",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.note.python-frontend-open-points",
+      "properties": {}
     }
   ],
   "in": []
