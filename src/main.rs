@@ -1992,8 +1992,8 @@ mod tests {
             }
         }
         for heading in [
-            "### implementer (always)",
-            "### unit/int/e2e-test-implementer(s) (per detected tier)",
+            "### <name>-implementer (one per detected subsystem; file `<name>-implementer.md`)",
+            "### unit/int/e2e-test-implementer(s) (per detected tier, where a test tier is file-separable)",
         ] {
             let grant = section(builder, heading);
             assert!(
