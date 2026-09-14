@@ -11,5 +11,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "requirements.note.open-points-reconciliation",
+      "properties": {}
+    }
+  ]
 }
