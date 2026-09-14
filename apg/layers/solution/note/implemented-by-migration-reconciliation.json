@@ -39,6 +39,11 @@
       "kind": "details",
       "target": "solution.component.db-splicer",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.phase-timer",
+      "properties": {}
     }
   ],
   "in": []
