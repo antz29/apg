@@ -4,7 +4,13 @@
   "name": "rust-manifest-discovery",
   "body": "Rust frontend manifest discovery: find all Cargo manifests under the scan root, load each project/workspace (rust-analyzer ProjectManifest/ProjectWorkspace), dedupe workspace members by manifest root, and merge the emitted facts. Fixes the discover_single gap that leaves src/rustlib (a separate Cargo project) out of the graph. Source is src/rustlib/src/main.rs (load_workspace_at / discover_single), which is not yet in the scanned graph — the plan declares it as a planned Implementation node.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "/Users/jledrew/apg/apg/.worktrees/scanner-optimisation/src/rustlib/src/main.rs",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
