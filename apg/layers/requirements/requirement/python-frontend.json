@@ -6,6 +6,12 @@
   "properties": {
     "feature": "python-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.python-accept-extensions",
+      "properties": {}
+    }
+  ],
   "in": []
 }
