@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "language-contains-module",
+  "body": "Every `Module` node is contained by the `Language` node for the language it was scanned under: `Language —Contains→ Module` is wired ingestor-side, so a module's parent is its language node. The `Contains` rel table gains the `(Language, Module)` pair (write-time validation already restricts `Contains` pairs), and module insertion in the ingestor attaches each module to its language root exactly once.\n\nExisting Module→Module containment (Rust nested modules, Java sub-packages, Go sub-packages, C++ namespaces, TS file namespaces) is unchanged in shape — it now hangs under a rooted module FQN, beneath the Language root. A module with no language root is a defect.\n\nAcceptance: `MATCH (l:Language)-[:Contains]->(m:Module) RETURN l.fqn, m.fqn` returns every Module exactly once under its own language; no Module node exists without an incoming `Contains` from a Language; the `Contains` pair `(Language, Module)` is declared in the DB schema so the edge is not silently dropped; nested module containment still holds under the rooted FQNs.",
+  "properties": {
+    "feature": "language-rooting"
+  },
+  "out": [],
+  "in": []
+}
