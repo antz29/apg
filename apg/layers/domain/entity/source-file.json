@@ -53,6 +53,11 @@
       "kind": "drives",
       "source": "requirements.requirement.python-accept-extensions",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.python-code-type",
+      "properties": {}
     }
   ]
 }

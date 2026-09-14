@@ -6,7 +6,13 @@
   "properties": {
     "feature": "python-frontend"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.source-file",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
