@@ -49,6 +49,11 @@
       "kind": "details",
       "target": "solution.component.js-ts-frontend",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.markdown-frontend",
+      "properties": {}
     }
   ],
   "in": []

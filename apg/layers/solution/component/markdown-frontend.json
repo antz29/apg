@@ -51,6 +51,11 @@
       "kind": "details",
       "source": "requirements.note.open-points-reconciliation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.implemented-by-migration-reconciliation",
+      "properties": {}
     }
   ]
 }
