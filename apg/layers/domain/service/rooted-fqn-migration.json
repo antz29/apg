@@ -26,6 +26,11 @@
       "kind": "contains",
       "source": "domain.group.frontend-coverage",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.rooted-fqn-migration",
+      "properties": {}
     }
   ]
 }
