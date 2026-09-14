@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.python-package",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.module-fqn-prefix",
+      "properties": {}
     }
   ],
   "in": [
