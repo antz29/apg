@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-frontend",
+  "body": "A first-class Python frontend: language id `py`, artifact `pyfrontend`, a standalone Rust binary built on Astral's `ty` type-checker engine with Ruff parser crates vendored as git deps pinned to the ruff repo tag — the same vendored-pin pattern as src/rustlib's rust-analyzer pin — so a scan needs no Python runtime. It accepts .py/.pyi sources, resolves calls/uses through `ty`'s project semantics, emits an UnresolvedTarget (with a category) for anything `ty` cannot resolve, and fits the incremental frontend contract (full-context resolution, targeted emission, native cache). Feature python-frontend. Decomposes into accepted extensions, the __init__.py package/module identity model, ty-based resolution, unresolved categories, language plumbing, code-type classification, build/integration, the incremental contract, and acceptance fixtures.",
+  "properties": {
+    "feature": "python-frontend"
+  },
+  "out": [],
+  "in": []
+}
