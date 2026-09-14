@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "requirements.requirement.python-package-identity",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.python-package",
+      "properties": {}
     }
   ],
   "in": []

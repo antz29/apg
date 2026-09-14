@@ -23,6 +23,11 @@
       "kind": "drives",
       "source": "requirements.requirement.python-package-identity",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.language-rooting-reconciliation",
+      "properties": {}
     }
   ]
 }
