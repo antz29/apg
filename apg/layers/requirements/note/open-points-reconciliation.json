@@ -84,6 +84,11 @@
       "kind": "details",
       "target": "solution.component.markdown-frontend",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.markdown-document",
+      "properties": {}
     }
   ],
   "in": []

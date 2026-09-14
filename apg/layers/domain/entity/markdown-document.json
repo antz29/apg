@@ -28,6 +28,11 @@
       "kind": "drives",
       "source": "requirements.requirement.markdown-sections-as-symbols",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.open-points-reconciliation",
+      "properties": {}
     }
   ]
 }
