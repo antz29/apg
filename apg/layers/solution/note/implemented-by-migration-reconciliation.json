@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "requirements.constraint.implemented-by-migration-sequence",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.fact-cache",
+      "properties": {}
     }
   ],
   "in": []

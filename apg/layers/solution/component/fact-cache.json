@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.group.scan-cache",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.implemented-by-migration-reconciliation",
+      "properties": {}
     }
   ]
 }
