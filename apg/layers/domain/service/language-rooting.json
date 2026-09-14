@@ -20,6 +20,11 @@
       "kind": "drives",
       "source": "requirements.requirement.cross-language-collision-freedom",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.language-rooting-docs",
+      "properties": {}
     }
   ]
 }
