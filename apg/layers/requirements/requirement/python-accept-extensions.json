@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-accept-extensions",
+  "body": "The Python frontend must accept the extension set .py and .pyi (.pyi stubs are Python source that `ty` consumes like any module) under the `py` language id, and emit for each accepted file a File node whose FQN is the absolute path (extension retained) whose parent is its module (see python-package-identity), never dropping the file (all-code-included: filtering is by code_type, not by omission). The accepted set is pinned to .py/.pyi; .pyx (Cython) is NOT accepted — Cython is not `ty`-parseable, so a .pyx source cannot be resolved exactly and is out of scope rather than scanned under a reduced parser (recorded as an open point, see the open-points note). The reference implementation's auto-detect list naming .pyx while its discovery accepts only .py/.pyi is the inconsistency this requirement resolves. AC: a repo containing a .py and a .pyi produces a file node for each; a repo whose only Python is .pyx triggers no `py` frontend run and yields no code node for it.",
+  "properties": {
+    "feature": "python-frontend"
+  },
+  "out": [],
+  "in": []
+}
