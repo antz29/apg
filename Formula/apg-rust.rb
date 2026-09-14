@@ -7,14 +7,14 @@ class ApgRust < Formula
   desc "Rust scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.13.0",
-      revision: "557d1bbe5b2fa34f98d7d94390f8fb6ccdd81c3d"
+      tag:      "v0.13.1",
+      revision: "24e2c49d7f998ed78475c15e419e0506d1403fcf"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.13.0"
-    rebuild 25
+    root_url "https://github.com/antz29/apg/releases/download/v0.13.1"
+    rebuild 26
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "c669522b54a63d9a9bff276b76fb89b859bc3bb2b79c1972310fd9ec6f852b2e"
   end
 
