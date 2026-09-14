@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "fact-emission",
-  "body": "A frontend resolving against the full compilation context and emitting facts for its discovered projects/files — declarations, references, and edges — with anything unresolved emitted as an UnresolvedTarget, never guessed. Emission is per discovered project; the full context is never reduced.",
+  "body": "A frontend resolving against the full compilation context and emitting facts for its discovered projects/files — declarations, references, and edges — with anything unresolved emitted as an UnresolvedTarget, never guessed. Emission is per discovered project; the full context is never reduced. For Python, emission resolves against the full `ty` project (imports and base classes cross files) and uses the ty/salsa native incremental cache; only emission is filtered to the target set (requirements.requirement.python-incremental-contract).",
   "properties": {},
   "out": [
     {
