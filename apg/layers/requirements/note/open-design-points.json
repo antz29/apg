@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "note",
   "name": "open-design-points",
-  "body": "Open design points for the plan (do NOT invent decisions here): (1) per-language granularity — package vs module vs crate — and what \"signature\" means for early cutoff; (2) where the shared content-addressed fact store lives and how worktrees/DBs project from it; (3) the DB splice mechanism (seed-from-previous vs overlay) and its atomicity; (4) re-anchor/fallback thresholds — purely correctness/version gates, never heuristics.",
+  "body": "Open design points for the plan (do NOT invent decisions here; those pinned are marked DECIDED).\n\n(1) Per-language incremental granularity and the meaning of \"signature\" for early cutoff. Python's granularity is DECIDED as per-package/module (requirements.note.python-frontend-open-points #5; requirements.requirement.python-incremental-contract): the target set is a set of modules/packages, resolution still runs against the full `ty` project. The remaining per-language granularities (crate/package for Rust/Go/Java/TS/C#) and what \"signature\" means for early cutoff remain plan-time.\n\n(2) Where the shared content-addressed fact store lives and how worktrees/DBs project from it — plan-time.\n\n(3) The DB splice mechanism (seed-from-previous vs overlay) and its atomicity — plan-time (domain.note.cache-store-and-splice).\n\n(4) Re-anchor/fallback thresholds — purely correctness/version gates, never heuristics; plan-time.",
   "properties": {},
   "out": [
     {
