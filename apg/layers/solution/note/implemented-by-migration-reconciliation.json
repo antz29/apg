@@ -69,6 +69,11 @@
       "kind": "details",
       "target": "solution.component.language-rooting",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.plan-store-atomic-rewrite",
+      "properties": {}
     }
   ],
   "in": []
