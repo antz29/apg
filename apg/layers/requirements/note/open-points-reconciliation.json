@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "requirements.requirement.markdown-accept-extensions",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.markdown-build-and-acceptance",
+      "properties": {}
     }
   ],
   "in": []
