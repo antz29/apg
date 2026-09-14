@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "implemented-by-migration",
+  "body": "Because language rooting changes every code FQN, every existing authored `implemented-by` edge target — which the ingestor validates against the scanned code universe (real code FQNs from `graph.jsonl`, src/layers.rs `classify_code_ref`) — is reported as DRIFT unless it is migrated to its rooted FQN. This change-set therefore migrates every existing `implemented-by` target to the rooted form.\n\nThe migration is sequenced AFTER the FQN change: (1) the Language node + rooted FQNs land; (2) the branch is re-scanned so the rooted code FQNs exist; (3) every authored `implemented-by` edge is re-pointed with `apg edge rm implemented-by …` + `apg edge add implemented-by …` (each replacement atomic — both halves rewritten, no orphaned half); (4) the re-scan / verify re-checks the targets and reports no drift. This is a data/layer migration, not net-new code: it uses the existing node/edge mutation surface.\n\nAcceptance: after migration, every authored `implemented-by` target resolves against the scanned code universe (no DRIFT on the next scan/validate); no `implemented-by` target remains at an unrooted FQN; the spine query reaches rooted code FQNs; each re-pointed edge has both halves present (the node-file pairing is consistent); `apg plan verify` does not refuse for a missing/drifted implementation target.",
+  "properties": {
+    "feature": "language-rooting"
+  },
+  "out": [],
+  "in": []
+}
