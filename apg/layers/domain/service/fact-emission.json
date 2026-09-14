@@ -61,6 +61,11 @@
       "kind": "drives",
       "source": "requirements.requirement.python-exactness-unresolved",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.python-build-and-deps",
+      "properties": {}
     }
   ]
 }
