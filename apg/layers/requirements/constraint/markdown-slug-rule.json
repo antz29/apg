@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "markdown-slug-rule",
+  "body": "Heading text -> one FQN segment, deterministic (GitHub-style). The rule: trim leading/trailing whitespace; Unicode-normalize (NFC); lowercase (Unicode-aware); replace each whitespace run with a single `-`; drop punctuation except `-` and `_`; preserve non-ASCII letters and digits; collapse runs of `-` and trim leading/trailing `-`. The result is exactly ONE segment that cannot contain the `.` separator (`.` is dropped), so a slug never aliases the FQN hierarchy.\n\nDuplicate headings in the SAME document map to distinct segments: the first occurrence is the bare slug, the second `-1`, the third `-2`, … (suffixes applied in document order, after slugging). The rule is total: any heading text yields a segment (an empty result falls back to a fixed literal, e.g. `section`).\n\nThis satisfies the pinned scheme constraints — delimiter-safe single segment, never embeds the `.` separator ambiguously, duplicate headings distinct — and makes section FQNs injective given the unique absolute-path File prefix. The duplicate-heading fixture is asserted in requirements.requirement.markdown-sections-as-symbols.",
+  "properties": {
+    "attaches-to": "requirements.requirement.markdown-sections-as-symbols"
+  },
+  "out": [],
+  "in": []
+}
