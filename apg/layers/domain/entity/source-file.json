@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "source-file",
-  "body": "A scannable source file, identified by its language and classified by code type. JS/TS sources are .ts/.tsx/.js/.jsx/.mjs/.cjs; Rust sources are .rs; Markdown documents are .md/.markdown. Every eligible source file is included in the graph; filtering is by code type, never by dropping the file.",
+  "body": "A scannable source file, identified by its language and classified by code type. JS/TS sources are .ts/.tsx/.js/.jsx/.mjs/.cjs; Rust sources are .rs; Markdown documents are .md/.markdown; Python sources are .py/.pyi. Every eligible source file is included in the graph; filtering is by code type, never by dropping the file.",
   "properties": {
     "kind": "entity"
   },
