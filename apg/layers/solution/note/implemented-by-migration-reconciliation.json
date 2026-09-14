@@ -59,6 +59,11 @@
       "kind": "details",
       "target": "solution.component.python-frontend",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.rust-manifest-discovery",
+      "properties": {}
     }
   ],
   "in": []
