@@ -92,6 +92,11 @@
       "kind": "contains",
       "target": "domain.service.language-rooting",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.rooted-fqn-migration",
+      "properties": {}
     }
   ],
   "in": [

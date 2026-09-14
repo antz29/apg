@@ -10,6 +10,11 @@
       "kind": "drives",
       "source": "requirements.requirement.implemented-by-migration",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.frontend-coverage",
+      "properties": {}
     }
   ]
 }
