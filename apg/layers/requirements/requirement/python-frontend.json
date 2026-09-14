@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "requirements.requirement.python-code-type",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.python-build-and-deps",
+      "properties": {}
     }
   ],
   "in": []
