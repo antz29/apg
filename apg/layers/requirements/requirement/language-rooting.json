@@ -73,6 +73,11 @@
       "kind": "contains",
       "source": "requirements.user.suite-agent",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.language-rooting-evidence",
+      "properties": {}
     }
   ]
 }
