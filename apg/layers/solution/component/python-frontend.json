@@ -46,6 +46,11 @@
       "kind": "details",
       "source": "requirements.note.python-frontend-open-points",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.implemented-by-migration-reconciliation",
+      "properties": {}
     }
   ]
 }

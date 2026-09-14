@@ -54,6 +54,11 @@
       "kind": "details",
       "target": "solution.component.markdown-frontend",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.python-frontend",
+      "properties": {}
     }
   ],
   "in": []
