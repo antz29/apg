@@ -41,6 +41,11 @@
       "kind": "realised-by",
       "source": "domain.service.fact-emission",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.implemented-by-migration-reconciliation",
+      "properties": {}
     }
   ]
 }

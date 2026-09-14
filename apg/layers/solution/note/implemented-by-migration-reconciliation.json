@@ -44,6 +44,11 @@
       "kind": "details",
       "target": "solution.component.phase-timer",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.js-ts-frontend",
+      "properties": {}
     }
   ],
   "in": []
