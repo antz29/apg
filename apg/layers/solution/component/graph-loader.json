@@ -31,6 +31,11 @@
       "kind": "contains",
       "source": "solution.container.ingestor",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.language-root",
+      "properties": {}
     }
   ]
 }
