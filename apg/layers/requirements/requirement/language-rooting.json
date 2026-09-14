@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.language-rooted-module-fqn",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.symbols-inherit-language-root",
+      "properties": {}
     }
   ],
   "in": [
