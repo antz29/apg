@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "solution.component.language-rooting",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.ingest.claim",
+      "properties": {}
     }
   ],
   "in": [
