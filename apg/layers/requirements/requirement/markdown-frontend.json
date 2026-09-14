@@ -19,11 +19,6 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.markdown-links-as-edges",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "requirements.requirement.markdown-language-plumbing",
       "properties": {}
     },

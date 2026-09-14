@@ -44,11 +44,6 @@
     },
     {
       "kind": "drives",
-      "source": "requirements.requirement.markdown-links-as-edges",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
       "source": "requirements.requirement.markdown-exactness-unresolved",
       "properties": {}
     },
