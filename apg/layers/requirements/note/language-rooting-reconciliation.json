@@ -34,6 +34,11 @@
       "kind": "details",
       "target": "requirements.requirement.markdown-sections-as-symbols",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.markdown-accept-extensions",
+      "properties": {}
     }
   ],
   "in": []
