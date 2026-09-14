@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "symbols-inherit-language-root",
+  "body": "Symbols inherit the language root automatically because they render `parent.name` (SPEC §4) and their parent chain terminates in a rooted module. A declaration whose `parent` is a module must be rendered against the ROOTED module FQN — not the verbatim module FQN the frontend emitted — and a declaration nested in a struct inherits through that rooted ancestor. Overload rendering (`parent.name(T1,...)`), the Go `init` special case (`parent.init#<file-basename>`), and the TS getter/setter overload grouping are unchanged in shape; only the `parent` they are built on is now rooted.\n\nAcceptance: Rust `apg.ingest.ingest` renders `rust.apg.ingest.ingest` and `apg.ingest.claim` renders `rust.apg.ingest.claim`; a Python method `Class.method` in package `pkg.sub` renders `py.pkg.sub.Class.method`; an overloaded pair renders `rust.<module>.<name>(params)` with the `(params)` suffix preserved; a nested Rust method still hangs under its rooted self-type path; no symbol FQN exists whose parent is an unrooted module FQN.",
+  "properties": {
+    "feature": "language-rooting"
+  },
+  "out": [],
+  "in": []
+}
