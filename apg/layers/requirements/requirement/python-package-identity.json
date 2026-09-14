@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-package-identity",
+  "body": "A Python source file's module identity must follow Python's package model and stay collision-free. A directory containing __init__.py or __init__.pyi is a package; a module's dotted identity is built by walking up its ancestors while they are init-bearing packages; a file with no init-bearing ancestor is a flat top-level module. The frontend emits one Module node per discovered package/module and sets each File's parent to its module, so the ingestor's `parent.name` rendering yields the dotted symbol FQNs. Because the shared Module FQN namespace also carries language/package-derived names from other frontends (a Cargo package name, an npm package name, a Go module path) and the ingestor panics on any residual Module FQN collision rather than overwriting (SPEC §4), the rendered Python Module FQN must be collision-free across the whole scan: a bare dotted package name can collide with another language's module (a root package `apg` against the Rust `apg` module) and a flat-stem rule can collide two same-stem top-level modules in different directories, so the namespace form that guarantees disjointness is an open design point (see the open-points note), while collision-freedom itself is required. Discovery must not descend into generated/dependency trees (see domain.constraint.python-exclusions). AC: a package pkg/ with __init__.py and pkg/sub/__init__.py yields two distinct module nodes, each containing its files' symbols; a directory with no __init__.py yields a distinct flat module node; no two discovered modules render to the same FQN and the scan triggers no ingestor FQN-collision panic.",
+  "properties": {
+    "feature": "python-frontend"
+  },
+  "out": [],
+  "in": []
+}
