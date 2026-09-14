@@ -35,6 +35,11 @@
       "kind": "drives",
       "source": "requirements.requirement.python-language-plumbing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.language-rooting",
+      "properties": {}
     }
   ]
 }

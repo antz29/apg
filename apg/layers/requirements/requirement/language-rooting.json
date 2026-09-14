@@ -46,6 +46,11 @@
       "kind": "drives",
       "target": "domain.group.frontend-coverage",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.language-id",
+      "properties": {}
     }
   ],
   "in": [
