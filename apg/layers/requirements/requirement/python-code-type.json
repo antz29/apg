@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-code-type",
+  "body": "Add a `py` arm to the ingestor's built-in code-type classifier (builtin_code_type, src/classify.rs) so Python sources are in the graph and filterable rather than dropped: test = a *_test.py / test_* / *.test.py filename or a test|tests|__tests__ path segment; generated = a *.pyi stub filename or a __pycache__|gen|generated path segment; external = a vendor|third_party|thirdparty|site-packages path segment; else src. The existing config-replaces-built-ins behaviour is unchanged (an apg/config.json replaces the built-ins entirely). All-code-included holds: every accepted Python file is scanned and filtered by code_type, never excluded. AC: an ordinary src module classifies src; a *_test.py classifies test; a .pyi stub classifies generated; a file under site-packages classifies external; none is absent from the graph.",
+  "properties": {
+    "feature": "python-frontend"
+  },
+  "out": [],
+  "in": []
+}
