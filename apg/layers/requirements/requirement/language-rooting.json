@@ -83,6 +83,11 @@
       "kind": "details",
       "source": "requirements.note.language-rooting-open-points",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.implemented-by-migration-reconciliation",
+      "properties": {}
     }
   ]
 }
