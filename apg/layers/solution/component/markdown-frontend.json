@@ -4,7 +4,13 @@
   "name": "markdown-frontend",
   "body": "The markdown document frontend: a new Rust standalone binary under `src/mdlib`, built by build.rs and staged as `mdfrontend` (the bare-binary convention like pyfrontend/csharpfrontend/rustfrontend). It discovers `.md` and `.markdown` sources (`.mdx` is out), emits each file as a File (FQN = the absolute path) under a directory-based Module (`md.<absolute-path>`), and each heading as a Struct section symbol nested by heading level, applying the pinned slug rule (requirements.constraint.markdown-slug-rule) and the section FQN scheme (requirements.requirement.markdown-sections-as-symbols). It emits no links: link references becoming graph edges are DEFERRED — a later feature, out of scope (requirements.note.markdown-links-deferred) — so there is no synthesized document-root section and a heading-less document yields only its File. Its source does not exist yet and is not in the scanned graph, so this component carries NO implemented-by edge — the plan declares it as planned Implementation nodes, the same state as solution.component.js-ts-frontend and solution.component.rust-manifest-discovery.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.mdfrontend",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
