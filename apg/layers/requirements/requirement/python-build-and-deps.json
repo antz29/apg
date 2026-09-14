@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-build-and-deps",
+  "body": "The Python frontend must be a first-class build artifact with the same vendored-pin discipline as src/rustlib: a standalone Rust binary `pyfrontend` under src/pylib, built on Astral's `ty` type-checker engine plus Ruff parser crates pulled as git dependencies pinned to https://github.com/astral-sh/ruff at tag 0.16.6 (ruff_db, ruff_python_ast, ruff_python_parser, ruff_source_file, ruff_text_size, ty_ide, ty_project, ty_python_core, ty_python_semantic, ty_module_resolver, ty_vendored, salsa; edition 2024), with its own Cargo.toml/Cargo.lock and isolated build target — no Python runtime at scan time. build.rs gains the py block (the APG_BUILD_FRONTENDS allowlist entry, the staged artifact under target/<profile>/frontends, the APG_FRONTEND_PY env, and the APG_LANGUAGES entry) and the runtime frontend lookup resolves it; install.sh gains a `py` component; the brew split formulae gain apg-py and scanner.rb references it; .gitignore ignores /src/pylib/target. AC: cargo build stages pyfrontend and records py in APG_LANGUAGES; a Python fixture scans on a scratch repo per no-real-project-test; the frontend runs with no Python interpreter present.",
+  "properties": {
+    "feature": "python-frontend"
+  },
+  "out": [],
+  "in": []
+}
