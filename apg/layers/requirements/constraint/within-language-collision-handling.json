@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "within-language-collision-handling",
+  "body": "Language rooting removes only the cross-language collision. Within one language the existing handling is retained unchanged: a module whose FQN is claimed by a struct/function of the same language is shadowed by the type and counted in `shadowed_modules` (logged by `src/main.rs`), a function shadowed by a struct is counted in `shadowed_functions`, and a genuine same-kind Struct/Function collision panics in `claim` (src/ingest.rs:88-96 / Pass B 614-615). This change may not introduce a within-language silent merge or overwrite; the counters and the panic stay observable. Cross-language module shadowing (today the silent-loss path in Pass B2, src/ingest.rs:647-670) must be impossible by construction, because the disjoint language roots make the FQNs distinct.",
+  "properties": {
+    "attaches-to": "requirements.requirement.cross-language-collision-freedom"
+  },
+  "out": [],
+  "in": []
+}
