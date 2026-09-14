@@ -27,11 +27,6 @@
     },
     {
       "kind": "details",
-      "target": "requirements.note.markdown-frontend-open-points",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.note.language-rooting-open-points",
       "properties": {}
     },
