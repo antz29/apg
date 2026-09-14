@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "solution.component.fact-cache",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.delta-analyzer",
+      "properties": {}
     }
   ],
   "in": []
