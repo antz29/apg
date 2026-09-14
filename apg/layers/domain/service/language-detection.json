@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "language-detection",
-  "body": "Deciding which language frontends run for a repo: scanning the tree for language source extensions (skipping generated/dependency directories such as node_modules) and mapping them to the unified JS/TS frontend plus the other per-language frontends.",
+  "body": "Deciding which language frontends run for a repo: scanning the tree for language source extensions (skipping generated/dependency directories such as node_modules and the Python exclusion set) and mapping them to the unified JS/TS frontend, the Python frontend (.py/.pyi), plus the other per-language frontends.",
   "properties": {},
   "out": [
     {
