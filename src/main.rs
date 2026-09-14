@@ -1,8 +1,12 @@
 mod artifacts;
+mod cache;
 mod classify;
 mod cleanup;
+mod delta;
 mod git;
 mod graph;
+mod impact;
+mod incremental;
 mod ingest;
 mod layers;
 mod load;
@@ -525,6 +529,168 @@ fn temp_dir() -> PathBuf {
         .unwrap()
         .as_nanos();
     std::env::temp_dir().join(format!("apg-load-{}-{nanos}", std::process::id()))
+}
+
+/// The **target-set handoff protocol** (phase-02 task-9, PINNED INTERFACE —
+/// feedback-85), the ONE contract every language frontend consumes.
+///
+/// CHANNEL: argv flags appended to each language's frontend command at the
+/// spawn site, beside the existing `--module`/`--id-prefix`. `stdin` stays
+/// `Stdio::null` (not the channel) and env vars are not the channel.
+///
+/// * `--targets <file>`: the absolute path to a UTF-8, newline-delimited file
+///   of absolute source-file paths, one per line, no header, blanks ignored. An
+///   absent flag or an empty file means "no emission filter". A language whose
+///   target set is unchanged and empty is skipped entirely (phase-03 task-5).
+/// * `--cache-dir <abs dir>`: the shared content-addressed store root
+///   (`<git-common-dir>/apg/facts`).
+/// * `--cache-key <key>`: the global cache key (`domain.value.cache-key`),
+///   computed once by APG and passed unchanged to every frontend.
+///
+/// The frontend persists its native incremental artifact under
+/// `<cache-dir>/<lang>/<cache-key>/`. Every frontend resolves against the FULL
+/// context and only emission is filtered (`global.constraint.frontend-full-context`).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FrontendHandoff {
+    /// When true, a `--targets <file>` list is written into the scan's temp dir
+    /// and passed. `false` = no emission filter.
+    pub targets_enabled: bool,
+    /// The shared store root (`<git-common-dir>/apg/facts`).
+    pub cache_dir: Option<PathBuf>,
+    /// The global cache key token.
+    pub cache_key: Option<String>,
+}
+
+impl FrontendHandoff {
+    /// Writes the per-language target file for `lang` from the absolute target
+    /// paths of that language's emission granularity, returning the path. A
+    /// language with no targets writes an EMPTY file (the frontend treats
+    /// "absent flag or empty file" as no filter; the spawn skip is phase-03
+    /// task-5, not this filter).
+    fn write_targets(&self, tmp: &Path, lang: &str, targets: &[String]) -> PathBuf {
+        let path = tmp.join(format!("{lang}.targets"));
+        let mut body = String::new();
+        for t in targets {
+            body.push_str(t);
+            body.push('\n');
+        }
+        std::fs::write(&path, body).expect("write target list");
+        path
+    }
+
+    /// Appends the handoff flags to a frontend `Command` for `lang`.
+    fn append(&self, child: &mut Command, tmp: &Path, lang: &str, targets: &[String]) {
+        if self.targets_enabled {
+            let path = self.write_targets(tmp, lang, targets);
+            child.arg("--targets").arg(path);
+        }
+        if let Some(dir) = &self.cache_dir {
+            child.arg("--cache-dir").arg(dir);
+        }
+        if let Some(key) = &self.cache_key {
+            child.arg("--cache-key").arg(key);
+        }
+    }
+}
+
+/// The absolute target paths belonging to `language`'s emission granularity,
+/// from the checkout-relative target set.
+fn targets_for_language(
+    targets_rel: &std::collections::BTreeSet<String>,
+    scan_root: &Path,
+    language: &str,
+) -> Vec<String> {
+    let mut out: Vec<String> = targets_rel
+        .iter()
+        .filter(|rel| incremental::language_of(rel) == language)
+        .map(|rel| scan_root.join(rel).to_string_lossy().into_owned())
+        .collect();
+    out.sort();
+    out
+}
+
+/// Spawns one language's frontend for a scan phase, draining stdout to a spool
+/// and stderr to a log spool. Returns the spool path on success, `None` when
+/// the frontend failed (reported + skipped, never fatal).
+#[allow(clippy::too_many_arguments)]
+fn spawn_frontend(
+    lang: &str,
+    project_dir: &Path,
+    module_dirs: &[String],
+    path_excludes: &[String],
+    no_build_scripts: bool,
+    multi: bool,
+    handoff: &FrontendHandoff,
+    tmp: &Path,
+    targets: &[String],
+    phase: u32,
+    log: &mut Log,
+) -> Option<PathBuf> {
+    let cmd = frontend_cmd(lang).unwrap_or_else(|| {
+        panic!("frontend for language '{lang}' is not installed");
+    });
+    let spool = tmp.join(format!("{lang}.p{phase}.jsonl"));
+    let spool_file = std::fs::File::create(&spool).unwrap();
+    let stderr_spool = tmp.join(format!("{lang}.p{phase}.stderr"));
+    let stderr_file = std::fs::File::create(&stderr_spool).unwrap();
+    // `cmd` is a full command line (e.g. "node /path/scanner.mjs" or the java
+    // wrapper); split it into argv so every frontend spawns the same way.
+    let mut parts = cmd.split_whitespace();
+    let prog = parts.next().expect("empty frontend command");
+    let mut child = Command::new(prog);
+    child.args(parts).arg(project_dir.display().to_string());
+    for m in module_dirs {
+        child.arg("--module").arg(m);
+    }
+    if lang == "rust" && no_build_scripts {
+        child.arg("--no-build-scripts");
+    }
+    if multi {
+        child.arg("--id-prefix").arg(id_prefix_for(lang));
+    }
+    // Win-B target-set hand-off (task-9): only on the incremental path.
+    if handoff.targets_enabled {
+        handoff.append(&mut child, tmp, lang, targets);
+    }
+    child
+        .args(path_excludes)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(spool_file.try_clone().unwrap()))
+        .stderr(Stdio::from(stderr_file.try_clone().unwrap()));
+    log.ln(&format!("[scan] running {lang} frontend..."));
+    let mut frontend_output = child.spawn().expect("Failed to run frontend");
+    let ok = frontend_output
+        .wait()
+        .expect("couldn't wait for frontend")
+        .success();
+    log.append_file(&stderr_spool);
+    if !ok {
+        log.ln(&format!(
+            "[scan] {lang} frontend failed; skipping this language"
+        ));
+        for line in tail_of(&stderr_spool, 10) {
+            log.ln(&format!("  [{lang}] {line}"));
+        }
+        return None;
+    }
+    log.ln(&format!("[scan] {lang} frontend exited"));
+    Some(spool)
+}
+
+/// Parses the `--targets <file>` list: newline-delimited absolute paths, one
+/// per line, blanks ignored. The frontend consumes the file directly (the
+/// contract is the file format); this helper exists so the integration test can
+/// assert the exact format.
+#[cfg(test)]
+pub(crate) fn read_targets_file(path: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// The `apg --help` text. Split from [`print_help`] so the strict add|update|rm
@@ -1265,6 +1431,48 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     let config = classify::ApgConfig::load(&project_dir);
 
+    // Win-B incremental preparation (phase-02 task-8): the content manifest,
+    // git delta + correctness fallbacks, impact target set, and the fact-reuse
+    // candidates. `full_scan: Some(reason)` falls through to the full pipeline
+    // (the correctness reference). The target set drives the frontend
+    // `--targets` hand-off (task-9) and the fact splice in `run_pipeline`.
+    let incremental = incremental::prepare(
+        &project_dir,
+        &apg_root,
+        &cache::ScanConfigKey {
+            languages: languages.clone(),
+            excludes: path_excludes.clone(),
+            modules: module_dirs.clone(),
+        },
+    );
+    let mut handoff = FrontendHandoff::default();
+    let mut reuse_plan: Option<incremental::ReusePlan> = None;
+    if let Some(reason) = &incremental.full_scan {
+        log.ln(&format!("[scan] {}", reason.describe()));
+    } else {
+        log.ln(&format!(
+            "[scan] incremental: {} target file(s), {} reusable file(s)",
+            incremental.targets_rel.len(),
+            incremental.reuse_candidates.len(),
+        ));
+        // The pinned target-set hand-off contract (task-9): `--targets`,
+        // `--cache-dir`, `--cache-key` on every language's argv. The target
+        // files live in the scan's own temp dir (removed with it).
+        handoff.targets_enabled = true;
+        handoff.cache_dir = Some(incremental.store_root.clone());
+        handoff.cache_key = Some(incremental.cache_key.token());
+        reuse_plan = Some(incremental::ReusePlan {
+            store_root: incremental.store_root.clone(),
+            cache_key: incremental.cache_key.clone(),
+            files: incremental
+                .reuse_candidates
+                .iter()
+                .map(|f| (f.rel.clone(), f.lang.clone(), f.oid.clone()))
+                .collect(),
+            reader_root: project_dir.to_string_lossy().into_owned(),
+        });
+    }
+
     // Each frontend's stderr (progress + compiler diagnostics) is spooled to a
     // per-language temp file, then folded into the log file. On a non-zero
     // exit the tail is also reported to the terminal (SPEC 0.9.1 R1).
@@ -1281,54 +1489,102 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let multi = languages.len() > 1;
     let mut spools: Vec<(String, PathBuf)> = Vec::new();
     let mut failed: Vec<String> = Vec::new();
-    for lang in &languages {
-        let cmd = frontend_cmd(lang).unwrap_or_else(|| {
-            panic!("frontend for language '{lang}' is not installed");
-        });
-        let spool = tmp.join(format!("{lang}.jsonl"));
-        let spool_file = std::fs::File::create(&spool).unwrap();
-        let stderr_spool = tmp.join(format!("{lang}.stderr"));
-        let stderr_file = std::fs::File::create(&stderr_spool).unwrap();
-        // `cmd` is a full command line (e.g. "node /path/scanner.mjs" or the
-        // java wrapper); split it into argv so every frontend spawns the same
-        // way.
-        let mut parts = cmd.split_whitespace();
-        let prog = parts.next().expect("empty frontend command");
-        let mut child = Command::new(prog);
-        child.args(parts).arg(project_dir.display().to_string());
-        for m in &module_dirs {
-            child.arg("--module").arg(m);
-        }
-        if *lang == "rust" && no_build_scripts {
-            child.arg("--no-build-scripts");
-        }
-        if multi {
-            child.arg("--id-prefix").arg(id_prefix_for(lang));
-        }
-        child
-            .args(&path_excludes)
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(spool_file.try_clone().unwrap()))
-            .stderr(Stdio::from(stderr_file.try_clone().unwrap()));
-        log.ln(&format!("[scan] running {lang} frontend..."));
-        let mut frontend_output = child.spawn().expect("Failed to run frontend");
-        let ok = frontend_output
-            .wait()
-            .expect("couldn't wait for frontend")
-            .success();
-        log.append_file(&stderr_spool);
-        if !ok {
-            log.ln(&format!(
-                "[scan] {lang} frontend failed; skipping this language"
-            ));
-            for line in tail_of(&stderr_spool, 10) {
-                log.ln(&format!("  [{lang}] {line}"));
+
+    // Phase 1: the changed files ∪ overload peers (the stage-1 target set).
+    // The signature early-cutoff (phase-02 task-6) is applied AFTER this pass:
+    // the phase-1 stream yields the changed files' new exported signatures, and
+    // only a genuine signature change pulls the reverse-dependency closure into
+    // phase 2. A body-only change ends after phase 1, so its dependents are
+    // reused.
+    let mut phase = 1u32;
+    let mut targets_rel = incremental.targets_rel.clone();
+    loop {
+        for lang in &languages {
+            let targets = targets_for_language(&targets_rel, &project_dir, lang);
+            // A phase-2 language with no additional targets keeps its phase-1
+            // spool (no re-run); a phase-1 language with no targets still runs
+            // (an empty/absent target list means "no filter" per the contract).
+            if phase == 2 && targets.is_empty() {
+                continue;
             }
-            failed.push(lang.clone());
-            continue;
+            match spawn_frontend(
+                lang,
+                &project_dir,
+                &module_dirs,
+                &path_excludes,
+                no_build_scripts,
+                multi,
+                &handoff,
+                &tmp,
+                &targets,
+                phase,
+                &mut log,
+            ) {
+                Some(spool) => {
+                    // A phase-2 re-run replaces the language's phase-1 spool, so
+                    // each language contributes exactly one stream (no duplicate
+                    // emission / FQN collision).
+                    spools.retain(|(l, _)| l != lang);
+                    spools.push((lang.clone(), spool));
+                }
+                None => failed.push(lang.clone()),
+            }
         }
-        log.ln(&format!("[scan] {lang} frontend exited"));
-        spools.push((lang.clone(), spool));
+        if phase == 2 || incremental.full_scan.is_some() {
+            break;
+        }
+        // Apply the signature early-cutoff using the phase-1 stream.
+        let extra = {
+            let phase1_lang = if languages.len() == 1 {
+                languages[0].clone()
+            } else {
+                languages.join(",")
+            };
+            let (phase1_graph, _) = ingest::ingest(
+                scanner_records(&spools[..], &git_state),
+                &ingest::IngestOptions {
+                    blacklist: &blacklist,
+                    language: &phase1_lang,
+                    config: config.as_ref(),
+                },
+            );
+            incremental::extra_cascade_targets(
+                &incremental.store_root,
+                &project_dir,
+                &phase1_graph,
+                &targets_rel,
+            )
+        };
+        if extra.is_empty() {
+            break;
+        }
+        log.ln(&format!(
+            "[scan] signature change cascades to {} dependent file(s)",
+            extra.len()
+        ));
+        targets_rel.extend(extra);
+        // Phase 2 re-spawns the languages that gained targets over the UNION
+        // (stage-1 ∪ cascade), with the spools accumulated above: a language
+        // that gained targets is dropped and re-spawned so its stream covers
+        // the union exactly once.
+        phase = 2;
+    }
+    // The final re-emission target set (stage 1 ∪ the signature cascade).
+    let targets_rel = targets_rel;
+    // Rebuild the reuse plan against the FULL target set, so a cascaded
+    // dependent is re-emitted rather than reused from stale facts.
+    if incremental.full_scan.is_none() {
+        reuse_plan = Some(incremental::ReusePlan {
+            store_root: incremental.store_root.clone(),
+            cache_key: incremental.cache_key.clone(),
+            files: incremental
+                .reuse_candidates
+                .iter()
+                .filter(|f| !targets_rel.contains(&f.rel))
+                .map(|f| (f.rel.clone(), f.lang.clone(), f.oid.clone()))
+                .collect(),
+            reader_root: project_dir.to_string_lossy().into_owned(),
+        });
     }
 
     // Merge the streams into one record iterator, with a `lang_switch` record
@@ -1354,7 +1610,15 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     // Pre-ingest the scanner stream to compute the scanned code-FQN universe
     // `ingest_tree` validates `implemented-by` refs against (real → real).
-    let scanned_code: BTreeSet<String> = {
+    //
+    // FULL-UNIVERSE SEAM (feedback-92): on the win-B incremental path the spool
+    // holds only the re-emitted target facts, so a language skipped/emission-
+    // filtered this scan would vanish from the universe and `validate_code_refs`
+    // would falsely bail `spec drift`. Derive the FULL universe instead from the
+    // PREVIOUS export (the sole full code-identity source) MINUS the delta's
+    // removed FQNs UNION the delta's emitted real code FQNs — never the
+    // target-only spool. On a full scan the full spool IS the universe.
+    let scanned_code: BTreeSet<String> = if incremental.full_scan.is_some() {
         let (pre, _) = ingest::ingest(
             scanner_records(&spools, &git_state),
             &ingest::IngestOptions {
@@ -1376,6 +1640,32 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             })
             .map(|(f, _)| f.clone())
             .collect()
+    } else {
+        // The delta's emitted real code FQNs: pre-ingest the target-only spool
+        // to discover exactly which FQNs this scan's frontends produced.
+        let (emitted, _) = ingest::ingest(
+            scanner_records(&spools, &git_state),
+            &ingest::IngestOptions {
+                blacklist: &blacklist,
+                language: &cleanup_language,
+                config: config.as_ref(),
+            },
+        );
+        let emitted_fqns: BTreeSet<String> = emitted
+            .nodes
+            .iter()
+            .filter(|(_, n)| {
+                matches!(
+                    n.kind,
+                    graph::NodeKind::Module
+                        | graph::NodeKind::Struct
+                        | graph::NodeKind::Function
+                        | graph::NodeKind::File
+                ) && n.status.is_none()
+            })
+            .map(|(f, _)| f.clone())
+            .collect();
+        incremental::full_universe(&apg_root, &incremental, &emitted_fqns)
     };
 
     // Read the transient legs (`.trans/plans/*.jsonl` — the per-branch plan
@@ -1414,12 +1704,30 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     let records = records.chain(layers_records).chain(transient_records);
 
+    // The win-B pipeline input: the store to splice cached facts from and to
+    // record the completed scan back into. The store is ALWAYS recorded (a full
+    // scan records the cold baseline the next scan diffs against); only `reuse`
+    // is `None` on the full path.
+    let pipeline_input = if incremental.store_root.as_os_str().is_empty() {
+        None
+    } else {
+        Some(incremental::PipelineInput {
+            store_root: Some(incremental.store_root.clone()),
+            cache_key: incremental.cache_key.clone(),
+            scan_root: project_dir.clone(),
+            manifest: incremental.manifest.clone(),
+            sha: git_state.sha.clone().unwrap_or_default(),
+            reuse: reuse_plan.clone(),
+        })
+    };
+
     run_pipeline(
         records,
         &blacklist,
         &path_excludes,
         &cleanup_language,
         config.as_ref(),
+        pipeline_input.as_ref(),
         &mut log,
     );
     let _ = std::fs::remove_dir_all(&tmp);
@@ -1436,26 +1744,54 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
 /// Consumes the merged scanner JSONL stream, ingests it, and loads `db.lbug` +
 /// `graph.jsonl` (SPEC §6).
+///
+/// `input` carries the win-B incremental state when the scan is incremental
+/// (phase-02 task-7/task-8): the cached fact units to splice into the assembly
+/// and the store to record the completed scan back into. `None` on the full
+/// path (and for the hermetic test harness), where assembly is spool-only.
 pub(crate) fn run_pipeline(
     records: impl IntoIterator<Item = schema::Record>,
     blacklist: &[String],
     path_excludes: &[String],
     language: &str,
     config: Option<&classify::ApgConfig>,
+    input: Option<&incremental::PipelineInput>,
     log: &mut Log,
 ) {
     let (mut graph, report) = {
-        // Stream the scanner JSONL straight into the ingestor (which inserts
-        // nodes as they arrive and spools edges to disk) rather than buffering
-        // every record in memory (SPEC §6).
-        ingest::ingest(
-            records,
-            &ingest::IngestOptions {
-                blacklist,
-                language,
-                config,
-            },
-        )
+        // Stream the scanner JSONL straight into the ingestor. On the win-B
+        // path the target-only spool is ingested here and the unaffected files'
+        // cached fact units are spliced into the SAME in-memory graph
+        // (phase-02 task-7 owns this assembly on every path). The resulting
+        // full fact-spliced graph is the single graph consumed downstream.
+        let reuse_holder;
+        let reuse = match input.and_then(|i| i.reuse.as_ref()) {
+            Some(plan) => {
+                reuse_holder = cache::FactStore::at(plan.store_root.clone()).load();
+                Some(plan.reuse(&reuse_holder))
+            }
+            None => None,
+        };
+        if let Some(r) = reuse.as_ref() {
+            ingest::ingest_with_reuse(
+                records,
+                &ingest::IngestOptions {
+                    blacklist,
+                    language,
+                    config,
+                },
+                Some(r),
+            )
+        } else {
+            ingest::ingest(
+                records,
+                &ingest::IngestOptions {
+                    blacklist,
+                    language,
+                    config,
+                },
+            )
+        }
     };
     log.ln(&format!("Skipped {} blacklisted messages", report.skipped));
     if report.shadowed_modules > 0 {
@@ -1498,6 +1834,27 @@ pub(crate) fn run_pipeline(
         graph.unresolved_calls.len(),
         graph.unresolved_uses.len(),
     ));
+
+    // Win-B: record the just-assembled graph back into the shared
+    // content-addressed store (manifest, scan record, per-file fact units, the
+    // portable dep/signature/overload indexes). Recording is a best-effort
+    // cache write — a failure downgrades the next scan to a full scan, never
+    // the current graph.
+    if let Some(input) = input
+        && let Some(store_root) = &input.store_root
+    {
+        match incremental::record(
+            store_root,
+            &input.cache_key,
+            &input.scan_root,
+            &graph,
+            &input.manifest,
+            &input.sha,
+        ) {
+            Ok(()) => log.ln("[scan] content-addressed facts recorded"),
+            Err(e) => log.ln(&format!("[scan] fact recording skipped: {e:#}")),
+        }
+    }
 
     let dir = temp_dir();
     std::fs::create_dir_all(&dir).unwrap();
@@ -3486,6 +3843,401 @@ mod tests {
         );
 
         // ---- teardown: the scratch repo AND the isolated HOME ----
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // -------------------------------------------------------------------
+    // Phase-02 win-B incremental integration (tasks 17 / 19). Every scenario
+    // runs the CANDIDATE binary only, against a scratch /tmp git repo
+    // (`global.constraint.no-real-project-test`).
+    // -------------------------------------------------------------------
+
+    /// Phase-02 task-9 (the pinned target-set hand-off contract, feedback-85):
+    /// the `--targets <file>` list is newline-delimited absolute paths (blank
+    /// lines ignored), and the same list is written per language from the
+    /// checkout-relative target set. The channel is argv — stdin stays null.
+    #[test]
+    fn frontend_handoff_targets_file_is_newline_delimited_absolute_paths() {
+        let tmp = std::env::temp_dir().join(format!("apg-handoff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let handoff = FrontendHandoff {
+            targets_enabled: true,
+            cache_dir: Some(PathBuf::from("/common/apg/facts")),
+            cache_key: Some("cache-key-token".to_string()),
+        };
+        let targets = vec!["/root/b.go".to_string(), "/root/a.go".to_string()];
+        let path = handoff.write_targets(&tmp, "go", &targets);
+        let read = read_targets_file(&path);
+        assert_eq!(read, targets, "the target list round-trips verbatim");
+
+        // Blanks are ignored.
+        std::fs::write(&path, "/root/x.go\n\n  \n/root/y.go\n").unwrap();
+        assert_eq!(
+            read_targets_file(&path),
+            vec!["/root/x.go".to_string(), "/root/y.go".to_string()]
+        );
+
+        // An absent file parses to an empty list (no filter).
+        assert!(read_targets_file(&tmp.join("missing.targets")).is_empty());
+
+        // `targets_for_language` maps the checkout-relative set onto absolute
+        // per-language paths under the scan root.
+        let mut rel = BTreeSet::new();
+        rel.insert("a/a.go".to_string());
+        rel.insert("b/b.go".to_string());
+        rel.insert("t/thing.ts".to_string());
+        let go = targets_for_language(&rel, Path::new("/root"), "go");
+        assert_eq!(go, vec!["/root/a/a.go", "/root/b/b.go"]);
+        let ts = targets_for_language(&rel, Path::new("/root"), "ts");
+        assert_eq!(ts, vec!["/root/t/thing.ts"]);
+
+        // The pinned flags are the ONLY channel: a command built with the
+        // hand-off carries `--targets`, `--cache-dir`, `--cache-key`.
+        let mut cmd = Command::new("true");
+        handoff.append(&mut cmd, &tmp, "go", &targets);
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            vec![
+                "--targets".to_string(),
+                path.display().to_string(),
+                "--cache-dir".to_string(),
+                "/common/apg/facts".to_string(),
+                "--cache-key".to_string(),
+                "cache-key-token".to_string(),
+            ]
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A scratch repo with real Go sources, a `go.mod`, and an `apg/` layout at
+    /// the binary's version. Returns `(base, repo_dir)` (base for teardown).
+    fn winb_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("apg-winb-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+        for (rel, body) in files {
+            let p = repo_dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        scratch_commit_all(&repo_dir, "init source");
+        (base, repo_dir)
+    }
+
+    /// The standard three-package Go fixture: `a` (leaf), `b` (depends on a),
+    /// `c` (depends on b).
+    fn winb_go_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (
+                "a/a.go",
+                "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 1 }\n",
+            ),
+            (
+                "b/b.go",
+                "package b\n\nimport \"scratch/a\"\n\n// B is a struct.\ntype B struct {\n\tA a.A\n}\n\n// Foo calls the leaf.\nfunc Foo() int { return a.Leaf() }\n",
+            ),
+            (
+                "c/c.go",
+                "package c\n\nimport \"scratch/b\"\n\n// Bar calls Foo.\nfunc Bar() int { return b.Foo() }\n",
+            ),
+        ]
+    }
+
+    fn winb_run(repo_dir: &Path, home: &Path, args: &[&str]) -> std::process::Output {
+        testutil::ApgCommand::new(args)
+            .cwd(repo_dir)
+            .env("HOME", &home.to_string_lossy())
+            .output()
+    }
+
+    /// Parse the export into comparable node/edge/unresolved sets.
+    fn winb_graph(
+        repo_dir: &Path,
+    ) -> (
+        BTreeSet<String>,
+        BTreeSet<(String, String)>,
+        BTreeSet<String>,
+    ) {
+        let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+        let mut nodes = BTreeSet::new();
+        let mut edges = BTreeSet::new();
+        let mut unresolved = BTreeSet::new();
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            match ty {
+                "module" | "file" | "struct" | "function" => {
+                    nodes.insert(format!(
+                        "{}:{}",
+                        ty,
+                        v.get("fqn").and_then(|f| f.as_str()).unwrap_or("")
+                    ));
+                }
+                "contains" | "calls" | "uses" | "unresolved_call" | "unresolved_use" => {
+                    edges.insert((
+                        ty.to_string(),
+                        format!(
+                            "{}->{}",
+                            v.get("from").and_then(|f| f.as_str()).unwrap_or(""),
+                            v.get("to").and_then(|f| f.as_str()).unwrap_or("")
+                        ),
+                    ));
+                }
+                "unresolved" => {
+                    unresolved.insert(format!(
+                        "{}:{}",
+                        v.get("fqn").and_then(|f| f.as_str()).unwrap_or(""),
+                        v.get("category").and_then(|c| c.as_str()).unwrap_or("")
+                    ));
+                }
+                _ => {}
+            }
+        }
+        (nodes, edges, unresolved)
+    }
+
+    /// Phase-02 task-17 (int): a targeted re-scan of each change class yields a
+    /// graph exactly equal to a fresh full scan of the same tree — same node
+    /// set, same edge set, same unresolved targets. The full-scan oracle runs
+    /// with the shared fact store cleared (no reuse, no splice). Scratch /tmp
+    /// repos, CANDIDATE binary only.
+    #[test]
+    #[allow(clippy::type_complexity)]
+    fn acceptance_targeted_rescan_equivalence_leaf_body_signature_rename() {
+        // Change classes. Go has no overloads, so the overload-peer rule is
+        // covered by the impact unit test (task-16); the int-level classes are
+        // leaf edit, body-only edit, signature change, and rename.
+        let scenarios: &[(&str, fn(&Path))] = &[
+            ("leaf-edit", |repo: &Path| {
+                // Add a declaration to the leaf file (its signature changes).
+                std::fs::write(
+                    repo.join("a/a.go"),
+                    "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 1 }\n\n// Extra is new.\nfunc Extra() int { return 2 }\n",
+                )
+                .unwrap();
+            }),
+            ("body-only-edit", |repo: &Path| {
+                // Change a function BODY without changing any declaration.
+                std::fs::write(
+                    repo.join("a/a.go"),
+                    "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 42 }\n",
+                )
+                .unwrap();
+            }),
+            ("signature-change", |repo: &Path| {
+                // Change the leaf's signature (params) — dependents cascade.
+                std::fs::write(
+                    repo.join("a/a.go"),
+                    "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf takes a param now.\nfunc Leaf(n int) int { return n }\n",
+                )
+                .unwrap();
+            }),
+            ("rename", |repo: &Path| {
+                // Rename a file within its package (FQNs of its units persist;
+                // the File node path changes).
+                let from = repo.join("b/b.go");
+                let to = repo.join("b/bb.go");
+                let body = std::fs::read_to_string(&from).unwrap();
+                std::fs::remove_file(&from).unwrap();
+                std::fs::write(&to, body).unwrap();
+            }),
+        ];
+
+        for (tag, mutate) in scenarios {
+            let (base, repo_dir) = winb_scratch(tag, &winb_go_fixture());
+            let home = base.join("home");
+            let _ = winb_run(&repo_dir, &home, &["init", "."]);
+            scratch_commit_all(&repo_dir, "apg init");
+            // Cold scan: records the manifest + fact store.
+            let cold = winb_run(&repo_dir, &home, &["scan", "."]);
+            assert!(
+                cold.status.success(),
+                "{tag}: cold scan: {}",
+                String::from_utf8_lossy(&cold.stderr)
+            );
+
+            // Mutate the tree (working-tree change at the same sha).
+            mutate(&repo_dir);
+
+            // Incremental re-scan.
+            let inc = winb_run(&repo_dir, &home, &["scan", "."]);
+            assert!(
+                inc.status.success(),
+                "{tag}: incremental scan: {}",
+                String::from_utf8_lossy(&inc.stderr)
+            );
+            let inc_err = String::from_utf8_lossy(&inc.stderr);
+            let (inc_nodes, inc_edges, inc_unres) = winb_graph(&repo_dir);
+
+            // Oracle: a fresh FULL scan of the SAME tree with the fast-path,
+            // the DB, AND the shared fact cache cleared — no reuse/splice.
+            std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
+            std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+            let store = repo_dir.join(".git/apg/facts");
+            let _ = std::fs::remove_dir_all(&store);
+            let full = winb_run(&repo_dir, &home, &["scan", "."]);
+            assert!(
+                full.status.success(),
+                "{tag}: full scan oracle: {}",
+                String::from_utf8_lossy(&full.stderr)
+            );
+            let (full_nodes, full_edges, full_unres) = winb_graph(&repo_dir);
+
+            assert_eq!(
+                inc_nodes, full_nodes,
+                "{tag}: node sets must be exactly equal (incremental vs full)\n{inc_err}"
+            );
+            assert_eq!(
+                inc_edges, full_edges,
+                "{tag}: edge sets must be exactly equal (incremental vs full)\n{inc_err}"
+            );
+            assert_eq!(
+                inc_unres, full_unres,
+                "{tag}: unresolved-target sets must be exactly equal\n{inc_err}"
+            );
+
+            // The incremental path must have taken the target-set hand-off (not
+            // a silent full scan).
+            assert!(
+                inc_err.contains("incremental:"),
+                "{tag}: the incremental verdict must be printed: {inc_err}"
+            );
+
+            // Signature early cutoff: a body-only change does NOT cascade to
+            // dependents; a signature change DOES. `b` depends on `a` and `c` on
+            // `b`, so the cascade marker's presence is a direct observable.
+            let cascaded = inc_err.contains("signature change cascades");
+            match *tag {
+                "body-only-edit" => assert!(
+                    !cascaded,
+                    "{tag}: a body-only change must not cascade: {inc_err}"
+                ),
+                "signature-change" => assert!(
+                    cascaded,
+                    "{tag}: a signature change must cascade: {inc_err}"
+                ),
+                _ => {}
+            }
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+    }
+
+    /// Phase-02 task-19 (int): cross-worktree cache sharing — the reuse half AND
+    /// the exactness half. A cold full scan of a scratch repo records the
+    /// reference graph; a SECOND clean near-identical worktree started from the
+    /// same repo must (a) reuse the shared `<git-common-dir>/apg/facts` cache
+    /// (no cold full frontend run) AND (b) produce a graph exactly equal to the
+    /// full scan (same node set, edge set, unresolved targets). Candidate
+    /// binary only, scratch /tmp repo.
+    #[test]
+    fn acceptance_cross_worktree_cache_sharing_exactness() {
+        let (base, repo_dir) = winb_scratch("xwt", &winb_go_fixture());
+        let home = base.join("home");
+        let _ = winb_run(&repo_dir, &home, &["init", "."]);
+        scratch_commit_all(&repo_dir, "apg init");
+
+        // The cold full scan records the reference graph + the shared cache.
+        let cold = winb_run(&repo_dir, &home, &["scan", "."]);
+        assert!(
+            cold.status.success(),
+            "cold scan: {}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+        let reference = std::fs::read(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+        let store = repo_dir.join(".git/apg/facts");
+        assert!(store.is_dir(), "the shared store must exist after a scan");
+        assert!(
+            store.join("index.json").is_file(),
+            "the shared store must index the per-file fact units"
+        );
+
+        // Start a SECOND clean worktree from the same repo (outside the main
+        // checkout, so main stays clean). The worktree's committed source bytes
+        // are identical to main's, so the relative-path-keyed units are
+        // reusable. Raw git2 only — the candidate binary runs scans, nothing
+        // else, and never against a real project.
+        let wt = base.join("wt2");
+        {
+            let repo = git2::Repository::open(&repo_dir).unwrap();
+            repo.worktree("wt2", &wt, None).unwrap();
+            let wt_repo = git2::Repository::open(&wt).unwrap();
+            wt_repo.set_head("refs/heads/wt2").unwrap();
+            wt_repo
+                .checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+                .unwrap();
+        }
+        // The worktree's own `apg/.trans/` marker (ignored content, so the
+        // version gate + layout discovery resolve here, mirroring `project
+        // start`).
+        std::fs::create_dir_all(wt.join("apg/.trans")).unwrap();
+        assert!(
+            wt.join("apg/config.json").is_file(),
+            "the committed layout config materializes in the worktree"
+        );
+
+        // The fresh worktree's scan reuses the shared store's units.
+        let fresh = winb_run(&wt, &home, &["scan", "."]);
+        assert!(
+            fresh.status.success(),
+            "fresh worktree scan: {}",
+            String::from_utf8_lossy(&fresh.stderr)
+        );
+        let fresh_err = String::from_utf8_lossy(&fresh.stderr);
+
+        // (a) REUSE: the fresh worktree took the incremental/reuse path against
+        // the shared store (not a cold, cacheless full scan).
+        assert!(
+            fresh_err.contains("incremental:") || fresh_err.contains("reusable file"),
+            "the fresh worktree must reuse the shared cache: {fresh_err}"
+        );
+
+        // (b) EXACTNESS: the fresh worktree's graph equals the full scan. File
+        // node FQNs are absolute paths under the checkout root, so normalise
+        // both sides to checkout-relative before comparing; every other record
+        // must be exactly equal as a set.
+        let norm_s = |root: &Path, set: BTreeSet<String>| -> BTreeSet<String> {
+            let root_s = root.to_string_lossy().replace('\\', "/");
+            set.into_iter()
+                .map(|s| s.replace(root_s.as_str(), "<root>"))
+                .collect()
+        };
+        let norm_e = |root: &Path, set: BTreeSet<(String, String)>| -> BTreeSet<(String, String)> {
+            let root_s = root.to_string_lossy().replace('\\', "/");
+            set.into_iter()
+                .map(|(t, e)| (t, e.replace(root_s.as_str(), "<root>")))
+                .collect()
+        };
+        let (f_nodes, f_edges, f_unres) = winb_graph(&wt);
+        let (r_nodes, r_edges, r_unres) = winb_graph(&repo_dir);
+        assert_eq!(
+            norm_s(&wt, f_nodes),
+            norm_s(&repo_dir, r_nodes),
+            "cross-worktree node sets must be equal"
+        );
+        assert_eq!(
+            norm_e(&wt, f_edges),
+            norm_e(&repo_dir, r_edges),
+            "cross-worktree edge sets must be equal"
+        );
+        assert_eq!(
+            f_unres, r_unres,
+            "cross-worktree unresolved sets must be equal"
+        );
+        let _ = &reference;
+
         let _ = std::fs::remove_dir_all(&base);
     }
 }

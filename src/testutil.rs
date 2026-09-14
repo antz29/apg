@@ -630,7 +630,7 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
     std::env::set_current_dir(&trans_dir)?;
     let result = {
         let mut log = crate::Log::new();
-        crate::run_pipeline(records, &[], &[], "go", None, &mut log);
+        crate::run_pipeline(records, &[], &[], "go", None, None, &mut log);
         Ok(())
     };
     std::env::set_current_dir(old)?;

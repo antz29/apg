@@ -26,6 +26,21 @@ pub struct IngestOptions<'a> {
     pub config: Option<&'a ApgConfig>,
 }
 
+/// Reuse/splice inputs for a win-B incremental assembly (phase-02 task-7): the
+/// cached facts for files whose bytes AND resolution inputs are unchanged,
+/// projected onto the current worktree. The target-only re-emitted spool is
+/// ingested normally, then the cached units are spliced in.
+pub struct Reuse<'a> {
+    /// The store the cached units live in (already loaded).
+    pub store: &'a crate::cache::FactStore,
+    /// The cache key the units were stored under.
+    pub cache_key: &'a crate::cache::CacheKey,
+    /// Relative path (`/`-separated) -> `(lang, blob OID)` for units to reuse.
+    pub files: Vec<(String, String, String)>,
+    /// The scan root the cached units are re-based onto (absolute).
+    pub reader_root: String,
+}
+
 pub struct IngestReport {
     /// Number of records skipped due to blacklist filtering.
     pub skipped: u64,
@@ -165,6 +180,156 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node) {
 pub fn ingest(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
+) -> (Graph, IngestReport) {
+    ingest_records(records, opts, false)
+}
+
+/// [`ingest`] with win-B cached-fact reuse (phase-02 task-7).
+///
+/// On the incremental path the caller ingests the **target-only** re-emitted
+/// spool here and passes the unaffected files' cached fact units via `reuse`.
+/// The assembler splices those units into the SAME in-memory graph, so the
+/// result is the full fact-spliced graph — exact node/edge/unresolved sets —
+/// and is the single graph consumed downstream (win B and the phase-3 win-C
+/// splice path both consume it).
+///
+/// Ordering: the spool (real, freshly resolved facts) is ingested first; cached
+/// units are then merged, with a freshly-emitted node at an FQN always winning
+/// over a cached one (the re-emitted target is authoritative). Cached units
+/// provide the unaffected files' nodes and edges.
+pub fn ingest_with_reuse(
+    records: impl IntoIterator<Item = Record>,
+    opts: &IngestOptions,
+    reuse: Option<&Reuse>,
+) -> (Graph, IngestReport) {
+    let (mut graph, report) = ingest_records(records, opts, true);
+    if let Some(reuse) = reuse {
+        splice_cached(&mut graph, reuse);
+        // One finalize after the cached facts land, so an edge to a cached
+        // symbol is not pruned before its endpoint arrives.
+        finalize_graph(&mut graph);
+    }
+    (graph, report)
+}
+
+/// Merges cached per-file fact units into an assembled graph. A fresh node at
+/// an FQN wins; a cached node fills a gap. Cached edges are added only when
+/// both endpoints exist after the merge (the same dangling-edge rule the
+/// ingestor applies), and a cached edge already present is a no-op.
+///
+/// The merge is deliberately THREE passes — every unit's nodes first, then the
+/// module records, then every unit's edges — so a cross-file edge whose
+/// endpoints live in different units is never dropped by unit iteration order.
+/// (A single nodes-then-edges pass per unit would lose a `calls`/`uses` edge
+/// whose target unit had not been visited yet; the win-B fact splice must
+/// preserve the exact full-scan edge set regardless of ordering.)
+fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
+    let mut cached_modules: HashSet<String> = HashSet::new();
+    let mut loaded: Vec<(crate::cache::FileFragment, String)> = Vec::new();
+    for (rel, lang, oid) in &reuse.files {
+        let Some((frag, stored_root)) = load_reusable(reuse.store, lang, rel, oid, reuse.cache_key)
+        else {
+            continue;
+        };
+        loaded.push((frag, stored_root));
+    }
+
+    // Pass 1: every unit's nodes (a fresh node at an FQN wins; a cached node
+    // fills a gap; an UnresolvedTarget placeholder yields to a real node).
+    for (frag, stored_root) in &loaded {
+        let (modules, nodes, _) = frag.project(stored_root, &reuse.reader_root);
+        for m in modules {
+            cached_modules.insert(m);
+        }
+        for (fqn, node) in nodes {
+            match graph.nodes.get(&fqn) {
+                None => {
+                    graph.nodes.insert(fqn, node);
+                }
+                Some(existing) if existing.kind == NodeKind::UnresolvedTarget => {
+                    if node.kind != NodeKind::UnresolvedTarget {
+                        graph.nodes.insert(fqn, node);
+                    }
+                }
+                Some(_) => {
+                    // A freshly re-emitted node (or another cached unit's node)
+                    // already claims the FQN; keep it.
+                }
+            }
+        }
+    }
+
+    // Pass 2: cached module records — a module declared by a reused unit must
+    // exist for its Module→File `contains` edges to survive. Inserted when the
+    // spool did not emit it.
+    for m in cached_modules {
+        if !graph.nodes.contains_key(&m) {
+            insert_node(
+                graph,
+                m.clone(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+            );
+        }
+    }
+
+    // Pass 3: every unit's edges, now that ALL endpoints exist.
+    for (frag, stored_root) in &loaded {
+        let (_, _, edges) = frag.project(stored_root, &reuse.reader_root);
+        for e in edges {
+            if !graph.nodes.contains_key(&e.from) || !graph.nodes.contains_key(&e.to) {
+                continue;
+            }
+            match e.kind.as_str() {
+                "contains" => {
+                    graph.contains.insert((e.from, e.to));
+                }
+                "calls" => {
+                    graph.calls.insert((e.from, e.to));
+                }
+                "uses" => {
+                    graph.uses.insert((e.from, e.to));
+                }
+                "unresolved_call" => {
+                    graph.unresolved_calls.insert((e.from, e.to, e.target_type));
+                }
+                "unresolved_use" => {
+                    graph.unresolved_uses.insert((e.from, e.to));
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Loads a reusable cached unit for `(lang, rel, oid)` under `cache_key`. The
+/// inputs digest is read from the file's current bytes' candidate unit when the
+/// unit's own recorded inputs are needed; the caller keys reuse on the unit's
+/// recorded inputs, so a unit is returned only when it exists for this exact
+/// content+key. Input drift is checked by the store's index entry.
+fn load_reusable(
+    store: &crate::cache::FactStore,
+    lang: &str,
+    rel: &str,
+    oid: &str,
+    cache_key: &crate::cache::CacheKey,
+) -> Option<(crate::cache::FileFragment, String)> {
+    // `candidate` returns the unit regardless of input drift; the caller only
+    // routes here for units it already accepted, so use it directly.
+    store.candidate(lang, rel, oid, cache_key)
+}
+
+/// The core single-pass ingestor: renders canonical FQNs, inserts nodes, and
+/// resolves edges. See [`ingest`] / [`ingest_with_reuse`].
+///
+/// `defer_finalize` suppresses the dangling-edge cleanup / edge validation
+/// (the win-B path runs it once after the cached facts merge).
+fn ingest_records(
+    records: impl IntoIterator<Item = Record>,
+    opts: &IngestOptions,
+    defer_finalize: bool,
 ) -> (Graph, IngestReport) {
     let mut graph = Graph::default();
     let mut skipped = 0u64;
@@ -639,6 +804,7 @@ pub fn ingest(
                     start_line: f.start_line,
                     end_line: f.end_line,
                 }),
+                params: f.params.clone(),
                 category: None,
                 code_type,
                 ..Node::default()
@@ -874,6 +1040,29 @@ pub fn ingest(
     }
     let _ = std::fs::remove_file(&spool);
 
+    // The final prune/validate pass runs HERE for the full path; on the win-B
+    // splice path the deferred cached facts are merged first, then the caller
+    // re-runs `finalize_graph` (phase-02 task-7), so a freshly-emitted edge to a
+    // cached symbol survives.
+    if !defer_finalize {
+        finalize_graph(&mut graph);
+    }
+
+    (
+        graph,
+        IngestReport {
+            skipped,
+            shadowed_modules,
+            shadowed_functions,
+        },
+    )
+}
+
+/// The dangling-edge cleanup and spec/plan/spine edge validation (SPEC R2/R21,
+/// §7). Split out so the win-B splice path can merge cached facts first and
+/// then finalize once (phase-02 task-7) — an edge to a symbol the target-only
+/// spool did not emit must not be pruned before the cached unit lands.
+pub(crate) fn finalize_graph(graph: &mut Graph) {
     // Drop edges whose endpoints do not exist (dangling ids, blacklisted nodes).
     // Containment is a strict tree: the six code pairs (Module→Module,
     // Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function),
@@ -918,33 +1107,33 @@ pub fn ingest(
 
     // Spec/plan edge validation (SPEC R2/R21). Spec records carry no ids, so
     // dangling here means a JSONL referenced a node that isn't in the graph.
-    graph.details = filter_edges(&graph, &graph.details, |g, a, b| {
+    graph.details = filter_edges(graph, &graph.details, |g, a, b| {
         g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Note
     });
-    graph.reviews = filter_edges(&graph, &graph.reviews, |g, a, b| {
+    graph.reviews = filter_edges(graph, &graph.reviews, |g, a, b| {
         g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Feedback
     });
-    graph.depends_on = filter_edges(&graph, &graph.depends_on, |g, a, b| {
+    graph.depends_on = filter_edges(graph, &graph.depends_on, |g, a, b| {
         kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Requirement)
     });
-    graph.gates = filter_edges(&graph, &graph.gates, |g, a, b| {
+    graph.gates = filter_edges(graph, &graph.gates, |g, a, b| {
         kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::PlanPhase)
     });
-    graph.satisfies = filter_edges(&graph, &graph.satisfies, |g, a, b| {
+    graph.satisfies = filter_edges(graph, &graph.satisfies, |g, a, b| {
         kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::Requirement)
     });
 
     // Spine edges (GraphModel-SPEC.md; PHASE_01). `drives` runs Requirement →
     // Group/Entity/Value/Service; `represents` runs User → Entity and Entity →
     // Person (both endpoints must exist and carry the tier kinds).
-    graph.drives = filter_edges(&graph, &graph.drives, |g, a, b| {
+    graph.drives = filter_edges(graph, &graph.drives, |g, a, b| {
         kind_is(g, a, NodeKind::Requirement)
             && matches!(
                 g.nodes[b].kind,
                 NodeKind::Group | NodeKind::Entity | NodeKind::Value | NodeKind::Service
             )
     });
-    graph.represents = filter_edges(&graph, &graph.represents, |g, a, b| {
+    graph.represents = filter_edges(graph, &graph.represents, |g, a, b| {
         (kind_is(g, a, NodeKind::User) && kind_is(g, b, NodeKind::Entity))
             || (kind_is(g, a, NodeKind::Entity) && kind_is(g, b, NodeKind::Person))
     });
@@ -952,13 +1141,13 @@ pub fn ingest(
     // New-model §3.3 spec edges (apg-projects). RealisedBy runs Group/Entity/
     // Service → System/Container/Component; SpecImplementedBy runs System/
     // Container/Component → code; Publishes/Subscribes run Service → Entity.
-    graph.realised_by = filter_edges(&graph, &graph.realised_by, |g, a, b| {
+    graph.realised_by = filter_edges(graph, &graph.realised_by, |g, a, b| {
         matches!(
             g.nodes[a].kind,
             NodeKind::Group | NodeKind::Entity | NodeKind::Service
         ) && is_solution_kind(g, b)
     });
-    graph.spec_implemented_by = filter_edges(&graph, &graph.spec_implemented_by, |g, a, b| {
+    graph.spec_implemented_by = filter_edges(graph, &graph.spec_implemented_by, |g, a, b| {
         is_solution_kind(g, a)
             && g.nodes.contains_key(b)
             && matches!(
@@ -966,21 +1155,12 @@ pub fn ingest(
                 NodeKind::Module | NodeKind::File | NodeKind::Struct | NodeKind::Function
             )
     });
-    graph.publishes = filter_edges(&graph, &graph.publishes, |g, a, b| {
+    graph.publishes = filter_edges(graph, &graph.publishes, |g, a, b| {
         kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
     });
-    graph.subscribes = filter_edges(&graph, &graph.subscribes, |g, a, b| {
+    graph.subscribes = filter_edges(graph, &graph.subscribes, |g, a, b| {
         kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
     });
-
-    (
-        graph,
-        IngestReport {
-            skipped,
-            shadowed_modules,
-            shadowed_functions,
-        },
-    )
 }
 
 /// Whether a `(from, to)` kind pair is a valid `Contains` edge (SPEC §7, R2,
@@ -1848,5 +2028,131 @@ mod tests {
                 .contains(&("/x/a.go".to_string(), "keep.mod.A".to_string()))
         );
         assert!(!graph.contains.is_empty());
+    }
+
+    #[test]
+    fn cached_cross_file_edges_survive_unit_order() {
+        // Regression: the win-B fact splice merges ALL cached nodes before ANY
+        // cached edges, so a cross-file `calls`/`uses` edge whose target unit is
+        // visited later is not dropped. The reuse list is deliberately ordered
+        // so the depending file comes FIRST (its callee lands in a later unit).
+        use crate::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
+        use crate::graph::{Graph, Location, Node, NodeKind};
+        use std::path::PathBuf;
+
+        let dir = std::env::temp_dir().join(format!("apg-splice-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let mut store = FactStore::at(dir.join("facts"));
+
+        // Build a two-file graph: b/b.go.Later calls a/a.go.Leaf.
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "scratch".to_string(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        for (fqn, path, kind) in [
+            ("scratch/a.Leaf", "/w/a/a.go", NodeKind::Function),
+            ("scratch/b.Later", "/w/b/b.go", NodeKind::Function),
+        ] {
+            g.nodes.insert(
+                fqn.to_string(),
+                Node {
+                    kind,
+                    location: Some(Location {
+                        path: PathBuf::from(path),
+                        start: 0,
+                        end: 1,
+                        start_line: 1,
+                        end_line: 1,
+                    }),
+                    code_type: "src".into(),
+                    ..Node::default()
+                },
+            );
+        }
+        for path in ["/w/a/a.go", "/w/b/b.go"] {
+            g.nodes.insert(
+                path.to_string(),
+                Node {
+                    kind: NodeKind::File,
+                    location: Some(Location {
+                        path: PathBuf::from(path),
+                        start: 0,
+                        end: 0,
+                        start_line: 1,
+                        end_line: 1,
+                    }),
+                    ..Node::default()
+                },
+            );
+            g.contains.insert(("scratch".to_string(), path.to_string()));
+        }
+        g.contains
+            .insert(("/w/a/a.go".to_string(), "scratch/a.Leaf".to_string()));
+        g.contains
+            .insert(("/w/b/b.go".to_string(), "scratch/b.Later".to_string()));
+        g.calls
+            .insert(("scratch/b.Later".to_string(), "scratch/a.Leaf".to_string()));
+
+        for (abs, rel) in [("/w/a/a.go", "a/a.go"), ("/w/b/b.go", "b/b.go")] {
+            let frag = FileFragment::from_graph(&g, abs, rel, &format!("oid-{rel}"), "go");
+            store.put(&frag, "/w", &cache_key).unwrap();
+        }
+
+        // The reuse list puts b/b.go (the caller) BEFORE a/a.go (the callee).
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: vec![
+                (
+                    "b/b.go".to_string(),
+                    "go".to_string(),
+                    "oid-b/b.go".to_string(),
+                ),
+                (
+                    "a/a.go".to_string(),
+                    "go".to_string(),
+                    "oid-a/a.go".to_string(),
+                ),
+            ],
+            reader_root: "/fresh".to_string(),
+        };
+
+        let (graph, _) = ingest_with_reuse(
+            Vec::<Record>::new(),
+            &IngestOptions {
+                blacklist: &[],
+                language: "go",
+                config: None,
+            },
+            Some(&reuse),
+        );
+        // All nodes landed and the cross-file call survived (it would be lost if
+        // edges were merged per-unit before every node existed).
+        assert!(
+            graph.nodes.contains_key("/fresh/b/b.go"),
+            "{:?}",
+            graph.nodes
+        );
+        assert!(graph.nodes.contains_key("/fresh/a/a.go"));
+        assert!(graph.nodes.contains_key("scratch/b.Later"));
+        assert!(graph.nodes.contains_key("scratch/a.Leaf"));
+        assert!(
+            graph
+                .calls
+                .contains(&("scratch/b.Later".to_string(), "scratch/a.Leaf".to_string())),
+            "the cached cross-file call must survive unit order: {:?}",
+            graph.calls
+        );
+        assert!(
+            graph
+                .contains
+                .contains(&("scratch".to_string(), "/fresh/b/b.go".to_string()))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

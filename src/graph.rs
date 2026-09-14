@@ -96,6 +96,13 @@ pub struct Node {
     pub kind: NodeKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
+    /// The erased parameter list of a Function node (the declaration surface
+    /// the win-B signature early-cutoff compares). Empty for every other kind
+    /// and for a function with no params. Not part of the DB/export schema — it
+    /// exists so the signature cutoff is exact even when the FQN carries no
+    /// `(params)` suffix (a unique function), and is skipped on serialization.
+    #[serde(skip)]
+    pub params: Vec<String>,
     /// Classification of an UnresolvedTarget: builtin/stdlib/external/
     /// func-value/interface-method/unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,6 +200,7 @@ impl Default for Node {
         Node {
             kind: NodeKind::Module,
             location: None,
+            params: Vec::new(),
             category: None,
             code_type: String::new(),
             title: None,
