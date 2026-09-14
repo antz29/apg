@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.language-root",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.language-id",
+      "properties": {}
     }
   ],
   "in": [
