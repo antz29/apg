@@ -64,6 +64,11 @@
       "kind": "details",
       "target": "solution.component.rust-manifest-discovery",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.language-rooting",
+      "properties": {}
     }
   ],
   "in": []
