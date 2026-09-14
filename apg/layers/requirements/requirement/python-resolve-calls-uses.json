@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-resolve-calls-uses",
+  "body": "The Python frontend must resolve references through `ty`'s project semantics against the full project context: a resolved function or method call becomes a Calls edge (Function to Function); a resolved class base becomes a Uses edge to the base class Struct; a resolved class/constructor reference becomes a Uses edge from the calling Function to the class Struct. Declaration hierarchy is emitted as contains edges (module/file to class to method) like every other frontend, and annotations/params are erased the same way (self/cls dropped). Resolution runs against the full `ty` project (the whole scanned tree plus its environment), never a per-file or reduced mode. AC: a fixture where a.py calls a function defined in b.py yields a Calls edge to b's function; a class subclassing a base in another file yields a Uses edge to the base Struct; a constructor call on a project class yields a Uses edge to that class Struct.",
+  "properties": {
+    "feature": "python-frontend"
+  },
+  "out": [],
+  "in": []
+}
