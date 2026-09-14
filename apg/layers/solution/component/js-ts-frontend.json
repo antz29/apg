@@ -4,7 +4,13 @@
   "name": "js-ts-frontend",
   "body": "The unified JS/TS frontend: the TypeScript compiler API over .ts/.tsx plus .js/.jsx/.mjs/.cjs via allowJs, with CJS/ESM/package.json module resolution, jsx, and JSDoc checking where present. Ported from scanner.mjs to a built scanner.ts. Exact where the checker resolves; unresolved dynamic JavaScript yields UnresolvedTarget. Source is src/tslib/scanner.mjs + src/tslib/package.json, which are not yet in the scanned graph (plain ESM, no build step) — the plan declares the ported source as planned Implementation nodes.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-tsfrontend.scanner.collectFile",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
