@@ -53,6 +53,11 @@
       "kind": "realised-by",
       "source": "domain.entity.language-root",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.language-rooting",
+      "properties": {}
     }
   ]
 }

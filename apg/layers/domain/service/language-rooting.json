@@ -9,6 +9,11 @@
       "kind": "realised-by",
       "target": "solution.component.language-rooting",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.ingestor",
+      "properties": {}
     }
   ],
   "in": [
