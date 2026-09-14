@@ -6,7 +6,13 @@
   "properties": {
     "feature": "language-rooting"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.language-root",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
