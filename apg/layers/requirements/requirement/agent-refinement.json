@@ -46,6 +46,11 @@
       "kind": "contains",
       "target": "requirements.requirement.coordinator-mediated-feedback",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.role-minimal-tool-grants",
+      "properties": {}
     }
   ],
   "in": [
