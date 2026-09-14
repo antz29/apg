@@ -10,6 +10,11 @@
       "kind": "drives",
       "source": "requirements.requirement.language-rooted-module-fqn",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.symbols-inherit-language-root",
+      "properties": {}
     }
   ]
 }
