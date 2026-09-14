@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "rooted-fqn-migration",
+  "body": "The operational re-pointing of authored `implemented-by` targets after the language-rooting FQN change, sequenced: (1) the Language node + rooted FQNs land; (2) the branch re-scan makes the rooted code FQNs real in the code universe (`graph.jsonl`); (3) each `implemented-by` edge is re-pointed via `apg edge rm implemented-by <solution> <old-bare-target>` + `apg edge add implemented-by <solution> <new-rooted-target>` (atomic per edge, both halves rewritten — no orphaned half); (4) validation / the next scan confirms no drift.\n\nNo net-new code: the existing node/edge mutation surface performs the migration. It is realised by solution.container.node-edge-surface (the edge mutations) and solution.container.ingestor (the re-scan that makes the rooted FQNs real), via domain.service.rooted-fqn-migration. Each migration step is durable and auto-committed like any other edge mutation; the plan carries it as an explicit task so the coverage gate can see it.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
