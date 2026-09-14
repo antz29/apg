@@ -78,6 +78,11 @@
       "kind": "details",
       "source": "requirements.note.python-frontend-evidence",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.python-frontend-open-points",
+      "properties": {}
     }
   ]
 }

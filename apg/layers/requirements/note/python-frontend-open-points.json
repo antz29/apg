@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "solution.component.python-frontend",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.python-frontend",
+      "properties": {}
     }
   ],
   "in": []
