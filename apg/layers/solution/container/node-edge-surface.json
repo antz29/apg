@@ -73,6 +73,11 @@
       "kind": "realised-by",
       "source": "domain.service.mutation-surface",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.rooted-fqn-migration",
+      "properties": {}
     }
   ]
 }

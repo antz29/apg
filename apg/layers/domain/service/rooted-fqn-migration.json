@@ -4,7 +4,13 @@
   "name": "rooted-fqn-migration",
   "body": "The operational migration that re-points every authored `implemented-by` edge target to its rooted FQN after the FQN change. Because the code universe shifts (every code FQN gains its language root), the existing targets become DRIFT; the migration replaces each unrooted target with its rooted equivalent through the node/edge mutation surface (`apg edge rm implemented-by …` + `apg edge add implemented-by …`), each replacement atomic across both endpoint files.\n\nIt is a data/layer migration, not net-new behaviour: it uses the existing edge surface, and the branch re-scan is what makes the rooted code FQNs real and surfaces any remaining drift. The sequence is: FQN change lands → branch re-scan → re-point the edges → validation/re-scan confirms no drift.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.container.node-edge-surface",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",
