@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.language-node-kind",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.language-contains-module",
+      "properties": {}
     }
   ],
   "in": [
