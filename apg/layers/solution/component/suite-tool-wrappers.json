@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "suite-tool-wrappers",
-  "body": "The opencode suite tool wrappers in opencode-suite/tools/*.ts, embedded into the binary by `src/main.rs` via `include_str!` and installed by `apg init`. `apg_plan_init.ts` becomes a plan-`add` tool; `apg_plan_add.ts` treats `kind` as optional (= the plan itself); new node/edge update/rm variants; new plan update/rm tools; `apg_plan_link.ts` retired. Because the .ts files are embedded (not scanned code in this graph), coverage anchors to the embedding Rust (`apg.main`).",
+  "body": "The opencode suite tool wrappers in opencode-suite/tools/*.ts, embedded into the binary by `src/main.rs` via `include_str!` and installed by `apg init`. `apg_plan_init.ts` becomes a plan-`add` tool; `apg_plan_add.ts` treats `kind` as optional (= the plan itself); new node/edge update/rm variants; new plan update/rm tools; `apg_plan_link.ts` retired.\n\nThe .ts files ARE scanned code in this graph (File/Function nodes exist, e.g. the shared plumbing in opencode-suite/lib/apg.ts), but their FQNs are rooted at the checkout directory basename — `suite-query-error-guard.opencode-suite.lib.apg.runCypher` in a worktree vs `apg.opencode-suite.lib.apg.runCypher` on main — so a worktree-prefixed FQN is not a stable `implemented-by` anchor: it would be spec drift on the main rebuild (and `apg.layers.validate_code_refs` bails the scan on drift). Coverage therefore anchors to the embedding Rust (`apg.main`).",
   "properties": {},
   "out": [
     {
