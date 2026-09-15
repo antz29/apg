@@ -3039,6 +3039,172 @@ mod tests {
         testutil::remove(&repo);
     }
 
+    /// Unit: an empty target is the core mechanism the CLI `--no-fqn` sentinel
+    /// drives. An empty target CLEARS a task's target to the target-less
+    /// `creates` form (preserving `status`), an omitted target leaves it
+    /// untouched (omission ≠ clear), and a target-less task is legal ONLY for
+    /// `creates`: an empty target with a non-`creates` effective verb is
+    /// refused by `validate_task_verb` with no partial write. The `--no-fqn`
+    /// mapping itself lives in `plan_update` (`Some(String::new())`), so this
+    /// covers the semantics that flag feeds into `plan_update_task_at`.
+    #[test]
+    fn plan_update_task_clears_target_to_targetless() {
+        let (apg_root, repo, _wt) = fixture("clear-target");
+        let mut records = vec![
+            Record::Plan {
+                fqn: "foo/plan".into(),
+                title: "P".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "foo/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "D".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "foo/plan".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+            Record::Task {
+                fqn: "foo/plan.phase-01.task-1".into(),
+                title: "T".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "done".into(),
+                verb: "modifies".into(),
+                target: "github.com/x/y.Store".into(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "foo/plan.phase-01".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            },
+        ];
+        let snapshot = |recs: &[Record]| -> Vec<String> {
+            recs.iter()
+                .map(|r| serde_json::to_string(r).unwrap())
+                .collect()
+        };
+        let task_state = |recs: &[Record]| -> (String, String, String) {
+            recs.iter()
+                .find_map(|r| match r {
+                    Record::Task {
+                        fqn,
+                        verb,
+                        target,
+                        status,
+                        ..
+                    } if fqn == "foo/plan.phase-01.task-1" => {
+                        Some((verb.clone(), target.clone(), status.clone()))
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+
+        // 1. Omission ≠ clear: an update that passes neither `--verb` nor
+        //    `--fqn` leaves the existing real target exactly as it was.
+        let real = (
+            "modifies".to_string(),
+            "github.com/x/y.Store".to_string(),
+            "done".to_string(),
+        );
+        assert_eq!(task_state(&records), real);
+        plan_update_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            task_state(&records),
+            real,
+            "omitting --verb/--fqn must leave the target unchanged, not clear it"
+        );
+
+        // 2. The `--no-fqn` sentinel (an empty target) CLEARS to the
+        //    target-less `creates` form; `status` survives the clear.
+        plan_update_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            None,
+            None,
+            None,
+            Some("creates"),
+            Some(""),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            task_state(&records),
+            ("creates".to_string(), String::new(), "done".to_string()),
+            "an empty target clears the task to the target-less creates form"
+        );
+
+        // 3. Target-less is creates-only. Restore a real target, then empty it
+        //    with a non-creates effective verb — both explicitly and by leaving
+        //    the stored `modifies` in place — and confirm the refusal plus a
+        //    byte-identical record set (no partial write).
+        plan_update_task_at(
+            &apg_root,
+            "foo",
+            &mut records,
+            1,
+            1,
+            None,
+            None,
+            None,
+            Some("modifies"),
+            Some("github.com/x/y.Store"),
+            None,
+        )
+        .unwrap();
+        let before = snapshot(&records);
+        for (label, verb) in [
+            ("explicit modifies", Some("modifies")),
+            ("stored modifies", None),
+        ] {
+            let err = plan_update_task_at(
+                &apg_root,
+                "foo",
+                &mut records,
+                1,
+                1,
+                None,
+                None,
+                None,
+                verb,
+                Some(""),
+                None,
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("requires --fqn"),
+                "{label}: expected the validate_task_verb target-less refusal, got `{err}`"
+            );
+            assert_eq!(
+                snapshot(&records),
+                before,
+                "{label}: a refused clear must leave the record set byte-identical"
+            );
+        }
+
+        testutil::remove(&repo);
+    }
+
     /// Unit: `plan_update_planned_at` repoints the parent `Contains` edge while
     /// preserving every other incident edge.
     #[test]
