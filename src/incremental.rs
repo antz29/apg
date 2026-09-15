@@ -476,6 +476,18 @@ pub fn record(
     Ok(())
 }
 
+/// The C++ source/header extensions the C++ frontend recognizes — the dotless
+/// mirror of `cpplib.is_cpp_ext` (`src/cpplib/main.cpp`). This is the root
+/// crate's single source of truth for C++ membership: [`language_of`]
+/// classifies by it and `main::auto_detect_languages` derives its C++ candidate
+/// list from it. Keeping one list means a changed `.hxx`/`.tpp`/`.ipp`/`.c++`
+/// lands in the C++ target set instead of falling through to `other`, which
+/// would leave it in the impact set but in no per-language list — re-emitted by
+/// neither the frontend nor the cache, silently dropping its facts.
+pub const CPP_EXTENSIONS: &[&str] = &[
+    "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp",
+];
+
 /// The language a checkout-relative path belongs to, by extension — the
 /// per-language granularity key for the fact store.
 pub fn language_of(rel: &str) -> &'static str {
@@ -490,7 +502,7 @@ pub fn language_of(rel: &str) -> &'static str {
         "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" => "ts",
         "cs" | "csx" => "csharp",
         "py" | "pyi" => "python",
-        "cpp" | "cc" | "cxx" | "hpp" | "h" | "hh" => "cpp",
+        _ if CPP_EXTENSIONS.contains(&ext) => "cpp",
         "md" | "markdown" => "md",
         _ => "other",
     }
@@ -556,6 +568,17 @@ mod tests {
         assert_eq!(language_of("x.cs"), "csharp");
         assert_eq!(language_of("x.py"), "python");
         assert_eq!(language_of("x.cpp"), "cpp");
+        // Every extension `cpplib.is_cpp_ext` accepts classifies as cpp, so a
+        // changed header/impl lands in the C++ target list (feedback-99).
+        assert_eq!(language_of("x.cc"), "cpp");
+        assert_eq!(language_of("x.cxx"), "cpp");
+        assert_eq!(language_of("x.c++"), "cpp");
+        assert_eq!(language_of("x.h"), "cpp");
+        assert_eq!(language_of("x.hpp"), "cpp");
+        assert_eq!(language_of("x.hh"), "cpp");
+        assert_eq!(language_of("x.hxx"), "cpp");
+        assert_eq!(language_of("x.tpp"), "cpp");
+        assert_eq!(language_of("x.ipp"), "cpp");
         assert_eq!(language_of("x.md"), "md");
         assert_eq!(language_of("x.unknown"), "other");
     }

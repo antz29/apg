@@ -490,10 +490,18 @@ fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32) -> bool {
 /// to installed frontends. A multi-language repo returns several entries; a
 /// scan then runs each frontend and merges their graphs.
 fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec<String> {
+    // C++ is derived from the root crate's single source of truth
+    // (`incremental::CPP_EXTENSIONS`, dotless) so detection cannot drift from
+    // `language_of`'s classification or the frontend's `is_cpp_ext`.
+    let cpp_dotted: Vec<String> = incremental::CPP_EXTENSIONS
+        .iter()
+        .map(|e| format!(".{e}"))
+        .collect();
+    let cpp_exts: Vec<&str> = cpp_dotted.iter().map(String::as_str).collect();
     let candidates: Vec<(&str, &[&str])> = vec![
         ("java", &[".java"] as &[&str]),
         ("go", &[".go"]),
-        ("cpp", &[".cpp", ".cc", ".cxx", ".hpp", ".h", ".hh"]),
+        ("cpp", cpp_exts.as_slice()),
         ("rust", &[".rs"]),
         ("ts", &[".ts", ".tsx", ".mts", ".cts"]),
         ("csharp", &[".cs", ".csx"]),
@@ -3888,10 +3896,15 @@ mod tests {
         rel.insert("a/a.go".to_string());
         rel.insert("b/b.go".to_string());
         rel.insert("t/thing.ts".to_string());
+        // A `.hxx` change is a C++ target (feedback-99): it must land in the
+        // cpp list, not fall through to `other` and drop its facts.
+        rel.insert("c/thing.hxx".to_string());
         let go = targets_for_language(&rel, Path::new("/root"), "go");
         assert_eq!(go, vec!["/root/a/a.go", "/root/b/b.go"]);
         let ts = targets_for_language(&rel, Path::new("/root"), "ts");
         assert_eq!(ts, vec!["/root/t/thing.ts"]);
+        let cpp = targets_for_language(&rel, Path::new("/root"), "cpp");
+        assert_eq!(cpp, vec!["/root/c/thing.hxx"]);
 
         // The pinned flags are the ONLY channel: a command built with the
         // hand-off carries `--targets`, `--cache-dir`, `--cache-key`.

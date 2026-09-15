@@ -1,4 +1,5 @@
 #include <tree_sitter/api.h>
+#include <unistd.h>
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -124,7 +125,17 @@ static uint32_t line_end_of(const std::string &src, uint32_t end) {
     return end == 0 ? 1 : line_of(src, end - 1);
 }
 
+// When non-null, scanner output is appended here instead of stdout. Used by
+// the --self-test harness to compare a full scan against a target-filtered one
+// in-process. Normally null, so the emitted stream is byte-identical.
+static std::string *captureOut = nullptr;
+
 static void emit_json(const std::string &json) {
+    if (captureOut) {
+        *captureOut += json;
+        *captureOut += '\n';
+        return;
+    }
     printf("%s\n", json.c_str());
 }
 
@@ -319,6 +330,46 @@ static std::string type_node_to_fqn(TSNode node, const std::string &source) {
         TSNode name = ts_node_child_by_field_name(node, "name", 4);
         if (!ts_node_is_null(name)) return node_text(name, source);
         return "";
+    }
+    return "";
+}
+
+// Locates the `base_class_clause` of a class/struct/union specifier, or a null
+// TSNode when the specifier has no base clause. In this vendored tree-sitter-cpp
+// revision the base is an UNNAMED `base_class_clause` child (there is no
+// `base`/`type` field on the specifier or on the clause — both production field
+// maps are empty), so it is found positionally. The clause is either a direct
+// child or one hidden declaration-item level down; both are checked. The class
+// body (`field_declaration_list`) is never descended into, so a nested class's
+// base is not mistaken for the enclosing class's.
+static TSNode base_class_clause_of(TSNode node) {
+    uint32_t count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_child(node, i);
+        const char *ck = ts_node_type(child);
+        if (strcmp(ck, "base_class_clause") == 0) return child;
+        if (strcmp(ck, "field_declaration_list") == 0) continue;
+        uint32_t inner = ts_node_child_count(child);
+        for (uint32_t j = 0; j < inner; j++) {
+            TSNode g = ts_node_child(child, j);
+            if (strcmp(ts_node_type(g), "base_class_clause") == 0) return g;
+        }
+    }
+    return TSNode{};
+}
+
+// The base type as written ("Base", "ns::Base" -> "ns.Base"), or "" when the
+// specifier has no base clause. The clause is
+// `: [public|private|protected] [virtual] TYPE`; the first child that
+// `type_node_to_fqn` recognises is the type, which skips the access and virtual
+// specifiers.
+static std::string base_type_text(TSNode node, const std::string &source) {
+    TSNode clause = base_class_clause_of(node);
+    if (ts_node_is_null(clause)) return "";
+    uint32_t n = ts_node_named_child_count(clause);
+    for (uint32_t i = 0; i < n; i++) {
+        std::string t = type_node_to_fqn(ts_node_named_child(clause, i), source);
+        if (!t.empty()) return t;
     }
     return "";
 }
@@ -530,16 +581,13 @@ static void collect_decls(TSNode node, const std::string &source,
                                  line_of(source, ts_node_start_byte(node)),
                                  line_end_of(source, ts_node_end_byte(node)), {}});
 
-                // Collect base classes
-                TSNode base = ts_node_child_by_field_name(node, "base", 4);
-                if (!ts_node_is_null(base)) {
-                    TSNode base_type = ts_node_child_by_field_name(base, "type", 4);
-                    if (!ts_node_is_null(base_type)) {
-                        std::string base_fqn = type_node_to_fqn(base_type, source);
-                        if (!base_fqn.empty()) {
-                            base_classes.push_back({fqn, base_fqn, path});
-                        }
-                    }
+                // Collect base classes. The base type is stored as written
+                // ("Base") and resolved against the deriving class's enclosing
+                // scope at emission time (see main), once the module-prefixed
+                // struct-FQN set is known — structID is keyed by that FQN.
+                std::string base_fqn = base_type_text(node, source);
+                if (!base_fqn.empty()) {
+                    base_classes.push_back({fqn, base_fqn, path});
                 }
             }
 
@@ -785,14 +833,10 @@ static void resolve_refs(TSNode node, const std::string &source,
         if (!name.empty()) {
             std::string class_fqn = clean_fqn(fqn_in_scope(name, scope));
 
-            // Emit use edges for base classes
-            TSNode base = ts_node_child_by_field_name(node, "base", 4);
-            if (!ts_node_is_null(base)) {
-                TSNode base_type = ts_node_child_by_field_name(base, "type", 4);
-                if (!ts_node_is_null(base_type)) {
-                    emit_use_from_type(base_type, source, scope, fqn_set, class_fqn);
-                }
-            }
+            // Base-class `uses` edges are NOT emitted here: they are emitted
+            // once by the target-set-aware `base_classes` pass in main, which
+            // resolves the base against the class's scope. (This branch used
+            // to read a non-existent `base`/`type` field and never fired.)
 
             scope.push_back(name);
             TSNode body = ts_node_child_by_field_name(node, "body", 4);
@@ -1198,39 +1242,32 @@ static std::unordered_set<std::string> read_target_set(const std::string &path) 
     return out;
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: cppfrontend <dir> [--module <dir>]... [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude...]\n");
-        return 1;
-    }
+// Clears the scanner's global state so scan_root can be driven more than once
+// in-process (the --self-test harness). `idPrefix` is a caller setting and is
+// left untouched.
+static void reset_scan_state() {
+    nextId = 0;
+    structID.clear();
+    funcID.clear();
+    funcIDByFqn.clear();
+    unresolvedSeen.clear();
+    targetFilterActive = false;
+    targetFiles.clear();
+    emittedIds.clear();
+    idFqn.clear();
+    parser = nullptr;
+}
 
-    fs::path root = fs::absolute(argv[1]);
-
-    // Parse --module <dir> pairs, --id-prefix, and the pinned target-set
-    // hand-off flags (phase-02 task-13); remaining args are excludes.
-    std::vector<std::string> module_dirs;
-    std::vector<std::string> excludes;
-    std::string targets_path, cache_dir, cache_key;
-    for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "--module") == 0 && i + 1 < argc) {
-            module_dirs.push_back(argv[i + 1]);
-            i++;
-        } else if (strcmp(argv[i], "--id-prefix") == 0 && i + 1 < argc) {
-            idPrefix = argv[i + 1];
-            i++;
-        } else if (strcmp(argv[i], "--targets") == 0 && i + 1 < argc) {
-            targets_path = argv[i + 1];
-            i++;
-        } else if (strcmp(argv[i], "--cache-dir") == 0 && i + 1 < argc) {
-            cache_dir = argv[i + 1];
-            i++;
-        } else if (strcmp(argv[i], "--cache-key") == 0 && i + 1 < argc) {
-            cache_key = argv[i + 1];
-            i++;
-        } else {
-            excludes.push_back(argv[i]);
-        }
-    }
+// The scanning/emission core, split out of main so the self-test can run it
+// repeatedly and capture its stream. Returns 0 on success, 1 when no modules
+// are found.
+static int scan_root(const fs::path &root_arg,
+    const std::vector<std::string> &module_dirs,
+    const std::string &targets_path,
+    const std::vector<std::string> &excludes)
+{
+    fs::path root = fs::absolute(root_arg);
+    reset_scan_state();
 
     // The target set is an EMISSION filter only. An absent flag or an empty
     // file means NO filter (the byte-identical full-scan path). A non-empty
@@ -1239,13 +1276,6 @@ int main(int argc, char **argv) {
         targetFiles = read_target_set(targets_path);
         targetFilterActive = !targetFiles.empty();
     }
-
-    // C++ is heuristic/per-file, so it needs no native compiler cache: the
-    // pinned per-language artifact location (<cache-dir>/cpp/<cache-key>/) is
-    // unused. The flags are still parsed so they are never mistaken for
-    // excludes.
-    (void)cache_dir;
-    (void)cache_key;
 
     // Discover modules: explicit --module dirs, or top-level dirs under root
     // that contain source files. The root itself is a module if it has sources.
@@ -1489,13 +1519,27 @@ int main(int argc, char **argv) {
         }
     }
 
-    // Emit use edges for base classes
+    // Emit use edges for base classes. bc.base is the base type as written
+    // ("Base" or "ns::Base" -> "ns.Base"); resolve it against the deriving
+    // class's enclosing scope so the lookup hits structID's module-prefixed key
+    // (bare "Base" misses "alpha.Base" — the bug the self-test fixtures). Emits
+    // for the full scan and the target-set filter alike; edge_endpoint renders
+    // the non-target endpoint by canonical FQN.
     for (const auto &bc : base_classes) {
         if (!is_target_file(bc.path)) continue;
-        if (structID.count(bc.derived) && structID.count(bc.base)) {
-            emit_edge("uses", edge_endpoint(bc.derived, structID[bc.derived]),
-                edge_endpoint(bc.base, structID[bc.base]));
+        if (!structID.count(bc.derived)) continue;
+        std::string scope_fqn = parent_of(bc.derived);
+        std::vector<std::string> base_scope;
+        for (size_t p = 0, dot; p < scope_fqn.size(); p = dot + 1) {
+            dot = scope_fqn.find('.', p);
+            if (dot == std::string::npos) dot = scope_fqn.size();
+            base_scope.push_back(scope_fqn.substr(p, dot - p));
+            if (dot == scope_fqn.size()) break;
         }
+        std::string base_fqn = resolve_type_fqn(bc.base, base_scope, decl_fqns);
+        if (!structID.count(base_fqn)) continue;
+        emit_edge("uses", edge_endpoint(bc.derived, structID[bc.derived]),
+            edge_endpoint(base_fqn, structID[base_fqn]));
     }
 
     // Build name map (only methods/functions)
@@ -1532,4 +1576,159 @@ int main(int argc, char **argv) {
     ts_parser_delete(parser);
 
     return 0;
+}
+
+// ── --self-test: the phase-02 task-13 emission-exactness fixture ─────
+//
+// src/cpplib has no test harness of its own (build.rs compiles main.cpp into
+// the cppfrontend binary and nothing else), so this mode embeds a ≥2-file
+// fixture, runs the real scan_root over it three times — no filter, all files
+// as targets, and one file as the target — and asserts the target-set
+// emission contract:
+//   (a) an all-targets run is byte-identical to the no-filter full scan;
+//   (b) a cross-file `calls`/base-class `uses` edge into a NON-target file is
+//       emitted with the ingestor's canonical FQN, not an opaque id, while the
+//       non-target file's own facts are absent;
+//   (c) the cross-file endpoint of an overloaded group carries the ingestor's
+//       `parent.name(params)` rendering (the overload suffix).
+static bool json_has(const std::string &hay, const std::string &needle) {
+    return hay.find(needle) != std::string::npos;
+}
+
+static int run_self_test() {
+    int failures = 0;
+    auto check = [&](bool ok, const char *what) {
+        fprintf(stderr, "%s: %s\n", ok ? "ok  " : "FAIL", what);
+        if (!ok) failures++;
+    };
+
+    fs::path dir = fs::temp_directory_path() /
+        ("cppfrontend_selftest_" + std::to_string((long)getpid()));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir / "alpha", ec);
+
+    auto write_file = [](const fs::path &p, const std::string &body) {
+        std::ofstream out(p, std::ios::binary);
+        out << body;
+    };
+
+    // Non-target file: a base class plus an overloaded free-function group.
+    fs::path base = dir / "alpha" / "base.h";
+    write_file(base,
+        "#pragma once\n"
+        "struct Base {\n"
+        "    int seed;\n"
+        "};\n"
+        "inline int helper(int x) { return x; }\n"
+        "inline int helper(double x) { return (int)x; }\n");
+
+    // Target file: derives from Base and calls the overloaded helper.
+    fs::path mainf = dir / "alpha" / "main.cpp";
+    write_file(mainf,
+        "#include \"base.h\"\n"
+        "struct Derived : public Base {\n"
+        "    int add(int a) { return helper(a); }\n"
+        "};\n");
+
+    fs::path all_targets = dir / "all.txt";
+    write_file(all_targets, base.string() + "\n" + mainf.string() + "\n");
+    fs::path one_target = dir / "one.txt";
+    write_file(one_target, mainf.string() + "\n");
+
+    std::string full, all, filtered;
+    captureOut = &full;
+    scan_root(dir, {}, "", {});
+    captureOut = &all;
+    scan_root(dir, {}, all_targets.string(), {});
+    captureOut = &filtered;
+    scan_root(dir, {}, one_target.string(), {});
+    captureOut = nullptr;
+
+    // (a) all targets ⇒ byte-identical to the no-filter stream.
+    check(full == all, "(a) all-targets stream is byte-identical to the full scan");
+    if (full != all) {
+        size_t n = std::min(full.size(), all.size()), i = 0;
+        while (i < n && full[i] == all[i]) i++;
+        fprintf(stderr, "  first divergence at byte %zu\n", i);
+    }
+
+    // (c) the full scan carries both overload declarations.
+    check(json_has(full, "\"name\":\"helper\",\"params\":[\"int\"]"),
+        "(c) full scan declares helper(int)");
+    check(json_has(full, "\"name\":\"helper\",\"params\":[\"double\"]"),
+        "(c) full scan declares helper(double)");
+
+    // (b)/(c) filtered run: cross-file call into the non-target overload is the
+    // canonical parent.name(params) FQN.
+    check(json_has(filtered, "\"type\":\"calls\"") &&
+            json_has(filtered, "\"to\":\"alpha.helper("),
+        "(b/c) cross-file calls edge into a non-target overload uses the canonical parent.name(params) FQN");
+
+    // (b) filtered run: base-class `uses` into the non-target file is the FQN.
+    check(json_has(filtered, "\"type\":\"uses\"") &&
+            json_has(filtered, "\"to\":\"alpha.Base\""),
+        "(b) base-class uses edge into a non-target file uses the canonical FQN");
+
+    // (b) the non-target file's own facts are not emitted, but the target
+    // file's are.
+    check(!json_has(filtered, "\"name\":\"helper\"") &&
+            !json_has(filtered, "base.h\""),
+        "(b) non-target file's facts are absent from the filtered stream");
+    check(json_has(filtered, "\"name\":\"Derived\"") &&
+            json_has(filtered, "\"name\":\"add\""),
+        "(b) target file's declarations are still emitted");
+
+    fs::remove_all(dir, ec);
+    if (failures == 0) {
+        printf("cppfrontend self-test PASS\n");
+        return 0;
+    }
+    fprintf(stderr, "cppfrontend self-test FAILED (%d)\n", failures);
+    return 1;
+}
+
+int main(int argc, char **argv) {
+    if (argc >= 2 && strcmp(argv[1], "--self-test") == 0) {
+        return run_self_test();
+    }
+    if (argc < 2) {
+        fprintf(stderr, "Usage: cppfrontend <dir> [--module <dir>]... [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude...]\n");
+        return 1;
+    }
+
+    // Parse --module <dir> pairs, --id-prefix, and the pinned target-set
+    // hand-off flags (phase-02 task-13); remaining args are excludes.
+    std::vector<std::string> module_dirs;
+    std::vector<std::string> excludes;
+    std::string targets_path, cache_dir, cache_key;
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--module") == 0 && i + 1 < argc) {
+            module_dirs.push_back(argv[i + 1]);
+            i++;
+        } else if (strcmp(argv[i], "--id-prefix") == 0 && i + 1 < argc) {
+            idPrefix = argv[i + 1];
+            i++;
+        } else if (strcmp(argv[i], "--targets") == 0 && i + 1 < argc) {
+            targets_path = argv[i + 1];
+            i++;
+        } else if (strcmp(argv[i], "--cache-dir") == 0 && i + 1 < argc) {
+            cache_dir = argv[i + 1];
+            i++;
+        } else if (strcmp(argv[i], "--cache-key") == 0 && i + 1 < argc) {
+            cache_key = argv[i + 1];
+            i++;
+        } else {
+            excludes.push_back(argv[i]);
+        }
+    }
+
+    // C++ is heuristic/per-file, so it needs no native compiler cache: the
+    // pinned per-language artifact location (<cache-dir>/cpp/<cache-key>/) is
+    // unused. The flags are still parsed so they are never mistaken for
+    // excludes.
+    (void)cache_dir;
+    (void)cache_key;
+
+    return scan_root(argv[1], module_dirs, targets_path, excludes);
 }

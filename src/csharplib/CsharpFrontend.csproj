@@ -15,4 +15,12 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.12.0" />
   </ItemGroup>
+
+  <!-- The test harness is a separate project under tests/ (run via `dotnet
+       run` with its project path); it must never be compiled into the
+       production scanner (a second entry point). The glob is broad enough to
+       also cover tests/obj/**. -->
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+  </ItemGroup>
 </Project>

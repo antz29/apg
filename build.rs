@@ -38,6 +38,11 @@ fn main() {
     println!("cargo:rerun-if-changed=src/csharplib/CsharpFrontend.csproj");
     println!("cargo:rerun-if-changed=src/csharplib/Program.cs");
 
+    // Re-run when the frontend allowlist changes, so toggling
+    // `APG_BUILD_FRONTENDS` re-stages (and re-tests) the selected frontends
+    // instead of reusing a stale build-script fingerprint.
+    println!("cargo:rerun-if-env-changed=APG_BUILD_FRONTENDS");
+
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let frontends = build_frontends();
     let mut languages: Vec<String> = Vec::new();
@@ -157,6 +162,27 @@ fn main() {
             if link_ok {
                 println!("cargo:rustc-env=APG_FRONTEND_CPP={}", cppfrontend.display());
                 let _ = std::fs::copy(&cppfrontend, stage_dir.join("cppfrontend"));
+
+                // Execute the frontend's own fixture. cpplib has no other test
+                // harness (it is a standalone C++ binary), so the cross-file
+                // filtered-emission self-test is the only thing that exercises
+                // `scan_root`'s target-set path; run it here so `cargo build` /
+                // `cargo test` actually execute it and a regression fails the
+                // aggregate build rather than passing unnoticed. Scoped to the
+                // C++ stage — the other frontend stages are untouched.
+                match Command::new(&cppfrontend).arg("--self-test").output() {
+                    Ok(out) if out.status.success() => {
+                        print!("{}", String::from_utf8_lossy(&out.stdout));
+                    }
+                    Ok(out) => panic!(
+                        "cppfrontend --self-test failed ({}):\n{}\n{}",
+                        out.status,
+                        String::from_utf8_lossy(&out.stdout),
+                        String::from_utf8_lossy(&out.stderr),
+                    ),
+                    Err(e) => panic!("failed to run cppfrontend --self-test: {e}"),
+                }
+
                 languages.push("cpp".into());
             }
         }

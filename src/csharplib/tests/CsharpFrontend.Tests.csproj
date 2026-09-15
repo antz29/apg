@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Gate tests for the phase-02 task-12 targeted (file-granularity) C# scan.
+    A framework-free console harness (the crate has no test framework; this
+    mirrors the sibling Java frontend's CallGraphBuilderTest). It references
+    the production scanner project and drives `Program.Main` / `Scanner.Run`
+    in-process, capturing stdout. Run it with `dotnet run` and this project's
+    path (src/csharplib/tests/CsharpFrontend.Tests.csproj).
+
+    The production project (CsharpFrontend.csproj) excludes this tree from its
+    compile glob, so build.rs's `dotnet publish` of the scanner is unaffected.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>CsharpFrontend.Tests</AssemblyName>
+    <RootNamespace>CsharpFrontend.Tests</RootNamespace>
+    <!-- The production project is a self-contained executable; a
+         framework-dependent project cannot reference it (NETSDK1151). Match it
+         (the SDK infers the current RID). -->
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The production project publishes self-contained/single-file. For the
+         test's ordinary build we only need its framework-dependent assembly, so
+         override those publish-only properties on this reference (NETSDK1151). -->
+    <ProjectReference Include="../CsharpFrontend.csproj">
+      <AdditionalProperties>SelfContained=false;PublishSingleFile=false;PublishReadyToRun=false</AdditionalProperties>
+    </ProjectReference>
+    <!-- Roslyn, used only to obtain the fixture's declared symbols for the
+         direct canonical-form assertions (reflection over Scanner.CanonicalFqn). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" />
+  </ItemGroup>
+</Project>
