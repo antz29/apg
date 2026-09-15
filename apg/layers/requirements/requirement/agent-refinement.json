@@ -56,6 +56,11 @@
       "kind": "contains",
       "target": "requirements.requirement.suite-tools-surface-query-failures",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.suite-tool-followups",
+      "properties": {}
     }
   ],
   "in": [
