@@ -190,6 +190,17 @@ pub struct PipelineInput {
     pub sha: String,
     /// The fact-reuse plan for the win-B assembly (`None` on a full scan).
     pub reuse: Option<ReusePlan>,
+    /// The FINAL phase-2 re-emission target set (checkout-relative): changed
+    /// files ∪ the signature-cascade reverse-dependency closure ∪ overload
+    /// peers. This is the win-C splice's delete scope (phase-03 task-4) and the
+    /// very set that drove the frontend `--targets` hand-off — it is threaded
+    /// through, never re-derived. Empty on a full-scan fallback.
+    pub targets_rel: BTreeSet<String>,
+    /// The code FQNs that disappeared with the delta (the subtraction half of
+    /// the full-universe seam, feedback-92). The splice detaches them even when
+    /// their file path lies outside `targets_rel`. Empty on a full-scan
+    /// fallback.
+    pub removed_fqns: BTreeSet<String>,
 }
 
 /// Prepares the incremental scan: computes the delta + fallbacks, the changed

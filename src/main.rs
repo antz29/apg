@@ -1727,6 +1727,12 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             manifest: incremental.manifest.clone(),
             sha: git_state.sha.clone().unwrap_or_default(),
             reuse: reuse_plan.clone(),
+            // The win-C splice's delete scope and subtraction set are the SAME
+            // phase-2 state that drove the frontend target hand-off: the FINAL
+            // target set (stage-1 ∪ the signature cascade) and the delta's
+            // removed FQNs. Threaded, never re-derived (phase-03 task-4).
+            targets_rel: targets_rel.clone(),
+            removed_fqns: incremental.removed_fqns.clone(),
         })
     };
 
@@ -1865,50 +1871,195 @@ pub(crate) fn run_pipeline(
         }
     }
 
-    let dir = temp_dir();
-    std::fs::create_dir_all(&dir).unwrap();
-    log.ln("[load] writing parquet load files...");
-    load::build_load_files(&graph, &dir).unwrap();
-    log.ln("[load] parquet files written");
+    // `run_pipeline` runs from inside `<apg_root>/.trans` (both `cmd_scan` and
+    // the hermetic test harness chdir there), so the previous/next artifacts
+    // are `<apg_root>/.trans/{db.lbug,graph.jsonl}` (SPEC §6).
+    let apg_root = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| cwd.parent().map(Path::to_path_buf));
 
-    // Defense in depth (phase-03 lifecycle exclusivity): never unlink a DB a
-    // live session holds. `cmd_scan` refuses earlier; this guard catches a
-    // session that started mid-scan before the projected DB is replaced.
-    if let Ok(cwd) = std::env::current_dir()
-        && let Some(apg_root) = cwd.parent()
+    // Defense in depth (phase-03 lifecycle exclusivity): never unlink — or seed
+    // from — a DB a live session holds. `cmd_scan` refuses earlier; this guard
+    // catches a session that started mid-scan before the projected DB is
+    // replaced.
+    if let Some(apg_root) = &apg_root
         && session::live_session(apg_root)
     {
         panic!(
             "refused: a live apg session owns this db.lbug — run `apg session end` before scanning"
         );
     }
-    let _ = std::fs::remove_file("db.lbug");
-    if std::path::Path::new("db.lbug").exists() {
-        panic!(
-            "db.lbug still exists (a previous run is still holding it?) — kill any stray apg/java processes and retry"
-        );
+
+    // ---- DB build dispatch (win C, phase-03 task-4) ------------------------
+    //
+    // On the win-B incremental path the previous `db.lbug` already holds every
+    // unaffected row, so seed a copy of it, apply the phase-2 delta as DML
+    // (`splice`), and publish BOTH artifacts atomically instead of rebuilding
+    // from scratch. The existing full load (remove + create_schema + copy_from
+    // + write_graph_jsonl) stays the correctness reference and runs whenever the
+    // splice is ineligible or fails mid-sequence. `input.reuse` is `Some`
+    // exactly on the incremental path (it is `None` on every correctness
+    // full-scan fallback), and `input.targets_rel`/`removed_fqns` are the SAME
+    // phase-2 sets that drove the frontend target hand-off.
+    let splice_report = match (input, apg_root.as_deref()) {
+        (Some(input), Some(apg_root)) => try_splice_build(&graph, input, apg_root, log),
+        _ => None,
+    };
+    if let Some(report) = splice_report {
+        log.ln(&format!(
+            "[load] splice: {} node(s) upserted, {} deleted, {} rel(s) re-inserted, {} unresolved GC'd, scan row refreshed: {}",
+            report.nodes_upserted,
+            report.nodes_deleted,
+            report.edges_merged,
+            report.unresolved_gc,
+            report.scan_refreshed,
+        ));
+        // NOTE (phase-03 task-7 seam): the splice's export is published
+        // atomically by `splice::publish` above; the full-load path below keeps
+        // the standalone `load::write_graph_jsonl` call site for task-7 to route.
+    } else {
+        let dir = temp_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        log.ln("[load] writing parquet load files...");
+        load::build_load_files(&graph, &dir).unwrap();
+        log.ln("[load] parquet files written");
+
+        let _ = std::fs::remove_file("db.lbug");
+        if std::path::Path::new("db.lbug").exists() {
+            panic!(
+                "db.lbug still exists (a previous run is still holding it?) — kill any stray apg/java processes and retry"
+            );
+        }
+        log.ln("[load] Database::new...");
+        let db = Database::new("db.lbug", Default::default()).unwrap();
+        log.ln("[load] Database::new done");
+        let conn = Connection::new(&db).unwrap();
+        log.ln("[load] create_schema...");
+        load::create_schema(&conn).unwrap();
+        log.ln("[load] schema created");
+        log.ln("[load] copy_from...");
+        load::copy_from(&conn, &dir).unwrap();
+        log.ln("[load] copy_from done");
+
+        log.ln("[load] write_graph_jsonl...");
+        load::write_graph_jsonl(&graph, std::path::Path::new("graph.jsonl")).unwrap();
+        log.ln("[load] graph.jsonl written");
+
+        log.ln("[load] dropping db...");
+        drop(conn);
+        drop(db);
+        log.ln("[load] db dropped");
+        let _ = std::fs::remove_dir_all(&dir);
+        log.ln("[load] temp dir removed");
     }
-    log.ln("[load] Database::new...");
-    let db = Database::new("db.lbug", Default::default()).unwrap();
-    log.ln("[load] Database::new done");
-    let conn = Connection::new(&db).unwrap();
-    log.ln("[load] create_schema...");
-    load::create_schema(&conn).unwrap();
-    log.ln("[load] schema created");
-    log.ln("[load] copy_from...");
-    load::copy_from(&conn, &dir).unwrap();
-    log.ln("[load] copy_from done");
+}
 
-    log.ln("[load] write_graph_jsonl...");
-    load::write_graph_jsonl(&graph, std::path::Path::new("graph.jsonl")).unwrap();
-    log.ln("[load] graph.jsonl written");
+/// The win-C DB-build dispatch (phase-03 task-4): try to seed the working
+/// `db.lbug` from the previous scan and apply the phase-2 delta as DML, then
+/// publish `db.lbug` + `graph.jsonl` atomically (`splice::publish`).
+///
+/// Returns the splice report on success; `None` on any ineligibility or
+/// mid-sequence failure, in which case the caller runs the existing full load
+/// (the correctness reference) and the previous artifacts are left in place.
+/// This function never panics: a failure is a logged fallback.
+///
+/// `graph` is the win-B assembled graph (re-emitted target units PLUS cached
+/// unaffected units) and `input` carries the same phase-2 target/removed sets
+/// that drove the frontend hand-off — the delete scope is never re-derived.
+fn try_splice_build(
+    graph: &graph::Graph,
+    input: &incremental::PipelineInput,
+    apg_root: &Path,
+    log: &mut Log,
+) -> Option<splice::SpliceReport> {
+    // Eligibility: the win-B incremental path (a phase-2 delta/manifest exists)
+    // with a previous DB to seed from. A full-scan fallback must never splice —
+    // it has no target/removed set and its graph is the full universe.
+    input.reuse.as_ref()?;
+    let db = splice::db_path(apg_root);
+    if !db.exists() {
+        log.ln("[load] splice: no previous db.lbug to seed from — full load");
+        return None;
+    }
+    // The seed is a WHOLE-FILE copy, so a previous DB that was not
+    // checkpointed/closed cleanly (a leftover WAL/SHM sidecar) could lose its
+    // unflushed rows in the copy. Fall back to the full load rather than
+    // publish an incomplete database (task-1 checkpoint guard).
+    for suffix in [".wal", ".shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", db.display()));
+        if sidecar.exists() {
+            log.ln(&format!(
+                "[load] splice: previous db.lbug has a {suffix} sidecar (not cleanly closed) — full load"
+            ));
+            return None;
+        }
+    }
+    // The delta refreshes the single Scan row; without the ingested scan_meta
+    // there is nothing to write, so fall back rather than publish a bogus head.
+    let Some(scan) = scan_row_from_graph(graph) else {
+        log.ln("[load] splice: assembled graph carries no Scan row — full load");
+        return None;
+    };
+    // The delete scope is the FINAL phase-2 target set (stage-1 ∪ the signature
+    // cascade), re-based onto this scan root as absolute paths.
+    let targets: BTreeSet<String> = input
+        .targets_rel
+        .iter()
+        .map(|rel| incremental::absolute(&input.scan_root, rel))
+        .collect();
 
-    log.ln("[load] dropping db...");
-    drop(conn);
-    drop(db);
-    log.ln("[load] db dropped");
-    let _ = std::fs::remove_dir_all(&dir);
-    log.ln("[load] temp dir removed");
+    let seeded = match splice::seed(&db) {
+        splice::SeedDecision::Seed(seeded) => seeded,
+        splice::SeedDecision::FullLoad(reason) => {
+            log.ln(&format!("[load] splice: {} — full load", reason.describe()));
+            return None;
+        }
+    };
+
+    let delta = splice::SpliceDelta {
+        graph,
+        targets: &targets,
+        removed_fqns: &input.removed_fqns,
+        scan,
+    };
+    let report = match seeded.apply(&delta) {
+        Ok(report) => report,
+        Err(e) => {
+            // A mid-sequence failure leaves the seeded COPY partially mutated;
+            // discard it and hand the caller to the full load. The previous DB
+            // was only ever read, so it is untouched.
+            log.ln(&format!(
+                "[load] splice: delta application failed ({e:#}) — discarding seed, full load"
+            ));
+            let _ = seeded.discard();
+            return None;
+        }
+    };
+
+    match splice::publish(seeded, graph, &splice::export_path(apg_root)) {
+        Ok(()) => Some(report),
+        Err(e) => {
+            // `publish` rolls both targets back to their previous bytes on a
+            // reported failure, so the full load starts from a clean pair.
+            log.ln(&format!(
+                "[load] splice: publish failed ({e:#}) — falling back to the full load"
+            ));
+            None
+        }
+    }
+}
+
+/// The `ScanRow` the splice refreshes, read from the assembled graph's single
+/// `Scan` node (the ingested `scan_meta`). `None` when the graph carries no
+/// scan_meta, which makes the splice ineligible.
+fn scan_row_from_graph(graph: &graph::Graph) -> Option<splice::ScanRow> {
+    let node = graph.nodes.get(schema::SCAN_HEAD)?;
+    Some(splice::ScanRow {
+        git_sha: node.git_sha.clone(),
+        git_clean: node.git_clean,
+        content_key: node.content_key.clone(),
+        scanned_at: node.scanned_at.clone().unwrap_or_default(),
+    })
 }
 #[cfg(test)]
 mod tests {
@@ -4251,6 +4402,235 @@ mod tests {
             "cross-worktree unresolved sets must be equal"
         );
         let _ = &reference;
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // -----------------------------------------------------------------------
+    // Win-C DB-build dispatch (phase-03 task-4)
+    // -----------------------------------------------------------------------
+
+    /// Builds a real on-disk DB at `path` through the same
+    /// `create_schema + copy_from` full load the scan path uses, so the dispatch
+    /// under test sees a genuine previous database.
+    fn win_c_build_db(path: &Path, graph: &graph::Graph) {
+        let ldir = path.parent().unwrap().join("load");
+        std::fs::create_dir_all(&ldir).unwrap();
+        load::build_load_files(graph, &ldir).unwrap();
+        let db = Database::new(path, SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        load::create_schema(&conn).unwrap();
+        load::copy_from(&conn, &ldir).unwrap();
+        drop(conn);
+        drop(db);
+    }
+
+    /// A previous/next graph for the dispatch fixtures: the module, the target
+    /// file, a struct and one function, plus the single `Scan` head.
+    fn win_c_fixture(abs_file: &str, scan_sha: &str) -> graph::Graph {
+        use crate::graph::{Graph, Location, Node, NodeKind};
+        let located = |kind: NodeKind| Node {
+            kind,
+            location: Some(Location {
+                path: PathBuf::from(abs_file),
+                start: 0,
+                end: 1,
+                start_line: 1,
+                end_line: 1,
+            }),
+            ..Node::default()
+        };
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "mod".to_string(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        g.nodes
+            .insert(abs_file.to_string(), located(NodeKind::File));
+        g.nodes
+            .insert("mod.A".to_string(), located(NodeKind::Struct));
+        g.nodes
+            .insert("mod.A.f".to_string(), located(NodeKind::Function));
+        g.nodes.insert(
+            schema::SCAN_HEAD.to_string(),
+            Node {
+                kind: NodeKind::Scan,
+                git_sha: Some(scan_sha.to_string()),
+                scanned_at: Some(format!("t-{scan_sha}")),
+                ..Node::default()
+            },
+        );
+        g.contains.insert(("mod".to_string(), abs_file.to_string()));
+        g.contains
+            .insert((abs_file.to_string(), "mod.A".to_string()));
+        g.contains
+            .insert(("mod.A".to_string(), "mod.A.f".to_string()));
+        g
+    }
+
+    /// The incremental `PipelineInput` the dispatch fixtures pass: the win-B
+    /// reuse plan (the eligibility marker) plus the phase-2 target set.
+    fn win_c_input(
+        base: &Path,
+        scan_root: &Path,
+        targets_rel: &[&str],
+    ) -> incremental::PipelineInput {
+        use crate::cache::{CacheKey, Manifest, ScanConfigKey};
+        let key = CacheKey::compute(&ScanConfigKey::default());
+        incremental::PipelineInput {
+            store_root: Some(base.join("store")),
+            cache_key: key.clone(),
+            scan_root: scan_root.to_path_buf(),
+            manifest: Manifest::default(),
+            sha: "new".to_string(),
+            reuse: Some(incremental::ReusePlan {
+                store_root: base.join("store"),
+                cache_key: key,
+                files: Vec::new(),
+                reader_root: scan_root.to_string_lossy().into_owned(),
+            }),
+            targets_rel: targets_rel.iter().map(|s| s.to_string()).collect(),
+            removed_fqns: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn splice_dispatch_seeds_applies_and_publishes() {
+        let base = std::env::temp_dir().join(format!("apg-splice-dispatch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let apg_root = base.join("apg");
+        let trans = apg_root.join(specs::TRANS);
+        std::fs::create_dir_all(&trans).unwrap();
+        let abs = base.join("a.go").to_string_lossy().into_owned();
+
+        // The previous scan's DB (full load) — the seed source.
+        let prev = win_c_fixture(&abs, "old");
+        win_c_build_db(&splice::db_path(&apg_root), &prev);
+
+        // The delta graph: a new function in the SAME (target) file and a fresh
+        // Scan head; everything else is reused.
+        let mut next = prev.clone();
+        {
+            use crate::graph::{Location, Node, NodeKind};
+            next.nodes.insert(
+                "mod.A.g".to_string(),
+                Node {
+                    kind: NodeKind::Function,
+                    location: Some(Location {
+                        path: PathBuf::from(&abs),
+                        start: 0,
+                        end: 1,
+                        start_line: 1,
+                        end_line: 1,
+                    }),
+                    ..Node::default()
+                },
+            );
+        }
+        next.nodes.get_mut(schema::SCAN_HEAD).unwrap().git_sha = Some("new".to_string());
+        next.contains
+            .insert(("mod.A".to_string(), "mod.A.g".to_string()));
+
+        let input = win_c_input(&base, &base, &["a.go"]);
+        let report = with_cwd(&trans, || {
+            let mut log = Log::new();
+            try_splice_build(&next, &input, &apg_root, &mut log)
+        })
+        .expect("the incremental dispatch must splice, not fall back");
+        assert!(report.scan_refreshed, "the Scan row must be refreshed");
+        assert!(
+            report.nodes_upserted >= 1,
+            "at least the new function is upserted: {report:?}"
+        );
+
+        // The published DB answers with the new unit, keeps the unaffected one,
+        // and carries the refreshed Scan head.
+        let db = Database::new(splice::db_path(&apg_root), SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        let funcs = emit_json_rows(
+            conn.query("MATCH (f:Function) RETURN f.fqn AS fqn")
+                .unwrap(),
+        );
+        let head = emit_json_rows(
+            conn.query("MATCH (s:Scan) RETURN s.git_sha AS sha")
+                .unwrap(),
+        );
+        drop(conn);
+        drop(db);
+        assert!(
+            funcs.contains("mod.A.g"),
+            "the new function must be published: {funcs}"
+        );
+        assert!(
+            funcs.contains("mod.A.f"),
+            "an unaffected unit must survive: {funcs}"
+        );
+        assert!(
+            head.contains("new"),
+            "the Scan head must be refreshed: {head}"
+        );
+
+        // The export is published in the same atomic swap.
+        let export = std::fs::read_to_string(splice::export_path(&apg_root)).unwrap();
+        assert!(
+            export.contains("mod.A.g"),
+            "graph.jsonl must carry the new unit"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn splice_dispatch_falls_back_when_ineligible() {
+        let base = std::env::temp_dir().join(format!("apg-splice-fallback-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let apg_root = base.join("apg");
+        let trans = apg_root.join(specs::TRANS);
+        std::fs::create_dir_all(&trans).unwrap();
+        let abs = base.join("a.go").to_string_lossy().into_owned();
+        let graph = win_c_fixture(&abs, "new");
+        let input = win_c_input(&base, &base, &["a.go"]);
+        let db = splice::db_path(&apg_root);
+
+        // No previous DB: the dispatch declines and the full load runs.
+        assert!(
+            with_cwd(&trans, || {
+                let mut log = Log::new();
+                try_splice_build(&graph, &input, &apg_root, &mut log)
+            })
+            .is_none(),
+            "a missing previous db.lbug must fall back"
+        );
+
+        // A previous DB with an unclean WAL sidecar: the whole-file copy could
+        // lose unflushed rows, so the dispatch declines.
+        win_c_build_db(&db, &graph);
+        let wal = format!("{}.wal", db.display());
+        std::fs::write(&wal, b"unflushed").unwrap();
+        assert!(
+            with_cwd(&trans, || {
+                let mut log = Log::new();
+                try_splice_build(&graph, &input, &apg_root, &mut log)
+            })
+            .is_none(),
+            "a WAL sidecar on the previous db must fall back"
+        );
+        std::fs::remove_file(&wal).unwrap();
+
+        // A full-scan fallback (no phase-2 delta) never splices.
+        let mut full = win_c_input(&base, &base, &[]);
+        full.reuse = None;
+        assert!(
+            with_cwd(&trans, || {
+                let mut log = Log::new();
+                try_splice_build(&graph, &full, &apg_root, &mut log)
+            })
+            .is_none(),
+            "the full-scan path must never splice"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
