@@ -128,10 +128,14 @@ export function projectOf(fqn: string): string | null {
   return m ? m[1] : null
 }
 
-/** Parses `apg query`'s CSV output (header + rows, quoted fields) into rows. */
+/** Parses `apg query`'s CSV output (header + rows, quoted fields) into rows.
+ *  Guards the result first: a `runCypher` error string (query failure or
+ *  missing DB) throws verbatim from `expectQueryOk` rather than being
+ *  misparsed as data. Calling the parse boundary is therefore sufficient —
+ *  callers cannot forget the guard. */
 export function csvToRows(out: string): string[][] {
   const rows: string[][] = []
-  for (const line of out.split("\n")) {
+  for (const line of expectQueryOk(out).split("\n")) {
     if (line.length === 0) continue
     rows.push(parseCsvLine(line))
   }
