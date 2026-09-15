@@ -150,15 +150,18 @@ fn plan_update_at(
 /// `apg plan update <project> phase <n> [--title …] [--deliverable …]
 /// [--prereq <n>]* [--satisfies <req>]*` /
 /// `apg plan update <project> task <phase> <k> [--title …] [--kind …]
-/// [--tier …] [--verb …] [--fqn …] [--to …]` /
+/// [--tier …] [--verb …] [--fqn …] [--no-fqn] [--to …]` /
 /// `apg plan update <project> planned <fqn> [--kind …] [--name …] [--parent …]`.
 ///
 /// A missing flag leaves that field unchanged: the plan-record arm MERGEs
 /// title/strategy, the phase/task arms update in place (every phase/task and
 /// every edge survives — except the phase's replaced Satisfies/Gates sets),
 /// and the planned arm repoints the parent `Contains` edge. Every arm refuses
-/// an absent target. `apg plan link` is retired: its bridge set-semantics live
-/// here (`phase` + `--satisfies`/`--prereq`).
+/// an absent target. On the task arm `--no-fqn` is the sentinel that clears
+/// the target back to the target-less form (an empty target is legal only for
+/// `--verb creates`); `--fqn` and `--no-fqn` together are refused as
+/// ambiguous. `apg plan link` is retired: its bridge set-semantics live here
+/// (`phase` + `--satisfies`/`--prereq`).
 fn plan_update(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(project) = p.positional.first() else {
@@ -208,8 +211,22 @@ fn plan_update(args: &[String]) -> anyhow::Result<()> {
                 p.positional.get(3).and_then(|s| s.parse::<u32>().ok()),
             ) else {
                 anyhow::bail!(
-                    "usage: apg plan update <project> task <phase> <k> [--title …] [--kind …] [--tier …] [--verb …] [--fqn …] [--to …]"
+                    "usage: apg plan update <project> task <phase> <k> [--title …] [--kind …] [--tier …] [--verb …] [--fqn …] [--no-fqn] [--to …]"
                 );
+            };
+            // `--no-fqn` is the sentinel that CLEARS the target (an empty
+            // target is the target-less `creates` form, which
+            // `validate_task_verb` accepts only for `creates`); an omitted
+            // `--fqn` leaves the target unchanged. Passing both is ambiguous.
+            let target = if p.has("no-fqn") {
+                if p.has("fqn") {
+                    anyhow::bail!(
+                        "--fqn and --no-fqn are mutually exclusive on a task update — pass --fqn <fqn> to set the target, or --no-fqn alone to clear it (with --verb creates)"
+                    );
+                }
+                Some(String::new())
+            } else {
+                p.get("fqn")
             };
             plan_update_task_at(
                 &apg_root,
@@ -221,7 +238,7 @@ fn plan_update(args: &[String]) -> anyhow::Result<()> {
                 p.get("kind").as_deref(),
                 p.get("tier").as_deref(),
                 p.get("verb").as_deref(),
-                p.get("fqn").as_deref(),
+                target.as_deref(),
                 p.get("to").as_deref(),
             )?;
             write_through(&apg_root, project, &records)?;
