@@ -16,15 +16,25 @@ export default tool({
   },
   async execute(args, context) {
     const where = args.project ? ` WHERE p.fqn = ${lit(`${args.project}/plan`)}` : ""
-    const plans = csvToRows(await runCypher(context, `MATCH (p:Plan)${where} RETURN p.fqn, p.title, p.strategy ORDER BY p.fqn`, args.directory))
+    let plans: string[][]
+    let phases: string[][]
+    let sat: string[][]
+    let tasks: string[][]
+    let verbs: string[][]
+    try {
+      plans = csvToRows(await runCypher(context, `MATCH (p:Plan)${where} RETURN p.fqn, p.title, p.strategy ORDER BY p.fqn`, args.directory))
+      phases = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase) RETURN pp.fqn, pp.number, pp.title, pp.deliverable", args.directory))
+      sat = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn", args.directory))
+      tasks = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.status", args.directory))
+      verbs = csvToRows(await runCypher(context, "MATCH (t:Task) RETURN t.fqn, t.verb, t.target", args.directory))
+    } catch (e) {
+      // Surface the verbatim `apg query failed …` message instead of an
+      // opaque crash when the guard rejects a result.
+      return e instanceof Error ? e.message : String(e)
+    }
     if (plans.length <= 1) {
       return "No plans found. Author one with `apg plan add <project> --strategy ...` (or the apg_plan_add tool)."
     }
-
-    const phases = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase) RETURN pp.fqn, pp.number, pp.title, pp.deliverable", args.directory))
-    const sat = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn", args.directory))
-    const tasks = csvToRows(await runCypher(context, "MATCH (pp:PlanPhase)-[:Contains]->(t:Task) RETURN pp.fqn, t.fqn, t.status", args.directory))
-    const verbs = csvToRows(await runCypher(context, "MATCH (t:Task) RETURN t.fqn, t.verb, t.target", args.directory))
 
     const out: string[] = []
     for (const [planFqn, title, strategy] of plans.slice(1)) {
