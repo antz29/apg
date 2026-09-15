@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "/Users/jledrew/apg/apg/.worktrees/suite-tool-followups/opencode-suite/tools/apg_plan_add.ts",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "/Users/jledrew/apg/apg/.worktrees/suite-tool-followups/src/main.rs",
+      "properties": {}
     }
   ],
   "in": [
