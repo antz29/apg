@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.plan_update",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "/Users/jledrew/apg/apg/.worktrees/suite-tool-followups/opencode-suite/tools/apg_plan_add.ts",
+      "properties": {}
     }
   ],
   "in": [
