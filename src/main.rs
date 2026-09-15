@@ -17,6 +17,7 @@ mod review_cmd;
 mod schema;
 mod session;
 mod specs;
+mod splice;
 #[cfg(test)]
 mod testutil;
 mod version_gate;
