@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -28,6 +29,15 @@ struct Decl {
     std::vector<std::string> params;  // method parameter type names (best-effort)
 };
 
+// A class/struct's base-class reference, tagged with the deriving declaration's
+// file so the target-set emission filter (phase-02 task-13) can attribute the
+// `uses` edge to the file that authored it.
+struct BaseRef {
+    std::string derived;
+    std::string base;
+    std::string path;
+};
+
 // ── Global id state (SPEC §3) ────────────────────────────────────────
 //
 // nextId is the monotonic opaque-id counter. idPrefix (`--id-prefix`, default
@@ -48,6 +58,48 @@ static std::unordered_map<std::string, std::string> funcIDByFqn;
 
 // unresolvedSeen deduplicates unresolved node records by fqn.
 static std::unordered_set<std::string> unresolvedSeen;
+
+// ── Target-set emission filter (phase-02 task-13, the pinned hand-off) ──
+//
+// `--targets <file>` carries a UTF-8, newline-delimited list of absolute
+// source-file paths. An absent flag or an empty file means NO filter — the
+// byte-identical full-scan stream. Otherwise only the target files' facts are
+// emitted; the full parse still supplies the resolution context
+// (global.constraint.frontend-full-context: resolve against the full context,
+// filter only emission). Directory modules and namespace module records carry
+// no location and are not part of any per-file fact unit, so — like the Go
+// frontend's module hierarchy — they are emitted verbatim for the whole graph
+// (the ingestor's cached-fact splice relies on the full module set being
+// present). Only the per-file node/edge/unresolved facts are filtered.
+static bool targetFilterActive = false;
+static std::unordered_set<std::string> targetFiles;  // normalized absolute paths
+static std::unordered_set<std::string> emittedIds;   // ids of target-file decls
+// id -> the canonical FQN the ingestor will render for that node (only built
+// under a target set). Used when a cross-file edge endpoint is not emitted.
+static std::unordered_map<std::string, std::string> idFqn;
+
+// Normalizes a path for target-set comparison. Lexical only: both the hand-off
+// and the walked paths are absolute, so no filesystem resolution is needed.
+static std::string normalized_path(const std::string &p) {
+    return fs::path(p).lexically_normal().string();
+}
+
+// True when `path` is in the target set, or when no filter is in force.
+static bool is_target_file(const std::string &path) {
+    if (!targetFilterActive) return true;
+    return targetFiles.count(normalized_path(path)) > 0;
+}
+
+// The endpoint to use for an edge: the opaque id when the target node is part
+// of the emitted (target) set, else the node's canonical FQN. The ingestor
+// resolves a bare FQN against the reused cached unit, so a cross-file edge
+// authored by a target file survives the incremental splice. With no filter in
+// force this is always the id — byte-identical to the full scan.
+static std::string edge_endpoint(const std::string &fqn, const std::string &id) {
+    if (!targetFilterActive || emittedIds.count(id)) return id;
+    auto it = idFqn.find(id);
+    return it != idFqn.end() ? it->second : fqn;
+}
 
 static std::string node_text(TSNode node, const std::string &source) {
     uint32_t start = ts_node_start_byte(node);
@@ -327,7 +379,7 @@ static void emit_use(const std::string &source_fqn, const std::string &target_fq
     std::string sid = node_id(source_fqn);
     auto tit = structID.find(target_fqn);
     if (sid.empty() || tit == structID.end()) return;
-    emit_edge("uses", sid, tit->second);
+    emit_edge("uses", sid, edge_endpoint(target_fqn, tit->second));
 }
 
 static void emit_u_use(const std::string &source_fqn, const std::string &target,
@@ -356,7 +408,7 @@ static void emit_call(const std::string &source_fqn, const std::string &target_f
     if (sid.empty()) return;
     auto it = funcIDByFqn.find(target_fqn);
     if (it != funcIDByFqn.end()) {
-        emit_edge("calls", sid, it->second);
+        emit_edge("calls", sid, edge_endpoint(target_fqn, it->second));
     } else {
         emit_u_call(source_fqn, target_fqn, category_for(target_fqn, false));
     }
@@ -438,7 +490,7 @@ static std::string parent_of(const std::string &fqn) {
 static void collect_decls(TSNode node, const std::string &source,
     std::vector<std::string> &scope, const std::string &path,
     std::vector<Decl> &decls,
-    std::vector<std::pair<std::string, std::string>> &base_classes)
+    std::vector<BaseRef> &base_classes)
 {
     const char *kind = ts_node_type(node);
     if (strcmp(kind, "namespace_definition") == 0) {
@@ -485,7 +537,7 @@ static void collect_decls(TSNode node, const std::string &source,
                     if (!ts_node_is_null(base_type)) {
                         std::string base_fqn = type_node_to_fqn(base_type, source);
                         if (!base_fqn.empty()) {
-                            base_classes.push_back({fqn, base_fqn});
+                            base_classes.push_back({fqn, base_fqn, path});
                         }
                     }
                 }
@@ -1125,17 +1177,40 @@ static std::string read_file(const fs::path &path) {
     return out;
 }
 
+// Reads the pinned `--targets` list (phase-02 task-13): a UTF-8,
+// newline-delimited file of absolute source-file paths, one per line, no
+// header; blank (and whitespace-only) lines are ignored. A missing/unreadable
+// file warns and yields an empty set, which the caller treats as "no filter".
+static std::unordered_set<std::string> read_target_set(const std::string &path) {
+    std::unordered_set<std::string> out;
+    std::ifstream in(path);
+    if (!in) {
+        fprintf(stderr, "Warning: could not read targets %s\n", path.c_str());
+        return out;
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        size_t a = line.find_first_not_of(" \t\r");
+        if (a == std::string::npos) continue;
+        size_t b = line.find_last_not_of(" \t\r");
+        out.insert(normalized_path(line.substr(a, b - a + 1)));
+    }
+    return out;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: cppfrontend <dir> [--module <dir>]... [exclude...]\n");
+        fprintf(stderr, "Usage: cppfrontend <dir> [--module <dir>]... [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude...]\n");
         return 1;
     }
 
     fs::path root = fs::absolute(argv[1]);
 
-    // Parse --module <dir> pairs and --id-prefix; remaining args are excludes.
+    // Parse --module <dir> pairs, --id-prefix, and the pinned target-set
+    // hand-off flags (phase-02 task-13); remaining args are excludes.
     std::vector<std::string> module_dirs;
     std::vector<std::string> excludes;
+    std::string targets_path, cache_dir, cache_key;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--module") == 0 && i + 1 < argc) {
             module_dirs.push_back(argv[i + 1]);
@@ -1143,10 +1218,34 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--id-prefix") == 0 && i + 1 < argc) {
             idPrefix = argv[i + 1];
             i++;
+        } else if (strcmp(argv[i], "--targets") == 0 && i + 1 < argc) {
+            targets_path = argv[i + 1];
+            i++;
+        } else if (strcmp(argv[i], "--cache-dir") == 0 && i + 1 < argc) {
+            cache_dir = argv[i + 1];
+            i++;
+        } else if (strcmp(argv[i], "--cache-key") == 0 && i + 1 < argc) {
+            cache_key = argv[i + 1];
+            i++;
         } else {
             excludes.push_back(argv[i]);
         }
     }
+
+    // The target set is an EMISSION filter only. An absent flag or an empty
+    // file means NO filter (the byte-identical full-scan path). A non-empty
+    // list that matches no walked file selects nothing — never everything.
+    if (!targets_path.empty()) {
+        targetFiles = read_target_set(targets_path);
+        targetFilterActive = !targetFiles.empty();
+    }
+
+    // C++ is heuristic/per-file, so it needs no native compiler cache: the
+    // pinned per-language artifact location (<cache-dir>/cpp/<cache-key>/) is
+    // unused. The flags are still parsed so they are never mistaken for
+    // excludes.
+    (void)cache_dir;
+    (void)cache_key;
 
     // Discover modules: explicit --module dirs, or top-level dirs under root
     // that contain source files. The root itself is a module if it has sources.
@@ -1217,8 +1316,10 @@ int main(int argc, char **argv) {
     size_t total = ast_files.size();
 
     // Emit one file node per scanned file: parent module, 1..line-count
-    // (SPEC §7).
+    // (SPEC §7). Under a target set only the target files' File nodes are
+    // emitted; module records below stay global.
     for (const auto &af : ast_files) {
+        if (!is_target_file(af.path)) continue;
         emit_json(JsonBuilder().field("type", "file").field("path", af.path)
             .field("parent", af.module)
             .field("start_line", (uint32_t)1)
@@ -1229,13 +1330,36 @@ int main(int argc, char **argv) {
     // onto the scope so every FQN is module-prefixed (module.namespace.Class),
     // which keeps FQNs unique across modules.
     std::vector<Decl> all_decls;
-    std::vector<std::pair<std::string, std::string>> base_classes;
+    std::vector<BaseRef> base_classes;
     std::vector<std::string> scope;
 
     for (auto &af : ast_files) {
         scope.clear();
         scope.push_back(af.module);
         collect_decls(ts_tree_root_node(af.tree), af.source, scope, af.path, all_decls, base_classes);
+    }
+
+    // The emission filter's node set: the opaque ids of the decls declared in
+    // target files. A target file's edges may reference those ids directly; any
+    // other endpoint is emitted by canonical FQN (edge_endpoint) for the
+    // ingestor's cached-fact splice. idFqn records every node's rendered FQN so
+    // that fallback matches what a full scan's id would normalize to — including
+    // the ingestor's overload rendering, parent.name(params).
+    if (targetFilterActive) {
+        for (const auto &d : all_decls) {
+            if (is_target_file(d.path)) emittedIds.insert(d.id);
+            idFqn[d.id] = d.fqn;
+        }
+        std::unordered_map<std::string, int> funcGroups;
+        for (const auto &d : all_decls) {
+            if (d.kind == "method") funcGroups[d.parent + "\x01" + d.name]++;
+        }
+        for (const auto &d : all_decls) {
+            if (d.kind != "method") continue;
+            if (funcGroups[d.parent + "\x01" + d.name] > 1) {
+                idFqn[d.id] = d.fqn + "(" + join_params(d.params) + ")";
+            }
+        }
     }
 
     // Sort by FQN
@@ -1317,6 +1441,8 @@ int main(int argc, char **argv) {
 
     // Emit struct/function nodes + contains edges.
     for (const auto &d : all_decls) {
+        // Under a target set, only the target files' declarations are emitted.
+        if (targetFilterActive && !emittedIds.count(d.id)) continue;
         std::string path_str = d.path;
         if (d.kind == "class") {
             JsonBuilder jb;
@@ -1354,15 +1480,21 @@ int main(int argc, char **argv) {
 
         // contains edge: methods and nested types stay directly under their
         // class; top-level classes and free functions are reached through the
-        // file node instead of the module/namespace (SPEC §7).
+        // file node instead of the module/namespace (SPEC §7). A parent class
+        // outside the target set is referenced by canonical FQN so the cached
+        // unit's node resolves it.
         auto it = structID.find(d.parent);
-        if (it != structID.end()) emit_edge("contains", it->second, d.id);
+        if (it != structID.end()) {
+            emit_edge("contains", edge_endpoint(d.parent, it->second), d.id);
+        }
     }
 
     // Emit use edges for base classes
     for (const auto &bc : base_classes) {
-        if (structID.count(bc.first) && structID.count(bc.second)) {
-            emit_edge("uses", structID[bc.first], structID[bc.second]);
+        if (!is_target_file(bc.path)) continue;
+        if (structID.count(bc.derived) && structID.count(bc.base)) {
+            emit_edge("uses", edge_endpoint(bc.derived, structID[bc.derived]),
+                edge_endpoint(bc.base, structID[bc.base]));
         }
     }
 
@@ -1380,10 +1512,14 @@ int main(int argc, char **argv) {
     // first, matching the module-prefixed FQNs.
     size_t scan_done = 0;
     for (auto &af : ast_files) {
-        scope.clear();
-        scope.push_back(af.module);
-        resolve_refs(ts_tree_root_node(af.tree), af.source, scope, decl_fqns, name_map, af.module,
-            "", nullptr, &class_methods);
+        // Only the target files' references are emitted; resolution for them
+        // still runs against the full declaration context built above.
+        if (is_target_file(af.path)) {
+            scope.clear();
+            scope.push_back(af.module);
+            resolve_refs(ts_tree_root_node(af.tree), af.source, scope, decl_fqns, name_map, af.module,
+                "", nullptr, &class_methods);
+        }
         scan_done++;
         fprintf(stderr, "\rScanning: %zu%% (%zu/%zu)", scan_done * 100 / total, scan_done, total);
     }

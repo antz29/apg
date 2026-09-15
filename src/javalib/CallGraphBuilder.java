@@ -43,12 +43,26 @@ public class CallGraphBuilder {
     public static void main(String[] args) throws Exception {
         Path dir = Paths.get(args[0]);
         // `--id-prefix <p>` (default "n") keeps opaque ids unique across
-        // frontends when a scan merges multiple languages.
+        // frontends when a scan merges multiple languages. The three
+        // phase-02 task-11 hand-off flags are appended beside it on the
+        // incremental path (the pinned target-set interface).
         String idPrefix = "n";
         List<String> excludePaths = new ArrayList<>();
+        String targetsPath = null;
+        String cacheDir = null;
+        String cacheKey = null;
         for (int i = 1; i < args.length; i++) {
             if (args[i].equals("--id-prefix") && i + 1 < args.length) {
                 idPrefix = args[i + 1];
+                i++;
+            } else if (args[i].equals("--targets") && i + 1 < args.length) {
+                targetsPath = args[i + 1];
+                i++;
+            } else if (args[i].equals("--cache-dir") && i + 1 < args.length) {
+                cacheDir = args[i + 1];
+                i++;
+            } else if (args[i].equals("--cache-key") && i + 1 < args.length) {
+                cacheKey = args[i + 1];
                 i++;
             } else {
                 excludePaths.add(args[i]);
@@ -66,6 +80,24 @@ public class CallGraphBuilder {
         }
         System.err.println("[" + elapsed() + "] " + files.size() + " .java files");
 
+        // The target set is an EMISSION filter only (phase-02 task-11). An
+        // absent flag or an empty file means NO filter — the byte-identical
+        // full-scan path below. A non-empty list in force selects its packages
+        // for re-emission (a list matching no walked file emits nothing).
+        List<Path> targets = null;
+        if (targetsPath != null) {
+            targets = readTargetList(Paths.get(targetsPath));
+            if (targets.isEmpty()) targets = null;
+        }
+        if (targets == null) {
+            runFullScan(files, prefix);
+        } else {
+            runIncrementalScan(dir, files, targets, prefix, cacheDir, cacheKey);
+        }
+    }
+
+    /** The full-context scan: parse everything, attribute everything, emit everything. */
+    static void runFullScan(List<Path> files, String prefix) throws Exception {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         var fm = compiler.getStandardFileManager(null, null, null);
 
@@ -110,11 +142,394 @@ public class CallGraphBuilder {
         c.flush();
     }
 
+    // ------------------------------------------------------------------
+    // Phase-02 task-11: package-granularity targeted (incremental) scan.
+    //
+    // The target set is an EMISSION filter only: the changed packages are
+    // compiled/attributed from source while the unchanged packages are made
+    // available as BYTECODE on a shared class dir, so javac resolves every
+    // dependency exactly without re-analyzing the unchanged sources from
+    // scratch. Only the target packages' facts are emitted; edges into an
+    // unchanged package are emitted against its canonical FQN, which the
+    // ingestor's cached-fact splice resolves (the unchanged file's unit is
+    // reused, so its node is present).
+    // ------------------------------------------------------------------
+
+    /** Reads the `--targets` list: absolute source paths, one per line, blanks ignored. */
+    static List<Path> readTargetList(Path file) {
+        List<Path> out = new ArrayList<>();
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                String s = line.trim();
+                if (s.isEmpty()) continue;
+                out.add(Paths.get(s).toAbsolutePath().normalize());
+            }
+        } catch (IOException e) {
+            System.err.println("WARNING: could not read targets " + file + ": " + e);
+            return new ArrayList<>();
+        }
+        return out;
+    }
+
+    /** Per-source declaration surface persisted in the class cache. */
+    static final class FileRec {
+        String hash = "";
+        boolean compiled = false;
+        final List<String> structs = new ArrayList<>();
+        final List<String> funcs = new ArrayList<>();
+        final List<String> flats = new ArrayList<>();
+    }
+
+    static void runIncrementalScan(Path dir, List<Path> allFiles, List<Path> targetList,
+            String prefix, String cacheDir, String cacheKey) throws Exception {
+        Path root = dir.toAbsolutePath().normalize();
+
+        // The native artifact lives at <cache-dir>/java/<cache-key>/ (pinned).
+        Path javaRoot = null;
+        if (cacheDir != null && !cacheDir.isEmpty()) {
+            javaRoot = Paths.get(cacheDir, "java");
+            if (cacheKey != null && !cacheKey.isEmpty()) javaRoot = javaRoot.resolve(cacheKey);
+        }
+        boolean persistent = javaRoot != null;
+        Path classesDir;
+        Path surfaceFile;
+        if (persistent) {
+            Files.createDirectories(javaRoot);
+            classesDir = javaRoot.resolve("classes");
+            surfaceFile = javaRoot.resolve("surface.tsv");
+        } else {
+            classesDir = Files.createTempDirectory("apg-java-classes");
+            surfaceFile = null;
+        }
+        Files.createDirectories(classesDir);
+
+        // Caller-provided target paths are absolute; map them onto the walked tree.
+        Map<Path, Path> walked = new LinkedHashMap<>();
+        for (Path f : allFiles) walked.putIfAbsent(f.toAbsolutePath().normalize(), f);
+        Set<Path> requested = new LinkedHashSet<>();
+        for (Path t : targetList) {
+            Path a = t.toAbsolutePath().normalize();
+            if (walked.containsKey(a)) requested.add(a);
+        }
+        if (requested.isEmpty()) {
+            // A non-empty target list that matches no walked file selects
+            // nothing (an explicit filter is in force), never everything.
+            System.err.println("[" + elapsed() + "] targets matched no scanned file; emitting nothing");
+            return;
+        }
+
+        // Package of every file (the re-emission unit for Java). Parsing is
+        // cheap; attribution is the expensive part we keep to the target set.
+        // Phase 02 note: java compilers/file managers carry option state across
+        // tasks in one JVM, so every task gets a fresh compiler + file manager.
+        Map<Path, String> pkgByFile = packageMap(ToolProvider.getSystemJavaCompiler(),
+                new ArrayList<>(walked.keySet()));
+        Set<String> targetPkgs = new HashSet<>();
+        for (Path t : requested) targetPkgs.add(pkgByFile.getOrDefault(t, ""));
+        Set<Path> targetFiles = new LinkedHashSet<>();
+        Set<Path> nonTargetFiles = new LinkedHashSet<>();
+        for (Path f : walked.keySet()) {
+            if (targetPkgs.contains(pkgByFile.getOrDefault(f, ""))) targetFiles.add(f);
+            else nonTargetFiles.add(f);
+        }
+        System.err.println("[" + elapsed() + "] incremental: " + targetFiles.size()
+            + " target file(s) in " + targetPkgs.size() + " package(s); "
+            + nonTargetFiles.size() + " reused from the class cache");
+
+        // Load the compiled-declaration surface persisted from earlier scans.
+        Map<String, FileRec> surface = persistent ? loadSurface(surfaceFile) : new HashMap<>();
+
+        // Drop records (and their bytecode) for files that are now targets or
+        // gone; compile only the non-target files whose cache entry is missing
+        // or stale (content hash changed).
+        List<String> staleRels = new ArrayList<>();
+        for (String rel : surface.keySet()) {
+            if (!nonTargetFiles.contains(root.resolve(rel))) staleRels.add(rel);
+        }
+        for (String rel : staleRels) {
+            FileRec rec = surface.remove(rel);
+            if (rec != null) deleteClasses(classesDir, rec);
+        }
+
+        Map<String, FileRec> clean = new LinkedHashMap<>();
+        List<Path> dirty = new ArrayList<>();
+        for (Path f : nonTargetFiles) {
+            String rel = relOf(root, f);
+            FileRec rec = surface.get(rel);
+            String hash = sha1(f);
+            if (rec != null && rec.compiled && rec.hash.equals(hash) && classesPresent(classesDir, rec)) {
+                clean.put(rel, rec);
+            } else {
+                if (rec != null) deleteClasses(classesDir, rec);
+                dirty.add(f);
+            }
+        }
+
+        List<String> classOpts = new ArrayList<>(List.of(
+                "-classpath", classesDir.toString(),
+                "-d", classesDir.toString()));
+
+        // Compile the dirty unchanged-package sources — plus the target files,
+        // so the class dir stays a complete snapshot the unchanged packages
+        // resolve against (a body-only change leaves them non-target while
+        // their dependents may still reference them) — and collect the
+        // UNCHANGED files' declaration surface. Crashing files are isolated
+        // and dropped, exactly like the full scan.
+        if (!dirty.isEmpty() || !targetFiles.isEmpty()) {
+            if (!dirty.isEmpty()) {
+                System.err.println("[" + elapsed() + "] compiling " + dirty.size()
+                    + " unchanged-package file(s) into " + classesDir);
+            }
+            LinkedHashSet<Path> batch = new LinkedHashSet<>(dirty);
+            batch.addAll(targetFiles);
+            Map<Path, FileRec> fresh = new LinkedHashMap<>();
+            var ccompiler = ToolProvider.getSystemJavaCompiler();
+            var cfm = ccompiler.getStandardFileManager(null, null, null);
+            compileAndCollect(ccompiler, cfm, new ArrayList<>(batch), classOpts, fresh, nonTargetFiles);
+            for (var e : fresh.entrySet()) clean.put(relOf(root, e.getKey()), e.getValue());
+            endProgress();
+        }
+
+        // Build the surface lookup: declared struct FQNs + function keys, with
+        // the ingestor's overload rendering (singleton -> parent.name,
+        // overload -> parent.name(params)).
+        Set<String> surfaceStructs = new HashSet<>();
+        Map<String, List<String>> funcGroups = new LinkedHashMap<>();
+        for (FileRec rec : clean.values()) {
+            surfaceStructs.addAll(rec.structs);
+            for (String k : rec.funcs) {
+                funcGroups.computeIfAbsent(groupKey(k), x -> new ArrayList<>()).add(k);
+            }
+        }
+        Map<String, String> surfaceFuncFqn = new HashMap<>();
+        for (List<String> keys : funcGroups.values()) {
+            for (String k : keys) {
+                surfaceFuncFqn.put(k, keys.size() == 1 ? k.substring(0, k.indexOf('(')) : k);
+            }
+        }
+
+        // Attribute ONLY the target packages, with the unchanged packages on
+        // the classpath: javac resolves deps from bytecode (full context,
+        // exact) but the unchanged sources are not re-analyzed.
+        List<Path> tfiles = new ArrayList<>(targetFiles);
+        int total = tfiles.size();
+        var tcompiler = ToolProvider.getSystemJavaCompiler();
+        var tfm = tcompiler.getStandardFileManager(null, null, null);
+        var task = newTask(tcompiler, tfm, tfiles, List.of("-classpath", classesDir.toString()));
+        var units = new ArrayList<CompilationUnitTree>();
+        for (CompilationUnitTree unit : task.parse()) units.add(unit);
+        if (!tryAnalyze(task, total)) {
+            System.err.println("WARNING: attribution crashed; isolating offending files...");
+            List<Path> crashing = findCrashingFiles(tcompiler, tfm, tfiles,
+                List.of("-classpath", classesDir.toString()));
+            System.err.println();
+            System.err.println("WARNING: excluding " + crashing.size() + " files from attribution: " + crashing);
+            tfiles.removeAll(crashing);
+            task = newTask(tcompiler, tfm, tfiles, List.of("-classpath", classesDir.toString()));
+            units.clear();
+            for (var unit : task.parse()) units.add(unit);
+            tryAnalyze(task, tfiles.size());
+        }
+
+        System.err.println("[" + elapsed() + "] pass 1: assigning ids to declared classes and methods...");
+        var c = new Collector(prefix, true, surfaceStructs, surfaceFuncFqn);
+        c.collectAll(units);
+        System.err.println("[" + elapsed() + "] pass 2: emitting nodes and edges...");
+        c.emitAll(units, total);
+        c.flush();
+
+        // Persist the surface for the next scan (atomic replace).
+        if (persistent) {
+            Map<String, FileRec> out = new LinkedHashMap<>(clean);
+            saveSurface(surfaceFile, out);
+        }
+    }
+
+    /** Parses every file and maps its absolute path to its package name. */
+    static Map<Path, String> packageMap(JavaCompiler compiler, List<Path> files) {
+        Map<Path, String> out = new LinkedHashMap<>();
+        if (files.isEmpty()) return out;
+        var fm = compiler.getStandardFileManager(null, null, null);
+        try {
+            var task = newTask(compiler, fm, files);
+            for (CompilationUnitTree u : task.parse()) {
+                String p = u.getPackageName() == null ? "" : u.getPackageName().toString();
+                out.put(Paths.get(u.getSourceFile().toUri()).toAbsolutePath().normalize(), p);
+            }
+        } catch (Throwable t) {
+            System.err.println("WARNING: package parse failed: " + t);
+            for (Path f : files) out.putIfAbsent(f.toAbsolutePath().normalize(), "");
+        }
+        return out;
+    }
+
+    /**
+     * Compiles a batch of sources into the class dir (bytecode generation must
+     * happen even when an unrelated file has errors, so the error-stop policy
+     * is OFF here), and records the declaration surface of the files in
+     * `collect`. A batch that crashes javac is split (binary isolation) so one
+     * bad file never discards the rest; a single crashing file is dropped,
+     * matching the full scan's behaviour.
+     */
+    static void compileAndCollect(JavaCompiler compiler, StandardJavaFileManager fm,
+            List<Path> files, List<String> opts, Map<Path, FileRec> out,
+            Set<Path> collect) {
+        if (files.isEmpty()) return;
+        try {
+            var task = newTask(compiler, fm, files, opts, false);
+            List<CompilationUnitTree> units = new ArrayList<>();
+            for (var u : task.parse()) units.add(u);
+            for (var u : task.analyze()) {
+                /* drive attribution */
+            }
+            for (var u : units) {
+                Path abs = Paths.get(u.getSourceFile().toUri()).toAbsolutePath().normalize();
+                if (!collect.contains(abs)) continue;
+                var sc = new SurfaceScanner();
+                sc.scan(u, null);
+                FileRec rec = new FileRec();
+                rec.compiled = true;
+                rec.hash = sha1(abs);
+                rec.structs.addAll(sc.structs);
+                rec.funcs.addAll(sc.funcs);
+                rec.flats.addAll(sc.flats);
+                out.put(abs, rec);
+            }
+            // `analyze()` only attributes; bytecode is produced by `generate()`.
+            // (Collect first: desugaring mutates the attributed trees.)
+            for (var g : task.generate()) {
+                /* write the class files */
+            }
+        } catch (Throwable t) {
+            if (files.size() == 1) {
+                System.err.println("  [" + elapsed() + "] dropping un-attributable file: " + files.get(0));
+                return;
+            }
+            int mid = files.size() / 2;
+            compileAndCollect(compiler, fm, new ArrayList<>(files.subList(0, mid)), opts, out, collect);
+            compileAndCollect(compiler, fm, new ArrayList<>(files.subList(mid, files.size())), opts, out, collect);
+        }
+    }
+
+    static String relOf(Path root, Path abs) {
+        try {
+            return root.relativize(abs.toAbsolutePath().normalize()).toString().replace('\\', '/');
+        } catch (Exception e) {
+            return abs.toString();
+        }
+    }
+
+    static String groupKey(String funcKey) {
+        int p = funcKey.indexOf('(');
+        String prefix = p >= 0 ? funcKey.substring(0, p) : funcKey;
+        int d = prefix.lastIndexOf('.');
+        return d >= 0 ? prefix.substring(0, d) + "\u0000" + prefix.substring(d + 1) : prefix;
+    }
+
+    /** SHA-1 hex of a file's bytes (content identity, never mtime). */
+    static String sha1(Path f) {
+        try {
+            var md = java.security.MessageDigest.getInstance("SHA-1");
+            byte[] h = md.digest(Files.readAllBytes(f));
+            StringBuilder sb = new StringBuilder(h.length * 2);
+            for (byte b : h) sb.append(String.format("%02x", b & 0xff));
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    static void deleteClasses(Path classesDir, FileRec rec) {
+        for (String flat : rec.flats) {
+            try {
+                Files.deleteIfExists(classesDir.resolve(flat.replace('.', '/') + ".class"));
+            } catch (IOException e) {
+                /* best effort */
+            }
+        }
+    }
+
+    /** True when a cached record's bytecode is still present in the class dir. */
+    static boolean classesPresent(Path classesDir, FileRec rec) {
+        if (rec.flats.isEmpty()) return true;
+        for (String flat : rec.flats) {
+            if (Files.exists(classesDir.resolve(flat.replace('.', '/') + ".class"))) return true;
+        }
+        return false;
+    }
+
+    /** Loads the persisted `surface.tsv` (path -> declaration surface). */
+    static Map<String, FileRec> loadSurface(Path file) {
+        Map<String, FileRec> out = new LinkedHashMap<>();
+        if (!Files.exists(file)) return out;
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                if (line.isEmpty()) continue;
+                String[] p = line.split("\t", -1);
+                if (p.length < 3) continue;
+                switch (p[0]) {
+                    case "D" -> {
+                        FileRec r = new FileRec();
+                        r.compiled = true;
+                        r.hash = p[2];
+                        out.put(p[1], r);
+                    }
+                    case "S" -> rec(out, p[1]).structs.add(p[2]);
+                    case "F" -> rec(out, p[1]).funcs.add(p[2]);
+                    case "K" -> rec(out, p[1]).flats.add(p[2]);
+                    default -> { }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("WARNING: could not read surface cache: " + e);
+        }
+        return out;
+    }
+
+    static FileRec rec(Map<String, FileRec> m, String path) {
+        return m.computeIfAbsent(path, k -> new FileRec());
+    }
+
+    /** Atomically persists the declaration surface for the next scan. */
+    static void saveSurface(Path file, Map<String, FileRec> surface) {
+        StringBuilder sb = new StringBuilder();
+        for (var e : surface.entrySet()) {
+            FileRec r = e.getValue();
+            if (!r.compiled) continue;
+            sb.append("D\t").append(e.getKey()).append('\t').append(r.hash).append('\n');
+            for (String s : r.structs) sb.append("S\t").append(e.getKey()).append('\t').append(s).append('\n');
+            for (String f : r.funcs) sb.append("F\t").append(e.getKey()).append('\t').append(f).append('\n');
+            for (String k : r.flats) sb.append("K\t").append(e.getKey()).append('\t').append(k).append('\n');
+        }
+        try {
+            Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+            Files.writeString(tmp, sb.toString(), StandardCharsets.UTF_8);
+            try {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (Exception e) {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            System.err.println("WARNING: could not write surface cache: " + e);
+        }
+    }
+
     static JavacTask newTask(JavaCompiler compiler, StandardJavaFileManager fm, List<Path> files) {
-        return (JavacTask) compiler.getTask(null, fm, null,
-                List.of("-proc:none", "-Xlint:none", "-implicit:none",
-                        "-XDshouldStopPolicyIfError=ATTR"),
-                null, fm.getJavaFileObjectsFromPaths(files));
+        return newTask(compiler, fm, files, List.of());
+    }
+
+    static JavacTask newTask(JavaCompiler compiler, StandardJavaFileManager fm, List<Path> files,
+            List<String> extra) {
+        return newTask(compiler, fm, files, extra, true);
+    }
+
+    static JavacTask newTask(JavaCompiler compiler, StandardJavaFileManager fm, List<Path> files,
+            List<String> extra, boolean stopOnError) {
+        List<String> opts = new ArrayList<>(List.of("-proc:none", "-Xlint:none", "-implicit:none"));
+        if (stopOnError) opts.add("-XDshouldStopPolicyIfError=ATTR");
+        opts.addAll(extra);
+        return (JavacTask) compiler.getTask(null, fm, null, opts, null,
+                fm.getJavaFileObjectsFromPaths(files));
     }
 
     /** Source file for a task event (ANALYZE fires per compilation unit). */
@@ -205,6 +620,50 @@ public class CallGraphBuilder {
         if (chunk.isEmpty()) return false;
         try {
             var task = newTask(compiler, fm, chunk);
+            for (var u : task.parse()) {}
+            for (var u : task.analyze()) {}
+            return false;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /** Options-aware crash isolation (the targeted scan's classpath probe). */
+    static List<Path> findCrashingFiles(JavaCompiler compiler, StandardJavaFileManager fm,
+            List<Path> files, List<String> opts) {
+        System.err.println("[" + elapsed() + "] binary-searching " + files.size()
+            + " files; each probe re-parses+re-attributes a chunk (slow)...");
+        List<Path> crashing = new ArrayList<>();
+        findCrashingFiles(compiler, fm, files, 0, files.size(), crashing, opts);
+        return crashing;
+    }
+
+    static void findCrashingFiles(JavaCompiler compiler, StandardJavaFileManager fm,
+            List<Path> files, int lo, int hi, List<Path> out, List<String> opts) {
+        if (lo >= hi) return;
+        if (hi - lo == 1) {
+            System.err.println("  [" + elapsed() + "] crashing file: " + files.get(lo));
+            out.add(files.get(lo));
+            return;
+        }
+        int mid = (lo + hi) / 2;
+        System.err.println("[" + elapsed() + "] probing chunk [" + lo + "," + mid + ") of "
+            + files.size() + " (" + (mid - lo) + " files)...");
+        if (chunkCrashes(compiler, fm, files.subList(lo, mid), opts)) {
+            findCrashingFiles(compiler, fm, files, lo, mid, out, opts);
+        }
+        System.err.println("[" + elapsed() + "] probing chunk [" + mid + "," + hi + ") of "
+            + files.size() + " (" + (hi - mid) + " files)...");
+        if (chunkCrashes(compiler, fm, files.subList(mid, hi), opts)) {
+            findCrashingFiles(compiler, fm, files, mid, hi, out, opts);
+        }
+    }
+
+    static boolean chunkCrashes(JavaCompiler compiler, StandardJavaFileManager fm,
+            List<Path> chunk, List<String> opts) {
+        if (chunk.isEmpty()) return false;
+        try {
+            var task = newTask(compiler, fm, chunk, opts);
             for (var u : task.parse()) {}
             for (var u : task.analyze()) {}
             return false;
@@ -338,6 +797,60 @@ public class CallGraphBuilder {
         return null;
     }
 
+    /**
+     * Collects the declaration surface of one unchanged-package source file:
+     * the struct FQNs it declares (in the same `pkg.Outer.Inner` form the
+     * Collector uses) and the erased function keys `parent.name(params)`.
+     * Derived from the SAME tree walk as the full scan, so the keys — and the
+     * implicit-constructor / synthetic-member behaviour — match exactly.
+     */
+    static class SurfaceScanner extends TreePathScanner<Void, Void> {
+        String pkg = "", cls = "";
+        final List<String> structs = new ArrayList<>();
+        final List<String> funcs = new ArrayList<>();
+        final List<String> flats = new ArrayList<>();
+
+        @Override
+        public Void visitCompilationUnit(CompilationUnitTree cu, Void nil) {
+            pkg = cu.getPackageName() == null ? "" : cu.getPackageName().toString();
+            return super.visitCompilationUnit(cu, nil);
+        }
+
+        @Override
+        public Void visitClass(ClassTree ct, Void nil) {
+            String name = ct.getSimpleName().toString();
+            if (name.isEmpty() || name.equals("<error>")) return super.visitClass(ct, nil);
+            String outer = cls;
+            cls = cls.isEmpty() ? name : cls + "." + name;
+            String fqn = pkg.isEmpty() ? cls : pkg + "." + cls;
+            structs.add(fqn);
+            flats.add((pkg.isEmpty() ? "" : pkg + ".") + cls.replace('.', '$'));
+            Void r = super.visitClass(ct, nil);
+            cls = outer;
+            return r;
+        }
+
+        @Override
+        public Void visitMethod(MethodTree mt, Void nil) {
+            if (insideAnonymousClass()) return super.visitMethod(mt, nil);
+            String name = mt.getName().toString();
+            if (name.equals("<error>")) return super.visitMethod(mt, nil);
+            List<String> params = paramStrings(symOfDecl(mt));
+            String parentFqn = pkg.isEmpty() ? cls : pkg + "." + cls;
+            funcs.add(parentFqn + "." + name + "(" + String.join(",", params) + ")");
+            return super.visitMethod(mt, nil);
+        }
+
+        boolean insideAnonymousClass() {
+            for (TreePath p = getCurrentPath().getParentPath(); p != null; p = p.getParentPath()) {
+                if (p.getLeaf() instanceof ClassTree ct) {
+                    return ct.getSimpleName().length() == 0;
+                }
+            }
+            return false;
+        }
+    }
+
     static class Collector extends TreePathScanner<Void, Void> {
         String pkg = "", cls = "", mtd = "";
         String currentFile = "", sourceText = "";
@@ -359,8 +872,25 @@ public class CallGraphBuilder {
         final Set<String> emittedPkg = new HashSet<>();
         final String idPrefix;
 
+        // Targeted-scan mode (phase-02 task-11): when true, a call/use whose
+        // target is a project symbol NOT in the emitted target packages is
+        // emitted against the target's canonical FQN — the unchanged file's
+        // cached unit supplies the node, so the edge is exact. surfaceStructs /
+        // surfaceFuncFqn are those unchanged packages' declaration surface.
+        final boolean filtered;
+        final Set<String> surfaceStructs;
+        final Map<String, String> surfaceFuncFqn;
+
         Collector(String idPrefix) {
+            this(idPrefix, false, Set.of(), Map.of());
+        }
+
+        Collector(String idPrefix, boolean filtered,
+                Set<String> surfaceStructs, Map<String, String> surfaceFuncFqn) {
             this.idPrefix = idPrefix;
+            this.filtered = filtered;
+            this.surfaceStructs = surfaceStructs;
+            this.surfaceFuncFqn = surfaceFuncFqn;
         }
 
         String newNodeID() {
@@ -651,6 +1181,14 @@ public class CallGraphBuilder {
                         emitEdge("calls", mtd, id);
                         return;
                     }
+                    // Targeted scan: the method belongs to an unchanged
+                    // (non-emitted) project package — emit against its
+                    // canonical FQN so the cached node resolves the edge.
+                    String canon = filtered ? surfaceFuncFqn.get(key) : null;
+                    if (canon != null) {
+                        emitEdge("calls", mtd, canon);
+                        return;
+                    }
                     String fqn = name.equals("<init>") ? parent + ".<init>" : parent + "." + name;
                     unresolved(fqn, categoryOf(parent));
                     emitUnresolvedCall(mtd, fqn);
@@ -659,6 +1197,8 @@ public class CallGraphBuilder {
             }
             if (recvFqn != null && structID.containsKey(recvFqn)) {
                 emitEdge("uses", mtd, structID.get(recvFqn));
+            } else if (recvFqn != null && filtered && surfaceStructs.contains(recvFqn)) {
+                emitEdge("uses", mtd, recvFqn);
             } else {
                 String target = rawName == null ? "?" : rawName;
                 unresolved(target, "unknown");
@@ -679,6 +1219,8 @@ public class CallGraphBuilder {
                 emitEdge("unresolved_use", fromId, raw == null ? "?" : raw);
             } else if (structID.containsKey(tfqn)) {
                 emitEdge("uses", fromId, structID.get(tfqn));
+            } else if (filtered && surfaceStructs.contains(tfqn)) {
+                emitEdge("uses", fromId, tfqn);
             }
         }
 

@@ -1,0 +1,4 @@
+# `go build ./...` from this directory writes the scanner executable here.
+# The real artifact is staged by build.rs via `go build -o <target>/frontends`;
+# never commit the in-tree build output.
+/gofrontend

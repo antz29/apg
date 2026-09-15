@@ -88,9 +88,34 @@ func newNodeID() string {
 
 // structID / funcID map canonical FQNs (parent.name, or parent.init#file for
 // init) to the opaque ids assigned in pass 1, so edge records can reference
-// declarations by id in pass 2.
+// declarations by id in pass 2. They are built over the FULL loaded package
+// set (the full resolution context), never over just the emitted packages: a
+// resolved cross-package reference must still find its target.
 var structID map[string]string
 var funcID map[string]string
+
+// emittedID holds the opaque ids whose declaration node records are actually
+// part of the emitted stream (the target set, or every package when no filter
+// is in force). An edge to a declaration whose id is NOT in this set carries
+// the target's canonical FQN instead of the opaque id, so a reference into a
+// non-emitted (cached) package survives the ingestor's fact splice; see
+// edgeEndpoint.
+var emittedID map[string]bool
+
+// edgeEndpoint resolves the `to` endpoint of a calls/uses edge for a target
+// declaration with canonical FQN `fqn` and opaque `id`: the opaque id when the
+// declaration is part of the emitted stream, else `fqn` itself. The ingestor's
+// cached-fact splice resolves a bare FQN against the reused unit, so a
+// reference authored by an emitted package to a declaration in a non-emitted
+// package is preserved instead of being silently dropped. With no filter in
+// force every declaration is emitted, so this is always `id` — byte-identical
+// to a full scan.
+func edgeEndpoint(fqn, id string) string {
+	if emittedID[id] {
+		return id
+	}
+	return fqn
+}
 
 // unresolvedSeen deduplicates unresolved node records by fqn.
 var unresolvedSeen map[string]bool
@@ -111,24 +136,63 @@ func funcKey(parent, name, file string) string {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: gofrontend <dir> [--module <dir>]... [exclude...]\n")
+		fmt.Fprintf(os.Stderr, "Usage: gofrontend <dir> [--module <dir>]... [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude...]\n")
 		os.Exit(1)
 	}
 	root, _ := filepath.Abs(os.Args[1])
 
-	// Parse --module <dir> pairs and --id-prefix; remaining args are excludes.
+	// Parse --module <dir> pairs, --id-prefix, and the target-set hand-off
+	// flags (phase-02 task-10, the pinned interface); remaining args are
+	// excludes.
 	var moduleDirs []string
 	var excludes []string
+	var targetsPath, cacheDir, cacheKey string
 	args := os.Args[2:]
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--module" && i+1 < len(args) {
+		switch {
+		case args[i] == "--module" && i+1 < len(args):
 			moduleDirs = append(moduleDirs, args[i+1])
 			i++
-		} else if args[i] == "--id-prefix" && i+1 < len(args) {
+		case args[i] == "--id-prefix" && i+1 < len(args):
 			idPrefix = args[i+1]
 			i++
-		} else {
+		case args[i] == "--targets" && i+1 < len(args):
+			targetsPath = args[i+1]
+			i++
+		case args[i] == "--cache-dir" && i+1 < len(args):
+			cacheDir = args[i+1]
+			i++
+		case args[i] == "--cache-key" && i+1 < len(args):
+			cacheKey = args[i+1]
+			i++
+		default:
 			excludes = append(excludes, args[i])
+		}
+	}
+
+	// The native Go build/export cache for this scan lives under the shared
+	// store root: <cache-dir>/go/<cache-key>/ (the pinned per-language artifact
+	// location, phase-02 task-10). Set it BEFORE any `go` subprocess — module
+	// discovery and go/packages both inherit the environment — so unchanged
+	// packages' compiled export data is reused across scans instead of being
+	// re-type-checked from scratch, and the user's default GOCACHE is untouched.
+	if cacheDir != "" {
+		if gc, err := applyGoBuildCache(cacheDir, cacheKey); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not create GOCACHE %s: %v\n", gc, err)
+		}
+	}
+
+	// The target set is an EMISSION filter only. The full module graph below is
+	// still loaded and type-checked so every reference resolves exactly
+	// (global.constraint.frontend-full-context). An absent flag or an empty
+	// file means NO filter (the byte-identical full-scan stream).
+	var targets fileSet
+	if targetsPath != "" {
+		ts, err := readTargetSet(targetsPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not read targets %s: %v\n", targetsPath, err)
+		} else if len(ts) > 0 {
+			targets = ts
 		}
 	}
 
@@ -189,12 +253,50 @@ func main() {
 		return projectPkgs[i].PkgPath < projectPkgs[j].PkgPath
 	})
 
+	// Module records are GLOBAL scaffolding, emitted for every loaded package
+	// regardless of the emission filter: they carry no location and so are not
+	// part of any per-file fact unit (the shared store records units per file),
+	// and a full scan's module set + Module->Module hierarchy must be present
+	// verbatim for the incremental graph to equal a full scan. Only the
+	// per-file declaration/reference facts are filtered.
+	for _, p := range projectPkgs {
+		mod := moduleForPkg(p.PkgPath, mods)
+		if mod == "" {
+			continue
+		}
+		emitPkgHierarchy(p.PkgPath, mod, enc, emittedPkg)
+	}
+
+	emitFacts(projectPkgs, mods, modSet, targets, excludes)
+}
+
+// emitFacts assigns opaque ids over the FULL loaded package set (the full
+// resolution context) and emits the per-file declaration/reference facts for
+// the packages selected by `targets` (`nil` = every package, the byte-identical
+// full-scan stream). The id maps and resolution context are never filtered —
+// only the emitted node/declaration stream is — so a resolved reference from an
+// emitted package to a declaration in a non-emitted package still resolves.
+// Such an edge carries the target's canonical FQN instead of an opaque id
+// (edgeEndpoint), which the ingestor's cached-fact splice resolves against the
+// reused unit.
+func emitFacts(projectPkgs []*packages.Package, mods []moduleInfo, modSet map[string]bool, targets fileSet, excludes []string) {
+	// Package-granularity emission selection (phase-02 task-10): a package is
+	// re-emitted when any of its Go files is in the target set. `nil` means no
+	// filter is in force, so every package is scanned (the full-scan stream).
+	targetPkgs := targetPkgPaths(projectPkgs, targets)
+	selectedPkg := func(p *packages.Package) bool {
+		return targetPkgs == nil || targetPkgs[p.PkgPath]
+	}
+
 	// With Tests:true, go/packages returns test-augmented packages whose
 	// Syntax re-includes non-test files alongside *_test.go files. Count and
 	// scan each source file exactly once by absolute path.
 	seen := map[string]bool{}
 	totalFiles := 0
 	for _, p := range projectPkgs {
+		if !selectedPkg(p) {
+			continue
+		}
 		for _, f := range p.GoFiles {
 			if !seen[f] && !isExcluded(f, excludes) {
 				seen[f] = true
@@ -206,44 +308,47 @@ func main() {
 	scanDone := 0
 	scanned := map[string]bool{}
 
-	for _, p := range projectPkgs {
-		mod := moduleForPkg(p.PkgPath, mods)
-		if mod == "" {
-			continue
-		}
-		emitPkgHierarchy(p.PkgPath, mod, enc, emittedPkg)
-	}
-
-	// Gather project source files (deduped by absolute path).
+	// Pass 1: assign an opaque id to every declared struct and function over the
+	// FULL loaded package set, and record which ids belong to the emitted
+	// stream. A package that is not re-emitted still contributes ids so that an
+	// emitted package's reference to it resolves exactly; its own node records
+	// are simply never written (the cached unit supplies them).
 	type fileScan struct {
 		file     *ast.File
 		filePath string
 		p        *packages.Package
 		decls    []fileDecl
+		emit     bool
 	}
+	structID = map[string]string{}
+	funcID = map[string]string{}
+	emittedID = map[string]bool{}
+	unresolvedSeen = map[string]bool{}
+
 	var scans []fileScan
 	for _, p := range projectPkgs {
+		emit := selectedPkg(p)
 		for fi, file := range p.Syntax {
 			filePath := p.GoFiles[fi]
 			if isExcluded(filePath, excludes) || scanned[filePath] {
 				continue
 			}
 			scanned[filePath] = true
-			scans = append(scans, fileScan{file: file, filePath: filePath, p: p})
+			decls := collectDecls(file, filePath, p)
+			if emit {
+				for _, d := range decls {
+					emittedID[d.id] = true
+				}
+			}
+			scans = append(scans, fileScan{file: file, filePath: filePath, p: p, decls: decls, emit: emit})
 		}
 	}
 
-	// Pass 1: assign an opaque id to every declared struct and function, and
-	// build the fqn->id maps used by edge records.
-	structID = map[string]string{}
-	funcID = map[string]string{}
-	unresolvedSeen = map[string]bool{}
-	for i := range scans {
-		scans[i].decls = collectDecls(scans[i].file, scans[i].filePath, scans[i].p)
-	}
-
-	// Pass 2: emit node records and edge records.
+	// Pass 2: emit node records and edge records for the selected files only.
 	for _, s := range scans {
+		if !s.emit {
+			continue
+		}
 		emitFile(s.file, s.filePath, s.p, s.decls, modSet)
 		// Emit the file node: parent module comes from the package, and the
 		// line count from the token.File (a file ending in a newline counts
@@ -536,7 +641,7 @@ func emitFile(file *ast.File, filePath string, p *packages.Package, decls []file
 			// Methods stay directly under their struct; free functions are
 			// reached through the file node instead of the module.
 			if id, ok := structID[d.parent]; ok {
-				enc.Encode(edgeMsg{Type: "contains", From: id, To: d.id})
+				enc.Encode(edgeMsg{Type: "contains", From: edgeEndpoint(d.parent, id), To: d.id})
 			}
 			if fn, ok := d.astNode.(*ast.FuncDecl); ok && fn.Body != nil {
 				emitBodyEdges(fn.Body, d.id, ti, modSet)
@@ -556,7 +661,7 @@ func emitStructUses(d fileDecl, ti *types.Info, modSet map[string]bool) {
 		if tv, ok := ti.Types[typ]; ok && tv.Type != nil {
 			if fqn := typeFQN(tv.Type, modSet); fqn != "" {
 				if id, ok := structID[fqn]; ok {
-					enc.Encode(edgeMsg{Type: "uses", From: d.id, To: id})
+					enc.Encode(edgeMsg{Type: "uses", From: d.id, To: edgeEndpoint(fqn, id)})
 				}
 			}
 		}
@@ -587,14 +692,14 @@ func emitBodyEdges(body *ast.BlockStmt, sourceID string, ti *types.Info, modSet 
 			switch cls.kind {
 			case "call":
 				if id, ok := funcID[cls.target]; ok {
-					enc.Encode(edgeMsg{Type: "calls", From: sourceID, To: id})
+					enc.Encode(edgeMsg{Type: "calls", From: sourceID, To: edgeEndpoint(cls.target, id)})
 				}
 			case "u_call":
 				emitUnresolved(cls.target, cls.category)
 				enc.Encode(edgeMsg{Type: "unresolved_call", From: sourceID, To: cls.target, TargetType: cls.targetType})
 			case "use":
 				if id, ok := structID[cls.target]; ok {
-					enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: id})
+					enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: edgeEndpoint(cls.target, id)})
 				}
 			case "u_use":
 				emitUnresolved(cls.target, cls.category)
@@ -606,7 +711,7 @@ func emitBodyEdges(body *ast.BlockStmt, sourceID string, ti *types.Info, modSet 
 				if tv, ok := ti.Types[node.Type]; ok && tv.Type != nil {
 					if fqn := typeFQN(tv.Type, modSet); fqn != "" {
 						if id, ok := structID[fqn]; ok {
-							enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: id})
+							enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: edgeEndpoint(fqn, id)})
 						}
 					}
 				} else {
@@ -619,7 +724,7 @@ func emitBodyEdges(body *ast.BlockStmt, sourceID string, ti *types.Info, modSet 
 				if tv, ok := ti.Types[node.Type]; ok && tv.Type != nil {
 					if fqn := typeFQN(tv.Type, modSet); fqn != "" {
 						if id, ok := structID[fqn]; ok {
-							enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: id})
+							enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: edgeEndpoint(fqn, id)})
 						}
 					}
 				} else {
@@ -641,7 +746,7 @@ func emitBodyEdges(body *ast.BlockStmt, sourceID string, ti *types.Info, modSet 
 					if tv, ok := ti.Types[vs.Type]; ok && tv.Type != nil {
 						if fqn := typeFQN(tv.Type, modSet); fqn != "" {
 							if id, ok := structID[fqn]; ok {
-								enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: id})
+								enc.Encode(edgeMsg{Type: "uses", From: sourceID, To: edgeEndpoint(fqn, id)})
 							}
 						}
 					} else {
@@ -1087,6 +1192,83 @@ func isExcluded(path string, excludes []string) bool {
 		}
 	}
 	return false
+}
+
+// --- target-set hand-off (phase-02 task-10, the pinned interface) ---
+
+// fileSet is the set of cleaned absolute source-file paths read from the
+// `--targets` hand-off. An empty/nil set means "no emission filter".
+type fileSet map[string]bool
+
+// readTargetSet reads the pinned `--targets` list: a UTF-8, newline-delimited
+// file of absolute source-file paths, one per line, no header; blank (and
+// whitespace-only) lines are ignored. The caller treats a missing flag or an
+// empty file as "no filter".
+func readTargetSet(path string) (fileSet, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	set := fileSet{}
+	sc := bufio.NewScanner(f)
+	// Source paths can exceed bufio.Scanner's 64 KiB default; give generous
+	// headroom so a long path is never a silent read failure.
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		set[filepath.Clean(line)] = true
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return set, nil
+}
+
+// targetPkgPaths maps the target file set onto PACKAGE granularity: the import
+// path of every package that contains at least one target file. A package is
+// the re-emission unit (its whole file set is re-emitted), so a file shared by
+// the plain and test-augmented package variants selects it once. `nil` means
+// the target set is absent/empty — no filter, every package is emitted.
+func targetPkgPaths(pkgs []*packages.Package, targets fileSet) map[string]bool {
+	if len(targets) == 0 {
+		return nil
+	}
+	sel := map[string]bool{}
+	for _, p := range pkgs {
+		for _, f := range p.GoFiles {
+			if targets[filepath.Clean(f)] {
+				sel[p.PkgPath] = true
+				break
+			}
+		}
+	}
+	return sel
+}
+
+// goBuildCacheDir is the native Go build/export cache for this scan:
+// `<cache-dir>/go/<cache-key>/` — the pinned per-language artifact location.
+func goBuildCacheDir(cacheDir, cacheKey string) string {
+	dir := filepath.Join(cacheDir, "go")
+	if cacheKey != "" {
+		dir = filepath.Join(dir, cacheKey)
+	}
+	return dir
+}
+
+// applyGoBuildCache creates the shared per-scan Go build cache and points
+// GOCACHE at it, returning the directory used. Child `go` processes (module
+// discovery and go/packages) inherit the environment, so unchanged packages'
+// compiled export data is reused across scans.
+func applyGoBuildCache(cacheDir, cacheKey string) (string, error) {
+	dir := goBuildCacheDir(cacheDir, cacheKey)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return dir, err
+	}
+	return dir, os.Setenv("GOCACHE", dir)
 }
 
 func emitPkgHierarchy(pkgFqn, modPath string, enc *json.Encoder, emitted map[string]bool) {
