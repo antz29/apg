@@ -115,6 +115,53 @@ pub fn seed_from_apg_root(apg_root: &Path) -> SeedDecision {
     seed(&db_path(apg_root))
 }
 
+/// The content-identity key recorded in `previous`'s single `Scan` row
+/// (SCAN_HEAD), or `None` when the DB carries no `Scan` row or an empty key (a
+/// pre-hardening DB). This is the identity of the tree the DB was BUILT from —
+/// the seed's own account of itself.
+pub fn recorded_content_key(previous: &Path) -> anyhow::Result<Option<String>> {
+    let db = Database::new(previous, SystemConfig::default().read_only(true))?;
+    let conn = Connection::new(&db)?;
+    let (_, rows) = query_rows(&conn, "MATCH (s:Scan) RETURN s.content_key AS content_key")?;
+    Ok(rows.first().map(|r| cell(r, 0)).filter(|s| !s.is_empty()))
+}
+
+/// The equivalence-guarded seed (feedback-101).
+///
+/// The delta/manifest are **shared** across worktrees
+/// (`<git-common-dir>/apg/facts`) while the seeded DB is **local** to this
+/// worktree. The splice is exact only when the LOCAL seed was built from the
+/// SAME tree content the shared [`crate::delta::ScanRecord`] (and hence the
+/// delta) was derived from. If another worktree (or main) scans in between, the
+/// shared record advances past this worktree's DB: the manifest diff no longer
+/// describes the local DB, an empty/partial target set leaves the stale seeded
+/// rows in place, and the published DB is not a full rebuild — which the next
+/// freshness fast-path then reuses. `content_key` folds the HEAD sha and the
+/// working-tree/index/untracked content, so an equal key means the same tree
+/// content; a mismatch (or a missing key on either side) is ineligible.
+///
+/// `expected` is the shared recorded key (`ScanRecord::content_key`) captured
+/// BEFORE the completed scan rewrites it. The caller runs the existing full
+/// load on any [`SeedFallback`], keeping it the correctness reference.
+pub fn seed_checked(previous: &Path, expected: Option<&str>) -> SeedDecision {
+    if !previous.exists() {
+        return SeedDecision::FullLoad(SeedFallback::MissingPrevious);
+    }
+    let seed_key = match recorded_content_key(previous) {
+        Ok(key) => key,
+        Err(e) => return SeedDecision::FullLoad(SeedFallback::Unreadable(e.to_string())),
+    };
+    // A missing key on either side cannot be verified as equivalent.
+    let current = matches!((seed_key.as_deref(), expected), (Some(s), Some(r)) if s == r);
+    if !current {
+        return SeedDecision::FullLoad(SeedFallback::StaleSeed {
+            seed: seed_key.unwrap_or_else(|| "(none)".to_string()),
+            recorded: expected.unwrap_or("(none)").to_string(),
+        });
+    }
+    seed(previous)
+}
+
 /// Opens `previous` read-only and compares its structural fingerprint to this
 /// binary's `create_schema`. A read failure or a fingerprint mismatch is the
 /// invalidation. No temp file is created on this path.
@@ -368,6 +415,13 @@ pub enum SeedFallback {
     /// The previous DB opened but its schema differs from this binary's
     /// `create_schema` — a schema/version mismatch. Carries a table summary.
     IncompatibleSchema(String),
+    /// The previous DB was built from a **different tree** than the shared scan
+    /// record the delta was derived from — another worktree (or main) scanned
+    /// in between, so the shared manifest no longer describes this LOCAL DB.
+    /// Seeding it and applying the delta would publish a DB that is not a full
+    /// rebuild, so the caller runs the full load. Carries the seed's recorded
+    /// content-identity key and the expected (shared) one (feedback-101).
+    StaleSeed { seed: String, recorded: String },
     /// The whole-file copy succeeded but the copied DB could not be opened.
     SeededCopyUnreadable(String),
 }
@@ -383,6 +437,9 @@ impl SeedFallback {
             SeedFallback::IncompatibleSchema(d) => {
                 format!("previous db.lbug schema is incompatible: {d}")
             }
+            SeedFallback::StaleSeed { seed, recorded } => format!(
+                "previous db.lbug was built from content {seed} but the shared scan record is {recorded} (another worktree scanned) — full load"
+            ),
             SeedFallback::SeededCopyUnreadable(e) => {
                 format!("seeded db.lbug copy could not be opened: {e}")
             }
@@ -2057,6 +2114,119 @@ mod tests {
         let temp = seeded.temp_path.clone();
         drop(seeded);
         std::fs::remove_file(&temp).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// feedback-101: the splice seeds the LOCAL `db.lbug` while the
+    /// manifest/delta live in the SHARED store (`<git-common-dir>/apg/facts`).
+    /// When another worktree scans in between, the shared `scan.json`/manifest
+    /// advances past this worktree's DB; the empty-target case then upserts no
+    /// code unit and the stale seeded rows survive — the published DB is NOT a
+    /// full rebuild, and the next freshness fast-path reuses it. The
+    /// equivalence-guarded seed must refuse such a DB and hand the caller to the
+    /// full load.
+    #[test]
+    fn stale_local_seed_is_refused_when_another_worktree_advanced_the_store() {
+        use crate::cache::{CacheKey, Manifest, ScanConfigKey};
+        use crate::delta::ScanRecord;
+
+        let dir = scratch("stale-seed");
+        let prev_path = dir.join("db.lbug");
+        let a = "/x/a.go".to_string();
+        let b = "/x/b.go".to_string();
+        let c = "/x/c.go".to_string();
+
+        // This worktree's LOCAL DB: built by its last scan at content "oldkey".
+        build_db(&prev_path, &previous_graph(&a, &b, &c));
+
+        // The ASSEMBLED graph for this worktree's CURRENT tree, and its full
+        // rebuild (the same graph loaded whole) — the correctness reference.
+        let assembled = assembled_graph(&a, &b);
+        let expected_path = dir.join("expected.lbug");
+        build_db(&expected_path, &assembled);
+        let expected = published_snapshot(&expected_path);
+
+        // Another worktree (B) scanned in between. B's tree content equals this
+        // worktree's current tree, so the SHARED scan record carries the current
+        // key ("newkey") and the shared-manifest diff against the current tree
+        // is EMPTY — the feedback's empty-target case.
+        let store = dir.join("facts");
+        std::fs::create_dir_all(&store).unwrap();
+        let key = CacheKey::compute(&ScanConfigKey::default());
+        ScanRecord {
+            sha: "newsha".into(),
+            cache_key: key,
+            manifest: Manifest::default(),
+            content_key: Some("newkey".into()),
+        }
+        .save(&store)
+        .unwrap();
+        let recorded = ScanRecord::load(&store).unwrap();
+
+        // The unguarded splice — the pre-fix behaviour — applies the
+        // empty-target delta: no code unit is upserted, so the stale seeded
+        // rows survive and the export is the current full tree. The DB therefore
+        // DIVERGES from a full rebuild: exactly the bug this guard prevents.
+        {
+            let seeded = match seed(&prev_path) {
+                SeedDecision::Seed(s) => s,
+                SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+            };
+            let targets: BTreeSet<String> = BTreeSet::new();
+            let removed: BTreeSet<String> = BTreeSet::new();
+            seeded
+                .apply(&SpliceDelta {
+                    graph: &assembled,
+                    targets: &targets,
+                    removed_fqns: &removed,
+                    scan: ScanRow {
+                        git_sha: Some("newsha".into()),
+                        git_clean: Some(true),
+                        content_key: Some("newkey".into()),
+                        scanned_at: "2026-01-02T00:00:00Z".into(),
+                    },
+                })
+                .unwrap();
+            assert_ne!(
+                code_snapshot(&seeded.db),
+                expected,
+                "an empty-target splice of a stale seed must diverge from a full rebuild"
+            );
+            let temp = seeded.temp_path.clone();
+            drop(seeded);
+            std::fs::remove_file(&temp).ok();
+        }
+
+        // The fix: the shared recorded key ("newkey") does not match the local
+        // seed's own key ("oldkey"), so the splice is REFUSED — the caller runs
+        // the full load, which is the correctness reference.
+        match seed_checked(&prev_path, recorded.content_key.as_deref()) {
+            SeedDecision::FullLoad(SeedFallback::StaleSeed { seed, recorded }) => {
+                assert_eq!(seed, "oldkey");
+                assert_eq!(recorded, "newkey");
+            }
+            SeedDecision::FullLoad(other) => {
+                panic!("expected StaleSeed, got: {}", other.describe())
+            }
+            SeedDecision::Seed(_) => panic!("a stale local seed must never seed"),
+        }
+
+        // The common single-worktree case still seeds: the shared recorded key
+        // IS the local DB's own key.
+        match seed_checked(&prev_path, Some("oldkey")) {
+            SeedDecision::Seed(s) => s.discard().unwrap(),
+            SeedDecision::FullLoad(f) => {
+                panic!("a current local seed must still splice: {}", f.describe())
+            }
+        }
+
+        // A missing key on either side is ineligible — equivalence cannot be
+        // verified.
+        assert!(matches!(
+            seed_checked(&prev_path, None),
+            SeedDecision::FullLoad(SeedFallback::StaleSeed { .. })
+        ));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

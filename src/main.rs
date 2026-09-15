@@ -1814,6 +1814,10 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             // removed FQNs. Threaded, never re-derived (phase-03 task-4).
             targets_rel: targets_rel.clone(),
             removed_fqns: incremental.removed_fqns.clone(),
+            // The shared recorded content identity the delta was derived from,
+            // captured before the completed scan rewrote `scan.json` — the
+            // splice's equivalence guard (feedback-101).
+            recorded_content_key: incremental.recorded_content_key.clone(),
         })
     };
 
@@ -2047,6 +2051,13 @@ pub(crate) fn run_pipeline(
 /// `graph` is the win-B assembled graph (re-emitted target units PLUS cached
 /// unaffected units) and `input` carries the same phase-2 target/removed sets
 /// that drove the frontend hand-off — the delete scope is never re-derived.
+///
+/// The seed is EQUIVALENCE-GUARDED (feedback-101): the delta/manifest are
+/// shared across worktrees while `db.lbug` is local, so the splice is refused
+/// unless this worktree's seed was built from the same tree content the shared
+/// [`incremental::Prepared::recorded_content_key`] names — see
+/// [`splice::seed_checked`]. A refusal is a full load (the correctness
+/// reference), never a published DB that diverges from a rebuild.
 fn try_splice_build(
     graph: &graph::Graph,
     input: &incremental::PipelineInput,
@@ -2089,7 +2100,7 @@ fn try_splice_build(
         .map(|rel| incremental::absolute(&input.scan_root, rel))
         .collect();
 
-    let seeded = match splice::seed(&db) {
+    let seeded = match splice::seed_checked(&db, input.recorded_content_key.as_deref()) {
         splice::SeedDecision::Seed(seeded) => seeded,
         splice::SeedDecision::FullLoad(reason) => {
             log.ln(&format!("[load] splice: {} — full load", reason.describe()));
@@ -4574,6 +4585,7 @@ mod tests {
             Node {
                 kind: NodeKind::Scan,
                 git_sha: Some(scan_sha.to_string()),
+                content_key: Some(format!("key-{scan_sha}")),
                 scanned_at: Some(format!("t-{scan_sha}")),
                 ..Node::default()
             },
@@ -4610,6 +4622,7 @@ mod tests {
             }),
             targets_rel: targets_rel.iter().map(|s| s.to_string()).collect(),
             removed_fqns: BTreeSet::new(),
+            recorded_content_key: Some("key-old".to_string()),
         }
     }
 
@@ -4746,6 +4759,61 @@ mod tests {
             })
             .is_none(),
             "the full-scan path must never splice"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// feedback-101: the delta/manifest are shared across worktrees while the
+    /// seed is the LOCAL `db.lbug`. When another worktree scans in between, the
+    /// shared scan record advances past this worktree's DB; the dispatch must
+    /// refuse the seed (falling back to the full load) rather than publish a DB
+    /// that is not a full rebuild — and must leave the previous DB untouched.
+    #[test]
+    fn splice_dispatch_falls_back_when_the_local_seed_is_stale() {
+        let base = std::env::temp_dir().join(format!("apg-splice-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let apg_root = base.join("apg");
+        let trans = apg_root.join(specs::TRANS);
+        std::fs::create_dir_all(&trans).unwrap();
+        let abs = base.join("a.go").to_string_lossy().into_owned();
+        let db = splice::db_path(&apg_root);
+
+        // This worktree's local DB was built at content "key-old".
+        win_c_build_db(&db, &win_c_fixture(&abs, "old"));
+        let before = std::fs::read(&db).unwrap();
+
+        // The shared scan record the delta was derived from names a DIFFERENT
+        // tree ("key-other") — another worktree scanned in between.
+        let mut input = win_c_input(&base, &base, &["a.go"]);
+        input.recorded_content_key = Some("key-other".to_string());
+        let next = win_c_fixture(&abs, "new");
+        assert!(
+            with_cwd(&trans, || {
+                let mut log = Log::new();
+                try_splice_build(&next, &input, &apg_root, &mut log)
+            })
+            .is_none(),
+            "a seed built from a different tree than the shared record must fall back"
+        );
+        assert_eq!(
+            std::fs::read(&db).unwrap(),
+            before,
+            "the previous DB must be byte-identical when the splice is refused"
+        );
+
+        // The common single-worktree case — the shared record names the local
+        // DB's own tree — still splices.
+        let mut current = win_c_input(&base, &base, &["a.go"]);
+        current.recorded_content_key = Some("key-old".to_string());
+        let report = with_cwd(&trans, || {
+            let mut log = Log::new();
+            try_splice_build(&next, &current, &apg_root, &mut log)
+        })
+        .expect("a current local seed must still splice");
+        assert!(
+            report.scan_refreshed,
+            "the splice must refresh the Scan row"
         );
 
         let _ = std::fs::remove_dir_all(&base);

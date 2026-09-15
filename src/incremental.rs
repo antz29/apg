@@ -134,6 +134,14 @@ pub struct Prepared {
     /// The current content manifest (path → blob OID), built with the prepare
     /// so the pipeline can record it without re-walking the tree.
     pub manifest: Manifest,
+    /// The content-identity key of the recorded scan the delta was derived from
+    /// (`ScanRecord::content_key`), captured BEFORE the completed scan
+    /// overwrites `scan.json`. The win-C splice is eligible only when the LOCAL
+    /// seed DB's own recorded key equals this — otherwise another worktree's
+    /// scan advanced the shared state past this worktree's DB and seeding would
+    /// publish a DB that is not a full rebuild (feedback-101, see
+    /// [`crate::splice::seed_checked`]).
+    pub recorded_content_key: Option<String>,
 }
 
 impl Prepared {
@@ -207,6 +215,12 @@ pub struct PipelineInput {
     /// their file path lies outside `targets_rel`. Empty on a full-scan
     /// fallback.
     pub removed_fqns: BTreeSet<String>,
+    /// The content-identity key of the recorded scan the delta was derived from
+    /// (`ScanRecord::content_key`), captured before the completed scan
+    /// overwrites the shared store. `None` on a full-scan fallback and on a
+    /// pre-hardening record; the win-C splice refuses a seed that does not
+    /// match this key (feedback-101).
+    pub recorded_content_key: Option<String>,
 }
 
 /// Prepares the incremental scan: computes the delta + fallbacks, the changed
@@ -230,9 +244,15 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey) -> Pre
                 removed_fqns: BTreeSet::new(),
                 reuse_candidates: Vec::new(),
                 manifest: Manifest::default(),
+                recorded_content_key: None,
             };
         }
     };
+    // The content identity the delta is derived from, captured BEFORE the
+    // completed scan rewrites the shared `scan.json` (feedback-101): the win-C
+    // splice seeds the LOCAL db.lbug and must refuse it when its own recorded
+    // key differs — another worktree scanned in between.
+    let recorded_content_key = ScanRecord::load(&store_root).and_then(|r| r.content_key);
     let plan = delta::plan(apg_root, Some(&store_root), config);
     let manifest = Manifest::build(scan_root);
     if let Some(reason) = plan.full_scan {
@@ -247,6 +267,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey) -> Pre
             removed_fqns: BTreeSet::new(),
             reuse_candidates: Vec::new(),
             manifest,
+            recorded_content_key: None,
         };
     }
 
@@ -310,6 +331,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey) -> Pre
             removed_fqns: BTreeSet::new(),
             reuse_candidates: Vec::new(),
             manifest,
+            recorded_content_key: None,
         };
     }
 
@@ -364,6 +386,7 @@ pub fn prepare(scan_root: &Path, apg_root: &Path, config: &ScanConfigKey) -> Pre
         removed_fqns,
         reuse_candidates,
         manifest,
+        recorded_content_key,
     }
 }
 
@@ -497,6 +520,13 @@ pub fn record(
         sha: sha.to_string(),
         cache_key: cache_key.clone(),
         manifest: manifest.clone(),
+        // The same content-identity key the DB `Scan` row and graph.jsonl line
+        // 1 carry (this scan's `scan_meta`), so the next scan can verify its
+        // LOCAL seed against the shared record before splicing (feedback-101).
+        content_key: graph
+            .nodes
+            .get(crate::schema::SCAN_HEAD)
+            .and_then(|n| n.content_key.clone()),
     }
     .save(store_root)?;
 
@@ -731,6 +761,7 @@ mod tests {
             sha,
             cache_key: key.clone(),
             manifest: Manifest::default(),
+            content_key: None,
         }
         .save(&store)
         .unwrap();

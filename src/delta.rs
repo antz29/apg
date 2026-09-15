@@ -137,6 +137,16 @@ pub struct ScanRecord {
     pub sha: String,
     pub cache_key: CacheKey,
     pub manifest: Manifest,
+    /// The content-identity key of the tree this scan ran on (win A,
+    /// phase-01) — the same key the scan wrote into the DB `Scan` row and
+    /// `graph.jsonl` line 1, and the same tree `manifest` describes. It is
+    /// captured here so the NEXT scan can verify that this worktree's LOCAL
+    /// `db.lbug` was built from the very tree the SHARED delta is derived from
+    /// (see `crate::splice::seed_checked`, feedback-101). A missing key (a
+    /// pre-hardening record, or one written before this field existed) makes
+    /// the win-C splice ineligible — equivalence cannot be verified.
+    #[serde(default)]
+    pub content_key: Option<String>,
 }
 
 impl ScanRecord {
@@ -511,6 +521,7 @@ mod tests {
             sha: tip.clone(),
             cache_key: key.clone(),
             manifest: Manifest::default(),
+            content_key: None,
         }
         .save(&store)
         .unwrap();
@@ -557,6 +568,7 @@ mod tests {
             sha: "not-a-sha".to_string(),
             cache_key: key.clone(),
             manifest: Manifest::default(),
+            content_key: None,
         }
         .save(&store)
         .unwrap();
@@ -585,6 +597,7 @@ mod tests {
             sha: base,
             cache_key: recorded,
             manifest: Manifest::default(),
+            content_key: None,
         }
         .save(&store)
         .unwrap();
@@ -629,6 +642,45 @@ mod tests {
         let store = dir.join("store");
         let reason = full_scan_reason(&dir, Some(&store), &key);
         assert!(matches!(reason, Some(FullScanReason::NoRecordedScan)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_record_content_key_round_trips_and_defaults_absent() {
+        // The phase-01 content-identity key is part of the shared scan record
+        // (feedback-101): the next scan's splice guard compares this against the
+        // local DB's own recorded key. A pre-hardening `scan.json` (no field)
+        // still loads — serde-defaults to `None` — which simply makes the
+        // splice ineligible rather than failing to read the record.
+        let dir = std::env::temp_dir().join(format!("apg-scanrecord-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = CacheKey::compute(&ScanConfigKey::default());
+        let store = dir.join("store");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(
+            store.join("scan.json"),
+            format!(
+                r#"{{"sha":"abc","cache_key":{},"manifest":{}}}"#,
+                serde_json::to_string(&key).unwrap(),
+                serde_json::to_string(&Manifest::default()).unwrap()
+            ),
+        )
+        .unwrap();
+        assert_eq!(ScanRecord::load(&store).unwrap().content_key, None);
+
+        ScanRecord {
+            sha: "abc".into(),
+            cache_key: key,
+            manifest: Manifest::default(),
+            content_key: Some("keyabc".into()),
+        }
+        .save(&store)
+        .unwrap();
+        assert_eq!(
+            ScanRecord::load(&store).unwrap().content_key.as_deref(),
+            Some("keyabc")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
