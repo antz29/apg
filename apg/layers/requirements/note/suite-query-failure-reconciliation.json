@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.suite-tools-surface-query-failures",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.suite-tool-wrappers",
+      "properties": {}
     }
   ],
   "in": []

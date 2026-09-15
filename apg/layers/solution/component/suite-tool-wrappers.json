@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "source": "domain.group.agent-suite",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.suite-query-failure-reconciliation",
+      "properties": {}
     }
   ]
 }
