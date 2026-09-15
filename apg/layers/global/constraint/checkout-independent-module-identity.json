@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "checkout-independent-module-identity",
+  "body": "TypeScript module identity must be checkout-independent: a TS package must not derive its module identity — and therefore its FQNs — from the checkout directory basename. A package's module identity must be declared by its own manifest (its npm `name`), or otherwise be stable across every checkout and worktree, so FQNs do not vary with the directory a repository is checked out into; any fallback for an unnamed package must not be the directory name.\n\nConsequence: an `implemented-by` anchor to a TS symbol stays valid across branches and worktrees, and a checkout-directory-prefixed FQN never enters the durable spec (it would be spec drift on the main rebuild). A package that relies on the directory fallback silently makes every one of its symbols unanchorable.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
