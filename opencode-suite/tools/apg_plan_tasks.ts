@@ -22,13 +22,20 @@ export default tool({
     const pfx = `${project}/plan.`
     const limit = args.limit ? Math.max(1, Math.min(1000, Number(args.limit))) : 500
 
-    const tasks = csvToRows(
-      await runCypher(
-        context,
-        `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.title, t.kind, t.tier, t.status, t.verb, t.target, t.new_fqn ORDER BY t.fqn LIMIT ${limit}`,
-        args.directory,
-      ),
-    )
+    let tasks: string[][]
+    try {
+      tasks = csvToRows(
+        await runCypher(
+          context,
+          `MATCH (pp:PlanPhase)-[:Contains]->(t:Task) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN pp.fqn, t.fqn, t.title, t.kind, t.tier, t.status, t.verb, t.target, t.new_fqn ORDER BY t.fqn LIMIT ${limit}`,
+          args.directory,
+        ),
+      )
+    } catch (e) {
+      // Surface the verbatim `apg query failed …` message instead of an
+      // opaque crash (or a benign "no tasks") when the guard rejects the result.
+      return e instanceof Error ? e.message : String(e)
+    }
     if (tasks.length <= 1) return `No tasks in plan \`${project}\`.`
 
     const lines = ["task,phase,title,kind,tier,status,verb,target,new_fqn"]
