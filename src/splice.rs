@@ -526,6 +526,28 @@ impl SeededDb {
 pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<SpliceReport> {
     let mut report = SpliceReport::default();
 
+    // The module delete scope is bounded by the delta's target set: a seeded
+    // Module is only re-decided when the delta reaches a File somewhere in its
+    // subtree. The assembled graph cannot vouch for a module the delta never
+    // touched — a skipped/emission-filtered language emits no global module
+    // scaffolding, so its `Module -> Module` hierarchy and pure-intermediate
+    // modules never reach the assembled graph. Deleting such a module (or
+    // wiping its outgoing Contains rels) would drop rows a full rebuild keeps
+    // (`domain.constraint.db-splice-equivalence`).
+    let subtrees = module_file_subtrees(conn)?;
+    let reached = |m: &str| {
+        subtrees
+            .get(m)
+            .is_some_and(|files| files.iter().any(|f| delta.targets.contains(f)))
+    };
+    // A module can only be *disappearing* when EVERY file under it is in the
+    // delta scope: any unchanged file keeps it alive in a full rebuild.
+    let fully_reached = |m: &str| {
+        subtrees.get(m).is_some_and(|files| {
+            !files.is_empty() && files.iter().all(|f| delta.targets.contains(f))
+        })
+    };
+
     // --- 1. Select the delta's code units from the assembled graph ---------
     let mut delta_funcs: Vec<String> = Vec::new();
     let mut delta_structs: Vec<String> = Vec::new();
@@ -536,8 +558,13 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     for (fqn, node) in &delta.graph.nodes {
         match node.kind {
             NodeKind::Module => {
-                delta_modules.push(fqn.clone());
-                delta_labels.insert(fqn.clone(), "Module");
+                // Only a module the delta's target set reaches is re-decided;
+                // an untouched module's seed row and outgoing Contains rels are
+                // already exact (the assembled graph may not carry them at all).
+                if reached(fqn) {
+                    delta_modules.push(fqn.clone());
+                    delta_labels.insert(fqn.clone(), "Module");
+                }
             }
             NodeKind::Struct => {
                 if location_in_targets(node, delta.targets) {
@@ -569,7 +596,12 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // it disappears iff the assembled graph does not re-emit it.
     let mut in_scope: BTreeMap<String, &'static str> = code_fqns_in_paths(conn, delta.targets)?;
     for m in seed_modules(conn)? {
-        in_scope.insert(m, "Module");
+        // Only a module whose ENTIRE file subtree is in the delta can be
+        // genuinely gone; an untouched module (or one with any reused file left)
+        // is left exactly as the seed left it.
+        if fully_reached(&m) {
+            in_scope.insert(m, "Module");
+        }
     }
     for fqn in delta.removed_fqns {
         if !in_scope.contains_key(fqn)
@@ -835,6 +867,66 @@ fn seed_modules(conn: &Connection) -> anyhow::Result<Vec<String>> {
         "MATCH (n:Module) WHERE n.status IS NULL OR n.status <> 'planned' RETURN n.fqn AS fqn",
     )?;
     Ok(rows.iter().map(|r| cell(r, 0)).collect())
+}
+
+/// The File FQNs transitively contained under each seeded Module — the module's
+/// whole file subtree through the `Module -> Module` hierarchy plus its direct
+/// `Module -> File` children. The splicer uses it to decide whether the delta's
+/// re-emission target set reaches a module's content: a module whose subtree is
+/// outside the target set is untouched and must survive the splice verbatim.
+fn module_file_subtrees(conn: &Connection) -> anyhow::Result<BTreeMap<String, BTreeSet<String>>> {
+    let (_, rows) = query_rows(
+        conn,
+        "MATCH (p:Module)-[:Contains]->(c:Module) RETURN p.fqn AS p, c.fqn AS c",
+    )?;
+    let mut children: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for row in rows {
+        children
+            .entry(cell(&row, 0))
+            .or_default()
+            .push(cell(&row, 1));
+    }
+    let (_, rows) = query_rows(
+        conn,
+        "MATCH (m:Module)-[:Contains]->(f:File) RETURN m.fqn AS m, f.fqn AS f",
+    )?;
+    let mut direct: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for row in rows {
+        direct
+            .entry(cell(&row, 0))
+            .or_default()
+            .insert(cell(&row, 1));
+    }
+
+    // Every module that names a child or owns a file directly. A module with no
+    // direct file (a pure-intermediate package node) still appears as a parent.
+    let mut modules: BTreeSet<String> = children.keys().cloned().collect();
+    for kids in children.values() {
+        modules.extend(kids.iter().cloned());
+    }
+    modules.extend(direct.keys().cloned());
+
+    let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for m in &modules {
+        let mut files: BTreeSet<String> = BTreeSet::new();
+        let mut stack: Vec<String> = vec![m.clone()];
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        while let Some(cur) = stack.pop() {
+            // `Contains` is acyclic, but guard the walk anyway so a malformed
+            // seed can never loop.
+            if !seen.insert(cur.clone()) {
+                continue;
+            }
+            if let Some(fs) = direct.get(&cur) {
+                files.extend(fs.iter().cloned());
+            }
+            if let Some(kids) = children.get(&cur) {
+                stack.extend(kids.iter().cloned());
+            }
+        }
+        out.insert(m.clone(), files);
+    }
+    Ok(out)
 }
 
 /// The label of a code node at `fqn`, or `None`. Excludes `planned`
@@ -1960,6 +2052,268 @@ mod tests {
         assert!(
             spliced.contains("Scan:scan/HEAD|newsha|true|newkey|2026-01-02T00:00:00Z"),
             "the seeded Scan row must be refreshed, not preserved"
+        );
+
+        let temp = seeded.temp_path.clone();
+        drop(seeded);
+        std::fs::remove_file(&temp).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The previous full graph for the two-language fixture: a changed language
+    /// (`godemo` -> `godemo/changed`, one file `changed`) and a skipped
+    /// language whose hierarchy has two pure-intermediate modules
+    /// (`Apg` -> `Apg.CsharpFrontend` -> `Apg.CsharpFrontend.Tests`) above the
+    /// leaf module that owns the file `skipped`. Neither `Apg` nor
+    /// `Apg.CsharpFrontend` has a File child, so a full scan emits them only as
+    /// `Module -> Module` scaffolding.
+    fn multi_lang_previous(changed: &str, skipped: &str) -> Graph {
+        let module = |_: &str| Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let mut g = Graph::default();
+        // The changed language (it spawns and re-emits its full hierarchy).
+        g.nodes.insert("godemo".into(), module("godemo"));
+        g.nodes
+            .insert("godemo/changed".into(), module("godemo/changed"));
+        g.nodes
+            .insert(changed.into(), located(NodeKind::File, changed, 1, 30));
+        g.nodes.insert(
+            "godemo.changed.S".into(),
+            located(NodeKind::Struct, changed, 1, 30),
+        );
+        g.nodes.insert(
+            "godemo.changed.S.f".into(),
+            located(NodeKind::Function, changed, 2, 10),
+        );
+        g.contains
+            .insert(("godemo".into(), "godemo/changed".into()));
+        g.contains.insert(("godemo/changed".into(), changed.into()));
+        g.contains
+            .insert((changed.into(), "godemo.changed.S".into()));
+        g.contains
+            .insert((changed.into(), "godemo.changed.S.f".into()));
+        g.contains
+            .insert(("godemo.changed.S".into(), "godemo.changed.S.f".into()));
+        // The skipped language: global Module->Module scaffolding with two
+        // pure-intermediate modules and a leaf module that owns the file.
+        g.nodes.insert("Apg".into(), module("Apg"));
+        g.nodes
+            .insert("Apg.CsharpFrontend".into(), module("Apg.CsharpFrontend"));
+        g.nodes.insert(
+            "Apg.CsharpFrontend.Tests".into(),
+            module("Apg.CsharpFrontend.Tests"),
+        );
+        g.nodes
+            .insert(skipped.into(), located(NodeKind::File, skipped, 1, 20));
+        g.nodes.insert(
+            "Apg.CsharpFrontend.Tests.Program".into(),
+            located(NodeKind::Struct, skipped, 1, 20),
+        );
+        g.nodes.insert(
+            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+            located(NodeKind::Function, skipped, 2, 10),
+        );
+        g.contains
+            .insert(("Apg".into(), "Apg.CsharpFrontend".into()));
+        g.contains.insert((
+            "Apg.CsharpFrontend".into(),
+            "Apg.CsharpFrontend.Tests".into(),
+        ));
+        g.contains
+            .insert(("Apg.CsharpFrontend.Tests".into(), skipped.into()));
+        g.contains
+            .insert((skipped.into(), "Apg.CsharpFrontend.Tests.Program".into()));
+        g.contains.insert((
+            skipped.into(),
+            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+        ));
+        g.contains.insert((
+            "Apg.CsharpFrontend.Tests.Program".into(),
+            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+        ));
+        g.nodes.insert(
+            crate::schema::SCAN_HEAD.into(),
+            scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+        );
+        g
+    }
+
+    /// The win-B ASSEMBLED graph a partial scan produces when the changed
+    /// language spawns and the skipped language does not: the changed language's
+    /// full hierarchy is re-emitted, and the skipped language's cached per-file
+    /// facts arrive (its leaf module is the reused File's direct parent) but its
+    /// global scaffolding — the two pure-intermediate modules and every
+    /// `Module -> Module` hierarchy edge — is MISSING. This is exactly the
+    /// assembled graph the feedback names.
+    fn multi_lang_assembled(changed: &str, skipped: &str) -> Graph {
+        let module = |_: &str| Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let mut g = Graph::default();
+        g.nodes.insert("godemo".into(), module("godemo"));
+        g.nodes
+            .insert("godemo/changed".into(), module("godemo/changed"));
+        g.nodes
+            .insert(changed.into(), located(NodeKind::File, changed, 1, 40));
+        g.nodes.insert(
+            "godemo.changed.S".into(),
+            located(NodeKind::Struct, changed, 1, 40),
+        );
+        g.nodes.insert(
+            "godemo.changed.S.f".into(),
+            located(NodeKind::Function, changed, 2, 10),
+        );
+        g.nodes.insert(
+            "godemo.changed.S.h".into(),
+            located(NodeKind::Function, changed, 12, 20),
+        );
+        g.contains
+            .insert(("godemo".into(), "godemo/changed".into()));
+        g.contains.insert(("godemo/changed".into(), changed.into()));
+        g.contains
+            .insert((changed.into(), "godemo.changed.S".into()));
+        g.contains
+            .insert((changed.into(), "godemo.changed.S.f".into()));
+        g.contains
+            .insert((changed.into(), "godemo.changed.S.h".into()));
+        g.contains
+            .insert(("godemo.changed.S".into(), "godemo.changed.S.f".into()));
+        g.contains
+            .insert(("godemo.changed.S".into(), "godemo.changed.S.h".into()));
+        // Cached facts for the skipped language: the reused File's direct-parent
+        // module only — NO `Apg`, NO `Apg.CsharpFrontend`, NO Module->Module
+        // edges.
+        g.nodes.insert(
+            "Apg.CsharpFrontend.Tests".into(),
+            module("Apg.CsharpFrontend.Tests"),
+        );
+        g.nodes
+            .insert(skipped.into(), located(NodeKind::File, skipped, 1, 20));
+        g.nodes.insert(
+            "Apg.CsharpFrontend.Tests.Program".into(),
+            located(NodeKind::Struct, skipped, 1, 20),
+        );
+        g.nodes.insert(
+            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+            located(NodeKind::Function, skipped, 2, 10),
+        );
+        g.contains
+            .insert(("Apg.CsharpFrontend.Tests".into(), skipped.into()));
+        g.contains
+            .insert((skipped.into(), "Apg.CsharpFrontend.Tests.Program".into()));
+        g.contains.insert((
+            skipped.into(),
+            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+        ));
+        g.contains.insert((
+            "Apg.CsharpFrontend.Tests.Program".into(),
+            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+        ));
+        g.nodes.insert(
+            crate::schema::SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+        g
+    }
+
+    /// The TRUE new tree of the multi-language fixture — the full-rebuild
+    /// reference: the changed language re-emitted (with the new `...S.h`), the
+    /// skipped language untouched.
+    fn multi_lang_new(changed: &str, skipped: &str) -> Graph {
+        let mut g = multi_lang_previous(changed, skipped);
+        g.nodes.insert(
+            "godemo.changed.S.h".into(),
+            located(NodeKind::Function, changed, 12, 20),
+        );
+        g.contains
+            .insert((changed.into(), "godemo.changed.S.h".into()));
+        g.contains
+            .insert(("godemo.changed.S".into(), "godemo.changed.S.h".into()));
+        g.nodes.insert(
+            crate::schema::SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+        g
+    }
+
+    /// The win-C spawn skip must not delete a skipped language's global module
+    /// scaffolding (feedback-100). The assembled graph is MISSING the skipped
+    /// language's pure-intermediate modules and every `Module -> Module`
+    /// hierarchy edge — exactly what a partial scan that skips that language
+    /// produces — yet the spliced DB must equal a full rebuild of the TRUE tree
+    /// (same node set incl. modules, per-rel-type Contains counts, the
+    /// UnresolvedTarget set, and the Scan row). Before the fix the splice
+    /// treated every seeded module as in scope and `DETACH DELETE`d the
+    /// scaffolding the assembled graph could not vouch for.
+    #[test]
+    fn module_scaffolding_survives_a_partial_scan_that_skips_a_language() {
+        let dir = scratch("skipped-lang");
+        let prev_path = dir.join("db.lbug");
+        let changed = "/x/go/changed.go".to_string();
+        let skipped = "/x/csharp/Tests.cs".to_string();
+
+        build_db(&prev_path, &multi_lang_previous(&changed, &skipped));
+        let seeded = match seed(&prev_path) {
+            SeedDecision::Seed(s) => s,
+            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+        };
+
+        // The win-B assembled graph: the changed language re-emitted, the
+        // skipped language's cached file facts only (no global scaffolding).
+        let assembled = multi_lang_assembled(&changed, &skipped);
+        // The delete scope is exactly the changed language's file.
+        let targets: BTreeSet<String> = [changed.clone()].into_iter().collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+        let report = seeded
+            .apply(&SpliceDelta {
+                graph: &assembled,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
+
+        // The skipped language is untouched, so nothing disappears.
+        assert_eq!(
+            report.nodes_deleted, 0,
+            "an untouched skipped language has no disappearing units: {report:?}"
+        );
+        let spliced = code_snapshot(&seeded.db);
+        for row in [
+            "Module:Apg:",
+            "Module:Apg.CsharpFrontend:",
+            "Module:Apg.CsharpFrontend.Tests:",
+            "Contains:Apg->Apg.CsharpFrontend",
+            "Contains:Apg.CsharpFrontend->Apg.CsharpFrontend.Tests",
+        ] {
+            assert!(
+                spliced.contains(row),
+                "the skipped language's scaffolding must survive: {row}\n{spliced:?}"
+            );
+        }
+
+        // The full-rebuild reference: the TRUE new tree, loaded whole — NOT the
+        // same assembled graph (which would make the oracle miss the bug).
+        let expected_path = dir.join("expected.lbug");
+        build_db(&expected_path, &multi_lang_new(&changed, &skipped));
+        let expected = {
+            let db =
+                Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
+            let snap = code_snapshot(&db);
+            drop(db);
+            snap
+        };
+        assert_eq!(
+            spliced, expected,
+            "a spliced DB must answer identically to a full rebuild"
         );
 
         let temp = seeded.temp_path.clone();
