@@ -3190,4 +3190,132 @@ mod tests {
         // ---- teardown: the scratch repo AND the isolated HOME ----
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    /// Regression guard for the `apg query` failure-vs-data bug: a failed query
+    /// came back from `runCypher` as an error *string*, the line-based
+    /// `csvToRows` parsed it as data, and the plan tools then crashed with
+    /// `undefined is not an object (evaluating 'fqn.replace')`.
+    ///
+    /// This is a STRUCTURAL check over the embedded suite consts (`APG_LIB` /
+    /// `SUITE_TOOLS`), not full-file equality: it pins that the guard sits on
+    /// the shared parse boundary (so a caller cannot forget it), that the
+    /// producer (`runCypher`) and the discriminant (`isQueryError`) share the
+    /// same prefix constants (so the failure signals cannot drift apart), and
+    /// that the three observed crash sites route their parse through the guarded
+    /// boundary and return the verbatim message. It fails on the pre-fix suite
+    /// (where `csvToRows` split `out` directly and the guard was dead code).
+    #[test]
+    fn suite_tools_query_error_guard_is_structural() {
+        // Extract a top-level function's source (signature through its closing
+        // brace) from the embedded lib, so the assertions speak about the
+        // function body rather than unrelated text elsewhere in the file.
+        fn function_body<'a>(src: &'a str, signature: &str) -> &'a str {
+            let start = src
+                .find(signature)
+                .unwrap_or_else(|| panic!("APG_LIB must declare `{signature}`"));
+            let open = src[start..]
+                .find('{')
+                .map(|i| start + i)
+                .unwrap_or_else(|| panic!("`{signature}` must have a body"));
+            let mut depth = 0usize;
+            for (i, c) in src[open..].char_indices() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return &src[start..open + i + 1];
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            panic!("`{signature}` has an unbalanced body");
+        }
+
+        // 1. The guard is ON the shared parse boundary, by construction: the
+        //    body of `csvToRows` — the one function every caller uses to turn a
+        //    `runCypher` result into rows — invokes `expectQueryOk` before it
+        //    splits any line. Pre-fix this body split `out` directly, leaving the
+        //    guard as dead code a tool could forget; this is the assertion that
+        //    fails on the old suite.
+        let csv_body = function_body(APG_LIB, "export function csvToRows");
+        assert!(
+            csv_body.contains("expectQueryOk("),
+            "csvToRows must call expectQueryOk at the shared parse boundary so a \
+             runCypher error result can never be parsed as data: {csv_body}"
+        );
+
+        // 2. An error result cannot be mistaken for data: `runCypher` (the
+        //    producer) and `isQueryError` (the discriminant) both build on the
+        //    exported constants, so the prefixes cannot drift out of sync; and
+        //    `runCypher` RETURNS the error string on the non-zero exit path —
+        //    it never throws and never yields data.
+        assert!(
+            APG_LIB.contains("export const QUERY_FAILED_PREFIX")
+                && APG_LIB.contains("export const NO_DB_ERROR"),
+            "runCypher's failure signals must be exported constants shared with isQueryError"
+        );
+        let run_body = function_body(APG_LIB, "export async function runCypher");
+        let is_err_body = function_body(APG_LIB, "export function isQueryError");
+        for (who, body) in [("runCypher", run_body), ("isQueryError", is_err_body)] {
+            for const_name in ["QUERY_FAILED_PREFIX", "NO_DB_ERROR"] {
+                assert!(
+                    body.contains(const_name),
+                    "{who} must reference the shared `{const_name}` discriminant: {body}"
+                );
+            }
+        }
+        let exit_check = run_body
+            .find("result.exitCode !== 0")
+            .expect("runCypher must classify success/failure by `apg query`'s exit code");
+        assert!(
+            !run_body
+                .lines()
+                .any(|l| l.trim_start().starts_with("throw")),
+            "runCypher must RETURN the error string, never throw: {run_body}"
+        );
+        let failure = &run_body[exit_check..];
+        let failure_return = failure
+            .find("return")
+            .expect("the non-zero exit path must return the error string");
+        assert!(
+            failure[failure_return..].contains("${QUERY_FAILED_PREFIX}"),
+            "the failure return must carry the shared prefix so isQueryError \
+             recognizes it: {}",
+            &failure[failure_return..]
+        );
+
+        // 3. The three observed crash sites are covered: each embeds the shared
+        //    guarded boundary and returns the verbatim error message, so a
+        //    failure reads as a failure rather than as data (or an opaque crash).
+        let tool = |name: &str| -> &'static str {
+            SUITE_TOOLS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("SUITE_TOOLS must embed {name}"))
+        };
+        for name in ["apg_plan_tasks.ts", "apg_plan.ts", "apg_plan_phases.ts"] {
+            let src = tool(name);
+            assert!(
+                src.contains("../lib/apg.ts") && src.contains("csvToRows"),
+                "{name} must route its parse through the shared guarded boundary \
+                 (csvToRows from ../lib/apg.ts)"
+            );
+            assert!(
+                src.contains("csvToRows(") && src.contains("await runCypher("),
+                "{name} must feed runCypher's result into the guarded csvToRows boundary"
+            );
+            assert!(
+                src.contains("try {"),
+                "{name} must wrap the guarded parse so a rejection is handled"
+            );
+            assert!(
+                src.contains("catch (e)")
+                    && src.contains("e instanceof Error ? e.message : String(e)"),
+                "{name} must return the verbatim guarded-parse error message"
+            );
+        }
+    }
 }
