@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "suite-tooling",
+  "body": "The apg opencode suite's install-and-authoring surface: the `apg init` installer that scaffolds the shared `~/.opencode/package.json` and installs the embedded tools/agents, the shared suite lib (`opencode-suite/lib/apg.ts`) that every tool's CLI/query plumbing flows through, and the plan-authoring path (`apg_plan_add` tool wrapping `apg plan update`). Suite hygiene is a property of this one surface: the missing-DB error has a single source, the installer's plugin pin matches the suite manifest, and the authoring surface can express the target-less task form (a task with no `--fqn`) as freely as the targeted one.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
