@@ -124,7 +124,7 @@ export function noteIfEmpty(out: string, note: string): string {
 export async function runCli(context: ToolContext, args: string[], directory?: string): Promise<string> {
   const root = findApgRoot(context, directory)
   if (!root) {
-    return "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
+    return NO_DB_ERROR
   }
   const result = await Bun.$`${apgBinary()} ${args}`.cwd(root).quiet().nothrow()
   if (result.exitCode !== 0) {
