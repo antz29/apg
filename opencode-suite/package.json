@@ -1,0 +1,7 @@
+{
+  "name": "apg-opencode-suite",
+  "private": true,
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.20"
+  }
+}
