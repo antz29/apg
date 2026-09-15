@@ -47,9 +47,25 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
   return null
 }
 
+/** Prefix of the error string runCypher returns when `apg query` exits non-zero;
+ *  the exit code and the CLI's stderr follow it. Shared with `isQueryError` so
+ *  the producer and the discriminant cannot silently drift apart. */
+export const QUERY_FAILED_PREFIX = "apg query failed"
+
+/** The error string runCypher returns when no `apg/.trans/db.lbug` is found on
+ *  the walk-up. Shared with `isQueryError` so the producer and the discriminant
+ *  cannot silently drift apart. */
+export const NO_DB_ERROR =
+  "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
+
 /**
  * Runs a Cypher query against the project's db and returns CSV text with a
- * header row (or an error message prefixed with "apg query failed").
+ * header row on success. On failure it returns an error STRING — never a throw,
+ * never data — that `isQueryError` recognizes: either `NO_DB_ERROR` (no db
+ * found) or a string beginning with `QUERY_FAILED_PREFIX`, carrying `apg
+ * query`'s exit code and stderr verbatim. Both failure signals are built from
+ * the constants above, which `isQueryError` also tests against, so the failure
+ * contract stays structural rather than duplicated string literals.
  */
 export async function runCypher(
   context: ToolContext,
@@ -58,11 +74,11 @@ export async function runCypher(
 ): Promise<string> {
   const root = findApgRoot(context, directory)
   if (!root) {
-    return "Error: no apg/.trans/db.lbug found. Run `apg scan` in the project root first."
+    return NO_DB_ERROR
   }
   const result = await Bun.$`${apgBinary()} query ${cypher}`.cwd(root).quiet().nothrow()
   if (result.exitCode !== 0) {
-    return `apg query failed (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
+    return `${QUERY_FAILED_PREFIX} (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
   }
   return result.stdout.toString().trim()
 }
@@ -144,10 +160,12 @@ export function csvToRows(out: string): string[][] {
 
 /**
  * True when a runCypher result is an error string (query failure or missing
- * DB), not CSV data — checked before it is ever fed to csvToRows.
+ * DB), not CSV data — checked before it is ever fed to csvToRows. Tests the
+ * exact signals runCypher builds (`QUERY_FAILED_PREFIX` / `NO_DB_ERROR`), so
+ * the two cannot drift apart.
  */
 export function isQueryError(out: string): boolean {
-  return out.startsWith("apg query failed") || out.startsWith("Error:")
+  return out.startsWith(QUERY_FAILED_PREFIX) || out.startsWith(NO_DB_ERROR)
 }
 
 /**
