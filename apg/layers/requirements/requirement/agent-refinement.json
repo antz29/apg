@@ -51,6 +51,11 @@
       "kind": "contains",
       "target": "requirements.requirement.role-minimal-tool-grants",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.suite-tools-surface-query-failures",
+      "properties": {}
     }
   ],
   "in": [
