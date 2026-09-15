@@ -48,6 +48,11 @@
       "kind": "drives",
       "source": "requirements.requirement.coordinator-mediated-feedback",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.suite-tools-surface-query-failures",
+      "properties": {}
     }
   ]
 }
