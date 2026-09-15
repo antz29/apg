@@ -31,6 +31,11 @@
       "kind": "realised-by",
       "source": "domain.service.suite-tooling",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.suite-tool-followups-provenance",
+      "properties": {}
     }
   ]
 }
