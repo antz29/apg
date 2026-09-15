@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "suite-tools-surface-query-failures",
+  "body": "An opencode suite tool that runs a query must surface a query failure to its caller verbatim — the `apg query failed (exit N): …` message or the missing-DB `Error: no apg/.trans/db.lbug found …` message — and must never feed an error string into a parse/format path in a way that crashes with an opaque JavaScript error or silently hides the cause. The guard that detects a query-error result must be structurally part of the shared parse path (not something each tool must remember to call), so it applies to every suite tool.\n\nObserved defect: `runCypher` (opencode-suite/lib/apg.ts) returns a two-line error string on failure; `csvToRows` is line-based, so the error parses as data rows. The CSV-parsing tools `apg_plan_tasks`, `apg_plan`, and `apg_plan_phases` feed the result straight into `csvToRows`; in `apg_plan_tasks` the destructure then yields `fqn === undefined` and the run crashes with `undefined is not an object (evaluating 'fqn.replace')`, masking the real `apg query failed` message. The guard for exactly this class (`expectQueryOk` / `isQueryError`, whose doc comment names the identical prior `'body.replace'` crash) already exists in that shared lib but no tool imports it — dead code — so the class recurred.\n\nAcceptance:\n- When the underlying `apg query` fails, a suite tool surfaces the verbatim `apg query failed (exit N): …` / missing-DB message to the caller — never an opaque `undefined is not an object (…)` crash, and never a benign \"no data\" result that hides the cause.\n- The error guard lives inside the shared query/parse path, so every CSV-parsing tool is covered by construction and a tool cannot forget to call it (the guard is reachable, not dead code).\n- The three observed crash sites — `apg_plan_tasks`, `apg_plan`, `apg_plan_phases` — are covered.",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
