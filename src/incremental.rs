@@ -158,6 +158,11 @@ pub struct ReusePlan {
     pub files: Vec<(String, String, String)>,
     /// The current scan root the cached units are re-based onto.
     pub reader_root: String,
+    /// The languages whose frontend is skipped entirely this scan (empty target
+    /// set on a partial scan). Their module scaffolding is replayed from the
+    /// store into the assembled graph (feedback-102) — the SAME per-language
+    /// verdict the win-C spawn skip uses, never re-derived.
+    pub skipped_langs: BTreeSet<String>,
 }
 
 impl ReusePlan {
@@ -169,6 +174,7 @@ impl ReusePlan {
             cache_key: &self.cache_key,
             files: self.files.clone(),
             reader_root: self.reader_root.clone(),
+            skipped_langs: self.skipped_langs.clone(),
         }
     }
 }
@@ -471,6 +477,18 @@ pub fn record(
         let frag = FileFragment::from_graph(graph, abs, &rel, oid, lang);
         store.put(&frag, &writer_root, cache_key)?;
     }
+    // feedback-102: the per-file units cannot carry a language's
+    // pure-intermediate modules or its `Module -> Module` hierarchy, so record
+    // that scaffolding alongside them. A later partial scan that skips a
+    // language replays it, keeping the win-B-assembled graph — and therefore the
+    // `graph.jsonl` rendered from it — a full rebuild's equal. This runs BEFORE
+    // the manifest/scan-record save, so a scaffolding write failure aborts the
+    // recording and the next scan takes the full-scan fallback rather than
+    // reusing an incomplete store. The assembled graph is complete here (spawned
+    // languages emit their full scaffolding; skipped ones were just replayed),
+    // so the extraction is authoritative.
+    let scaffolding = crate::cache::ModuleScaffolding::extract(graph, scan_root);
+    store.put_scaffolding_all(&scaffolding, cache_key)?;
     store.save_index()?;
 
     // The manifest + scan record (the next scan's baseline).

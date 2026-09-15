@@ -1520,6 +1520,8 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 .map(|f| (f.rel.clone(), f.lang.clone(), f.oid.clone()))
                 .collect(),
             reader_root: project_dir.to_string_lossy().into_owned(),
+            // Filled from the FINAL target set after the spawn loop.
+            skipped_langs: BTreeSet::new(),
         });
     }
 
@@ -1640,16 +1642,38 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // Rebuild the reuse plan against the FULL target set, so a cascaded
     // dependent is re-emitted rather than reused from stale facts.
     if incremental.full_scan.is_none() {
+        let files: Vec<(String, String, String)> = incremental
+            .reuse_candidates
+            .iter()
+            .filter(|f| !targets_rel.contains(&f.rel))
+            .map(|f| (f.rel.clone(), f.lang.clone(), f.oid.clone()))
+            .collect();
+        // The languages whose frontend was skipped this scan: every language
+        // with reused facts that has NO file in the final target set. Derived
+        // from the SAME final target set that drives the spawn skip and the DB
+        // splice, so the scaffolding replay and the spawn skip can never
+        // disagree; a language with any target is spawned and emits its own
+        // (fresh) scaffolding.
+        let skipped_langs: BTreeSet<String> = if targets_rel.is_empty() {
+            BTreeSet::new()
+        } else {
+            let with_targets: BTreeSet<&str> = targets_rel
+                .iter()
+                .map(|rel| incremental::language_of(rel))
+                .collect();
+            files
+                .iter()
+                .map(|(_, lang, _)| lang)
+                .filter(|lang| !with_targets.contains(lang.as_str()))
+                .cloned()
+                .collect()
+        };
         reuse_plan = Some(incremental::ReusePlan {
             store_root: incremental.store_root.clone(),
             cache_key: incremental.cache_key.clone(),
-            files: incremental
-                .reuse_candidates
-                .iter()
-                .filter(|f| !targets_rel.contains(&f.rel))
-                .map(|f| (f.rel.clone(), f.lang.clone(), f.oid.clone()))
-                .collect(),
+            files,
             reader_root: project_dir.to_string_lossy().into_owned(),
+            skipped_langs,
         });
     }
 
@@ -4582,6 +4606,7 @@ mod tests {
                 cache_key: key,
                 files: Vec::new(),
                 reader_root: scan_root.to_string_lossy().into_owned(),
+                skipped_langs: BTreeSet::new(),
             }),
             targets_rel: targets_rel.iter().map(|s| s.to_string()).collect(),
             removed_fqns: BTreeSet::new(),

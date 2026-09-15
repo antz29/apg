@@ -2322,6 +2322,165 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The EXPORT half of the partial-skip oracle (feedback-102): a partial
+    /// scan that spawns one language and skips another must render a
+    /// `graph.jsonl` byte-equal to a full rebuild's. The win-B assembly is the
+    /// export source, so the skipped language's global scaffolding —
+    /// pure-intermediate modules and every `Module -> Module` edge, which no
+    /// per-file fact unit carries — must be replayed from the store into that
+    /// assembly. Before the fix the assembled graph structurally could not carry
+    /// it and the export differed even though the spliced DB matched.
+    #[test]
+    fn partial_scan_export_matches_a_full_rebuild() {
+        use crate::cache::{CacheKey, FactStore, FileFragment, ModuleScaffolding, ScanConfigKey};
+        use crate::ingest::{IngestOptions, Reuse, ingest_with_reuse};
+        use crate::schema::Record;
+
+        let dir = scratch("export-equiv");
+        let changed = "/x/go/changed.go".to_string();
+        let skipped = "/x/csharp/Tests.cs".to_string();
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+
+        // The last FULL scan's graph: both languages' complete scaffolding.
+        let previous = multi_lang_previous(&changed, &skipped);
+        let mut store = FactStore::at(dir.join("facts"));
+        let frag = FileFragment::from_graph(
+            &previous,
+            &skipped,
+            "csharp/Tests.cs",
+            "oid-skipped",
+            "csharp",
+        );
+        store.put(&frag, "/x", &cache_key).unwrap();
+        let scaffolding = ModuleScaffolding::extract(&previous, Path::new("/x"));
+        store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+
+        // The win-B assembly: only the changed language re-emits facts; the
+        // skipped file comes from the cache and its scaffolding from the store.
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: vec![(
+                "csharp/Tests.cs".to_string(),
+                "csharp".to_string(),
+                "oid-skipped".to_string(),
+            )],
+            reader_root: "/x".to_string(),
+            skipped_langs: ["csharp".to_string()].into_iter().collect(),
+        };
+        let records = vec![
+            Record::ScanMeta {
+                git_sha: Some("newsha".into()),
+                git_clean: Some(true),
+                content_key: Some("newkey".into()),
+                scanned_at: "2026-01-02T00:00:00Z".into(),
+            },
+            Record::LangSwitch {
+                language: "go".into(),
+            },
+            Record::Module {
+                fqn: "godemo".into(),
+            },
+            Record::Module {
+                fqn: "godemo/changed".into(),
+            },
+            Record::File {
+                path: changed.clone(),
+                parent: "godemo/changed".into(),
+                start_line: 1,
+                end_line: 30,
+            },
+            Record::Struct {
+                id: "s1".into(),
+                parent: "godemo.changed".into(),
+                name: "S".into(),
+                path: changed.clone(),
+                start: 0,
+                end: 1,
+                start_line: 1,
+                end_line: 30,
+            },
+            Record::Function {
+                id: "f1".into(),
+                parent: "godemo.changed.S".into(),
+                name: "f".into(),
+                params: Vec::new(),
+                file: changed.clone(),
+                path: changed.clone(),
+                start: 0,
+                end: 1,
+                start_line: 2,
+                end_line: 10,
+            },
+            Record::Function {
+                id: "f2".into(),
+                parent: "godemo.changed.S".into(),
+                name: "h".into(),
+                params: Vec::new(),
+                file: changed.clone(),
+                path: changed.clone(),
+                start: 0,
+                end: 1,
+                start_line: 12,
+                end_line: 20,
+            },
+            Record::Contains {
+                from: "godemo".into(),
+                to: "godemo/changed".into(),
+            },
+            Record::Contains {
+                from: "s1".into(),
+                to: "f1".into(),
+            },
+            Record::Contains {
+                from: "s1".into(),
+                to: "f2".into(),
+            },
+        ];
+        let (assembled, _) = ingest_with_reuse(
+            records,
+            &IngestOptions {
+                blacklist: &[],
+                language: "go",
+                config: None,
+            },
+            Some(&reuse),
+        );
+
+        // The TRUE new tree, loaded whole — the full-rebuild reference.
+        let reference = multi_lang_new(&changed, &skipped);
+        let assembled_path = dir.join("assembled.jsonl");
+        let reference_path = dir.join("reference.jsonl");
+        load::write_graph_jsonl(&assembled, &assembled_path).unwrap();
+        load::write_graph_jsonl(&reference, &reference_path).unwrap();
+        let assembled_jsonl = std::fs::read_to_string(&assembled_path).unwrap();
+        let reference_jsonl = std::fs::read_to_string(&reference_path).unwrap();
+        // `Graph`'s node/edge maps are unordered (HashMap/HashSet), so line
+        // order is not part of the export's contract; equality is the SET of
+        // records. The `scan_meta` control record still leads line 1.
+        let canonical =
+            |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
+        assert_eq!(
+            canonical(&assembled_jsonl),
+            canonical(&reference_jsonl),
+            "a partial scan that skips a language must export a full rebuild's graph.jsonl"
+        );
+        assert!(assembled_jsonl.starts_with("{\"type\":\"scan_meta\""));
+        assert!(reference_jsonl.starts_with("{\"type\":\"scan_meta\""));
+        // The skipped language's scaffolding is present in the export itself.
+        for needle in [
+            "\"type\":\"module\",\"fqn\":\"Apg\"",
+            "\"type\":\"module\",\"fqn\":\"Apg.CsharpFrontend\"",
+            "\"type\":\"contains\",\"from\":\"Apg\",\"to\":\"Apg.CsharpFrontend\"",
+        ] {
+            assert!(
+                assembled_jsonl.contains(needle),
+                "the export must carry the skipped language's scaffolding: {needle}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A removed file named only by `removed_fqns` (not by a target path) is
     /// still detached — the subtraction half of the full-universe seam.
     #[test]

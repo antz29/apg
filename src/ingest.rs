@@ -12,7 +12,7 @@
 //! shadowed package colliding with a method of the shadowing class) resolve by
 //! precedence: struct > module, struct > function.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
@@ -39,6 +39,13 @@ pub struct Reuse<'a> {
     pub files: Vec<(String, String, String)>,
     /// The scan root the cached units are re-based onto (absolute).
     pub reader_root: String,
+    /// The languages whose frontend was **skipped entirely** this scan (an
+    /// empty target set on a partial/incremental scan). Their global module
+    /// scaffolding — the pure-intermediate modules and `Module -> Module`
+    /// hierarchy that no per-file fact unit carries — is replayed from the store
+    /// so the assembled graph (and the `graph.jsonl` rendered from it) equals a
+    /// full rebuild (feedback-102).
+    pub skipped_langs: BTreeSet<String>,
 }
 
 pub struct IngestReport {
@@ -272,6 +279,31 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
                     ..Node::default()
                 },
             );
+        }
+    }
+
+    // Pass 2b: the skipped languages' global module scaffolding (feedback-102).
+    //
+    // A language whose frontend was skipped re-emits nothing, so its
+    // pure-intermediate modules and every `Module -> Module` hierarchy edge —
+    // which no per-file fact unit can express — must be replayed from the store
+    // or the assembled graph (the `graph.jsonl` export source) is structurally
+    // incomplete even when the spliced DB keeps the seed's rows. Only a language
+    // the orchestrator actually skipped is replayed, so a spawned language's
+    // fresh scaffolding (emitted unconditionally, outside the emission filter)
+    // is never shadowed by stale cache rows.
+    for lang in &reuse.skipped_langs {
+        let Some(scaffolding) = reuse.store.scaffolding(lang, reuse.cache_key) else {
+            continue;
+        };
+        for m in &scaffolding.modules {
+            graph.nodes.entry(m.clone()).or_insert_with(|| Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            });
+        }
+        for (from, to) in &scaffolding.edges {
+            graph.contains.insert((from.clone(), to.clone()));
         }
     }
 
@@ -2120,6 +2152,7 @@ mod tests {
                 ),
             ],
             reader_root: "/fresh".to_string(),
+            skipped_langs: BTreeSet::new(),
         };
 
         let (graph, _) = ingest_with_reuse(
@@ -2154,5 +2187,149 @@ mod tests {
                 .contains(&("scratch".to_string(), "/fresh/b/b.go".to_string()))
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// feedback-102: a language whose frontend was skipped re-emits nothing, so
+    /// its global module scaffolding (pure-intermediate modules, file-less
+    /// descendants, and every `Module -> Module` edge) must be replayed from the
+    /// store into the assembled graph — the `graph.jsonl` export source — or the
+    /// export is structurally incomplete even though the spliced DB keeps the
+    /// seed's rows. The replay is gated on the exact `skipped_langs` verdict, so
+    /// a spawned language is never shadowed by stale cache rows.
+    #[test]
+    fn skipped_language_scaffolding_is_replayed_into_the_assembly() {
+        use crate::cache::{CacheKey, FactStore, FileFragment, ModuleScaffolding, ScanConfigKey};
+        use crate::graph::{Graph, Location, Node, NodeKind};
+        use std::path::PathBuf;
+
+        let dir = std::env::temp_dir().join(format!("apg-splice-scaffold-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let mut store = FactStore::at(dir.join("facts"));
+
+        let module = || Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let located = |kind: NodeKind, path: &str| Node {
+            kind,
+            location: Some(Location {
+                path: PathBuf::from(path),
+                start: 0,
+                end: 1,
+                start_line: 1,
+                end_line: 1,
+            }),
+            code_type: "src".into(),
+            ..Node::default()
+        };
+        let skipped = "/x/csharp/T.cs";
+        let mut prev = Graph::default();
+        prev.nodes.insert("Apg".into(), module());
+        prev.nodes.insert("Apg.CsharpFrontend".into(), module());
+        prev.nodes
+            .insert("Apg.CsharpFrontend.Tests".into(), module());
+        prev.nodes
+            .insert("Apg.CsharpFrontend.Tests.Inline".into(), module());
+        prev.nodes
+            .insert(skipped.into(), located(NodeKind::File, skipped));
+        prev.nodes.insert(
+            "Apg.CsharpFrontend.Tests.Program".into(),
+            located(NodeKind::Struct, skipped),
+        );
+        prev.contains
+            .insert(("Apg".into(), "Apg.CsharpFrontend".into()));
+        prev.contains.insert((
+            "Apg.CsharpFrontend".into(),
+            "Apg.CsharpFrontend.Tests".into(),
+        ));
+        prev.contains.insert((
+            "Apg.CsharpFrontend.Tests".into(),
+            "Apg.CsharpFrontend.Tests.Inline".into(),
+        ));
+        prev.contains
+            .insert(("Apg.CsharpFrontend.Tests".into(), skipped.into()));
+        prev.contains
+            .insert((skipped.into(), "Apg.CsharpFrontend.Tests.Program".into()));
+
+        let frag = FileFragment::from_graph(&prev, skipped, "csharp/T.cs", "oid-t", "csharp");
+        store.put(&frag, "/x", &cache_key).unwrap();
+        let scaffolding = ModuleScaffolding::extract(&prev, std::path::Path::new("/x"));
+        store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+
+        // The whole assembly comes from the cache (the changed language
+        // contributes no records in this unit test).
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: vec![("csharp/T.cs".into(), "csharp".into(), "oid-t".into())],
+            reader_root: "/x".into(),
+            skipped_langs: ["csharp".into()].into_iter().collect(),
+        };
+        let (graph, _) = ingest_with_reuse(
+            Vec::<Record>::new(),
+            &IngestOptions {
+                blacklist: &[],
+                language: "csharp",
+                config: None,
+            },
+            Some(&reuse),
+        );
+        for m in [
+            "Apg",
+            "Apg.CsharpFrontend",
+            "Apg.CsharpFrontend.Tests",
+            "Apg.CsharpFrontend.Tests.Inline",
+        ] {
+            assert!(
+                graph.nodes.contains_key(m),
+                "the skipped language's module `{m}` must be replayed: {:?}",
+                graph.nodes.keys().collect::<Vec<_>>()
+            );
+        }
+        for (from, to) in [
+            ("Apg", "Apg.CsharpFrontend"),
+            ("Apg.CsharpFrontend", "Apg.CsharpFrontend.Tests"),
+            (
+                "Apg.CsharpFrontend.Tests",
+                "Apg.CsharpFrontend.Tests.Inline",
+            ),
+        ] {
+            assert!(
+                graph.contains.contains(&(from.to_string(), to.to_string())),
+                "the `Module -> Module` edge {from} -> {to} must be replayed"
+            );
+        }
+        // The reused file's own unit and its Module→File edge survive.
+        assert!(graph.nodes.contains_key(skipped));
+        assert!(
+            graph
+                .contains
+                .contains(&("Apg.CsharpFrontend.Tests".to_string(), skipped.to_string()))
+        );
+
+        // The replay is gated on the skipped-language verdict: with an empty
+        // `skipped_langs` the same store contributes no scaffolding.
+        let not_skipped = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: vec![("csharp/T.cs".into(), "csharp".into(), "oid-t".into())],
+            reader_root: "/x".into(),
+            skipped_langs: BTreeSet::new(),
+        };
+        let (bare, _) = ingest_with_reuse(
+            Vec::<Record>::new(),
+            &IngestOptions {
+                blacklist: &[],
+                language: "csharp",
+                config: None,
+            },
+            Some(&not_skipped),
+        );
+        assert!(
+            !bare.nodes.contains_key("Apg"),
+            "a language that was not skipped must not replay cached scaffolding"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

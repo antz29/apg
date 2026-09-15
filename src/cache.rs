@@ -46,12 +46,25 @@ pub const JSONL_SCHEMA_VERSION: &str = "1";
 /// The ingestor projection-rule version folded into [`CacheKey`]. Bump when the
 /// ingestor's FQN rendering / node projection changes so cached units produced
 /// by an older projection are discarded.
-pub const PROJECTION_RULES_VERSION: &str = "1";
+///
+/// `2` (feedback-102): the cache additionally carries each language's global
+/// **module scaffolding** ([`ModuleScaffolding`]) — the pure-intermediate
+/// `Module` nodes and every `Module -> Module` `contains` edge that no per-file
+/// fact unit can express. A store written by the `1` projection has no
+/// scaffolding recorded, so an incremental scan that skips a language would
+/// assemble (and export) a graph missing that scaffolding. Bumping the
+/// projection version changes the cache-key token, every `1` unit and its
+/// missing scaffolding miss, and the drift forces one correctness full scan
+/// that records the scaffolding before any reuse can happen.
+pub const PROJECTION_RULES_VERSION: &str = "2";
 
 /// The subdirectory under the git common dir that hosts the shared store.
 pub const STORE_DIR: &str = "apg";
 /// The leaf directory name of the shared fact store.
 pub const FACTS_DIR: &str = "facts";
+/// The file name holding one language's [`ModuleScaffolding`], inside its
+/// `<store>/<lang>/<cache-key>/` directory (feedback-102).
+pub const SCAFFOLDING_FILE: &str = "scaffolding.json";
 
 // ---------------------------------------------------------------------------
 // Global cache key (domain.value.cache-key)
@@ -593,6 +606,132 @@ impl FileFragment {
 }
 
 // ---------------------------------------------------------------------------
+// The module scaffolding carried alongside the per-file units (feedback-102)
+// ---------------------------------------------------------------------------
+
+/// One language's **global module scaffolding**: every real `Module` node and
+/// every `Module -> Module` `contains` edge that language's frontend emitted.
+///
+/// A per-file fact unit carries only the file's **direct-parent** module and the
+/// `Module -> File` edge (a file belongs to exactly one module), so a
+/// pure-intermediate `Module` (one with no `File` child) and every
+/// `Module -> Module` hierarchy edge are invisible to the fact cache. A partial
+/// scan that skips an unchanged language's frontend therefore cannot rebuild
+/// that scaffolding from the cached per-file units alone — the win-B-assembled
+/// graph (and the `graph.jsonl` rendered from it) would be structurally
+/// incomplete even though the spliced DB kept the seed's rows. This record is
+/// stored per language under the same cache-key dir as the fact units and
+/// replayed whenever that language's frontend is skipped.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleScaffolding {
+    /// The scaffolding's `Module` FQNs (sorted, deduped).
+    pub modules: Vec<String>,
+    /// The scaffolding's `Module -> Module` `contains` edges `(from, to)`
+    /// (sorted, deduped).
+    pub edges: Vec<(String, String)>,
+}
+
+impl ModuleScaffolding {
+    /// Extracts every language's module scaffolding from a resolved graph.
+    ///
+    /// Only **real** modules are considered — a `planned` placeholder (a
+    /// transient tier-4 record) is not scanned scaffolding. A module's language
+    /// is the language of a source `File` attached directly beneath it,
+    /// propagated across the undirected `Module -> Module` component so
+    /// pure-intermediate modules (no file of their own) and file-less
+    /// descendants (e.g. an inline `mod tests`) are attributed to the same
+    /// language as the files that anchor the component. A component with no
+    /// attached file anywhere is an empty/planned placeholder and is dropped.
+    pub fn extract(graph: &Graph, scan_root: &Path) -> BTreeMap<String, ModuleScaffolding> {
+        let real: BTreeSet<String> = graph
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.kind == NodeKind::Module && n.status.is_none())
+            .map(|(f, _)| f.clone())
+            .collect();
+        // The `Module -> Module` hierarchy, as an undirected component walk plus
+        // the directed edges themselves.
+        let mut adjacency: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut edges: Vec<(String, String)> = Vec::new();
+        for (a, b) in &graph.contains {
+            if real.contains(a) && real.contains(b) {
+                adjacency.entry(a.clone()).or_default().insert(b.clone());
+                adjacency.entry(b.clone()).or_default().insert(a.clone());
+                edges.push((a.clone(), b.clone()));
+            }
+        }
+        // A module is anchored to the language of a File directly under it.
+        // Deterministic when a module somehow anchors files of two languages:
+        // the smallest language label wins.
+        let mut label: BTreeMap<String, String> = BTreeMap::new();
+        for (a, b) in &graph.contains {
+            let anchored = graph.nodes.get(b).is_some_and(|n| n.kind == NodeKind::File);
+            if !real.contains(a) || !anchored {
+                continue;
+            }
+            let rel = rel_path_of(scan_root, b);
+            let lang = crate::incremental::language_of(&rel).to_string();
+            label
+                .entry(a.clone())
+                .and_modify(|current| {
+                    if lang < *current {
+                        *current = lang.clone();
+                    }
+                })
+                .or_insert(lang);
+        }
+
+        let mut out: BTreeMap<String, ModuleScaffolding> = BTreeMap::new();
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        for start in &real {
+            if seen.contains(start) {
+                continue;
+            }
+            let mut stack = vec![start.clone()];
+            let mut component: BTreeSet<String> = BTreeSet::new();
+            let mut langs: BTreeSet<String> = BTreeSet::new();
+            while let Some(m) = stack.pop() {
+                if !seen.insert(m.clone()) {
+                    continue;
+                }
+                if let Some(l) = label.get(&m) {
+                    langs.insert(l.clone());
+                }
+                component.insert(m.clone());
+                if let Some(neighbours) = adjacency.get(&m) {
+                    for n in neighbours {
+                        if !seen.contains(n) {
+                            stack.push(n.clone());
+                        }
+                    }
+                }
+            }
+            // No file anywhere in the component: an empty/planned placeholder,
+            // not scaffolding a scan should replay.
+            let Some(lang) = langs.into_iter().next() else {
+                continue;
+            };
+            let entry = out.entry(lang).or_default();
+            for m in &component {
+                entry.modules.push(m.clone());
+            }
+            for (a, b) in &edges {
+                if component.contains(a) && component.contains(b) {
+                    entry.edges.push((a.clone(), b.clone()));
+                }
+            }
+        }
+        for scaffolding in out.values_mut() {
+            scaffolding.modules.sort();
+            scaffolding.modules.dedup();
+            scaffolding.edges.sort();
+            scaffolding.edges.dedup();
+        }
+        out
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The shared content-addressed fact store (rust.apg.cache.FactStore, task-2)
 // ---------------------------------------------------------------------------
 
@@ -768,6 +907,45 @@ impl FactStore {
     /// True when the store holds no units.
     pub fn is_empty(&self) -> bool {
         self.index.is_empty()
+    }
+
+    /// Writes one language's module scaffolding under its cache-key dir. Stored
+    /// beside the per-file units so a cache-key drift discards it with them
+    /// (feedback-102).
+    pub fn put_scaffolding(
+        &self,
+        lang: &str,
+        scaffolding: &ModuleScaffolding,
+        cache_key: &CacheKey,
+    ) -> anyhow::Result<()> {
+        let dir = self.key_dir(lang, cache_key);
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(
+            dir.join(SCAFFOLDING_FILE),
+            serde_json::to_string(scaffolding)?,
+        )?;
+        Ok(())
+    }
+
+    /// Writes every language's scaffolding from a
+    /// [`ModuleScaffolding::extract`] map.
+    pub fn put_scaffolding_all(
+        &self,
+        by_lang: &BTreeMap<String, ModuleScaffolding>,
+        cache_key: &CacheKey,
+    ) -> anyhow::Result<()> {
+        for (lang, scaffolding) in by_lang {
+            self.put_scaffolding(lang, scaffolding, cache_key)?;
+        }
+        Ok(())
+    }
+
+    /// Reads a language's module scaffolding, or `None` when none was recorded
+    /// under this cache key (a `1`-projection store, or a language never seen).
+    pub fn scaffolding(&self, lang: &str, cache_key: &CacheKey) -> Option<ModuleScaffolding> {
+        let text =
+            std::fs::read_to_string(self.key_dir(lang, cache_key).join(SCAFFOLDING_FILE)).ok()?;
+        serde_json::from_str(&text).ok()
     }
 }
 
@@ -1114,6 +1292,122 @@ mod tests {
         assert!(nodes.iter().any(|(f, _)| f == "/fresh/src/a.go.A"));
         // Exactly one stored unit for the shared content.
         assert_eq!(store.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// feedback-102: the per-language scaffolding carries the pure-intermediate
+    /// modules, the file-less descendants, and every `Module -> Module` edge a
+    /// per-file fact unit cannot — while planned placeholders and file-less
+    /// components are excluded — and it round-trips through the store under a
+    /// cache key.
+    #[test]
+    fn module_scaffolding_covers_intermediates_descendants_and_round_trips() {
+        let dir = std::env::temp_dir().join(format!("apg-cache-scaffold-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+        let store = FactStore::at(dir.join("facts"));
+
+        let module = || Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let file = |path: &str| Node {
+            kind: NodeKind::File,
+            location: Some(Location {
+                path: PathBuf::from(path),
+                start: 0,
+                end: 0,
+                start_line: 1,
+                end_line: 1,
+            }),
+            ..Node::default()
+        };
+        let mut g = Graph::default();
+        // Go: a root and a child module, each with a file.
+        g.nodes.insert("godemo".into(), module());
+        g.nodes.insert("godemo/changed".into(), module());
+        g.nodes.insert("/x/go/a.go".into(), file("/x/go/a.go"));
+        g.nodes.insert("/x/go/b.go".into(), file("/x/go/b.go"));
+        g.contains
+            .insert(("godemo".into(), "godemo/changed".into()));
+        g.contains.insert(("godemo".into(), "/x/go/a.go".into()));
+        g.contains
+            .insert(("godemo/changed".into(), "/x/go/b.go".into()));
+        // C#: two pure-intermediate modules above a leaf module that owns the
+        // file, plus a file-less descendant (an inline test module).
+        g.nodes.insert("Apg".into(), module());
+        g.nodes.insert("Apg.CsharpFrontend".into(), module());
+        g.nodes.insert("Apg.CsharpFrontend.Tests".into(), module());
+        g.nodes
+            .insert("Apg.CsharpFrontend.Tests.Inline".into(), module());
+        g.nodes
+            .insert("/x/csharp/T.cs".into(), file("/x/csharp/T.cs"));
+        g.contains
+            .insert(("Apg".into(), "Apg.CsharpFrontend".into()));
+        g.contains.insert((
+            "Apg.CsharpFrontend".into(),
+            "Apg.CsharpFrontend.Tests".into(),
+        ));
+        g.contains.insert((
+            "Apg.CsharpFrontend.Tests".into(),
+            "Apg.CsharpFrontend.Tests.Inline".into(),
+        ));
+        g.contains
+            .insert(("Apg.CsharpFrontend.Tests".into(), "/x/csharp/T.cs".into()));
+        // A planned (transient) module with no file: never scaffolding.
+        g.nodes.insert(
+            "rust.planned".into(),
+            Node {
+                kind: NodeKind::Module,
+                status: Some("planned".into()),
+                ..Node::default()
+            },
+        );
+
+        let by_lang = ModuleScaffolding::extract(&g, Path::new("/x"));
+        assert!(
+            !by_lang.contains_key("rust"),
+            "a planned, file-less module is not scaffolding: {by_lang:?}"
+        );
+        let go = &by_lang["go"];
+        assert_eq!(go.modules, vec!["godemo", "godemo/changed"]);
+        assert_eq!(
+            go.edges,
+            vec![("godemo".to_string(), "godemo/changed".to_string())]
+        );
+        let cs = &by_lang["csharp"];
+        assert_eq!(
+            cs.modules,
+            vec![
+                "Apg",
+                "Apg.CsharpFrontend",
+                "Apg.CsharpFrontend.Tests",
+                "Apg.CsharpFrontend.Tests.Inline",
+            ]
+        );
+        // Both hierarchy edges (intermediate -> intermediate, and the
+        // file-less descendant) survive.
+        assert!(
+            cs.edges
+                .contains(&("Apg".to_string(), "Apg.CsharpFrontend".to_string()))
+        );
+        assert!(cs.edges.contains(&(
+            "Apg.CsharpFrontend".to_string(),
+            "Apg.CsharpFrontend.Tests".to_string()
+        )));
+        assert!(cs.edges.contains(&(
+            "Apg.CsharpFrontend.Tests".to_string(),
+            "Apg.CsharpFrontend.Tests.Inline".to_string()
+        )));
+
+        store.put_scaffolding_all(&by_lang, &cache_key).unwrap();
+        assert_eq!(store.scaffolding("csharp", &cache_key).as_ref(), Some(cs));
+        // A drifted key sees nothing (the store never mis-reads an old unit).
+        let drifted = CacheKey::compute(&ScanConfigKey {
+            languages: vec!["go".into()],
+            ..Default::default()
+        });
+        assert!(store.scaffolding("csharp", &drifted).is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 }
