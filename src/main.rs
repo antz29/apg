@@ -292,7 +292,7 @@ const KNOWN_AGENT_FILES: &[&str] = &[
 /// exists, so the tool files' `@opencode-ai/plugin` import resolves.
 const OPENCODE_PACKAGE_JSON: &str = r#"{
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.10"
+    "@opencode-ai/plugin": "1.18.20"
   }
 }
 "#;
