@@ -26,6 +26,11 @@
       "kind": "details",
       "source": "requirements.note.suite-query-failure-reconciliation",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.suite-query-execution",
+      "properties": {}
     }
   ]
 }
