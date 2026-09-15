@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "suite-tool-followups",
+  "body": "Three small, independent suite/installer hygiene fixes discovered during the `suite-query-error-guard` cycle. Together they keep the authoring surface honest: a session can make a stale task honest, the shared lib has one source for the missing-DB error, and the scaffolded plugin pin matches the suite manifest.\n\n(A) Plan-update must be able to CLEAR a task's target (target-less form). `apg plan update <project> task <phase> <k>` must be able to reset a task back to the target-less `creates` form (no `--fqn`) — the inverse of the target-less `add`. Today there is no way to clear an existing target: the `apg_plan_add` suite tool silently drops an empty `--fqn` (opencode-suite/tools/apg_plan_add.ts, the `update` → `kind === \"task\"` arm), so an authoring session cannot make a stale task honest and must resort to deleting it. Fix: a deterministic CLI mechanism — a `--no-fqn` sentinel on `apg plan update … task …` that clears the target (the CLI wrapper is `apg.plan_cmd.plan_update`, src/plan_cmd.rs:149; `parse_args` already keeps an empty value, so the sentinel is about robustly forwarding intent, not fixing the parser) — and the suite tool forwards it. Acceptance: with the sentinel (and verb `creates`), a task's verb+target become target-less and the task is valid; without it, behaviour is unchanged.\n\n(B) One missing-DB message in the suite lib. The shared lib `opencode-suite/lib/apg.ts` must have a single source for the missing-DB error string: `runCli` must reuse the already-exported `NO_DB_ERROR` constant instead of duplicating the literal (today `runCli` carries its own copy). Acceptance: no second copy of that literal remains in the lib; read and authoring paths cannot drift.\n\n(C) Installer plugin pin consistency. The `package.json` scaffolded by `apg init` into `~/.opencode/` (the `OPENCODE_PACKAGE_JSON` const in `src/main.rs`, currently pinning `@opencode-ai/plugin: \"1.18.10\"`) must pin the same version as the suite manifest `opencode-suite/package.json` (`\"1.18.20\"`). Acceptance: the scaffolded pin equals the suite manifest's pin (bump 1.18.10 → 1.18.20; if a test pins it, update that test too); no other behaviour changes.",
+  "properties": {
+    "feature": "agent-refinement"
+  },
+  "out": [],
+  "in": []
+}
