@@ -5,5 +5,11 @@
   "body": "The code that implements the three hygiene fixes on the suite's install+authoring surface: the shared suite lib's `runCli` (fix B — reuse the exported `NO_DB_ERROR` constant rather than a duplicated literal), the plan-update path — the `--no-fqn` sentinel on the CLI wrapper `apg.plan_cmd.plan_update` and its forwarding from the `apg_plan_add` tool (fix A) — and the `OPENCODE_PACKAGE_JSON` installer const in `src/main.rs` (fix C — pin `@opencode-ai/plugin` to the same version as `opencode-suite/package.json`). Nothing else changes.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.service.suite-tooling",
+      "properties": {}
+    }
+  ]
 }
