@@ -31,6 +31,11 @@
       "kind": "realised-by",
       "target": "solution.system.agent-suite",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.suite-tool-wrappers",
+      "properties": {}
     }
   ],
   "in": [
