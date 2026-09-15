@@ -6,13 +6,7 @@
   "properties": {
     "feature": "agent-refinement"
   },
-  "out": [
-    {
-      "kind": "drives",
-      "target": "domain.group.agent-suite",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
