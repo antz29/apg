@@ -4,6 +4,12 @@
   "name": "suite-tool-followups-provenance",
   "body": "Provenance: these are follow-ups discovered during the `suite-query-error-guard` cycle. The empty-target gap (fix A) specifically blocked resolving feedback-1 there — with no way to clear a stale task's target, the authoring session could not make the task honest and had to delete it instead. Fixes B and C are small drift/hygiene defects found in the same pass: the shared lib carried a second copy of the missing-DB literal, and the installer's scaffolded `@opencode-ai/plugin` pin (1.18.10) had fallen behind the suite manifest's (1.18.20). Scope is exactly A/B/C — no scanner or TypeScript-identity work (that is the separate `scanner-optimisation` change-set).",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.suite-tool-followups",
+      "properties": {}
+    }
+  ],
   "in": []
 }
