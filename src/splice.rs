@@ -47,12 +47,14 @@
 // `incremental` (phase-02) used before task-4.
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use lbug::{Connection, Database, SystemConfig};
 
+use crate::graph::{Graph, NodeKind};
 use crate::load;
+use crate::schema::SCAN_HEAD;
 
 /// The previous `db.lbug` path under an `apg/` layout root.
 pub fn db_path(apg_root: &Path) -> PathBuf {
@@ -393,6 +395,656 @@ pub enum SeedDecision {
     FullLoad(SeedFallback),
 }
 
+// ---------------------------------------------------------------------------
+// Delta application (phase-03 task-2)
+// ---------------------------------------------------------------------------
+//
+// The seeded DB is the previous scan's `db.lbug`, whole-file copied and opened
+// read-write (task-1). Task-2 applies **only the delta** as DML: the re-emitted
+// target units are upserted in place, the units whose FQN disappears are
+// detached, the shared `UnresolvedTarget` rows are lifecycle-managed by
+// reference, and the single `Scan` row (SCAN_HEAD) is refreshed. No parquet
+// build and no `COPY`: every unaffected row survives byte-for-byte from the
+// seed, which is what makes a spliced DB equal a full rebuild
+// (`domain.constraint.db-splice-equivalence`).
+//
+// ## The input is the win-B assembled graph, not the target-only spool
+//
+// `graph` is the full assembled graph (`ingest::ingest_with_reuse`'s output:
+// the re-emitted target units PLUS the cached unaffected units). The splicer
+// selects the **delta rows** from it:
+//
+// * a Struct/Function is a delta unit when its location path is in `targets`;
+// * a File is a delta unit when its FQN (the absolute path) is in `targets`;
+// * a Module is always re-upserted (there are few, and the module set is part
+//   of the equivalence — a removed file can orphan its module);
+// * an UnresolvedTarget is inserted only when a delta edge first references it.
+//
+// Reading the FULL assembled graph (rather than a target-only spool) is what
+// keeps a target unit's edge to an **unaffected** unit: the frontend emits such
+// a cross-cut edge with its canonical FQN, and the cached endpoint only exists
+// in the assembled graph — a target-only graph would have pruned it in
+// `finalize_graph` before the splicer ever saw it.
+//
+// ## Scheme (feedback-90, option (i): upsert in place + replace outgoing rels)
+//
+// For a **persisting** FQN (body-only or signature change):
+//   1. delete every rel it AUTHORS (outgoing Calls/Uses/UnresolvedCall/
+//      UnresolvedUse/Contains) — delete-before-insert holds for rels;
+//   2. UPSERT the node in place (`MERGE … SET`, the `ArtifactDb::merge_node`
+//      pattern) — never a node delete, so INCOMING Calls/Uses from units
+//      OUTSIDE the re-emission target set survive untouched (a body-only change
+//      re-emits only the changed file, so its callers are not in the delta);
+//   3. MERGE its new outgoing rels from the delta (the `ArtifactDb::merge_edge`
+//      rel-upsert pattern).
+//
+// For a **disappearing** FQN (removed file/module, or an overload re-suffix
+// retiring an old FQN): delete its authored rels, then `DETACH DELETE` the
+// node. The silent incoming-edge drop is safe ONLY here: a disappearing
+// exported symbol is a signature change, so the reverse-dependency closure put
+// every referrer in the re-emission target set, and their replacement outgoing
+// rels are merged **before** the `DETACH DELETE` runs. No edge a full rebuild
+// keeps is lost. DETACH-DELETEing a persisting FQN is forbidden.
+//
+// ## Authored/transient seed assumption
+//
+// The seed already holds the CURRENT authored/transient tables (Requirement/
+// Entity/Note/Constraint/Plan/PlanPhase/Task/Feedback and their rels) by
+// write-through: every durable/transient mutation synchronously projects into
+// `db.lbug`. The splice writes no authored row — `graph` is the **code**
+// assembly (scanner records spliced with cached fact units), never the layer/
+// transient records, so a planned node can never be re-marked over a realized
+// one. A missing/incompatible previous DB falls back to the full load
+// (task-1/task-4).
+
+/// The single `Scan` row (SCAN_HEAD) a spliced DB must carry. Mirrors the
+/// `scan_meta` control record (`schema::Record::ScanMeta`) and the columns
+/// `build_load_files` writes from a `Scan` node: `git_sha`/`git_clean` are
+/// `None` outside a git repo (stored as empty strings), and `content_key` is
+/// the phase-01 content-identity key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanRow {
+    pub git_sha: Option<String>,
+    pub git_clean: Option<bool>,
+    pub content_key: Option<String>,
+    pub scanned_at: String,
+}
+
+/// The delta a spliced DB must apply, expressed against the seeded copy.
+///
+/// `graph` is the win-B assembled graph (target units + cached unaffected
+/// units, see the module comment); `targets` is the FULL phase-2 re-emission
+/// target set — changed files ∪ reverse-dependency closure ∪ overload-group
+/// peers — and is the **delete scope**; `removed_fqns` is the subtraction half
+/// of the full-universe seam (`incremental::Prepared::removed_fqns`); `scan` is
+/// the new SCAN_HEAD row.
+pub struct SpliceDelta<'a> {
+    pub graph: &'a Graph,
+    pub targets: &'a BTreeSet<String>,
+    pub removed_fqns: &'a BTreeSet<String>,
+    pub scan: ScanRow,
+}
+
+/// What the delta application touched — logged by the pipeline and asserted by
+/// the unit tests.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SpliceReport {
+    /// Nodes MERGE-upserted in place (delta code units + modules + first-
+    /// referenced UnresolvedTargets).
+    pub nodes_upserted: u64,
+    /// Nodes DETACH-DELETEd (the disappeared units).
+    pub nodes_deleted: u64,
+    /// Outgoing rels deleted from the delta/delete units before re-insert.
+    pub edges_deleted: u64,
+    /// New outgoing rels merged from the delta.
+    pub edges_merged: u64,
+    /// UnresolvedTarget rows GC'd after the delta rels landed.
+    pub unresolved_gc: u64,
+    /// Whether the SCAN_HEAD row was refreshed.
+    pub scan_refreshed: bool,
+}
+
+impl SeededDb {
+    /// Applies `delta` to the seeded copy (task-2's DML half) on a fresh
+    /// connection. Drop the returned report; the seeded DB is then ready for
+    /// task-3's atomic publish.
+    pub fn apply(&self, delta: &SpliceDelta<'_>) -> anyhow::Result<SpliceReport> {
+        let conn = self.conn()?;
+        apply(&conn, delta)
+    }
+}
+
+/// Applies `delta` to the open (seeded) DB. Idempotent for a repeated identical
+/// delta: an upsert re-sets the same props and a re-merge of a present rel is a
+/// no-op. Runs as a sequence of DML statements; a mid-sequence failure leaves
+/// the seed partially mutated, which the caller abandons via
+/// `SeededDb::discard` and re-runs through the full load (task-4).
+pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<SpliceReport> {
+    let mut report = SpliceReport::default();
+
+    // --- 1. Select the delta's code units from the assembled graph ---------
+    let mut delta_funcs: Vec<String> = Vec::new();
+    let mut delta_structs: Vec<String> = Vec::new();
+    let mut delta_files: Vec<String> = Vec::new();
+    let mut delta_modules: Vec<String> = Vec::new();
+    // FQN -> label for every node the delta owns (code units + modules).
+    let mut delta_labels: HashMap<String, &'static str> = HashMap::new();
+    for (fqn, node) in &delta.graph.nodes {
+        match node.kind {
+            NodeKind::Module => {
+                delta_modules.push(fqn.clone());
+                delta_labels.insert(fqn.clone(), "Module");
+            }
+            NodeKind::Struct => {
+                if location_in_targets(node, delta.targets) {
+                    delta_structs.push(fqn.clone());
+                    delta_labels.insert(fqn.clone(), "Struct");
+                }
+            }
+            NodeKind::Function => {
+                if location_in_targets(node, delta.targets) {
+                    delta_funcs.push(fqn.clone());
+                    delta_labels.insert(fqn.clone(), "Function");
+                }
+            }
+            NodeKind::File if delta.targets.contains(fqn) => {
+                delta_files.push(fqn.clone());
+                delta_labels.insert(fqn.clone(), "File");
+            }
+            _ => {}
+        }
+    }
+
+    // --- 2. The delete scope: seed units owned by the target set -----------
+    //
+    // The delete scope is the WHOLE re-emission target set, never just the
+    // changed+removed files: an overload re-suffix retires the old FQN of a
+    // unit in an *unchanged* peer file, and a cascaded dependent's new facts
+    // can retire FQNs too. A seeded code unit whose location path is a target
+    // path (or whose FQN directly names one, for a File) is therefore in scope;
+    // it disappears iff the assembled graph does not re-emit it.
+    let mut in_scope: BTreeMap<String, &'static str> = code_fqns_in_paths(conn, delta.targets)?;
+    for m in seed_modules(conn)? {
+        in_scope.insert(m, "Module");
+    }
+    for fqn in delta.removed_fqns {
+        if !in_scope.contains_key(fqn)
+            && let Some(label) = db_code_label(conn, fqn)?
+        {
+            in_scope.insert(fqn.clone(), label);
+        }
+    }
+
+    let mut disappearing: BTreeMap<String, &'static str> = BTreeMap::new();
+    for (fqn, label) in &in_scope {
+        if !delta_labels.contains_key(fqn) {
+            disappearing.insert(fqn.clone(), label);
+        }
+    }
+
+    // --- 3. Delete every rel authored by a delta OR disappearing unit -------
+    //
+    // Bulk per (label, declared rel-set): an authored rel is deleted before its
+    // node is upserted (persisting) or detached (disappearing), so the delta's
+    // new rels are the only ones left. `edges_deleted` is the pre-count.
+    let mut delete_funcs: BTreeSet<String> = delta_funcs.iter().cloned().collect();
+    let mut delete_structs: BTreeSet<String> = delta_structs.iter().cloned().collect();
+    let mut delete_files: BTreeSet<String> = delta_files.iter().cloned().collect();
+    let mut delete_modules: BTreeSet<String> = delta_modules.iter().cloned().collect();
+    for (fqn, label) in &disappearing {
+        match *label {
+            "Function" => {
+                delete_funcs.insert(fqn.clone());
+            }
+            "Struct" => {
+                delete_structs.insert(fqn.clone());
+            }
+            "File" => {
+                delete_files.insert(fqn.clone());
+            }
+            "Module" => {
+                delete_modules.insert(fqn.clone());
+            }
+            _ => {}
+        }
+    }
+    report.edges_deleted +=
+        delete_authored_rels(conn, "Function", AUTH_RELS_FUNCTION, &delete_funcs)?;
+    report.edges_deleted +=
+        delete_authored_rels(conn, "Struct", AUTH_RELS_STRUCT, &delete_structs)?;
+    report.edges_deleted += delete_authored_rels(conn, "File", AUTH_RELS_CONTAINS, &delete_files)?;
+    report.edges_deleted +=
+        delete_authored_rels(conn, "Module", AUTH_RELS_CONTAINS, &delete_modules)?;
+
+    // --- 4. Upsert the delta's nodes in place ------------------------------
+    for fqn in &delta_funcs {
+        upsert_node(conn, "Function", fqn, &delta.graph.nodes[fqn])?;
+        report.nodes_upserted += 1;
+    }
+    for fqn in &delta_structs {
+        upsert_node(conn, "Struct", fqn, &delta.graph.nodes[fqn])?;
+        report.nodes_upserted += 1;
+    }
+    for fqn in &delta_files {
+        upsert_node(conn, "File", fqn, &delta.graph.nodes[fqn])?;
+        report.nodes_upserted += 1;
+    }
+    for fqn in &delta_modules {
+        if let Some(node) = delta.graph.nodes.get(fqn) {
+            upsert_node(conn, "Module", fqn, node)?;
+            report.nodes_upserted += 1;
+        }
+    }
+
+    // --- 5. Insert every first-referenced UnresolvedTarget, before its edge -
+    let mut delta_unresolved: BTreeSet<String> = BTreeSet::new();
+    for (from, to, _) in &delta.graph.unresolved_calls {
+        if delta_labels.contains_key(from)
+            && delta
+                .graph
+                .nodes
+                .get(to)
+                .is_some_and(|n| n.kind == NodeKind::UnresolvedTarget)
+        {
+            delta_unresolved.insert(to.clone());
+        }
+    }
+    for (from, to) in &delta.graph.unresolved_uses {
+        if delta_labels.contains_key(from)
+            && delta
+                .graph
+                .nodes
+                .get(to)
+                .is_some_and(|n| n.kind == NodeKind::UnresolvedTarget)
+        {
+            delta_unresolved.insert(to.clone());
+        }
+    }
+    for fqn in &delta_unresolved {
+        if let Some(node) = delta.graph.nodes.get(fqn) {
+            upsert_node(conn, "UnresolvedTarget", fqn, node)?;
+            report.nodes_upserted += 1;
+        }
+    }
+
+    // --- 6. MERGE the delta's new outgoing rels ----------------------------
+    let mut resolved: HashMap<String, Option<&'static str>> = HashMap::new();
+    let mut merge = |table: &str, from: &str, to: &str, target_type: &str| -> anyhow::Result<()> {
+        let Some(from_label) = delta_labels.get(from).copied() else {
+            return Ok(()); // an edge authored outside the delta is untouched
+        };
+        // An edge into a unit that is being detached would be dropped by the
+        // DETACH DELETE anyway; a full rebuild prunes it as dangling.
+        if disappearing.contains_key(to) {
+            return Ok(());
+        }
+        let to_label = endpoint_label(conn, to, delta.graph, &mut resolved)?;
+        let Some(to_label) = to_label else {
+            return Ok(()); // dangling endpoint — the full load prunes it too
+        };
+        if !pair_allowed(table, from_label, to_label) {
+            return Ok(());
+        }
+        if table == "UnresolvedCall" {
+            conn.query(&format!(
+                "MATCH (a:{from_label} {{fqn: {}}}), (b:{to_label} {{fqn: {}}}) \
+                 MERGE (a)-[r:UnresolvedCall]->(b) SET r.target_type = {}",
+                lit(from),
+                lit(to),
+                lit(target_type)
+            ))?;
+        } else {
+            conn.query(&format!(
+                "MATCH (a:{from_label} {{fqn: {}}}), (b:{to_label} {{fqn: {}}}) MERGE (a)-[:{table}]->(b)",
+                lit(from),
+                lit(to)
+            ))?;
+        }
+        report.edges_merged += 1;
+        Ok(())
+    };
+    for (from, to) in &delta.graph.contains {
+        merge("Contains", from, to, "")?;
+    }
+    for (from, to) in &delta.graph.calls {
+        merge("Calls", from, to, "")?;
+    }
+    for (from, to) in &delta.graph.uses {
+        merge("Uses", from, to, "")?;
+    }
+    for (from, to, tt) in &delta.graph.unresolved_calls {
+        merge("UnresolvedCall", from, to, tt)?;
+    }
+    for (from, to) in &delta.graph.unresolved_uses {
+        merge("UnresolvedUse", from, to, "")?;
+    }
+
+    // --- 7. DETACH DELETE the disappeared units ----------------------------
+    //
+    // After every replacement rel has been merged (step 6): the only edges left
+    // pointing at a disappearing node are stale incoming edges whose referrer
+    // either re-emitted a replacement or was never in the reverse closure.
+    for (label, fqns) in group_by_label(&disappearing) {
+        detach_delete(conn, label, &fqns)?;
+        report.nodes_deleted += fqns.len() as u64;
+    }
+
+    // --- 8. GC the shared UnresolvedTarget rows by reference ---------------
+    //
+    // UnresolvedTarget is deduplicated by FQN and SHARED across units, never
+    // unit-owned: after the delta rels land, a target with no surviving
+    // UnresolvedCall/UnresolvedUse edge is unreferenced by ANY unit.
+    report.unresolved_gc = count(
+        conn,
+        "MATCH (u:UnresolvedTarget) WHERE NOT (u)<-[:UnresolvedCall]-() \
+         AND NOT (u)<-[:UnresolvedUse]-() RETURN count(*)",
+    )? as u64;
+    conn.query(
+        "MATCH (u:UnresolvedTarget) WHERE NOT (u)<-[:UnresolvedCall]-() \
+         AND NOT (u)<-[:UnresolvedUse]-() DETACH DELETE u",
+    )?;
+
+    // --- 9. Refresh the single Scan row (SCAN_HEAD) ------------------------
+    //
+    // A full load rewrites the Scan node from the scan_meta record; the splice
+    // must DELETE the seeded row and INSERT the new one, or the previous scan's
+    // git state survives and the spliced DB disagrees with a full rebuild and
+    // with graph.jsonl line 1.
+    conn.query("MATCH (s:Scan) DELETE s")?;
+    conn.query(&format!(
+        "CREATE (s:Scan {{fqn: {}, git_sha: {}, git_clean: {}, content_key: {}, scanned_at: {}}})",
+        lit(SCAN_HEAD),
+        lit(delta.scan.git_sha.as_deref().unwrap_or("")),
+        lit(&delta
+            .scan
+            .git_clean
+            .map(|c| c.to_string())
+            .unwrap_or_default()),
+        lit(delta.scan.content_key.as_deref().unwrap_or("")),
+        lit(&delta.scan.scanned_at),
+    ))?;
+    report.scan_refreshed = true;
+
+    Ok(report)
+}
+
+/// The outgoing rel sets a code node authors, per its label. Each type is
+/// declared `FROM` that label in the schema (`create_schema`), so the Cypher
+/// never names an undeclared pair.
+const AUTH_RELS_FUNCTION: &str = "Calls|Uses|UnresolvedCall|UnresolvedUse";
+const AUTH_RELS_STRUCT: &str = "Uses|UnresolvedUse|Contains";
+const AUTH_RELS_CONTAINS: &str = "Contains";
+
+/// True when `node`'s location path is one of the delete-scope target paths.
+fn location_in_targets(node: &crate::graph::Node, targets: &BTreeSet<String>) -> bool {
+    node.location
+        .as_ref()
+        .is_some_and(|l| targets.contains(&l.path.to_string_lossy().into_owned()))
+}
+
+/// Single-quotes a value for a Cypher string literal.
+fn lit(value: &str) -> String {
+    format!("'{}'", cypher_escape(value))
+}
+
+/// A Cypher list literal of single-quoted strings.
+fn literal_list(values: &BTreeSet<String>) -> String {
+    values.iter().map(|v| lit(v)).collect::<Vec<_>>().join(", ")
+}
+
+/// Every seeded Struct/Function located in one of `targets`, plus every seeded
+/// File whose FQN is a target path, with its label.
+fn code_fqns_in_paths(
+    conn: &Connection,
+    targets: &BTreeSet<String>,
+) -> anyhow::Result<BTreeMap<String, &'static str>> {
+    let mut out = BTreeMap::new();
+    if targets.is_empty() {
+        return Ok(out);
+    }
+    let list = literal_list(targets);
+    for label in ["Struct", "Function"] {
+        let (_, rows) = query_rows(
+            conn,
+            &format!("MATCH (n:{label}) WHERE n.path IN [{list}] RETURN n.fqn AS fqn"),
+        )?;
+        for row in rows {
+            out.insert(cell(&row, 0), label);
+        }
+    }
+    let (_, rows) = query_rows(
+        conn,
+        &format!("MATCH (n:File) WHERE n.fqn IN [{list}] RETURN n.fqn AS fqn"),
+    )?;
+    for row in rows {
+        out.insert(cell(&row, 0), "File");
+    }
+    Ok(out)
+}
+
+/// Every **real** seeded Module FQN — `planned` placeholder modules are
+/// transient records the splice never owns (the authored/transient seed
+/// assumption), so they are excluded from the delete scope.
+fn seed_modules(conn: &Connection) -> anyhow::Result<Vec<String>> {
+    let (_, rows) = query_rows(
+        conn,
+        "MATCH (n:Module) WHERE n.status IS NULL OR n.status <> 'planned' RETURN n.fqn AS fqn",
+    )?;
+    Ok(rows.iter().map(|r| cell(r, 0)).collect())
+}
+
+/// The label of a code node at `fqn`, or `None`. Excludes `planned`
+/// placeholders on the four Implementation labels.
+fn db_code_label(conn: &Connection, fqn: &str) -> anyhow::Result<Option<&'static str>> {
+    for label in ["Function", "Struct", "File", "Module"] {
+        let n = count(
+            conn,
+            &format!(
+                "MATCH (n:{label} {{fqn: {}}}) WHERE n.status IS NULL OR n.status <> 'planned' RETURN count(*)",
+                lit(fqn)
+            ),
+        )?;
+        if n > 0 {
+            return Ok(Some(label));
+        }
+    }
+    Ok(None)
+}
+
+/// The DB label of an edge endpoint: the assembled graph's node when present,
+/// else the seeded DB (a cached/unaffected endpoint).
+fn endpoint_label(
+    conn: &Connection,
+    fqn: &str,
+    graph: &Graph,
+    cache: &mut HashMap<String, Option<&'static str>>,
+) -> anyhow::Result<Option<&'static str>> {
+    if let Some(node) = graph.nodes.get(fqn) {
+        return Ok(node_label_of(node.kind));
+    }
+    if let Some(hit) = cache.get(fqn) {
+        return Ok(*hit);
+    }
+    let label = db_code_label(conn, fqn)?;
+    cache.insert(fqn.to_string(), label);
+    Ok(label)
+}
+
+/// The node-table label of a code kind, or `None` for a non-code kind.
+fn node_label_of(kind: NodeKind) -> Option<&'static str> {
+    match kind {
+        NodeKind::Module => Some("Module"),
+        NodeKind::Struct => Some("Struct"),
+        NodeKind::Function => Some("Function"),
+        NodeKind::File => Some("File"),
+        NodeKind::UnresolvedTarget => Some("UnresolvedTarget"),
+        _ => None,
+    }
+}
+
+/// The scanned **code** rel-table `(table, from, to)` triples the delta
+/// re-merges. [`load::rel_table_pairs`] deliberately omits these (see its
+/// `AUTHORED_REL_PAIRS` comment): it exists for the write-through merge guard,
+/// which never re-merges scanned code edges — those are written by the load
+/// path. The splicer is the exception: it re-emits scanned code edges as DML,
+/// so it must admit the pairs the schema declares in `CREATE REL TABLE`
+/// (`Calls`/`Uses`/`UnresolvedCall`/`UnresolvedUse`). The `Contains` code pairs
+/// need no entry here — they already appear in `rel_table_pairs` via
+/// `contains_pairs`.
+const CODE_REL_PAIRS: [(&str, &str, &str); 6] = [
+    ("Calls", "Function", "Function"),
+    ("Uses", "Function", "Struct"),
+    ("Uses", "Struct", "Struct"),
+    ("UnresolvedCall", "Function", "UnresolvedTarget"),
+    ("UnresolvedUse", "Function", "UnresolvedTarget"),
+    ("UnresolvedUse", "Struct", "UnresolvedTarget"),
+];
+
+/// Whether the schema's rel table `table` declares an edge between the two node
+/// labels — [`load::rel_table_pairs`] plus the scanned code pairs
+/// ([`CODE_REL_PAIRS`]) — so an undeclared pair is skipped rather than fed to a
+/// binder exception.
+fn pair_allowed(table: &str, from: &str, to: &str) -> bool {
+    CODE_REL_PAIRS
+        .iter()
+        .any(|(t, a, b)| *t == table && *a == from && *b == to)
+        || load::rel_table_pairs()
+            .iter()
+            .any(|(t, a, b)| *t == table && *a == from && *b == to)
+}
+
+/// Counts and deletes the rels the `fqns` author from `label`. Returns the
+/// number deleted.
+fn delete_authored_rels(
+    conn: &Connection,
+    label: &str,
+    rels: &str,
+    fqns: &BTreeSet<String>,
+) -> anyhow::Result<u64> {
+    if fqns.is_empty() {
+        return Ok(0);
+    }
+    let list = literal_list(fqns);
+    let n = count(
+        conn,
+        &format!("MATCH (n:{label})-[r:{rels}]->() WHERE n.fqn IN [{list}] RETURN count(*)"),
+    )?;
+    conn.query(&format!(
+        "MATCH (n:{label})-[r:{rels}]->() WHERE n.fqn IN [{list}] DELETE r"
+    ))?;
+    Ok(n as u64)
+}
+
+/// Upserts one code node in place: `MERGE (n:Label {fqn}) SET props` (the
+/// `ArtifactDb::merge_node` pattern), with the property set `build_load_files`
+/// writes for that label. Never deletes the node, so incoming edges survive.
+fn upsert_node(
+    conn: &Connection,
+    label: &str,
+    fqn: &str,
+    node: &crate::graph::Node,
+) -> anyhow::Result<()> {
+    // A `planned` placeholder must never overwrite a realized module: a
+    // plan JSONL keeps its planned records after a realization scan. (The code
+    // assembly has no planned nodes; this is the same backstop `merge_records`
+    // applies.)
+    let status = lit(node.status.as_deref().unwrap_or(""));
+    let stmt = match node.kind {
+        NodeKind::Module => {
+            if node.status.as_deref() == Some("planned") {
+                let realized = count(
+                    conn,
+                    &format!(
+                        "MATCH (n:Module {{fqn: {}}}) WHERE n.status IS NULL OR n.status <> 'planned' RETURN count(*)",
+                        lit(fqn)
+                    ),
+                )?;
+                if realized > 0 {
+                    return Ok(());
+                }
+            }
+            format!(
+                "MERGE (n:Module {{fqn: {}}}) SET n.status = {status}",
+                lit(fqn)
+            )
+        }
+        NodeKind::Struct | NodeKind::Function => {
+            let (path, start, end, sl, el) = span(node);
+            format!(
+                "MERGE (n:{label} {{fqn: {}}}) SET n.path = {}, n.start = {start}, n.`end` = {end}, \
+                 n.start_line = {sl}, n.end_line = {el}, n.code_type = {}, n.status = {status}",
+                lit(fqn),
+                lit(&path),
+                lit(&node.code_type),
+            )
+        }
+        NodeKind::File => {
+            let (_, _, _, sl, el) = span(node);
+            format!(
+                "MERGE (n:File {{fqn: {}}}) SET n.start_line = {sl}, n.end_line = {el}, \
+                 n.code_type = {}, n.status = {status}",
+                lit(fqn),
+                lit(&node.code_type),
+            )
+        }
+        NodeKind::UnresolvedTarget => format!(
+            "MERGE (n:UnresolvedTarget {{fqn: {}}}) SET n.category = {}",
+            lit(fqn),
+            lit(node.category.as_deref().unwrap_or(""))
+        ),
+        _ => return Ok(()),
+    };
+    conn.query(&stmt)?;
+    Ok(())
+}
+
+/// The (path, start, end, start_line, end_line) location columns of a
+/// Struct/Function, defaulted to empty/0 when it carries no location.
+fn span(node: &crate::graph::Node) -> (String, u32, u32, u32, u32) {
+    match node.location.as_ref() {
+        Some(l) => (
+            l.path.to_string_lossy().into_owned(),
+            l.start,
+            l.end,
+            l.start_line,
+            l.end_line,
+        ),
+        None => (String::new(), 0, 0, 0, 0),
+    }
+}
+
+/// `DETACH DELETE`s every node of `label` in `fqns`.
+fn detach_delete(conn: &Connection, label: &str, fqns: &[String]) -> anyhow::Result<()> {
+    if fqns.is_empty() {
+        return Ok(());
+    }
+    let set: BTreeSet<String> = fqns.iter().cloned().collect();
+    conn.query(&format!(
+        "MATCH (n:{label}) WHERE n.fqn IN [{}] DETACH DELETE n",
+        literal_list(&set)
+    ))?;
+    Ok(())
+}
+
+/// Groups a labelled set by its label.
+fn group_by_label(set: &BTreeMap<String, &'static str>) -> Vec<(&'static str, Vec<String>)> {
+    let mut groups: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
+    for (fqn, label) in set {
+        groups.entry(label).or_default().push(fqn.clone());
+    }
+    groups.into_iter().collect()
+}
+
+/// Runs `RETURN count(*)` and returns the number (0 on a malformed result).
+fn count(conn: &Connection, query: &str) -> anyhow::Result<i64> {
+    let (_, rows) = query_rows(conn, query)?;
+    Ok(rows
+        .first()
+        .and_then(|r| r.first())
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .unwrap_or(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,6 +1321,357 @@ mod tests {
             SeedDecision::Seed(_) => panic!("a non-database file must never seed"),
         }
         assert!(seed_temps(&prev).is_empty(), "no temp on the format path");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // Delta application (phase-03 task-2)
+    // -----------------------------------------------------------------------
+
+    /// A code node with a location under `path`.
+    fn located(kind: NodeKind, path: &str, sl: u32, el: u32) -> Node {
+        Node {
+            kind,
+            location: Some(Location {
+                path: PathBuf::from(path),
+                start: 0,
+                end: 1,
+                start_line: sl,
+                end_line: el,
+            }),
+            code_type: "src".to_string(),
+            ..Node::default()
+        }
+    }
+
+    /// A `Scan` node with `(sha, clean, key, at)`.
+    fn scan_node(sha: &str, key: &str, at: &str) -> Node {
+        Node {
+            kind: NodeKind::Scan,
+            git_sha: Some(sha.to_string()),
+            git_clean: Some(true),
+            content_key: Some(key.to_string()),
+            scanned_at: Some(at.to_string()),
+            ..Node::default()
+        }
+    }
+
+    /// The previous tree: module `m` with `a.go` (struct `m.A`, fun `m.A.f`) and
+    /// `b.go` (fun `m.B.g` → `m.A.f`), plus module `m.C` with `c.go` (fun
+    /// `m.C.q`). `m.A.f` references `ext.Old`.
+    fn previous_graph(a: &str, b: &str, c: &str) -> Graph {
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "m".into(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(
+            "m.C".into(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(a.into(), located(NodeKind::File, a, 1, 80));
+        g.nodes.insert(b.into(), located(NodeKind::File, b, 1, 40));
+        g.nodes.insert(c.into(), located(NodeKind::File, c, 1, 20));
+        g.nodes
+            .insert("m.A".into(), located(NodeKind::Struct, a, 1, 50));
+        g.nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, a, 2, 20));
+        g.nodes
+            .insert("m.B.g".into(), located(NodeKind::Function, b, 2, 30));
+        g.nodes
+            .insert("m.C.q".into(), located(NodeKind::Function, c, 2, 10));
+        g.nodes.insert(
+            "ext.Old".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some("external".into()),
+                ..Node::default()
+            },
+        );
+        g.contains.insert(("m".into(), a.into()));
+        g.contains.insert(("m".into(), b.into()));
+        g.contains.insert(("m.C".into(), c.into()));
+        g.contains.insert((a.into(), "m.A".into()));
+        g.contains.insert((a.into(), "m.A.f".into()));
+        g.contains.insert(("m.A".into(), "m.A.f".into()));
+        g.contains.insert((b.into(), "m.B.g".into()));
+        g.contains.insert((c.into(), "m.C.q".into()));
+        g.calls.insert(("m.B.g".into(), "m.A.f".into()));
+        g.uses.insert(("m.A.f".into(), "m.A".into()));
+        g.unresolved_calls
+            .insert(("m.A.f".into(), "ext.Old".into(), String::new()));
+        g.nodes.insert(
+            crate::schema::SCAN_HEAD.into(),
+            scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+        );
+        g
+    }
+
+    /// The new tree — the win-B assembled graph: `a.go` re-emitted with a new
+    /// body (same FQNs) plus a new function `m.A.h`, now referencing `ext.New`
+    /// instead of `ext.Old`; `b.go` is a cached (unchanged) unit; `c.go` (and its
+    /// module `m.C`) is gone, so `m.C` is not in the graph. The new `Scan` row is
+    /// carried on the graph as the scanner emits it.
+    fn assembled_graph(a: &str, b: &str) -> Graph {
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "m".into(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(a.into(), located(NodeKind::File, a, 1, 90));
+        g.nodes.insert(b.into(), located(NodeKind::File, b, 1, 40));
+        g.nodes
+            .insert("m.A".into(), located(NodeKind::Struct, a, 1, 55));
+        g.nodes
+            .insert("m.A.f".into(), located(NodeKind::Function, a, 2, 22));
+        g.nodes
+            .insert("m.A.h".into(), located(NodeKind::Function, a, 24, 40));
+        g.nodes
+            .insert("m.B.g".into(), located(NodeKind::Function, b, 2, 30));
+        g.nodes.insert(
+            "ext.New".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some("stdlib".into()),
+                ..Node::default()
+            },
+        );
+        g.contains.insert(("m".into(), a.into()));
+        g.contains.insert(("m".into(), b.into()));
+        g.contains.insert((a.into(), "m.A".into()));
+        g.contains.insert((a.into(), "m.A.f".into()));
+        g.contains.insert((a.into(), "m.A.h".into()));
+        g.contains.insert(("m.A".into(), "m.A.f".into()));
+        g.contains.insert((b.into(), "m.B.g".into()));
+        g.calls.insert(("m.B.g".into(), "m.A.f".into()));
+        g.uses.insert(("m.A.f".into(), "m.A".into()));
+        g.unresolved_calls
+            .insert(("m.A.f".into(), "ext.New".into(), String::new()));
+        g.nodes.insert(
+            crate::schema::SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+        g
+    }
+
+    /// The full structural snapshot the equivalence oracle compares: every code
+    /// node (FQN + label + the UnresolvedTarget category), every code rel (table
+    /// + endpoints), and the single `Scan` row.
+    fn code_snapshot(db: &Database) -> BTreeSet<String> {
+        let conn = Connection::new(db).unwrap();
+        let mut out = BTreeSet::new();
+        for label in ["Module", "Struct", "Function", "File", "UnresolvedTarget"] {
+            let cat = if label == "UnresolvedTarget" {
+                ", n.category AS category"
+            } else {
+                ""
+            };
+            let (_, rows) = query_rows(
+                &conn,
+                &format!("MATCH (n:{label}) RETURN n.fqn AS fqn{cat}"),
+            )
+            .unwrap();
+            for row in rows {
+                out.insert(format!("{label}:{}:{}", cell(&row, 0), cell(&row, 1)));
+            }
+        }
+        // `rel_table_pairs` omits the scanned code pairs (see `CODE_REL_PAIRS`),
+        // so the oracle must add them back — otherwise it would silently skip
+        // every Function→Function `Calls` / Function→Struct `Uses` edge and
+        // compare only the tables a full rebuild happens to share with it.
+        let mut pairs: Vec<(&str, &str, &str)> = load::rel_table_pairs().to_vec();
+        pairs.extend(CODE_REL_PAIRS);
+        for (table, from, to) in pairs {
+            if !matches!(
+                table,
+                "Contains" | "Calls" | "Uses" | "UnresolvedCall" | "UnresolvedUse"
+            ) {
+                continue;
+            }
+            let (_, rows) = query_rows(
+                &conn,
+                &format!("MATCH (x:{from})-[r:{table}]->(y:{to}) RETURN x.fqn AS x, y.fqn AS y"),
+            )
+            .unwrap();
+            for row in rows {
+                out.insert(format!("{table}:{}->{}", cell(&row, 0), cell(&row, 1)));
+            }
+        }
+        let (_, rows) = query_rows(
+            &conn,
+            "MATCH (s:Scan) RETURN s.fqn AS fqn, s.git_sha AS sha, s.git_clean AS clean, \
+             s.content_key AS key, s.scanned_at AS at",
+        )
+        .unwrap();
+        for row in rows {
+            out.insert(format!(
+                "Scan:{}|{}|{}|{}|{}",
+                cell(&row, 0),
+                cell(&row, 1),
+                cell(&row, 2),
+                cell(&row, 3),
+                cell(&row, 4)
+            ));
+        }
+        out
+    }
+
+    /// The equivalence proof (`domain.constraint.db-splice-equivalence`): a
+    /// spliced DB's code node/edge/UnresolvedTarget/Scan sets equal a full
+    /// rebuild's, while covering persist / disappear / unresolved-GC / Scan
+    /// refresh in one delta.
+    #[test]
+    fn delta_application_matches_a_full_rebuild() {
+        let dir = scratch("delta");
+        let prev_path = dir.join("db.lbug");
+        let a = "/x/a.go".to_string();
+        let b = "/x/b.go".to_string();
+        let c = "/x/c.go".to_string();
+
+        let previous = previous_graph(&a, &b, &c);
+        build_db(&prev_path, &previous);
+
+        let seeded = match seed(&prev_path) {
+            SeedDecision::Seed(s) => s,
+            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+        };
+
+        let assembled = assembled_graph(&a, &b);
+        // The delete scope for a body-only change to a.go plus the removal of
+        // c.go: the changed file and the removed file. b.go is cut off (its
+        // caller edge must survive the splice untouched).
+        let targets: BTreeSet<String> = [a.clone(), c.clone()].into_iter().collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+        let delta = SpliceDelta {
+            graph: &assembled,
+            targets: &targets,
+            removed_fqns: &removed,
+            scan: ScanRow {
+                git_sha: Some("newsha".into()),
+                git_clean: Some(true),
+                content_key: Some("newkey".into()),
+                scanned_at: "2026-01-02T00:00:00Z".into(),
+            },
+        };
+
+        let report = seeded.apply(&delta).unwrap();
+        assert!(
+            report.nodes_upserted >= 6,
+            "persist+new units upserted: {report:?}"
+        );
+        assert_eq!(
+            report.nodes_deleted, 3,
+            "c.go, m.C.q, m.C disappear: {report:?}"
+        );
+        assert!(
+            report.edges_deleted >= 8,
+            "authored rels replaced: {report:?}"
+        );
+        assert!(report.edges_merged >= 8, "delta rels re-merged: {report:?}");
+        assert_eq!(
+            report.unresolved_gc, 1,
+            "ext.Old is now unreferenced: {report:?}"
+        );
+        assert!(report.scan_refreshed);
+
+        // The full-rebuild reference: the same assembled graph loaded whole.
+        let expected_path = dir.join("expected.lbug");
+        build_db(&expected_path, &assembled);
+
+        let spliced = code_snapshot(&seeded.db);
+        let expected = {
+            let db =
+                Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
+            let snap = code_snapshot(&db);
+            drop(db);
+            snap
+        };
+        assert_eq!(
+            spliced, expected,
+            "a spliced DB must answer identically to a full rebuild"
+        );
+
+        // Spot-check the three cases that motivate the scheme.
+        assert!(
+            spliced.contains("Calls:m.B.g->m.A.f"),
+            "a caller OUTSIDE the delta must keep its edge to a persisting FQN"
+        );
+        assert!(
+            !spliced.contains("Function:m.C.q:") && !spliced.contains("Module:m.C:"),
+            "the removed file's unit and its orphaned module must be gone"
+        );
+        assert!(
+            spliced.contains("UnresolvedTarget:ext.New:stdlib")
+                && !spliced
+                    .iter()
+                    .any(|s| s.starts_with("UnresolvedTarget:ext.Old")),
+            "the shared UnresolvedTarget rows must be insert-then-GC'd"
+        );
+        assert!(
+            spliced.contains("Scan:scan/HEAD|newsha|true|newkey|2026-01-02T00:00:00Z"),
+            "the seeded Scan row must be refreshed, not preserved"
+        );
+
+        let temp = seeded.temp_path.clone();
+        drop(seeded);
+        std::fs::remove_file(&temp).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A removed file named only by `removed_fqns` (not by a target path) is
+    /// still detached — the subtraction half of the full-universe seam.
+    #[test]
+    fn removed_fqns_are_detached_even_outside_the_target_paths() {
+        let dir = scratch("removed-fqns");
+        let prev_path = dir.join("db.lbug");
+        let a = "/x/a.go".to_string();
+        let b = "/x/b.go".to_string();
+        let c = "/x/c.go".to_string();
+        build_db(&prev_path, &previous_graph(&a, &b, &c));
+
+        let seeded = match seed(&prev_path) {
+            SeedDecision::Seed(s) => s,
+            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+        };
+        let assembled = assembled_graph(&a, &b);
+        let targets: BTreeSet<String> = [a.clone()].into_iter().collect();
+        let removed: BTreeSet<String> = ["m.C.q".to_string()].into_iter().collect();
+        seeded
+            .apply(&SpliceDelta {
+                graph: &assembled,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: None,
+                    git_clean: None,
+                    content_key: None,
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            })
+            .unwrap();
+
+        let snap = code_snapshot(&seeded.db);
+        assert!(
+            !snap.contains("Function:m.C.q:"),
+            "an FQN named by removed_fqns must be detached: {snap:?}"
+        );
+        // An empty git state writes empty strings, exactly as the full load does.
+        assert!(
+            snap.contains("Scan:scan/HEAD||||2026-01-02T00:00:00Z"),
+            "a non-git scan's Scan row is all-empty but scanned_at: {snap:?}"
+        );
+        let temp = seeded.temp_path.clone();
+        drop(seeded);
+        std::fs::remove_file(&temp).ok();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
