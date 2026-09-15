@@ -618,6 +618,47 @@ fn targets_for_language(
     out
 }
 
+/// The win-C per-language frontend spawn verdict (phase-03 task-5).
+///
+/// On the win-B incremental path (`full_scan == false`):
+///
+/// * a language with a **non-empty** target set spawns — it has changed files
+///   to re-emit;
+/// * a language with an **empty** target set is skipped **entirely** — not
+///   merely emission-filtered (phase-02 task-8/-9, where an empty target set
+///   still spawns) — and its per-file facts arrive through the win-B cached-fact
+///   reuse path (`reuse_plan` below carries every file outside the target set).
+///
+/// The skip applies only to the **PARTIAL** case the task names: the scan as a
+/// whole has a non-empty target set and *this* language is one of the unchanged
+/// ones. When the whole target set is empty, phase-02 deliberately runs every
+/// frontend **UNFILTERED** — an empty/absent `--targets` list means "no filter"
+/// (`incremental.rs` "an EMPTY target set emits every fact (no filter), so the
+/// full spool is already the universe and reuse stays available"). That is not
+/// merely an optimisation: the frontends emit their **global module
+/// scaffolding** (e.g. Go's `Module` records and the `Module -> Module` package
+/// hierarchy, `golib/main.go:256-268`) *outside* the per-file emission filter,
+/// because those records carry no location and so are not part of any per-file
+/// fact unit. The cached-fact reuse path can only rebuild modules it can see as
+/// a File's parent, so skipping when nothing changed would drop, say, Go's
+/// `scratch/a` package module and make the incremental graph differ from a full
+/// scan (the cross-worktree reuse acceptance). The whole-tree FRESH fast-path
+/// (phase-01 task-7) is the separate, earlier path for "the entire tree is
+/// unchanged".
+///
+/// On a whole-tree full scan (`full_scan == true`) every detected/requested
+/// language must still spawn; the skip applies only to the incremental
+/// partition of work.
+///
+/// This is the **single source of truth** for the per-language verdict: it is
+/// derived from the very phase-2 target set that drives the win-C DB splice
+/// (`PipelineInput { targets_rel, .. }`, phase-03 task-4), never from a fresh
+/// `auto_detect_languages` walk, so a language skipped here is exactly a
+/// language the splicer treats as unchanged and the two can never disagree.
+fn should_spawn_language(full_scan: bool, targets_empty: bool, any_targets: bool) -> bool {
+    full_scan || !any_targets || !targets_empty
+}
+
 /// Spawns one language's frontend for a scan phase, draining stdout to a spool
 /// and stderr to a log spool. Returns the spool path on success, `None` when
 /// the frontend failed (reported + skipped, never fatal).
@@ -1505,15 +1546,31 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // only a genuine signature change pulls the reverse-dependency closure into
     // phase 2. A body-only change ends after phase 1, so its dependents are
     // reused.
+    let full_scan_path = incremental.full_scan.is_some();
     let mut phase = 1u32;
     let mut targets_rel = incremental.targets_rel.clone();
     loop {
+        // The scan as a whole has work to re-emit (the PARTIAL case). When it
+        // does not, phase-02 runs every frontend unfiltered instead of skipping
+        // (see `should_spawn_language`).
+        let any_targets = !targets_rel.is_empty();
         for lang in &languages {
             let targets = targets_for_language(&targets_rel, &project_dir, lang);
-            // A phase-2 language with no additional targets keeps its phase-1
-            // spool (no re-run); a phase-1 language with no targets still runs
-            // (an empty/absent target list means "no filter" per the contract).
-            if phase == 2 && targets.is_empty() {
+            // Win-C per-language spawn skip (phase-03 task-5): on the
+            // incremental path an unchanged language (empty target set while
+            // the scan has other changed languages) has its frontend process
+            // skipped entirely; its per-file facts arrive via the win-B
+            // cached-fact reuse path. On a full scan every language spawns. A
+            // phase-2 language whose only targets are its phase-1 ones still
+            // has them in the final (stage-1 ∪ cascade) set, so it re-runs and
+            // replaces its spool; only a language with no targets at all is
+            // skipped here.
+            if !should_spawn_language(full_scan_path, targets.is_empty(), any_targets) {
+                if phase == 1 {
+                    log.ln(&format!(
+                        "[scan] {lang}: no changed targets — frontend skipped (facts reused)"
+                    ));
+                }
                 continue;
             }
             match spawn_frontend(
@@ -4079,6 +4136,40 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Phase-03 task-5: the per-language spawn verdict. On the incremental
+    /// path, in the PARTIAL case (the scan has other changed languages) a
+    /// language whose target set is empty is SKIPPED entirely (no process
+    /// spawn), while a language with targets spawns. When the whole target set
+    /// is empty phase-02's unfiltered path runs every language, and on a full
+    /// scan every language spawns. The verdict is derived from the SAME
+    /// phase-2 `targets_rel` set that drives the win-C DB splice, via
+    /// `targets_for_language`, never a fresh detection walk.
+    #[test]
+    fn spawn_verdict_skips_unchanged_languages_only_on_the_incremental_path() {
+        // A partial (win-C) delta: go changed, ts untouched.
+        let mut rel = BTreeSet::new();
+        rel.insert("a/a.go".to_string());
+        let go_targets = targets_for_language(&rel, Path::new("/root"), "go");
+        let ts_targets = targets_for_language(&rel, Path::new("/root"), "ts");
+        let any = !rel.is_empty();
+
+        // Incremental PARTIAL case: the changed language spawns; the unchanged
+        // one is skipped entirely (not merely emission-filtered).
+        assert!(should_spawn_language(false, go_targets.is_empty(), any));
+        assert!(!should_spawn_language(false, ts_targets.is_empty(), any));
+
+        // Incremental with NO targets anywhere: phase-02's unfiltered path runs
+        // every language (an empty target file means "no filter"), so the
+        // frontends still emit their global module scaffolding + full universe.
+        assert!(should_spawn_language(false, true, false));
+        assert!(should_spawn_language(false, false, false));
+
+        // Full scan: every detected/requested language still spawns, even with
+        // an empty target set (no emission filter is passed on this path).
+        assert!(should_spawn_language(true, true, false));
+        assert!(should_spawn_language(true, go_targets.is_empty(), any));
     }
 
     /// A scratch repo with real Go sources, a `go.mod`, and an `apg/` layout at
