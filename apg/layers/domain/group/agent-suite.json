@@ -36,6 +36,11 @@
       "kind": "realised-by",
       "target": "solution.component.suite-tool-wrappers",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.suite-query-execution",
+      "properties": {}
     }
   ],
   "in": [
