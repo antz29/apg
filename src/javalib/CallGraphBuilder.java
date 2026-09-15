@@ -211,19 +211,29 @@ public class CallGraphBuilder {
             Path a = t.toAbsolutePath().normalize();
             if (walked.containsKey(a)) requested.add(a);
         }
-        if (requested.isEmpty()) {
-            // A non-empty target list that matches no walked file selects
-            // nothing (an explicit filter is in force), never everything.
-            System.err.println("[" + elapsed() + "] targets matched no scanned file; emitting nothing");
-            return;
-        }
-
-        // Package of every file (the re-emission unit for Java). Parsing is
-        // cheap; attribution is the expensive part we keep to the target set.
+        // Package of every walked file (the re-emission unit for Java). Parsing
+        // is cheap; attribution is the expensive part we keep to the target set.
         // Phase 02 note: java compilers/file managers carry option state across
         // tasks in one JVM, so every task gets a fresh compiler + file manager.
         Map<Path, String> pkgByFile = packageMap(ToolProvider.getSystemJavaCompiler(),
                 new ArrayList<>(walked.keySet()));
+
+        if (requested.isEmpty()) {
+            // A non-empty target list that matches no walked file selects no
+            // per-file facts (an explicit filter is in force), never everything.
+            // It is still a SPAWNED Java frontend, though, so its global
+            // Module->Module scaffolding must cover every walked package
+            // (feedback-103), exactly as a full scan's does.
+            LinkedHashSet<String> allPkgs = new LinkedHashSet<>(pkgByFile.values());
+            allPkgs.remove("");
+            System.err.println("[" + elapsed() + "] targets matched no scanned file; "
+                + "emitting global module scaffolding for " + allPkgs.size() + " package(s) only");
+            var c = new Collector(prefix, true, Set.of(), Map.of());
+            c.emitGlobalPkgScaffolding(allPkgs);
+            c.flush();
+            return;
+        }
+
         Set<String> targetPkgs = new HashSet<>();
         for (Path t : requested) targetPkgs.add(pkgByFile.getOrDefault(t, ""));
         Set<Path> targetFiles = new LinkedHashSet<>();
@@ -334,6 +344,17 @@ public class CallGraphBuilder {
         System.err.println("[" + elapsed() + "] pass 1: assigning ids to declared classes and methods...");
         var c = new Collector(prefix, true, surfaceStructs, surfaceFuncFqn);
         c.collectAll(units);
+        // feedback-103: emit the global Module->Module scaffolding for the
+        // unchanged packages the per-file filter leaves out. Target packages
+        // get theirs from their own re-emitted files, so the union covers every
+        // walked package — matching a full scan's hierarchy. The all-targets
+        // path has no unchanged package and stays byte-identical to a full scan.
+        LinkedHashSet<String> nonTargetPkgs = new LinkedHashSet<>();
+        for (Path f : nonTargetFiles) nonTargetPkgs.add(pkgByFile.getOrDefault(f, ""));
+        nonTargetPkgs.remove("");
+        System.err.println("[" + elapsed() + "] emitting global module scaffolding for "
+            + nonTargetPkgs.size() + " reused package(s)...");
+        c.emitGlobalPkgScaffolding(nonTargetPkgs);
         System.err.println("[" + elapsed() + "] pass 2: emitting nodes and edges...");
         c.emitAll(units, total);
         c.flush();
@@ -939,6 +960,23 @@ public class CallGraphBuilder {
                 }
                 prev = cur;
             }
+        }
+
+        /**
+         * Emits the GLOBAL Module->Module scaffolding for packages outside the
+         * per-file emission filter (feedback-103).
+         *
+         * The targeted scan re-emits only the target files' facts, but it walks
+         * every source file (to build the class cache and package map). The
+         * module hierarchy is not per-file emission: a full scan emits a
+         * `module` record and `Module->Module` contains edge for every package it
+         * walks, and the win-B assembled graph/export must match a full rebuild.
+         * The target packages are covered by their own re-emitted files, so this
+         * is called with the UNCHANGED packages only — the all-targets path
+         * passes an empty set and stays byte-identical to the full scan.
+         */
+        void emitGlobalPkgScaffolding(Collection<String> packages) {
+            for (String p : packages) emitPkgHierarchy(p);
         }
 
         void collectAll(List<CompilationUnitTree> units) {

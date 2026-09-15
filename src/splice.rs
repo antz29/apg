@@ -2651,6 +2651,263 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The TRUE new tree of the multi-package Java fixture — the full-rebuild
+    /// reference: `pkg`, `pkg.a` (unchanged), `pkg.b` (changed), `pkg.c`
+    /// (unchanged), each package's `Module` record and `Module -> Module`
+    /// hierarchy edge, plus one File/Struct/Function per package. Java emits the
+    /// package hierarchy for EVERY package it walks, whether or not the package's
+    /// per-file facts pass the targeted emission filter.
+    fn java_pkg_tree(a: &str, b: &str, c: &str) -> Graph {
+        let module = |_: &str| Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        };
+        let mut g = Graph::default();
+        for p in ["pkg", "pkg.a", "pkg.b", "pkg.c"] {
+            g.nodes.insert(p.to_string(), module(p));
+        }
+        for (pkg, file, ty) in [("pkg.a", a, "A"), ("pkg.b", b, "B"), ("pkg.c", c, "C")] {
+            let st = format!("{pkg}.{ty}");
+            let fun = format!("{pkg}.{ty}.f");
+            g.nodes
+                .insert(file.to_string(), located(NodeKind::File, file, 1, 20));
+            g.nodes
+                .insert(st.clone(), located(NodeKind::Struct, file, 1, 20));
+            g.nodes
+                .insert(fun.clone(), located(NodeKind::Function, file, 2, 10));
+            // The ingestor derives a `File -> unit` edge for every located
+            // Struct AND Function (Pass B3), so the full-rebuild reference must
+            // carry both or the oracle compares against a graph no full scan
+            // would ever produce.
+            g.contains.insert((pkg.to_string(), file.to_string()));
+            g.contains.insert((file.to_string(), st.clone()));
+            g.contains.insert((file.to_string(), fun.clone()));
+            g.contains.insert((st.clone(), fun.clone()));
+        }
+        for p in ["pkg.a", "pkg.b", "pkg.c"] {
+            g.contains.insert(("pkg".to_string(), p.to_string()));
+        }
+        g.nodes.insert(
+            crate::schema::SCAN_HEAD.into(),
+            scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+        );
+        g
+    }
+
+    /// feedback-103: a **spawned** language's global `Module -> Module`
+    /// scaffolding must reach the EXPORT even when its per-file facts are
+    /// filtered to a target set. `partial_scan_export_matches_a_full_rebuild`
+    /// covers the SKIPPED language (its scaffolding is replayed from the store);
+    /// this covers the SPAWNED one, where `Reuse.skipped_langs` is EMPTY so pass
+    /// 2b replays nothing — the scaffolding can only come from the scanned
+    /// stream. The condition is Java's: a multi-package tree (`pkg`, `pkg.a`
+    /// unchanged, `pkg.b` changed, `pkg.c` unchanged) where the targeted scan
+    /// re-emits only `pkg.b`'s per-file facts, yet the walk covers every package.
+    /// The fixed scanner emits the global package hierarchy for every walked
+    /// package; before the fix it emitted only the target package's, so the
+    /// assembled export lacked `pkg -> pkg.a` while Java was not in
+    /// `skipped_langs`, and the export diverged from a full rebuild.
+    #[test]
+    fn java_targeted_scan_scaffolding_reaches_the_export() {
+        use crate::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
+        use crate::ingest::{IngestOptions, Reuse, ingest_with_reuse};
+        use crate::schema::Record;
+
+        let dir = scratch("java-targeted-export");
+        let a = "/x/java/pkg/a/A.java".to_string();
+        let b = "/x/java/pkg/b/B.java".to_string();
+        let c = "/x/java/pkg/c/C.java".to_string();
+        let cache_key = CacheKey::compute(&ScanConfigKey::default());
+
+        // The TRUE new tree: the full-rebuild reference AND the source of the
+        // unchanged files' cached per-file units.
+        let reference = java_pkg_tree(&a, &b, &c);
+        let mut store = FactStore::at(dir.join("facts"));
+        for (abs, rel, oid) in [
+            (a.as_str(), "java/pkg/a/A.java", "oid-a"),
+            (c.as_str(), "java/pkg/c/C.java", "oid-c"),
+        ] {
+            let frag = FileFragment::from_graph(&reference, abs, rel, oid, "java");
+            store.put(&frag, "/x", &cache_key).unwrap();
+        }
+        // Deliberately NO stored scaffolding: pass 2b only replays for a SKIPPED
+        // language, and `skipped_langs` below is empty.
+
+        // The stream the FIXED Java frontend emits for a targeted scan of
+        // `pkg/b/B.java` ONLY: the global package hierarchy for every walked
+        // package, then the target file's per-file facts.
+        let scaffolding = || {
+            vec![
+                Record::Module { fqn: "pkg".into() },
+                Record::Module {
+                    fqn: "pkg.a".into(),
+                },
+                Record::Module {
+                    fqn: "pkg.b".into(),
+                },
+                Record::Module {
+                    fqn: "pkg.c".into(),
+                },
+                Record::Contains {
+                    from: "pkg".into(),
+                    to: "pkg.a".into(),
+                },
+                Record::Contains {
+                    from: "pkg".into(),
+                    to: "pkg.b".into(),
+                },
+                Record::Contains {
+                    from: "pkg".into(),
+                    to: "pkg.c".into(),
+                },
+            ]
+        };
+        let target_facts = || {
+            vec![
+                Record::LangSwitch {
+                    language: "java".into(),
+                },
+                Record::File {
+                    path: b.clone(),
+                    parent: "pkg.b".into(),
+                    start_line: 1,
+                    end_line: 20,
+                },
+                Record::Struct {
+                    id: "sb".into(),
+                    parent: "pkg.b".into(),
+                    name: "B".into(),
+                    path: b.clone(),
+                    start: 0,
+                    end: 1,
+                    start_line: 1,
+                    end_line: 20,
+                },
+                Record::Function {
+                    id: "fb".into(),
+                    parent: "pkg.b.B".into(),
+                    name: "f".into(),
+                    params: Vec::new(),
+                    file: b.clone(),
+                    path: b.clone(),
+                    start: 0,
+                    end: 1,
+                    start_line: 2,
+                    end_line: 10,
+                },
+                Record::Contains {
+                    from: "sb".into(),
+                    to: "fb".into(),
+                },
+            ]
+        };
+        let scan_meta = || Record::ScanMeta {
+            git_sha: Some("newsha".into()),
+            git_clean: Some(true),
+            content_key: Some("newkey".into()),
+            scanned_at: "2026-01-02T00:00:00Z".into(),
+        };
+
+        // The spawned-language reuse: the unchanged Java FILES are spliced from
+        // the cache, but Java is NOT in `skipped_langs` (it was spawned), so the
+        // store's scaffolding is never replayed.
+        let reuse = Reuse {
+            store: &store,
+            cache_key: &cache_key,
+            files: vec![
+                (
+                    "java/pkg/a/A.java".to_string(),
+                    "java".to_string(),
+                    "oid-a".to_string(),
+                ),
+                (
+                    "java/pkg/c/C.java".to_string(),
+                    "java".to_string(),
+                    "oid-c".to_string(),
+                ),
+            ],
+            reader_root: "/x".to_string(),
+            skipped_langs: BTreeSet::new(),
+        };
+        assert!(
+            reuse.skipped_langs.is_empty(),
+            "Java is spawned, not skipped: pass 2b must replay nothing"
+        );
+
+        let opts = IngestOptions {
+            blacklist: &[],
+            language: "java",
+            config: None,
+        };
+        let mut fixed: Vec<Record> = vec![scan_meta()];
+        fixed.extend(scaffolding());
+        fixed.extend(target_facts());
+        let (assembled, _) = ingest_with_reuse(fixed, &opts, Some(&reuse));
+
+        let assembled_path = dir.join("assembled.jsonl");
+        let reference_path = dir.join("reference.jsonl");
+        load::write_graph_jsonl(&assembled, &assembled_path).unwrap();
+        load::write_graph_jsonl(&reference, &reference_path).unwrap();
+        let assembled_jsonl = std::fs::read_to_string(&assembled_path).unwrap();
+        let reference_jsonl = std::fs::read_to_string(&reference_path).unwrap();
+        let canonical =
+            |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
+
+        // The scaffolding is in the export itself...
+        assert!(
+            assembled_jsonl.contains("\"type\":\"module\",\"fqn\":\"pkg.a\""),
+            "the export must carry the unchanged package's module record"
+        );
+        assert!(
+            assembled_jsonl.contains("\"type\":\"contains\",\"from\":\"pkg\",\"to\":\"pkg.a\""),
+            "the export must carry the spawned stream's pkg -> pkg.a scaffolding:\n{assembled_jsonl}"
+        );
+        // ...and the whole export equals a full rebuild's.
+        assert_eq!(
+            canonical(&assembled_jsonl),
+            canonical(&reference_jsonl),
+            "a spawned targeted Java scan must export a full rebuild's graph.jsonl"
+        );
+        assert!(assembled_jsonl.starts_with("{\"type\":\"scan_meta\""));
+
+        // Sensitivity / non-blindness: re-assemble the stream the PRE-FIX
+        // scanner emitted — the target package's hierarchy only. `skipped_langs`
+        // is STILL empty (Java is spawned), so nothing can recover the missing
+        // hierarchy: the export lacks the `pkg -> pkg.a` edge even though `pkg.a`
+        // itself survives as the reused file's cached direct-parent module, and
+        // it diverges from the full rebuild. The hierarchy EDGE — not the module
+        // record — is the discriminating assertion above.
+        let mut pre_fix: Vec<Record> = vec![scan_meta()];
+        pre_fix.push(Record::Module { fqn: "pkg".into() });
+        pre_fix.push(Record::Module {
+            fqn: "pkg.b".into(),
+        });
+        pre_fix.push(Record::Contains {
+            from: "pkg".into(),
+            to: "pkg.b".into(),
+        });
+        pre_fix.extend(target_facts());
+        let (before_fix, _) = ingest_with_reuse(pre_fix, &opts, Some(&reuse));
+        let before_path = dir.join("before-fix.jsonl");
+        load::write_graph_jsonl(&before_fix, &before_path).unwrap();
+        let before_jsonl = std::fs::read_to_string(&before_path).unwrap();
+        assert!(
+            before_jsonl.contains("\"type\":\"module\",\"fqn\":\"pkg.a\""),
+            "the reused file's cached direct-parent module survives even pre-fix"
+        );
+        assert!(
+            !before_jsonl.contains("\"type\":\"contains\",\"from\":\"pkg\",\"to\":\"pkg.a\""),
+            "the pre-fix stream cannot carry pkg -> pkg.a:\n{before_jsonl}"
+        );
+        assert_ne!(
+            canonical(&before_jsonl),
+            canonical(&reference_jsonl),
+            "the pre-fix stream's export must diverge from a full rebuild"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A removed file named only by `removed_fqns` (not by a target path) is
     /// still detached — the subtraction half of the full-universe seam.
     #[test]

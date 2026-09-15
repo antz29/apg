@@ -33,6 +33,7 @@ public class CallGraphBuilderTest {
             testTargetedEqualsFullForTargetPackage(proj, base);
             testWarmCacheReusesUnchangedPackages(proj, base);
             testEmptyTargetsMeansNoFilter(proj, base);
+            testNoMatchingTargetsEmitsScaffoldingOnly(proj, base);
         } finally {
             deleteRec(base);
         }
@@ -132,10 +133,24 @@ public class CallGraphBuilderTest {
             "--cache-dir", cache.toString(), "--cache-key", "k1");
         String incRaw = incR.out;
 
-        Set<String> fullForTarget = filterToTarget(normalize(fullRaw), "pkg.b", bFile(proj));
+        Set<String> fullForTarget = filterToTarget(normalize(fullRaw), bFile(proj));
         Set<String> inc = normalize(incRaw);
         check("targeted facts for pkg.b equal the full scan's pkg.b facts",
             fullForTarget.equals(inc), setDiff(fullForTarget, inc) + "\nSTDERR:\n" + incR.err);
+
+        // feedback-103: global Module->Module scaffolding is NOT per-file
+        // emission. The targeted scan walks every source file (to build the
+        // class cache and package map), so the unchanged packages' module
+        // records and hierarchy edges must be present even though only pkg.b's
+        // per-file facts are re-emitted. Java was the lone frontend omitting
+        // this, which broke DB/export == full-rebuild equivalence on a partial
+        // scan that still SPAWNS the Java frontend.
+        check("targeted scan carries the unchanged packages' module records",
+            inc.contains("module|pkg") && inc.contains("module|pkg.a") && inc.contains("module|pkg.c"),
+            "targeted output was:\n" + incRaw);
+        check("targeted scan carries the unchanged packages' Module->Module contains edges",
+            inc.contains("contains|pkg|pkg.a") && inc.contains("contains|pkg|pkg.c"),
+            "targeted output was:\n" + incRaw);
     }
 
     /** A second scan with the same tree must not recompile the unchanged packages. */
@@ -163,6 +178,29 @@ public class CallGraphBuilderTest {
         String out = run(proj, "--targets", targets.toString()).out;
         check("an empty targets file is byte-identical to the full scan",
             full.equals(out), diff(full, out));
+    }
+
+    /**
+     * A target list naming only paths outside the walked tree (e.g. deleted
+     * sources) selects no per-file facts, but it is still a SPAWNED Java
+     * frontend: it must carry every walked package's global Module->Module
+     * scaffolding, exactly as a full scan does (feedback-103).
+     */
+    static void testNoMatchingTargetsEmitsScaffoldingOnly(Path proj, Path base) throws Exception {
+        Path targets = base.resolve("missing.targets");
+        Files.writeString(targets, base.resolve("gone/G.java").toAbsolutePath().normalize() + "\n",
+            StandardCharsets.UTF_8);
+        String out = run(proj, "--targets", targets.toString()).out;
+        Set<String> recs = normalize(out);
+        check("no-match targets emit the global module scaffolding",
+            recs.containsAll(Set.of("module|pkg", "module|pkg.a", "module|pkg.b", "module|pkg.c")),
+            "targeted output was:\n" + out);
+        check("no-match targets emit the Module->Module hierarchy edges",
+            recs.containsAll(Set.of("contains|pkg|pkg.a", "contains|pkg|pkg.b", "contains|pkg|pkg.c")),
+            "targeted output was:\n" + out);
+        boolean perFile = recs.stream().anyMatch(s -> s.startsWith("file|") || s.startsWith("struct|")
+            || s.startsWith("function|"));
+        check("no-match targets emit no per-file facts", !perFile, "targeted output was:\n" + out);
     }
 
     // ------------------------------------------------------------------
@@ -285,32 +323,40 @@ public class CallGraphBuilderTest {
         return out;
     }
 
-    /** Keeps only the records a targeted scan of `targetPkg`/`targetFile` should emit. */
-    static Set<String> filterToTarget(Set<String> all, String targetPkg, Path targetFile) {
+    /**
+     * The records a targeted scan of `targetFile` must emit (feedback-103).
+     *
+     * Per-file facts — the target file's `file`/`struct`/`function` records and
+     * the `contains`/`calls`/`uses`/`unresolved_*` edges between its units — are
+     * filtered to the target file. The global Module->Module scaffolding is NOT
+     * per-file emission: a targeted scan walks every source file (to build the
+     * class cache and package map), so it carries every walked package's
+     * `module` record and `Module->Module` contains edge, exactly as a full scan
+     * does. (The target package's own scaffolding arrives via its re-emitted
+     * files; the unchanged packages' arrives via the global pre-emission.)
+     */
+    static Set<String> filterToTarget(Set<String> all, Path targetFile) {
         String tf = targetFile.toString();
         Set<String> targetUnits = new TreeSet<>();
-        Set<String> targetModules = new TreeSet<>();
+        Set<String> modules = new TreeSet<>();
         for (String s : all) {
             String[] p = s.split("\\|", -1);
+            if (p[0].equals("module")) modules.add(p[1]);
             if ((p[0].equals("struct") || p[0].equals("function")) && p[2].equals(tf)) targetUnits.add(p[1]);
-        }
-        targetModules.add(targetPkg);
-        int dot = targetPkg.lastIndexOf('.');
-        while (dot > 0) {
-            targetModules.add(targetPkg.substring(0, dot));
-            dot = targetPkg.lastIndexOf('.', dot - 1);
         }
         Set<String> keep = new TreeSet<>();
         Set<String> keptUnresolved = new TreeSet<>();
         for (String s : all) {
             String[] p = s.split("\\|", -1);
             switch (p[0]) {
-                case "module" -> { if (targetModules.contains(p[1])) keep.add(s); }
+                case "module" -> keep.add(s);
                 case "file" -> { if (p[1].equals(tf)) keep.add(s); }
                 case "struct", "function" -> { if (p[2].equals(tf)) keep.add(s); }
                 case "contains" -> {
-                    if ((targetUnits.contains(p[1]) || targetModules.contains(p[1]))
-                        && (targetUnits.contains(p[2]) || targetModules.contains(p[2]))) keep.add(s);
+                    // Module->Module hierarchy is global; struct containment
+                    // (nested struct / struct->method) is per-file.
+                    if ((modules.contains(p[1]) && modules.contains(p[2]))
+                        || (targetUnits.contains(p[1]) && targetUnits.contains(p[2]))) keep.add(s);
                 }
                 case "calls", "uses", "unresolved_call", "unresolved_use" -> {
                     if (targetUnits.contains(p[1])) {
