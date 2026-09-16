@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "note",
   "name": "baseline-and-acceptance",
-  "body": "Measured full-scan baselines that define the wins. jgrapht (fast CI baseline): full scan ~16s wall (~12s logged) — Java frontend 9s (70%), graph assembly ~1s, DB load 2s, startup/overhead 3–4s; 21,334 nodes, 153k edges, 18 MB DB. netbeans: stress case, 1h+ full scan. Acceptance: fresh worktree near-instant; 1–5 file localized netbeans edit single-digit minutes; signature change to a widely-depended symbol may approach a full scan. Re-measure each phase via the per-phase timing report.",
+  "body": "Measured full-scan baselines that define the wins. jgrapht (the reference workload, fast CI baseline): full scan ~16s wall (~12s logged) — Java frontend ~9s (~70%), graph assembly ~1s, DB load ~2s, startup/overhead 3–4s; 21,334 nodes, 153k edges, 18 MB DB. netbeans (motivation only, NOT an acceptance workload): ~1h+ full scan. Acceptance — all three scenarios on jgrapht (requirements.requirement.incremental-acceptance-targets): fresh worktree near-instant; a 1–5 file localized edit materially below the recorded ~16s baseline (stated target of at most half, ~8s; frontend phase materially below the ~9s Java-frontend baseline, `frontend-skipped` on full reuse); a signature change to a widely-depended symbol may approach a full scan but must be exact (incremental graph equals a from-scratch full scan of the same changed tree). Re-measure each phase via the per-phase timing report.",
   "properties": {},
   "out": [
     {
