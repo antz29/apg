@@ -342,6 +342,68 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
             }
         }
     }
+
+    // Pass 4 (phase-04 task-16): re-resolve. Pass 1 replaced an UnresolvedTarget
+    // placeholder with a cached real node, but a spool-authored (or cached)
+    // unresolved edge still names that FQN, so the assembly would carry an
+    // unresolved edge to a real symbol — a shape a full scan never produces.
+    // Now that EVERY node is merged, convert those edges and drop the
+    // UnresolvedTarget rows no unresolved edge still references.
+    resolve_unresolved_edges(graph);
+}
+
+/// Converts unresolved edges whose target FQN resolves to a real project node in
+/// the assembled graph (phase-04 task-16), then GCs the `UnresolvedTarget` rows
+/// no remaining unresolved edge references.
+///
+/// A spool-authored `unresolved_call`/`unresolved_use` to an FQN a cached unit
+/// declares as a real `Function`/`Struct` must become the `calls`/`uses` edge a
+/// full-scan assembly has. The move keeps `target_type` on the edges that stay
+/// unresolved; a resolved `calls`/`uses` edge carries none (a full scan's
+/// resolved edges do not). The reference GC mirrors the DB splicer's rule — a
+/// shared row lives only while some unresolved edge names it.
+fn resolve_unresolved_edges(graph: &mut Graph) {
+    let is_fn = |g: &Graph, fqn: &str| {
+        g.nodes
+            .get(fqn)
+            .is_some_and(|n| n.kind == NodeKind::Function)
+    };
+    let is_struct =
+        |g: &Graph, fqn: &str| g.nodes.get(fqn).is_some_and(|n| n.kind == NodeKind::Struct);
+
+    let resolved_calls: Vec<(String, String)> = graph
+        .unresolved_calls
+        .iter()
+        .filter(|(from, to, _)| is_fn(graph, from) && is_fn(graph, to))
+        .map(|(from, to, _)| (from.clone(), to.clone()))
+        .collect();
+    for (from, to) in resolved_calls {
+        graph
+            .unresolved_calls
+            .retain(|(f, t, _)| !(f == &from && t == &to));
+        graph.calls.insert((from, to));
+    }
+
+    let resolved_uses: Vec<(String, String)> = graph
+        .unresolved_uses
+        .iter()
+        .filter(|(from, to)| (is_fn(graph, from) || is_struct(graph, from)) && is_struct(graph, to))
+        .map(|(from, to)| (from.clone(), to.clone()))
+        .collect();
+    for (from, to) in resolved_uses {
+        graph.unresolved_uses.remove(&(from.clone(), to.clone()));
+        graph.uses.insert((from, to));
+    }
+
+    let referenced: HashSet<String> = graph
+        .unresolved_calls
+        .iter()
+        .map(|(_, to, _)| to.clone())
+        .chain(graph.unresolved_uses.iter().map(|(_, to)| to.clone()))
+        .collect();
+    graph
+        .nodes
+        .retain(|fqn, node| node.kind != NodeKind::UnresolvedTarget || referenced.contains(fqn));
 }
 
 /// Loads a reusable cached unit for `(lang, rel, oid)` under `cache_key`. The
@@ -2299,6 +2361,267 @@ mod tests {
                     .contains
                     .contains(&("scratch".to_string(), "/fresh/b/b.go".to_string()))
             );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// Phase-04 task-24: the reuse splice re-resolves unresolved edges whose
+        /// target FQN a cached unit declares as a real node. Pass 1 replaces the
+        /// UnresolvedTarget placeholder, but the spool-authored unresolved edges
+        /// still name the FQN; pass 4 converts them to `calls`/`uses` and GCs the
+        /// now-unreferenced row, so the assembled graph equals a full-scan assembly
+        /// of the same tree — the falsifiable re-resolution claim (task-16).
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn reuse_splice_reresolves_unresolved_edges_to_cached_real_nodes() {
+            use crate::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
+            use crate::graph::{Graph, Location, Node, NodeKind};
+            use std::path::PathBuf;
+
+            let dir = std::env::temp_dir().join(format!("apg-reresolve-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let cache_key = CacheKey::compute(&ScanConfigKey::default());
+            let mut store = FactStore::at(dir.join("facts"));
+
+            // The cached unit b/b.go declares the two real targets.
+            let mut cached = Graph::default();
+            cached.nodes.insert(
+                "scratch".to_string(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+            );
+            cached.nodes.insert(
+                "/fresh/b.go".to_string(),
+                Node {
+                    kind: NodeKind::File,
+                    location: Some(Location {
+                        path: PathBuf::from("/fresh/b.go"),
+                        start: 0,
+                        end: 0,
+                        start_line: 1,
+                        end_line: 9,
+                    }),
+                    ..Node::default()
+                },
+            );
+            for (fqn, kind, start_line) in [
+                ("scratch.Callee", NodeKind::Function, 2u32),
+                ("scratch.Model", NodeKind::Struct, 6u32),
+            ] {
+                cached.nodes.insert(
+                    fqn.to_string(),
+                    Node {
+                        kind,
+                        location: Some(Location {
+                            path: PathBuf::from("/fresh/b.go"),
+                            start: 0,
+                            end: 1,
+                            start_line,
+                            end_line: start_line,
+                        }),
+                        code_type: "src".into(),
+                        ..Node::default()
+                    },
+                );
+            }
+            cached
+                .contains
+                .insert(("scratch".to_string(), "/fresh/b.go".to_string()));
+            cached
+                .contains
+                .insert(("/fresh/b.go".to_string(), "scratch.Callee".to_string()));
+            cached
+                .contains
+                .insert(("/fresh/b.go".to_string(), "scratch.Model".to_string()));
+            let frag = FileFragment::from_graph(&cached, "/fresh/b.go", "b.go", "oid-b", "go");
+            store.put(&frag, "/fresh", &cache_key).unwrap();
+
+            // The freshly re-emitted spool: a.go's Caller authors unresolved edges
+            // at BOTH cached real FQNs plus one genuinely-unresolved target.
+            let spool = vec![
+                Record::Module {
+                    fqn: "scratch".to_string(),
+                },
+                Record::Function {
+                    id: "s1".to_string(),
+                    parent: "scratch".to_string(),
+                    name: "Caller".to_string(),
+                    params: vec![],
+                    file: "/fresh/a.go".to_string(),
+                    path: "/fresh/a.go".to_string(),
+                    start: 0,
+                    end: 1,
+                    start_line: 1,
+                    end_line: 1,
+                },
+                file_rec("/fresh/a.go", "scratch", 10),
+                Record::Unresolved {
+                    fqn: "scratch.Callee".to_string(),
+                    category: Some("unknown".to_string()),
+                },
+                Record::Unresolved {
+                    fqn: "scratch.Model".to_string(),
+                    category: Some("external".to_string()),
+                },
+                Record::Unresolved {
+                    fqn: "ghost.External".to_string(),
+                    category: Some("external".to_string()),
+                },
+                Record::UnresolvedCall {
+                    from: "s1".to_string(),
+                    to: "scratch.Callee".to_string(),
+                    target_type: "func()".to_string(),
+                },
+                Record::UnresolvedUse {
+                    from: "s1".to_string(),
+                    to: "scratch.Model".to_string(),
+                },
+                Record::UnresolvedCall {
+                    from: "s1".to_string(),
+                    to: "ghost.External".to_string(),
+                    target_type: String::new(),
+                },
+            ];
+            let reuse = Reuse {
+                store: &store,
+                cache_key: &cache_key,
+                files: vec![("b.go".to_string(), "go".to_string(), "oid-b".to_string())],
+                reader_root: "/fresh".to_string(),
+                skipped_langs: BTreeSet::new(),
+            };
+            let (assembled, _) = ingest_with_reuse(
+                spool,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+                Some(&reuse),
+            );
+
+            // The same tree resolved from scratch: the cached targets are declared
+            // here and the call/use are RESOLVED edges.
+            let full = vec![
+                Record::Module {
+                    fqn: "scratch".to_string(),
+                },
+                Record::Function {
+                    id: "f1".to_string(),
+                    parent: "scratch".to_string(),
+                    name: "Caller".to_string(),
+                    params: vec![],
+                    file: "/fresh/a.go".to_string(),
+                    path: "/fresh/a.go".to_string(),
+                    start: 0,
+                    end: 1,
+                    start_line: 1,
+                    end_line: 1,
+                },
+                Record::Function {
+                    id: "f2".to_string(),
+                    parent: "scratch".to_string(),
+                    name: "Callee".to_string(),
+                    params: vec![],
+                    file: "/fresh/b.go".to_string(),
+                    path: "/fresh/b.go".to_string(),
+                    start: 0,
+                    end: 1,
+                    start_line: 2,
+                    end_line: 2,
+                },
+                srec("f3", "scratch", "Model", "/fresh/b.go"),
+                file_rec("/fresh/a.go", "scratch", 10),
+                file_rec("/fresh/b.go", "scratch", 9),
+                Record::Unresolved {
+                    fqn: "ghost.External".to_string(),
+                    category: Some("external".to_string()),
+                },
+                Record::Calls {
+                    from: "f1".to_string(),
+                    to: "f2".to_string(),
+                },
+                Record::Uses {
+                    from: "f1".to_string(),
+                    to: "f3".to_string(),
+                },
+                Record::UnresolvedCall {
+                    from: "f1".to_string(),
+                    to: "ghost.External".to_string(),
+                    target_type: String::new(),
+                },
+            ];
+            let (reference, _) = ingest(
+                full,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+            );
+
+            // (a) the converted edges appear in `calls`/`uses`.
+            assert!(
+                assembled
+                    .calls
+                    .contains(&("scratch.Caller".to_string(), "scratch.Callee".to_string())),
+                "the unresolved call to a cached real Function must move to calls: {:?}",
+                assembled.calls
+            );
+            assert!(
+                assembled
+                    .uses
+                    .contains(&("scratch.Caller".to_string(), "scratch.Model".to_string())),
+                "the unresolved use of a cached real Struct must move to uses: {:?}",
+                assembled.uses
+            );
+            // (b) NO unresolved edge targets a real (non-UnresolvedTarget) node.
+            for (from, to, _) in &assembled.unresolved_calls {
+                assert!(
+                    assembled
+                        .nodes
+                        .get(to)
+                        .is_some_and(|n| n.kind == NodeKind::UnresolvedTarget),
+                    "unresolved_call {from} -> {to} must not target a real project FQN"
+                );
+            }
+            for (from, to) in &assembled.unresolved_uses {
+                assert!(
+                    assembled
+                        .nodes
+                        .get(to)
+                        .is_some_and(|n| n.kind == NodeKind::UnresolvedTarget),
+                    "unresolved_use {from} -> {to} must not target a real project FQN"
+                );
+            }
+            // (c) the genuine unresolved edge + exactly ONE UnresolvedTarget row.
+            assert!(assembled.unresolved_calls.contains(&(
+                "scratch.Caller".to_string(),
+                "ghost.External".to_string(),
+                String::new()
+            )));
+            let unresolved = |g: &Graph| -> BTreeSet<String> {
+                g.nodes
+                    .iter()
+                    .filter(|(_, n)| n.kind == NodeKind::UnresolvedTarget)
+                    .map(|(fqn, _)| fqn.clone())
+                    .collect()
+            };
+            assert_eq!(
+                unresolved(&assembled),
+                BTreeSet::from(["ghost.External".to_string()]),
+                "exactly one shared UnresolvedTarget row may survive"
+            );
+            // (d) the assembled node/edge/unresolved sets equal a full-scan assembly.
+            let node_set = |g: &Graph| -> BTreeSet<String> { g.nodes.keys().cloned().collect() };
+            assert_eq!(node_set(&assembled), node_set(&reference));
+            assert_eq!(assembled.contains, reference.contains);
+            assert_eq!(assembled.calls, reference.calls);
+            assert_eq!(assembled.uses, reference.uses);
+            assert_eq!(assembled.unresolved_calls, reference.unresolved_calls);
+            assert_eq!(assembled.unresolved_uses, reference.unresolved_uses);
+            assert_eq!(unresolved(&assembled), unresolved(&reference));
+
             let _ = std::fs::remove_dir_all(&dir);
         }
 

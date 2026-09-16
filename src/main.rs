@@ -2612,6 +2612,16 @@ mod tests {
         crate::timing::TimingReport,
         String,
     ) {
+        // Phase-04 task-19: an acceptance-satisfied run measures the RELEASE
+        // profile. The harness resolves `target/release/apg` or fails loudly
+        // naming `cargo build --release`; a debug candidate can never yield one.
+        assert!(
+            h.candidate.is_acceptance_satisfied(),
+            "acceptance must measure the release-profile candidate (got {} at {}) — \
+             run `cargo build --release`",
+            h.candidate.label(),
+            h.candidate.binary_path().display()
+        );
         let init = h.run(&["init", "."]);
         assert!(
             init.status.success(),
@@ -5325,6 +5335,8 @@ mod tests {
             let artifact = serde_json::json!({
                 "workload": h.workload,
                 "scenario": "fresh-worktree-near-instant",
+                "profile": h.candidate.label(),
+                "binary_path": h.candidate.binary_path().display().to_string(),
                 "source": h.source.label(),
                 "source_path": h.source_path.display().to_string(),
                 "staged_files": h.staged_files,
@@ -5425,6 +5437,8 @@ mod tests {
             let artifact = serde_json::json!({
                 "workload": h.workload,
                 "scenario": "localized-edit-incremental",
+                "profile": h.candidate.label(),
+                "binary_path": h.candidate.binary_path().display().to_string(),
                 "source": h.source.label(),
                 "source_path": h.source_path.display().to_string(),
                 "staged_files": h.staged_files,
@@ -5626,6 +5640,8 @@ mod tests {
             let artifact = serde_json::json!({
                 "workload": h.workload,
                 "scenario": "wide-signature-change-exact",
+                "profile": h.candidate.label(),
+                "binary_path": h.candidate.binary_path().display().to_string(),
                 "source": h.source.label(),
                 "source_path": h.source_path.display().to_string(),
                 "staged_files": h.staged_files,

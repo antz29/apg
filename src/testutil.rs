@@ -272,6 +272,122 @@ pub fn apg_bin() -> PathBuf {
     );
 }
 
+/// The `apg` binary file name for the host platform.
+fn apg_bin_name() -> &'static str {
+    if cfg!(windows) { "apg.exe" } else { "apg" }
+}
+
+/// The cargo `target/` directory for this checkout — the parent of the candidate
+/// profile dirs. `CARGO_TARGET_DIR` wins when set, else `<manifest>/target`.
+pub fn acceptance_target_dir() -> Option<PathBuf> {
+    if let Some(dir) = option_env!("CARGO_TARGET_DIR").filter(|d| !d.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
+    option_env!("CARGO_MANIFEST_DIR").map(|m| PathBuf::from(m).join("target"))
+}
+
+// ---------------------------------------------------------------------------
+// Acceptance candidate resolution (phase-04 task-18). The recorded jgrapht
+// baseline's provenance is the OPTIMIZED release binary, so acceptance measures
+// `target/release/apg` — never the debug sibling. A debug measurement can never
+// be mistaken for a passing acceptance: the ONLY observable is the loud failure
+// naming `cargo build --release`.
+// ---------------------------------------------------------------------------
+
+/// The cargo profile an acceptance candidate was built under, plus its absolute
+/// binary path — the provenance every acceptance artifact records.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptanceProfile {
+    label: &'static str,
+    binary_path: PathBuf,
+}
+
+impl AcceptanceProfile {
+    /// Classifies an existing candidate path: the label is DERIVED from the
+    /// artifact (`target/<profile>/apg`), never hard-coded.
+    pub fn from_path(path: &Path) -> AcceptanceProfile {
+        AcceptanceProfile {
+            label: classify_candidate_profile(path),
+            binary_path: path.to_path_buf(),
+        }
+    }
+
+    /// The profile label: `release` or `debug`.
+    pub fn label(&self) -> &'static str {
+        self.label
+    }
+
+    /// The absolute candidate binary path (for the acceptance artifacts).
+    pub fn binary_path(&self) -> &Path {
+        &self.binary_path
+    }
+
+    pub fn is_release(&self) -> bool {
+        self.label == "release"
+    }
+
+    /// An acceptance artifact is satisfied ONLY by a release-profile candidate;
+    /// a debug measurement is NOT acceptance-satisfied.
+    pub fn is_acceptance_satisfied(&self) -> bool {
+        self.is_release()
+    }
+}
+
+/// The profile label a candidate artifact path belongs to — the component after
+/// `target` (`release`/`debug`). Derived from the path, never hard-coded; a path
+/// with no `target/<profile>` component classifies as `debug` (never a silent
+/// release).
+pub fn classify_candidate_profile(path: &Path) -> &'static str {
+    let mut comps = path.components();
+    while let Some(c) = comps.next() {
+        if c.as_os_str().to_str() == Some("target") {
+            return match comps.next().and_then(|p| p.as_os_str().to_str()) {
+                Some("release") => "release",
+                _ => "debug",
+            };
+        }
+    }
+    "debug"
+}
+
+/// Resolves `target/release/apg` under `target_dir` — the acceptance candidate.
+/// `None` when that artifact is absent: the caller MUST fail loudly naming
+/// `cargo build --release`; it NEVER falls back to the debug sibling.
+pub fn resolve_acceptance_candidate(target_dir: &Path) -> Option<AcceptanceProfile> {
+    let candidate = target_dir.join("release").join(apg_bin_name());
+    if candidate.is_file() {
+        Some(AcceptanceProfile::from_path(&candidate))
+    } else {
+        None
+    }
+}
+
+/// [`resolve_acceptance_candidate`] against an explicit `target/` dir, failing
+/// LOUDLY naming `cargo build --release` when the release artifact is absent —
+/// never a silent debug fallback. Split out so the single observable is testable
+/// against a synthetic target tree.
+pub fn resolve_acceptance_candidate_or_panic(target_dir: &Path) -> AcceptanceProfile {
+    resolve_acceptance_candidate(target_dir).unwrap_or_else(|| {
+        panic!(
+            "acceptance candidate `target/release/apg` is absent under {} — run \
+             `cargo build --release` first (a debug-profile measurement is NOT \
+             acceptance-satisfied)",
+            target_dir.display()
+        )
+    })
+}
+
+/// The acceptance candidate: `target/release/apg`, the artifact
+/// `cargo build --release` leaves. Panics naming `cargo build --release` when it
+/// is absent — a debug-profile run can never resolve a candidate, so it can
+/// never be acceptance-satisfied (exactly ONE observable: this loud failure).
+pub fn apg_bin_profile() -> AcceptanceProfile {
+    let dir = acceptance_target_dir().unwrap_or_else(|| {
+        panic!("cannot locate the cargo target directory — run `cargo build --release` first")
+    });
+    resolve_acceptance_candidate_or_panic(&dir)
+}
+
 /// A configured real-CLI `apg` invocation: the built binary at [`apg_bin`],
 /// the argument list, an optional cwd, and per-child environment overrides.
 ///
@@ -290,6 +406,18 @@ impl ApgCommand {
     pub fn new(args: &[&str]) -> ApgCommand {
         ApgCommand {
             bin: apg_bin(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            cwd: None,
+            envs: Vec::new(),
+        }
+    }
+
+    /// A configured real-CLI `apg` invocation against an EXPLICIT binary — the
+    /// acceptance harness's release-profile candidate ([`apg_bin_profile`]) —
+    /// rather than the running profile's [`apg_bin`].
+    pub fn with_bin(bin: PathBuf, args: &[&str]) -> ApgCommand {
+        ApgCommand {
+            bin,
             args: args.iter().map(|s| s.to_string()).collect(),
             cwd: None,
             envs: Vec::new(),
@@ -784,6 +912,10 @@ pub struct AcceptanceHarness {
     pub workload: &'static str,
     pub source: AcceptanceSource,
     pub source_path: PathBuf,
+    /// The RELEASE-profile candidate the scenarios measure (phase-04 task-18):
+    /// resolution panics naming `cargo build --release` when it is absent, so a
+    /// debug-profile run can never be acceptance-satisfied.
+    pub candidate: AcceptanceProfile,
     /// The scratch base (teardown removes it).
     pub base: PathBuf,
     /// The staged read-only copy (a fresh git repo checked out at the source's
@@ -860,10 +992,17 @@ impl AcceptanceHarness {
         });
         commit_all_files(&repo, "staged acceptance checkout");
 
+        // Phase-04 task-18: the measured candidate is the RELEASE artifact. The
+        // frontend staging above stays on the running profile's `apg_bin` (the
+        // Java frontend is language tooling, not the measured scanner and is
+        // always built under `cargo build`/`cargo test`).
+        let candidate = apg_bin_profile();
+
         Ok(AcceptanceHarness {
             workload: ACCEPTANCE_WORKLOAD,
             source,
             source_path,
+            candidate,
             base,
             repo,
             home,
@@ -878,9 +1017,10 @@ impl AcceptanceHarness {
     }
 
     /// Runs the CANDIDATE binary with cwd `dir` (the staged repo, or one of its
-    /// worktrees).
+    /// worktrees). The candidate is the RELEASE-profile artifact resolved at
+    /// harness construction (phase-04 task-18), never the debug sibling.
     pub fn run_in(&self, dir: &Path, args: &[&str]) -> Output {
-        ApgCommand::new(args)
+        ApgCommand::with_bin(self.candidate.binary_path().to_path_buf(), args)
             .cwd(dir)
             .env("HOME", &self.home.to_string_lossy())
             .env("APG_FRONTEND_DIR", &self.frontend_dir.to_string_lossy())
@@ -1324,6 +1464,110 @@ mod tests {
             );
 
             remove(&repo);
+        }
+
+        /// Phase-04 task-26: the acceptance harness resolves the RELEASE-profile
+        /// candidate and never silently accepts a debug one. Real `target/` tree
+        /// access ⇒ e2e by global.constraint.test-tier-boundaries.
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp dir/target tree); run via cargo test-e2e"]
+        fn acceptance_candidate_resolves_release_and_rejects_debug() {
+            fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+                payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_default()
+            }
+
+            // (a) profile classification is DERIVED from the artifact path.
+            assert_eq!(
+                classify_candidate_profile(Path::new("/x/target/release/apg")),
+                "release"
+            );
+            assert_eq!(
+                classify_candidate_profile(Path::new("/x/target/debug/apg")),
+                "debug"
+            );
+            assert_eq!(
+                classify_candidate_profile(Path::new("relative/apg")),
+                "debug"
+            );
+
+            // (d) the profile label + absolute path are queryable, and a debug
+            // result is NOT acceptance-satisfied.
+            let release = AcceptanceProfile::from_path(Path::new("/x/target/release/apg"));
+            assert_eq!(release.label(), "release");
+            assert_eq!(release.binary_path(), Path::new("/x/target/release/apg"));
+            assert!(release.is_release() && release.is_acceptance_satisfied());
+            let debug = AcceptanceProfile::from_path(Path::new("/x/target/debug/apg"));
+            assert_eq!(debug.label(), "debug");
+            assert!(!debug.is_release());
+            assert!(!debug.is_acceptance_satisfied());
+
+            // (b)/(c) synthetic target trees: release present ⇒ THAT path (never the
+            // debug sibling); release absent ⇒ resolution yields no candidate.
+            let dir = std::env::temp_dir()
+                .join(format!("apg-accept-profile-{}", std::process::id()))
+                .join("target");
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("release")).unwrap();
+            std::fs::create_dir_all(dir.join("debug")).unwrap();
+            std::fs::write(dir.join("release").join(apg_bin_name()), b"release").unwrap();
+            std::fs::write(dir.join("debug").join(apg_bin_name()), b"debug").unwrap();
+
+            let resolved = resolve_acceptance_candidate(&dir).expect("release candidate present");
+            assert_eq!(resolved.label(), "release");
+            assert!(
+                resolved
+                    .binary_path()
+                    .ends_with(Path::new("release").join(apg_bin_name())),
+                "the release artifact must be returned: {}",
+                resolved.binary_path().display()
+            );
+            assert!(
+                !resolved.binary_path().to_string_lossy().contains("/debug/"),
+                "the debug sibling must never be returned"
+            );
+
+            std::fs::remove_file(dir.join("release").join(apg_bin_name())).unwrap();
+            assert!(
+                resolve_acceptance_candidate(&dir).is_none(),
+                "an absent release artifact must not fall back to the debug sibling"
+            );
+
+            // (c) the acceptance entry point fails LOUDLY naming `cargo build
+            // --release` — never a silent debug fallback (the synthetic tree has
+            // only a debug sibling, so the fallback is exactly what must not
+            // happen).
+            let prev = std::panic::take_hook();
+            std::panic::set_hook(Box::new(|_| {}));
+            let result = std::panic::catch_unwind(|| resolve_acceptance_candidate_or_panic(&dir));
+            std::panic::set_hook(prev);
+            let msg = panic_message(result.expect_err("absent release must panic"));
+            assert!(
+                msg.contains("cargo build --release"),
+                "the loud failure must name `cargo build --release`: {msg}"
+            );
+            assert!(
+                !msg.contains("/debug/"),
+                "the failure must never fall back to the debug sibling: {msg}"
+            );
+
+            // When this checkout itself has the release artifact, the entry point
+            // resolves THAT path as the release candidate.
+            let real = acceptance_target_dir()
+                .unwrap()
+                .join("release")
+                .join(apg_bin_name());
+            if real.is_file() {
+                let p = apg_bin_profile();
+                assert_eq!(p.label(), "release");
+                assert_eq!(p.binary_path(), real.as_path());
+                assert!(p.is_acceptance_satisfied());
+            }
+
+            let _ = std::fs::remove_dir_all(&dir);
         }
     }
 }
