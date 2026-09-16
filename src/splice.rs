@@ -1683,6 +1683,67 @@ mod tests {
             .collect()
     }
 
+    /// Every table's row count in a DB file opened read-only — the equivalence
+    /// oracle's per-label NODE counts AND per-rel-type COUNTS in one map
+    /// (`row_counts` walks every table `show_tables()` reports, nodes and RELs
+    /// alike).
+    fn table_counts(path: &Path) -> BTreeMap<String, i64> {
+        let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+        let counts = row_counts(&db);
+        drop(db);
+        counts
+    }
+
+    /// The `UnresolvedTarget` rows as `(fqn, category)` — the oracle's unresolved
+    /// set by FQN WITH its category (folded per-category counts come from this).
+    fn unresolved_rows(path: &Path) -> BTreeSet<(String, String)> {
+        let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        let (names, rows) = query_rows(
+            &conn,
+            "MATCH (n:UnresolvedTarget) RETURN n.fqn AS fqn, n.category AS category",
+        )
+        .unwrap();
+        let f = column_index(&names, "fqn").unwrap();
+        let c = column_index(&names, "category").unwrap();
+        let out = rows.iter().map(|r| (cell(r, f), cell(r, c))).collect();
+        drop(conn);
+        drop(db);
+        out
+    }
+
+    /// The per-category counts of an unresolved `(fqn, category)` set.
+    fn category_counts(rows: &BTreeSet<(String, String)>) -> BTreeMap<String, usize> {
+        let mut out: BTreeMap<String, usize> = BTreeMap::new();
+        for (_, category) in rows {
+            *out.entry(category.clone()).or_default() += 1;
+        }
+        out
+    }
+
+    /// The single `Scan` row of a DB file opened read-only, as
+    /// `(git_sha, git_clean, content_key, scanned_at)`.
+    fn scan_row_of(path: &Path) -> (String, String, String, String) {
+        let db = Database::new(path, SystemConfig::default().read_only(true)).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        let (_, rows) = query_rows(
+            &conn,
+            "MATCH (s:Scan) RETURN s.git_sha AS sha, s.git_clean AS clean, \
+             s.content_key AS key, s.scanned_at AS at",
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1, "exactly one Scan row");
+        let out = (
+            cell(&rows[0], 0),
+            cell(&rows[0], 1),
+            cell(&rows[0], 2),
+            cell(&rows[0], 3),
+        );
+        drop(conn);
+        drop(db);
+        out
+    }
+
     /// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files,
     /// writes `graph.jsonl` and node files under the temp dir. Each is
     /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
@@ -2713,6 +2774,415 @@ mod tests {
                 transient_entries(&dir).is_empty(),
                 "an earlier failure must clean up its temps: {:?}",
                 transient_entries(&dir)
+            );
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // -----------------------------------------------------------------------
+        // Enumerated equivalence oracle + export leg (phase-03 task-8)
+        // -----------------------------------------------------------------------
+
+        /// `domain.constraint.db-splice-equivalence`, enumerated: a spliced DB
+        /// agrees with a full rebuild of the same assembled graph on EVERY table's
+        /// row count — the per-label NODE counts AND the per-rel-type COUNTS
+        /// (Contains/Calls/Uses/UnresolvedCall/UnresolvedUse listed explicitly) —
+        /// on the UnresolvedTarget set by FQN WITH categories (hence the
+        /// per-category counts), and on the single `Scan` row.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn spliced_and_full_rebuild_agree_on_every_table_count() {
+            let dir = scratch("counts");
+            let prev_path = dir.join("db.lbug");
+            let export = dir.join("graph.jsonl");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+            let c = "/x/c.go".to_string();
+            build_db(&prev_path, &previous_graph(&a, &b, &c));
+            std::fs::write(&export, b"previous export\n").unwrap();
+
+            let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
+            publish(seeded, &assembled, &export).unwrap();
+
+            // The full-rebuild reference: the same assembled graph, loaded whole.
+            let expected_path = dir.join("expected.lbug");
+            build_db(&expected_path, &assembled);
+
+            let spliced_counts = table_counts(&prev_path);
+            let expected_counts = table_counts(&expected_path);
+            assert_eq!(
+                spliced_counts, expected_counts,
+                "every table's row count must equal a full rebuild"
+            );
+            // Prove the enumeration is COMPLETE: every code label and every code
+            // rel table the oracle compares is actually in the map (a missing
+            // table would otherwise make the equality above vacuous).
+            for label in ["Module", "File", "Struct", "Function", "UnresolvedTarget"] {
+                assert!(
+                    spliced_counts.contains_key(label),
+                    "the oracle must enumerate the {label} node table: {spliced_counts:?}"
+                );
+            }
+            for table in [
+                "Contains",
+                "Calls",
+                "Uses",
+                "UnresolvedCall",
+                "UnresolvedUse",
+            ] {
+                assert!(
+                    spliced_counts.contains_key(table),
+                    "the oracle must enumerate the {table} rel table: {spliced_counts:?}"
+                );
+                assert_eq!(
+                    spliced_counts.get(table),
+                    expected_counts.get(table),
+                    "{table} row count must equal a full rebuild"
+                );
+            }
+
+            // UnresolvedTarget by FQN WITH category, and the folded per-category
+            // counts.
+            let spliced_unres = unresolved_rows(&prev_path);
+            let expected_unres = unresolved_rows(&expected_path);
+            assert_eq!(
+                spliced_unres, expected_unres,
+                "the unresolved set by (fqn, category) must equal a full rebuild"
+            );
+            assert_eq!(
+                category_counts(&spliced_unres),
+                category_counts(&expected_unres),
+                "the per-category unresolved counts must equal a full rebuild"
+            );
+
+            // And the Scan row.
+            assert_eq!(
+                scan_row_of(&prev_path),
+                scan_row_of(&expected_path),
+                "the Scan row must equal a full rebuild's"
+            );
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// feedback-90 — the incoming-edge invariant. A body-only change to a
+        /// widely-referenced unit whose CALLERS ARE NOT re-emitted must keep every
+        /// incoming Calls/Uses edge from those callers (the persisting FQN is
+        /// UPSERTed, never DETACH DELETEd); a removed FQN disappears and leaves no
+        /// dangling edge; and the per-rel-type counts still equal a full rebuild,
+        /// so nothing a rebuild keeps was lost.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn persisting_fqn_is_upserted_and_incoming_edges_survive() {
+            let dir = scratch("incoming");
+            let prev_path = dir.join("db.lbug");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+            let c = "/x/c.go".to_string();
+            build_db(&prev_path, &previous_graph(&a, &b, &c));
+
+            let seeded = match seed(&prev_path) {
+                SeedDecision::Seed(s) => s,
+                SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+            };
+            // `assembled_graph(a, b)` is the body-only change to `a.go` (plus a new
+            // `m.A.h`); `b.go`'s caller `m.B.g` is a cached, NON-re-emitted unit and
+            // `c.go` is removed. The delete scope is exactly the changed + removed
+            // files.
+            let assembled = assembled_graph(&a, &b);
+            let targets: BTreeSet<String> = [a.clone(), c.clone()].into_iter().collect();
+            let removed: BTreeSet<String> = BTreeSet::new();
+            let report = seeded
+                .apply(&SpliceDelta {
+                    graph: &assembled,
+                    targets: &targets,
+                    removed_fqns: &removed,
+                    scan: ScanRow {
+                        git_sha: Some("newsha".into()),
+                        git_clean: Some(true),
+                        content_key: Some("newkey".into()),
+                        scanned_at: "2026-01-02T00:00:00Z".into(),
+                    },
+                })
+                .unwrap();
+
+            let conn = seeded.conn().unwrap();
+            let (names, rows) = query_rows(
+                &conn,
+                "MATCH (x:Function)-[:Calls]->(y:Function) RETURN x.fqn AS x, y.fqn AS y",
+            )
+            .unwrap();
+            let xi = column_index(&names, "x").unwrap();
+            let yi = column_index(&names, "y").unwrap();
+            let calls: BTreeSet<String> = rows
+                .iter()
+                .map(|r| format!("{}->{}", cell(r, xi), cell(r, yi)))
+                .collect();
+            let (names, rows) = query_rows(
+                &conn,
+                "MATCH (x:Function)-[:Uses]->(y:Struct) RETURN x.fqn AS x, y.fqn AS y",
+            )
+            .unwrap();
+            let xi = column_index(&names, "x").unwrap();
+            let yi = column_index(&names, "y").unwrap();
+            let uses: BTreeSet<String> = rows
+                .iter()
+                .map(|r| format!("{}->{}", cell(r, xi), cell(r, yi)))
+                .collect();
+            drop(conn);
+
+            assert!(
+                calls.contains("m.B.g->m.A.f"),
+                "a caller OUTSIDE the delete scope must keep its incoming edge to the \
+                 upserted FQN: {calls:?}"
+            );
+            assert!(
+                uses.contains("m.A.f->m.A"),
+                "the re-emitted unit's own Uses edge must survive: {uses:?}"
+            );
+            // The persisting `m.A.f` was UPSERTed in place, never detached: exactly
+            // one row remains.
+            let snap = code_snapshot(&seeded.db);
+            assert_eq!(
+                snap.iter()
+                    .filter(|s| s.starts_with("Function:m.A.f:"))
+                    .count(),
+                1,
+                "the persisting FQN must be a single upserted row: {snap:?}"
+            );
+            // The removed FQN disappeared: no node row and no rel naming it (the
+            // graph stays a closure — no dangling edge).
+            assert!(
+                !snap.iter().any(|s| s.contains("m.C")),
+                "the removed unit/module and every rel naming them must be gone: {snap:?}"
+            );
+            assert_eq!(
+                report.nodes_deleted, 3,
+                "exactly the removed file's nodes are deleted: {report:?}"
+            );
+
+            // Per-rel-type counts (and every other table) still equal a full
+            // rebuild — the surviving incoming edge is part of that equality.
+            let expected_path = dir.join("expected.lbug");
+            build_db(&expected_path, &assembled);
+            assert_eq!(
+                table_counts(&seeded.temp_path),
+                table_counts(&expected_path),
+                "counts must equal a full rebuild after the upsert+delete"
+            );
+
+            let temp = seeded.temp_path.clone();
+            drop(seeded);
+            std::fs::remove_file(&temp).ok();
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// The UnresolvedTarget SHARED lifecycle: a target still referenced by an
+        /// unchanged, NON-re-emitted unit survives a re-emitted unit's edge
+        /// deletion; a target whose only referrer changed (and dropped the
+        /// reference) is GC'd; and a delta-first-referenced target is inserted with
+        /// its category exactly once (dedup by FQN). The per-category counts equal a
+        /// full rebuild.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn unresolved_target_lifecycle_survives_gc_and_dedup() {
+            let dir = scratch("unresolved-life");
+            let prev_path = dir.join("db.lbug");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+
+            let module = || Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            };
+            let target = |cat: &str| Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some(cat.to_string()),
+                ..Node::default()
+            };
+
+            // prev: a.go's `m.A.f` references `ext.Gone`; b.go's `m.B.g`
+            // references `ext.Keep`.
+            let mut prev = Graph::default();
+            prev.nodes.insert("m".into(), module());
+            prev.nodes
+                .insert(a.clone(), located(NodeKind::File, &a, 1, 80));
+            prev.nodes
+                .insert(b.clone(), located(NodeKind::File, &b, 1, 40));
+            prev.nodes
+                .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 20));
+            prev.nodes
+                .insert("m.B.g".into(), located(NodeKind::Function, &b, 2, 30));
+            prev.nodes.insert("ext.Gone".into(), target("external"));
+            prev.nodes.insert("ext.Keep".into(), target("stdlib"));
+            prev.contains.insert(("m".into(), a.clone()));
+            prev.contains.insert(("m".into(), b.clone()));
+            prev.contains.insert((a.clone(), "m.A.f".into()));
+            prev.contains.insert((b.clone(), "m.B.g".into()));
+            prev.unresolved_calls
+                .insert(("m.A.f".into(), "ext.Gone".into(), String::new()));
+            prev.unresolved_calls
+                .insert(("m.B.g".into(), "ext.Keep".into(), String::new()));
+            prev.nodes.insert(
+                crate::schema::SCAN_HEAD.into(),
+                scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+            );
+            build_db(&prev_path, &prev);
+
+            // assembled: only a.go is re-emitted (targets = {a}); `m.A.f` now
+            // references the delta-first `ext.Brand`; b.go is a cached unit, so
+            // `m.B.g` keeps `ext.Keep`.
+            let mut new = Graph::default();
+            new.nodes.insert("m".into(), module());
+            new.nodes
+                .insert(a.clone(), located(NodeKind::File, &a, 1, 90));
+            new.nodes
+                .insert(b.clone(), located(NodeKind::File, &b, 1, 40));
+            new.nodes
+                .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 22));
+            new.nodes
+                .insert("m.B.g".into(), located(NodeKind::Function, &b, 2, 30));
+            new.nodes.insert("ext.Brand".into(), target("stdlib"));
+            new.nodes.insert("ext.Keep".into(), target("stdlib"));
+            new.contains.insert(("m".into(), a.clone()));
+            new.contains.insert(("m".into(), b.clone()));
+            new.contains.insert((a.clone(), "m.A.f".into()));
+            new.contains.insert((b.clone(), "m.B.g".into()));
+            new.unresolved_calls
+                .insert(("m.A.f".into(), "ext.Brand".into(), String::new()));
+            new.unresolved_calls
+                .insert(("m.B.g".into(), "ext.Keep".into(), String::new()));
+            new.nodes.insert(
+                crate::schema::SCAN_HEAD.into(),
+                scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+            );
+
+            let seeded = match seed(&prev_path) {
+                SeedDecision::Seed(s) => s,
+                SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+            };
+            let targets: BTreeSet<String> = [a.clone()].into_iter().collect();
+            let removed: BTreeSet<String> = BTreeSet::new();
+            let report = seeded
+                .apply(&SpliceDelta {
+                    graph: &new,
+                    targets: &targets,
+                    removed_fqns: &removed,
+                    scan: ScanRow {
+                        git_sha: Some("newsha".into()),
+                        git_clean: Some(true),
+                        content_key: Some("newkey".into()),
+                        scanned_at: "2026-01-02T00:00:00Z".into(),
+                    },
+                })
+                .unwrap();
+
+            let rows = unresolved_rows(&seeded.temp_path);
+            // (1) The target of the non-re-emitted unit SURVIVES.
+            assert!(
+                rows.contains(&("ext.Keep".to_string(), "stdlib".to_string())),
+                "a target of an unchanged, non-re-emitted unit must survive: {rows:?}"
+            );
+            // (2) The target whose only referrer was re-emitted and dropped the
+            // reference is GC'd.
+            assert!(
+                !rows.iter().any(|(f, _)| f == "ext.Gone"),
+                "a target whose only referrer changed must be GC'd: {rows:?}"
+            );
+            assert_eq!(
+                report.unresolved_gc, 1,
+                "exactly one target GC'd: {report:?}"
+            );
+            // (3) The delta-first target is inserted exactly ONCE, carrying its
+            // category (dedup by FQN).
+            let brand: Vec<&(String, String)> =
+                rows.iter().filter(|(f, _)| f == "ext.Brand").collect();
+            assert_eq!(
+                brand.len(),
+                1,
+                "a delta-first-referenced target must be exactly one row: {rows:?}"
+            );
+            assert_eq!(
+                brand[0].1, "stdlib",
+                "the inserted UnresolvedTarget row keeps its category"
+            );
+
+            // Per-category counts equal a full rebuild.
+            let expected_path = dir.join("expected.lbug");
+            build_db(&expected_path, &new);
+            assert_eq!(
+                category_counts(&rows),
+                category_counts(&unresolved_rows(&expected_path)),
+                "per-category unresolved counts must equal a full rebuild"
+            );
+
+            let temp = seeded.temp_path.clone();
+            drop(seeded);
+            std::fs::remove_file(&temp).ok();
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// The EXPORT leg: the published `graph.jsonl` equals a full rebuild's
+        /// (both are the unchanged writer's rendering of the same assembled graph),
+        /// ROUND-TRIPS through the re-ingest reader (JSONL → Graph → JSONL), and its
+        /// line 1 is the `scan_meta` control record whose fields equal the spliced
+        /// DB's `Scan` row (feedback-91).
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn published_export_equals_a_full_rebuild_and_round_trips() {
+            let dir = scratch("export-roundtrip");
+            let prev_path = dir.join("db.lbug");
+            let export = dir.join("graph.jsonl");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+            let c = "/x/c.go".to_string();
+            build_db(&prev_path, &previous_graph(&a, &b, &c));
+            std::fs::write(&export, b"previous export\n").unwrap();
+
+            let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
+            publish(seeded, &assembled, &export).unwrap();
+
+            let canonical =
+                |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
+            let published = std::fs::read_to_string(&export).unwrap();
+
+            // The full-rebuild reference export: the same assembled graph, whole.
+            let reference = dir.join("reference.jsonl");
+            load::write_graph_jsonl(&assembled, &reference).unwrap();
+            assert_eq!(
+                canonical(&published),
+                canonical(&std::fs::read_to_string(&reference).unwrap()),
+                "the spliced export must equal a full rebuild's graph.jsonl"
+            );
+
+            // Round-trip through the re-ingest leg: JSONL → Graph → JSONL.
+            let back = crate::load::tests::read_graph_jsonl(&export).unwrap();
+            let again = dir.join("again.jsonl");
+            load::write_graph_jsonl(&back, &again).unwrap();
+            assert_eq!(
+                canonical(&published),
+                canonical(&std::fs::read_to_string(&again).unwrap()),
+                "graph.jsonl must round-trip through read_graph_jsonl"
+            );
+
+            // Line 1 is the scan_meta control record; its fields equal the spliced
+            // DB's Scan row (both come from the delta's ScanRow).
+            let first = published.lines().next().unwrap();
+            let v: serde_json::Value = serde_json::from_str(first).unwrap();
+            assert_eq!(
+                v["type"], "scan_meta",
+                "line 1 must lead with scan_meta: {first}"
+            );
+            assert_eq!(v["git_sha"], "newsha");
+            assert_eq!(v["git_clean"], true);
+            assert_eq!(v["content_key"], "newkey");
+            assert_eq!(v["scanned_at"], "2026-01-02T00:00:00Z");
+            let db = Database::new(&prev_path, SystemConfig::default().read_only(true)).unwrap();
+            let snap = code_snapshot(&db);
+            drop(db);
+            assert!(
+                snap.contains("Scan:scan/HEAD|newsha|true|newkey|2026-01-02T00:00:00Z"),
+                "the spliced DB's Scan row must match the export's line 1: {snap:?}"
             );
 
             let _ = std::fs::remove_dir_all(&dir);

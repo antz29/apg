@@ -204,6 +204,14 @@ pub fn ingest(
 /// units are then merged, with a freshly-emitted node at an FQN always winning
 /// over a cached one (the re-emitted target is authoritative). Cached units
 /// provide the unaffected files' nodes and edges.
+///
+/// Win-C hand-off (phase-03 task-6): the returned graph IS the splice delta
+/// source. The caller builds `splice::SpliceDelta { graph, targets,
+/// removed_fqns, scan }` from it — `targets` being the phase-2 re-emission
+/// target set (the delete scope) and `removed_fqns` the delta's removed
+/// declarations — and the splicer derives its DML from exactly that. The
+/// previous `graph.jsonl` is never re-read and no second assembly runs; the
+/// full-record path ([`ingest`]) is unchanged.
 pub fn ingest_with_reuse(
     records: impl IntoIterator<Item = Record>,
     opts: &IngestOptions,
@@ -1345,6 +1353,7 @@ impl<R: BufRead> EdgeReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn fd(id: &str, parent: &str, name: &str, params: &[&str], file: &str) -> FuncDecl {
         FuncDecl {
@@ -1401,6 +1410,82 @@ mod tests {
 
     fn fqns(decls: &[FuncDecl]) -> HashMap<String, String> {
         render_function_fqns(decls).into_iter().collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // Real-DB oracle readers (phase-03 task-9). Non-#[test] harness helpers, so
+    // they live at the `mod tests` root and are shared by the whole module.
+    // -----------------------------------------------------------------------
+
+    /// Runs `query` against a DB file opened read-only and returns every row's
+    /// cells as strings (empty when the DB cannot be opened/queried).
+    fn db_rows(path: &Path, query: &str) -> Vec<Vec<String>> {
+        let db = lbug::Database::new(path, lbug::SystemConfig::default().read_only(true))
+            .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+        let conn = lbug::Connection::new(&db).unwrap();
+        let rows = conn
+            .query(query)
+            .map(|r| {
+                r.map(|row| row.iter().map(|v| v.to_string()).collect::<Vec<String>>())
+                    .collect::<Vec<Vec<String>>>()
+            })
+            .unwrap_or_default();
+        drop(conn);
+        drop(db);
+        rows
+    }
+
+    /// Every table's row count in a DB file opened read-only — the per-label
+    /// NODE counts AND the per-rel-type COUNTS in one map (`show_tables()`
+    /// enumerates both node and REL tables).
+    fn db_table_counts(path: &Path) -> std::collections::BTreeMap<String, i64> {
+        let mut out = std::collections::BTreeMap::new();
+        let tables = db_rows(path, "CALL show_tables() RETURN name, type");
+        for row in tables {
+            let table = row.first().cloned().unwrap_or_default();
+            let kind = row.get(1).cloned().unwrap_or_default();
+            let q = if kind == "REL" {
+                format!("MATCH ()-[r:{table}]->() RETURN count(*)")
+            } else {
+                format!("MATCH (n:{table}) RETURN count(*)")
+            };
+            let n = db_rows(path, &q)
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(-1);
+            out.insert(table, n);
+        }
+        out
+    }
+
+    /// The `UnresolvedTarget` rows of a DB file as `(fqn, category)`.
+    fn db_unresolved_rows(path: &Path) -> std::collections::BTreeSet<(String, String)> {
+        db_rows(path, "MATCH (n:UnresolvedTarget) RETURN n.fqn, n.category")
+            .into_iter()
+            .map(|r| {
+                (
+                    r.first().cloned().unwrap_or_default(),
+                    r.get(1).cloned().unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
+    /// The single `Scan` row of a DB file as `(sha, clean, key, at)`.
+    fn db_scan_row(path: &Path) -> (String, String, String, String) {
+        let rows = db_rows(
+            path,
+            "MATCH (s:Scan) RETURN s.git_sha, s.git_clean, s.content_key, s.scanned_at",
+        );
+        assert_eq!(rows.len(), 1, "exactly one Scan row in {}", path.display());
+        let r = &rows[0];
+        (
+            r.first().cloned().unwrap_or_default(),
+            r.get(1).cloned().unwrap_or_default(),
+            r.get(2).cloned().unwrap_or_default(),
+            r.get(3).cloned().unwrap_or_default(),
+        )
     }
 
     /// unit tier -- pure in-memory: no filesystem, database, git or process.
@@ -2363,6 +2448,268 @@ mod tests {
                 "a language that was not skipped must not replay cached scaffolding"
             );
             let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// Phase-03 task-9 — the splice path END-TO-END: a scratch /tmp git repo
+        /// driven by the CANDIDATE binary only
+        /// (global.constraint.no-real-project-test). (1) The DETERMINISTIC
+        /// no-full-DB-rebuild observable: the distinct splice verdict line is
+        /// PRESENT on a localized re-scan and ABSENT on a full rebuild, whose path
+        /// emits the full-load lines instead — a named observable, not the mere
+        /// absence of a frontend spawn. (2) The ENUMERATED equivalence oracle:
+        /// spliced vs full rebuild on per-label and per-rel-type counts, the
+        /// UnresolvedTarget set by FQN WITH categories (per-category counts), the
+        /// `Scan` row, a spine query, and the EXPORT (`graph.jsonl` equality plus a
+        /// JSONL → Graph → JSONL round-trip).
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn splice_path_is_taken_and_equals_a_full_rebuild() {
+            use crate::testutil::{ApgCommand, Repo};
+
+            let repo = Repo::new("p3-splice-e2e");
+            let home = repo.root.join("home");
+            std::fs::create_dir_all(&home).unwrap();
+            // A real Go module: `b` depends on `a`, `c` depends on `b`.
+            repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+            repo.write(
+                "a/a.go",
+                "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 1 }\n",
+            );
+            repo.write(
+                "b/b.go",
+                "package b\n\nimport \"scratch/a\"\n\n// B is a struct.\ntype B struct {\n\tA a.A\n}\n\n// Foo calls the leaf.\nfunc Foo() int { return a.Leaf() }\n",
+            );
+            repo.write(
+                "c/c.go",
+                "package c\n\nimport \"scratch/b\"\n\n// Bar calls Foo.\nfunc Bar() int { return b.Foo() }\n",
+            );
+            repo.commit_all("source");
+            let run = |args: &[&str]| {
+                ApgCommand::new(args)
+                    .cwd(&repo.root)
+                    .env("HOME", home.to_str().unwrap())
+                    .output()
+            };
+            let init = run(&["init", "."]);
+            assert!(
+                init.status.success(),
+                "init: {}",
+                String::from_utf8_lossy(&init.stderr)
+            );
+            repo.commit_all("apg init");
+
+            let trans = repo
+                .root
+                .join(crate::specs::LAYOUT)
+                .join(crate::specs::TRANS);
+            let db_path = trans.join("db.lbug");
+            let jsonl_path = trans.join("graph.jsonl");
+
+            // The cold scan has no previous DB: a FULL load, with no splice verdict.
+            let cold = run(&["scan", "."]);
+            let cold_err = String::from_utf8_lossy(&cold.stderr).into_owned();
+            assert!(cold.status.success(), "cold scan: {cold_err}");
+            assert!(
+                cold_err.contains("[load] writing parquet load files"),
+                "the cold scan must full-load: {cold_err}"
+            );
+            assert!(
+                !cold_err.contains("[load] splice:"),
+                "the cold scan must not splice: {cold_err}"
+            );
+            // The cold scan's own Scan row — the seed the splice must REFRESH.
+            let cold_scan = db_scan_row(&db_path);
+
+            // A localized BODY-ONLY edit to the leaf file: `a.go` changes, b/c do not.
+            repo.write(
+                "a/a.go",
+                "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 42 }\n",
+            );
+
+            let inc = run(&["scan", "."]);
+            let inc_err = String::from_utf8_lossy(&inc.stderr).into_owned();
+            assert!(inc.status.success(), "incremental scan: {inc_err}");
+            // (1) The distinct splice verdict is PRESENT and the full-load lines are
+            // ABSENT — the splice path was genuinely taken (a full rebuild cannot
+            // produce this line).
+            assert!(
+                inc_err.contains("[load] splice:"),
+                "the localized re-scan must take the splice path: {inc_err}"
+            );
+            assert!(
+                !inc_err.contains("[load] writing parquet load files"),
+                "the splice path must skip the full load: {inc_err}"
+            );
+            assert!(
+                inc_err.contains("upserted") && inc_err.contains("full load skipped"),
+                "the splice verdict must name the applied delta and the skipped full load: {inc_err}"
+            );
+
+            // Snapshot the spliced pair, then FORCE a full rebuild of the SAME tree:
+            // clear the DB, the export AND the shared fact cache so neither the
+            // fast-path nor win-B reuse can engage.
+            let spliced_db = repo.root.join("spliced.lbug");
+            let spliced_jsonl = repo.root.join("spliced.jsonl");
+            std::fs::copy(&db_path, &spliced_db).unwrap();
+            std::fs::copy(&jsonl_path, &spliced_jsonl).unwrap();
+            std::fs::remove_file(&db_path).unwrap();
+            std::fs::remove_file(&jsonl_path).unwrap();
+            let _ = std::fs::remove_dir_all(repo.root.join(".git/apg/facts"));
+            let full = run(&["scan", "."]);
+            let full_err = String::from_utf8_lossy(&full.stderr).into_owned();
+            assert!(full.status.success(), "full rebuild: {full_err}");
+            assert!(
+                full_err.contains("[load] writing parquet load files"),
+                "the rebuild must full-load: {full_err}"
+            );
+            assert!(
+                !full_err.contains("[load] splice:"),
+                "a full rebuild must not emit the splice verdict: {full_err}"
+            );
+
+            // (2) The enumerated equivalence oracle: spliced vs full rebuild.
+            let spliced_counts = db_table_counts(&spliced_db);
+            let full_counts = db_table_counts(&db_path);
+            assert_eq!(
+                spliced_counts, full_counts,
+                "every table's count must equal a full rebuild"
+            );
+            for label in ["Module", "File", "Struct", "Function", "UnresolvedTarget"] {
+                assert!(
+                    spliced_counts.contains_key(label),
+                    "the oracle must enumerate the {label} node table: {spliced_counts:?}"
+                );
+            }
+            for table in [
+                "Contains",
+                "Calls",
+                "Uses",
+                "UnresolvedCall",
+                "UnresolvedUse",
+            ] {
+                assert!(
+                    spliced_counts.contains_key(table),
+                    "the oracle must enumerate the {table} rel table: {spliced_counts:?}"
+                );
+                assert_eq!(
+                    spliced_counts.get(table),
+                    full_counts.get(table),
+                    "{table} count must equal a full rebuild"
+                );
+            }
+
+            let spliced_unres = db_unresolved_rows(&spliced_db);
+            let full_unres = db_unresolved_rows(&db_path);
+            assert_eq!(
+                spliced_unres, full_unres,
+                "the UnresolvedTarget set by (fqn, category) must equal a full rebuild's"
+            );
+            let per_category = |rows: &std::collections::BTreeSet<(String, String)>| {
+                let mut m: std::collections::BTreeMap<String, usize> =
+                    std::collections::BTreeMap::new();
+                for (_, c) in rows {
+                    *m.entry(c.clone()).or_default() += 1;
+                }
+                m
+            };
+            assert_eq!(
+                per_category(&spliced_unres),
+                per_category(&full_unres),
+                "the per-category unresolved counts must equal a full rebuild's"
+            );
+
+            // The Scan row: REFRESHED by the delta (never the seeded cold-scan
+            // row) and exactly the spliced export's line 1. Two separate scans
+            // legitimately carry different `scanned_at`/content keys, so the
+            // full-rebuild comparison is on the identity fields (sha/clean), with
+            // the line-1 tie asserted per scan.
+            let spliced_scan = db_scan_row(&spliced_db);
+            assert_ne!(
+                spliced_scan, cold_scan,
+                "the seeded Scan row must be deleted+reinserted, not preserved"
+            );
+            assert_ne!(
+                spliced_scan.3, cold_scan.3,
+                "the refreshed Scan row must carry THIS scan's scanned_at: {spliced_scan:?} vs {cold_scan:?}"
+            );
+            let spliced_jsonl_text = std::fs::read_to_string(&spliced_jsonl).unwrap();
+            let spliced_first = spliced_jsonl_text.lines().next().unwrap();
+            let sv: serde_json::Value = serde_json::from_str(spliced_first).unwrap();
+            assert_eq!(
+                sv["type"], "scan_meta",
+                "line 1 leads with scan_meta: {spliced_first}"
+            );
+            assert_eq!(sv["git_sha"].as_str().unwrap_or_default(), spliced_scan.0);
+            assert_eq!(
+                sv["git_clean"].as_bool().unwrap_or(false),
+                spliced_scan.1 == "true"
+            );
+            assert_eq!(
+                sv["content_key"].as_str().unwrap_or_default(),
+                spliced_scan.2
+            );
+            assert_eq!(
+                sv["scanned_at"].as_str().unwrap_or_default(),
+                spliced_scan.3
+            );
+
+            // The full rebuild's Scan row/line 1, and the identity fields it must
+            // share with the spliced one (same tree, same HEAD, same dirty state).
+            let full_scan = db_scan_row(&db_path);
+            assert_eq!(
+                (spliced_scan.0.clone(), spliced_scan.1.clone()),
+                (full_scan.0.clone(), full_scan.1.clone()),
+                "the spliced Scan row's sha/clean must match a full rebuild's"
+            );
+            let full_jsonl = std::fs::read_to_string(&jsonl_path).unwrap();
+            let full_first = full_jsonl.lines().next().unwrap();
+            let fv: serde_json::Value = serde_json::from_str(full_first).unwrap();
+            assert_eq!(fv["type"], "scan_meta", "line 1 leads with scan_meta");
+            assert_eq!(fv["scanned_at"].as_str().unwrap_or_default(), full_scan.3);
+            assert_eq!(fv["content_key"].as_str().unwrap_or_default(), full_scan.2);
+
+            // A sample spine query (a bare scratch repo has no authored nodes, so
+            // both sides are empty — the equality is still a real assertion).
+            let spine = "MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->\
+                         (:Container)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn";
+            assert_eq!(
+                db_rows(&spliced_db, spine),
+                db_rows(&db_path, spine),
+                "the spine query must agree with a full rebuild"
+            );
+
+            // The EXPORT: record-set equality with the full rebuild's for every
+            // record kind EXCEPT the per-scan `scan_meta` line (each scan's own
+            // line 1 is tied to its own Scan row above), plus a JSONL → Graph →
+            // JSONL round-trip through the re-ingest reader.
+            let canon = |t: &str| -> std::collections::BTreeSet<String> {
+                t.lines()
+                    .filter(|l| !l.starts_with("{\"type\":\"scan_meta\""))
+                    .map(str::to_string)
+                    .collect()
+            };
+            assert_eq!(
+                canon(&spliced_jsonl_text),
+                canon(&full_jsonl),
+                "every non-scan_meta export record must equal a full rebuild's"
+            );
+            let back = crate::load::tests::read_graph_jsonl(&spliced_jsonl).unwrap();
+            let again = repo.root.join("again.jsonl");
+            crate::load::write_graph_jsonl(&back, &again).unwrap();
+            let again_text = std::fs::read_to_string(&again).unwrap();
+            assert_eq!(
+                canon(&spliced_jsonl_text),
+                canon(&again_text),
+                "graph.jsonl must round-trip through read_graph_jsonl"
+            );
+            // …including its `scan_meta` line 1 (the Scan node round-trips too).
+            assert_eq!(
+                again_text.lines().next().unwrap(),
+                spliced_first,
+                "the round-tripped export must reproduce the scan_meta line"
+            );
+
+            let _ = std::fs::remove_dir_all(&repo.root);
         }
     }
 }

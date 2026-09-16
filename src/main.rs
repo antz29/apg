@@ -1992,16 +1992,21 @@ pub(crate) fn run_pipeline(
     };
     if let Some(report) = splice_report {
         log.ln(&format!(
-            "[load] splice: {} node(s) upserted, {} deleted, {} rel(s) re-inserted, {} unresolved GC'd, scan row refreshed: {}",
+            "[load] splice: {} node(s) upserted, {} deleted, {} rel(s) re-inserted, {} unresolved GC'd, scan row refreshed: {}; full load skipped",
             report.nodes_upserted,
             report.nodes_deleted,
             report.edges_merged,
             report.unresolved_gc,
             report.scan_refreshed,
         ));
-        // NOTE (phase-03 task-7 seam): the splice's export is published
-        // atomically by `splice::publish` above; the full-load path below keeps
-        // the standalone `load::write_graph_jsonl` call site for task-7 to route.
+        // Export routing (phase-03 task-7): on the splice branch the export is
+        // serialized by the UNCHANGED `load::write_graph_jsonl` into a
+        // same-directory `.graph-*.tmp` sibling inside `splice::publish` above
+        // and renamed in AFTER the spliced DB (DB first, then export), so both
+        // artifacts of the P2-assembled full in-memory graph land atomically.
+        // The full-load branch below keeps the standalone direct `graph.jsonl`
+        // write, so every Export record kind/property still comes from the one
+        // tested writer.
     } else {
         let dir = temp_dir();
         std::fs::create_dir_all(&dir).unwrap();

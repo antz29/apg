@@ -1910,7 +1910,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Reads `graph.jsonl` back into a [`Graph`] — the re-ingest leg of the
