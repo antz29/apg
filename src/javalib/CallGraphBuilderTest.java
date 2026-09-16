@@ -39,6 +39,9 @@ public class CallGraphBuilderTest {
             Path proj2 = base.resolve("proj-incomplete");
             writeIncompleteContextFixture(proj2);
             testIncompleteClassDirStillResolvesTargetPackage(proj2, base);
+            Path proj3 = base.resolve("proj-modules");
+            writeModuleDescriptorFixture(proj3);
+            testModuleDescriptorsDoNotDegradeAttribution(proj3, base);
         } finally {
             deleteRec(base);
         }
@@ -178,6 +181,68 @@ public class CallGraphBuilderTest {
     /** The Maven-like nested source root the incomplete-context fixture uses. */
     static Path nestedSrc(Path proj) {
         return proj.resolve("src/main/java").toAbsolutePath().normalize();
+    }
+
+    /**
+     * Phase-04 task-15 residual: the module-descriptor defect class.
+     *
+     * jgrapht is a Maven multi-module tree with a `module-info.java` per module
+     * (`<root>/<module>/src/main/java/module-info.java`). Handing several module
+     * descriptors to ONE javac task makes javac report `too many module
+     * declarations found` and attribute every source inside a NAMED module,
+     * whose `requires` graph does not read `java.desktop` / `java.sql` /
+     * `java.xml` / `org.xml.sax`. Every type from those JDK modules then
+     * degrades to a javac error symbol, so the FULL-scan leg emits bare simple
+     * names (`JFrame`, `pack`, `setVisible`, `add`, `AttributesImpl`,
+     * `StreamResult`, ...) while the TARGETED leg — whose target batch carries
+     * no module descriptor — resolves the same receivers exactly
+     * (`javax.swing.JFrame.<init>`, `java.awt.Window.pack`,
+     * `java.awt.Component.add`, ... `stdlib`). The full scan is the side losing
+     * context, so it is the side this fixture pins.
+     *
+     * Smallest-scale reproduction: two modules, each with a `module-info.java`
+     * that requires only `java.base`, and a target class using
+     * `javax.swing.JFrame`. RED pre-fix (the full scan emits the bare `JFrame`
+     * / `pack` / `setVisible` unknowns and diverges from the targeted leg);
+     * GREEN post-fix (both legs resolve the JDK receivers and the targeted
+     * facts equal the full scan's for the target package).
+     */
+    static void writeModuleDescriptorFixture(Path root) throws Exception {
+        Path a = root.resolve("mod-a/src/main/java");
+        Path b = root.resolve("mod-b/src/main/java");
+        Files.createDirectories(a.resolve("pkg/a"));
+        Files.createDirectories(b.resolve("pkg/b"));
+        Files.writeString(a.resolve("module-info.java"),
+            "module mod.a {\n    requires java.base;\n}\n", StandardCharsets.UTF_8);
+        Files.writeString(a.resolve("pkg/a/A.java"), """
+            package pkg.a;
+            public class A {
+                public A() {}
+                public int foo() { return 1; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(b.resolve("module-info.java"),
+            "module mod.b {\n    requires java.base;\n}\n", StandardCharsets.UTF_8);
+        Files.writeString(b.resolve("pkg/b/Demo.java"), """
+            package pkg.b;
+            import pkg.a.A;
+            public class Demo {
+                public int go() {
+                    A a = new A();
+                    javax.swing.JFrame frame = new javax.swing.JFrame();
+                    frame.pack();
+                    frame.setVisible(true);
+                    return a.foo();
+                }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(b.resolve("pkg/b/Target.java"), """
+            package pkg.b;
+            public class Target {
+                public Target() {}
+                public int t() { return 2; }
+            }
+            """, StandardCharsets.UTF_8);
     }
 
     // ------------------------------------------------------------------
@@ -394,6 +459,46 @@ public class CallGraphBuilderTest {
             bare.isEmpty(), "bare: " + bare + "\ntargeted output was:\n" + incR.out);
         check("no UnresolvedTarget carries a javac error symbol",
             errors.isEmpty(), "errors: " + errors + "\ntargeted output was:\n" + incR.out);
+    }
+
+    /**
+     * Phase-04 task-15 residual: the FULL-scan leg must not lose JDK-module
+     * visibility to a named-module compilation. Both legs must resolve the JDK
+     * receivers exactly (qualified `stdlib` targets, no bare `unknown` names),
+     * and the targeted facts must equal the full scan's for the target package.
+     */
+    static void testModuleDescriptorsDoNotDegradeAttribution(Path proj, Path base) throws Exception {
+        String fullRaw = run(proj).out;
+        Set<String> full = normalize(fullRaw);
+        check("full scan resolves the JDK constructor across module descriptors",
+            full.contains("unresolved|javax.swing.JFrame.<init>|stdlib"),
+            "full output was:\n" + fullRaw);
+        check("full scan resolves the JDK methods across module descriptors",
+            full.contains("unresolved|java.awt.Window.pack|stdlib")
+                && full.contains("unresolved|java.awt.Window.setVisible|stdlib"),
+            "full output was:\n" + fullRaw);
+        check("full scan leaks no bare JDK simple name",
+            !full.contains("unresolved|JFrame|unknown")
+                && !full.contains("unresolved|pack|unknown")
+                && !full.contains("unresolved|setVisible|unknown"),
+            "full output was:\n" + fullRaw);
+
+        Path src = proj.resolve("mod-b/src/main/java").toAbsolutePath().normalize();
+        Path targets = base.resolve("modules-b.targets");
+        Files.writeString(targets, src.resolve("pkg/b/Demo.java") + "\n", StandardCharsets.UTF_8);
+        Result incR = run(proj, "--targets", targets.toString(),
+            "--cache-dir", base.resolve("cache-modules").toString(), "--cache-key", "k1");
+        Set<String> inc = normalize(incR.out);
+        Set<Path> targetFiles = Set.of(
+            src.resolve("pkg/b/Demo.java"),
+            src.resolve("pkg/b/Target.java"));
+        Set<String> fullForTarget = filterToTarget(full, targetFiles);
+        check("targeted facts equal the full scan's across module descriptors",
+            fullForTarget.equals(inc), setDiff(fullForTarget, inc) + "\nSTDERR:\n" + incR.err);
+        check("targeted scan also resolves the JDK receivers",
+            inc.contains("unresolved|javax.swing.JFrame.<init>|stdlib")
+                && inc.contains("unresolved|java.awt.Window.pack|stdlib"),
+            "targeted output was:\n" + incR.out + "\nSTDERR:\n" + incR.err);
     }
 
     /**

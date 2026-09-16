@@ -74,6 +74,22 @@ public class CallGraphBuilder {
         List<Path> files = new ArrayList<>();
         try (var walk = Files.walk(dir)) {
             walk.filter(p -> p.toString().endsWith(".java"))
+                // Phase-04 task-15 residual: a `module-info.java` is a module
+                // DESCRIPTOR, not a source of graph units. Handing one to a
+                // javac task puts the whole compilation into NAMED-module mode,
+                // whose `requires` graph hides every JDK module the descriptor
+                // does not read (java.desktop/java.sql/java.xml/org.xml.sax/...)
+                // — each such type then degrades to an error symbol and its
+                // calls/uses leak out as bare simple names (`JFrame`, `pack`,
+                // `add`, `StreamResult`). A Maven multi-module tree carries one
+                // per module (jgrapht), so the one-task full scan reported
+                // `too many module declarations found` and lost JDK visibility
+                // wholesale. The scanner attributes an UNNAMED-module source
+                // tree (global.constraint.frontend-full-context: resolve against
+                // the FULL context), so module descriptors are excluded from the
+                // walked set on BOTH legs — the same shape the targeted path
+                // already had.
+                .filter(p -> !"module-info.java".equals(p.getFileName().toString()))
                 .filter(Files::isRegularFile)
                 .filter(p -> excludePaths.stream().noneMatch(pat -> p.toString().contains(pat)))
                 .forEach(files::add);
@@ -442,6 +458,9 @@ public class CallGraphBuilder {
         // (pkgByFile) off its parent directory; dedupe and ':'-join. A file in
         // the default/empty package contributes its own parent directory.
         LinkedHashSet<String> sourceRoots = new LinkedHashSet<>();
+        Path rootsBase = null;
+        int rootsIdx = 0;
+        Map<Path, Path> linkedRoots = new HashMap<>();
         for (Path f : walked.keySet()) {
             Path p = f.getParent();
             String pkg = pkgByFile.getOrDefault(f, "");
@@ -450,7 +469,31 @@ public class CallGraphBuilder {
                     p = p.getParent();
                 }
             }
-            if (p != null) sourceRoots.add(p.toString());
+            if (p == null) continue;
+            // Phase-04 task-15 residual: a `module-info.java` at a sourcepath
+            // entry root makes javac load that descriptor and attribute the whole
+            // task in NAMED-module mode, whose `requires` graph hides every JDK
+            // module the descriptor does not read (java.desktop / java.sql /
+            // java.xml / org.xml.sax / ...). Each such type then degrades to a
+            // javac error symbol — the targeted scan would resolve against a
+            // REDUCED context, which global.constraint.frontend-full-context
+            // forbids and which the full scan (all files explicit, module
+            // descriptors excluded from the walk) does not suffer. A Maven
+            // source root always carries the descriptor, so substitute an
+            // equivalent root that links every child EXCEPT `module-info.java`:
+            // package lookup is unchanged, javac finds no descriptor and stays
+            // in the unnamed module.
+            if (Files.exists(p.resolve("module-info.java"))) {
+                if (rootsBase == null) rootsBase = Files.createTempDirectory("apg-java-srcroots");
+                Path cached = linkedRoots.get(p);
+                if (cached == null) {
+                    Path linked = moduleInfoFreeRoot(p, rootsBase.resolve("r" + rootsIdx++));
+                    cached = linked != null ? linked : p;
+                    linkedRoots.put(p, cached);
+                }
+                p = cached;
+            }
+            sourceRoots.add(p.toString());
         }
         String sourcePath = sourceRoots.isEmpty() ? root.toString() : String.join(":", sourceRoots);
 
@@ -498,6 +541,44 @@ public class CallGraphBuilder {
         if (persistent) {
             Map<String, FileRec> out = new LinkedHashMap<>(clean);
             saveSurface(surfaceFile, out);
+        }
+        deleteRec(rootsBase);
+    }
+
+    /**
+     * A sourcepath entry that resolves the same packages as `root` but exposes
+     * no `module-info.java`, so javac never loads a module descriptor from the
+     * source path. Returns null when the links cannot be created (the caller
+     * then keeps `root` — today's behaviour).
+     */
+    static Path moduleInfoFreeRoot(Path root, Path tmp) {
+        try {
+            Files.createDirectories(tmp);
+            try (var children = Files.list(root)) {
+                for (Path c : (Iterable<Path>) children::iterator) {
+                    if (c.getFileName().toString().equals("module-info.java")) continue;
+                    Files.createSymbolicLink(tmp.resolve(c.getFileName()), c.toAbsolutePath());
+                }
+            }
+            return tmp;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Best-effort recursive delete of scan-local scratch (the linked roots). */
+    static void deleteRec(Path p) {
+        if (p == null) return;
+        try (var walk = Files.walk(p)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(x -> {
+                try {
+                    Files.deleteIfExists(x);
+                } catch (IOException e) {
+                    /* best effort */
+                }
+            });
+        } catch (Throwable t) {
+            /* best effort */
         }
     }
 
