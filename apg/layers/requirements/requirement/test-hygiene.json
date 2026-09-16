@@ -7,5 +7,11 @@
     "feature": "test-hygiene"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.stakeholder.test-suite-owner",
+      "properties": {}
+    }
+  ]
 }
