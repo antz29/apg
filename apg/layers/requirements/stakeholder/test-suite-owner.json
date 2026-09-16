@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "stakeholder",
+  "name": "test-suite-owner",
+  "body": "The apg maintainer/implementer who runs the repo's default `cargo test` gate and authors the test tasks a plan carries (each task's `tier` is unit / int / e2e). Interest: the default suite stays FAST — the whole unit+integration suite runs in seconds, so the edit-test loop is tight — while the slow, real-I/O end-to-end tests are opt-in and exercised only as the final acceptance gate, never in the default run. Also interested in the tiers being defined precisely enough that a test author can classify a new test, without judgment, by its I/O and its unit count alone.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
