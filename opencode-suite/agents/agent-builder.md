@@ -204,16 +204,19 @@ never a mutation place.
   (`apg_node`/`apg_edge`/`apg_plan_add`).** It either attaches/approves
   Feedback or marks the phase complete; it never writes code and never marks
   tasks done.
-- **Verification surface (interview; default = static).** By default the
-  reviewer holds no build/run surface, so a phase's gate numbers (test counts,
-  wall times, "e2e green") are *claims* it cannot check. If the repo wants them
-  *verified*, grant the read-only execution surface only — the test tiers
-  (`cargo test`, `cargo test tests::…`) and the pinned gate entry point
-  (`scripts/gate.sh`) — and never free-form `cargo build`/`clippy`/`fmt`, which
-  would let it rewrite the gate's meaning; the pinned entry point is safe
-  precisely because its contents are reviewed. State in its body that it runs
-  the gate to check the implementer's numbers rather than trusting them. No
-  edit, no commit, no scan, ever.
+- **No verification surface — review is subjective, by design.** The reviewer
+  never runs the build or the tests, and is never scaffolded a grant to:
+  review assesses the artifact against the plan and the spec — conformance,
+  acceptance criteria, divergence, quality — not the machine's exit status.
+  Gate greenness is the **implementer's asserted done-contract**: a phase whose
+  gate is red, unrun, or unasserted must not be handed to review at all, and a
+  reviewer that finds itself looking at one returns it to the coordinator
+  rather than re-running anything. Never grant a reviewer `cargo …`,
+  `scripts/gate.sh`, or any other build/run/test invocation — and never edit,
+  commit or scan (those hold regardless). A scaffolded reviewer with an
+  execution grant is a regression: it invites the role to re-derive numbers
+  instead of judging the work, and it lets the gate's meaning be rewritten
+  under the sequence it is supposed to check.
 - **Never actions Feedback.** The reviewer attaches, resolves, or rejects
   items; the implementing writer returns an ACTIONED/WONT-FIX claim and the
   **coordinator** performs the shallow claim-vs-change check and then actions
