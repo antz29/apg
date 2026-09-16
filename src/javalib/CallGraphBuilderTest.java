@@ -107,59 +107,77 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-15 fixture: the class-dir-incompleteness defect class.
+     * Phase-04 task-15 fixture: the Maven-like nested-source-root defect class.
+     *
+     * Sources sit under a MAVEN-LIKE NESTED root (`src/main/java/pkg/...`), so
+     * the scan root is NOT a valid package root. That is the jgrapht shape
+     * (`<root>/jgrapht-core/src/main/java/org/jgrapht/...`) and it is what makes
+     * the old `-sourcepath <scan root>` silently INEFFECTIVE — javac looks for
+     * `<scan root>/pkg/a/A.java`, which does not exist, so a reference into a
+     * non-target package degrades to a javac error symbol. Sources placed
+     * directly under the scan root (the previous fixture) never reproduced the
+     * divergence because the scan root WAS a valid package root there.
      *
      * `pkg.a.Broken` is a source javac cannot compile — it references a package
-     * that does not exist — and `pkg.b.Target` is a TARGET-package class
-     * referenced from the re-emitted `pkg.b.B`. Because javac refuses to emit
-     * ANY bytecode for a compilation that has an error, the erroring source
-     * leaves the whole class dir empty, and the target attribution used to run
-     * against an incomplete context: the reference into the unchanged package
-     * degraded to a bare simple-name UnresolvedTarget (`foo`) and the exact
-     * `calls` edge vanished, while the reference to the TARGET-package class
-     * could not be recognised from the unchanged-package-only index.
+     * that does not exist — so javac refuses to emit ANY bytecode for the batch
+     * and the class dir is left empty (the `-classpath` half of the context is
+     * empty too). The re-emitted `pkg.b` therefore has NO usable context for
+     * the unchanged `pkg.a`: the cross-package reference collapses to a bare
+     * project-class simple name (`A`), the call degrades to a bare method name
+     * (`foo`), and the exact `calls` edge vanishes. The reference to the
+     * TARGET-package `pkg.b.Target` resolves because it is compiled in the same
+     * batch.
      */
     static void writeIncompleteContextFixture(Path root) throws Exception {
-        Files.createDirectories(root.resolve("pkg/a"));
-        Files.createDirectories(root.resolve("pkg/b"));
-        Files.createDirectories(root.resolve("pkg/c"));
-        Files.writeString(root.resolve("pkg/a/A.java"), """
+        Path src = root.resolve("src/main/java");
+        Files.createDirectories(src.resolve("pkg/a"));
+        Files.createDirectories(src.resolve("pkg/b"));
+        Files.createDirectories(src.resolve("pkg/c"));
+        Files.writeString(src.resolve("pkg/a/A.java"), """
             package pkg.a;
             public class A {
                 public A() {}
                 public int foo() { return 1; }
             }
             """, StandardCharsets.UTF_8);
-        Files.writeString(root.resolve("pkg/a/Broken.java"), """
+        Files.writeString(src.resolve("pkg/a/Broken.java"), """
             package pkg.a;
             public class Broken {
                 public missing.Thing boom() { return null; }
             }
             """, StandardCharsets.UTF_8);
-        Files.writeString(root.resolve("pkg/b/Target.java"), """
+        Files.writeString(src.resolve("pkg/b/Target.java"), """
             package pkg.b;
             public class Target {
                 public Target() {}
                 public int t() { return 2; }
             }
             """, StandardCharsets.UTF_8);
-        Files.writeString(root.resolve("pkg/b/B.java"), """
+        Files.writeString(src.resolve("pkg/b/B.java"), """
             package pkg.b;
             import pkg.a.A;
             public class B {
                 private final A a = new A();
                 private final Target t = new Target();
-                public int go() { return a.foo() + t.t(); }
+                public int go() {
+                    A local = a;
+                    return local.foo() + t.t();
+                }
                 public Target make() { return new Target(); }
             }
             """, StandardCharsets.UTF_8);
-        Files.writeString(root.resolve("pkg/c/C.java"), """
+        Files.writeString(src.resolve("pkg/c/C.java"), """
             package pkg.c;
             import pkg.b.B;
             public class C {
                 public int baz() { return new B().go(); }
             }
             """, StandardCharsets.UTF_8);
+    }
+
+    /** The Maven-like nested source root the incomplete-context fixture uses. */
+    static Path nestedSrc(Path proj) {
+        return proj.resolve("src/main/java").toAbsolutePath().normalize();
     }
 
     // ------------------------------------------------------------------
@@ -298,10 +316,15 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-15 (residual): a TARGET-package class referenced from a
-     * re-emitted file resolves exactly even when a source javac cannot compile
-     * has left the class dir empty. This FAILS pre-fix (the resolved call is
-     * missing and a bare method simple name leaks) and PASSES post-fix.
+     * Phase-04 task-15: a TARGET-package class referenced from a re-emitted file
+     * resolves exactly even when (a) the sources sit under a Maven-like nested
+     * root — so the scan root is NOT a valid package root and the old
+     * `-sourcepath <scan root>` was silently ineffective — and (b) a source
+     * javac cannot compile has left the class dir empty. This FAILS pre-fix
+     * (the cross-package call is missing, a bare project-class simple name `A`
+     * and a bare method name `foo` leak as UnresolvedTargets) and PASSES
+     * post-fix (the `-sourcepath` names the ACTUAL source root
+     * `<proj>/src/main/java`).
      *
      * The enumerated oracle is the phase-04 task-9 one, scaled down: the whole
      * target package's facts must equal a from-scratch full scan's facts for
@@ -309,18 +332,33 @@ public class CallGraphBuilderTest {
      * a bare project-class simple name and none carrying a javac error symbol.
      */
     static void testIncompleteClassDirStillResolvesTargetPackage(Path proj, Path base) throws Exception {
+        Path src = nestedSrc(proj);
         String full = run(proj).out;
         Path targets = base.resolve("incomplete-b.targets");
-        Files.writeString(targets, proj.resolve("pkg/b/B.java").toAbsolutePath().normalize() + "\n",
+        Files.writeString(targets, src.resolve("pkg/b/B.java") + "\n",
             StandardCharsets.UTF_8);
         Result incR = run(proj, "--targets", targets.toString(),
             "--cache-dir", base.resolve("cache-incomplete").toString(), "--cache-key", "k1");
         Set<String> inc = normalize(incR.out);
 
+        // The class-dir half of the context really is EMPTY: the compile batch
+        // fails on Broken.java, so javac emits no bytecode at all. The exact
+        // facts asserted below therefore came from the corrected SOURCEPATH,
+        // not from a bytecode cache — the property this fix establishes.
+        Path classes = base.resolve("cache-incomplete").resolve("java").resolve("k1").resolve("classes");
+        long classFiles = 0;
+        if (Files.isDirectory(classes)) {
+            try (var walk = Files.walk(classes)) {
+                classFiles = walk.filter(x -> x.toString().endsWith(".class")).count();
+            }
+        }
+        check("the class dir is empty (the batch could not emit bytecode)",
+            classFiles == 0, "class files under " + classes + ": " + classFiles);
+
         // The whole target package is re-emitted (Java's package granularity).
         Set<Path> targetFiles = Set.of(
-            proj.resolve("pkg/b/B.java").toAbsolutePath().normalize(),
-            proj.resolve("pkg/b/Target.java").toAbsolutePath().normalize());
+            src.resolve("pkg/b/B.java"),
+            src.resolve("pkg/b/Target.java"));
         Set<String> fullForTarget = filterToTarget(normalize(full), targetFiles);
         check("targeted facts equal the full scan's when the class dir is incomplete",
             fullForTarget.equals(inc), setDiff(fullForTarget, inc) + "\nSTDERR:\n" + incR.err);

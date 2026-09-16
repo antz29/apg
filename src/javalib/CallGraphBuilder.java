@@ -429,18 +429,38 @@ public class CallGraphBuilder {
         // cross-package type becomes an error symbol, declaration parameter
         // types lose their package (WeightCombiner, not
         // org.jgrapht.graph.WeightCombiner) and resolved calls collapse into
-        // bare simple-name UnresolvedTargets. The pinned scan root is therefore
-        // also on the SOURCEPATH: a type the class dir cannot supply is
-        // attributed from source, exactly as the full scan resolves it. This is
-        // the full context the frontend contract requires; the class dir only
-        // saves the re-analysis when it is complete.
+        // bare simple-name UnresolvedTargets. The SOURCEPATH is therefore the
+        // real resolution context: a type the class dir cannot supply is
+        // attributed from source, exactly as the full scan resolves it.
+        //
+        // Phase-04 task-15: the sourcepath must name the ACTUAL SOURCE ROOTS of
+        // the walked files, NOT the scan root. In a Maven-like layout
+        // (<root>/<module>/src/main/java/pkg/...) the scan root is not a valid
+        // package root, so a scan-root sourcepath is silently INEFFECTIVE and
+        // every reference into a non-target package degrades to a javac error
+        // symbol. For each walked file, strip the declared-package path
+        // (pkgByFile) off its parent directory; dedupe and ':'-join. A file in
+        // the default/empty package contributes its own parent directory.
+        LinkedHashSet<String> sourceRoots = new LinkedHashSet<>();
+        for (Path f : walked.keySet()) {
+            Path p = f.getParent();
+            String pkg = pkgByFile.getOrDefault(f, "");
+            if (pkg != null && !pkg.isEmpty()) {
+                for (int i = 0, n = pkg.split("\\.").length; i < n && p != null; i++) {
+                    p = p.getParent();
+                }
+            }
+            if (p != null) sourceRoots.add(p.toString());
+        }
+        String sourcePath = sourceRoots.isEmpty() ? root.toString() : String.join(":", sourceRoots);
+
         List<Path> tfiles = new ArrayList<>(targetFiles);
         int total = tfiles.size();
         var tcompiler = ToolProvider.getSystemJavaCompiler();
         var tfm = tcompiler.getStandardFileManager(null, null, null);
         List<String> targetOpts = List.of(
                 "-classpath", classesDir.toString(),
-                "-sourcepath", root.toString());
+                "-sourcepath", sourcePath);
         var task = newTask(tcompiler, tfm, tfiles, targetOpts);
         var units = new ArrayList<CompilationUnitTree>();
         for (CompilationUnitTree unit : task.parse()) units.add(unit);
