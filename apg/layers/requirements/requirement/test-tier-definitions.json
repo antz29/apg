@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.integration-tier-pure",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.e2e-tier-real-io",
+      "properties": {}
     }
   ],
   "in": [
