@@ -2909,6 +2909,25 @@ mod tests {
         out
     }
 
+    /// The `(from, to)` endpoints of one edge kind in the export
+    /// (`calls`/`uses`/…) — the positive half of the task-23 extension, where
+    /// the re-emitted file's references into the TARGET package must appear as
+    /// their real resolved FQNs (never a bare simple name or an error symbol).
+    fn java_edges(repo_dir: &Path, kind: &str) -> std::collections::BTreeSet<(String, String)> {
+        let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+        let mut out = std::collections::BTreeSet::new();
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            if v.get("type").and_then(|t| t.as_str()) != Some(kind) {
+                continue;
+            }
+            let from = v.get("from").and_then(|f| f.as_str()).unwrap_or("");
+            let to = v.get("to").and_then(|t| t.as_str()).unwrap_or("");
+            out.insert((from.to_string(), to.to_string()));
+        }
+        out
+    }
+
     /// The simple names of every project `struct` the scan declared (the
     /// "project class" set the bare-name leak is checked against).
     fn java_project_class_simple_names(repo_dir: &Path) -> std::collections::BTreeSet<String> {
@@ -2982,11 +3001,28 @@ mod tests {
         None
     }
 
-    /// The task-23 Java fixture: a changed package (`pkg.b`) whose type is
-    /// referenced from an unchanged package (`pkg.c`) and which itself calls
-    /// into an unchanged package (`pkg.a`) — the cross-package resolution shape
-    /// note-87's divergence class exercised on jgrapht (resolved -> unresolved
-    /// when the context is incomplete).
+    /// The task-23 Java fixture (EXTENDED, feedback-134): a changed package
+    /// (`pkg.b`) whose type is referenced from an unchanged package (`pkg.c`)
+    /// and which itself calls into an unchanged package (`pkg.a`) — the
+    /// cross-package resolution shape note-87's divergence class exercised on
+    /// jgrapht (resolved -> unresolved when the context is incomplete).
+    ///
+    /// The extension reproduces the TWO halves of that class the original small
+    /// fixture missed:
+    ///
+    /// (a) `pkg.b.Target` is a TARGET-package declaration — a class declared in
+    ///     the re-emitted package and referenced from the re-emitted
+    ///     `pkg.b.B` — so the project-class index the `resolveCall`/`recordUse`
+    ///     fall-throughs consult must cover the TARGET declarations too, not the
+    ///     unchanged-package surface alone (task-15/-35).
+    /// (b) `pkg.a.Broken` is a source javac cannot compile (it names the absent
+    ///     package `missing`), dropped by `compileAndCollect`'s single-file
+    ///     catch; its declarations must still contribute to the surface/class
+    ///     dir, and (with the batch unable to emit bytecode) the class dir it
+    ///     leaves behind is incomplete — exactly the degraded-context shape the
+    ///     frontend-level fixture (`CallGraphBuilderTest
+    ///     .writeIncompleteContextFixture`) demonstrates as pre-fix FAIL /
+    ///     post-fix PASS.
     fn java_edge_exactness_fixture() -> Vec<(&'static str, &'static str)> {
         vec![
             (
@@ -2997,9 +3033,21 @@ mod tests {
                 "pkg/a/Util.java",
                 "package pkg.a;\n\npublic class Util {\n    public static int twice(int n) { return n * 2; }\n}\n",
             ),
+            // The un-attributable source: javac errors on `missing.Thing`, so
+            // the batch cannot emit bytecode and the class dir is incomplete.
+            (
+                "pkg/a/Broken.java",
+                "package pkg.a;\n\npublic class Broken {\n    public missing.Thing boom() { return null; }\n}\n",
+            ),
+            // The TARGET-package declaration the re-emitted `pkg.b.B` uses: a
+            // class whose simple name must never leak as an UnresolvedTarget.
+            (
+                "pkg/b/Target.java",
+                "package pkg.b;\n\npublic class Target {\n    public Target() {}\n\n    public int t() { return 2; }\n}\n",
+            ),
             (
                 "pkg/b/B.java",
-                "package pkg.b;\n\nimport pkg.a.A;\nimport pkg.a.Util;\n\npublic class B {\n    private final A a = new A();\n\n    public int bar() { return Util.twice(a.foo()); }\n}\n",
+                "package pkg.b;\n\nimport pkg.a.A;\nimport pkg.a.Util;\n\npublic class B {\n    private final A a = new A();\n    private final Target t = new Target();\n\n    public int bar() { return Util.twice(a.foo()) + t.t(); }\n\n    public Target make() { return new Target(); }\n}\n",
             ),
             (
                 "pkg/c/C.java",
@@ -6025,6 +6073,21 @@ mod tests {
         /// It additionally rejects the javac error-symbol leak: no
         /// `UnresolvedTarget` may carry a project-class simple name or an error
         /// symbol. Candidate binary only, scratch /tmp repo, java-only frontend.
+        ///
+        /// EXTENDED (feedback-134): the fixture now also carries a TARGET-package
+        /// class (`pkg.b.Target`, referenced from the re-emitted `pkg.b.B`) and an
+        /// un-attributable source (`pkg.a.Broken`), so the class dir is
+        /// incomplete and the complete project-class index — not the incomplete
+        /// class dir — is what must resolve the re-emitted file's references. It
+        /// asserts the POSITIVE observable as well: the re-emitted file's calls
+        /// and uses into the TARGET-package class appear as their real resolved
+        /// FQNs in BOTH scans. Pre-fix (incomplete target-aware project-class
+        /// index / no `-sourcepath` context) the re-emitted package's attribution
+        /// degrades and this test FAILS — the resolved edges vanish and a bare
+        /// project-class simple name leaks — the same pre-fix FAIL / post-fix
+        /// PASS the frontend-level fixture demonstrates
+        /// (`CallGraphBuilderTest.writeIncompleteContextFixture` /
+        /// `testIncompleteClassDirStillResolvesTargetPackage`).
         #[test]
         #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
         fn java_targeted_scan_is_edge_exact_against_a_full_scan() {
@@ -6046,12 +6109,15 @@ mod tests {
                 String::from_utf8_lossy(&cold.stderr)
             );
 
-            // A body-only edit to `pkg.b.B`: `pkg.c` references B and `pkg.b`
-            // calls into `pkg.a`, so the targeted scan must resolve across the
-            // package edge against the classes of the unchanged packages.
+            // A body-only edit to `pkg.b.B` (same declarations, same exported
+            // signature): `pkg.c` references B and `pkg.b` calls into `pkg.a`
+            // AND into the TARGET-package class `pkg.b.Target`, so the targeted
+            // scan must resolve across the package edges against the complete
+            // project-class index even though `pkg.a.Broken` has left the class
+            // dir incomplete.
             std::fs::write(
                 repo_dir.join("pkg/b/B.java"),
-                "package pkg.b;\n\nimport pkg.a.A;\nimport pkg.a.Util;\n\npublic class B {\n    private final A a = new A();\n\n    public int bar() { return Util.twice(a.foo()) + 1; }\n}\n",
+                "package pkg.b;\n\nimport pkg.a.A;\nimport pkg.a.Util;\n\npublic class B {\n    private final A a = new A();\n    private final Target t = new Target();\n\n    public int bar() { return Util.twice(a.foo()) + t.t() + 1; }\n\n    public Target make() { return new Target(); }\n}\n",
             )
             .unwrap();
 
@@ -6068,6 +6134,8 @@ mod tests {
             );
             let inc_counts = java_rel_counts(&repo_dir);
             let inc_unresolved = java_unresolved(&repo_dir);
+            let inc_calls = java_edges(&repo_dir, "calls");
+            let inc_uses = java_edges(&repo_dir, "uses");
             let class_names = java_project_class_simple_names(&repo_dir);
 
             // Forced from-scratch FULL scan of the SAME tree: db.lbug +
@@ -6084,6 +6152,8 @@ mod tests {
             );
             let full_counts = java_rel_counts(&repo_dir);
             let full_unresolved = java_unresolved(&repo_dir);
+            let full_calls = java_edges(&repo_dir, "calls");
+            let full_uses = java_edges(&repo_dir, "uses");
 
             assert_eq!(
                 inc_counts, full_counts,
@@ -6093,6 +6163,35 @@ mod tests {
                 inc_unresolved, full_unresolved,
                 "the UnresolvedTarget set by FQN-with-categories must be exactly equal"
             );
+
+            // The POSITIVE observable of the extended fixture: the re-emitted
+            // file's references into the TARGET-package class (`pkg.b.Target`)
+            // and into the unchanged package (`pkg.a.A`) appear as their real
+            // resolved FQNs in the targeted scan AND in the full-scan oracle. A
+            // degraded attribution emits a bare project-class simple name (or an
+            // error symbol) instead, so this is the assertion the pre-fix
+            // implementation fails.
+            for (tag, calls, uses) in [
+                ("targeted", &inc_calls, &inc_uses),
+                ("full", &full_calls, &full_uses),
+            ] {
+                for (from, to) in [
+                    ("pkg.b.B.bar", "pkg.b.Target.t"),
+                    ("pkg.b.B.make", "pkg.b.Target.<init>"),
+                    ("pkg.b.B.bar", "pkg.a.A.foo"),
+                ] {
+                    assert!(
+                        calls.contains(&(from.to_string(), to.to_string())),
+                        "{tag}: the resolved call {from} -> {to} must be present \
+                         (a degraded context leaks a bare project-class simple \
+                         name instead)"
+                    );
+                }
+                assert!(
+                    uses.contains(&("pkg.b.B.make".to_string(), "pkg.b.Target".to_string())),
+                    "{tag}: the resolved use pkg.b.B.make -> pkg.b.Target must be present"
+                );
+            }
 
             // No bare project-class simple name and no error symbol in EITHER
             // scan's unresolved set (the javac error-symbol leak, note-87).
