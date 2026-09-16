@@ -3001,60 +3001,109 @@ mod tests {
         None
     }
 
-    /// The task-23 Java fixture (EXTENDED, feedback-134): a changed package
-    /// (`pkg.b`) whose type is referenced from an unchanged package (`pkg.c`)
-    /// and which itself calls into an unchanged package (`pkg.a`) — the
-    /// cross-package resolution shape note-87's divergence class exercised on
-    /// jgrapht (resolved -> unresolved when the context is incomplete).
+    /// The number of `.class` files anywhere under the shared store's Java class
+    /// caches (`<store>/java/<cache-key>/classes`). The task-23 nested-root
+    /// fixture carries a source javac cannot compile (`pkg.a.Broken`), so the
+    /// compile batch cannot emit bytecode and the count is ZERO — the positive
+    /// proof that the targeted scan's exact facts came from the corrected
+    /// `-sourcepath` (the actual source roots), NOT from a bytecode cache. A
+    /// non-zero count would mean the fixture could pass vacuously via the
+    /// classpath, so the test asserts this observable.
+    fn java_class_file_count(store: &Path) -> usize {
+        let java = store.join("java");
+        let Ok(keys) = std::fs::read_dir(&java) else {
+            return 0;
+        };
+        keys.flatten()
+            .map(|k| count_class_files(&k.path().join("classes")))
+            .sum()
+    }
+
+    /// Recursively counts `.class` files under a class dir.
+    fn count_class_files(dir: &Path) -> usize {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return 0;
+        };
+        let mut n = 0usize;
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                n += count_class_files(&p);
+            } else if p.extension().and_then(|x| x.to_str()) == Some("class") {
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// The task-23 Java fixture (EXTENDED, feedback-134; nested-root corrected
+    /// per phase-04 task-23): a changed package (`pkg.b`) whose type is
+    /// referenced from an unchanged package (`pkg.c`) and which itself calls
+    /// into an unchanged package (`pkg.a`) — the cross-package resolution shape
+    /// note-87's divergence class exercised on jgrapht (resolved -> unresolved
+    /// when the context is incomplete).
     ///
-    /// The extension reproduces the TWO halves of that class the original small
-    /// fixture missed:
+    /// FIXTURE ROOT (REQUIRED): every source sits under a MAVEN-LIKE NESTED
+    /// SOURCE ROOT — `proj/src/main/java/pkg/...` under the scan root — so the
+    /// scan root is NOT a valid package root, exactly like jgrapht's Maven
+    /// multi-module layout (`<root>/jgrapht-core/src/main/java/org/jgrapht/…`).
+    /// This is what makes the pre-fix `-sourcepath <scan root>` silently
+    /// INEFFECTIVE: javac looks for `<scan root>/pkg/a/A.java`, which does not
+    /// exist, so a reference into a non-target package degrades to a javac
+    /// error symbol. A fixture with `pkg/a/A.java` DIRECTLY under the scan root
+    /// does NOT reproduce the divergence (the scan root WAS a valid package
+    /// root there) and is exactly the wrong assumption the committed frontend
+    /// fixture encoded before task-15's smallest falsifiable experiment.
     ///
-    /// (a) `pkg.b.Target` is a TARGET-package declaration — a class declared in
-    ///     the re-emitted package and referenced from the re-emitted
-    ///     `pkg.b.B` — so the project-class index the `resolveCall`/`recordUse`
-    ///     fall-throughs consult must cover the TARGET declarations too, not the
-    ///     unchanged-package surface alone (task-15/-35).
-    /// (b) `pkg.a.Broken` is a source javac cannot compile (it names the absent
+    /// On top of the nested root, the fixture carries:
+    ///
+    /// (a) `pkg.b.Target` — a TARGET-package declaration, declared in the
+    ///     re-emitted package and referenced from the re-emitted `pkg.b.B` — so
+    ///     the complete project-class index must cover the TARGET declarations
+    ///     too, not the unchanged-package surface alone (task-15/-35);
+    /// (b) `pkg.a.Broken` — a source javac cannot compile (it names the absent
     ///     package `missing`), dropped by `compileAndCollect`'s single-file
     ///     catch; its declarations must still contribute to the surface/class
     ///     dir, and (with the batch unable to emit bytecode) the class dir it
-    ///     leaves behind is incomplete — exactly the degraded-context shape the
+    ///     leaves behind is incomplete — the degraded-context shape the
     ///     frontend-level fixture (`CallGraphBuilderTest
     ///     .writeIncompleteContextFixture`) demonstrates as pre-fix FAIL /
-    ///     post-fix PASS.
+    ///     post-fix PASS; and
+    /// (c) the NON-TARGET `pkg.a` (and `pkg.c`) packages the target package
+    ///     references, in the nested-root layout, so the missing non-target
+    ///     resolution context actually bites.
     fn java_edge_exactness_fixture() -> Vec<(&'static str, &'static str)> {
         vec![
             (
-                "pkg/a/A.java",
+                "proj/src/main/java/pkg/a/A.java",
                 "package pkg.a;\n\npublic class A {\n    public int foo() { return 1; }\n}\n",
             ),
             (
-                "pkg/a/Util.java",
+                "proj/src/main/java/pkg/a/Util.java",
                 "package pkg.a;\n\npublic class Util {\n    public static int twice(int n) { return n * 2; }\n}\n",
             ),
             // The un-attributable source: javac errors on `missing.Thing`, so
             // the batch cannot emit bytecode and the class dir is incomplete.
             (
-                "pkg/a/Broken.java",
+                "proj/src/main/java/pkg/a/Broken.java",
                 "package pkg.a;\n\npublic class Broken {\n    public missing.Thing boom() { return null; }\n}\n",
             ),
             // The TARGET-package declaration the re-emitted `pkg.b.B` uses: a
             // class whose simple name must never leak as an UnresolvedTarget.
             (
-                "pkg/b/Target.java",
+                "proj/src/main/java/pkg/b/Target.java",
                 "package pkg.b;\n\npublic class Target {\n    public Target() {}\n\n    public int t() { return 2; }\n}\n",
             ),
             (
-                "pkg/b/B.java",
+                "proj/src/main/java/pkg/b/B.java",
                 "package pkg.b;\n\nimport pkg.a.A;\nimport pkg.a.Util;\n\npublic class B {\n    private final A a = new A();\n    private final Target t = new Target();\n\n    public int bar() { return Util.twice(a.foo()) + t.t(); }\n\n    public Target make() { return new Target(); }\n}\n",
             ),
             (
-                "pkg/c/C.java",
+                "proj/src/main/java/pkg/c/C.java",
                 "package pkg.c;\n\nimport pkg.b.B;\n\npublic class C {\n    public int baz() { return new B().bar(); }\n}\n",
             ),
             (
-                "pkg/c/ListUser.java",
+                "proj/src/main/java/pkg/c/ListUser.java",
                 "package pkg.c;\n\nimport java.util.ArrayList;\nimport java.util.List;\n\npublic class ListUser {\n    public int size() {\n        List<String> xs = new ArrayList<>();\n        xs.add(\"x\");\n        return xs.size();\n    }\n}\n",
             ),
         ]
@@ -6074,19 +6123,26 @@ mod tests {
         /// `UnresolvedTarget` may carry a project-class simple name or an error
         /// symbol. Candidate binary only, scratch /tmp repo, java-only frontend.
         ///
-        /// EXTENDED (feedback-134): the fixture now also carries a TARGET-package
+        /// FIXTURE ROOT (REQUIRED — reproduces the measured root cause): the
+        /// sources sit under a MAVEN-LIKE NESTED SOURCE ROOT
+        /// (`proj/src/main/java/pkg/...` under the scan root), so the scan root
+        /// is NOT a valid package root and the pre-fix `-sourcepath <scan root>`
+        /// is silently INEFFECTIVE — the jgrapht Maven multi-module shape. A
+        /// fixture with `pkg/a/A.java` directly under the scan root does NOT
+        /// reproduce the divergence and this test deliberately does not use it.
+        ///
+        /// EXTENDED (feedback-134): the fixture also carries a TARGET-package
         /// class (`pkg.b.Target`, referenced from the re-emitted `pkg.b.B`) and an
         /// un-attributable source (`pkg.a.Broken`), so the class dir is
         /// incomplete and the complete project-class index — not the incomplete
         /// class dir — is what must resolve the re-emitted file's references. It
         /// asserts the POSITIVE observable as well: the re-emitted file's calls
         /// and uses into the TARGET-package class appear as their real resolved
-        /// FQNs in BOTH scans. Pre-fix (incomplete target-aware project-class
-        /// index / no `-sourcepath` context) the re-emitted package's attribution
-        /// degrades and this test FAILS — the resolved edges vanish and a bare
-        /// project-class simple name leaks — the same pre-fix FAIL / post-fix
-        /// PASS the frontend-level fixture demonstrates
-        /// (`CallGraphBuilderTest.writeIncompleteContextFixture` /
+        /// FQNs in BOTH scans. Pre-fix (no effective `-sourcepath` context) the
+        /// re-emitted package's attribution degrades and this test FAILS — the
+        /// resolved edges vanish and a bare project-class simple name leaks — the
+        /// same pre-fix FAIL / post-fix PASS the frontend-level fixture
+        /// demonstrates (`CallGraphBuilderTest.writeIncompleteContextFixture` /
         /// `testIncompleteClassDirStillResolvesTargetPackage`).
         #[test]
         #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
@@ -6110,13 +6166,13 @@ mod tests {
             );
 
             // A body-only edit to `pkg.b.B` (same declarations, same exported
-            // signature): `pkg.c` references B and `pkg.b` calls into `pkg.a`
-            // AND into the TARGET-package class `pkg.b.Target`, so the targeted
-            // scan must resolve across the package edges against the complete
-            // project-class index even though `pkg.a.Broken` has left the class
-            // dir incomplete.
+            // signature) in the NESTED source root: `pkg.c` references B and
+            // `pkg.b` calls into `pkg.a` AND into the TARGET-package class
+            // `pkg.b.Target`, so the targeted scan must resolve across the
+            // package edges against the complete project-class index even though
+            // `pkg.a.Broken` has left the class dir incomplete.
             std::fs::write(
-                repo_dir.join("pkg/b/B.java"),
+                repo_dir.join("proj/src/main/java/pkg/b/B.java"),
                 "package pkg.b;\n\nimport pkg.a.A;\nimport pkg.a.Util;\n\npublic class B {\n    private final A a = new A();\n    private final Target t = new Target();\n\n    public int bar() { return Util.twice(a.foo()) + t.t() + 1; }\n\n    public Target make() { return new Target(); }\n}\n",
             )
             .unwrap();
@@ -6137,6 +6193,21 @@ mod tests {
             let inc_calls = java_edges(&repo_dir, "calls");
             let inc_uses = java_edges(&repo_dir, "uses");
             let class_names = java_project_class_simple_names(&repo_dir);
+            // Non-vacuity of the nested-root fixture: `pkg.a.Broken` makes the
+            // Java compile batch fail, so javac emits NO bytecode and the
+            // targeted scan's class dir holds ZERO `.class` files. The exact
+            // resolution asserted below therefore came from the corrected
+            // `-sourcepath` (the actual source roots), not from the classpath —
+            // if this is non-zero the fixture could pass without the fix.
+            let class_files = java_class_file_count(&java_store(&repo_dir));
+            assert!(
+                class_files == 0,
+                "the nested-root fixture must leave the class dir EMPTY (the \
+                 dropped `pkg.a.Broken` makes the compile batch fail), so the \
+                 targeted scan resolves from `-sourcepath`; found {class_files} \
+                 `.class` file(s) — the fixture would pass vacuously via the \
+                 bytecode classpath"
+            );
 
             // Forced from-scratch FULL scan of the SAME tree: db.lbug +
             // graph.jsonl + the shared fact store cleared — never the
