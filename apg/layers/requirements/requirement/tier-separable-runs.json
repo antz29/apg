@@ -6,7 +6,13 @@
   "properties": {
     "feature": "test-hygiene"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "depends-on",
+      "target": "requirements.requirement.test-tier-definitions",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
