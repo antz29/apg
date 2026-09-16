@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "test-tier-boundaries",
+  "body": "The repo's tests are exactly three tiers, decided by what a test exercises, not by its name or location:\n\n- unit: tests exactly 1 unit, with everything else faked, NO real I/O.\n- integration: tests 2+ units, with everything else faked, NO real I/O.\n- e2e: tests 1+ units, with real I/O, but still effectively isolated.\n\nSTRICT I/O BOUNDARY (no exception): \"real I/O\" means ANY filesystem access — INCLUDING temp directories; ANY database access — INCLUDING opening a local `db.lbug`; ANY git operation; and ANY process spawn. A unit or integration test must therefore be PURE IN-MEMORY, with fakes for filesystem, database, git, and process. Any test that touches a temp dir, writes node files, opens `db.lbug`, runs git, or spawns the apg binary is e2e BY DEFINITION, whatever it is named or wherever it lives.\n\nDEFAULT GATE: the whole unit+integration suite must run FAST — the entire default suite in seconds. e2e may be slow and is the FINAL GATE ONLY: e2e is EXCLUDED from the default gate (a plain `cargo test` runs unit+int only) and is opt-in behind an explicit guard (the `-short`/`#[ignore]`-and-invoke or an equivalent named env-var opt-in), exercised only as the final acceptance gate.\n\nSCOPE: this law governs every test in the repo, and every test task a plan authors (a plan task's tier is unit / int / e2e). It does not restate isolation: e2e remains bound by `global.constraint.no-real-project-test` (a candidate binary is exercised only against a scratch /tmp git repo, never a real project). Satisfaction is by review — the binary validates structure and references only, never the prose.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
