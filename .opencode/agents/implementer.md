@@ -104,6 +104,14 @@ permission:
     "cargo fmt *": allow
     "cargo clippy": allow
     "cargo clippy *": allow
+    "cargo test-unit": allow
+    "cargo test-unit *": allow
+    "cargo test-int": allow
+    "cargo test-int *": allow
+    "cargo test-e2e": allow
+    "cargo test-e2e *": allow
+    "scripts/gate.sh": allow
+    "scripts/gate.sh *": allow
     "rm src/*.rs": allow
   apg_query: allow
   apg_find_symbol: allow
@@ -317,11 +325,27 @@ reviewer:    apg_review_reject <f>                               → status = op
   `cargo clippy` (argument variants allowed — filtered runs, `--all-targets`,
   `--check`, `-- -D warnings`; one command per call, no chaining). The clippy
   standard is **zero warnings**.
+- **Also granted by name**: the documented tier aliases — `cargo test-unit`,
+  `cargo test-int`, `cargo test-e2e` (a hyphenated alias is NOT matched by
+  `cargo test *`, which is why each is granted explicitly) — and
+  **`scripts/gate.sh`**, granted **run-only**: `scripts/**` is not in your edit
+  grant, so you can run the gate but never rewrite it.
 - **Deletion**: plain `rm src/*.rs` only (no flags) — for removing a source
   file you created/own. Nothing else is deletable.
 
 ## Done gate — the repo-green contract
 
+- **`scripts/gate.sh` is the single gate command**: it runs exactly the repo's
+  sequence — `cargo fmt --check` → `cargo check --all-targets` → `cargo clippy
+  --all-targets -- -D warnings` → `cargo build` → `cargo test` — stopping at the
+  first failure; `scripts/gate.sh --e2e` appends the opt-in e2e tier. Run it
+  before every commit; the individual steps below are the same contract run as
+  separate calls.
+- **Fast core-only build**: to build without compiling the language frontends,
+  use `cargo build --config 'env.APG_BUILD_FRONTENDS="0"'` — it matches the
+  `cargo build *` grant. Env-prefixed forms (`APG_BUILD_FRONTENDS=0 cargo
+  build`) are deliberately **not** granted: they match no allowed pattern, and a
+  glob that accepted them would invite smuggling.
 - The release gate is **`cargo test` GREEN**. Before any commit, run the gates
   (`cargo fmt`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D
   warnings`, `cargo build`, `cargo test` — separate calls) and fix everything
