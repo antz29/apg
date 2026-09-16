@@ -12,6 +12,7 @@
 
 #![cfg(test)]
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -635,6 +636,486 @@ pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
     };
     std::env::set_current_dir(old)?;
     result
+}
+
+// ---------------------------------------------------------------------------
+// Acceptance harness (phase-04 task-5). The SINGLE acceptance workload is
+// jgrapht. Resolution is explicit-source-first, staging is a READ-ONLY copy of
+// the real checkout's HEAD into a fresh scratch /tmp git repo, and only the
+// CANDIDATE binary is ever pointed at the staged copy
+// (global.constraint.no-real-project-test). A missing checkout is a LOUD
+// failure by default; the only skip is the explicit `APG_ACCEPTANCE_SKIP=1`
+// opt-in, which records a machine-readable SKIP disposition that is NOT
+// acceptance-satisfied.
+// ---------------------------------------------------------------------------
+
+/// The single acceptance workload (the jgrapht reference project). There is no
+/// netbeans workload.
+pub const ACCEPTANCE_WORKLOAD: &str = "jgrapht";
+/// Per-workload override: the jgrapht checkout path.
+pub const ACCEPTANCE_JGRAPHT_ENV: &str = "APG_ACCEPTANCE_JGRAPHT";
+/// Shared-root override: jgrapht is `<root>/jgrapht`.
+pub const ACCEPTANCE_ROOT_ENV: &str = "APG_ACCEPTANCE_ROOT";
+/// The documented opt-in skip (`1`/`true`); a skipped run is NOT
+/// acceptance-satisfied.
+pub const ACCEPTANCE_SKIP_ENV: &str = "APG_ACCEPTANCE_SKIP";
+
+/// Which source the jgrapht reference checkout was resolved from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcceptanceSource {
+    /// `APG_ACCEPTANCE_JGRAPHT` (the per-workload override).
+    EnvJgrapht,
+    /// `APG_ACCEPTANCE_ROOT` (jgrapht is `<root>/jgrapht`).
+    EnvRoot,
+    /// The conventional `~/jgrapht`.
+    ConventionalHome,
+}
+
+impl AcceptanceSource {
+    /// The label recorded in the machine-readable artifact.
+    pub fn label(&self) -> &'static str {
+        match self {
+            AcceptanceSource::EnvJgrapht => ACCEPTANCE_JGRAPHT_ENV,
+            AcceptanceSource::EnvRoot => ACCEPTANCE_ROOT_ENV,
+            AcceptanceSource::ConventionalHome => "~/jgrapht",
+        }
+    }
+}
+
+/// Why an acceptance harness could not be built.
+#[derive(Debug)]
+pub enum AcceptanceError {
+    /// No checkout at the resolved path and no opt-in skip — a LOUD failure.
+    Missing {
+        workload: &'static str,
+        source: AcceptanceSource,
+        path: PathBuf,
+        reason: String,
+    },
+    /// The explicit opt-in skip was taken: a SKIP disposition was recorded and
+    /// the run is NOT acceptance-satisfied.
+    Skipped {
+        workload: &'static str,
+        source: AcceptanceSource,
+        path: PathBuf,
+        reason: String,
+        disposition: PathBuf,
+    },
+}
+
+impl AcceptanceError {
+    /// True for the explicit opt-in skip (the caller may return early; the
+    /// recorded disposition marks the run unsatisfied).
+    pub fn is_skip(&self) -> bool {
+        matches!(self, AcceptanceError::Skipped { .. })
+    }
+}
+
+impl std::fmt::Display for AcceptanceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AcceptanceError::Missing {
+                workload,
+                source,
+                path,
+                reason,
+            } => write!(
+                f,
+                "acceptance workload `{workload}` is MISSING: {reason} (at {}, \
+                 resolved from {src}). Set {j} to the {workload} checkout, or {r} to a \
+                 root containing {workload}/, or provide ~/{workload}.",
+                path.display(),
+                src = source.label(),
+                j = ACCEPTANCE_JGRAPHT_ENV,
+                r = ACCEPTANCE_ROOT_ENV
+            ),
+            AcceptanceError::Skipped {
+                workload,
+                source,
+                path,
+                reason,
+                disposition,
+            } => write!(
+                f,
+                "acceptance workload `{workload}` SKIPPED by {skip}=1: {reason} (at {}, \
+                 resolved from {src}). This run is NOT acceptance-satisfied — the task \
+                 stays open and the skip must be filed as feedback. SKIP disposition: {}",
+                path.display(),
+                disposition.display(),
+                skip = ACCEPTANCE_SKIP_ENV,
+                src = source.label(),
+            ),
+        }
+    }
+}
+
+/// Resolution precedence: `APG_ACCEPTANCE_JGRAPHT`, then
+/// `APG_ACCEPTANCE_ROOT/jgrapht`, then `~/jgrapht`. Returns the path even when
+/// it is missing so the caller can decide missing vs. skip.
+pub fn resolve_jgrapht() -> (AcceptanceSource, PathBuf) {
+    if let Some(p) = std::env::var_os(ACCEPTANCE_JGRAPHT_ENV).filter(|v| !v.is_empty()) {
+        return (AcceptanceSource::EnvJgrapht, PathBuf::from(p));
+    }
+    if let Some(root) = std::env::var_os(ACCEPTANCE_ROOT_ENV).filter(|v| !v.is_empty()) {
+        return (
+            AcceptanceSource::EnvRoot,
+            PathBuf::from(root).join(ACCEPTANCE_WORKLOAD),
+        );
+    }
+    let path = match std::env::var_os("HOME") {
+        Some(h) if !h.is_empty() => PathBuf::from(h).join(ACCEPTANCE_WORKLOAD),
+        _ => PathBuf::from(ACCEPTANCE_WORKLOAD),
+    };
+    (AcceptanceSource::ConventionalHome, path)
+}
+
+fn acceptance_skip_requested() -> bool {
+    matches!(
+        std::env::var(ACCEPTANCE_SKIP_ENV).as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
+/// The staged acceptance workload: a fresh scratch `/tmp` git repo holding the
+/// reference checkout's HEAD content, an isolated `HOME`, and an isolated
+/// `APG_FRONTEND_DIR` carrying only the Java frontend (the workload is Java, so
+/// detection can never accidentally run every installed frontend on it).
+pub struct AcceptanceHarness {
+    pub workload: &'static str,
+    pub source: AcceptanceSource,
+    pub source_path: PathBuf,
+    /// The scratch base (teardown removes it).
+    pub base: PathBuf,
+    /// The staged read-only copy (a fresh git repo checked out at the source's
+    /// HEAD).
+    pub repo: PathBuf,
+    /// Isolated `HOME` for `apg init`'s suite install.
+    pub home: PathBuf,
+    /// Isolated `APG_FRONTEND_DIR` holding only `java-classes`.
+    pub frontend_dir: PathBuf,
+    /// How many files the read-only staging wrote.
+    pub staged_files: usize,
+}
+
+impl AcceptanceHarness {
+    /// Build the jgrapht acceptance harness, or fail loudly / record a skip.
+    pub fn jgrapht() -> Result<AcceptanceHarness, AcceptanceError> {
+        let (source, source_path) = resolve_jgrapht();
+        if !source_path.is_dir() {
+            let reason = format!("no checkout directory at {}", source_path.display());
+            if acceptance_skip_requested() {
+                let disposition =
+                    write_skip_disposition(ACCEPTANCE_WORKLOAD, &source, &source_path, &reason);
+                return Err(AcceptanceError::Skipped {
+                    workload: ACCEPTANCE_WORKLOAD,
+                    source,
+                    path: source_path,
+                    reason,
+                    disposition,
+                });
+            }
+            return Err(AcceptanceError::Missing {
+                workload: ACCEPTANCE_WORKLOAD,
+                source,
+                path: source_path,
+                reason,
+            });
+        }
+
+        let base = std::env::temp_dir().join(format!(
+            "apg-acceptance-{}-{}",
+            ACCEPTANCE_WORKLOAD,
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo = base.join("staged");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
+        // it never shells out to npm.
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+
+        // The staged copy carries ONLY the Java frontend, so auto-detection on
+        // the Java workload yields exactly `java` (never a multi-frontend run).
+        let frontend_dir = base.join("frontends");
+        let src_frontend = apg_bin()
+            .parent()
+            .expect("apg binary parent")
+            .join("frontends")
+            .join("java-classes");
+        assert!(
+            src_frontend.is_dir(),
+            "the staged Java frontend must exist at {} — run `cargo build` first",
+            src_frontend.display()
+        );
+        copy_dir(&src_frontend, &frontend_dir.join("java-classes"))
+            .unwrap_or_else(|e| panic!("stage the Java frontend: {e:#}"));
+
+        let staged_files = stage_checkout_readonly(&source_path, &repo).unwrap_or_else(|e| {
+            panic!(
+                "stage {} read-only from {}: {e:#}",
+                ACCEPTANCE_WORKLOAD,
+                source_path.display()
+            )
+        });
+        commit_all_files(&repo, "staged acceptance checkout");
+
+        Ok(AcceptanceHarness {
+            workload: ACCEPTANCE_WORKLOAD,
+            source,
+            source_path,
+            base,
+            repo,
+            home,
+            frontend_dir,
+            staged_files,
+        })
+    }
+
+    /// Runs the CANDIDATE binary against the staged repo root.
+    pub fn run(&self, args: &[&str]) -> Output {
+        self.run_in(&self.repo, args)
+    }
+
+    /// Runs the CANDIDATE binary with cwd `dir` (the staged repo, or one of its
+    /// worktrees).
+    pub fn run_in(&self, dir: &Path, args: &[&str]) -> Output {
+        ApgCommand::new(args)
+            .cwd(dir)
+            .env("HOME", &self.home.to_string_lossy())
+            .env("APG_FRONTEND_DIR", &self.frontend_dir.to_string_lossy())
+            .output()
+    }
+
+    /// Removes the scratch copy (and its staged frontends / HOME).
+    pub fn discard(&self) {
+        let _ = std::fs::remove_dir_all(&self.base);
+    }
+}
+
+/// Recursively copies a directory (the isolated Java frontend staging).
+pub fn copy_dir(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &to)?;
+        } else {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
+/// The `git archive HEAD` equivalent: writes every blob of the source's HEAD
+/// tree into the fresh scratch repo `dest`, git2-only and READ-ONLY on `src`
+/// (the real checkout is never written to or git-mutated). Submodule gitlinks
+/// and any non-blob entry are skipped. Returns the number of files written.
+fn stage_checkout_readonly(src: &Path, dest: &Path) -> anyhow::Result<usize> {
+    let src_repo = git2::Repository::open(src)
+        .map_err(|e| anyhow::anyhow!("open reference checkout {}: {e}", src.display()))?;
+    let head = src_repo.head()?.peel_to_commit()?;
+    let tree = head.tree()?;
+    let mut opts = git2::RepositoryInitOptions::new();
+    opts.initial_head("refs/heads/main");
+    let _dest_repo = git2::Repository::init_opts(dest, &opts)?;
+    write_tree_blobs(&src_repo, &tree, Path::new(""), dest)
+}
+
+fn write_tree_blobs(
+    src_repo: &git2::Repository,
+    tree: &git2::Tree,
+    prefix: &Path,
+    dest: &Path,
+) -> anyhow::Result<usize> {
+    let mut written = 0usize;
+    for entry in tree.iter() {
+        let name = entry
+            .name()
+            .ok_or_else(|| anyhow::anyhow!("non-UTF-8 tree entry"))?;
+        let rel = prefix.join(name);
+        match entry.kind() {
+            Some(git2::ObjectType::Blob) => {
+                let blob = src_repo.find_blob(entry.id())?;
+                let out = dest.join(&rel);
+                if let Some(parent) = out.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&out, blob.content())?;
+                written += 1;
+            }
+            Some(git2::ObjectType::Tree) => {
+                let sub = src_repo.find_tree(entry.id())?;
+                written += write_tree_blobs(src_repo, &sub, &rel, dest)?;
+            }
+            // Submodule gitlinks and anything else are not source files.
+            _ => {}
+        }
+    }
+    Ok(written)
+}
+
+/// Stages and commits every change under `dir` (git2 — the git CLI is never
+/// shelled out to anywhere in src), tolerating an unborn HEAD.
+pub fn commit_all_files(dir: &Path, msg: &str) {
+    let repo = git2::Repository::open(dir).unwrap();
+    let mut cfg = repo.config().unwrap();
+    cfg.set_str("user.name", "apg acceptance").unwrap();
+    cfg.set_str("user.email", "apg-acceptance@example.com")
+        .unwrap();
+    drop(cfg);
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    let head = repo.head().ok().map(|h| h.peel_to_commit().unwrap());
+    let parents: Vec<&git2::Commit> = head.iter().collect();
+    repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, parents.as_slice())
+        .unwrap();
+}
+
+/// The gitignored acceptance-artifact directory (`apg/.trans/acceptance/`).
+pub fn acceptance_artifact_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(specs::LAYOUT)
+        .join(specs::TRANS)
+        .join("acceptance")
+}
+
+/// Writes a machine-readable acceptance artifact, returning its path. Also
+/// echoes the one-line JSON to stderr, so the measured numbers are visible
+/// under `--nocapture` (the artifact itself lives in the read-guarded
+/// `apg/.trans/`).
+pub fn write_acceptance_artifact(name: &str, value: &serde_json::Value) -> PathBuf {
+    let dir = acceptance_artifact_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        format!("{}\n", serde_json::to_string_pretty(value).unwrap()),
+    )
+    .unwrap();
+    eprintln!(
+        "acceptance artifact {}: {}",
+        path.display(),
+        serde_json::to_string(value).unwrap()
+    );
+    path
+}
+
+/// Records a machine-readable SKIP disposition (workload, source, reason,
+/// timestamp) — NOT acceptance-satisfied.
+pub fn write_skip_disposition(
+    workload: &str,
+    source: &AcceptanceSource,
+    path: &Path,
+    reason: &str,
+) -> PathBuf {
+    let value = serde_json::json!({
+        "acceptance": "SKIP",
+        "workload": workload,
+        "source": source.label(),
+        "resolved_path": path.display().to_string(),
+        "reason": reason,
+        "recorded_at": crate::git::now_iso8601(),
+        "acceptance_satisfied": false,
+    });
+    write_acceptance_artifact(&format!("skip-{workload}.json"), &value)
+}
+
+// ---------------------------------------------------------------------------
+// Enumerated equivalence-oracle readers (phase-02 task-17 / phase-03 task-9),
+// shared by the phase-04 acceptance scenarios. Non-#[test] harness helpers, so
+// they live at module level.
+// ---------------------------------------------------------------------------
+
+/// Opens a DB file read-only, runs `f`, and closes it — one `Database::new`
+/// per oracle pass, so a large acceptance DB is not reopened per query.
+pub fn with_db<T>(path: &Path, f: impl FnOnce(&lbug::Connection) -> T) -> T {
+    let db = lbug::Database::new(path, lbug::SystemConfig::default().read_only(true))
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    let conn = lbug::Connection::new(&db).unwrap();
+    let out = f(&conn);
+    drop(conn);
+    drop(db);
+    out
+}
+
+/// Runs `query` on an open read-only connection, returning every row's cells as
+/// strings.
+pub fn query_rows(conn: &lbug::Connection, query: &str) -> Vec<Vec<String>> {
+    conn.query(query)
+        .map(|r| {
+            r.map(|row| row.iter().map(|v| v.to_string()).collect::<Vec<String>>())
+                .collect::<Vec<Vec<String>>>()
+        })
+        .unwrap_or_default()
+}
+
+/// Runs `query` against a DB file opened read-only, returning every row's cells
+/// as strings.
+pub fn db_rows(path: &Path, query: &str) -> Vec<Vec<String>> {
+    with_db(path, |conn| query_rows(conn, query))
+}
+
+/// Every table's row count in a DB file opened read-only — the per-label NODE
+/// counts AND the per-rel-type COUNTS in one map (`show_tables()` enumerates
+/// both node and REL tables). The DB is opened once for the whole pass.
+pub fn db_table_counts(path: &Path) -> BTreeMap<String, i64> {
+    with_db(path, |conn| {
+        let mut out = BTreeMap::new();
+        let tables = query_rows(conn, "CALL show_tables() RETURN name, type");
+        for row in tables {
+            let table = row.first().cloned().unwrap_or_default();
+            let kind = row.get(1).cloned().unwrap_or_default();
+            let q = if kind == "REL" {
+                format!("MATCH ()-[r:{table}]->() RETURN count(*)")
+            } else {
+                format!("MATCH (n:{table}) RETURN count(*)")
+            };
+            let n = query_rows(conn, &q)
+                .first()
+                .and_then(|r| r.first())
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(-1);
+            out.insert(table, n);
+        }
+        out
+    })
+}
+
+/// The `UnresolvedTarget` rows of a DB file as `(fqn, category)`.
+pub fn db_unresolved_rows(path: &Path) -> BTreeSet<(String, String)> {
+    db_rows(path, "MATCH (n:UnresolvedTarget) RETURN n.fqn, n.category")
+        .into_iter()
+        .map(|r| {
+            (
+                r.first().cloned().unwrap_or_default(),
+                r.get(1).cloned().unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
+/// The single `Scan` row of a DB file as `(sha, clean, key, at)`.
+pub fn db_scan_row(path: &Path) -> (String, String, String, String) {
+    let rows = db_rows(
+        path,
+        "MATCH (s:Scan) RETURN s.git_sha, s.git_clean, s.content_key, s.scanned_at",
+    );
+    assert_eq!(rows.len(), 1, "exactly one Scan row in {}", path.display());
+    let r = &rows[0];
+    (
+        r.first().cloned().unwrap_or_default(),
+        r.get(1).cloned().unwrap_or_default(),
+        r.get(2).cloned().unwrap_or_default(),
+        r.get(3).cloned().unwrap_or_default(),
+    )
 }
 
 #[cfg(test)]
