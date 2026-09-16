@@ -20,6 +20,7 @@ mod specs;
 mod splice;
 #[cfg(test)]
 mod testutil;
+mod timing;
 mod version_gate;
 
 use std::collections::BTreeSet;
@@ -335,6 +336,14 @@ impl Log {
             let _ = write!(self.f, "{content}");
         }
     }
+}
+
+/// Emits the per-phase timing report first-class (phase-04 task-1/task-2): the
+/// human `[timing]` line plus the machine-readable `[timing-json]` line, both
+/// through the scan log (stderr *and* `apg-frontend.log`).
+fn emit_timing(log: &mut Log, report: &timing::TimingReport) {
+    log.ln(&report.human_line());
+    log.ln(&report.machine_line());
 }
 
 /// Last `n` non-empty-ish lines of a file, oldest first (a short tail for
@@ -1345,6 +1354,10 @@ fn scanner_records<'a>(
 /// whole stream with the git state the scan ran under (recorded as the DB's
 /// `Scan` node and graph.jsonl line 1).
 pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
+    // Per-phase timing (phase-04): `scan_start` is taken before any work so the
+    // startup/overhead phase spans argument parsing onward.
+    let scan_start = std::time::Instant::now();
+    let mut timing = timing::TimingReport::new();
     let mut language_args: Vec<String> = Vec::new();
     let mut path_excludes: Vec<String> = Vec::new();
     let mut module_dirs: Vec<String> = Vec::new();
@@ -1442,6 +1455,13 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         log.ln(
             "[scan] fast-path: tree unchanged since the recorded scan — reusing db.lbug (frontends skipped)",
         );
+        // Phase-04 task-3: the whole-tree fast path runs no frontend and
+        // rebuilds nothing, so all the elapsed time is startup/overhead and the
+        // frontend phase is reported `frontend-skipped` (with ingest-assembly
+        // and db-load at zero, every phase key still present).
+        timing.record(timing::Phase::Startup, scan_start.elapsed());
+        timing.mark_frontend_skipped();
+        emit_timing(&mut log, &timing);
         return Ok(());
     }
 
@@ -1529,6 +1549,12 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // per-language temp file, then folded into the log file. On a non-zero
     // exit the tail is also reported to the terminal (SPEC 0.9.1 R1).
     log.ln("Frontend progress -> apg-frontend.log");
+
+    // Startup/overhead ends where the frontend work begins (phase-04 task-2):
+    // argument parsing, git state, the version gate, layout discovery, and the
+    // win-B incremental preparation all fall in this phase.
+    timing.record(timing::Phase::Startup, scan_start.elapsed());
+    let frontend_start = std::time::Instant::now();
 
     // Drain each frontend's stdout to a temp file (spooled to disk, never
     // buffered in memory), then ingest the merged streams. Running them
@@ -1637,6 +1663,9 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         // the union exactly once.
         phase = 2;
     }
+    // The frontend phase covers the whole spawn loop — both the stage-1 pass
+    // and any signature-cascade stage-2 re-runs (phase-04 task-2).
+    timing.record(timing::Phase::Frontend, frontend_start.elapsed());
     // The final re-emission target set (stage 1 ∪ the signature cascade).
     let targets_rel = targets_rel;
     // Rebuild the reuse plan against the FULL target set, so a cascaded
@@ -1687,6 +1716,11 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // it can be read twice: once for a pre-ingest that computes the scanned
     // code-FQN universe (the honest renderer reuse for `ingest_tree`'s
     // `implemented-by` validation), and once for the real pipeline.
+    // Ingest-assembly (phase-04 task-4) starts at the pre-ingest/universe work
+    // below and continues through `run_pipeline`'s own ingestion; the DB build
+    // after that in `run_pipeline` is the db-load phase.
+    let assembly_start = std::time::Instant::now();
+
     let records = scanner_records(&spools, &git_state);
 
     // Cleanup span validation is per-language: keep the single-language value,
@@ -1821,7 +1855,8 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         })
     };
 
-    run_pipeline(
+    timing.add(timing::Phase::IngestAssembly, assembly_start.elapsed());
+    let pipeline_timings = run_pipeline(
         records,
         &blacklist,
         &path_excludes,
@@ -1830,8 +1865,17 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         pipeline_input.as_ref(),
         &mut log,
     );
+    timing.add(
+        timing::Phase::IngestAssembly,
+        pipeline_timings.ingest_assembly,
+    );
+    timing.record(timing::Phase::DbLoad, pipeline_timings.db_load);
     let _ = std::fs::remove_dir_all(&tmp);
     log.ln("[scan] spool temp dir removed");
+    // The per-phase report is first-class scan output (phase-04 task-2): it is
+    // emitted on every non-panicking path, including a partial graph after a
+    // frontend failure.
+    emit_timing(&mut log, &timing);
     if !failed.is_empty() {
         anyhow::bail!(
             "{} frontend(s) failed to scan (partial graph written): {}",
@@ -1857,7 +1901,13 @@ pub(crate) fn run_pipeline(
     config: Option<&classify::ApgConfig>,
     input: Option<&incremental::PipelineInput>,
     log: &mut Log,
-) {
+) -> timing::PipelineTimings {
+    // Phase-04 task-4: this function owns two reported phases. Ingest-assembly
+    // covers the ingestor passes, cleanup, and the fact-store recording from
+    // entry to the DB dispatch below; db-load covers that dispatch (splice OR
+    // parquet/Database::new/create_schema/copy_from) and the `graph.jsonl`
+    // export.
+    let assembly_start = std::time::Instant::now();
     let (mut graph, report) = {
         // Stream the scanner JSONL straight into the ingestor. On the win-B
         // path the target-only spool is ingested here and the unaffected files'
@@ -1956,6 +2006,11 @@ pub(crate) fn run_pipeline(
         }
     }
 
+    // Ingest-assembly ends here; the DB build dispatch below is the db-load
+    // phase (phase-04 task-4).
+    let ingest_assembly = assembly_start.elapsed();
+    let db_start = std::time::Instant::now();
+
     // `run_pipeline` runs from inside `<apg_root>/.trans` (both `cmd_scan` and
     // the hermetic test harness chdir there), so the previous/next artifacts
     // are `<apg_root>/.trans/{db.lbug,graph.jsonl}` (SPEC §6).
@@ -2041,6 +2096,10 @@ pub(crate) fn run_pipeline(
         log.ln("[load] db dropped");
         let _ = std::fs::remove_dir_all(&dir);
         log.ln("[load] temp dir removed");
+    }
+    timing::PipelineTimings {
+        ingest_assembly,
+        db_load: db_start.elapsed(),
     }
 }
 
@@ -4877,6 +4936,118 @@ mod tests {
             assert!(
                 report.scan_refreshed,
                 "the splice must refresh the Scan row"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-04 task-11 (e2e by body: a REAL scratch-repo `apg scan` — a
+        /// process spawn plus `db.lbug` I/O): the emitted per-phase timing report
+        /// is first-class and truthful on the real paths. A cold full scan emits
+        /// BOTH lines (human `[timing]` + machine `[timing-json]`) carrying all
+        /// four phases with NO skip marker; a no-op re-scan of the unchanged repo
+        /// takes the freshness fast-path and its report marks the frontend phase
+        /// `frontend-skipped`; a content edit forces a normal scan whose report
+        /// clears the marker. The in-process model/round-trip assertions stay in
+        /// `apg.timing::tests::unit` (task-6); this test supplies the real-scan
+        /// coverage the AC requires. Candidate binary only, against a scratch
+        /// `/tmp` git repo (`global.constraint.no-real-project-test`).
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn acceptance_scan_emits_per_phase_timing_report_with_fast_path_skip_marker() {
+            let base = std::env::temp_dir().join(format!("apg-timing-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let repo_dir = base.join("repo");
+            let home = base.join("home");
+            std::fs::create_dir_all(&home).unwrap();
+            // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
+            // it never shells out to npm.
+            std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin"))
+                .unwrap();
+            let home_s = home.to_str().unwrap().to_string();
+
+            scratch_repo_init(&repo_dir);
+            std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+            std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+            scratch_commit_all(&repo_dir, "init source");
+
+            let run_in = |dir: &Path, args: &[&str]| -> std::process::Output {
+                let out = testutil::ApgCommand::new(args)
+                    .cwd(dir)
+                    .env("HOME", &home_s)
+                    .output();
+                assert!(
+                    out.status.success(),
+                    "{args:?} in {}: {}{}",
+                    dir.display(),
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                out
+            };
+            let stderr_of =
+                |out: &std::process::Output| String::from_utf8_lossy(&out.stderr).into_owned();
+            let machine_report = |stderr: &str| -> crate::timing::TimingReport {
+                let line = stderr
+                    .lines()
+                    .find(|l| l.starts_with(crate::timing::MACHINE_PREFIX))
+                    .unwrap_or_else(|| panic!("no machine-readable timing line in: {stderr}"));
+                crate::timing::TimingReport::from_machine_line(line)
+                    .unwrap_or_else(|| panic!("the timing line must parse: {line}"))
+            };
+            let assert_four_phases = |stderr: &str| {
+                assert!(stderr.contains("[timing]"), "human line emitted: {stderr}");
+                for key in ["startup=", "frontend=", "ingest-assembly=", "db-load="] {
+                    assert!(
+                        stderr.contains(key),
+                        "the timing report must carry {key}: {stderr}"
+                    );
+                }
+            };
+
+            run_in(&repo_dir, &["init", "."]);
+            scratch_commit_all(&repo_dir, "apg init");
+
+            // ---- (1) cold full scan: all four phases, no skip marker ----
+            let cold = stderr_of(&run_in(&repo_dir, &["scan", "."]));
+            assert_four_phases(&cold);
+            assert!(
+                !cold.contains("frontend-skipped"),
+                "a full scan must not mark the frontend skipped: {cold}"
+            );
+            assert!(
+                !machine_report(&cold).frontend_skipped(),
+                "a full scan's machine line must clear the skip marker"
+            );
+
+            // ---- (2) no-op re-scan: fast-path, all four phases + skip marker ----
+            let noop = stderr_of(&run_in(&repo_dir, &["scan", "."]));
+            assert!(noop.contains("fast-path"), "fast-path verdict: {noop}");
+            assert_four_phases(&noop);
+            assert!(
+                noop.contains("frontend-skipped"),
+                "the fast-path must mark the frontend phase skipped: {noop}"
+            );
+            assert!(
+                machine_report(&noop).frontend_skipped(),
+                "the fast-path machine line must carry frontend_skipped"
+            );
+
+            // ---- (3) a content edit forces a normal scan: the marker clears ----
+            std::fs::write(
+                repo_dir.join("main.go"),
+                "package main\n\nfunc main() { helper() }\n\nfunc helper() {}\n",
+            )
+            .unwrap();
+            let edited = stderr_of(&run_in(&repo_dir, &["scan", "."]));
+            assert_four_phases(&edited);
+            assert!(
+                !edited.contains("frontend-skipped"),
+                "a normal scan clears the skip marker: {edited}"
+            );
+            assert!(
+                !machine_report(&edited).frontend_skipped(),
+                "the normal scan's machine line must clear the skip marker"
             );
 
             let _ = std::fs::remove_dir_all(&base);

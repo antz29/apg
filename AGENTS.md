@@ -246,6 +246,13 @@ unreachable through the default gate. **e2e is the FINAL gate only** and obeys
 `global.constraint.no-real-project-test`: the candidate binary is exercised
 against a scratch `/tmp` git repo, never a real project (see below).
 
+**The repo gate is `scripts/gate.sh`** — the single gate command. It runs the
+exact sequence `cargo fmt --check` → `cargo check --all-targets` → `cargo clippy
+--all-targets -- -D warnings` → `cargo build` → `cargo test` (the default
+unit+int suite), stopping at the first failure; `scripts/gate.sh --e2e` appends
+the opt-in e2e tier. It is **run-only** — `scripts/**` is not in an agent's edit
+grant, so the sequence cannot be rewritten beneath a running agent.
+
 Listing quirks (verified): `cargo test -- --list` **includes `#[ignore]`d
 tests**, and `cargo test-e2e -- --list` mis-composes to a double `--` and
 *executes* the e2e tier instead of listing it — to list the e2e tier use the raw
@@ -346,7 +353,10 @@ on the old version) ships stale `OLD-version` bottles — the v0.10.3 mistake.
 
 Forward release (the `scripts/release.sh <version>` helper automates steps 4–5):
 
-1. **Gate green**: `cargo build` first, then **`cargo test` AND `cargo test-e2e`**
+1. **Gate green**: run `scripts/gate.sh --e2e` — the single gate command
+   (`scripts/gate.sh` = `cargo fmt --check` → `check --all-targets` → `clippy
+   --all-targets -D warnings` → `build` → `test`; `--e2e` appends the opt-in e2e
+   tier) — i.e. `cargo build` first, then **`cargo test` AND `cargo test-e2e`**
    pass (not just `cargo check`). `cargo test` is the fast unit+int default gate
    and does **not** run the release-version guard: those tests read
    `Cargo.toml`/`Cargo.lock`/`README.md` from disk and are therefore **e2e**, so

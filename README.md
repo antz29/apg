@@ -425,8 +425,14 @@ cargo test-e2e      # e2e tier only, opt-in (cargo test tests::e2e:: -- --ignore
 
 The e2e tier is the opt-in final gate; it exercises a scratch `/tmp` git repo and
 also runs the release-version guard (which reads `Cargo.toml`/`Cargo.lock`/
-`README.md` and is therefore e2e), so a release gate is `cargo build` +
-`cargo test` + `cargo test-e2e`.
+`README.md` and is therefore e2e), so a release gate is `scripts/gate.sh --e2e`
+(`cargo build` + `cargo test` + `cargo test-e2e`).
+
+The gate is `scripts/gate.sh` — the single command that runs `cargo fmt --check`,
+`cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`,
+`cargo build`, then `cargo test` (the fast unit+int default), stopping at the
+first failure; `scripts/gate.sh --e2e` appends the e2e tier. It is run-only
+(`scripts/**` is not editable by agents).
 
 ## Project layout
 
