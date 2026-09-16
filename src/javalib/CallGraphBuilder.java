@@ -74,22 +74,27 @@ public class CallGraphBuilder {
         List<Path> files = new ArrayList<>();
         try (var walk = Files.walk(dir)) {
             walk.filter(p -> p.toString().endsWith(".java"))
-                // Phase-04 task-15 residual: a `module-info.java` is a module
-                // DESCRIPTOR, not a source of graph units. Handing one to a
-                // javac task puts the whole compilation into NAMED-module mode,
-                // whose `requires` graph hides every JDK module the descriptor
-                // does not read (java.desktop/java.sql/java.xml/org.xml.sax/...)
-                // — each such type then degrades to an error symbol and its
-                // calls/uses leak out as bare simple names (`JFrame`, `pack`,
-                // `add`, `StreamResult`). A Maven multi-module tree carries one
-                // per module (jgrapht), so the one-task full scan reported
-                // `too many module declarations found` and lost JDK visibility
-                // wholesale. The scanner attributes an UNNAMED-module source
-                // tree (global.constraint.frontend-full-context: resolve against
-                // the FULL context), so module descriptors are excluded from the
-                // walked set on BOTH legs — the same shape the targeted path
-                // already had.
-                .filter(p -> !"module-info.java".equals(p.getFileName().toString()))
+                // Phase-04 task-15 residual (feedback-138): a `module-info.java`
+                // is a module DESCRIPTOR — it declares no package and no
+                // struct/function/edge facts — but it is still a SCANNED source
+                // file, so it stays in the walked set and the graph still
+                // carries its `file` record (domain.entity.source-file: every
+                // eligible source file is included; filtering is by code_type,
+                // never by dropping the file). It is partitioned OUT of every
+                // javac task and every `-sourcepath` root instead
+                // (partitionDescriptors): ONE descriptor in a batch flips the
+                // whole compilation into NAMED-module mode, whose `requires`
+                // graph hides every JDK module the descriptor does not read
+                // (java.desktop/java.sql/java.xml/org.xml.sax/...), and each
+                // such type then degrades to an error symbol whose calls/uses
+                // leak out as bare simple names (`JFrame`, `pack`, `add`,
+                // `StreamResult`). A Maven multi-module tree carries one per
+                // module (jgrapht), so a one-task full scan reported `too many
+                // module declarations found` and lost JDK visibility wholesale.
+                // The scanner attributes an UNNAMED-module source tree
+                // (global.constraint.frontend-full-context: resolve against the
+                // FULL context), so descriptors are attributed nowhere on BOTH
+                // legs while remaining part of the scanned file set.
                 .filter(Files::isRegularFile)
                 .filter(p -> excludePaths.stream().noneMatch(pat -> p.toString().contains(pat)))
                 .forEach(files::add);
@@ -115,6 +120,32 @@ public class CallGraphBuilder {
         }
     }
 
+    /** True for a `module-info.java` module descriptor. */
+    static boolean isModuleDescriptor(Path p) {
+        return "module-info.java".equals(p.getFileName().toString());
+    }
+
+    /**
+     * Splits a walked set into attributable sources and module descriptors.
+     *
+     * A descriptor is part of the WALKED/scanned file set — its `file` record
+     * is a graph fact (feedback-138; domain.entity.source-file: every eligible
+     * source file is included, filtering is by code_type, never by dropping the
+     * file) — but it must never reach a javac task or a `-sourcepath` root: one
+     * descriptor in a batch flips javac into NAMED-module attribution (`too
+     * many module declarations found`), whose `requires` graph hides every JDK
+     * module the descriptor does not read, degrading each such receiver to a
+     * bare simple name. Both legs call this before building any batch, so the
+     * descriptor's `file` record is always emitted from the walked set (see
+     * Collector.emitWalkedFile) and never from a compilation unit.
+     */
+    static void partitionDescriptors(List<Path> files, List<Path> sources, List<Path> descriptors) {
+        for (Path f : files) {
+            if (isModuleDescriptor(f)) descriptors.add(f);
+            else sources.add(f);
+        }
+    }
+
     /**
      * The full-context scan: parse everything, attribute everything, emit
      * everything. When the pinned `--cache-dir`/`--cache-key` hand-off is
@@ -124,16 +155,23 @@ public class CallGraphBuilder {
      */
     static void runFullScan(Path dir, List<Path> files, String prefix, String cacheDir, String cacheKey)
             throws Exception {
-        // Snapshot the walked sources before crashing-file isolation mutates
-        // `files`: the seeded surface must be complete over every input.
-        List<Path> allFiles = new ArrayList<>(files);
+        // Module descriptors stay in the walked set (their `file` record is a
+        // graph fact) but are attributed nowhere; every batch/total/surface
+        // below is over the attributable sources only.
+        List<Path> sources = new ArrayList<>();
+        List<Path> descriptors = new ArrayList<>();
+        partitionDescriptors(files, sources, descriptors);
+        // Snapshot the attributable sources before crashing-file isolation
+        // mutates `sources`: the seeded surface must be complete over every
+        // attributable input (a descriptor declares nothing to surface).
+        List<Path> allFiles = new ArrayList<>(sources);
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         var fm = compiler.getStandardFileManager(null, null, null);
 
         // Parse everything first (declarations are collected/emitted from the
         // parse tree; edges are resolved against attributed symbols).
-        var task = newTask(compiler, fm, files);
-        int total = files.size();
+        var task = newTask(compiler, fm, sources);
+        int total = sources.size();
         var units = new ArrayList<CompilationUnitTree>();
         int i = 0;
         for (CompilationUnitTree unit : task.parse()) {
@@ -150,12 +188,12 @@ public class CallGraphBuilder {
         List<Path> crashing = new ArrayList<>();
         if (!tryAnalyze(task, total)) {
             System.err.println("WARNING: attribution crashed; isolating offending files...");
-            crashing = findCrashingFiles(compiler, fm, files);
+            crashing = findCrashingFiles(compiler, fm, sources);
             System.err.println();
             System.err.println("WARNING: excluding " + crashing.size() + " files from attribution: " + crashing);
-            files.removeAll(crashing);
-            System.err.println("[" + elapsed() + "] re-parsing and re-attributing " + files.size() + " remaining files...");
-            task = newTask(compiler, fm, files);
+            sources.removeAll(crashing);
+            System.err.println("[" + elapsed() + "] re-parsing and re-attributing " + sources.size() + " remaining files...");
+            task = newTask(compiler, fm, sources);
             units.clear();
             for (var unit : task.parse()) units.add(unit);
             tryAnalyze(task, total);
@@ -168,6 +206,10 @@ public class CallGraphBuilder {
         System.err.println("[" + elapsed() + "] pass 2: emitting nodes and edges...");
         // Pass 2: emit node + edge records, resolving endpoints by id.
         c.emitAll(units, total);
+        // The walked module descriptors: a `file` record each, byte-identical to
+        // a compilation unit's, emitted from the walked set exactly once (they
+        // are in no attributed batch, so no unit ever emits them). feedback-138.
+        for (Path d : descriptors) c.emitWalkedFile(d);
         c.flush();
 
         // Phase-04 task-17: stdout is complete; seed the native class cache the
@@ -293,33 +335,58 @@ public class CallGraphBuilder {
         }
         Files.createDirectories(classesDir);
 
-        // Caller-provided target paths are absolute; map them onto the walked tree.
+        // A `module-info.java` must never enter a javac batch (target,
+        // non-target, compileAndCollect) nor a `-sourcepath` root: one
+        // descriptor flips attribution into NAMED-module mode and hides the JDK
+        // modules it does not read. It is still a WALKED/scanned file, though,
+        // so it is carried separately for its `file` record — and never grouped
+        // by package, where its empty package (`pkgByFile` -> "") would pull it
+        // into the default package's target/non-target batches (feedback-138).
+        List<Path> sourceList = new ArrayList<>();
+        List<Path> descriptorList = new ArrayList<>();
+        partitionDescriptors(allFiles, sourceList, descriptorList);
+
+        // Caller-provided target paths are absolute; map them onto the walked
+        // tree. Sources are the attribution/re-emission units; a descriptor can
+        // only ever select its own `file` record (it belongs to no package), so
+        // it is matched separately and never joins targetFiles/nonTargetFiles.
         Map<Path, Path> walked = new LinkedHashMap<>();
-        for (Path f : allFiles) walked.putIfAbsent(f.toAbsolutePath().normalize(), f);
+        for (Path f : sourceList) walked.putIfAbsent(f.toAbsolutePath().normalize(), f);
+        Set<Path> descriptorByAbs = new LinkedHashSet<>();
+        for (Path f : descriptorList) descriptorByAbs.add(f.toAbsolutePath().normalize());
         Set<Path> requested = new LinkedHashSet<>();
+        Set<Path> requestedDescriptors = new LinkedHashSet<>();
         for (Path t : targetList) {
             Path a = t.toAbsolutePath().normalize();
             if (walked.containsKey(a)) requested.add(a);
+            else if (descriptorByAbs.contains(a)) requestedDescriptors.add(a);
         }
-        // Package of every walked file (the re-emission unit for Java). Parsing
-        // is cheap; attribution is the expensive part we keep to the target set.
-        // Phase 02 note: java compilers/file managers carry option state across
-        // tasks in one JVM, so every task gets a fresh compiler + file manager.
+        // Package of every walked source file (the re-emission unit for Java).
+        // Parsing is cheap; attribution is the expensive part we keep to the
+        // target set. Phase 02 note: java compilers/file managers carry option
+        // state across tasks in one JVM, so every task gets a fresh compiler +
+        // file manager.
         Map<Path, String> pkgByFile = packageMap(ToolProvider.getSystemJavaCompiler(),
                 new ArrayList<>(walked.keySet()));
 
         if (requested.isEmpty()) {
-            // A non-empty target list that matches no walked file selects no
-            // per-file facts (an explicit filter is in force), never everything.
-            // It is still a SPAWNED Java frontend, though, so its global
-            // Module->Module scaffolding must cover every walked package
-            // (feedback-103), exactly as a full scan's does.
+            // A non-empty target list that matches no walked source file selects
+            // no per-file facts (an explicit filter is in force), never
+            // everything. It is still a SPAWNED Java frontend, though, so its
+            // global Module->Module scaffolding must cover every walked package
+            // (feedback-103), exactly as a full scan's does. A requested module
+            // descriptor is a walked file with a `file` record but no package,
+            // so it is emitted here (never attributed) alongside that
+            // scaffolding.
             LinkedHashSet<String> allPkgs = new LinkedHashSet<>(pkgByFile.values());
             allPkgs.remove("");
-            System.err.println("[" + elapsed() + "] targets matched no scanned file; "
-                + "emitting global module scaffolding for " + allPkgs.size() + " package(s) only");
+            System.err.println("[" + elapsed() + "] targets matched no attributable scanned file; "
+                + "emitting global module scaffolding for " + allPkgs.size() + " package(s)"
+                + (requestedDescriptors.isEmpty() ? " only"
+                    : " + " + requestedDescriptors.size() + " module descriptor file(s)"));
             var c = new Collector(prefix, true, Set.of(), Map.of());
             c.emitGlobalPkgScaffolding(allPkgs);
+            for (Path d : requestedDescriptors) c.emitWalkedFile(d);
             c.flush();
             return;
         }
@@ -535,6 +602,14 @@ public class CallGraphBuilder {
         c.emitGlobalPkgScaffolding(nonTargetPkgs);
         System.err.println("[" + elapsed() + "] pass 2: emitting nodes and edges...");
         c.emitAll(units, total);
+        // The module descriptors named by the re-emission target set: a `file`
+        // record each, emitted from the walked set (they are attributed
+        // nowhere), exactly once and byte-identical to the full leg's — so a
+        // changed module-info.java keeps its File node without any descriptor
+        // ever entering an attribution batch. A non-target descriptor is not
+        // re-emitted here; its File node is reused from the cached fact unit,
+        // exactly like any unchanged file. feedback-138.
+        for (Path d : requestedDescriptors) c.emitWalkedFile(d);
         c.flush();
 
         // Persist the surface for the next scan (atomic replace).
@@ -1399,6 +1474,41 @@ public class CallGraphBuilder {
                     + "\",\"start_line\":1,\"end_line\":" + Math.max(1, last) + "}");
             }
             return super.visitCompilationUnit(cu, nil);
+        }
+
+        /**
+         * Emits the `file` record for a WALKED source that is not a compilation
+         * unit — a `module-info.java` descriptor. It stays in the scanned file
+         * set (domain.entity.source-file: filtering is by code_type, never by
+         * dropping the file) but is partitioned out of every javac batch
+         * (partitionDescriptors), so no compilation unit ever emits it. The
+         * record is byte-identical to visitCompilationUnit's for a unit: same
+         * path rendering, `parent` "" (a descriptor declares no package), the
+         * same `end_line` line count. Never a declaration/edge — a descriptor
+         * has none.
+         */
+        void emitWalkedFile(Path f) {
+            Path abs = f.toAbsolutePath().normalize();
+            emit("{\"type\":\"file\",\"path\":\"" + jstr(abs.toString())
+                + "\",\"parent\":\"\",\"start_line\":1,\"end_line\":" + Math.max(1, lineCountOf(abs)) + "}");
+        }
+
+        /**
+         * The `end_line` a compilation unit in this file would report:
+         * javac's 1-based line of the file's last character — the count of
+         * lines carrying content (`"a\nb\n"` -> 2, `"a\nb"` -> 2, `"\n\n"` -> 2),
+         * and 1 for an empty file, matching `visitCompilationUnit`'s
+         * `Math.max(1, LineMap.getLineNumber(len-1))`.
+         */
+        static long lineCountOf(Path f) {
+            try {
+                String s = Files.readString(f, StandardCharsets.UTF_8);
+                if (s.isEmpty()) return 1;
+                long nl = s.chars().filter(c -> c == '\n').count();
+                return s.charAt(s.length() - 1) == '\n' ? nl : nl + 1;
+            } catch (IOException e) {
+                return 1;
+            }
         }
 
         @Override

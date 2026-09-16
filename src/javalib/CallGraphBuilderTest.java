@@ -462,12 +462,21 @@ public class CallGraphBuilderTest {
     }
 
     /**
-     * Phase-04 task-15 residual: the FULL-scan leg must not lose JDK-module
-     * visibility to a named-module compilation. Both legs must resolve the JDK
-     * receivers exactly (qualified `stdlib` targets, no bare `unknown` names),
-     * and the targeted facts must equal the full scan's for the target package.
+     * Phase-04 task-15 residual / feedback-138: the FULL-scan leg must not lose
+     * JDK-module visibility to a named-module compilation, AND the module
+     * descriptor must still be a SCANNED file — a `File` record for it, exactly
+     * once, byte-identical on both legs (domain.entity.source-file: every
+     * eligible source file is included; filtering is by code_type, never by
+     * dropping the file). Both legs must resolve the JDK receivers exactly
+     * (qualified `stdlib` targets, no bare `unknown` names), and the targeted
+     * facts must equal the full scan's for the target package.
      */
     static void testModuleDescriptorsDoNotDegradeAttribution(Path proj, Path base) throws Exception {
+        Path srcA = proj.resolve("mod-a/src/main/java").toAbsolutePath().normalize();
+        Path srcB = proj.resolve("mod-b/src/main/java").toAbsolutePath().normalize();
+        Path descA = srcA.resolve("module-info.java");
+        Path descB = srcB.resolve("module-info.java");
+
         String fullRaw = run(proj).out;
         Set<String> full = normalize(fullRaw);
         check("full scan resolves the JDK constructor across module descriptors",
@@ -483,15 +492,34 @@ public class CallGraphBuilderTest {
                 && !full.contains("unresolved|setVisible|unknown"),
             "full output was:\n" + fullRaw);
 
-        Path src = proj.resolve("mod-b/src/main/java").toAbsolutePath().normalize();
+        // feedback-138: a descriptor is a WALKED file, so its `file` record is
+        // emitted from the walked set (never from a compilation unit: no
+        // descriptor ever joins a javac batch), exactly once per descriptor,
+        // with parent "" and the same line count a compilation unit would report.
+        String descARec = "file|" + descA + "||1|3";
+        String descBRec = "file|" + descB + "||1|3";
+        check("full scan emits a File record for each module descriptor",
+            full.contains(descARec) && full.contains(descBRec),
+            "missing descriptor file record(s) in:\n" + fullRaw);
+        check("full scan emits each module descriptor File record exactly once",
+            fileRecordCount(fullRaw, descA) == 1 && fileRecordCount(fullRaw, descB) == 1,
+            "descriptor file-record counts: mod-a=" + fileRecordCount(fullRaw, descA)
+                + " mod-b=" + fileRecordCount(fullRaw, descB) + "\n" + fullRaw);
+
+        // The re-emission target set names the CHANGED module descriptor too: a
+        // descriptor edit must keep its File node without the descriptor ever
+        // entering an attribution batch or a -sourcepath root (the JDK
+        // receivers below still resolve, which is the poisoning this guards).
         Path targets = base.resolve("modules-b.targets");
-        Files.writeString(targets, src.resolve("pkg/b/Demo.java") + "\n", StandardCharsets.UTF_8);
+        Files.writeString(targets, srcB.resolve("pkg/b/Demo.java") + "\n"
+            + descB + "\n", StandardCharsets.UTF_8);
         Result incR = run(proj, "--targets", targets.toString(),
             "--cache-dir", base.resolve("cache-modules").toString(), "--cache-key", "k1");
         Set<String> inc = normalize(incR.out);
         Set<Path> targetFiles = Set.of(
-            src.resolve("pkg/b/Demo.java"),
-            src.resolve("pkg/b/Target.java"));
+            srcB.resolve("pkg/b/Demo.java"),
+            srcB.resolve("pkg/b/Target.java"),
+            descB);
         Set<String> fullForTarget = filterToTarget(full, targetFiles);
         check("targeted facts equal the full scan's across module descriptors",
             fullForTarget.equals(inc), setDiff(fullForTarget, inc) + "\nSTDERR:\n" + incR.err);
@@ -499,6 +527,13 @@ public class CallGraphBuilderTest {
             inc.contains("unresolved|javax.swing.JFrame.<init>|stdlib")
                 && inc.contains("unresolved|java.awt.Window.pack|stdlib"),
             "targeted output was:\n" + incR.out + "\nSTDERR:\n" + incR.err);
+        check("targeted scan emits the requested module descriptor File record exactly once",
+            fileRecordCount(incR.out, descB) == 1 && inc.contains(descBRec),
+            "descriptor file-record count: " + fileRecordCount(incR.out, descB)
+                + "\n" + incR.out + "\nSTDERR:\n" + incR.err);
+        check("targeted scan does not emit the non-target module descriptor",
+            fileRecordCount(incR.out, descA) == 0,
+            "targeted output was:\n" + incR.out);
     }
 
     /**
@@ -728,6 +763,18 @@ public class CallGraphBuilderTest {
         Set<String> sa = new TreeSet<>(Arrays.asList(a.split("\n")));
         Set<String> sb = new TreeSet<>(Arrays.asList(b.split("\n")));
         return setDiff(sa, sb);
+    }
+
+    /**
+     * Counts the raw `file` records for an absolute path in a scanner stream —
+     * the exactly-once check a Set-based {@link #normalize} cannot make (it
+     * collapses duplicates).
+     */
+    static int fileRecordCount(String raw, Path p) {
+        String key = "\"type\":\"file\",\"path\":\"" + p.toAbsolutePath().normalize() + "\"";
+        int n = 0;
+        for (int i = raw.indexOf(key); i >= 0; i = raw.indexOf(key, i + 1)) n++;
+        return n;
     }
 
     static String listRec(Path p) throws Exception {
