@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "e2e-final-gate-only",
+  "body": "e2e tests are the FINAL GATE ONLY, and are EXCLUDED from the default gate. The default `cargo test` gate runs unit+integration only; e2e tests are opt-in — gated behind an explicit opt-in guard (the existing `-short`/`#[ignore]`-plus-explicit-invocation or an equivalent named env-var pattern) so a plain `cargo test` never runs them — and are exercised only as the final acceptance gate, once the fast suite is green.\n\nThis is consistent with the existing plan vocabulary: a plan task's `tier` is one of unit / int / e2e, and e2e acceptance tasks already carry the \"opt-in, NOT under the default `cargo test` gate\" execution model. e2e may be slow (`requirements.requirement.e2e-tier-real-io`) and, being real-I/O, must obey `global.constraint.no-real-project-test` (scratch /tmp repo only).\n\nAC (review-checked): a plain `cargo test` runs no e2e test; every e2e test is reachable only through the explicit opt-in guard; the gate that runs e2e is the final acceptance gate, after the fast suite; the repo's default gate runs unit+int only.",
+  "properties": {
+    "feature": "test-hygiene"
+  },
+  "out": [],
+  "in": []
+}
