@@ -563,6 +563,12 @@ pub struct SpliceReport {
     pub unresolved_gc: u64,
     /// Whether the SCAN_HEAD row was refreshed.
     pub scan_refreshed: bool,
+    /// DML statements executed by [`apply`] — each BATCHED statement counted
+    /// ONCE, never per row (phase-04 task-30). The batching claim of task-14:
+    /// a jgrapht-scale delta (the pre-fix ~82 298 per-row statements,
+    /// `plan.note-87`) must report a small constant instead of a number that
+    /// grows with the delta's node/edge count.
+    pub dml_statements: u64,
 }
 
 impl SeededDb {
@@ -713,32 +719,37 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
             _ => {}
         }
     }
-    report.edges_deleted +=
+    let (deleted, stmts) =
         delete_authored_rels(conn, "Function", AUTH_RELS_FUNCTION, &delete_funcs)?;
-    report.edges_deleted +=
-        delete_authored_rels(conn, "Struct", AUTH_RELS_STRUCT, &delete_structs)?;
-    report.edges_deleted += delete_authored_rels(conn, "File", AUTH_RELS_CONTAINS, &delete_files)?;
-    report.edges_deleted +=
+    report.edges_deleted += deleted;
+    report.dml_statements += stmts;
+    let (deleted, stmts) = delete_authored_rels(conn, "Struct", AUTH_RELS_STRUCT, &delete_structs)?;
+    report.edges_deleted += deleted;
+    report.dml_statements += stmts;
+    let (deleted, stmts) = delete_authored_rels(conn, "File", AUTH_RELS_CONTAINS, &delete_files)?;
+    report.edges_deleted += deleted;
+    report.dml_statements += stmts;
+    let (deleted, stmts) =
         delete_authored_rels(conn, "Module", AUTH_RELS_CONTAINS, &delete_modules)?;
+    report.edges_deleted += deleted;
+    report.dml_statements += stmts;
 
-    // --- 4. Upsert the delta's nodes in place ------------------------------
-    for fqn in &delta_funcs {
-        upsert_node(conn, "Function", fqn, &delta.graph.nodes[fqn])?;
-        report.nodes_upserted += 1;
-    }
-    for fqn in &delta_structs {
-        upsert_node(conn, "Struct", fqn, &delta.graph.nodes[fqn])?;
-        report.nodes_upserted += 1;
-    }
-    for fqn in &delta_files {
-        upsert_node(conn, "File", fqn, &delta.graph.nodes[fqn])?;
-        report.nodes_upserted += 1;
-    }
-    for fqn in &delta_modules {
-        if let Some(node) = delta.graph.nodes.get(fqn) {
-            upsert_node(conn, "Module", fqn, node)?;
-            report.nodes_upserted += 1;
-        }
+    // --- 4. Upsert the delta's nodes in place (batched, one statement/label) --
+    //
+    // Every node the pre-fix per-row helper upserted (delta_funcs, delta_structs,
+    // delta_files, delta_modules, delta_unresolved) is still upserted with the
+    // same properties; the DML is now grouped per label into ONE multi-row
+    // `UNWIND … MERGE … SET` (task-29), so ~tens of thousands of node statements
+    // become ≤5.
+    for (label, fqns) in [
+        ("Function", &delta_funcs),
+        ("Struct", &delta_structs),
+        ("File", &delta_files),
+        ("Module", &delta_modules),
+    ] {
+        let (rows, stmts) = upsert_node(conn, label, fqns, delta.graph)?;
+        report.nodes_upserted += rows;
+        report.dml_statements += stmts;
     }
 
     // --- 5. Insert every first-referenced UnresolvedTarget, before its edge -
@@ -765,78 +776,110 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
             delta_unresolved.insert(to.clone());
         }
     }
-    for fqn in &delta_unresolved {
-        if let Some(node) = delta.graph.nodes.get(fqn) {
-            upsert_node(conn, "UnresolvedTarget", fqn, node)?;
-            report.nodes_upserted += 1;
+    let unresolved_rows: Vec<String> = delta_unresolved.iter().cloned().collect();
+    let (rows, stmts) = upsert_node(conn, "UnresolvedTarget", &unresolved_rows, delta.graph)?;
+    report.nodes_upserted += rows;
+    report.dml_statements += stmts;
+
+    // --- 6. MERGE the delta's new outgoing rels (batched per rel-table pair) --
+    //
+    // Resolve every delta edge exactly as the pre-fix per-row `merge` closure
+    // did (the Contains additive exception, the disappearing-target skip, the
+    // declared-pair guard), but COLLECT the survivors into `(table, from_label,
+    // to_label)` groups and emit ONE multi-row `UNWIND … MATCH … MERGE` per
+    // group — so ~tens of thousands of per-edge statements become one per
+    // declared `(table, label-pair)` the delta actually uses (task-14).
+    let mut resolved: HashMap<String, Option<&'static str>> = HashMap::new();
+    type RelGroup =
+        BTreeMap<(&'static str, &'static str, &'static str), Vec<(String, String, String)>>;
+    let mut groups: RelGroup = BTreeMap::new();
+    {
+        let mut stage =
+            |table: &'static str, from: &str, to: &str, target_type: &str| -> anyhow::Result<()> {
+                // The delta authors an edge when it owns the SOURCE unit.
+                // `Contains` is the one exception (feedback-118): a seeded
+                // Module the delta did NOT re-decide still authors `Module ->
+                // File` / `Module -> Module` to a child the delta ADDED — a full
+                // rebuild carries that edge and the seed cannot, so it must be
+                // merged ADDITIVELY (nothing is deleted for that module, so its
+                // pre-existing Contains rels stay untouched).
+                let from_label = match delta_labels.get(from).copied() {
+                    Some(label) => label,
+                    None if table == "Contains" && delta_labels.contains_key(to) => {
+                        match endpoint_label(conn, from, delta.graph, &mut resolved)? {
+                            Some(label) => label,
+                            // An unknown/unseeded source: the full load prunes it too.
+                            None => return Ok(()),
+                        }
+                    }
+                    // An edge authored outside the delta is untouched.
+                    None => return Ok(()),
+                };
+                // An edge into a unit that is being detached would be dropped by
+                // the DETACH DELETE anyway; a full rebuild prunes it as dangling.
+                if disappearing.contains_key(to) {
+                    return Ok(());
+                }
+                let to_label = endpoint_label(conn, to, delta.graph, &mut resolved)?;
+                let Some(to_label) = to_label else {
+                    return Ok(()); // dangling endpoint — the full load prunes it too
+                };
+                if !pair_allowed(table, from_label, to_label) {
+                    return Ok(());
+                }
+                groups
+                    .entry((table, from_label, to_label))
+                    .or_default()
+                    .push((from.to_string(), to.to_string(), target_type.to_string()));
+                Ok(())
+            };
+        for (from, to) in &delta.graph.contains {
+            stage("Contains", from, to, "")?;
+        }
+        for (from, to) in &delta.graph.calls {
+            stage("Calls", from, to, "")?;
+        }
+        for (from, to) in &delta.graph.uses {
+            stage("Uses", from, to, "")?;
+        }
+        for (from, to, tt) in &delta.graph.unresolved_calls {
+            stage("UnresolvedCall", from, to, tt)?;
+        }
+        for (from, to) in &delta.graph.unresolved_uses {
+            stage("UnresolvedUse", from, to, "")?;
         }
     }
-
-    // --- 6. MERGE the delta's new outgoing rels ----------------------------
-    let mut resolved: HashMap<String, Option<&'static str>> = HashMap::new();
-    let mut merge = |table: &str, from: &str, to: &str, target_type: &str| -> anyhow::Result<()> {
-        // The delta authors an edge when it owns the SOURCE unit. `Contains` is
-        // the one exception (feedback-118): a seeded Module the delta did NOT
-        // re-decide still authors `Module -> File` / `Module -> Module` to a
-        // child the delta ADDED — a full rebuild carries that edge and the seed
-        // cannot, so it must be merged ADDITIVELY (nothing is deleted for that
-        // module, so its pre-existing Contains rels stay untouched).
-        let from_label = match delta_labels.get(from).copied() {
-            Some(label) => label,
-            None if table == "Contains" && delta_labels.contains_key(to) => {
-                match endpoint_label(conn, from, delta.graph, &mut resolved)? {
-                    Some(label) => label,
-                    // An unknown/unseeded source: the full load prunes it too.
-                    None => return Ok(()),
+    for (&(table, from_label, to_label), edges) in &groups {
+        let rows = edges
+            .iter()
+            .map(|(from, to, target_type)| {
+                if table == "UnresolvedCall" {
+                    format!(
+                        "{{from: {}, to: {}, tt: {}}}",
+                        lit(from),
+                        lit(to),
+                        lit(target_type)
+                    )
+                } else {
+                    format!("{{from: {}, to: {}}}", lit(from), lit(to))
                 }
-            }
-            // An edge authored outside the delta is untouched.
-            None => return Ok(()),
-        };
-        // An edge into a unit that is being detached would be dropped by the
-        // DETACH DELETE anyway; a full rebuild prunes it as dangling.
-        if disappearing.contains_key(to) {
-            return Ok(());
-        }
-        let to_label = endpoint_label(conn, to, delta.graph, &mut resolved)?;
-        let Some(to_label) = to_label else {
-            return Ok(()); // dangling endpoint — the full load prunes it too
-        };
-        if !pair_allowed(table, from_label, to_label) {
-            return Ok(());
-        }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
         if table == "UnresolvedCall" {
             conn.query(&format!(
-                "MATCH (a:{from_label} {{fqn: {}}}), (b:{to_label} {{fqn: {}}}) \
-                 MERGE (a)-[r:UnresolvedCall]->(b) SET r.target_type = {}",
-                lit(from),
-                lit(to),
-                lit(target_type)
+                "UNWIND [{rows}] AS row MATCH (a:{from_label} {{fqn: row.from}}), \
+                 (b:{to_label} {{fqn: row.to}}) MERGE (a)-[r:UnresolvedCall]->(b) \
+                 SET r.target_type = row.tt"
             ))?;
         } else {
             conn.query(&format!(
-                "MATCH (a:{from_label} {{fqn: {}}}), (b:{to_label} {{fqn: {}}}) MERGE (a)-[:{table}]->(b)",
-                lit(from),
-                lit(to)
+                "UNWIND [{rows}] AS row MATCH (a:{from_label} {{fqn: row.from}}), \
+                 (b:{to_label} {{fqn: row.to}}) MERGE (a)-[:{table}]->(b)"
             ))?;
         }
-        report.edges_merged += 1;
-        Ok(())
-    };
-    for (from, to) in &delta.graph.contains {
-        merge("Contains", from, to, "")?;
-    }
-    for (from, to) in &delta.graph.calls {
-        merge("Calls", from, to, "")?;
-    }
-    for (from, to) in &delta.graph.uses {
-        merge("Uses", from, to, "")?;
-    }
-    for (from, to, tt) in &delta.graph.unresolved_calls {
-        merge("UnresolvedCall", from, to, tt)?;
-    }
-    for (from, to) in &delta.graph.unresolved_uses {
-        merge("UnresolvedUse", from, to, "")?;
+        report.edges_merged += edges.len() as u64;
+        report.dml_statements += 1;
     }
 
     // --- 7. DETACH DELETE the disappeared units ----------------------------
@@ -847,6 +890,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     for (label, fqns) in group_by_label(&disappearing) {
         detach_delete(conn, label, &fqns)?;
         report.nodes_deleted += fqns.len() as u64;
+        report.dml_statements += 1;
     }
 
     // --- 8. GC the shared UnresolvedTarget rows by reference ---------------
@@ -863,6 +907,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
         "MATCH (u:UnresolvedTarget) WHERE NOT (u)<-[:UnresolvedCall]-() \
          AND NOT (u)<-[:UnresolvedUse]-() DETACH DELETE u",
     )?;
+    report.dml_statements += 1;
 
     // --- 9. Refresh the single Scan row (SCAN_HEAD) ------------------------
     //
@@ -883,6 +928,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
         lit(delta.scan.content_key.as_deref().unwrap_or("")),
         lit(&delta.scan.scanned_at),
     ))?;
+    report.dml_statements += 2;
     report.scan_refreshed = true;
 
     Ok(report)
@@ -1093,16 +1139,18 @@ fn pair_allowed(table: &str, from: &str, to: &str) -> bool {
             .any(|(t, a, b)| *t == table && *a == from && *b == to)
 }
 
-/// Counts and deletes the rels the `fqns` author from `label`. Returns the
-/// number deleted.
+/// Counts and deletes the rels the `fqns` author from `label`. Returns
+/// `(deleted, statements)`: the number of rels deleted and the number of DML
+/// statements executed (0 for an empty set, else the ONE batched DELETE) so
+/// [`apply`] can count the statement once, never per row.
 fn delete_authored_rels(
     conn: &Connection,
     label: &str,
     rels: &str,
     fqns: &BTreeSet<String>,
-) -> anyhow::Result<u64> {
+) -> anyhow::Result<(u64, u64)> {
     if fqns.is_empty() {
-        return Ok(0);
+        return Ok((0, 0));
     }
     let list = literal_list(fqns);
     let n = count(
@@ -1112,70 +1160,103 @@ fn delete_authored_rels(
     conn.query(&format!(
         "MATCH (n:{label})-[r:{rels}]->() WHERE n.fqn IN [{list}] DELETE r"
     ))?;
-    Ok(n as u64)
+    Ok((n as u64, 1))
 }
 
-/// Upserts one code node in place: `MERGE (n:Label {fqn}) SET props` (the
-/// `ArtifactDb::merge_node` pattern), with the property set `build_load_files`
-/// writes for that label. Never deletes the node, so incoming edges survive.
+/// Batched in-place node upsert (phase-04 task-29; the node-DML half of
+/// task-14): `MERGE (n:Label {fqn: row.fqn}) SET props` over ONE multi-row
+/// `UNWIND … AS row` statement PER LABEL, in place of the pre-fix helper's one
+/// `conn.query` per node. The semantics are identical to the per-row helper it
+/// replaces:
+///
+/// * an in-place upsert (`MERGE … SET`, never a node delete) so incoming
+///   Calls/Uses from units OUTSIDE the re-emission target set survive;
+/// * the Module planned-placeholder backstop — a `planned` row never re-marks a
+///   realized Module (`ON MATCH` keeps a non-`planned` status untouched);
+/// * the per-label property set `build_load_files` writes (Module: status;
+///   Struct/Function: path/start/`end`/start_line/end_line/code_type/status;
+///   File: start_line/end_line/code_type/status; UnresolvedTarget: category).
+///
+/// A node whose FQN is absent from `graph` is not upserted (the pre-fix guard).
+/// Returns `(rows, statements)`: the row count (the caller's `nodes_upserted`
+/// increment) and the DML statement count (0 for an empty group, else 1) for
+/// the task-30 counter.
 fn upsert_node(
     conn: &Connection,
     label: &str,
-    fqn: &str,
-    node: &crate::graph::Node,
-) -> anyhow::Result<()> {
-    // A `planned` placeholder must never overwrite a realized module: a
-    // plan JSONL keeps its planned records after a realization scan. (The code
-    // assembly has no planned nodes; this is the same backstop `merge_records`
-    // applies.)
-    let status = lit(node.status.as_deref().unwrap_or(""));
-    let stmt = match node.kind {
-        NodeKind::Module => {
-            if node.status.as_deref() == Some("planned") {
-                let realized = count(
-                    conn,
-                    &format!(
-                        "MATCH (n:Module {{fqn: {}}}) WHERE n.status IS NULL OR n.status <> 'planned' RETURN count(*)",
-                        lit(fqn)
-                    ),
-                )?;
-                if realized > 0 {
-                    return Ok(());
-                }
+    fqns: &[String],
+    graph: &Graph,
+) -> anyhow::Result<(u64, u64)> {
+    // One `{…}` map literal per row; values are inlined as Cypher literals (the
+    // splicer already interpolates its own delta data).
+    let mut rows: Vec<String> = Vec::with_capacity(fqns.len());
+    for fqn in fqns {
+        let Some(node) = graph.nodes.get(fqn) else {
+            continue;
+        };
+        let status = lit(node.status.as_deref().unwrap_or(""));
+        rows.push(match node.kind {
+            NodeKind::Module => format!("{{fqn: {}, status: {status}}}", lit(fqn)),
+            NodeKind::Struct | NodeKind::Function => {
+                let (path, start, end, sl, el) = span(node);
+                format!(
+                    "{{fqn: {}, path: {}, start: {start}, end_pos: {end}, sline: {sl}, \
+                     eline: {el}, ctype: {}, status: {status}}}",
+                    lit(fqn),
+                    lit(&path),
+                    lit(&node.code_type),
+                )
             }
-            format!(
-                "MERGE (n:Module {{fqn: {}}}) SET n.status = {status}",
-                lit(fqn)
-            )
-        }
-        NodeKind::Struct | NodeKind::Function => {
-            let (path, start, end, sl, el) = span(node);
-            format!(
-                "MERGE (n:{label} {{fqn: {}}}) SET n.path = {}, n.start = {start}, n.`end` = {end}, \
-                 n.start_line = {sl}, n.end_line = {el}, n.code_type = {}, n.status = {status}",
+            NodeKind::File => {
+                let (_, _, _, sl, el) = span(node);
+                format!(
+                    "{{fqn: {}, sline: {sl}, eline: {el}, ctype: {}, status: {status}}}",
+                    lit(fqn),
+                    lit(&node.code_type),
+                )
+            }
+            NodeKind::UnresolvedTarget => format!(
+                "{{fqn: {}, category: {}}}",
                 lit(fqn),
-                lit(&path),
-                lit(&node.code_type),
-            )
-        }
-        NodeKind::File => {
-            let (_, _, _, sl, el) = span(node);
-            format!(
-                "MERGE (n:File {{fqn: {}}}) SET n.start_line = {sl}, n.end_line = {el}, \
-                 n.code_type = {}, n.status = {status}",
-                lit(fqn),
-                lit(&node.code_type),
-            )
-        }
-        NodeKind::UnresolvedTarget => format!(
-            "MERGE (n:UnresolvedTarget {{fqn: {}}}) SET n.category = {}",
-            lit(fqn),
-            lit(node.category.as_deref().unwrap_or(""))
+                lit(node.category.as_deref().unwrap_or(""))
+            ),
+            _ => continue,
+        });
+    }
+    if rows.is_empty() {
+        return Ok((0, 0));
+    }
+    let list = rows.join(", ");
+    let stmt = match label {
+        // The `ON MATCH` branch is the planned-placeholder backstop in batched
+        // form: a `planned` row leaves a realized (non-`planned`, non-NULL)
+        // Module's status untouched; every other case sets the row's status
+        // (the pre-fix `MERGE … SET n.status = …`).
+        "Module" => format!(
+            "UNWIND [{list}] AS row MERGE (n:Module {{fqn: row.fqn}}) \
+             ON CREATE SET n.status = row.status \
+             ON MATCH SET n.status = CASE WHEN row.status = 'planned' \
+             AND (n.status IS NULL OR n.status <> 'planned') THEN n.status ELSE row.status END"
         ),
-        _ => return Ok(()),
+        "Struct" | "Function" => format!(
+            "UNWIND [{list}] AS row MERGE (n:{label} {{fqn: row.fqn}}) \
+             SET n.path = row.path, n.start = row.start, n.`end` = row.end_pos, \
+             n.start_line = row.sline, n.end_line = row.eline, \
+             n.code_type = row.ctype, n.status = row.status"
+        ),
+        "File" => format!(
+            "UNWIND [{list}] AS row MERGE (n:File {{fqn: row.fqn}}) \
+             SET n.start_line = row.sline, n.end_line = row.eline, \
+             n.code_type = row.ctype, n.status = row.status"
+        ),
+        "UnresolvedTarget" => format!(
+            "UNWIND [{list}] AS row MERGE (n:UnresolvedTarget {{fqn: row.fqn}}) \
+             SET n.category = row.category"
+        ),
+        _ => return Ok((0, 0)),
     };
     conn.query(&stmt)?;
-    Ok(())
+    Ok((rows.len() as u64, 1))
 }
 
 /// The (path, start, end, start_line, end_line) location columns of a
@@ -2892,6 +2973,91 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
+        /// phase-04 task-22 — the splice applies its delta in a BOUNDED number
+        /// of DML statements that does NOT grow with the delta's node/edge
+        /// count, while equivalence to a full rebuild is NOT weakened. The
+        /// pre-fix per-row implementation issued one statement per node and per
+        /// edge (`plan.note-87`: ~82 298 on the jgrapht scenario), so it fails
+        /// the bound; the batched implementation reports a small constant, and
+        /// the existing enumerated splice equivalence + rollback oracles stay
+        /// green beside it.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn batched_dml_statement_count_is_bounded_and_size_independent() {
+            // A small delta and a 4x-larger delta of the SAME shape: the batched
+            // statement count is a function of the label/rel-pair set, not of the
+            // row count.
+            const BOUND: u64 = 64;
+            let small = wide_splice(400);
+            let large = wide_splice(1600);
+
+            // (a) the falsifiable batching claim.
+            for out in [&small, &large] {
+                assert!(
+                    out.report.dml_statements <= BOUND,
+                    "the batched DML must stay within {BOUND} statements: {:?}",
+                    out.report
+                );
+                assert!(
+                    out.report.nodes_upserted + out.report.edges_merged >= 400,
+                    "the fixture must really exercise a wide delta: {:?}",
+                    out.report
+                );
+            }
+            assert_eq!(
+                small.report.dml_statements, large.report.dml_statements,
+                "the statement count must not grow with the delta's row count: small={:?} large={:?}",
+                small.report, large.report
+            );
+            assert!(
+                large.report.nodes_upserted > small.report.nodes_upserted
+                    && large.report.edges_merged > small.report.edges_merged,
+                "the large delta must actually carry more rows — otherwise the \
+                 equality above is vacuous: small={:?} large={:?}",
+                small.report,
+                large.report
+            );
+
+            // (b) equivalence is NOT weakened: the enumerated oracle runs beside
+            // the count assertion — per-label/per-rel-type counts, the
+            // UnresolvedTarget set by FQN WITH category, the refreshed Scan row,
+            // and the published DB's full code snapshot (every node/rel) all
+            // equal a full rebuild of the same assembled graph.
+            for out in [&small, &large] {
+                assert_eq!(
+                    out.spliced_counts, out.expected_counts,
+                    "every table's row count must equal a full rebuild"
+                );
+                assert_eq!(
+                    out.spliced_unres, out.expected_unres,
+                    "the unresolved set by (fqn, category) must equal a full rebuild"
+                );
+                assert_eq!(
+                    out.spliced_scan, out.expected_scan,
+                    "the refreshed Scan row must equal a full rebuild's"
+                );
+                assert_eq!(
+                    out.spliced_snapshot, out.expected_snapshot,
+                    "the full code snapshot (nodes + rels + Scan) must equal a full rebuild"
+                );
+                assert!(
+                    out.report.nodes_deleted > 0
+                        && out.report.edges_deleted > 0
+                        && out.report.unresolved_gc > 0,
+                    "the delta must exercise the delete + UnresolvedTarget-GC paths: {:?}",
+                    out.report
+                );
+            }
+
+            // (c) the seed stays abandonable: `discard` removed the temp copy and
+            // left the previous `db.lbug` byte-identical (the full-load fallback
+            // path of task-4/task-1).
+            assert!(
+                small.previous_bytes_preserved && large.previous_bytes_preserved,
+                "discard must leave the previous db.lbug byte-identical"
+            );
+        }
+
         /// feedback-90 — the incoming-edge invariant. A body-only change to a
         /// widely-referenced unit whose CALLERS ARE NOT re-emitted must keep every
         /// incoming Calls/Uses edge from those callers (the persisting FQN is
@@ -3512,6 +3678,164 @@ mod tests {
             scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
         );
         g
+    }
+
+    /// A wide fixture tree for the batched-DML regression (phase-04 task-22):
+    /// one module `w`, `n` `/w/f{i}.go` file/struct/function triples, a chain of
+    /// `Calls` between the functions, a `Uses` per function, and one shared
+    /// external `UnresolvedTarget` per file. `drop` omits file index `drop` and
+    /// every edge that names its units — the removed-file half of the delta.
+    fn wide_tree(n: usize, drop: usize, sha: &str, key: &str) -> Graph {
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "w".into(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        for i in 0..n {
+            if i == drop {
+                continue;
+            }
+            let path = format!("/w/f{i}.go");
+            let sty = format!("w.C{i}");
+            let fun = format!("w.C{i}.m");
+            g.nodes
+                .insert(path.clone(), located(NodeKind::File, &path, 1, 20));
+            g.nodes
+                .insert(sty.clone(), located(NodeKind::Struct, &path, 1, 20));
+            g.nodes
+                .insert(fun.clone(), located(NodeKind::Function, &path, 2, 10));
+            g.contains.insert(("w".to_string(), path.clone()));
+            g.contains.insert((path.clone(), sty.clone()));
+            g.contains.insert((path.clone(), fun.clone()));
+            g.contains.insert((sty.clone(), fun.clone()));
+            g.uses.insert((fun.clone(), sty.clone()));
+            if i + 1 < n && i + 1 != drop {
+                g.calls.insert((fun.clone(), format!("w.C{}.m", i + 1)));
+            }
+            let ext = format!("ext.T{i}");
+            g.nodes.insert(
+                ext.clone(),
+                Node {
+                    kind: NodeKind::UnresolvedTarget,
+                    category: Some("external".into()),
+                    ..Node::default()
+                },
+            );
+            g.unresolved_calls
+                .insert((fun.clone(), ext.clone(), String::new()));
+            g.unresolved_uses.insert((fun, ext));
+        }
+        g.nodes.insert(
+            crate::schema::SCAN_HEAD.into(),
+            scan_node(sha, key, "2026-01-02T00:00:00Z"),
+        );
+        g
+    }
+
+    /// The wide-tree body-change delta: `graph` re-emits every surviving unit;
+    /// `targets` is the previous tree's every file path (so the dropped file's
+    /// units are in scope and disappear).
+    fn wide_delta<'a>(
+        graph: &'a Graph,
+        targets: &'a BTreeSet<String>,
+        removed: &'a BTreeSet<String>,
+    ) -> SpliceDelta<'a> {
+        SpliceDelta {
+            graph,
+            targets,
+            removed_fqns: removed,
+            scan: ScanRow {
+                git_sha: Some("newsha".into()),
+                git_clean: Some(true),
+                content_key: Some("newkey".into()),
+                scanned_at: "2026-01-02T00:00:00Z".into(),
+            },
+        }
+    }
+
+    /// Seeds `prev`, panicking if the seed was not taken (the test fixture is
+    /// always schema-compatible).
+    fn seed_or_panic(prev: &Path) -> SeededDb {
+        match seed(prev) {
+            SeedDecision::Seed(s) => s,
+            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+        }
+    }
+
+    /// One wide-tree splice run's oracle data (phase-04 task-22): the splice
+    /// report, the spliced DB's code snapshot / per-table counts / unresolved
+    /// set / Scan row, the full rebuild's counterparts, and whether the abandon
+    /// path left the previous DB byte-identical.
+    struct WideOutcome {
+        report: SpliceReport,
+        spliced_snapshot: BTreeSet<String>,
+        expected_snapshot: BTreeSet<String>,
+        spliced_counts: BTreeMap<String, i64>,
+        expected_counts: BTreeMap<String, i64>,
+        spliced_unres: BTreeSet<(String, String)>,
+        expected_unres: BTreeSet<(String, String)>,
+        spliced_scan: (String, String, String, String),
+        expected_scan: (String, String, String, String),
+        previous_bytes_preserved: bool,
+    }
+
+    /// Seeds, applies and publishes the wide-tree delta of size `n`, and gathers
+    /// the full-rebuild comparison. Runs the delta TWICE: once abandoned via
+    /// `SeededDb::discard` (proving the previous DB is byte-identical and the
+    /// temp removed) and once published for the oracle.
+    fn wide_splice(n: usize) -> WideOutcome {
+        let dir = scratch(&format!("batch-{n}"));
+        let prev_path = dir.join("db.lbug");
+        let export = dir.join("graph.jsonl");
+        // Previous: every file. Assembled: the same tree minus the LAST file
+        // (the removed file), every surviving unit re-emitted (a body change).
+        let previous = wide_tree(n, n, "oldsha", "oldkey");
+        let assembled = wide_tree(n, n - 1, "newsha", "newkey");
+        build_db(&prev_path, &previous);
+        let before = std::fs::read(&prev_path).unwrap();
+        let targets: BTreeSet<String> = (0..n).map(|i| format!("/w/f{i}.go")).collect();
+        let removed: BTreeSet<String> = BTreeSet::new();
+
+        // Run 1 — apply, then abandon via `discard`.
+        let seeded = seed_or_panic(&prev_path);
+        let first = seeded
+            .apply(&wide_delta(&assembled, &targets, &removed))
+            .unwrap();
+        let temp = seeded.temp_path.clone();
+        seeded.discard().unwrap();
+        let previous_bytes_preserved =
+            !temp.exists() && std::fs::read(&prev_path).unwrap() == before;
+
+        // Run 2 — apply + publish, then compare the published DB to a full rebuild.
+        let seeded = seed_or_panic(&prev_path);
+        let report = seeded
+            .apply(&wide_delta(&assembled, &targets, &removed))
+            .unwrap();
+        assert_eq!(
+            report.dml_statements, first.dml_statements,
+            "the statement count is deterministic across runs"
+        );
+        publish(seeded, &assembled, &export).unwrap();
+        let expected_path = dir.join("expected.lbug");
+        build_db(&expected_path, &assembled);
+
+        let out = WideOutcome {
+            report,
+            spliced_snapshot: published_snapshot(&prev_path),
+            expected_snapshot: published_snapshot(&expected_path),
+            spliced_counts: table_counts(&prev_path),
+            expected_counts: table_counts(&expected_path),
+            spliced_unres: unresolved_rows(&prev_path),
+            expected_unres: unresolved_rows(&expected_path),
+            spliced_scan: scan_row_of(&prev_path),
+            expected_scan: scan_row_of(&expected_path),
+            previous_bytes_preserved,
+        };
+        let _ = std::fs::remove_dir_all(&dir);
+        out
     }
 
     /// The full structural snapshot the equivalence oracle compares: every code
