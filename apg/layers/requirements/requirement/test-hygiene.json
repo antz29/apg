@@ -28,6 +28,11 @@
       "kind": "contains",
       "source": "requirements.stakeholder.test-suite-owner",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.test-hygiene-motivation",
+      "properties": {}
     }
   ]
 }
