@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "fast-default-suite",
+  "body": "The whole unit + integration suite must run FAST — the entire default suite finishes in seconds. Because unit and integration are pure in-memory with fakes (`requirements.requirement.no-real-io-boundary`), they carry no filesystem, database, git, or process cost, so the default `cargo test` gate is seconds, not minutes. Slowness in the default gate is a defect in tier purity: a slow default suite means a real-I/O test has slipped into unit/integration.\n\nAC (review-checked): the default gate (`cargo test`, no opt-in flags) runs the whole unit+integration suite in seconds (not minutes); the gate's wall time is reported; every real-I/O test is excluded from the default gate by the e2e tier (requirements.requirement.e2e-final-gate-only).",
+  "properties": {
+    "feature": "test-hygiene"
+  },
+  "out": [],
+  "in": []
+}
