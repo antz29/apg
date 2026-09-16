@@ -27,7 +27,6 @@ permission:
     "*": deny
     "src/golib/**": allow
     "apg/.worktrees/*/src/golib/**": allow
-    "src/*.rs": deny
     "build.rs": deny
     "Cargo.toml": deny
     "Cargo.lock": deny
@@ -44,7 +43,6 @@ permission:
     "src/*/target/**": deny
     "src/tslib/node_modules/**": deny
     "src/cpplib/vendor/**": deny
-    "apg/.worktrees/*/src/*.rs": deny
     "apg/.worktrees/*/build.rs": deny
     "apg/.worktrees/*/Cargo.toml": deny
     "apg/.worktrees/*/Cargo.lock": deny
