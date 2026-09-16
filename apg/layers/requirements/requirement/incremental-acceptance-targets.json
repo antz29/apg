@@ -28,6 +28,11 @@
       "kind": "details",
       "source": "requirements.note.baseline-and-acceptance",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.acceptance-narrowed-to-jgrapht",
+      "properties": {}
     }
   ]
 }
