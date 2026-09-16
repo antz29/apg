@@ -14,11 +14,6 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.plan_update",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "/Users/jledrew/apg/apg/.worktrees/suite-tool-followups/src/main.rs",
-      "properties": {}
     }
   ],
   "in": [
