@@ -2541,10 +2541,36 @@ mod tests {
             .to_string()
     }
 
+    /// The RECORDED jgrapht full-scan wall baseline (~16 s wall / ~12 s logged;
+    /// note-86/note-87 provenance). The phase-04 task-8 PRIMARY pass/fail bound
+    /// is half THIS RECORDED figure (the recorded ≈8 s), never half a freshly
+    /// measured local baseline — a local baseline is recorded for context only
+    /// and may not tighten or replace the recorded bound.
+    const RECORDED_FULL_SCAN_BASELINE_MS: f64 = 16_000.0;
+
+    /// The RECORDED jgrapht Java-frontend baseline (~9 s). The Java-frontend
+    /// clause is measured against THIS RECORDED figure (again, not the local
+    /// one): the re-scan's frontend phase must be materially below it.
+    const RECORDED_JAVA_FRONTEND_BASELINE_MS: f64 = 9_000.0;
+
+    /// How far "materially below" the recorded Java-frontend baseline is: the
+    /// frontend phase must come in at or under this fraction of the recorded
+    /// baseline. Kept at the pre-fix clause's factor; only the binding moves
+    /// from the local to the RECORDED baseline.
+    const MATERIAL_BELOW_RECORDED_FRONTEND: f64 = 0.75;
+
     /// The `.java` `src` files of a scan export (the localized-edit picker).
+    ///
+    /// DETERMINISTIC + STABLE (phase-04 task-8 fix round; measured problem 1):
+    /// every matching File record is collected and the set is SORTED by path
+    /// before the first `limit` are taken, and only comment-bearing files (whose
+    /// edit is BODY-ONLY — the exported signature cannot change) are candidates.
+    /// It must NEVER depend on the raw `graph.jsonl` emission order, which
+    /// varies per run: that non-determinism once made a byte-only comment edit
+    /// look like a signature change and cascade 615 dependent files.
     fn exported_java_files(repo: &Path, limit: usize) -> Vec<PathBuf> {
         let text = std::fs::read_to_string(repo.join("apg/.trans/graph.jsonl")).unwrap();
-        let mut out = Vec::new();
+        let mut out: Vec<PathBuf> = Vec::new();
         for line in text.lines() {
             let v: serde_json::Value = serde_json::from_str(line).unwrap();
             if v.get("type").and_then(|t| t.as_str()) == Some("file")
@@ -2553,13 +2579,28 @@ mod tests {
                 let fqn = v.get("fqn").and_then(|f| f.as_str()).unwrap_or("");
                 if fqn.ends_with(".java") {
                     out.push(PathBuf::from(fqn));
-                    if out.len() >= limit {
-                        break;
-                    }
                 }
             }
         }
+        out.sort();
+        out.dedup();
+        // A body-only edit needs a comment line; keep only candidates that have
+        // one so the chosen set is always safely editable (still deterministic).
+        out.retain(|p| has_comment_line(p));
+        out.truncate(limit);
         out
+    }
+
+    /// Whether `path` has a line `body_only_edit` can flip (a `//` or `*`
+    /// comment line) — the body-only-editable predicate the picker filters on.
+    fn has_comment_line(path: &Path) -> bool {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return false;
+        };
+        text.lines().any(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with("//") || trimmed.starts_with('*')
+        })
     }
 
     /// A byte-level BODY-ONLY edit: flip one ASCII letter inside a comment line,
@@ -5639,14 +5680,18 @@ mod tests {
             h.discard();
         }
 
-        /// Phase-04 task-8 — a 1–5 file localized edit on the staged jgrapht copy
-        /// re-scans INCREMENTALLY: the P2 target set is the localized set, the P3
-        /// splice path is taken (no full DB rebuild, no full frontend pass), all
-        /// four phase durations are reported, and the run meets the stated target
-        /// of at most half the recorded baseline wall with the Java frontend phase
-        /// materially below its baseline. The whole-tree `frontend-skipped` marker
-        /// is explicitly NOT required here — a content edit clears it; the
-        /// observable is the reduced-target-set verdict.
+        /// Phase-04 task-8 — a 1–5 file localized edit (chosen by a DETERMINISTIC,
+        /// STABLE picker: the sorted first 3 `file`/`code_type=src`/`.java` export
+        /// records, body-only edits) on the staged jgrapht copy re-scans
+        /// INCREMENTALLY: the P2 target set is the localized set, the P3 splice
+        /// path is taken (no full DB rebuild, no full frontend pass), all four
+        /// phase durations are reported, and the run meets the AC bound of at most
+        /// half the RECORDED ~16 s wall (≈8 s) with the Java frontend phase
+        /// materially below the RECORDED ~9 s baseline. The frontend phase
+        /// duration and the reduced-target-set verdict are first-class output.
+        /// The whole-tree `frontend-skipped` marker is explicitly NOT required
+        /// here — a content edit clears it; the observable is the
+        /// reduced-target-set verdict.
         #[test]
         #[ignore = "e2e tier: real I/O (staged jgrapht checkout/spawned apg/db.lbug); run via cargo test-e2e"]
         fn acceptance_localized_edit_jgrapht_incremental() {
@@ -5661,9 +5706,22 @@ mod tests {
             let (h, baseline_ms, base_phases, _) = acceptance_baseline(h);
             let base_frontend_ms = phase_ms(&base_phases, crate::timing::Phase::Frontend);
 
+            // AC-faithful bound binding (phase-04 task-8 fix round): the PRIMARY
+            // pass/fail bound is half the RECORDED ~16 s wall baseline (the
+            // recorded ≈8 s figure) — NOT half of a freshly measured local
+            // baseline. `baseline_ms`/`base_frontend_ms` are still measured and
+            // recorded for CONTEXT ONLY; they never tighten or replace the
+            // recorded bounds (a locally-derived ≈4.4 s bound must not fail a
+            // run that satisfies the recorded ≈8 s bound).
+            let half_recorded_baseline = RECORDED_FULL_SCAN_BASELINE_MS / 2.0;
+            let material = RECORDED_JAVA_FRONTEND_BASELINE_MS * MATERIAL_BELOW_RECORDED_FRONTEND;
+
             // The localized edit: a byte-level body-only change to 3 src files
             // (1–5) — no exported signature changes, so the target set stays
-            // the localized set and no cascade occurs.
+            // the localized set and no cascade occurs. The picker is
+            // DETERMINISTIC + STABLE: the SORTED first 3
+            // `file`/`code_type=src`/`.java` records, never the first-N records
+            // in raw graph.jsonl emission order (which varies per run).
             let files = exported_java_files(&h.repo, 3);
             assert!(
                 !files.is_empty(),
@@ -5705,9 +5763,16 @@ mod tests {
                 "the splice path must skip the full DB rebuild: {err}"
             );
 
+            // First-class AC output (corrected title): the reduced-target-set
+            // verdict must be REPORTED for the incremental run; an unreported
+            // verdict is a FAIL. The frontend phase duration is recorded
+            // first-class in the artifact below.
+            let reduced_target_set_verdict = line_with(&err, "[scan] incremental:");
+            assert!(
+                !reduced_target_set_verdict.is_empty(),
+                "the reduced-target-set verdict must be reported as first-class output: {err}"
+            );
             let frontend_ms = phase_ms(&report, crate::timing::Phase::Frontend);
-            let half_baseline = baseline_ms / 2.0;
-            let material = base_frontend_ms * 0.75;
             let artifact = serde_json::json!({
                 "workload": h.workload,
                 "scenario": "localized-edit-incremental",
@@ -5717,34 +5782,39 @@ mod tests {
                 "source_path": h.source_path.display().to_string(),
                 "staged_files": h.staged_files,
                 "frontends": "java-only (isolated APG_FRONTEND_DIR)",
+                "edit_picker": "sorted first 3 file/code_type=src/.java graph.jsonl records",
                 "edited_files": files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
-                "baseline_full_scan_ms": baseline_ms,
-                "baseline_java_frontend_ms": base_frontend_ms,
+                "recorded_baseline_full_scan_ms": RECORDED_FULL_SCAN_BASELINE_MS,
+                "recorded_java_frontend_baseline_ms": RECORDED_JAVA_FRONTEND_BASELINE_MS,
+                "local_baseline_full_scan_ms": baseline_ms,
+                "local_java_frontend_baseline_ms": base_frontend_ms,
                 "rescan_ms": inc_ms,
                 "rescan_phases_ms": phases_json(&report),
+                "frontend_phase_ms": frontend_ms,
                 "target_files": targets,
                 "cascade_dependent_files": cascade_count(&err),
-                "incremental_verdict": line_with(&err, "[scan] incremental:"),
+                "reduced_target_set_verdict": reduced_target_set_verdict,
+                "incremental_verdict": reduced_target_set_verdict,
                 "splice_verdict": line_with(&err, "[load] splice:"),
                 "java_frontend_ms": frontend_ms,
                 "stated_target_ms": {
-                    "half_baseline": half_baseline,
-                    "java_frontend_below_baseline_x0_75": material,
+                    "half_recorded_baseline": half_recorded_baseline,
+                    "java_frontend_below_recorded_baseline_x0_75": material,
                 },
                 "splice": true,
                 "frontend_skipped": report.frontend_skipped(),
-                "pass": inc_ms <= half_baseline && frontend_ms <= material,
+                "pass": inc_ms <= half_recorded_baseline && frontend_ms <= material,
             });
             let path =
                 testutil::write_acceptance_artifact("localized-edit-jgrapht.json", &artifact);
             assert!(
-                inc_ms <= half_baseline,
-                "the localized re-scan was {inc_ms:.1}ms, must be ≤ half the {baseline_ms:.1}ms baseline ({half_baseline:.1}ms) (artifact {})",
+                inc_ms <= half_recorded_baseline,
+                "the localized re-scan was {inc_ms:.1}ms, must be ≤ half the RECORDED {RECORDED_FULL_SCAN_BASELINE_MS:.0}ms baseline ({half_recorded_baseline:.1}ms); the measured local baseline ({baseline_ms:.1}ms) is context only (artifact {})",
                 path.display()
             );
             assert!(
                 frontend_ms <= material,
-                "the Java frontend phase was {frontend_ms:.1}ms, must be materially below the {base_frontend_ms:.1}ms baseline (≤{material:.1}ms) (artifact {})",
+                "the Java frontend phase was {frontend_ms:.1}ms, must be materially below the RECORDED {RECORDED_JAVA_FRONTEND_BASELINE_MS:.0}ms baseline (≤{material:.1}ms); the measured local frontend baseline ({base_frontend_ms:.1}ms) is context only (artifact {})",
                 path.display()
             );
 
