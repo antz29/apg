@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.test-hygiene",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "global.constraint.test-tier-boundaries",
+      "properties": {}
     }
   ],
   "in": []
