@@ -1,0 +1,21 @@
+# Tier-separable test selections (phase-10 harness, task-45).
+#
+#   unit  -- exactly 1 unit, everything else faked, NO real I/O
+#   int   -- 2+ units, everything else faked, NO real I/O
+#   e2e   -- 1+ units WITH real I/O (any temp dir, node-file write, db.lbug
+#            open, git op or process spawn is e2e BY DEFINITION)
+#
+# Every e2e test is additionally `#[ignore]`d, so a plain `cargo test` (the
+# fast default gate) runs the unit+int tiers only and can never reach an e2e
+# test; e2e is the opt-in FINAL gate only.
+#
+# Helpers/fixtures/builders stay at the `mod tests` root -- only `#[test]`
+# functions move into a tier submodule, and each tier submodule starts with
+# `use super::*;`.
+[alias]
+# unit tier only -- pure in-memory, exactly 1 unit, no real I/O.
+test-unit = "test tests::unit::"
+# integration tier only -- pure in-memory, 2+ units wired, no real I/O.
+test-int = "test tests::int::"
+# e2e tier only -- real I/O; the ONLY e2e entry point (opt-in final gate).
+test-e2e = "test tests::e2e:: -- --ignored"
