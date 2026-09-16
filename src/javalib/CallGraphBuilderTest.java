@@ -32,6 +32,8 @@ public class CallGraphBuilderTest {
             testFullScanEqualsAllTargets(proj, base);
             testTargetedEqualsFullForTargetPackage(proj, base);
             testWarmCacheReusesUnchangedPackages(proj, base);
+            testFullScanSeedsClassCache(proj, base);
+            testSurfaceFromSourceRecoversDroppedDeclarations(proj);
             testEmptyTargetsMeansNoFilter(proj, base);
             testNoMatchingTargetsEmitsScaffoldingOnly(proj, base);
         } finally {
@@ -168,6 +170,62 @@ public class CallGraphBuilderTest {
             !r2.err.contains("unchanged-package"), "stderr was:\n" + r2.err);
         check("warm targeted scan emits the same facts",
             normalize(r1.out).equals(normalize(r2.out)), diff(r1.out, r2.out));
+    }
+
+    /**
+     * Phase-04 task-17/-32: a cold full scan invoked with the pinned
+     * --cache-dir/--cache-key hand-off persists the SAME class dir + surface the
+     * targeted path consumes, so the FIRST targeted scan after it recompiles no
+     * unchanged packages and still emits the full scan's facts. Without both
+     * flags no artifact is written (today's behaviour).
+     */
+    static void testFullScanSeedsClassCache(Path proj, Path base) throws Exception {
+        String full = run(proj).out;
+
+        // A flag absent either way writes no cache artifact.
+        Path halfCache = base.resolve("cache-half");
+        run(proj, "--cache-dir", halfCache.toString());
+        check("full scan without --cache-key writes no cache artifact",
+            !Files.exists(halfCache.resolve("java")), "unexpected artifact under " + halfCache);
+
+        // Cold full scan WITH both flags seeds <cache-dir>/java/<cache-key>/.
+        Path cache = base.resolve("cache-seed");
+        Result seeded = run(proj, "--cache-dir", cache.toString(), "--cache-key", "k1");
+        Path javaRoot = cache.resolve("java").resolve("k1");
+        check("full scan with both flags writes the class dir + surface",
+            Files.isDirectory(javaRoot.resolve("classes")) && Files.exists(javaRoot.resolve("surface.tsv")),
+            "contents of " + javaRoot + ": " + listRec(javaRoot));
+        check("a seeded full scan's facts are byte-identical to a plain full scan",
+            full.equals(seeded.out), diff(full, seeded.out));
+
+        // The first targeted scan after the seed reuses it: no recompile.
+        Path targets = base.resolve("seed-b.targets");
+        Files.writeString(targets, bFile(proj) + "\n", StandardCharsets.UTF_8);
+        Result r = run(proj, "--targets", targets.toString(),
+            "--cache-dir", cache.toString(), "--cache-key", "k1");
+        check("first targeted scan after the cold full scan recompiles no unchanged package",
+            !r.err.contains("unchanged-package"), "stderr was:\n" + r.err);
+        Set<String> fullForTarget = filterToTarget(normalize(full), bFile(proj));
+        check("seeded targeted scan's pkg.b facts still equal the full scan's",
+            fullForTarget.equals(normalize(r.out)),
+            setDiff(fullForTarget, normalize(r.out)) + "\nSTDERR:\n" + r.err);
+    }
+
+    /**
+     * Phase-04 task-31: a source javac drops from bytecode generation still
+     * contributes its declaration surface — recovered from a parse-only pass,
+     * so the file is never silently absent from the surface/class context.
+     */
+    static void testSurfaceFromSourceRecoversDroppedDeclarations(Path proj) {
+        CallGraphBuilder.FileRec rec = CallGraphBuilder.surfaceFromSource(bFile(proj));
+        check("surfaceFromSource recovers the dropped source's struct declarations",
+            rec != null && rec.structs.contains("pkg.b.B"),
+            "rec structs: " + (rec == null ? "null" : rec.structs));
+        check("surfaceFromSource recovers the dropped source's class flats",
+            rec != null && rec.flats.contains("pkg.b.B"),
+            "rec flats: " + (rec == null ? "null" : rec.flats));
+        check("surfaceFromSource records the dropped source's content hash",
+            rec != null && !rec.hash.isEmpty(), "rec hash: " + (rec == null ? "null" : rec.hash));
     }
 
     /** An empty --targets file means NO filter. */
@@ -401,6 +459,16 @@ public class CallGraphBuilderTest {
         Set<String> sa = new TreeSet<>(Arrays.asList(a.split("\n")));
         Set<String> sb = new TreeSet<>(Arrays.asList(b.split("\n")));
         return setDiff(sa, sb);
+    }
+
+    static String listRec(Path p) throws Exception {
+        if (!Files.exists(p)) return "<absent>";
+        List<String> names = new ArrayList<>();
+        try (var walk = Files.walk(p)) {
+            walk.forEach(x -> names.add(p.relativize(x).toString()));
+        }
+        Collections.sort(names);
+        return String.join(", ", names);
     }
 
     static void deleteRec(Path p) throws Exception {

@@ -90,14 +90,27 @@ public class CallGraphBuilder {
             if (targets.isEmpty()) targets = null;
         }
         if (targets == null) {
-            runFullScan(files, prefix);
+            // Phase-04 task-32: the pinned --cache-dir/--cache-key hand-off
+            // reaches the full-scan path too (task-17 seeds the class cache);
+            // the incremental dispatch and the emission filter are unchanged.
+            runFullScan(dir, files, prefix, cacheDir, cacheKey);
         } else {
             runIncrementalScan(dir, files, targets, prefix, cacheDir, cacheKey);
         }
     }
 
-    /** The full-context scan: parse everything, attribute everything, emit everything. */
-    static void runFullScan(List<Path> files, String prefix) throws Exception {
+    /**
+     * The full-context scan: parse everything, attribute everything, emit
+     * everything. When the pinned `--cache-dir`/`--cache-key` hand-off is
+     * present it also seeds the native class cache (phase-04 task-17) so the
+     * next targeted scan reuses it instead of recompiling every unchanged
+     * source.
+     */
+    static void runFullScan(Path dir, List<Path> files, String prefix, String cacheDir, String cacheKey)
+            throws Exception {
+        // Snapshot the walked sources before crashing-file isolation mutates
+        // `files`: the seeded surface must be complete over every input.
+        List<Path> allFiles = new ArrayList<>(files);
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         var fm = compiler.getStandardFileManager(null, null, null);
 
@@ -140,6 +153,67 @@ public class CallGraphBuilder {
         // Pass 2: emit node + edge records, resolving endpoints by id.
         c.emitAll(units, total);
         c.flush();
+
+        // Phase-04 task-17: stdout is complete; seed the native class cache the
+        // targeted path consumes. Best-effort — a cache failure never fails the
+        // scan, and an absent flag writes nothing.
+        seedClassCache(allFiles, dir, cacheDir, cacheKey);
+    }
+
+    /**
+     * The pinned native-artifact root `<cache-dir>/java/<cache-key>`, or null
+     * when either flag is absent. The full scan only persists when both flags
+     * are present: an absent flag keeps the pre-phase-04 behaviour and writes
+     * no artifact (no cache path is fabricated or defaulted).
+     */
+    static Path persistentJavaRoot(String cacheDir, String cacheKey) {
+        if (cacheDir == null || cacheDir.isEmpty()) return null;
+        if (cacheKey == null || cacheKey.isEmpty()) return null;
+        return Paths.get(cacheDir, "java").resolve(cacheKey);
+    }
+
+    /**
+     * Phase-04 task-17: persists the SAME class dir + declaration surface the
+     * targeted path consumes (`compileAndCollect` + `saveSurface`), so the first
+     * targeted scan after a cold full scan reuses it and reports zero
+     * `compiling N unchanged-package file(s)`. A full scan has every source, so
+     * it is authoritative (global.constraint.frontend-full-context); a partial
+     * surface is never persisted.
+     */
+    static void seedClassCache(List<Path> allFiles, Path dir, String cacheDir, String cacheKey) {
+        Path javaRoot = persistentJavaRoot(cacheDir, cacheKey);
+        if (javaRoot == null) return;
+        Path root = dir.toAbsolutePath().normalize();
+        try {
+            Path classesDir = javaRoot.resolve("classes");
+            Files.createDirectories(classesDir);
+            List<String> classOpts = new ArrayList<>(List.of(
+                    "-classpath", classesDir.toString(),
+                    "-d", classesDir.toString()));
+            Set<Path> wanted = new HashSet<>();
+            for (Path f : allFiles) wanted.add(f.toAbsolutePath().normalize());
+            System.err.println("[" + elapsed() + "] seeding java class cache for "
+                + wanted.size() + " file(s) into " + javaRoot);
+            Map<Path, FileRec> raw = new LinkedHashMap<>();
+            var compiler = ToolProvider.getSystemJavaCompiler();
+            var fm = compiler.getStandardFileManager(null, null, null);
+            compileAndCollect(compiler, fm, new ArrayList<>(allFiles), classOpts, raw, wanted);
+            // The surface the targeted path consumes is keyed relative to the
+            // scan root (runIncrementalScan does `root.resolve(rel)`).
+            Map<String, FileRec> surface = new LinkedHashMap<>();
+            for (var e : raw.entrySet()) surface.put(relOf(root, e.getKey()), e.getValue());
+            if (surface.size() != wanted.size()) {
+                System.err.println("WARNING: java class surface incomplete ("
+                    + surface.size() + "/" + wanted.size()
+                    + " file(s) surfaced); not persisting a partial surface");
+                return;
+            }
+            saveSurface(javaRoot.resolve("surface.tsv"), surface);
+            System.err.println("[" + elapsed() + "] persisted java class surface for "
+                + surface.size() + " file(s)");
+        } catch (Throwable t) {
+            System.err.println("WARNING: could not seed java class cache: " + t);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -300,6 +374,25 @@ public class CallGraphBuilder {
             endProgress();
         }
 
+        // Phase-04 task-15: the surface must be COMPLETE before target
+        // attribution. `compileAndCollect` drops a source that crashes javac
+        // (task-31 recovers its declarations), so re-check every unchanged file
+        // and surface any still absent from the class cache from source. A
+        // dropped source's declarations must never be silently missing, or its
+        // references would leak into the target attribution as bare
+        // project-class simple names / error symbols.
+        for (Path f : nonTargetFiles) {
+            String rel = relOf(root, f);
+            if (clean.containsKey(rel)) continue;
+            FileRec rec = surfaceFromSource(f);
+            if (rec != null) {
+                System.err.println("  [" + elapsed() + "] surfaced un-attributable unchanged file: " + rel);
+                clean.put(rel, rec);
+            } else {
+                System.err.println("WARNING: no declaration surface for un-attributable unchanged file: " + rel);
+            }
+        }
+
         // Build the surface lookup: declared struct FQNs + function keys, with
         // the ingestor's overload rendering (singleton -> parent.name,
         // overload -> parent.name(params)).
@@ -423,13 +516,58 @@ public class CallGraphBuilder {
             }
         } catch (Throwable t) {
             if (files.size() == 1) {
+                Path abs = files.get(0).toAbsolutePath().normalize();
                 System.err.println("  [" + elapsed() + "] dropping un-attributable file: " + files.get(0));
+                // Phase-04 task-31: a dropped source must still contribute its
+                // declaration surface. If the crash happened after collection
+                // (e.g. during generate()) the record is already present and is
+                // kept; otherwise recover it from a parse-only pass — the file
+                // must never silently vanish from a COMPLETE surface.
+                if (collect.contains(abs) && !out.containsKey(abs)) {
+                    FileRec rec = surfaceFromSource(files.get(0));
+                    if (rec != null) {
+                        out.put(abs, rec);
+                    } else {
+                        System.err.println("  [" + elapsed() + "] no declaration surface for dropped file: "
+                            + files.get(0));
+                    }
+                }
                 return;
             }
             int mid = files.size() / 2;
             compileAndCollect(compiler, fm, new ArrayList<>(files.subList(0, mid)), opts, out, collect);
             compileAndCollect(compiler, fm, new ArrayList<>(files.subList(mid, files.size())), opts, out, collect);
         }
+    }
+
+    /**
+     * Phase-04 task-31: the declaration surface of a source javac dropped from
+     * bytecode generation, recovered from a parse-only pass (a parse needs no
+     * attribution, so an un-attributable file still parses). Erased parameter
+     * types are unavailable without attribution, so the recovered function keys
+     * carry no parameters; the struct FQNs — what the emitter's bare-name
+     * fallback consults — are exact.
+     */
+    static FileRec surfaceFromSource(Path file) {
+        try {
+            var compiler = ToolProvider.getSystemJavaCompiler();
+            var fm = compiler.getStandardFileManager(null, null, null);
+            var task = newTask(compiler, fm, List.of(file));
+            for (CompilationUnitTree u : task.parse()) {
+                var sc = new SurfaceScanner();
+                sc.scan(u, null);
+                FileRec rec = new FileRec();
+                rec.compiled = true;
+                rec.hash = sha1(file.toAbsolutePath().normalize());
+                rec.structs.addAll(sc.structs);
+                rec.funcs.addAll(sc.funcs);
+                rec.flats.addAll(sc.flats);
+                return rec;
+            }
+        } catch (Throwable t) {
+            /* fall through: no surface recoverable */
+        }
+        return null;
     }
 
     static String relOf(Path root, Path abs) {
@@ -872,6 +1010,65 @@ public class CallGraphBuilder {
         }
     }
 
+    /** Simple class name of an FQN (its last `.`/`$` segment). */
+    static String simpleName(String fqn) {
+        if (fqn == null) return "";
+        int d = Math.max(fqn.lastIndexOf('.'), fqn.lastIndexOf('$'));
+        return d >= 0 ? fqn.substring(d + 1) : fqn;
+    }
+
+    /** Every simple class name in a set of FQNs. */
+    static Set<String> simpleNames(Collection<String> fqns) {
+        Set<String> out = new HashSet<>();
+        for (String fqn : fqns) {
+            String s = simpleName(fqn);
+            if (!s.isEmpty()) out.add(s);
+        }
+        return out;
+    }
+
+    /** Simple class name -> canonical FQN, only for unambiguous names. */
+    static Map<String, String> simpleStructIndex(Collection<String> surfaceStructs) {
+        Map<String, List<String>> multi = new HashMap<>();
+        for (String fqn : surfaceStructs) {
+            String s = simpleName(fqn);
+            if (s.isEmpty()) continue;
+            multi.computeIfAbsent(s, k -> new ArrayList<>()).add(fqn);
+        }
+        return unambiguous(multi);
+    }
+
+    /**
+     * Simple class name -> canonical `<init>` FQN for a constructor declared on
+     * that class in the surface (only when unambiguous). Used to resolve a
+     * `new X()` whose attribution degraded because X's bytecode was dropped.
+     */
+    static Map<String, String> constructorIndex(Map<String, String> surfaceFuncFqn) {
+        Map<String, List<String>> multi = new HashMap<>();
+        for (var e : surfaceFuncFqn.entrySet()) {
+            String key = e.getKey();
+            int p = key.indexOf('(');
+            if (p < 0) continue;
+            String decl = key.substring(0, p);
+            int d = decl.lastIndexOf('.');
+            if (d < 0 || !decl.substring(d + 1).equals("<init>")) continue;
+            String s = simpleName(decl.substring(0, d));
+            if (s.isEmpty()) continue;
+            multi.computeIfAbsent(s, k -> new ArrayList<>()).add(e.getValue());
+        }
+        return unambiguous(multi);
+    }
+
+    /** Keeps only keys with a single distinct value (ambiguity is dropped). */
+    static Map<String, String> unambiguous(Map<String, List<String>> multi) {
+        Map<String, String> out = new HashMap<>();
+        for (var e : multi.entrySet()) {
+            Set<String> vals = new LinkedHashSet<>(e.getValue());
+            if (vals.size() == 1) out.put(e.getKey(), vals.iterator().next());
+        }
+        return out;
+    }
+
     static class Collector extends TreePathScanner<Void, Void> {
         String pkg = "", cls = "", mtd = "";
         String currentFile = "", sourceText = "";
@@ -901,6 +1098,15 @@ public class CallGraphBuilder {
         final boolean filtered;
         final Set<String> surfaceStructs;
         final Map<String, String> surfaceFuncFqn;
+        // Phase-04 task-15: indexes over the unchanged-package surface so a
+        // degraded (error-symbol) attribution never leaks a bare project-class
+        // simple name as an unresolved target. `surfaceSimpleNames` is EVERY
+        // project-class simple name (ambiguous ones included) and gates the
+        // "never emit a bare project class" rule; the two maps resolve the
+        // unambiguous names to their canonical FQNs.
+        final Set<String> surfaceSimpleNames;
+        final Map<String, String> surfaceSimpleStruct;
+        final Map<String, String> surfaceCtorBySimple;
 
         Collector(String idPrefix) {
             this(idPrefix, false, Set.of(), Map.of());
@@ -912,6 +1118,9 @@ public class CallGraphBuilder {
             this.filtered = filtered;
             this.surfaceStructs = surfaceStructs;
             this.surfaceFuncFqn = surfaceFuncFqn;
+            this.surfaceSimpleNames = simpleNames(surfaceStructs);
+            this.surfaceSimpleStruct = simpleStructIndex(surfaceStructs);
+            this.surfaceCtorBySimple = constructorIndex(surfaceFuncFqn);
         }
 
         String newNodeID() {
@@ -1212,7 +1421,11 @@ public class CallGraphBuilder {
                 }
                 String parent = ownerFqn(directOwner);
                 String name = ms.getSimpleName().toString();
-                if (parent != null && (name.equals("<init>") || name.indexOf('<') < 0) && !name.equals("<error>")) {
+                // In targeted mode an error-symbol parent is not a resolvable
+                // project method (phase-04 task-15); the full scan keeps its
+                // exact behaviour, so this guard is filtered-only.
+                if (parent != null && (!filtered || !parent.contains("<error>"))
+                        && (name.equals("<init>") || name.indexOf('<') < 0) && !name.equals("<error>")) {
                     String key = parent + "." + name + "(" + String.join(",", paramStrings(ms)) + ")";
                     String id = funcID.get(key);
                     if (id != null) {
@@ -1233,12 +1446,28 @@ public class CallGraphBuilder {
                     return;
                 }
             }
+            // Phase-04 task-15: a degraded/error-symbol call must not leak a
+            // bare project-class simple name. If the call names a project class
+            // we know from the surface, resolve a constructor to its canonical
+            // <init> FQN; otherwise suppress — the full context resolves it, so
+            // an unresolved target would be wrong.
+            if (filtered && rawName != null && !rawName.contains("<error>")) {
+                String ctor = surfaceCtorBySimple.get(rawName);
+                if (ctor != null) {
+                    emitEdge("calls", mtd, ctor);
+                    return;
+                }
+                if (surfaceSimpleNames.contains(rawName)) return;
+            }
             if (recvFqn != null && structID.containsKey(recvFqn)) {
                 emitEdge("uses", mtd, structID.get(recvFqn));
             } else if (recvFqn != null && filtered && surfaceStructs.contains(recvFqn)) {
                 emitEdge("uses", mtd, recvFqn);
             } else {
                 String target = rawName == null ? "?" : rawName;
+                if (filtered && (target.contains("<error>") || surfaceSimpleNames.contains(target))) {
+                    return;
+                }
                 unresolved(target, "unknown");
                 emitUnresolvedCall(mtd, target);
             }
@@ -1251,15 +1480,36 @@ public class CallGraphBuilder {
          */
         void recordUse(String fromId, Tree type) {
             String tfqn = typeFqn(type);
-            String raw = typeRawName(type);
-            if (tfqn == null) {
-                unresolved(raw == null ? "?" : raw, "unknown");
-                emitEdge("unresolved_use", fromId, raw == null ? "?" : raw);
-            } else if (structID.containsKey(tfqn)) {
-                emitEdge("uses", fromId, structID.get(tfqn));
-            } else if (filtered && surfaceStructs.contains(tfqn)) {
-                emitEdge("uses", fromId, tfqn);
+            if (tfqn != null) {
+                if (structID.containsKey(tfqn)) {
+                    emitEdge("uses", fromId, structID.get(tfqn));
+                } else if (filtered && surfaceStructs.contains(tfqn)) {
+                    emitEdge("uses", fromId, tfqn);
+                }
+                return;
             }
+            String raw = typeRawName(type);
+            if (raw == null) raw = "?";
+            // Phase-04 task-15: `tfqn` is null both for a genuinely non-class
+            // type (type variable, primitive) and for a degraded/error symbol.
+            // A project class known from the surface must never leak as a bare
+            // simple name or an error symbol — resolve it to its canonical FQN.
+            // The full scan has complete context and keeps its exact behaviour.
+            if (filtered) {
+                if (raw.contains("<error>")) return;
+                String canon = surfaceSimpleStruct.get(raw);
+                if (canon != null) {
+                    emitEdge("uses", fromId, canon);
+                    return;
+                }
+                if (structID.containsKey(raw)) {
+                    emitEdge("uses", fromId, structID.get(raw));
+                    return;
+                }
+                if (surfaceSimpleNames.contains(raw)) return;
+            }
+            unresolved(raw, "unknown");
+            emitEdge("unresolved_use", fromId, raw);
         }
 
         /** Static type of the receiver expression of a method select, if any. */
