@@ -10,6 +10,11 @@
       "kind": "details",
       "source": "requirements.note.test-hygiene-motivation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.tier-separable-runs-rationale",
+      "properties": {}
     }
   ]
 }

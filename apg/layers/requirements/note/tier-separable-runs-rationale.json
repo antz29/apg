@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.tier-separable-runs",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "global.constraint.test-tier-boundaries",
+      "properties": {}
     }
   ],
   "in": []
