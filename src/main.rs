@@ -2000,6 +2000,11 @@ pub(crate) fn run_pipeline(
             &graph,
             &input.manifest,
             &input.sha,
+            // The SAME phase-2 re-emission target set that drove the frontend
+            // hand-off and the win-C splice, threaded through — never re-derived.
+            // Empty on the full-scan fallback, so `record` keeps its full-scan
+            // behaviour (phase-04 task-28 / task-13 AC (b)).
+            &input.targets_rel,
         ) {
             Ok(()) => log.ln("[scan] content-addressed facts recorded"),
             Err(e) => log.ln(&format!("[scan] fact recording skipped: {e:#}")),

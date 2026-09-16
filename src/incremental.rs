@@ -25,7 +25,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::cache::{CacheKey, FactStore, FileFragment, Manifest, ScanConfigKey};
+use crate::cache::{CacheKey, FactStore, FileFragment, FileIndex, Manifest, ScanConfigKey};
 use crate::delta::{self, Delta, FullScanReason, ScanRecord};
 use crate::graph::Graph;
 use crate::impact::{DepIndex, OverloadIndex, SignatureMap, signatures_of_graph};
@@ -470,8 +470,13 @@ pub fn absolute(root: &Path, rel: &str) -> String {
 /// Records the just-completed scan into the shared store: writes the new
 /// manifest, the scan record, each file's fact unit, and the portable indexes.
 ///
-/// `reuse_langs` maps a checkout-relative path to the language its unit was
-/// stored under, so reuse candidates carry their language on the next scan.
+/// `targets_rel` is the FINAL phase-2 re-emission target set (checkout-relative)
+/// — the SAME set that drove the frontend `--targets` hand-off and the win-C DB
+/// splice, threaded through and never re-derived. On the incremental path
+/// (non-empty) only the re-emitted/target files' units are (re)written; on a
+/// full scan (empty) every located file's unit is written so the shared store
+/// stays complete and reusable. A target the assembled graph does not carry is
+/// skipped — a stale unit would be a correctness bug, not a saving.
 pub fn record(
     store_root: &Path,
     cache_key: &CacheKey,
@@ -479,12 +484,17 @@ pub fn record(
     graph: &Graph,
     manifest: &Manifest,
     sha: &str,
+    targets_rel: &BTreeSet<String>,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(store_root)?;
     let writer_root = scan_root.to_string_lossy().into_owned();
     let mut store = FactStore::at(store_root.to_path_buf()).load();
 
-    // Per-file fact units for every located file in the assembled graph.
+    // Per-file fact units for every located file in the assembled graph, derived
+    // from ONE per-file index (phase-04 task-12) rather than an `O(F*(N+E))`
+    // per-file graph scan.
+    let index = FileIndex::build(graph);
+    let full_scan = targets_rel.is_empty();
     let mut files: BTreeSet<String> = BTreeSet::new();
     for node in graph.nodes.values() {
         if let Some(loc) = &node.location {
@@ -493,11 +503,19 @@ pub fn record(
     }
     for abs in &files {
         let rel = crate::cache::rel_path_of(scan_root, abs);
+        // Target-scoped recording (phase-04 task-13): with a target set in force
+        // write ONLY the re-emitted/target files' units — an unchanged non-target
+        // file keeps the unit a previous scan recorded. The full-scan path keeps
+        // writing every located file's unit. A target path the assembled graph
+        // does not carry is skipped, never written as a stale unit.
+        if !full_scan && !targets_rel.contains(&rel) {
+            continue;
+        }
         let Some(oid) = manifest.oid(&rel) else {
             continue;
         };
         let lang = language_of(rel.as_str());
-        let frag = FileFragment::from_graph(graph, abs, &rel, oid, lang);
+        let frag = FileFragment::from_index(&index, abs, &rel, oid, lang);
         store.put(&frag, &writer_root, cache_key)?;
     }
     // feedback-102: the per-file units cannot carry a language's
@@ -787,6 +805,195 @@ mod tests {
                 "a non-empty target set with no previous export must full-scan: {:?}",
                 prepared.full_scan
             );
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// phase-04 task-21: an incremental scan records ONLY the target files'
+        /// fact units, while a full-scan control records every located file's
+        /// unit and the baseline writes (manifest / ScanRecord / portable
+        /// index/state) still land. Real temp-dir FactStore — e2e by the
+        /// boundaries law.
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp dir + store on disk); run via cargo test-e2e"]
+        fn record_writes_only_the_target_files_units_with_a_full_scan_control() {
+            use crate::cache::{CacheKey, Manifest, ScanConfigKey};
+
+            let dir = std::env::temp_dir().join(format!("apg-record-scope-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let scan_root = dir.join("wt");
+            std::fs::create_dir_all(scan_root.join("src")).unwrap();
+            let cache_key = CacheKey::compute(&ScanConfigKey::default());
+
+            // F located files under one module, each with a real file (so a
+            // manifest OID exists) and a declaration.
+            let rels = ["src/a.go", "src/b.go", "src/c.go", "src/d.go", "src/e.go"];
+            let mut g = Graph::default();
+            g.nodes.insert(
+                "m".into(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+            );
+            let mut manifest = Manifest::default();
+            let mut abs_of: std::collections::BTreeMap<String, String> =
+                std::collections::BTreeMap::new();
+            for (i, rel) in rels.iter().enumerate() {
+                let abs = scan_root.join(rel);
+                std::fs::write(&abs, format!("package m // {i}\n")).unwrap();
+                let abs_s = abs.to_string_lossy().into_owned();
+                abs_of.insert((*rel).to_string(), abs_s.clone());
+                g.nodes
+                    .insert(abs_s.clone(), located(NodeKind::File, &abs_s));
+                g.nodes
+                    .insert(format!("m.F{i}"), located(NodeKind::Function, &abs_s));
+                g.contains.insert(("m".to_string(), abs_s.clone()));
+                g.contains.insert((abs_s.clone(), format!("m.F{i}")));
+                manifest
+                    .entries
+                    .insert((*rel).to_string(), format!("oid-{i}"));
+            }
+            // A manifest entry + target for a path the assembled graph does NOT
+            // carry: the ONLY reason its unit is not written is the missing node.
+            manifest
+                .entries
+                .insert("src/missing.go".into(), "oid-missing".into());
+
+            // Each file's reference fragment + inputs digest (the oracle).
+            let digest_of = |rel: &str| {
+                FileFragment::from_graph(&g, &abs_of[rel], rel, manifest.oid(rel).unwrap(), "go")
+                    .inputs_digest()
+            };
+
+            // (a) incremental: a target set of K of the F located files (plus the
+            // graph-absent one) writes exactly those K units, not all F.
+            let store_a = dir.join("store-a");
+            let targets: BTreeSet<String> = ["src/a.go", "src/c.go", "src/missing.go"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            record(
+                &store_a, &cache_key, &scan_root, &g, &manifest, "sha-a", &targets,
+            )
+            .unwrap();
+            let a = FactStore::at(store_a.clone()).load();
+            assert_eq!(a.len(), 2, "exactly the two graph-carried targets");
+            for rel in ["src/a.go", "src/c.go"] {
+                assert!(
+                    a.has(
+                        "go",
+                        rel,
+                        manifest.oid(rel).unwrap(),
+                        &digest_of(rel),
+                        &cache_key
+                    ),
+                    "target {rel} must have a unit"
+                );
+            }
+            for rel in ["src/b.go", "src/d.go", "src/e.go"] {
+                assert!(
+                    !a.has(
+                        "go",
+                        rel,
+                        manifest.oid(rel).unwrap(),
+                        &digest_of(rel),
+                        &cache_key
+                    ),
+                    "unchanged non-target {rel} must have NO unit"
+                );
+            }
+            // (d) a target the assembled graph does not carry is skipped even with
+            // a manifest OID: no stale unit is invented.
+            assert!(
+                a.candidate("go", "src/missing.go", "oid-missing", &cache_key)
+                    .is_none(),
+                "no unit for a graph-absent target"
+            );
+
+            // (b) full-scan control: the target set absent writes EVERY located
+            // file's unit (the graph-absent one still yields none).
+            let store_b = dir.join("store-b");
+            record(
+                &store_b,
+                &cache_key,
+                &scan_root,
+                &g,
+                &manifest,
+                "sha-b",
+                &BTreeSet::new(),
+            )
+            .unwrap();
+            let b = FactStore::at(store_b.clone()).load();
+            assert_eq!(b.len(), rels.len(), "every located file gets a unit");
+            for rel in rels {
+                assert!(
+                    b.has(
+                        "go",
+                        rel,
+                        manifest.oid(rel).unwrap(),
+                        &digest_of(rel),
+                        &cache_key
+                    ),
+                    "full scan must record {rel}"
+                );
+            }
+
+            // (c) the baseline writes still land after the runs, and re-running
+            // with a target set leaves a reused unit's fragment/inputs digest
+            // unchanged.
+            assert!(Manifest::load(&store_b).is_some(), "manifest.json on disk");
+            assert!(ScanRecord::load(&store_b).is_some(), "scan.json on disk");
+            for name in ["deps.json", "signatures.json", "overloads.json"] {
+                assert!(
+                    store_b.join("index").join(name).exists(),
+                    "index/{name} on disk"
+                );
+            }
+            let digest_a = digest_of("src/a.go");
+            let (before, before_root) = b
+                .reuse(
+                    "go",
+                    "src/a.go",
+                    manifest.oid("src/a.go").unwrap(),
+                    &digest_a,
+                    &cache_key,
+                )
+                .expect("the full scan recorded src/a.go");
+            assert_eq!(before_root, scan_root.to_string_lossy());
+
+            let one: BTreeSet<String> = ["src/a.go".to_string()].into_iter().collect();
+            record(
+                &store_b, &cache_key, &scan_root, &g, &manifest, "sha-c", &one,
+            )
+            .unwrap();
+            let c = FactStore::at(store_b.clone()).load();
+            let (after, _) = c
+                .reuse(
+                    "go",
+                    "src/a.go",
+                    manifest.oid("src/a.go").unwrap(),
+                    &digest_a,
+                    &cache_key,
+                )
+                .expect("the re-run kept src/a.go reusable");
+            assert_eq!(after, before, "a re-used unit's fragment is unchanged");
+            assert_eq!(
+                after.inputs_digest(),
+                digest_a,
+                "inputs digest byte-identical"
+            );
+
+            // A one-target run against a FRESH store writes exactly one unit —
+            // the scoping is not an artefact of units persisting from an earlier
+            // full run.
+            let store_c = dir.join("store-c");
+            record(
+                &store_c, &cache_key, &scan_root, &g, &manifest, "sha-d", &one,
+            )
+            .unwrap();
+            let cc = FactStore::at(store_c.clone()).load();
+            assert_eq!(cc.len(), 1, "a one-target run writes exactly one unit");
 
             let _ = std::fs::remove_dir_all(&dir);
         }

@@ -573,6 +573,68 @@ impl FileFragment {
         frag
     }
 
+    /// Derives this file's fragment from a one-pass [`FileIndex`] (phase-04
+    /// task-12). Identical to [`FileFragment::from_graph`] for the same graph
+    /// and arguments, but it reads only this file's index buckets instead of
+    /// rescanning the whole node map and all five edge sets — so building the
+    /// ~1 003 located files' fragments costs ONE graph traversal, not
+    /// `O(F*(N+E))`.
+    ///
+    /// `from_graph` stays the pre-fix reference oracle (task-20 compares the
+    /// two); the production scan records through this method.
+    pub fn from_index(
+        index: &FileIndex,
+        abs_path: &str,
+        rel_path: &str,
+        blob_oid: &str,
+        lang: &str,
+    ) -> FileFragment {
+        let mut frag = FileFragment {
+            rel_path: rel_path.to_string(),
+            blob_oid: blob_oid.to_string(),
+            lang: lang.to_string(),
+            ..FileFragment::default()
+        };
+
+        if let Some(nodes) = index.nodes_by_file.get(abs_path) {
+            frag.nodes.extend(nodes.iter().cloned());
+        }
+        // Edges authored by this file's declared units.
+        if let Some(edges) = index.edges_by_file.get(abs_path) {
+            for e in edges {
+                frag.inputs.insert(e.to.clone());
+                frag.edges.push(e.clone());
+            }
+        }
+        // A `Module -> File` edge is authored by neither endpoint's file (the
+        // module has no file and the File node is the target). Store it on the
+        // file's unit so a cached projection can rebuild the containment.
+        if let Some(mods) = index.module_edges_by_file.get(abs_path) {
+            for e in mods {
+                frag.modules.push(e.from.clone());
+                frag.inputs.insert(e.from.clone());
+                frag.edges.push(e.clone());
+            }
+        }
+        // Unresolved-target rows referenced by this file's edges travel with the
+        // unit so a projection can rebuild them without a re-scan.
+        for e in &frag.edges {
+            if matches!(e.kind.as_str(), "unresolved_call" | "unresolved_use")
+                && let Some(n) = index.node_rows.get(&e.to)
+            {
+                frag.nodes.push(n.clone());
+            }
+        }
+        frag.modules.sort();
+        frag.modules.dedup();
+        frag.nodes.sort_by(|a, b| a.fqn.cmp(&b.fqn));
+        frag.nodes.dedup_by(|a, b| a.fqn == b.fqn);
+        frag.edges
+            .sort_by(|a, b| (&a.kind, &a.from, &a.to).cmp(&(&b.kind, &b.from, &b.to)));
+        frag.edges.dedup();
+        frag
+    }
+
     /// Projects this unit onto a worktree: rebuilds its nodes (re-basing
     /// absolute paths from the writing worktree onto `reader_root`) and edges.
     /// Returns `(module_fqns, nodes, edges)`.
@@ -602,6 +664,166 @@ impl FileFragment {
             })
             .collect();
         (self.modules.clone(), nodes, edges)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The single-pass per-file index (phase-04 task-12)
+// ---------------------------------------------------------------------------
+
+/// A **one-pass per-file index** over an assembled [`Graph`].
+///
+/// [`FileFragment::from_graph`] rescans the whole node map and all five code
+/// edge sets for *each* file — `O(F*(N+E))`, ≈95 M iterations for the ~1 003
+/// located files of the staged jgrapht copy. [`FileIndex::build`] traverses the
+/// graph ONCE instead: every node is bucketed by the file it is located in and
+/// every edge by the file of its `from` unit (a `Module -> File` edge lands on
+/// the target File's bucket), so each file's fragment is derived from its own
+/// bucket alone — [`FileFragment::from_index`].
+///
+/// The builder is **pure** — it reads only the in-memory graph (no filesystem,
+/// database, git or process) — so the index property stays unit-testable.
+#[derive(Debug, Default)]
+pub struct FileIndex {
+    /// File key -> the File/Struct/Function nodes located in it.
+    nodes_by_file: BTreeMap<String, Vec<FragNode>>,
+    /// File key -> the edges authored by that file's declared units.
+    edges_by_file: BTreeMap<String, Vec<FragEdge>>,
+    /// File key -> the `Module -> File` contains edges targeting it.
+    module_edges_by_file: BTreeMap<String, Vec<FragEdge>>,
+    /// Every node's fragment row, keyed by FQN — resolves the row an unresolved
+    /// edge carries with the unit.
+    node_rows: BTreeMap<String, FragNode>,
+    /// The number of nodes visited while building (`== |nodes|`).
+    node_visits: usize,
+    /// The number of code-edge entries visited while building
+    /// (`== |contains|+|calls|+|uses|+|unresolved_calls|+|unresolved_uses|`).
+    edge_visits: usize,
+}
+
+impl FileIndex {
+    /// Builds the index in ONE pass over the graph: every node once, every
+    /// entry of the five code edge sets once.
+    pub fn build(graph: &Graph) -> FileIndex {
+        let mut index = FileIndex::default();
+        for (fqn, node) in &graph.nodes {
+            index.node_visits += 1;
+            let row = FragNode::of(fqn, node);
+            match node.kind {
+                // A File node keys by its FQN (which is its absolute path).
+                NodeKind::File => index
+                    .nodes_by_file
+                    .entry(fqn.clone())
+                    .or_default()
+                    .push(row.clone()),
+                // A Struct/Function keys by the file it is located in.
+                NodeKind::Struct | NodeKind::Function => {
+                    if let Some(loc) = &node.location {
+                        index
+                            .nodes_by_file
+                            .entry(loc.path.to_string_lossy().into_owned())
+                            .or_default()
+                            .push(row.clone());
+                    }
+                }
+                _ => {}
+            }
+            index.node_rows.insert(fqn.clone(), row);
+        }
+        for (a, b) in &graph.contains {
+            index.edge_visits += 1;
+            if let Some(key) = Self::file_key_of(graph, a) {
+                index.edges_by_file.entry(key).or_default().push(FragEdge {
+                    kind: "contains".to_string(),
+                    from: a.clone(),
+                    to: b.clone(),
+                    target_type: String::new(),
+                });
+            } else if graph
+                .nodes
+                .get(a)
+                .is_some_and(|n| n.kind == NodeKind::Module)
+            {
+                // A `Module -> File` edge is authored by neither endpoint's
+                // file, so it lands on the target File's bucket.
+                index
+                    .module_edges_by_file
+                    .entry(b.clone())
+                    .or_default()
+                    .push(FragEdge {
+                        kind: "contains".to_string(),
+                        from: a.clone(),
+                        to: b.clone(),
+                        target_type: String::new(),
+                    });
+            }
+        }
+        for (a, b) in &graph.calls {
+            index.edge_visits += 1;
+            index.push_edge(graph, a, b, "calls", "");
+        }
+        for (a, b) in &graph.uses {
+            index.edge_visits += 1;
+            index.push_edge(graph, a, b, "uses", "");
+        }
+        for (a, b, t) in &graph.unresolved_calls {
+            index.edge_visits += 1;
+            index.push_edge(graph, a, b, "unresolved_call", t);
+        }
+        for (a, b) in &graph.unresolved_uses {
+            index.edge_visits += 1;
+            index.push_edge(graph, a, b, "unresolved_use", "");
+        }
+        index
+    }
+
+    /// The file key a node's `from` role contributes its edges to: a File node
+    /// keys by its FQN, a Struct/Function by its location path, and every other
+    /// kind (Module, UnresolvedTarget, spec nodes) by no file.
+    fn file_key_of(graph: &Graph, fqn: &str) -> Option<String> {
+        let node = graph.nodes.get(fqn)?;
+        match node.kind {
+            NodeKind::File => Some(fqn.to_string()),
+            NodeKind::Struct | NodeKind::Function => node
+                .location
+                .as_ref()
+                .map(|l| l.path.to_string_lossy().into_owned()),
+            _ => None,
+        }
+    }
+
+    /// Buckets one edge authored by a file's declared unit (a no-op for an edge
+    /// whose `from` unit is not located in any file).
+    fn push_edge(&mut self, graph: &Graph, from: &str, to: &str, kind: &str, target_type: &str) {
+        if let Some(key) = Self::file_key_of(graph, from) {
+            self.edges_by_file.entry(key).or_default().push(FragEdge {
+                kind: kind.to_string(),
+                from: from.to_string(),
+                to: to.to_string(),
+                target_type: target_type.to_string(),
+            });
+        }
+    }
+
+    /// The number of nodes visited while building (`== |nodes|`).
+    pub fn node_visits(&self) -> usize {
+        self.node_visits
+    }
+
+    /// The number of code-edge entries visited while building
+    /// (`== |contains|+|calls|+|uses|+|unresolved_calls|+|unresolved_uses|`).
+    pub fn edge_visits(&self) -> usize {
+        self.edge_visits
+    }
+
+    /// Every file key the index carries a bucket for (tests/oracles).
+    pub fn files(&self) -> BTreeSet<String> {
+        self.nodes_by_file
+            .keys()
+            .chain(self.edges_by_file.keys())
+            .chain(self.module_edges_by_file.keys())
+            .cloned()
+            .collect()
     }
 }
 
@@ -1035,6 +1257,106 @@ mod tests {
         dir.parent().unwrap().to_path_buf()
     }
 
+    /// A located node helper for the pure fixtures (mirrors the frontend's
+    /// File/Struct/Function shape).
+    fn located_node(kind: NodeKind, path: &str) -> Node {
+        Node {
+            kind,
+            location: Some(Location {
+                path: PathBuf::from(path),
+                start: 0,
+                end: 1,
+                start_line: 1,
+                end_line: 1,
+            }),
+            code_type: "src".into(),
+            ..Node::default()
+        }
+    }
+
+    fn module_node() -> Node {
+        Node {
+            kind: NodeKind::Module,
+            ..Node::default()
+        }
+    }
+
+    /// A pure in-memory fixture graph for the single-pass index property: one
+    /// module over three files, a module hierarchy edge (module -> module), a
+    /// call/use across files, an unresolved target shared by two files, two
+    /// edges in one file to the SAME unresolved target (within-fragment dedup),
+    /// and a File node with no declarations.
+    fn index_fixture() -> Graph {
+        let mut g = Graph::default();
+        g.nodes.insert("m".into(), module_node());
+        g.nodes.insert("m.sub".into(), module_node());
+        g.contains.insert(("m".into(), "m.sub".into()));
+
+        // File a: a struct + two functions, one call and one use, and two
+        // unresolved edges to the SAME target.
+        g.nodes
+            .insert("/r/a.go".into(), located_node(NodeKind::File, "/r/a.go"));
+        g.nodes
+            .insert("m.a.A".into(), located_node(NodeKind::Struct, "/r/a.go"));
+        g.nodes
+            .insert("m.a.F".into(), located_node(NodeKind::Function, "/r/a.go"));
+        g.nodes
+            .insert("m.a.F2".into(), located_node(NodeKind::Function, "/r/a.go"));
+        g.contains.insert(("m".into(), "/r/a.go".into()));
+        g.contains.insert(("/r/a.go".into(), "m.a.A".into()));
+        g.contains.insert(("/r/a.go".into(), "m.a.F".into()));
+        g.contains.insert(("/r/a.go".into(), "m.a.F2".into()));
+        g.calls.insert(("m.a.F".into(), "m.b.G".into()));
+        g.uses.insert(("m.a.F".into(), "m.b.B".into()));
+        g.unresolved_calls
+            .insert(("m.a.F".into(), "fmt.Println".into(), "func(...)".into()));
+        g.unresolved_calls
+            .insert(("m.a.F2".into(), "fmt.Println".into(), "func(...)".into()));
+        g.unresolved_uses.insert(("m.a.A".into(), "os.File".into()));
+
+        // File b: the call/use targets plus an unresolved edge to the SAME
+        // target a carries (its own row, no cross-file coupling).
+        g.nodes
+            .insert("/r/b.go".into(), located_node(NodeKind::File, "/r/b.go"));
+        g.nodes
+            .insert("m.b.B".into(), located_node(NodeKind::Struct, "/r/b.go"));
+        g.nodes
+            .insert("m.b.G".into(), located_node(NodeKind::Function, "/r/b.go"));
+        g.contains.insert(("m".into(), "/r/b.go".into()));
+        g.contains.insert(("/r/b.go".into(), "m.b.B".into()));
+        g.contains.insert(("/r/b.go".into(), "m.b.G".into()));
+        g.calls.insert(("m.b.G".into(), "m.a.F".into()));
+        g.uses.insert(("m.b.G".into(), "m.a.A".into()));
+        g.unresolved_calls
+            .insert(("m.b.G".into(), "fmt.Println".into(), "func(...)".into()));
+
+        // The unresolved-target rows the fragments carry.
+        g.nodes.insert(
+            "fmt.Println".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some("stdlib".into()),
+                ..Node::default()
+            },
+        );
+        g.nodes.insert(
+            "os.File".into(),
+            Node {
+                kind: NodeKind::UnresolvedTarget,
+                category: Some("external".into()),
+                ..Node::default()
+            },
+        );
+
+        // A File node with no declarations (only the module -> file edge).
+        g.nodes.insert(
+            "/r/empty.go".into(),
+            located_node(NodeKind::File, "/r/empty.go"),
+        );
+        g.contains.insert(("m".into(), "/r/empty.go".into()));
+        g
+    }
+
     /// unit tier -- pure in-memory: no filesystem, database, git or process.
     mod unit {
         use super::*;
@@ -1089,6 +1411,105 @@ mod tests {
             assert!(d2.removed.contains("c.go"));
             assert!(d2.modified.contains("b.go"));
             assert!(d2.added.is_empty());
+        }
+
+        /// phase-04 task-20: the single-pass per-file index is falsifiably ONE
+        /// traversal (its visit counters equal the graph's own sizes and do not
+        /// grow as fragments are derived) and byte-identical to the unchanged
+        /// pre-fix `from_graph` per-file scan oracle.
+        #[test]
+        fn file_index_visits_each_node_and_edge_once_and_matches_reference_fragments() {
+            let g = index_fixture();
+            let index = FileIndex::build(&g);
+            let edge_total = g.contains.len()
+                + g.calls.len()
+                + g.uses.len()
+                + g.unresolved_calls.len()
+                + g.unresolved_uses.len();
+
+            // (a) ONE traversal: the counters equal the graph's own sizes.
+            assert_eq!(index.node_visits(), g.nodes.len());
+            assert_eq!(index.edge_visits(), edge_total);
+
+            // (b) equivalence for EVERY indexed file, against the unchanged
+            // pre-fix `from_graph` oracle.
+            let files = index.files();
+            assert!(files.contains("/r/a.go"), "{files:?}");
+            assert!(files.contains("/r/b.go"), "{files:?}");
+            assert!(files.contains("/r/empty.go"), "{files:?}");
+            let mut with_declarations = 0usize;
+            for abs in &files {
+                let reference = FileFragment::from_graph(&g, abs, "rel", "oid", "go");
+                let got = FileFragment::from_index(&index, abs, "rel", "oid", "go");
+                assert_eq!(got, reference, "index fragment differs for {abs}");
+                if !got.nodes.is_empty() {
+                    with_declarations += 1;
+                }
+            }
+            assert!(
+                with_declarations >= 3,
+                "the fixture must exercise real fragments"
+            );
+
+            // Deriving every fragment did NOT re-traverse the graph — the
+            // counters stay frozen at their build-time values.
+            assert_eq!(index.node_visits(), g.nodes.len());
+            assert_eq!(index.edge_visits(), edge_total);
+
+            // The unresolved-carrying fragment keeps its carried target rows, and
+            // two edges to the same target dedup to ONE row within the fragment.
+            let a = FileFragment::from_index(&index, "/r/a.go", "a.go", "oid-a", "go");
+            let unresolved: Vec<&str> = a
+                .nodes
+                .iter()
+                .filter(|n| n.kind == "unresolved")
+                .map(|n| n.fqn.as_str())
+                .collect();
+            assert!(unresolved.contains(&"fmt.Println"), "{unresolved:?}");
+            assert!(unresolved.contains(&"os.File"), "{unresolved:?}");
+            assert_eq!(
+                unresolved.iter().filter(|f| **f == "fmt.Println").count(),
+                1,
+                "within-fragment dedup: {unresolved:?}"
+            );
+            assert_eq!(a.modules, vec!["m".to_string()]);
+            // Two files referencing the SAME unresolved target each carry their
+            // own row; neither leaks the other's declarations.
+            let b = FileFragment::from_index(&index, "/r/b.go", "b.go", "oid-b", "go");
+            assert!(b.nodes.iter().any(|n| n.fqn == "fmt.Println"));
+            assert!(
+                !b.nodes.iter().any(|n| n.fqn == "m.a.A"),
+                "no cross-file coupling"
+            );
+            assert!(
+                !a.nodes.iter().any(|n| n.fqn == "m.b.B"),
+                "no cross-file coupling"
+            );
+
+            // (c) a path the graph does not carry yields the empty fragment, and a
+            // Module/Contains-only graph visits its objects but keys no file.
+            let missing = FileFragment::from_index(&index, "/r/nope.go", "nope.go", "oid", "go");
+            assert_eq!(
+                missing,
+                FileFragment::from_graph(&g, "/r/nope.go", "nope.go", "oid", "go")
+            );
+            assert!(
+                missing.nodes.is_empty() && missing.edges.is_empty() && missing.modules.is_empty()
+            );
+
+            let mut scaffold = Graph::default();
+            scaffold.nodes.insert("m".into(), module_node());
+            scaffold.nodes.insert("m.sub".into(), module_node());
+            scaffold.contains.insert(("m".into(), "m.sub".into()));
+            let sidx = FileIndex::build(&scaffold);
+            assert_eq!(sidx.node_visits(), 2);
+            assert_eq!(sidx.edge_visits(), 1);
+            let sfrag = FileFragment::from_index(&sidx, "/r/x.go", "x.go", "oid", "go");
+            assert_eq!(
+                sfrag,
+                FileFragment::from_graph(&scaffold, "/r/x.go", "x.go", "oid", "go")
+            );
+            assert!(sfrag.nodes.is_empty() && sfrag.edges.is_empty() && sfrag.modules.is_empty());
         }
     }
 
