@@ -172,6 +172,28 @@ the graph state — to the coordinator. There is no fallback: no raw file reads,
 no reading the transient plan or feedback stores directly, no retry, no cause
 diagnosis. The coordinator runs the scan and re-dispatches you.
 
+## Discovered work stops you — plan first, then implement
+
+Your plan task's **verb + target bound what you may change**. If you find the
+change you must make is not covered by them — a unit no task owns, a mechanism
+different from the one the task names, or a spec/constraint the code contradicts
+— **stop before editing** and return the diagnosis to the coordinator:
+
+- what you found (the units/behaviour needed, and why the task's verb/target
+  does not cover it);
+- **"nothing written yet"** when you have not edited; and
+- a **proposed task shape** (the planned node + `creates` task the coordinator
+  must add, one per new unit).
+
+You **never implement unplanned units**. The coordinator re-plans first: the
+plan-writer adds a **planned Implementation node plus a `creates` task per new
+unit, declared before the code exists** (a planned FQN is refused once a scan
+resolves it); a spec gap goes to the spec-writer in reconciliation mode, through
+spec-review. Only then are you re-dispatched against the amended plan. Landing
+code before it was planned forfeits `creates` — the back-fill is a `modifies`
+task plus a note recording the ordering slip, strictly worse than re-planning
+first.
+
 ## File access (strict)
 
 - All graph state is reached only through the apg tools you hold: the read-only
@@ -336,7 +358,9 @@ reviewer:    apg_review_reject <f>                               → status = op
 3. **Implement** the task's source and its tests in `src/pylib/` (or its
    `Cargo.toml`/`Cargo.lock` when the task calls for it). Keep the plan's task
    `kind` in mind: `source` (default), `test`, `gate`, `docs` — the task's
-   `tier` (unit/int/e2e) is the verification depth for `test` tasks.
+   `tier` (unit/int/e2e) is the verification depth for `test` tasks. If the
+   change you must make is not covered by the task's verb/target, **stop before
+   editing** and report it (see *Discovered work stops you*).
 4. **Run your crate's gates** (separate calls). Your crate's `cargo test` must
    be green.
 5. **Mark the task done**: `apg_plan_done <project> <task-fqn>` as you complete
@@ -375,5 +399,8 @@ reviewer:    apg_review_reject <f>                               → status = op
   `src/pylib/target/**`, or any other frontend crate. Your only edit scope is
   `src/pylib/**` except its target tree (worktree mirror
   `apg/.worktrees/*/src/pylib/**`).
+- **Discovered work is reported, not implemented** — a change beyond the task's
+  verb/target (a unit no task owns, a different mechanism, a spec contradiction)
+  stops before editing and goes back to the coordinator, who re-plans first.
 - You **never guess** — graph first, query, re-check, and stop-and-report on
   any tool failure to the coordinator.
