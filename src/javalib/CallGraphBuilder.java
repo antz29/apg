@@ -356,9 +356,12 @@ public class CallGraphBuilder {
         // Compile the dirty unchanged-package sources — plus the target files,
         // so the class dir stays a complete snapshot the unchanged packages
         // resolve against (a body-only change leaves them non-target while
-        // their dependents may still reference them) — and collect the
-        // UNCHANGED files' declaration surface. Crashing files are isolated
-        // and dropped, exactly like the full scan.
+        // their dependents may still reference them) — and collect the WHOLE
+        // batch's declaration surface (phase-04 task-15): the target-package
+        // declarations are part of the project-class index too, or the
+        // emitter's guards cannot recognise a target class whose attribution
+        // degraded and would leak it as a bare simple name. Crashing files are
+        // isolated and dropped, exactly like the full scan.
         if (!dirty.isEmpty() || !targetFiles.isEmpty()) {
             if (!dirty.isEmpty()) {
                 System.err.println("[" + elapsed() + "] compiling " + dirty.size()
@@ -369,27 +372,29 @@ public class CallGraphBuilder {
             Map<Path, FileRec> fresh = new LinkedHashMap<>();
             var ccompiler = ToolProvider.getSystemJavaCompiler();
             var cfm = ccompiler.getStandardFileManager(null, null, null);
-            compileAndCollect(ccompiler, cfm, new ArrayList<>(batch), classOpts, fresh, nonTargetFiles);
+            compileAndCollect(ccompiler, cfm, new ArrayList<>(batch), classOpts, fresh, batch);
             for (var e : fresh.entrySet()) clean.put(relOf(root, e.getKey()), e.getValue());
             endProgress();
         }
 
-        // Phase-04 task-15: the surface must be COMPLETE before target
-        // attribution. `compileAndCollect` drops a source that crashes javac
-        // (task-31 recovers its declarations), so re-check every unchanged file
-        // and surface any still absent from the class cache from source. A
-        // dropped source's declarations must never be silently missing, or its
-        // references would leak into the target attribution as bare
-        // project-class simple names / error symbols.
-        for (Path f : nonTargetFiles) {
+        // Phase-04 task-15: the project-class index must be COMPLETE over the
+        // WHOLE walked tree before target attribution. `compileAndCollect`
+        // drops a source that crashes javac (task-31 recovers its
+        // declarations), so re-check every walked file — TARGET files included,
+        // whatever side of the target boundary it is on — and surface any still
+        // absent from the class cache from source. A dropped source's
+        // declarations must never be silently missing, or its references would
+        // leak into the target attribution as bare project-class simple names /
+        // error symbols.
+        for (Path f : walked.keySet()) {
             String rel = relOf(root, f);
             if (clean.containsKey(rel)) continue;
             FileRec rec = surfaceFromSource(f);
             if (rec != null) {
-                System.err.println("  [" + elapsed() + "] surfaced un-attributable unchanged file: " + rel);
+                System.err.println("  [" + elapsed() + "] surfaced un-attributable file: " + rel);
                 clean.put(rel, rec);
             } else {
-                System.err.println("WARNING: no declaration surface for un-attributable unchanged file: " + rel);
+                System.err.println("WARNING: no declaration surface for un-attributable file: " + rel);
             }
         }
 
@@ -414,21 +419,38 @@ public class CallGraphBuilder {
         // Attribute ONLY the target packages, with the unchanged packages on
         // the classpath: javac resolves deps from bytecode (full context,
         // exact) but the unchanged sources are not re-analyzed.
+        //
+        // Phase-04 task-15: the class dir is a CACHE, never the whole context.
+        // javac refuses to emit bytecode for a compilation that has any error
+        // (the error-stop policy cannot be overridden through the JavacTask
+        // API), so a single unrelated error in the batch - an absent optional
+        // dependency, a module-info naming a missing module - leaves the class
+        // dir EMPTY and the target attribution degrades wholesale: every
+        // cross-package type becomes an error symbol, declaration parameter
+        // types lose their package (WeightCombiner, not
+        // org.jgrapht.graph.WeightCombiner) and resolved calls collapse into
+        // bare simple-name UnresolvedTargets. The pinned scan root is therefore
+        // also on the SOURCEPATH: a type the class dir cannot supply is
+        // attributed from source, exactly as the full scan resolves it. This is
+        // the full context the frontend contract requires; the class dir only
+        // saves the re-analysis when it is complete.
         List<Path> tfiles = new ArrayList<>(targetFiles);
         int total = tfiles.size();
         var tcompiler = ToolProvider.getSystemJavaCompiler();
         var tfm = tcompiler.getStandardFileManager(null, null, null);
-        var task = newTask(tcompiler, tfm, tfiles, List.of("-classpath", classesDir.toString()));
+        List<String> targetOpts = List.of(
+                "-classpath", classesDir.toString(),
+                "-sourcepath", root.toString());
+        var task = newTask(tcompiler, tfm, tfiles, targetOpts);
         var units = new ArrayList<CompilationUnitTree>();
         for (CompilationUnitTree unit : task.parse()) units.add(unit);
         if (!tryAnalyze(task, total)) {
             System.err.println("WARNING: attribution crashed; isolating offending files...");
-            List<Path> crashing = findCrashingFiles(tcompiler, tfm, tfiles,
-                List.of("-classpath", classesDir.toString()));
+            List<Path> crashing = findCrashingFiles(tcompiler, tfm, tfiles, targetOpts);
             System.err.println();
             System.err.println("WARNING: excluding " + crashing.size() + " files from attribution: " + crashing);
             tfiles.removeAll(crashing);
-            task = newTask(tcompiler, tfm, tfiles, List.of("-classpath", classesDir.toString()));
+            task = newTask(tcompiler, tfm, tfiles, targetOpts);
             units.clear();
             for (var unit : task.parse()) units.add(unit);
             tryAnalyze(task, tfiles.size());
@@ -1017,16 +1039,6 @@ public class CallGraphBuilder {
         return d >= 0 ? fqn.substring(d + 1) : fqn;
     }
 
-    /** Every simple class name in a set of FQNs. */
-    static Set<String> simpleNames(Collection<String> fqns) {
-        Set<String> out = new HashSet<>();
-        for (String fqn : fqns) {
-            String s = simpleName(fqn);
-            if (!s.isEmpty()) out.add(s);
-        }
-        return out;
-    }
-
     /** Simple class name -> canonical FQN, only for unambiguous names. */
     static Map<String, String> simpleStructIndex(Collection<String> surfaceStructs) {
         Map<String, List<String>> multi = new HashMap<>();
@@ -1098,13 +1110,11 @@ public class CallGraphBuilder {
         final boolean filtered;
         final Set<String> surfaceStructs;
         final Map<String, String> surfaceFuncFqn;
-        // Phase-04 task-15: indexes over the unchanged-package surface so a
-        // degraded (error-symbol) attribution never leaks a bare project-class
-        // simple name as an unresolved target. `surfaceSimpleNames` is EVERY
-        // project-class simple name (ambiguous ones included) and gates the
-        // "never emit a bare project class" rule; the two maps resolve the
-        // unambiguous names to their canonical FQNs.
-        final Set<String> surfaceSimpleNames;
+        // Phase-04 task-15: indexes over the WHOLE walked tree's declaration
+        // surface so a degraded (error-symbol) attribution never leaks a bare
+        // project-class simple name as an unresolved target —
+        // `surfaceSimpleStruct` resolves an unambiguous simple name to its
+        // canonical FQN.
         final Map<String, String> surfaceSimpleStruct;
         final Map<String, String> surfaceCtorBySimple;
 
@@ -1118,9 +1128,59 @@ public class CallGraphBuilder {
             this.filtered = filtered;
             this.surfaceStructs = surfaceStructs;
             this.surfaceFuncFqn = surfaceFuncFqn;
-            this.surfaceSimpleNames = simpleNames(surfaceStructs);
             this.surfaceSimpleStruct = simpleStructIndex(surfaceStructs);
             this.surfaceCtorBySimple = constructorIndex(surfaceFuncFqn);
+        }
+
+        // Phase-04 task-35: the COMPLETE project-class index the resolveCall
+        // fall-through consults on the filtered path. The surface indexes cover
+        // the whole walked tree (task-15); the Collector's own target
+        // declarations live in structID (FQN -> id) and funcID (function key ->
+        // id). Both halves are unioned BY SIMPLE NAME — structID is keyed by
+        // FQN, so a raw simple name can never match it directly. Built lazily:
+        // structID/funcID are only complete after collectAll.
+        private Map<String, String> projectStructBySimpleCache;
+        private Map<String, String> projectCtorBySimpleCache;
+
+        /** Simple class name -> canonical FQN over surface UNION target declarations. */
+        Map<String, String> projectStructBySimple() {
+            if (projectStructBySimpleCache == null) {
+                Map<String, String> m = new HashMap<>(surfaceSimpleStruct);
+                m.putAll(simpleStructIndex(structID.keySet()));
+                projectStructBySimpleCache = m;
+            }
+            return projectStructBySimpleCache;
+        }
+
+        /** Simple class name -> canonical `<init>` FQN over surface UNION target declarations. */
+        Map<String, String> projectCtorBySimple() {
+            if (projectCtorBySimpleCache == null) {
+                Map<String, String> m = new HashMap<>(surfaceCtorBySimple);
+                m.putAll(constructorIndex(renderedFuncFqn(funcID)));
+                projectCtorBySimpleCache = m;
+            }
+            return projectCtorBySimpleCache;
+        }
+
+        /**
+         * The ingestor's function-FQN rendering for a key -> id map's keys:
+         * a singleton (parent, name) group renders `parent.name`, an overloaded
+         * group `parent.name(params)` — identical to runIncrementalScan's
+         * surface rendering, so a resolved call into a target declaration
+         * matches the full scan's FQN exactly.
+         */
+        static Map<String, String> renderedFuncFqn(Map<String, String> funcKeys) {
+            Map<String, String> out = new HashMap<>();
+            Map<String, List<String>> groups = new LinkedHashMap<>();
+            for (String k : funcKeys.keySet()) {
+                groups.computeIfAbsent(groupKey(k), x -> new ArrayList<>()).add(k);
+            }
+            for (List<String> keys : groups.values()) {
+                for (String k : keys) {
+                    out.put(k, keys.size() == 1 ? k.substring(0, k.indexOf('(')) : k);
+                }
+            }
+            return out;
         }
 
         String newNodeID() {
@@ -1446,18 +1506,33 @@ public class CallGraphBuilder {
                     return;
                 }
             }
-            // Phase-04 task-15: a degraded/error-symbol call must not leak a
-            // bare project-class simple name. If the call names a project class
-            // we know from the surface, resolve a constructor to its canonical
-            // <init> FQN; otherwise suppress — the full context resolves it, so
-            // an unresolved target would be wrong.
+            // Phase-04 task-35: a degraded/error-symbol call must never leak a
+            // bare project-class simple name. The COMPLETE project-class index
+            // (the task-15 surface over the whole walked tree UNION the target
+            // declarations this Collector holds in structID/funcID) is consulted
+            // BY SIMPLE NAME: a constructor resolves to its canonical <init>
+            // FQN, and a project class with no declared constructor in the index
+            // resolves to the same `<FQN>.<init>` unresolved target the FULL
+            // context emits for its (implicit) constructor. A name the index
+            // cannot resolve to a single project class falls through to EXACTLY
+            // the full scan's own emission: the full scan is the exactness
+            // oracle, so suppressing a record it emits would be a deficit (the
+            // note-87 divergence direction). Only a genuine error symbol is
+            // withheld. The full scan (unfiltered) keeps its byte-identical
+            // behaviour.
             if (filtered && rawName != null && !rawName.contains("<error>")) {
-                String ctor = surfaceCtorBySimple.get(rawName);
+                String ctor = projectCtorBySimple().get(rawName);
                 if (ctor != null) {
                     emitEdge("calls", mtd, ctor);
                     return;
                 }
-                if (surfaceSimpleNames.contains(rawName)) return;
+                String structFqn = projectStructBySimple().get(rawName);
+                if (structFqn != null) {
+                    String fqn = structFqn + ".<init>";
+                    unresolved(fqn, categoryOf(structFqn));
+                    emitUnresolvedCall(mtd, fqn);
+                    return;
+                }
             }
             if (recvFqn != null && structID.containsKey(recvFqn)) {
                 emitEdge("uses", mtd, structID.get(recvFqn));
@@ -1465,9 +1540,7 @@ public class CallGraphBuilder {
                 emitEdge("uses", mtd, recvFqn);
             } else {
                 String target = rawName == null ? "?" : rawName;
-                if (filtered && (target.contains("<error>") || surfaceSimpleNames.contains(target))) {
-                    return;
-                }
+                if (filtered && target.contains("<error>")) return;
                 unresolved(target, "unknown");
                 emitUnresolvedCall(mtd, target);
             }
@@ -1490,24 +1563,22 @@ public class CallGraphBuilder {
             }
             String raw = typeRawName(type);
             if (raw == null) raw = "?";
-            // Phase-04 task-15: `tfqn` is null both for a genuinely non-class
-            // type (type variable, primitive) and for a degraded/error symbol.
-            // A project class known from the surface must never leak as a bare
-            // simple name or an error symbol — resolve it to its canonical FQN.
-            // The full scan has complete context and keeps its exact behaviour.
-            if (filtered) {
-                if (raw.contains("<error>")) return;
-                String canon = surfaceSimpleStruct.get(raw);
-                if (canon != null) {
-                    emitEdge("uses", fromId, canon);
-                    return;
-                }
-                if (structID.containsKey(raw)) {
-                    emitEdge("uses", fromId, structID.get(raw));
-                    return;
-                }
-                if (surfaceSimpleNames.contains(raw)) return;
-            }
+            // Phase-04 task-36: the previous pass's `structID.containsKey(raw)`
+            // compared a RAW SIMPLE NAME against structID's FQN keys — it could
+            // never match, and the surrounding surface reconstruction was built
+            // on it. Both are GONE: `recordUse` is a pure function of the tree's
+            // own attributed type, so when the FULL context degraded the tree
+            // (tfqn null) the full scan emits this same fall-through, and
+            // withholding or "resolving" it here would be a divergence from the
+            // exactness oracle — measured: reconstructing the unambiguous nested
+            // simple names the full context itself cannot resolve yields a
+            // deficit (DijkstraSearchFrontier / ContractionSearchFrontier /
+            // DijkstraClosestFirstIterator at jgrapht-core scale). The complete
+            // project-class index is consulted by resolveCall (task-35), where it
+            // reconstructs the correct resolved call; a type-use reference that
+            // javac could not resolve in the full context is emitted exactly as
+            // the full scan emits it. Only a genuine error symbol is withheld.
+            if (filtered && raw.contains("<error>")) return;
             unresolved(raw, "unknown");
             emitEdge("unresolved_use", fromId, raw);
         }

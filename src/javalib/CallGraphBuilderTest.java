@@ -36,6 +36,9 @@ public class CallGraphBuilderTest {
             testSurfaceFromSourceRecoversDroppedDeclarations(proj);
             testEmptyTargetsMeansNoFilter(proj, base);
             testNoMatchingTargetsEmitsScaffoldingOnly(proj, base);
+            Path proj2 = base.resolve("proj-incomplete");
+            writeIncompleteContextFixture(proj2);
+            testIncompleteClassDirStillResolvesTargetPackage(proj2, base);
         } finally {
             deleteRec(base);
         }
@@ -101,6 +104,62 @@ public class CallGraphBuilderTest {
 
     static Path bFile(Path proj) {
         return proj.resolve("pkg/b/B.java").toAbsolutePath().normalize();
+    }
+
+    /**
+     * Phase-04 task-15 fixture: the class-dir-incompleteness defect class.
+     *
+     * `pkg.a.Broken` is a source javac cannot compile — it references a package
+     * that does not exist — and `pkg.b.Target` is a TARGET-package class
+     * referenced from the re-emitted `pkg.b.B`. Because javac refuses to emit
+     * ANY bytecode for a compilation that has an error, the erroring source
+     * leaves the whole class dir empty, and the target attribution used to run
+     * against an incomplete context: the reference into the unchanged package
+     * degraded to a bare simple-name UnresolvedTarget (`foo`) and the exact
+     * `calls` edge vanished, while the reference to the TARGET-package class
+     * could not be recognised from the unchanged-package-only index.
+     */
+    static void writeIncompleteContextFixture(Path root) throws Exception {
+        Files.createDirectories(root.resolve("pkg/a"));
+        Files.createDirectories(root.resolve("pkg/b"));
+        Files.createDirectories(root.resolve("pkg/c"));
+        Files.writeString(root.resolve("pkg/a/A.java"), """
+            package pkg.a;
+            public class A {
+                public A() {}
+                public int foo() { return 1; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("pkg/a/Broken.java"), """
+            package pkg.a;
+            public class Broken {
+                public missing.Thing boom() { return null; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("pkg/b/Target.java"), """
+            package pkg.b;
+            public class Target {
+                public Target() {}
+                public int t() { return 2; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("pkg/b/B.java"), """
+            package pkg.b;
+            import pkg.a.A;
+            public class B {
+                private final A a = new A();
+                private final Target t = new Target();
+                public int go() { return a.foo() + t.t(); }
+                public Target make() { return new Target(); }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("pkg/c/C.java"), """
+            package pkg.c;
+            import pkg.b.B;
+            public class C {
+                public int baz() { return new B().go(); }
+            }
+            """, StandardCharsets.UTF_8);
     }
 
     // ------------------------------------------------------------------
@@ -236,6 +295,67 @@ public class CallGraphBuilderTest {
         String out = run(proj, "--targets", targets.toString()).out;
         check("an empty targets file is byte-identical to the full scan",
             full.equals(out), diff(full, out));
+    }
+
+    /**
+     * Phase-04 task-15 (residual): a TARGET-package class referenced from a
+     * re-emitted file resolves exactly even when a source javac cannot compile
+     * has left the class dir empty. This FAILS pre-fix (the resolved call is
+     * missing and a bare method simple name leaks) and PASSES post-fix.
+     *
+     * The enumerated oracle is the phase-04 task-9 one, scaled down: the whole
+     * target package's facts must equal a from-scratch full scan's facts for
+     * those files (per-record set equality), with NO UnresolvedTarget carrying
+     * a bare project-class simple name and none carrying a javac error symbol.
+     */
+    static void testIncompleteClassDirStillResolvesTargetPackage(Path proj, Path base) throws Exception {
+        String full = run(proj).out;
+        Path targets = base.resolve("incomplete-b.targets");
+        Files.writeString(targets, proj.resolve("pkg/b/B.java").toAbsolutePath().normalize() + "\n",
+            StandardCharsets.UTF_8);
+        Result incR = run(proj, "--targets", targets.toString(),
+            "--cache-dir", base.resolve("cache-incomplete").toString(), "--cache-key", "k1");
+        Set<String> inc = normalize(incR.out);
+
+        // The whole target package is re-emitted (Java's package granularity).
+        Set<Path> targetFiles = Set.of(
+            proj.resolve("pkg/b/B.java").toAbsolutePath().normalize(),
+            proj.resolve("pkg/b/Target.java").toAbsolutePath().normalize());
+        Set<String> fullForTarget = filterToTarget(normalize(full), targetFiles);
+        check("targeted facts equal the full scan's when the class dir is incomplete",
+            fullForTarget.equals(inc), setDiff(fullForTarget, inc) + "\nSTDERR:\n" + incR.err);
+
+        // The CORRECT resolved targets must appear (the pre-fix deficit).
+        check("the re-emitted file's call into the unchanged package resolves",
+            inc.contains("calls|pkg.b.B.go|pkg.a.A.foo"), "targeted output was:\n" + incR.out);
+        check("the re-emitted file's calls to the TARGET-package class resolve",
+            inc.contains("calls|pkg.b.B.go|pkg.b.Target.t")
+                && inc.contains("calls|pkg.b.B.make|pkg.b.Target.<init>"),
+            "targeted output was:\n" + incR.out);
+        check("the re-emitted file USES the TARGET-package class",
+            inc.contains("uses|pkg.b.B.make|pkg.b.Target"), "targeted output was:\n" + incR.out);
+
+        // No bare project-class simple name, no error symbol (the javac
+        // error-symbol leak note-87 measured on jgrapht).
+        Set<String> projectClasses = new TreeSet<>();
+        for (String line : full.split("\n")) {
+            if (line.contains("\"type\":\"struct\"")) {
+                String name = str(line, "name");
+                if (name != null) projectClasses.add(name);
+            }
+        }
+        List<String> bare = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+        for (String s : inc) {
+            String[] p = s.split("\\|", -1);
+            if (!p[0].equals("unresolved")) continue;
+            if (projectClasses.contains(p[1])) bare.add(p[1]);
+            if (p[1].contains("<error>")) errors.add(p[1]);
+        }
+        check("no UnresolvedTarget carries a bare project-class simple name",
+            bare.isEmpty(), "bare: " + bare + "\ntargeted output was:\n" + incR.out);
+        check("no UnresolvedTarget carries a javac error symbol",
+            errors.isEmpty(), "errors: " + errors + "\ntargeted output was:\n" + incR.out);
     }
 
     /**
@@ -394,13 +514,19 @@ public class CallGraphBuilderTest {
      * files; the unchanged packages' arrives via the global pre-emission.)
      */
     static Set<String> filterToTarget(Set<String> all, Path targetFile) {
-        String tf = targetFile.toString();
+        return filterToTarget(all, Set.of(targetFile));
+    }
+
+    /** The same filter over a SET of target files (Java re-emits whole packages). */
+    static Set<String> filterToTarget(Set<String> all, Set<Path> targetFiles) {
+        Set<String> tfs = new TreeSet<>();
+        for (Path p : targetFiles) tfs.add(p.toString());
         Set<String> targetUnits = new TreeSet<>();
         Set<String> modules = new TreeSet<>();
         for (String s : all) {
             String[] p = s.split("\\|", -1);
             if (p[0].equals("module")) modules.add(p[1]);
-            if ((p[0].equals("struct") || p[0].equals("function")) && p[2].equals(tf)) targetUnits.add(p[1]);
+            if ((p[0].equals("struct") || p[0].equals("function")) && tfs.contains(p[2])) targetUnits.add(p[1]);
         }
         Set<String> keep = new TreeSet<>();
         Set<String> keptUnresolved = new TreeSet<>();
@@ -408,8 +534,8 @@ public class CallGraphBuilderTest {
             String[] p = s.split("\\|", -1);
             switch (p[0]) {
                 case "module" -> keep.add(s);
-                case "file" -> { if (p[1].equals(tf)) keep.add(s); }
-                case "struct", "function" -> { if (p[2].equals(tf)) keep.add(s); }
+                case "file" -> { if (tfs.contains(p[1])) keep.add(s); }
+                case "struct", "function" -> { if (tfs.contains(p[2])) keep.add(s); }
                 case "contains" -> {
                     // Module->Module hierarchy is global; struct containment
                     // (nested struct / struct->method) is per-file.
