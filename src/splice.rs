@@ -606,6 +606,12 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     };
 
     // --- 1. Select the delta's code units from the assembled graph ---------
+    //
+    // The seeded Module FQNs, fetched ONCE (also reused for the delete scope in
+    // step 2): a module the seed does not own — a package/dir the previous scan
+    // did not have — is always re-decided, because the seed can vouch for
+    // neither its row nor its outgoing Contains rels.
+    let seeded_modules: BTreeSet<String> = seed_modules(conn)?.into_iter().collect();
     let mut delta_funcs: Vec<String> = Vec::new();
     let mut delta_structs: Vec<String> = Vec::new();
     let mut delta_files: Vec<String> = Vec::new();
@@ -615,10 +621,16 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     for (fqn, node) in &delta.graph.nodes {
         match node.kind {
             NodeKind::Module => {
-                // Only a module the delta's target set reaches is re-decided;
-                // an untouched module's seed row and outgoing Contains rels are
-                // already exact (the assembled graph may not carry them at all).
-                if reached(fqn) {
+                // A module is re-decided when the delta's target set reaches a
+                // File in its SEED subtree, OR when the seed has no Module row
+                // for it at all (a NEW package/dir: the assembled graph is the
+                // only source of truth for its node and its Contains rels). An
+                // otherwise-untouched module's seed row and outgoing Contains
+                // rels are already exact, and the assembled graph may not even
+                // carry them (a skipped language's scaffolding) — that guard is
+                // preserved. A delta File/Module added UNDER an untouched module
+                // is handled additively by the `Contains` merge in step 6.
+                if reached(fqn) || !seeded_modules.contains(fqn) {
                     delta_modules.push(fqn.clone());
                     delta_labels.insert(fqn.clone(), "Module");
                 }
@@ -652,12 +664,12 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // path (or whose FQN directly names one, for a File) is therefore in scope;
     // it disappears iff the assembled graph does not re-emit it.
     let mut in_scope: BTreeMap<String, &'static str> = code_fqns_in_paths(conn, delta.targets)?;
-    for m in seed_modules(conn)? {
+    for m in &seeded_modules {
         // Only a module whose ENTIRE file subtree is in the delta can be
         // genuinely gone; an untouched module (or one with any reused file left)
         // is left exactly as the seed left it.
-        if fully_reached(&m) {
-            in_scope.insert(m, "Module");
+        if fully_reached(m) {
+            in_scope.insert(m.clone(), "Module");
         }
     }
     for fqn in delta.removed_fqns {
@@ -763,8 +775,23 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     // --- 6. MERGE the delta's new outgoing rels ----------------------------
     let mut resolved: HashMap<String, Option<&'static str>> = HashMap::new();
     let mut merge = |table: &str, from: &str, to: &str, target_type: &str| -> anyhow::Result<()> {
-        let Some(from_label) = delta_labels.get(from).copied() else {
-            return Ok(()); // an edge authored outside the delta is untouched
+        // The delta authors an edge when it owns the SOURCE unit. `Contains` is
+        // the one exception (feedback-118): a seeded Module the delta did NOT
+        // re-decide still authors `Module -> File` / `Module -> Module` to a
+        // child the delta ADDED — a full rebuild carries that edge and the seed
+        // cannot, so it must be merged ADDITIVELY (nothing is deleted for that
+        // module, so its pre-existing Contains rels stay untouched).
+        let from_label = match delta_labels.get(from).copied() {
+            Some(label) => label,
+            None if table == "Contains" && delta_labels.contains_key(to) => {
+                match endpoint_label(conn, from, delta.graph, &mut resolved)? {
+                    Some(label) => label,
+                    // An unknown/unseeded source: the full load prunes it too.
+                    None => return Ok(()),
+                }
+            }
+            // An edge authored outside the delta is untouched.
+            None => return Ok(()),
         };
         // An edge into a unit that is being detached would be dropped by the
         // DETACH DELETE anyway; a full rebuild prunes it as dangling.
@@ -3185,6 +3212,169 @@ mod tests {
                 "the spliced DB's Scan row must match the export's line 1: {snap:?}"
             );
 
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// feedback-118 (phase-03 task-2): an ADD is the mirror of a removal. A
+        /// scan that adds a NEW FILE to an existing package AND a NEW PACKAGE (a
+        /// Module absent from the seed) must land exactly what a full rebuild
+        /// lands. The previous revision gated the module re-decide on the SEED
+        /// subtree (`reached`), so a module absent from the seed was never
+        /// inserted and the `Contains` edges a SEEDED module authors to the added
+        /// children (`Module -> File`, `Module -> Module`) were silently skipped —
+        /// the spliced DB then missed a `Module` row and `Contains` rels a full
+        /// rebuild keeps (`domain.constraint.db-splice-equivalence`).
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn added_file_and_new_package_land_like_a_full_rebuild() {
+            let dir = scratch("add-file-module");
+            let prev_path = dir.join("db.lbug");
+            let a = "/x/a.go".to_string();
+            let d = "/x/d.go".to_string();
+            let e = "/x/n/e.go".to_string();
+
+            let module = || Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            };
+
+            // prev: module `m` owning `a.go` (struct `m.A`, func `m.A.f`).
+            let mut prev = Graph::default();
+            prev.nodes.insert("m".into(), module());
+            prev.nodes
+                .insert(a.clone(), located(NodeKind::File, &a, 1, 20));
+            prev.nodes
+                .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 20));
+            prev.nodes
+                .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 10));
+            prev.contains.insert(("m".into(), a.clone()));
+            prev.contains.insert((a.clone(), "m.A".into()));
+            prev.contains.insert((a.clone(), "m.A.f".into()));
+            prev.contains.insert(("m.A".into(), "m.A.f".into()));
+            prev.nodes.insert(
+                crate::schema::SCAN_HEAD.into(),
+                scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+            );
+            build_db(&prev_path, &prev);
+
+            // assembled: the WHOLE new tree — `m` gains `d.go`, plus a NEW package
+            // `m.N` holding `n/e.go`.
+            let mut new = Graph::default();
+            new.nodes.insert("m".into(), module());
+            new.nodes.insert("m.N".into(), module());
+            new.nodes
+                .insert(a.clone(), located(NodeKind::File, &a, 1, 20));
+            new.nodes
+                .insert(d.clone(), located(NodeKind::File, &d, 1, 20));
+            new.nodes
+                .insert(e.clone(), located(NodeKind::File, &e, 1, 20));
+            new.nodes
+                .insert("m.A".into(), located(NodeKind::Struct, &a, 1, 20));
+            new.nodes
+                .insert("m.A.f".into(), located(NodeKind::Function, &a, 2, 10));
+            new.nodes
+                .insert("m.D".into(), located(NodeKind::Struct, &d, 1, 20));
+            new.nodes
+                .insert("m.D.d".into(), located(NodeKind::Function, &d, 2, 10));
+            new.nodes
+                .insert("m.N.E".into(), located(NodeKind::Struct, &e, 1, 20));
+            new.nodes
+                .insert("m.N.E.e".into(), located(NodeKind::Function, &e, 2, 10));
+            new.contains.insert(("m".into(), a.clone()));
+            new.contains.insert(("m".into(), d.clone()));
+            new.contains.insert(("m".into(), "m.N".into()));
+            new.contains.insert(("m.N".into(), e.clone()));
+            new.contains.insert((a.clone(), "m.A".into()));
+            new.contains.insert((a.clone(), "m.A.f".into()));
+            new.contains.insert(("m.A".into(), "m.A.f".into()));
+            new.contains.insert((d.clone(), "m.D".into()));
+            new.contains.insert((d.clone(), "m.D.d".into()));
+            new.contains.insert(("m.D".into(), "m.D.d".into()));
+            new.contains.insert((e.clone(), "m.N.E".into()));
+            new.contains.insert((e.clone(), "m.N.E.e".into()));
+            new.contains.insert(("m.N.E".into(), "m.N.E.e".into()));
+            new.nodes.insert(
+                crate::schema::SCAN_HEAD.into(),
+                scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
+            );
+
+            let seeded = match seed(&prev_path) {
+                SeedDecision::Seed(s) => s,
+                SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+            };
+            // The delta's re-emission target set: exactly the TWO added files.
+            let targets: BTreeSet<String> = [d.clone(), e.clone()].into_iter().collect();
+            let removed: BTreeSet<String> = BTreeSet::new();
+            seeded
+                .apply(&SpliceDelta {
+                    graph: &new,
+                    targets: &targets,
+                    removed_fqns: &removed,
+                    scan: ScanRow {
+                        git_sha: Some("newsha".into()),
+                        git_clean: Some(true),
+                        content_key: Some("newkey".into()),
+                        scanned_at: "2026-01-02T00:00:00Z".into(),
+                    },
+                })
+                .unwrap();
+
+            // The full-rebuild reference: the same assembled graph, loaded whole.
+            let expected_path = dir.join("expected.lbug");
+            build_db(&expected_path, &new);
+
+            // Per-table counts: per-label NODE counts AND per-rel-type COUNTS,
+            // with the Module node table and the Contains rel table named.
+            let spliced_counts = table_counts(&seeded.temp_path);
+            let expected_counts = table_counts(&expected_path);
+            assert_eq!(
+                spliced_counts, expected_counts,
+                "every table's count must equal a full rebuild"
+            );
+            assert_eq!(
+                spliced_counts.get("Module"),
+                expected_counts.get("Module"),
+                "the Module node count must equal a full rebuild's"
+            );
+            assert_eq!(
+                spliced_counts.get("Module"),
+                Some(&2),
+                "both packages (the seeded `m` and the NEW `m.N`) must be present"
+            );
+            assert_eq!(
+                spliced_counts.get("Contains"),
+                expected_counts.get("Contains"),
+                "the Contains rel count must equal a full rebuild's"
+            );
+
+            // The full structural set oracle (the Module set included).
+            let spliced = code_snapshot(&seeded.db);
+            let expected = {
+                let db =
+                    Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
+                let snap = code_snapshot(&db);
+                drop(db);
+                snap
+            };
+            assert_eq!(
+                spliced, expected,
+                "a spliced DB must answer a full rebuild's node/edge/Scan sets"
+            );
+            for needle in [
+                "Module:m.N:",
+                "Contains:m->/x/d.go",
+                "Contains:m->m.N",
+                "Contains:m.N->/x/n/e.go",
+            ] {
+                assert!(
+                    spliced.contains(needle),
+                    "the added file/package must land: `{needle}` missing from {spliced:?}"
+                );
+            }
+
+            let temp = seeded.temp_path.clone();
+            drop(seeded);
+            std::fs::remove_file(&temp).ok();
             let _ = std::fs::remove_dir_all(&dir);
         }
     }
