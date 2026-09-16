@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.fast-default-suite",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.e2e-final-gate-only",
+      "properties": {}
     }
   ],
   "in": [
