@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "unit-tier-pure",
+  "body": "A unit test exercises EXACTLY ONE unit — a single function, method, or struct's behaviour — with everything else FAKED. Its collaborators (filesystem, database, git, process spawning, network, clock, environment) are replaced by in-memory fakes; the test performs NO real I/O. It is pure in-memory: it runs in-process, with no temp directory, no `db.lbug` open, no git invocation, and no process spawn.\n\nAC: a unit test's body takes no real-I/O action (nothing matching the `global.constraint.test-tier-boundaries` boundary); every collaborator outside the one unit under test is a fake/stub/double; running the test creates and leaves no filesystem artifacts.",
+  "properties": {
+    "feature": "test-hygiene"
+  },
+  "out": [],
+  "in": []
+}
