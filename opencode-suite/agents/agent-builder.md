@@ -97,6 +97,13 @@ never a mutation place.
   (which tool, the invocation, what it returned/errored, the graph state) to
   the coordinator, who runs the scan. No fallback to raw file reads, no
   JSONL-fallback, no retry, no cause diagnosis.
+- **Stop-and-report on discovered work.** An implementer that finds the change
+  it must make is not covered by its task's verb/target — a unit no task owns, a
+  mechanism different from the one the task names, a spec/constraint the code
+  contradicts — **stops before editing** and returns the diagnosis and a
+  proposed task shape to the coordinator. It never implements unplanned units;
+  the coordinator re-plans first (a planned node plus a `creates` task per new
+  unit, declared before the code exists).
 - **No-internals prose.** Generated bodies name only the apg tools as the
   interface to the graph — no `.trans`/`layers` filesystem paths in prose.
 
@@ -128,6 +135,11 @@ never a mutation place.
   (`apg/.worktrees/*/src/golib/**` etc.). An agent whose grants only cover the
   root paths cannot touch the worktree it operates in; that is a broken
   scaffold (the 0.11.0 feedback-0-fix miss).
+- **Discovered work stops the implementer.** A change beyond the task's
+  verb/target — a new unit, a different mechanism, a spec contradiction — is
+  reported, not implemented: the coordinator routes it to the plan-writer (or
+  spec-writer) and re-dispatches. Discovered work is planned before it is
+  implemented.
 - **`apg_plan_done` / `apg_plan_undone`** — marks plan tasks done as it
   completes them.
 - **`apg_review`** — reads the transient feedback store (read-only). The

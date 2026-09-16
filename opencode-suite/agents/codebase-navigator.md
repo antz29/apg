@@ -409,6 +409,25 @@ grants: **without them, no code can change — that is the deliberate block.**
   `implementation-phase-reviewer` reviews a phase against the plan + spec and
   either completes it (`apg_plan_complete` — milestone only) or files Feedback.
 
+### Discovered work (stop → re-plan → implement)
+
+Implementation discovers work a plan did not enumerate; that is expected, and
+the order is not optional: **discovered work is planned before it is implemented.**
+
+- An implementer that finds its task's verb/target does not cover the change it
+  must make — a unit no task owns, a mechanism different from the one the task
+  names, a spec/constraint the code contradicts — **stops before editing** and
+  returns the diagnosis (findings, the units/behaviour needed, "nothing written
+  yet", a proposed task shape). Never let it implement unplanned units.
+- Route the discovery back to authoring before re-dispatching: the
+  **plan-writer** adds a planned Implementation node plus a `creates` task per
+  new unit, **declared before the code exists** (a planned FQN is refused once a
+  scan resolves it); a spec gap goes to the **spec-writer** in reconciliation
+  mode, through the spec-review cycle.
+- Then re-dispatch the implementer against the amended plan. A unit written
+  before it was planned can only be back-filled as a `modifies` task plus a note
+  recording the ordering slip — strictly worse than re-planning first.
+
 ### Feedback routing (coordinator-mediated)
 
 You are the **coordinator** of the feedback cycle. Every `Feedback` node is

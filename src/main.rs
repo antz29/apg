@@ -2011,6 +2011,38 @@ mod tests {
         }
     }
 
+    /// The discovered-work protocol: implementation-discovered work is re-planned
+    /// (a planned node plus a `creates` task) before it is implemented. The
+    /// embedded coordinator/authoring prompts must carry it so the rule cannot be
+    /// silently dropped from the distributed agents.
+    #[test]
+    fn discovered_work_is_replanned_before_it_is_implemented() {
+        fn agent(name: &str) -> &'static str {
+            AGENTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+        }
+        assert!(
+            agent("codebase-navigator.md")
+                .contains("discovered work is planned before it is implemented"),
+            "the coordinator prompt must state the discovered-work order"
+        );
+        assert!(
+            agent("agent-builder.md").contains("stops before editing"),
+            "the agent-builder template must carry the stop-and-report clause"
+        );
+        assert!(
+            agent("plan-writer.md").contains("declared before the code exists"),
+            "the plan-writer prompt must carry the planned-before-code rule"
+        );
+        assert!(
+            agent("spec-writer.md").contains("divergence discovered during implementation"),
+            "the spec-writer prompt must carry the reconciliation route for discovered divergence"
+        );
+    }
+
     #[test]
     fn scaffold_gitignore_adds_layout_entries_once() {
         let d = std::env::temp_dir().join(format!("apg-gitignore-{}", std::process::id()));

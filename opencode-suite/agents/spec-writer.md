@@ -183,6 +183,12 @@ The `implementation-phase-reviewer`'s final implementation review may discover
 fix the code (the implementer's job) or **reconcile the spec** — your job,
 through the normal spec-review cycle. When issued for reconciliation:
 
+A **divergence discovered during implementation** routes here before the code
+lands: when the implementer needs a behaviour the spec does not name, or the
+code cannot satisfy a prose law as written, the coordinator sends the finding to
+you first. Reconcile the spec (or report that the code must change instead)
+through the normal spec-review cycle; only then is the implementer re-dispatched.
+
 1. Compare the authored nodes against the code in the branch (`apg_query` the
    spine: `MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:SpecImplementedBy]->(c) RETURN …` vs `apg_find_symbol`/`apg_struct` for the built FQNs).
 2. Update the spec to tie it back to the implementation: re-point drifted

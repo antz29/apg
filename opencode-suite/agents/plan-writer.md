@@ -213,6 +213,25 @@ orchestrates; you operate the breakdown or a per-phase write):
 5. **Self-review.** `apg_plan_phases` must report no unsatisfied requirements (every spec requirement is Satisfied by some phase), **no requirement Satisfied by more than one phase**, no `Gates` cycles, and no phases without tasks.
 6. **Report.** Return the plan fqn (`<project>/plan`) and the next step (the navigator routes structural vs per-phase feedback; implementation proceeds via `apg_plan_done` per task as an assertion — the plan survives until verify).
 
+## Re-planning discovered work
+
+The coordinator routes a mid-implementation discovery back to you when the
+change needs units the plan does not cover. Add the coverage before the code is
+written:
+
+- For each new unit, declare a **planned Implementation node**
+  (`apg_plan_add <project> planned <kind> <fqn>`) and a `creates` task naming it
+  — **declared before the code exists**: a planned FQN is refused once the code
+  resolves in a scan, so a unit landed first can only be back-filled as a
+  `modifies` task plus a note recording the ordering slip.
+- A unit that already resolves in the scanned graph is a `modifies` (or
+  `deletes`/`renames`/`moves`) target, never `creates`.
+- The discoverer's proposed shape is a proposal: confirm the units, the verb
+  classification and the acceptance criteria against the spec and the graph
+  before authoring.
+- Report the added task FQNs back to the coordinator, who re-dispatches the
+  implementer against the amended plan.
+
 ## Translating an existing prose plan
 
 If handed an existing prose plan (`PLAN.md` / `PHASE_*.md`), translate it into

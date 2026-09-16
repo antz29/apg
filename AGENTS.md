@@ -77,6 +77,30 @@ internals:
    upgrade act**: re-run it idempotently to write the current version, scaffold
    `apg/.worktrees/` + its `.gitignore` entry, and update the installed suite.
 
+### Discovered work: stop, re-plan, then implement
+
+A plan cannot enumerate every unit a change needs — discovery during
+implementation is expected. What is not optional is the order: **discovered work
+is planned before it is implemented.**
+
+- An implementer that finds its task's verb/target does not cover the change it
+  must make — a unit no task owns, a different mechanism than the task names, a
+  spec/constraint the code contradicts — **stops before editing** and returns the
+  diagnosis (what it found, the units/behaviour needed, "nothing written yet",
+  and a proposed task shape) to the coordinator.
+- The coordinator routes the discovery back to authoring: the **plan-writer** adds
+  the missing coverage — a **planned Implementation node plus a `creates` task per
+  new unit, declared before the code exists** (a planned FQN is refused once the
+  code resolves in a scan); a spec gap goes to the **spec-writer** in
+  reconciliation mode, through spec-review.
+- Only then is the implementer re-dispatched against the amended plan. "Everything
+  ends up planned at some point" is the invariant; the verify gate (every unit
+  covered by a task, planned nodes realized, feedback resolved) is where it is
+  checked.
+- Corollary: `creates` is only authorable while the FQN is absent from the scanned
+  graph. Landing the code first forfeits it — the back-fill is then a `modifies`
+  task plus a note saying so, which is strictly worse.
+
 The suite agents (`codebase-navigator`, `spec-writer`, `plan-writer`,
 `spec-review`, `plan-review`, `agent-builder`) hold the operational detail.
 
