@@ -1419,852 +1419,878 @@ mod tests {
             .to_string()
     }
 
-    #[test]
-    fn illegal_details_pair_is_projected_away_not_a_binder_error() {
-        let (apg_root, repo, _wt) = project_fixture("orphan");
-        let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let baseline = baseline_records();
+    /// e2e tier -- real I/O: every test here builds a real project context
+    /// (git worktree + `db.lbug`), writes node files/JSONL on disk or spawns the
+    /// `apg` binary. Each is `#[ignore]`d, so a plain `cargo test` never runs
+    /// one; the only entry point is the named guard `cargo test-e2e`
+    /// (= `cargo test tests::e2e:: -- --ignored`).
+    mod e2e {
+        use super::*;
 
-        // A healthy committed state, write-through.
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
-        {
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn illegal_details_pair_is_projected_away_not_a_binder_error() {
+            let (apg_root, repo, _wt) = project_fixture("orphan");
+            let path = specs::plan_jsonl_path(&apg_root, "foo");
+            let baseline = baseline_records();
+
+            // A healthy committed state, write-through.
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert!(db.has_node("foo/plan"));
+                assert!(db.has_node("foo/note-1"));
+                assert_eq!(orphan_notes(&db), 0);
+            }
+
+            // A note whose Details edge targets another Note — a pair the Details
+            // rel table does NOT declare. The schema-pair guard projects the
+            // illegal pair away (the same bucketing the scan load path applies),
+            // so the write-through succeeds and the DB projection matches what a
+            // fresh scan would produce (the note node lands, the impossible edge
+            // never materializes).
+            let mut mutated = baseline.clone();
+            mutated.push(Record::Note {
+                fqn: "foo/note-2".into(),
+                body: "poison".into(),
+                kind: "background".into(),
+            });
+            mutated.push(Record::Details {
+                from: "foo/note-2".into(),
+                to: "foo/note-1".into(),
+            });
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap();
+
+            // The JSONL committed (the note record is durable truth).
+            assert_eq!(specs::read_jsonl(&path).unwrap(), mutated);
+            // No temp residue next to the committed JSONL.
+            let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join(specs::TRANS).join("plans"))
+                .into_iter()
+                .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
+                .collect();
+            assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
+
+            // The DB projection: the note node lands, the undeclared Details edge
+            // does not (identical to the scan load path's pair bucketing).
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(db.has_node("foo/note-2"));
+            let out = db
+                .conn()
+                .unwrap()
+                .query("MATCH (:Note {fqn: 'foo/note-2'})-[:Details]->() RETURN count(*)")
+                .unwrap()
+                .to_string();
+            assert!(
+                out.lines().last() == Some("0"),
+                "illegal pair must be projected away: {out}"
+            );
+            // The prior healthy edge survived the re-merge.
+            let out = db
+                .conn()
+                .unwrap()
+                .query("MATCH (:Note {fqn: 'foo/note-1'})-[:Details]->(p:Plan) RETURN count(*)")
+                .unwrap()
+                .to_string();
+            assert!(out.lines().last() == Some("1"), "healthy edge: {out}");
+            drop(db);
+
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn write_through_commits_jsonl_and_db() {
+            let (apg_root, repo, _wt) = project_fixture("commit");
+            let path = specs::plan_jsonl_path(&apg_root, "foo");
+            let recs = baseline_records();
+
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
+
+            // The JSONL matches the new records (a first write lands in the DB too,
+            // even though the file did not exist before this call).
+            assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(db.has_node("foo/plan"));
+            assert!(db.has_node("foo/plan.phase-01"));
+            assert!(db.has_node("foo/note-1"));
+            assert_eq!(orphan_notes(&db), 0);
+            let out = db
+                .conn()
+                .unwrap()
+                .query("MATCH (:Note)-[:Details]->(p:Plan) RETURN p.fqn")
+                .unwrap()
+                .to_string();
+            assert!(out.contains("foo/plan"), "details edge: {out}");
+            drop(db);
+
+            testutil::remove(&repo);
+        }
+
+        /// The plan re-merge write-through (`node_merge` → `MERGE SET`) carries the
+        /// Task verb projection too: a re-ingested Task record lands its
+        /// verb/target/new_fqn in the live DB, so the suite tools see the same
+        /// columns the scan load path projects.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn write_through_projects_task_verb_fields() {
+            let (apg_root, repo, _wt) = project_fixture("task-verb");
+            let path = specs::plan_jsonl_path(&apg_root, "foo");
+            let recs = vec![
+                Record::Plan {
+                    fqn: "foo/plan".into(),
+                    title: "Foo".into(),
+                    strategy: String::new(),
+                },
+                Record::PlanPhase {
+                    fqn: "foo/plan.phase-01".into(),
+                    number: 1,
+                    title: "P1".into(),
+                    deliverable: String::new(),
+                    status: "pending".into(),
+                },
+                Record::Contains {
+                    from: "foo/plan".into(),
+                    to: "foo/plan.phase-01".into(),
+                },
+                Record::Task {
+                    fqn: "foo/plan.phase-01.task-1".into(),
+                    title: "Rename".into(),
+                    kind: "source".into(),
+                    tier: String::new(),
+                    status: "pending".into(),
+                    verb: "renames".into(),
+                    target: "foo.Old".into(),
+                    new_fqn: "foo.New".into(),
+                },
+                Record::Contains {
+                    from: "foo/plan.phase-01".into(),
+                    to: "foo/plan.phase-01.task-1".into(),
+                },
+            ];
+
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
+
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            let out = db
+                .q("MATCH (t:Task) RETURN t.fqn, t.verb, t.target, t.new_fqn")
+                .unwrap();
+            assert!(
+                out.contains("foo/plan.phase-01.task-1")
+                    && out.contains("renames")
+                    && out.contains("foo.Old")
+                    && out.contains("foo.New"),
+                "write-through task verb projection: {out}"
+            );
+            drop(db);
+
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn write_through_without_db_writes_jsonl() {
+            let (apg_root, repo, _wt) = project_fixture("nodb");
+            std::fs::remove_file(apg_root.join(specs::TRANS).join("db.lbug")).unwrap();
+            let path = specs::plan_jsonl_path(&apg_root, "foo");
+            let recs = baseline_records();
+
+            // No scan yet: the JSONL is the durable form; no re-ingest is attempted.
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
+            assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
+            assert!(!path.as_os_str().to_string_lossy().ends_with(".tmp"));
+
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn stale_db_refuses_mutation_before_any_jsonl_write() {
+            let (apg_root, repo, wt) = project_fixture("stale");
+            // The DB records a clean scan at the first commit; then the branch
+            // tree moves on to a second commit: stale.
+            std::fs::write(wt.join("extra.txt"), "x").unwrap();
+            wt_commit_paths(&wt, &["extra.txt"], "second");
+            assert!(git::is_stale(&apg_root));
+
+            let path = specs::plan_jsonl_path(&apg_root, "foo");
+            let recs = baseline_records();
+            let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("graph is stale"), "refusal message: {msg}");
+            assert!(msg.contains("run `apg scan` before mutating"), "{msg}");
+
+            // The durable JSONL was never written (no partial mutation), and no
+            // temp residue sits next to where it would have gone.
+            assert!(!path.exists(), "refused mutation must not write JSONL");
+            let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join(specs::TRANS).join("plans"))
+                .into_iter()
+                .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
+                .collect();
+            assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
+
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn fresh_git_db_allows_write_through() {
+            let (apg_root, repo, _wt) = project_fixture("fresh");
+            // The recorded scan matches the current tree exactly → fresh.
+            assert!(!git::is_stale(&apg_root));
+
+            let path = specs::plan_jsonl_path(&apg_root, "foo");
+            let recs = baseline_records();
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
+
+            // The write-through landed in both the durable JSONL and the live DB.
+            assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
             let db = ArtifactDb::open(&apg_root).unwrap();
             assert!(db.has_node("foo/plan"));
             assert!(db.has_node("foo/note-1"));
             assert_eq!(orphan_notes(&db), 0);
+            drop(db);
+
+            testutil::remove(&repo);
         }
 
-        // A note whose Details edge targets another Note — a pair the Details
-        // rel table does NOT declare. The schema-pair guard projects the
-        // illegal pair away (the same bucketing the scan load path applies),
-        // so the write-through succeeds and the DB projection matches what a
-        // fresh scan would produce (the note node lands, the impossible edge
-        // never materializes).
-        let mut mutated = baseline.clone();
-        mutated.push(Record::Note {
-            fqn: "foo/note-2".into(),
-            body: "poison".into(),
-            kind: "background".into(),
-        });
-        mutated.push(Record::Details {
-            from: "foo/note-2".into(),
-            to: "foo/note-1".into(),
-        });
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap();
+        /// Phase-02 task-8: `code_universes_from_export` classifies Real
+        /// (graph.jsonl) / Planned (plan store) / absent with NO `db.lbug` open.
+        ///
+        /// The fixture deliberately writes a BOGUS `db.lbug` (not a database): if
+        /// the resolver opened it, decoding would fail — a passed test proves the
+        /// DB was never touched. A declared-but-unscanned planned FQN (the
+        /// `apg.session.Coordinator` example) classifies Planned, never drift.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn code_universes_from_export_classifies_real_planned_absent_without_db() {
+            let dir = std::env::temp_dir().join(format!("apg-cu-export-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let trans = dir.join(specs::TRANS);
+            std::fs::create_dir_all(trans.join("plans")).unwrap();
 
-        // The JSONL committed (the note record is durable truth).
-        assert_eq!(specs::read_jsonl(&path).unwrap(), mutated);
-        // No temp residue next to the committed JSONL.
-        let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join(specs::TRANS).join("plans"))
-            .into_iter()
-            .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
-            .collect();
-        assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
-
-        // The DB projection: the note node lands, the undeclared Details edge
-        // does not (identical to the scan load path's pair bucketing).
-        let db = ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("foo/note-2"));
-        let out = db
-            .conn()
-            .unwrap()
-            .query("MATCH (:Note {fqn: 'foo/note-2'})-[:Details]->() RETURN count(*)")
-            .unwrap()
-            .to_string();
-        assert!(
-            out.lines().last() == Some("0"),
-            "illegal pair must be projected away: {out}"
-        );
-        // The prior healthy edge survived the re-merge.
-        let out = db
-            .conn()
-            .unwrap()
-            .query("MATCH (:Note {fqn: 'foo/note-1'})-[:Details]->(p:Plan) RETURN count(*)")
-            .unwrap()
-            .to_string();
-        assert!(out.lines().last() == Some("1"), "healthy edge: {out}");
-        drop(db);
-
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn write_through_commits_jsonl_and_db() {
-        let (apg_root, repo, _wt) = project_fixture("commit");
-        let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let recs = baseline_records();
-
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
-
-        // The JSONL matches the new records (a first write lands in the DB too,
-        // even though the file did not exist before this call).
-        assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
-        let db = ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("foo/plan"));
-        assert!(db.has_node("foo/plan.phase-01"));
-        assert!(db.has_node("foo/note-1"));
-        assert_eq!(orphan_notes(&db), 0);
-        let out = db
-            .conn()
-            .unwrap()
-            .query("MATCH (:Note)-[:Details]->(p:Plan) RETURN p.fqn")
-            .unwrap()
-            .to_string();
-        assert!(out.contains("foo/plan"), "details edge: {out}");
-        drop(db);
-
-        testutil::remove(&repo);
-    }
-
-    /// The plan re-merge write-through (`node_merge` → `MERGE SET`) carries the
-    /// Task verb projection too: a re-ingested Task record lands its
-    /// verb/target/new_fqn in the live DB, so the suite tools see the same
-    /// columns the scan load path projects.
-    #[test]
-    fn write_through_projects_task_verb_fields() {
-        let (apg_root, repo, _wt) = project_fixture("task-verb");
-        let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let recs = vec![
-            Record::Plan {
-                fqn: "foo/plan".into(),
-                title: "Foo".into(),
-                strategy: String::new(),
-            },
-            Record::PlanPhase {
-                fqn: "foo/plan.phase-01".into(),
-                number: 1,
-                title: "P1".into(),
-                deliverable: String::new(),
-                status: "pending".into(),
-            },
-            Record::Contains {
-                from: "foo/plan".into(),
-                to: "foo/plan.phase-01".into(),
-            },
-            Record::Task {
-                fqn: "foo/plan.phase-01.task-1".into(),
-                title: "Rename".into(),
-                kind: "source".into(),
-                tier: String::new(),
-                status: "pending".into(),
-                verb: "renames".into(),
-                target: "foo.Old".into(),
-                new_fqn: "foo.New".into(),
-            },
-            Record::Contains {
-                from: "foo/plan.phase-01".into(),
-                to: "foo/plan.phase-01.task-1".into(),
-            },
-        ];
-
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
-
-        let db = ArtifactDb::open(&apg_root).unwrap();
-        let out = db
-            .q("MATCH (t:Task) RETURN t.fqn, t.verb, t.target, t.new_fqn")
-            .unwrap();
-        assert!(
-            out.contains("foo/plan.phase-01.task-1")
-                && out.contains("renames")
-                && out.contains("foo.Old")
-                && out.contains("foo.New"),
-            "write-through task verb projection: {out}"
-        );
-        drop(db);
-
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn write_through_without_db_writes_jsonl() {
-        let (apg_root, repo, _wt) = project_fixture("nodb");
-        std::fs::remove_file(apg_root.join(specs::TRANS).join("db.lbug")).unwrap();
-        let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let recs = baseline_records();
-
-        // No scan yet: the JSONL is the durable form; no re-ingest is attempted.
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
-        assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
-        assert!(!path.as_os_str().to_string_lossy().ends_with(".tmp"));
-
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn stale_db_refuses_mutation_before_any_jsonl_write() {
-        let (apg_root, repo, wt) = project_fixture("stale");
-        // The DB records a clean scan at the first commit; then the branch
-        // tree moves on to a second commit: stale.
-        std::fs::write(wt.join("extra.txt"), "x").unwrap();
-        wt_commit_paths(&wt, &["extra.txt"], "second");
-        assert!(git::is_stale(&apg_root));
-
-        let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let recs = baseline_records();
-        let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("graph is stale"), "refusal message: {msg}");
-        assert!(msg.contains("run `apg scan` before mutating"), "{msg}");
-
-        // The durable JSONL was never written (no partial mutation), and no
-        // temp residue sits next to where it would have gone.
-        assert!(!path.exists(), "refused mutation must not write JSONL");
-        let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join(specs::TRANS).join("plans"))
-            .into_iter()
-            .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
-            .collect();
-        assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
-
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn fresh_git_db_allows_write_through() {
-        let (apg_root, repo, _wt) = project_fixture("fresh");
-        // The recorded scan matches the current tree exactly → fresh.
-        assert!(!git::is_stale(&apg_root));
-
-        let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let recs = baseline_records();
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
-
-        // The write-through landed in both the durable JSONL and the live DB.
-        assert_eq!(specs::read_jsonl(&path).unwrap(), recs);
-        let db = ArtifactDb::open(&apg_root).unwrap();
-        assert!(db.has_node("foo/plan"));
-        assert!(db.has_node("foo/note-1"));
-        assert_eq!(orphan_notes(&db), 0);
-        drop(db);
-
-        testutil::remove(&repo);
-    }
-
-    /// The two record kinds the write-through re-merge used to drop through
-    /// `_ => None`: authored `uses` (Person→System) and `calls`
-    /// (Service→Service) map to their rel tables.
-    #[test]
-    fn edge_merge_maps_authored_uses_and_calls() {
-        assert_eq!(
-            edge_merge(&Record::Uses {
-                from: "solution.person.alice".into(),
-                to: "solution.system.portal".into(),
-            }),
-            Some(("Uses", "solution.person.alice", "solution.system.portal"))
-        );
-        assert_eq!(
-            edge_merge(&Record::Calls {
-                from: "domain.service.a".into(),
-                to: "domain.service.b".into(),
-            }),
-            Some(("Calls", "domain.service.a", "domain.service.b"))
-        );
-    }
-
-    /// The merge guard admits the two authored-only pairs through
-    /// [`load::rel_table_pairs`] — the guard's only consumer.
-    #[test]
-    fn rel_pair_allowed_admits_authored_uses_and_calls() {
-        assert!(rel_pair_allowed("Uses", "Person", "System"));
-        assert!(rel_pair_allowed("Calls", "Service", "Service"));
-    }
-
-    /// `remove_node` strips incident authored `uses`/`calls` edges too — they
-    /// were previously left behind because `edge_endpoints` did not recognize
-    /// the two record kinds.
-    #[test]
-    fn remove_node_strips_incident_uses_and_calls_edges() {
-        let mut records = vec![
-            Record::Person {
-                fqn: "solution.person.alice".into(),
-                name: "alice".into(),
-                body: String::new(),
-            },
-            Record::System {
-                fqn: "solution.system.portal".into(),
-                name: "portal".into(),
-                body: String::new(),
-            },
-            Record::Uses {
-                from: "solution.person.alice".into(),
-                to: "solution.system.portal".into(),
-            },
-            Record::Service {
-                fqn: "domain.service.a".into(),
-                name: "a".into(),
-                body: String::new(),
-            },
-            Record::Service {
-                fqn: "domain.service.b".into(),
-                name: "b".into(),
-                body: String::new(),
-            },
-            Record::Calls {
-                from: "domain.service.a".into(),
-                to: "domain.service.b".into(),
-            },
-            // An unrelated node + edge that must survive both removals.
-            Record::Note {
-                fqn: "foo/note-1".into(),
-                body: "background".into(),
-                kind: "background".into(),
-            },
-            Record::Details {
-                from: "foo/note-1".into(),
-                to: "solution.system.portal".into(),
-            },
-        ];
-
-        remove_node(&mut records, "solution.person.alice");
-        remove_node(&mut records, "domain.service.a");
-
-        let has_node = |fqn: &str| records.iter().any(|r| node_fqn(r) == Some(fqn));
-        let has_edge = |from: &str, to: &str| {
-            records
-                .iter()
-                .any(|r| edge_endpoints(r) == Some((from, to)))
-        };
-        assert!(!has_node("solution.person.alice"), "person must be removed");
-        assert!(!has_node("domain.service.a"), "service must be removed");
-        assert!(
-            !has_edge("solution.person.alice", "solution.system.portal"),
-            "the incident Uses edge must be removed with the person"
-        );
-        assert!(
-            !has_edge("domain.service.a", "domain.service.b"),
-            "the incident Calls edge must be removed with the service"
-        );
-        assert!(has_node("solution.system.portal"));
-        assert!(has_node("domain.service.b"));
-        assert!(has_edge("foo/note-1", "solution.system.portal"));
-    }
-
-    /// Phase-02 task-8: `code_universes_from_export` classifies Real
-    /// (graph.jsonl) / Planned (plan store) / absent with NO `db.lbug` open.
-    ///
-    /// The fixture deliberately writes a BOGUS `db.lbug` (not a database): if
-    /// the resolver opened it, decoding would fail — a passed test proves the
-    /// DB was never touched. A declared-but-unscanned planned FQN (the
-    /// `apg.session.Coordinator` example) classifies Planned, never drift.
-    #[test]
-    fn code_universes_from_export_classifies_real_planned_absent_without_db() {
-        let dir = std::env::temp_dir().join(format!("apg-cu-export-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let trans = dir.join(specs::TRANS);
-        std::fs::create_dir_all(trans.join("plans")).unwrap();
-
-        // graph.jsonl: a scan_meta lead, two real code nodes, and one node
-        // already projected with `status: planned` (a planned declaration that
-        // a scan carried through).
-        let graph = [
+            // graph.jsonl: a scan_meta lead, two real code nodes, and one node
+            // already projected with `status: planned` (a planned declaration that
+            // a scan carried through).
+            let graph = [
             r#"{"type":"scan_meta","git_sha":"abc","git_clean":true,"scanned_at":"2026-09-07T00:00:00Z"}"#,
             r#"{"type":"module","fqn":"github.com/x/y"}"#,
             r#"{"type":"struct","fqn":"github.com/x/y.Store","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src"}"#,
             r#"{"type":"function","fqn":"github.com/x/y.plannedFn","path":"/abs/store.go","start":0,"end":1,"start_line":1,"end_line":1,"code_type":"src","status":"planned"}"#,
         ]
         .join("\n");
-        std::fs::write(trans.join("graph.jsonl"), format!("{graph}\n")).unwrap();
+            std::fs::write(trans.join("graph.jsonl"), format!("{graph}\n")).unwrap();
 
-        // The plan store declares a FQN that has not been scanned yet.
-        specs::write_jsonl(
-            &trans.join("plans").join("foo.jsonl"),
-            &[Record::PlannedNode {
-                fqn: "apg.session.Coordinator".into(),
-                kind: "struct".into(),
-                name: "Coordinator".into(),
-                parent: "apg.session".into(),
-            }],
-        )
-        .unwrap();
-
-        // A bogus DB — never opened by the resolver.
-        std::fs::write(trans.join("db.lbug"), b"this is definitely not a db").unwrap();
-
-        let (scanned, planned) = code_universes_from_export(&dir).unwrap();
-        assert!(scanned.contains("github.com/x/y"));
-        assert!(scanned.contains("github.com/x/y.Store"));
-        assert!(
-            !scanned.contains("github.com/x/y.plannedFn"),
-            "a status:planned export record is not real code"
-        );
-        assert!(planned.contains("github.com/x/y.plannedFn"));
-        assert!(planned.contains("apg.session.Coordinator"));
-
-        // The three-way classification: Real / Planned (never Drift) / Drift.
-        assert_eq!(
-            crate::layers::classify_code_ref("github.com/x/y.Store", &scanned, &planned),
-            crate::layers::CodeRefStatus::Real
-        );
-        assert_eq!(
-            crate::layers::classify_code_ref("apg.session.Coordinator", &scanned, &planned),
-            crate::layers::CodeRefStatus::Pending
-        );
-        assert_eq!(
-            crate::layers::classify_code_ref("apg.gone.Nope", &scanned, &planned),
-            crate::layers::CodeRefStatus::Drift
-        );
-
-        // graph.jsonl absent: the export contributes nothing; the plan store's
-        // planned FQNs remain — the caller's graph.jsonl gate decides whether
-        // code-FQN refs are validated at all.
-        std::fs::remove_file(trans.join("graph.jsonl")).unwrap();
-        let (scanned2, planned2) = code_universes_from_export(&dir).unwrap();
-        assert!(scanned2.is_empty(), "no export ⇒ no scanned universe");
-        assert!(planned2.contains("apg.session.Coordinator"));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Phase-03 task-17: a routed mutation is written THROUGH — the durable
-    /// write lands with exactly one commit and its projection delta is applied
-    /// synchronously, so a mutation that reported success is already queryable
-    /// by a separate routed reader, before session end. Nothing is buffered
-    /// and there is no end-of-session flush.
-    #[test]
-    fn session_routed_write_is_committed_once_and_immediately_projected() {
-        let (wt_apg, repo, wt) = project_fixture("session-write-through");
-        let home = repo.root.join("home");
-        let session = testutil::start_session_process(&wt, &home);
-
-        let before = testutil::commit_count(&wt);
-        let add = testutil::ApgCommand::new(&[
-            "node",
-            "add",
-            "requirements",
-            "requirement",
-            "writethrough",
-        ])
-        .cwd(&wt)
-        .env("HOME", home.to_str().unwrap())
-        .output();
-        assert!(
-            add.status.success(),
-            "{}",
-            String::from_utf8_lossy(&add.stderr)
-        );
-
-        // (a) Exactly one commit for the one logical mutation.
-        assert_eq!(
-            testutil::commit_count(&wt),
-            before + 1,
-            "one logical mutation → one commit"
-        );
-
-        // (b) The projection delta was applied synchronously: a NEW routed
-        // reader (separate process) sees it BEFORE the session ends.
-        let q = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.writethrough'}) RETURN count(n)",
-            ],
-            &wt,
-        );
-        assert!(
-            q.status.success(),
-            "routed read: {}",
-            String::from_utf8_lossy(&q.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&q.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "the mutation must be queryable immediately, not at session end"
-        );
-
-        // (c) The durable node file is the system of record.
-        assert!(
-            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "writethrough")
-                .exists()
-        );
-
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-
-        testutil::remove(&repo);
-    }
-
-    /// Phase-05 task-7: pin the three planned-node states against the exact-FQN
-    /// projection delta.
-    ///
-    /// (1) A planned-only FQN with NO `<project>/` prefix disappears immediately
-    /// when the plan's planned declaration is removed, and the code graph is
-    /// otherwise untouched.
-    /// (2) That FQN AFTER a scan realized it — the delete is guarded by
-    /// `status = 'planned'`, so the REAL code node and its incident edges survive
-    /// removing the plan's placeholder declaration.
-    /// (3) An `implemented-by` to a declared-but-unscanned planned FQN stays
-    /// Pending (never drift) once `code_universes_from_export` reads the plan
-    /// store.
-    #[test]
-    fn planned_fqn_states_reflect_and_guard_realized_code() {
-        let (apg_root, repo, _wt) = project_fixture("planned-states");
-        let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let planned = |fqn: &str, kind: &str, name: &str, parent: &str| Record::PlannedNode {
-            fqn: fqn.to_string(),
-            kind: kind.to_string(),
-            name: name.to_string(),
-            parent: parent.to_string(),
-        };
-
-        // The code-graph baseline: the real struct + the File→Struct Contains
-        // edge. It must be untouched by every planned-declaration mutation.
-        let code_contains = {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert!(db.has_node("github.com/x/y.Store"));
-            count(
-                &db.db,
-                "MATCH (:File)-[:Contains]->(:Struct) RETURN count(*)",
+            // The plan store declares a FQN that has not been scanned yet.
+            specs::write_jsonl(
+                &trans.join("plans").join("foo.jsonl"),
+                &[Record::PlannedNode {
+                    fqn: "apg.session.Coordinator".into(),
+                    kind: "struct".into(),
+                    name: "Coordinator".into(),
+                    parent: "apg.session".into(),
+                }],
             )
-        };
-        assert_eq!(code_contains, 1);
+            .unwrap();
 
-        // (1) A planned-only FQN with no project prefix.
-        write_jsonl_and_reingest(
-            &apg_root,
-            &path,
-            "foo",
-            &[planned(
-                "apg.session.Coordinator.start",
-                "function",
-                "start",
-                "apg.session",
-            )],
-        )
-        .unwrap();
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert!(db.has_node("apg.session.Coordinator.start"));
-            assert!(db.is_planned("apg.session.Coordinator.start"));
-        }
+            // A bogus DB — never opened by the resolver.
+            std::fs::write(trans.join("db.lbug"), b"this is definitely not a db").unwrap();
 
-        // Removing the declaration drops the un-prefixed planned FQN at once and
-        // leaves the code graph alone.
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &[]).unwrap();
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
+            let (scanned, planned) = code_universes_from_export(&dir).unwrap();
+            assert!(scanned.contains("github.com/x/y"));
+            assert!(scanned.contains("github.com/x/y.Store"));
             assert!(
-                !db.has_node("apg.session.Coordinator.start"),
-                "a removed planned FQN without a project prefix must disappear immediately"
+                !scanned.contains("github.com/x/y.plannedFn"),
+                "a status:planned export record is not real code"
             );
-            assert!(db.has_node("github.com/x/y.Store"));
+            assert!(planned.contains("github.com/x/y.plannedFn"));
+            assert!(planned.contains("apg.session.Coordinator"));
+
+            // The three-way classification: Real / Planned (never Drift) / Drift.
             assert_eq!(
-                count(
-                    &db.db,
-                    "MATCH (:File)-[:Contains]->(:Struct) RETURN count(*)"
-                ),
-                code_contains,
-                "the code graph must be otherwise untouched"
-            );
-        }
-
-        // (2) The FQN AFTER a scan realized it: declare a planned node at the
-        // REAL struct's FQN. `merge_records` skips the placeholder (real code
-        // wins), and removing the declaration must NOT detach the real node —
-        // the status='planned' guard.
-        write_jsonl_and_reingest(
-            &apg_root,
-            &path,
-            "foo",
-            &[planned(
-                "github.com/x/y.Store",
-                "struct",
-                "Store",
-                "github.com/x/y",
-            )],
-        )
-        .unwrap();
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert!(db.has_node("github.com/x/y.Store"));
-            assert!(
-                !db.is_planned("github.com/x/y.Store"),
-                "the realized code node must keep status NULL"
-            );
-        }
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &[]).unwrap();
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert!(
-                db.has_node("github.com/x/y.Store"),
-                "removing a planned declaration must never drop the realized code node"
+                crate::layers::classify_code_ref("github.com/x/y.Store", &scanned, &planned),
+                crate::layers::CodeRefStatus::Real
             );
             assert_eq!(
-                count(
-                    &db.db,
-                    "MATCH (:File)-[:Contains]->(:Struct) RETURN count(*)"
-                ),
-                1,
-                "the realized code node's incident edges must survive the guarded delete"
+                crate::layers::classify_code_ref("apg.session.Coordinator", &scanned, &planned),
+                crate::layers::CodeRefStatus::Pending
             );
+            assert_eq!(
+                crate::layers::classify_code_ref("apg.gone.Nope", &scanned, &planned),
+                crate::layers::CodeRefStatus::Drift
+            );
+
+            // graph.jsonl absent: the export contributes nothing; the plan store's
+            // planned FQNs remain — the caller's graph.jsonl gate decides whether
+            // code-FQN refs are validated at all.
+            std::fs::remove_file(trans.join("graph.jsonl")).unwrap();
+            let (scanned2, planned2) = code_universes_from_export(&dir).unwrap();
+            assert!(scanned2.is_empty(), "no export ⇒ no scanned universe");
+            assert!(planned2.contains("apg.session.Coordinator"));
+
+            let _ = std::fs::remove_dir_all(&dir);
         }
 
-        // (3) An implemented-by to a declared-but-unscanned planned FQN is
-        // Pending, never Drift — resolved from the plan store with no scan.
-        let candidate = "apg.session.Coordinator.wait";
-        write_jsonl_and_reingest(
-            &apg_root,
-            &path,
-            "foo",
-            &[planned(candidate, "function", "wait", "apg.session")],
-        )
-        .unwrap();
-        let (scanned, planned_fqns) = code_universes_from_export(&apg_root).unwrap();
-        assert_eq!(
-            layers::classify_code_ref(candidate, &scanned, &planned_fqns),
-            layers::CodeRefStatus::Pending,
-            "a declared-but-unscanned planned FQN is pending, never drift"
-        );
+        /// Phase-03 task-17: a routed mutation is written THROUGH — the durable
+        /// write lands with exactly one commit and its projection delta is applied
+        /// synchronously, so a mutation that reported success is already queryable
+        /// by a separate routed reader, before session end. Nothing is buffered
+        /// and there is no end-of-session flush.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn session_routed_write_is_committed_once_and_immediately_projected() {
+            let (wt_apg, repo, wt) = project_fixture("session-write-through");
+            let home = repo.root.join("home");
+            let session = testutil::start_session_process(&wt, &home);
 
-        testutil::remove(&repo);
-    }
+            let before = testutil::commit_count(&wt);
+            let add = testutil::ApgCommand::new(&[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "writethrough",
+            ])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+            assert!(
+                add.status.success(),
+                "{}",
+                String::from_utf8_lossy(&add.stderr)
+            );
 
-    /// Phase-05 task-8: the projection delta converges with no residue —
-    /// add-then-remove and remove-then-add of the same node both converge, with
-    /// no duplicate/stale rows and no orphan edges.
-    #[test]
-    fn projection_delta_converges_without_residue() {
-        let (apg_root, repo, _wt) = project_fixture("delta-converge");
-        let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let baseline = baseline_records();
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+            // (a) Exactly one commit for the one logical mutation.
+            assert_eq!(
+                testutil::commit_count(&wt),
+                before + 1,
+                "one logical mutation → one commit"
+            );
 
-        let with_note2 = {
-            let mut r = baseline.clone();
-            r.push(Record::Note {
+            // (b) The projection delta was applied synchronously: a NEW routed
+            // reader (separate process) sees it BEFORE the session ends.
+            let q = testutil::spawn_apg(
+                &[
+                    "query",
+                    "MATCH (n:Requirement {fqn: 'requirements.requirement.writethrough'}) RETURN count(n)",
+                ],
+                &wt,
+            );
+            assert!(
+                q.status.success(),
+                "routed read: {}",
+                String::from_utf8_lossy(&q.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&q.stdout)
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1"),
+                "the mutation must be queryable immediately, not at session end"
+            );
+
+            // (c) The durable node file is the system of record.
+            assert!(
+                layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "writethrough")
+                    .exists()
+            );
+
+            let end = testutil::spawn_apg(&["session", "end"], &wt);
+            assert!(
+                end.status.success(),
+                "{}",
+                String::from_utf8_lossy(&end.stderr)
+            );
+            let out = session.child.wait_with_output().unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+
+            testutil::remove(&repo);
+        }
+
+        /// Phase-05 task-7: pin the three planned-node states against the exact-FQN
+        /// projection delta.
+        ///
+        /// (1) A planned-only FQN with NO `<project>/` prefix disappears immediately
+        /// when the plan's planned declaration is removed, and the code graph is
+        /// otherwise untouched.
+        /// (2) That FQN AFTER a scan realized it — the delete is guarded by
+        /// `status = 'planned'`, so the REAL code node and its incident edges survive
+        /// removing the plan's placeholder declaration.
+        /// (3) An `implemented-by` to a declared-but-unscanned planned FQN stays
+        /// Pending (never drift) once `code_universes_from_export` reads the plan
+        /// store.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn planned_fqn_states_reflect_and_guard_realized_code() {
+            let (apg_root, repo, _wt) = project_fixture("planned-states");
+            let path = specs::plan_jsonl_path(&apg_root, "foo");
+            let planned = |fqn: &str, kind: &str, name: &str, parent: &str| Record::PlannedNode {
+                fqn: fqn.to_string(),
+                kind: kind.to_string(),
+                name: name.to_string(),
+                parent: parent.to_string(),
+            };
+
+            // The code-graph baseline: the real struct + the File→Struct Contains
+            // edge. It must be untouched by every planned-declaration mutation.
+            let code_contains = {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert!(db.has_node("github.com/x/y.Store"));
+                count(
+                    &db.db,
+                    "MATCH (:File)-[:Contains]->(:Struct) RETURN count(*)",
+                )
+            };
+            assert_eq!(code_contains, 1);
+
+            // (1) A planned-only FQN with no project prefix.
+            write_jsonl_and_reingest(
+                &apg_root,
+                &path,
+                "foo",
+                &[planned(
+                    "apg.session.Coordinator.start",
+                    "function",
+                    "start",
+                    "apg.session",
+                )],
+            )
+            .unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert!(db.has_node("apg.session.Coordinator.start"));
+                assert!(db.is_planned("apg.session.Coordinator.start"));
+            }
+
+            // Removing the declaration drops the un-prefixed planned FQN at once and
+            // leaves the code graph alone.
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &[]).unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert!(
+                    !db.has_node("apg.session.Coordinator.start"),
+                    "a removed planned FQN without a project prefix must disappear immediately"
+                );
+                assert!(db.has_node("github.com/x/y.Store"));
+                assert_eq!(
+                    count(
+                        &db.db,
+                        "MATCH (:File)-[:Contains]->(:Struct) RETURN count(*)"
+                    ),
+                    code_contains,
+                    "the code graph must be otherwise untouched"
+                );
+            }
+
+            // (2) The FQN AFTER a scan realized it: declare a planned node at the
+            // REAL struct's FQN. `merge_records` skips the placeholder (real code
+            // wins), and removing the declaration must NOT detach the real node —
+            // the status='planned' guard.
+            write_jsonl_and_reingest(
+                &apg_root,
+                &path,
+                "foo",
+                &[planned(
+                    "github.com/x/y.Store",
+                    "struct",
+                    "Store",
+                    "github.com/x/y",
+                )],
+            )
+            .unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert!(db.has_node("github.com/x/y.Store"));
+                assert!(
+                    !db.is_planned("github.com/x/y.Store"),
+                    "the realized code node must keep status NULL"
+                );
+            }
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &[]).unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert!(
+                    db.has_node("github.com/x/y.Store"),
+                    "removing a planned declaration must never drop the realized code node"
+                );
+                assert_eq!(
+                    count(
+                        &db.db,
+                        "MATCH (:File)-[:Contains]->(:Struct) RETURN count(*)"
+                    ),
+                    1,
+                    "the realized code node's incident edges must survive the guarded delete"
+                );
+            }
+
+            // (3) An implemented-by to a declared-but-unscanned planned FQN is
+            // Pending, never Drift — resolved from the plan store with no scan.
+            let candidate = "apg.session.Coordinator.wait";
+            write_jsonl_and_reingest(
+                &apg_root,
+                &path,
+                "foo",
+                &[planned(candidate, "function", "wait", "apg.session")],
+            )
+            .unwrap();
+            let (scanned, planned_fqns) = code_universes_from_export(&apg_root).unwrap();
+            assert_eq!(
+                layers::classify_code_ref(candidate, &scanned, &planned_fqns),
+                layers::CodeRefStatus::Pending,
+                "a declared-but-unscanned planned FQN is pending, never drift"
+            );
+
+            testutil::remove(&repo);
+        }
+
+        /// Phase-05 task-8: the projection delta converges with no residue —
+        /// add-then-remove and remove-then-add of the same node both converge, with
+        /// no duplicate/stale rows and no orphan edges.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn projection_delta_converges_without_residue() {
+            let (apg_root, repo, _wt) = project_fixture("delta-converge");
+            let path = specs::plan_jsonl_path(&apg_root, "foo");
+            let baseline = baseline_records();
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+
+            let with_note2 = {
+                let mut r = baseline.clone();
+                r.push(Record::Note {
+                    fqn: "foo/note-2".into(),
+                    body: "second".into(),
+                    kind: "background".into(),
+                });
+                r.push(Record::Details {
+                    from: "foo/note-2".into(),
+                    to: "foo/plan".into(),
+                });
+                r
+            };
+
+            // Add: exactly one row and one edge.
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &with_note2).unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert_eq!(
+                    count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                    1
+                );
+                assert_eq!(
+                    count(
+                        &db.db,
+                        "MATCH (:Note {fqn: 'foo/note-2'})-[:Details]->(:Plan) RETURN count(*)"
+                    ),
+                    1
+                );
+                assert_eq!(orphan_notes(&db), 0);
+            }
+
+            // A changed node (its body) is re-projected without duplicating rows or
+            // dropping/re-adding its edges twice.
+            let changed = {
+                let mut r = with_note2.clone();
+                for x in &mut r {
+                    if let Record::Note { fqn, body, .. } = x
+                        && fqn == "foo/note-1"
+                    {
+                        *body = "first (edited)".into();
+                    }
+                }
+                r
+            };
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &changed).unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert_eq!(
+                    count(&db.db, "MATCH (n:Note {fqn: 'foo/note-1'}) RETURN count(*)"),
+                    1,
+                    "a changed node must not leave a stale duplicate row"
+                );
+                assert_eq!(
+                    count(&db.db, "MATCH ()-[:Details]->() RETURN count(*)"),
+                    2,
+                    "both Details edges survive the changed-node re-merge"
+                );
+            }
+
+            // Remove: the node and its edge are gone, no orphan/duplicate residue.
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert_eq!(
+                    count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                    0,
+                    "a removed node must not linger"
+                );
+                assert_eq!(
+                    count(&db.db, "MATCH ()-[:Details]->() RETURN count(*)"),
+                    1,
+                    "the removed node's edge must not linger"
+                );
+                assert_eq!(orphan_notes(&db), 0);
+            }
+
+            // Remove-then-add: re-adding converges to exactly one row/edge.
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &with_note2).unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert_eq!(
+                    count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                    1,
+                    "remove-then-add must not duplicate the row"
+                );
+                assert_eq!(
+                    count(
+                        &db.db,
+                        "MATCH (:Note {fqn: 'foo/note-2'})-[:Details]->(:Plan) RETURN count(*)"
+                    ),
+                    1,
+                    "remove-then-add must not duplicate the edge"
+                );
+                assert_eq!(orphan_notes(&db), 0);
+            }
+
+            testutil::remove(&repo);
+        }
+
+        /// Phase-05 task-10 (int): a forced mid-apply re-ingest failure rolls the
+        /// projection back to the prior state and the mutation reports failure. The
+        /// durable file write landed FIRST (commit-then-project), so the committed
+        /// JSONL holds the new state while the projection stays prior — and the
+        /// next apply reproduces the committed state.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn projection_apply_failure_rolls_back_and_reports() {
+            let (apg_root, repo, _wt) = project_fixture("projection-rollback");
+            let path = specs::plan_jsonl_path(&apg_root, "foo");
+            let baseline = baseline_records();
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
+
+            let mut mutated = baseline.clone();
+            mutated.push(Record::Note {
                 fqn: "foo/note-2".into(),
                 body: "second".into(),
                 kind: "background".into(),
             });
-            r.push(Record::Details {
+            mutated.push(Record::Details {
                 from: "foo/note-2".into(),
                 to: "foo/plan".into(),
             });
-            r
-        };
 
-        // Add: exactly one row and one edge.
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &with_note2).unwrap();
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert_eq!(
-                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
-                1
-            );
-            assert_eq!(
-                count(
-                    &db.db,
-                    "MATCH (:Note {fqn: 'foo/note-2'})-[:Details]->(:Plan) RETURN count(*)"
-                ),
-                1
-            );
-            assert_eq!(orphan_notes(&db), 0);
-        }
+            install_projection_hook(|| anyhow::bail!("forced mid-apply re-ingest failure"));
+            let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap_err();
+            assert!(format!("{err:#}").contains("forced mid-apply"), "{err:#}");
 
-        // A changed node (its body) is re-projected without duplicating rows or
-        // dropping/re-adding its edges twice.
-        let changed = {
-            let mut r = with_note2.clone();
-            for x in &mut r {
-                if let Record::Note { fqn, body, .. } = x
-                    && fqn == "foo/note-1"
-                {
-                    *body = "first (edited)".into();
-                }
+            // The projection rolled back to the prior state.
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert_eq!(
+                    count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                    0,
+                    "the failed mutation must not leave a projected row"
+                );
+                assert_eq!(
+                    count(&db.db, "MATCH (n:Note {fqn: 'foo/note-1'}) RETURN count(*)"),
+                    1,
+                    "the prior projection must survive the rollback"
+                );
+                assert_eq!(orphan_notes(&db), 0);
             }
-            r
-        };
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &changed).unwrap();
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert_eq!(
-                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-1'}) RETURN count(*)"),
-                1,
-                "a changed node must not leave a stale duplicate row"
-            );
-            assert_eq!(
-                count(&db.db, "MATCH ()-[:Details]->() RETURN count(*)"),
-                2,
-                "both Details edges survive the changed-node re-merge"
-            );
+            // The durable write landed FIRST: the committed JSONL is the new state.
+            assert_eq!(specs::read_jsonl(&path).unwrap(), mutated);
+            let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join(specs::TRANS).join("plans"))
+                .into_iter()
+                .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
+                .collect();
+            assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
+
+            // The failure was one-shot: the next apply reproduces the committed
+            // state.
+            write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap();
+            {
+                let db = ArtifactDb::open(&apg_root).unwrap();
+                assert_eq!(
+                    count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
+                    1,
+                    "the committed state must be reproducible"
+                );
+            }
+
+            testutil::remove(&repo);
         }
 
-        // Remove: the node and its edge are gone, no orphan/duplicate residue.
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert_eq!(
-                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
-                0,
-                "a removed node must not linger"
+        /// Phase-04 task-3 (acceptance): the next scan rebuilds `db.lbug` from
+        /// source and every metadata mutation stays visible in the query index.
+        ///
+        /// The mutation is projected write-through first (immediately queryable),
+        /// then the index is deleted and the real post-code scan leg re-run: the
+        /// rebuilt DB is a fresh file carrying both the scanned code and the
+        /// durable node-file mutation — no re-scan is needed for the metadata, and
+        /// the scan never loses it.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+        fn acceptance_next_scan_rebuilds_db_from_source_and_keeps_mutations_visible() {
+            use std::os::unix::fs::MetadataExt;
+
+            let (repo, wt, wt_apg) = testutil::project_with_db("accept-scan-rebuild");
+
+            // A durable mutation lands write-through: immediately queryable with no
+            // scan.
+            layers::write_project(
+                &wt_apg,
+                &[layers::NodeFile {
+                    layer: "requirements".to_string(),
+                    node_type: "requirement".to_string(),
+                    name: "rebuilt".to_string(),
+                    body: "survives the rebuild".to_string(),
+                    properties: std::collections::BTreeMap::new(),
+                    out: Vec::new(),
+                    in_edges: Vec::new(),
+                }],
+                &[],
+            )
+            .unwrap();
+            {
+                let db = ArtifactDb::open(&wt_apg).unwrap();
+                assert!(db.has_node("requirements.requirement.rebuilt"));
+                assert!(db.has_node("fixture.mod.Store"));
+            }
+
+            // The next scan REBUILDS `db.lbug` from source: remove the index (a
+            // scan unlinks and recreates it) and run the real post-code scan leg.
+            let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
+            let inode_before = std::fs::metadata(&db_path).unwrap().ino();
+            std::fs::remove_file(&db_path).unwrap();
+            testutil::scan_checkout(&wt).unwrap();
+            let inode_after = std::fs::metadata(&db_path).unwrap().ino();
+            assert_ne!(
+                inode_before, inode_after,
+                "the scan must rebuild db.lbug as a fresh file"
             );
-            assert_eq!(
-                count(&db.db, "MATCH ()-[:Details]->() RETURN count(*)"),
-                1,
-                "the removed node's edge must not linger"
-            );
-            assert_eq!(orphan_notes(&db), 0);
-        }
 
-        // Remove-then-add: re-adding converges to exactly one row/edge.
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &with_note2).unwrap();
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert_eq!(
-                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
-                1,
-                "remove-then-add must not duplicate the row"
-            );
-            assert_eq!(
-                count(
-                    &db.db,
-                    "MATCH (:Note {fqn: 'foo/note-2'})-[:Details]->(:Plan) RETURN count(*)"
-                ),
-                1,
-                "remove-then-add must not duplicate the edge"
-            );
-            assert_eq!(orphan_notes(&db), 0);
-        }
-
-        testutil::remove(&repo);
-    }
-
-    /// Phase-05 task-10 (int): a forced mid-apply re-ingest failure rolls the
-    /// projection back to the prior state and the mutation reports failure. The
-    /// durable file write landed FIRST (commit-then-project), so the committed
-    /// JSONL holds the new state while the projection stays prior — and the
-    /// next apply reproduces the committed state.
-    #[test]
-    fn projection_apply_failure_rolls_back_and_reports() {
-        let (apg_root, repo, _wt) = project_fixture("projection-rollback");
-        let path = specs::plan_jsonl_path(&apg_root, "foo");
-        let baseline = baseline_records();
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &baseline).unwrap();
-
-        let mut mutated = baseline.clone();
-        mutated.push(Record::Note {
-            fqn: "foo/note-2".into(),
-            body: "second".into(),
-            kind: "background".into(),
-        });
-        mutated.push(Record::Details {
-            from: "foo/note-2".into(),
-            to: "foo/plan".into(),
-        });
-
-        install_projection_hook(|| anyhow::bail!("forced mid-apply re-ingest failure"));
-        let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap_err();
-        assert!(format!("{err:#}").contains("forced mid-apply"), "{err:#}");
-
-        // The projection rolled back to the prior state.
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert_eq!(
-                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
-                0,
-                "the failed mutation must not leave a projected row"
-            );
-            assert_eq!(
-                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-1'}) RETURN count(*)"),
-                1,
-                "the prior projection must survive the rollback"
-            );
-            assert_eq!(orphan_notes(&db), 0);
-        }
-        // The durable write landed FIRST: the committed JSONL is the new state.
-        assert_eq!(specs::read_jsonl(&path).unwrap(), mutated);
-        let leftovers: Vec<_> = specs::jsonl_files(&apg_root.join(specs::TRANS).join("plans"))
-            .into_iter()
-            .filter(|p| p.extension().is_some_and(|e| e == "tmp"))
-            .collect();
-        assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
-
-        // The failure was one-shot: the next apply reproduces the committed
-        // state.
-        write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap();
-        {
-            let db = ArtifactDb::open(&apg_root).unwrap();
-            assert_eq!(
-                count(&db.db, "MATCH (n:Note {fqn: 'foo/note-2'}) RETURN count(*)"),
-                1,
-                "the committed state must be reproducible"
-            );
-        }
-
-        testutil::remove(&repo);
-    }
-
-    /// Phase-04 task-3 (acceptance): the next scan rebuilds `db.lbug` from
-    /// source and every metadata mutation stays visible in the query index.
-    ///
-    /// The mutation is projected write-through first (immediately queryable),
-    /// then the index is deleted and the real post-code scan leg re-run: the
-    /// rebuilt DB is a fresh file carrying both the scanned code and the
-    /// durable node-file mutation — no re-scan is needed for the metadata, and
-    /// the scan never loses it.
-    #[test]
-    fn acceptance_next_scan_rebuilds_db_from_source_and_keeps_mutations_visible() {
-        use std::os::unix::fs::MetadataExt;
-
-        let (repo, wt, wt_apg) = testutil::project_with_db("accept-scan-rebuild");
-
-        // A durable mutation lands write-through: immediately queryable with no
-        // scan.
-        layers::write_project(
-            &wt_apg,
-            &[layers::NodeFile {
-                layer: "requirements".to_string(),
-                node_type: "requirement".to_string(),
-                name: "rebuilt".to_string(),
-                body: "survives the rebuild".to_string(),
-                properties: std::collections::BTreeMap::new(),
-                out: Vec::new(),
-                in_edges: Vec::new(),
-            }],
-            &[],
-        )
-        .unwrap();
-        {
+            // Every mutation remains visible in the rebuilt index, alongside the
+            // freshly scanned code.
             let db = ArtifactDb::open(&wt_apg).unwrap();
-            assert!(db.has_node("requirements.requirement.rebuilt"));
-            assert!(db.has_node("fixture.mod.Store"));
+            assert!(
+                db.has_node("requirements.requirement.rebuilt"),
+                "the metadata mutation must survive the scan rebuild"
+            );
+            assert!(
+                db.has_node("fixture.mod.Store"),
+                "the scanned code must be rebuilt from source"
+            );
+            drop(db);
+
+            testutil::remove(&repo);
+        }
+    }
+
+    /// unit tier -- pure in-memory: no filesystem, database, git or process.
+    mod unit {
+        use super::*;
+
+        /// The two record kinds the write-through re-merge used to drop through
+        /// `_ => None`: authored `uses` (Person→System) and `calls`
+        /// (Service→Service) map to their rel tables.
+        #[test]
+        fn edge_merge_maps_authored_uses_and_calls() {
+            assert_eq!(
+                edge_merge(&Record::Uses {
+                    from: "solution.person.alice".into(),
+                    to: "solution.system.portal".into(),
+                }),
+                Some(("Uses", "solution.person.alice", "solution.system.portal"))
+            );
+            assert_eq!(
+                edge_merge(&Record::Calls {
+                    from: "domain.service.a".into(),
+                    to: "domain.service.b".into(),
+                }),
+                Some(("Calls", "domain.service.a", "domain.service.b"))
+            );
         }
 
-        // The next scan REBUILDS `db.lbug` from source: remove the index (a
-        // scan unlinks and recreates it) and run the real post-code scan leg.
-        let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
-        let inode_before = std::fs::metadata(&db_path).unwrap().ino();
-        std::fs::remove_file(&db_path).unwrap();
-        testutil::scan_checkout(&wt).unwrap();
-        let inode_after = std::fs::metadata(&db_path).unwrap().ino();
-        assert_ne!(
-            inode_before, inode_after,
-            "the scan must rebuild db.lbug as a fresh file"
-        );
+        /// The merge guard admits the two authored-only pairs through
+        /// [`load::rel_table_pairs`] — the guard's only consumer.
+        #[test]
+        fn rel_pair_allowed_admits_authored_uses_and_calls() {
+            assert!(rel_pair_allowed("Uses", "Person", "System"));
+            assert!(rel_pair_allowed("Calls", "Service", "Service"));
+        }
 
-        // Every mutation remains visible in the rebuilt index, alongside the
-        // freshly scanned code.
-        let db = ArtifactDb::open(&wt_apg).unwrap();
-        assert!(
-            db.has_node("requirements.requirement.rebuilt"),
-            "the metadata mutation must survive the scan rebuild"
-        );
-        assert!(
-            db.has_node("fixture.mod.Store"),
-            "the scanned code must be rebuilt from source"
-        );
-        drop(db);
+        /// `remove_node` strips incident authored `uses`/`calls` edges too — they
+        /// were previously left behind because `edge_endpoints` did not recognize
+        /// the two record kinds.
+        #[test]
+        fn remove_node_strips_incident_uses_and_calls_edges() {
+            let mut records = vec![
+                Record::Person {
+                    fqn: "solution.person.alice".into(),
+                    name: "alice".into(),
+                    body: String::new(),
+                },
+                Record::System {
+                    fqn: "solution.system.portal".into(),
+                    name: "portal".into(),
+                    body: String::new(),
+                },
+                Record::Uses {
+                    from: "solution.person.alice".into(),
+                    to: "solution.system.portal".into(),
+                },
+                Record::Service {
+                    fqn: "domain.service.a".into(),
+                    name: "a".into(),
+                    body: String::new(),
+                },
+                Record::Service {
+                    fqn: "domain.service.b".into(),
+                    name: "b".into(),
+                    body: String::new(),
+                },
+                Record::Calls {
+                    from: "domain.service.a".into(),
+                    to: "domain.service.b".into(),
+                },
+                // An unrelated node + edge that must survive both removals.
+                Record::Note {
+                    fqn: "foo/note-1".into(),
+                    body: "background".into(),
+                    kind: "background".into(),
+                },
+                Record::Details {
+                    from: "foo/note-1".into(),
+                    to: "solution.system.portal".into(),
+                },
+            ];
 
-        testutil::remove(&repo);
+            remove_node(&mut records, "solution.person.alice");
+            remove_node(&mut records, "domain.service.a");
+
+            let has_node = |fqn: &str| records.iter().any(|r| node_fqn(r) == Some(fqn));
+            let has_edge = |from: &str, to: &str| {
+                records
+                    .iter()
+                    .any(|r| edge_endpoints(r) == Some((from, to)))
+            };
+            assert!(!has_node("solution.person.alice"), "person must be removed");
+            assert!(!has_node("domain.service.a"), "service must be removed");
+            assert!(
+                !has_edge("solution.person.alice", "solution.system.portal"),
+                "the incident Uses edge must be removed with the person"
+            );
+            assert!(
+                !has_edge("domain.service.a", "domain.service.b"),
+                "the incident Calls edge must be removed with the service"
+            );
+            assert!(has_node("solution.system.portal"));
+            assert!(has_node("domain.service.b"));
+            assert!(has_edge("foo/note-1", "solution.system.portal"));
+        }
     }
 }

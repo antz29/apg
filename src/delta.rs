@@ -657,13 +657,13 @@ mod tests {
             assert!(matches!(reason, Some(FullScanReason::NoRecordedScan)));
             let _ = std::fs::remove_dir_all(&dir);
         }
-    }
-
-    /// unit tier -- pure in-memory: no filesystem, database, git or process.
-    mod unit {
-        use super::*;
-
+        /// The phase-01 content-identity key on the shared scan record
+        /// (feedback-101). It was listed as "pure serde ⇒ unit" but its body does
+        /// real filesystem I/O (`std::env::temp_dir()` + `ScanRecord::save/load`
+        /// via std::fs), so by `global.constraint.test-tier-boundaries` it is e2e
+        /// (the law governs, the body wins).
         #[test]
+        #[ignore = "e2e tier: real I/O (temp dir + scan.json fs); run via cargo test-e2e"]
         fn scan_record_content_key_round_trips_and_defaults_absent() {
             // The phase-01 content-identity key is part of the shared scan record
             // (feedback-101): the next scan's splice guard compares this against the

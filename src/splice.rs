@@ -1683,140 +1683,1041 @@ mod tests {
             .collect()
     }
 
-    /// (a) A seed copy preserves every table / every row of the previous DB.
-    #[test]
-    fn seed_copy_preserves_every_table_and_row() {
-        let dir = scratch("preserve");
-        let prev = dir.join("db.lbug");
-        build_db(&prev, &fixture_graph());
+    /// e2e tier -- real I/O: every test here builds/copies real `db.lbug` files,
+    /// writes `graph.jsonl` and node files under the temp dir. Each is
+    /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
+    /// point is the named guard `cargo test-e2e`
+    /// (= `cargo test tests::e2e:: -- --ignored`).
+    mod e2e {
+        use super::*;
 
-        let before_schema = {
-            let db = Database::new(&prev, SystemConfig::default().read_only(true)).unwrap();
-            let conn = Connection::new(&db).unwrap();
-            extract_schema(&conn).unwrap()
-        };
-        let before_counts = {
-            let db = Database::new(&prev, SystemConfig::default().read_only(true)).unwrap();
-            row_counts(&db)
-        };
+        /// (a) A seed copy preserves every table / every row of the previous DB.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn seed_copy_preserves_every_table_and_row() {
+            let dir = scratch("preserve");
+            let prev = dir.join("db.lbug");
+            build_db(&prev, &fixture_graph());
 
-        let seeded = match seed(&prev) {
-            SeedDecision::Seed(s) => s,
-            SeedDecision::FullLoad(f) => {
-                panic!(
-                    "expected a seed from a valid previous DB, got: {}",
-                    f.describe()
-                )
-            }
-        };
+            let before_schema = {
+                let db = Database::new(&prev, SystemConfig::default().read_only(true)).unwrap();
+                let conn = Connection::new(&db).unwrap();
+                extract_schema(&conn).unwrap()
+            };
+            let before_counts = {
+                let db = Database::new(&prev, SystemConfig::default().read_only(true)).unwrap();
+                row_counts(&db)
+            };
 
-        // Same-directory temp sibling (task-3's rename stays on one filesystem),
-        // distinct from the target, and the previous file is untouched.
-        assert_eq!(seeded.temp_path.parent(), prev.parent());
-        assert_ne!(seeded.temp_path, prev);
-        assert!(seeded.temp_path.exists());
-        assert!(prev.exists());
+            let seeded = match seed(&prev) {
+                SeedDecision::Seed(s) => s,
+                SeedDecision::FullLoad(f) => {
+                    panic!(
+                        "expected a seed from a valid previous DB, got: {}",
+                        f.describe()
+                    )
+                }
+            };
 
-        // The whole file is preserved — byte-for-byte.
-        assert_eq!(
-            std::fs::read(&prev).unwrap(),
-            std::fs::read(&seeded.temp_path).unwrap(),
-            "the seed must be a whole-file copy"
-        );
+            // Same-directory temp sibling (task-3's rename stays on one filesystem),
+            // distinct from the target, and the previous file is untouched.
+            assert_eq!(seeded.temp_path.parent(), prev.parent());
+            assert_ne!(seeded.temp_path, prev);
+            assert!(seeded.temp_path.exists());
+            assert!(prev.exists());
 
-        // The opened copy answers the same schema and the same row counts.
-        let conn = seeded.conn().unwrap();
-        let after_schema = extract_schema(&conn).unwrap();
-        assert_eq!(before_schema, after_schema, "schema preserved by the seed");
-        drop(conn);
-        let after_counts = row_counts(&seeded.db);
-        assert_eq!(
-            before_counts, after_counts,
-            "every table/row preserved by the seed"
-        );
-        assert!(
-            after_counts.get("UnresolvedTarget") == Some(&1),
-            "the fixture's unresolved target row must survive: {after_counts:?}"
-        );
-        assert!(
-            after_counts.get("Function") == Some(&1),
-            "the fixture's function row must survive: {after_counts:?}"
-        );
+            // The whole file is preserved — byte-for-byte.
+            assert_eq!(
+                std::fs::read(&prev).unwrap(),
+                std::fs::read(&seeded.temp_path).unwrap(),
+                "the seed must be a whole-file copy"
+            );
 
-        let temp = seeded.temp_path.clone();
-        drop(seeded);
-        std::fs::remove_file(&temp).ok();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// (b) A missing previous DB invalidates the seed (fallback), and no temp is
-    /// created.
-    #[test]
-    fn missing_previous_db_falls_back_to_full_load() {
-        let dir = scratch("missing");
-        let prev = dir.join("db.lbug");
-        assert!(!prev.exists());
-
-        match seed(&prev) {
-            SeedDecision::FullLoad(SeedFallback::MissingPrevious) => {}
-            SeedDecision::FullLoad(other) => {
-                panic!("expected MissingPrevious, got: {}", other.describe())
-            }
-            SeedDecision::Seed(_) => panic!("a missing previous DB must never seed"),
-        }
-        assert!(seed_temps(&prev).is_empty(), "no temp on the missing path");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// (c) An incompatible schema invalidates the seed (fallback): the previous
-    /// DB opens but its tables differ from this binary's `create_schema`.
-    #[test]
-    fn incompatible_schema_falls_back_to_full_load() {
-        let dir = scratch("schema");
-        let prev = dir.join("db.lbug");
-        {
-            let db = Database::new(&prev, SystemConfig::default()).unwrap();
-            let conn = Connection::new(&db).unwrap();
-            // Deliberately wrong: one table, none of the expected ones.
-            conn.query("CREATE NODE TABLE Widget(fqn STRING PRIMARY KEY, extra INT64)")
-                .unwrap();
+            // The opened copy answers the same schema and the same row counts.
+            let conn = seeded.conn().unwrap();
+            let after_schema = extract_schema(&conn).unwrap();
+            assert_eq!(before_schema, after_schema, "schema preserved by the seed");
             drop(conn);
-            drop(db);
+            let after_counts = row_counts(&seeded.db);
+            assert_eq!(
+                before_counts, after_counts,
+                "every table/row preserved by the seed"
+            );
+            assert!(
+                after_counts.get("UnresolvedTarget") == Some(&1),
+                "the fixture's unresolved target row must survive: {after_counts:?}"
+            );
+            assert!(
+                after_counts.get("Function") == Some(&1),
+                "the fixture's function row must survive: {after_counts:?}"
+            );
+
+            let temp = seeded.temp_path.clone();
+            drop(seeded);
+            std::fs::remove_file(&temp).ok();
+            let _ = std::fs::remove_dir_all(&dir);
         }
 
-        match seed(&prev) {
-            SeedDecision::FullLoad(SeedFallback::IncompatibleSchema(_)) => {}
-            SeedDecision::FullLoad(other) => {
-                panic!("expected IncompatibleSchema, got: {}", other.describe())
+        /// (b) A missing previous DB invalidates the seed (fallback), and no temp is
+        /// created.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn missing_previous_db_falls_back_to_full_load() {
+            let dir = scratch("missing");
+            let prev = dir.join("db.lbug");
+            assert!(!prev.exists());
+
+            match seed(&prev) {
+                SeedDecision::FullLoad(SeedFallback::MissingPrevious) => {}
+                SeedDecision::FullLoad(other) => {
+                    panic!("expected MissingPrevious, got: {}", other.describe())
+                }
+                SeedDecision::Seed(_) => panic!("a missing previous DB must never seed"),
             }
-            SeedDecision::Seed(_) => panic!("a schema mismatch must never seed"),
+            assert!(seed_temps(&prev).is_empty(), "no temp on the missing path");
+            let _ = std::fs::remove_dir_all(&dir);
         }
-        assert!(seed_temps(&prev).is_empty(), "no temp on the schema path");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 
-    /// (c) A storage-format / version mismatch (a file that is not a database)
-    /// invalidates the seed (fallback), and no temp is left behind.
-    #[test]
-    fn unreadable_previous_db_falls_back_to_full_load() {
-        let dir = scratch("format");
-        let prev = dir.join("db.lbug");
-        std::fs::write(&prev, b"this is definitely not a db").unwrap();
-
-        match seed(&prev) {
-            SeedDecision::FullLoad(SeedFallback::Unreadable(_)) => {}
-            SeedDecision::FullLoad(other) => {
-                panic!("expected Unreadable, got: {}", other.describe())
+        /// (c) An incompatible schema invalidates the seed (fallback): the previous
+        /// DB opens but its tables differ from this binary's `create_schema`.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn incompatible_schema_falls_back_to_full_load() {
+            let dir = scratch("schema");
+            let prev = dir.join("db.lbug");
+            {
+                let db = Database::new(&prev, SystemConfig::default()).unwrap();
+                let conn = Connection::new(&db).unwrap();
+                // Deliberately wrong: one table, none of the expected ones.
+                conn.query("CREATE NODE TABLE Widget(fqn STRING PRIMARY KEY, extra INT64)")
+                    .unwrap();
+                drop(conn);
+                drop(db);
             }
-            SeedDecision::Seed(_) => panic!("a non-database file must never seed"),
-        }
-        assert!(seed_temps(&prev).is_empty(), "no temp on the format path");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 
-    // -----------------------------------------------------------------------
-    // Delta application (phase-03 task-2)
-    // -----------------------------------------------------------------------
+            match seed(&prev) {
+                SeedDecision::FullLoad(SeedFallback::IncompatibleSchema(_)) => {}
+                SeedDecision::FullLoad(other) => {
+                    panic!("expected IncompatibleSchema, got: {}", other.describe())
+                }
+                SeedDecision::Seed(_) => panic!("a schema mismatch must never seed"),
+            }
+            assert!(seed_temps(&prev).is_empty(), "no temp on the schema path");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// (c) A storage-format / version mismatch (a file that is not a database)
+        /// invalidates the seed (fallback), and no temp is left behind.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn unreadable_previous_db_falls_back_to_full_load() {
+            let dir = scratch("format");
+            let prev = dir.join("db.lbug");
+            std::fs::write(&prev, b"this is definitely not a db").unwrap();
+
+            match seed(&prev) {
+                SeedDecision::FullLoad(SeedFallback::Unreadable(_)) => {}
+                SeedDecision::FullLoad(other) => {
+                    panic!("expected Unreadable, got: {}", other.describe())
+                }
+                SeedDecision::Seed(_) => panic!("a non-database file must never seed"),
+            }
+            assert!(seed_temps(&prev).is_empty(), "no temp on the format path");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // -----------------------------------------------------------------------
+        // Delta application (phase-03 task-2)
+        // -----------------------------------------------------------------------
+
+        /// The equivalence proof (`domain.constraint.db-splice-equivalence`): a
+        /// spliced DB's code node/edge/UnresolvedTarget/Scan sets equal a full
+        /// rebuild's, while covering persist / disappear / unresolved-GC / Scan
+        /// refresh in one delta.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn delta_application_matches_a_full_rebuild() {
+            let dir = scratch("delta");
+            let prev_path = dir.join("db.lbug");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+            let c = "/x/c.go".to_string();
+
+            let previous = previous_graph(&a, &b, &c);
+            build_db(&prev_path, &previous);
+
+            let seeded = match seed(&prev_path) {
+                SeedDecision::Seed(s) => s,
+                SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+            };
+
+            let assembled = assembled_graph(&a, &b);
+            // The delete scope for a body-only change to a.go plus the removal of
+            // c.go: the changed file and the removed file. b.go is cut off (its
+            // caller edge must survive the splice untouched).
+            let targets: BTreeSet<String> = [a.clone(), c.clone()].into_iter().collect();
+            let removed: BTreeSet<String> = BTreeSet::new();
+            let delta = SpliceDelta {
+                graph: &assembled,
+                targets: &targets,
+                removed_fqns: &removed,
+                scan: ScanRow {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+            };
+
+            let report = seeded.apply(&delta).unwrap();
+            assert!(
+                report.nodes_upserted >= 6,
+                "persist+new units upserted: {report:?}"
+            );
+            assert_eq!(
+                report.nodes_deleted, 3,
+                "c.go, m.C.q, m.C disappear: {report:?}"
+            );
+            assert!(
+                report.edges_deleted >= 8,
+                "authored rels replaced: {report:?}"
+            );
+            assert!(report.edges_merged >= 8, "delta rels re-merged: {report:?}");
+            assert_eq!(
+                report.unresolved_gc, 1,
+                "ext.Old is now unreferenced: {report:?}"
+            );
+            assert!(report.scan_refreshed);
+
+            // The full-rebuild reference: the same assembled graph loaded whole.
+            let expected_path = dir.join("expected.lbug");
+            build_db(&expected_path, &assembled);
+
+            let spliced = code_snapshot(&seeded.db);
+            let expected = {
+                let db =
+                    Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
+                let snap = code_snapshot(&db);
+                drop(db);
+                snap
+            };
+            assert_eq!(
+                spliced, expected,
+                "a spliced DB must answer identically to a full rebuild"
+            );
+
+            // Spot-check the three cases that motivate the scheme.
+            assert!(
+                spliced.contains("Calls:m.B.g->m.A.f"),
+                "a caller OUTSIDE the delta must keep its edge to a persisting FQN"
+            );
+            assert!(
+                !spliced.contains("Function:m.C.q:") && !spliced.contains("Module:m.C:"),
+                "the removed file's unit and its orphaned module must be gone"
+            );
+            assert!(
+                spliced.contains("UnresolvedTarget:ext.New:stdlib")
+                    && !spliced
+                        .iter()
+                        .any(|s| s.starts_with("UnresolvedTarget:ext.Old")),
+                "the shared UnresolvedTarget rows must be insert-then-GC'd"
+            );
+            assert!(
+                spliced.contains("Scan:scan/HEAD|newsha|true|newkey|2026-01-02T00:00:00Z"),
+                "the seeded Scan row must be refreshed, not preserved"
+            );
+
+            let temp = seeded.temp_path.clone();
+            drop(seeded);
+            std::fs::remove_file(&temp).ok();
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// feedback-101: the splice seeds the LOCAL `db.lbug` while the
+        /// manifest/delta live in the SHARED store (`<git-common-dir>/apg/facts`).
+        /// When another worktree scans in between, the shared `scan.json`/manifest
+        /// advances past this worktree's DB; the empty-target case then upserts no
+        /// code unit and the stale seeded rows survive — the published DB is NOT a
+        /// full rebuild, and the next freshness fast-path reuses it. The
+        /// equivalence-guarded seed must refuse such a DB and hand the caller to the
+        /// full load.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn stale_local_seed_is_refused_when_another_worktree_advanced_the_store() {
+            use crate::cache::{CacheKey, Manifest, ScanConfigKey};
+            use crate::delta::ScanRecord;
+
+            let dir = scratch("stale-seed");
+            let prev_path = dir.join("db.lbug");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+            let c = "/x/c.go".to_string();
+
+            // This worktree's LOCAL DB: built by its last scan at content "oldkey".
+            build_db(&prev_path, &previous_graph(&a, &b, &c));
+
+            // The ASSEMBLED graph for this worktree's CURRENT tree, and its full
+            // rebuild (the same graph loaded whole) — the correctness reference.
+            let assembled = assembled_graph(&a, &b);
+            let expected_path = dir.join("expected.lbug");
+            build_db(&expected_path, &assembled);
+            let expected = published_snapshot(&expected_path);
+
+            // Another worktree (B) scanned in between. B's tree content equals this
+            // worktree's current tree, so the SHARED scan record carries the current
+            // key ("newkey") and the shared-manifest diff against the current tree
+            // is EMPTY — the feedback's empty-target case.
+            let store = dir.join("facts");
+            std::fs::create_dir_all(&store).unwrap();
+            let key = CacheKey::compute(&ScanConfigKey::default());
+            ScanRecord {
+                sha: "newsha".into(),
+                cache_key: key,
+                manifest: Manifest::default(),
+                content_key: Some("newkey".into()),
+            }
+            .save(&store)
+            .unwrap();
+            let recorded = ScanRecord::load(&store).unwrap();
+
+            // The unguarded splice — the pre-fix behaviour — applies the
+            // empty-target delta: no code unit is upserted, so the stale seeded
+            // rows survive and the export is the current full tree. The DB therefore
+            // DIVERGES from a full rebuild: exactly the bug this guard prevents.
+            {
+                let seeded = match seed(&prev_path) {
+                    SeedDecision::Seed(s) => s,
+                    SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+                };
+                let targets: BTreeSet<String> = BTreeSet::new();
+                let removed: BTreeSet<String> = BTreeSet::new();
+                seeded
+                    .apply(&SpliceDelta {
+                        graph: &assembled,
+                        targets: &targets,
+                        removed_fqns: &removed,
+                        scan: ScanRow {
+                            git_sha: Some("newsha".into()),
+                            git_clean: Some(true),
+                            content_key: Some("newkey".into()),
+                            scanned_at: "2026-01-02T00:00:00Z".into(),
+                        },
+                    })
+                    .unwrap();
+                assert_ne!(
+                    code_snapshot(&seeded.db),
+                    expected,
+                    "an empty-target splice of a stale seed must diverge from a full rebuild"
+                );
+                let temp = seeded.temp_path.clone();
+                drop(seeded);
+                std::fs::remove_file(&temp).ok();
+            }
+
+            // The fix: the shared recorded key ("newkey") does not match the local
+            // seed's own key ("oldkey"), so the splice is REFUSED — the caller runs
+            // the full load, which is the correctness reference.
+            match seed_checked(&prev_path, recorded.content_key.as_deref()) {
+                SeedDecision::FullLoad(SeedFallback::StaleSeed { seed, recorded }) => {
+                    assert_eq!(seed, "oldkey");
+                    assert_eq!(recorded, "newkey");
+                }
+                SeedDecision::FullLoad(other) => {
+                    panic!("expected StaleSeed, got: {}", other.describe())
+                }
+                SeedDecision::Seed(_) => panic!("a stale local seed must never seed"),
+            }
+
+            // The common single-worktree case still seeds: the shared recorded key
+            // IS the local DB's own key.
+            match seed_checked(&prev_path, Some("oldkey")) {
+                SeedDecision::Seed(s) => s.discard().unwrap(),
+                SeedDecision::FullLoad(f) => {
+                    panic!("a current local seed must still splice: {}", f.describe())
+                }
+            }
+
+            // A missing key on either side is ineligible — equivalence cannot be
+            // verified.
+            assert!(matches!(
+                seed_checked(&prev_path, None),
+                SeedDecision::FullLoad(SeedFallback::StaleSeed { .. })
+            ));
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// The win-C spawn skip must not delete a skipped language's global module
+        /// scaffolding (feedback-100). The assembled graph is MISSING the skipped
+        /// language's pure-intermediate modules and every `Module -> Module`
+        /// hierarchy edge — exactly what a partial scan that skips that language
+        /// produces — yet the spliced DB must equal a full rebuild of the TRUE tree
+        /// (same node set incl. modules, per-rel-type Contains counts, the
+        /// UnresolvedTarget set, and the Scan row). Before the fix the splice
+        /// treated every seeded module as in scope and `DETACH DELETE`d the
+        /// scaffolding the assembled graph could not vouch for.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn module_scaffolding_survives_a_partial_scan_that_skips_a_language() {
+            let dir = scratch("skipped-lang");
+            let prev_path = dir.join("db.lbug");
+            let changed = "/x/go/changed.go".to_string();
+            let skipped = "/x/csharp/Tests.cs".to_string();
+
+            build_db(&prev_path, &multi_lang_previous(&changed, &skipped));
+            let seeded = match seed(&prev_path) {
+                SeedDecision::Seed(s) => s,
+                SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+            };
+
+            // The win-B assembled graph: the changed language re-emitted, the
+            // skipped language's cached file facts only (no global scaffolding).
+            let assembled = multi_lang_assembled(&changed, &skipped);
+            // The delete scope is exactly the changed language's file.
+            let targets: BTreeSet<String> = [changed.clone()].into_iter().collect();
+            let removed: BTreeSet<String> = BTreeSet::new();
+            let report = seeded
+                .apply(&SpliceDelta {
+                    graph: &assembled,
+                    targets: &targets,
+                    removed_fqns: &removed,
+                    scan: ScanRow {
+                        git_sha: Some("newsha".into()),
+                        git_clean: Some(true),
+                        content_key: Some("newkey".into()),
+                        scanned_at: "2026-01-02T00:00:00Z".into(),
+                    },
+                })
+                .unwrap();
+
+            // The skipped language is untouched, so nothing disappears.
+            assert_eq!(
+                report.nodes_deleted, 0,
+                "an untouched skipped language has no disappearing units: {report:?}"
+            );
+            let spliced = code_snapshot(&seeded.db);
+            for row in [
+                "Module:Apg:",
+                "Module:Apg.CsharpFrontend:",
+                "Module:Apg.CsharpFrontend.Tests:",
+                "Contains:Apg->Apg.CsharpFrontend",
+                "Contains:Apg.CsharpFrontend->Apg.CsharpFrontend.Tests",
+            ] {
+                assert!(
+                    spliced.contains(row),
+                    "the skipped language's scaffolding must survive: {row}\n{spliced:?}"
+                );
+            }
+
+            // The full-rebuild reference: the TRUE new tree, loaded whole — NOT the
+            // same assembled graph (which would make the oracle miss the bug).
+            let expected_path = dir.join("expected.lbug");
+            build_db(&expected_path, &multi_lang_new(&changed, &skipped));
+            let expected = {
+                let db =
+                    Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
+                let snap = code_snapshot(&db);
+                drop(db);
+                snap
+            };
+            assert_eq!(
+                spliced, expected,
+                "a spliced DB must answer identically to a full rebuild"
+            );
+
+            let temp = seeded.temp_path.clone();
+            drop(seeded);
+            std::fs::remove_file(&temp).ok();
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// The EXPORT half of the partial-skip oracle (feedback-102): a partial
+        /// scan that spawns one language and skips another must render a
+        /// `graph.jsonl` byte-equal to a full rebuild's. The win-B assembly is the
+        /// export source, so the skipped language's global scaffolding —
+        /// pure-intermediate modules and every `Module -> Module` edge, which no
+        /// per-file fact unit carries — must be replayed from the store into that
+        /// assembly. Before the fix the assembled graph structurally could not carry
+        /// it and the export differed even though the spliced DB matched.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn partial_scan_export_matches_a_full_rebuild() {
+            use crate::cache::{
+                CacheKey, FactStore, FileFragment, ModuleScaffolding, ScanConfigKey,
+            };
+            use crate::ingest::{IngestOptions, Reuse, ingest_with_reuse};
+            use crate::schema::Record;
+
+            let dir = scratch("export-equiv");
+            let changed = "/x/go/changed.go".to_string();
+            let skipped = "/x/csharp/Tests.cs".to_string();
+            let cache_key = CacheKey::compute(&ScanConfigKey::default());
+
+            // The last FULL scan's graph: both languages' complete scaffolding.
+            let previous = multi_lang_previous(&changed, &skipped);
+            let mut store = FactStore::at(dir.join("facts"));
+            let frag = FileFragment::from_graph(
+                &previous,
+                &skipped,
+                "csharp/Tests.cs",
+                "oid-skipped",
+                "csharp",
+            );
+            store.put(&frag, "/x", &cache_key).unwrap();
+            let scaffolding = ModuleScaffolding::extract(&previous, Path::new("/x"));
+            store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+
+            // The win-B assembly: only the changed language re-emits facts; the
+            // skipped file comes from the cache and its scaffolding from the store.
+            let reuse = Reuse {
+                store: &store,
+                cache_key: &cache_key,
+                files: vec![(
+                    "csharp/Tests.cs".to_string(),
+                    "csharp".to_string(),
+                    "oid-skipped".to_string(),
+                )],
+                reader_root: "/x".to_string(),
+                skipped_langs: ["csharp".to_string()].into_iter().collect(),
+            };
+            let records = vec![
+                Record::ScanMeta {
+                    git_sha: Some("newsha".into()),
+                    git_clean: Some(true),
+                    content_key: Some("newkey".into()),
+                    scanned_at: "2026-01-02T00:00:00Z".into(),
+                },
+                Record::LangSwitch {
+                    language: "go".into(),
+                },
+                Record::Module {
+                    fqn: "godemo".into(),
+                },
+                Record::Module {
+                    fqn: "godemo/changed".into(),
+                },
+                Record::File {
+                    path: changed.clone(),
+                    parent: "godemo/changed".into(),
+                    start_line: 1,
+                    end_line: 30,
+                },
+                Record::Struct {
+                    id: "s1".into(),
+                    parent: "godemo.changed".into(),
+                    name: "S".into(),
+                    path: changed.clone(),
+                    start: 0,
+                    end: 1,
+                    start_line: 1,
+                    end_line: 30,
+                },
+                Record::Function {
+                    id: "f1".into(),
+                    parent: "godemo.changed.S".into(),
+                    name: "f".into(),
+                    params: Vec::new(),
+                    file: changed.clone(),
+                    path: changed.clone(),
+                    start: 0,
+                    end: 1,
+                    start_line: 2,
+                    end_line: 10,
+                },
+                Record::Function {
+                    id: "f2".into(),
+                    parent: "godemo.changed.S".into(),
+                    name: "h".into(),
+                    params: Vec::new(),
+                    file: changed.clone(),
+                    path: changed.clone(),
+                    start: 0,
+                    end: 1,
+                    start_line: 12,
+                    end_line: 20,
+                },
+                Record::Contains {
+                    from: "godemo".into(),
+                    to: "godemo/changed".into(),
+                },
+                Record::Contains {
+                    from: "s1".into(),
+                    to: "f1".into(),
+                },
+                Record::Contains {
+                    from: "s1".into(),
+                    to: "f2".into(),
+                },
+            ];
+            let (assembled, _) = ingest_with_reuse(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+                Some(&reuse),
+            );
+
+            // The TRUE new tree, loaded whole — the full-rebuild reference.
+            let reference = multi_lang_new(&changed, &skipped);
+            let assembled_path = dir.join("assembled.jsonl");
+            let reference_path = dir.join("reference.jsonl");
+            load::write_graph_jsonl(&assembled, &assembled_path).unwrap();
+            load::write_graph_jsonl(&reference, &reference_path).unwrap();
+            let assembled_jsonl = std::fs::read_to_string(&assembled_path).unwrap();
+            let reference_jsonl = std::fs::read_to_string(&reference_path).unwrap();
+            // `Graph`'s node/edge maps are unordered (HashMap/HashSet), so line
+            // order is not part of the export's contract; equality is the SET of
+            // records. The `scan_meta` control record still leads line 1.
+            let canonical =
+                |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
+            assert_eq!(
+                canonical(&assembled_jsonl),
+                canonical(&reference_jsonl),
+                "a partial scan that skips a language must export a full rebuild's graph.jsonl"
+            );
+            assert!(assembled_jsonl.starts_with("{\"type\":\"scan_meta\""));
+            assert!(reference_jsonl.starts_with("{\"type\":\"scan_meta\""));
+            // The skipped language's scaffolding is present in the export itself.
+            for needle in [
+                "\"type\":\"module\",\"fqn\":\"Apg\"",
+                "\"type\":\"module\",\"fqn\":\"Apg.CsharpFrontend\"",
+                "\"type\":\"contains\",\"from\":\"Apg\",\"to\":\"Apg.CsharpFrontend\"",
+            ] {
+                assert!(
+                    assembled_jsonl.contains(needle),
+                    "the export must carry the skipped language's scaffolding: {needle}"
+                );
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// feedback-103: a **spawned** language's global `Module -> Module`
+        /// scaffolding must reach the EXPORT even when its per-file facts are
+        /// filtered to a target set. `partial_scan_export_matches_a_full_rebuild`
+        /// covers the SKIPPED language (its scaffolding is replayed from the store);
+        /// this covers the SPAWNED one, where `Reuse.skipped_langs` is EMPTY so pass
+        /// 2b replays nothing — the scaffolding can only come from the scanned
+        /// stream. The condition is Java's: a multi-package tree (`pkg`, `pkg.a`
+        /// unchanged, `pkg.b` changed, `pkg.c` unchanged) where the targeted scan
+        /// re-emits only `pkg.b`'s per-file facts, yet the walk covers every package.
+        /// The fixed scanner emits the global package hierarchy for every walked
+        /// package; before the fix it emitted only the target package's, so the
+        /// assembled export lacked `pkg -> pkg.a` while Java was not in
+        /// `skipped_langs`, and the export diverged from a full rebuild.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn java_targeted_scan_scaffolding_reaches_the_export() {
+            use crate::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
+            use crate::ingest::{IngestOptions, Reuse, ingest_with_reuse};
+            use crate::schema::Record;
+
+            let dir = scratch("java-targeted-export");
+            let a = "/x/java/pkg/a/A.java".to_string();
+            let b = "/x/java/pkg/b/B.java".to_string();
+            let c = "/x/java/pkg/c/C.java".to_string();
+            let cache_key = CacheKey::compute(&ScanConfigKey::default());
+
+            // The TRUE new tree: the full-rebuild reference AND the source of the
+            // unchanged files' cached per-file units.
+            let reference = java_pkg_tree(&a, &b, &c);
+            let mut store = FactStore::at(dir.join("facts"));
+            for (abs, rel, oid) in [
+                (a.as_str(), "java/pkg/a/A.java", "oid-a"),
+                (c.as_str(), "java/pkg/c/C.java", "oid-c"),
+            ] {
+                let frag = FileFragment::from_graph(&reference, abs, rel, oid, "java");
+                store.put(&frag, "/x", &cache_key).unwrap();
+            }
+            // Deliberately NO stored scaffolding: pass 2b only replays for a SKIPPED
+            // language, and `skipped_langs` below is empty.
+
+            // The stream the FIXED Java frontend emits for a targeted scan of
+            // `pkg/b/B.java` ONLY: the global package hierarchy for every walked
+            // package, then the target file's per-file facts.
+            let scaffolding = || {
+                vec![
+                    Record::Module { fqn: "pkg".into() },
+                    Record::Module {
+                        fqn: "pkg.a".into(),
+                    },
+                    Record::Module {
+                        fqn: "pkg.b".into(),
+                    },
+                    Record::Module {
+                        fqn: "pkg.c".into(),
+                    },
+                    Record::Contains {
+                        from: "pkg".into(),
+                        to: "pkg.a".into(),
+                    },
+                    Record::Contains {
+                        from: "pkg".into(),
+                        to: "pkg.b".into(),
+                    },
+                    Record::Contains {
+                        from: "pkg".into(),
+                        to: "pkg.c".into(),
+                    },
+                ]
+            };
+            let target_facts = || {
+                vec![
+                    Record::LangSwitch {
+                        language: "java".into(),
+                    },
+                    Record::File {
+                        path: b.clone(),
+                        parent: "pkg.b".into(),
+                        start_line: 1,
+                        end_line: 20,
+                    },
+                    Record::Struct {
+                        id: "sb".into(),
+                        parent: "pkg.b".into(),
+                        name: "B".into(),
+                        path: b.clone(),
+                        start: 0,
+                        end: 1,
+                        start_line: 1,
+                        end_line: 20,
+                    },
+                    Record::Function {
+                        id: "fb".into(),
+                        parent: "pkg.b.B".into(),
+                        name: "f".into(),
+                        params: Vec::new(),
+                        file: b.clone(),
+                        path: b.clone(),
+                        start: 0,
+                        end: 1,
+                        start_line: 2,
+                        end_line: 10,
+                    },
+                    Record::Contains {
+                        from: "sb".into(),
+                        to: "fb".into(),
+                    },
+                ]
+            };
+            let scan_meta = || Record::ScanMeta {
+                git_sha: Some("newsha".into()),
+                git_clean: Some(true),
+                content_key: Some("newkey".into()),
+                scanned_at: "2026-01-02T00:00:00Z".into(),
+            };
+
+            // The spawned-language reuse: the unchanged Java FILES are spliced from
+            // the cache, but Java is NOT in `skipped_langs` (it was spawned), so the
+            // store's scaffolding is never replayed.
+            let reuse = Reuse {
+                store: &store,
+                cache_key: &cache_key,
+                files: vec![
+                    (
+                        "java/pkg/a/A.java".to_string(),
+                        "java".to_string(),
+                        "oid-a".to_string(),
+                    ),
+                    (
+                        "java/pkg/c/C.java".to_string(),
+                        "java".to_string(),
+                        "oid-c".to_string(),
+                    ),
+                ],
+                reader_root: "/x".to_string(),
+                skipped_langs: BTreeSet::new(),
+            };
+            assert!(
+                reuse.skipped_langs.is_empty(),
+                "Java is spawned, not skipped: pass 2b must replay nothing"
+            );
+
+            let opts = IngestOptions {
+                blacklist: &[],
+                language: "java",
+                config: None,
+            };
+            let mut fixed: Vec<Record> = vec![scan_meta()];
+            fixed.extend(scaffolding());
+            fixed.extend(target_facts());
+            let (assembled, _) = ingest_with_reuse(fixed, &opts, Some(&reuse));
+
+            let assembled_path = dir.join("assembled.jsonl");
+            let reference_path = dir.join("reference.jsonl");
+            load::write_graph_jsonl(&assembled, &assembled_path).unwrap();
+            load::write_graph_jsonl(&reference, &reference_path).unwrap();
+            let assembled_jsonl = std::fs::read_to_string(&assembled_path).unwrap();
+            let reference_jsonl = std::fs::read_to_string(&reference_path).unwrap();
+            let canonical =
+                |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
+
+            // The scaffolding is in the export itself...
+            assert!(
+                assembled_jsonl.contains("\"type\":\"module\",\"fqn\":\"pkg.a\""),
+                "the export must carry the unchanged package's module record"
+            );
+            assert!(
+                assembled_jsonl.contains("\"type\":\"contains\",\"from\":\"pkg\",\"to\":\"pkg.a\""),
+                "the export must carry the spawned stream's pkg -> pkg.a scaffolding:\n{assembled_jsonl}"
+            );
+            // ...and the whole export equals a full rebuild's.
+            assert_eq!(
+                canonical(&assembled_jsonl),
+                canonical(&reference_jsonl),
+                "a spawned targeted Java scan must export a full rebuild's graph.jsonl"
+            );
+            assert!(assembled_jsonl.starts_with("{\"type\":\"scan_meta\""));
+
+            // Sensitivity / non-blindness: re-assemble the stream the PRE-FIX
+            // scanner emitted — the target package's hierarchy only. `skipped_langs`
+            // is STILL empty (Java is spawned), so nothing can recover the missing
+            // hierarchy: the export lacks the `pkg -> pkg.a` edge even though `pkg.a`
+            // itself survives as the reused file's cached direct-parent module, and
+            // it diverges from the full rebuild. The hierarchy EDGE — not the module
+            // record — is the discriminating assertion above.
+            let mut pre_fix: Vec<Record> = vec![scan_meta()];
+            pre_fix.push(Record::Module { fqn: "pkg".into() });
+            pre_fix.push(Record::Module {
+                fqn: "pkg.b".into(),
+            });
+            pre_fix.push(Record::Contains {
+                from: "pkg".into(),
+                to: "pkg.b".into(),
+            });
+            pre_fix.extend(target_facts());
+            let (before_fix, _) = ingest_with_reuse(pre_fix, &opts, Some(&reuse));
+            let before_path = dir.join("before-fix.jsonl");
+            load::write_graph_jsonl(&before_fix, &before_path).unwrap();
+            let before_jsonl = std::fs::read_to_string(&before_path).unwrap();
+            assert!(
+                before_jsonl.contains("\"type\":\"module\",\"fqn\":\"pkg.a\""),
+                "the reused file's cached direct-parent module survives even pre-fix"
+            );
+            assert!(
+                !before_jsonl.contains("\"type\":\"contains\",\"from\":\"pkg\",\"to\":\"pkg.a\""),
+                "the pre-fix stream cannot carry pkg -> pkg.a:\n{before_jsonl}"
+            );
+            assert_ne!(
+                canonical(&before_jsonl),
+                canonical(&reference_jsonl),
+                "the pre-fix stream's export must diverge from a full rebuild"
+            );
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// A removed file named only by `removed_fqns` (not by a target path) is
+        /// still detached — the subtraction half of the full-universe seam.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn removed_fqns_are_detached_even_outside_the_target_paths() {
+            let dir = scratch("removed-fqns");
+            let prev_path = dir.join("db.lbug");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+            let c = "/x/c.go".to_string();
+            build_db(&prev_path, &previous_graph(&a, &b, &c));
+
+            let seeded = match seed(&prev_path) {
+                SeedDecision::Seed(s) => s,
+                SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
+            };
+            let assembled = assembled_graph(&a, &b);
+            let targets: BTreeSet<String> = [a.clone()].into_iter().collect();
+            let removed: BTreeSet<String> = ["m.C.q".to_string()].into_iter().collect();
+            seeded
+                .apply(&SpliceDelta {
+                    graph: &assembled,
+                    targets: &targets,
+                    removed_fqns: &removed,
+                    scan: ScanRow {
+                        git_sha: None,
+                        git_clean: None,
+                        content_key: None,
+                        scanned_at: "2026-01-02T00:00:00Z".into(),
+                    },
+                })
+                .unwrap();
+
+            let snap = code_snapshot(&seeded.db);
+            assert!(
+                !snap.contains("Function:m.C.q:"),
+                "an FQN named by removed_fqns must be detached: {snap:?}"
+            );
+            // An empty git state writes empty strings, exactly as the full load does.
+            assert!(
+                snap.contains("Scan:scan/HEAD||||2026-01-02T00:00:00Z"),
+                "a non-git scan's Scan row is all-empty but scanned_at: {snap:?}"
+            );
+            let temp = seeded.temp_path.clone();
+            drop(seeded);
+            std::fs::remove_file(&temp).ok();
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        // -----------------------------------------------------------------------
+        // Atomic publish + rollback (phase-03 task-3)
+        // -----------------------------------------------------------------------
+
+        /// The happy path: both artifacts flip, the export is `write_graph_jsonl`'s
+        /// rendering of the in-memory graph, the DB answers the spliced snapshot,
+        /// and no temp/backup/WAL debris is left behind.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn publish_swaps_both_artifacts_and_leaves_no_debris() {
+            let dir = scratch("publish-ok");
+            let prev_path = dir.join("db.lbug");
+            let export = dir.join("graph.jsonl");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+            let c = "/x/c.go".to_string();
+            build_db(&prev_path, &previous_graph(&a, &b, &c));
+            std::fs::write(&export, b"previous export\n").unwrap();
+
+            let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
+            publish(seeded, &assembled, &export).unwrap();
+
+            // The export is exactly the existing writer's rendering of the graph —
+            // written from memory, never projected back out of the DB.
+            let reference = dir.join("reference.jsonl");
+            load::write_graph_jsonl(&assembled, &reference).unwrap();
+            assert_eq!(
+                std::fs::read(&export).unwrap(),
+                std::fs::read(&reference).unwrap(),
+                "the published export must be `write_graph_jsonl`'s output"
+            );
+
+            let snap = published_snapshot(&prev_path);
+            assert!(
+                snap.contains("Function:m.A.h:"),
+                "the added unit is present: {snap:?}"
+            );
+            assert!(
+                snap.contains("Function:m.A.f:"),
+                "the changed unit persists: {snap:?}"
+            );
+            assert!(
+                !snap.contains("Function:m.C.q:"),
+                "the removed unit is gone: {snap:?}"
+            );
+
+            assert!(
+                transient_entries(&dir).is_empty(),
+                "no temp/backup debris: {:?}",
+                transient_entries(&dir)
+            );
+            assert!(
+                !dir.join("db.lbug.wal").exists() && !dir.join("db.lbug.shm").exists(),
+                "the closed DB must have no WAL/shm sidecar"
+            );
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// A failure after the DB swap (the export rename) restores `db.lbug` from
+        /// its backup, so both targets return to the previous bytes and no debris
+        /// remains.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn export_rename_failure_rolls_back_and_restores_previous_bytes() {
+            let dir = scratch("publish-rollback");
+            let prev_path = dir.join("db.lbug");
+            let export = dir.join("graph.jsonl");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+            let c = "/x/c.go".to_string();
+            build_db(&prev_path, &previous_graph(&a, &b, &c));
+            std::fs::write(&export, b"previous export\n").unwrap();
+            let prev_db = std::fs::read(&prev_path).unwrap();
+            let prev_export = std::fs::read(&export).unwrap();
+
+            let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
+            install_publish_hook(PublishStage::BeforeExportRename, || {
+                Err(anyhow::anyhow!("injected export rename failure"))
+            });
+            let err = publish(seeded, &assembled, &export).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("injected export rename failure"),
+                "the original cause must surface: {err:#}"
+            );
+
+            assert_eq!(
+                std::fs::read(&prev_path).unwrap(),
+                prev_db,
+                "db.lbug must be restored byte-identical to the previous database"
+            );
+            assert_eq!(
+                std::fs::read(&export).unwrap(),
+                prev_export,
+                "graph.jsonl must still be the previous export"
+            );
+            assert!(
+                transient_entries(&dir).is_empty(),
+                "rollback must not leak temps/backups: {:?}",
+                transient_entries(&dir)
+            );
+
+            // The restored DB is genuinely the previous graph, not the spliced one.
+            let snap = published_snapshot(&prev_path);
+            assert!(
+                !snap.contains("Function:m.A.h:"),
+                "the rollback must restore the previous graph: {snap:?}"
+            );
+            assert!(
+                snap.contains("Function:m.C.q:"),
+                "the removed unit must be back: {snap:?}"
+            );
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// A failure before the DB swap (the export build) leaves both targets
+        /// byte-identical — the previous DB is never replaced.
+        #[test]
+        #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn export_build_failure_leaves_the_previous_artifacts_byte_identical() {
+            let dir = scratch("publish-early");
+            let prev_path = dir.join("db.lbug");
+            let export = dir.join("graph.jsonl");
+            let a = "/x/a.go".to_string();
+            let b = "/x/b.go".to_string();
+            let c = "/x/c.go".to_string();
+            build_db(&prev_path, &previous_graph(&a, &b, &c));
+            std::fs::write(&export, b"previous export\n").unwrap();
+            let prev_db = std::fs::read(&prev_path).unwrap();
+            let prev_export = std::fs::read(&export).unwrap();
+
+            let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
+            install_publish_hook(PublishStage::BeforeExportWrite, || {
+                Err(anyhow::anyhow!("injected export build failure"))
+            });
+            let err = publish(seeded, &assembled, &export).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("injected export build failure"),
+                "the original cause must surface: {err:#}"
+            );
+
+            assert_eq!(
+                std::fs::read(&prev_path).unwrap(),
+                prev_db,
+                "an earlier failure leaves db.lbug byte-identical"
+            );
+            assert_eq!(
+                std::fs::read(&export).unwrap(),
+                prev_export,
+                "an earlier failure leaves graph.jsonl byte-identical"
+            );
+            assert!(
+                transient_entries(&dir).is_empty(),
+                "an earlier failure must clean up its temps: {:?}",
+                transient_entries(&dir)
+            );
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
 
     /// A code node with a location under `path`.
     fn located(kind: NodeKind, path: &str, sl: u32, el: u32) -> Node {
@@ -2015,221 +2916,6 @@ mod tests {
         out
     }
 
-    /// The equivalence proof (`domain.constraint.db-splice-equivalence`): a
-    /// spliced DB's code node/edge/UnresolvedTarget/Scan sets equal a full
-    /// rebuild's, while covering persist / disappear / unresolved-GC / Scan
-    /// refresh in one delta.
-    #[test]
-    fn delta_application_matches_a_full_rebuild() {
-        let dir = scratch("delta");
-        let prev_path = dir.join("db.lbug");
-        let a = "/x/a.go".to_string();
-        let b = "/x/b.go".to_string();
-        let c = "/x/c.go".to_string();
-
-        let previous = previous_graph(&a, &b, &c);
-        build_db(&prev_path, &previous);
-
-        let seeded = match seed(&prev_path) {
-            SeedDecision::Seed(s) => s,
-            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
-        };
-
-        let assembled = assembled_graph(&a, &b);
-        // The delete scope for a body-only change to a.go plus the removal of
-        // c.go: the changed file and the removed file. b.go is cut off (its
-        // caller edge must survive the splice untouched).
-        let targets: BTreeSet<String> = [a.clone(), c.clone()].into_iter().collect();
-        let removed: BTreeSet<String> = BTreeSet::new();
-        let delta = SpliceDelta {
-            graph: &assembled,
-            targets: &targets,
-            removed_fqns: &removed,
-            scan: ScanRow {
-                git_sha: Some("newsha".into()),
-                git_clean: Some(true),
-                content_key: Some("newkey".into()),
-                scanned_at: "2026-01-02T00:00:00Z".into(),
-            },
-        };
-
-        let report = seeded.apply(&delta).unwrap();
-        assert!(
-            report.nodes_upserted >= 6,
-            "persist+new units upserted: {report:?}"
-        );
-        assert_eq!(
-            report.nodes_deleted, 3,
-            "c.go, m.C.q, m.C disappear: {report:?}"
-        );
-        assert!(
-            report.edges_deleted >= 8,
-            "authored rels replaced: {report:?}"
-        );
-        assert!(report.edges_merged >= 8, "delta rels re-merged: {report:?}");
-        assert_eq!(
-            report.unresolved_gc, 1,
-            "ext.Old is now unreferenced: {report:?}"
-        );
-        assert!(report.scan_refreshed);
-
-        // The full-rebuild reference: the same assembled graph loaded whole.
-        let expected_path = dir.join("expected.lbug");
-        build_db(&expected_path, &assembled);
-
-        let spliced = code_snapshot(&seeded.db);
-        let expected = {
-            let db =
-                Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
-            let snap = code_snapshot(&db);
-            drop(db);
-            snap
-        };
-        assert_eq!(
-            spliced, expected,
-            "a spliced DB must answer identically to a full rebuild"
-        );
-
-        // Spot-check the three cases that motivate the scheme.
-        assert!(
-            spliced.contains("Calls:m.B.g->m.A.f"),
-            "a caller OUTSIDE the delta must keep its edge to a persisting FQN"
-        );
-        assert!(
-            !spliced.contains("Function:m.C.q:") && !spliced.contains("Module:m.C:"),
-            "the removed file's unit and its orphaned module must be gone"
-        );
-        assert!(
-            spliced.contains("UnresolvedTarget:ext.New:stdlib")
-                && !spliced
-                    .iter()
-                    .any(|s| s.starts_with("UnresolvedTarget:ext.Old")),
-            "the shared UnresolvedTarget rows must be insert-then-GC'd"
-        );
-        assert!(
-            spliced.contains("Scan:scan/HEAD|newsha|true|newkey|2026-01-02T00:00:00Z"),
-            "the seeded Scan row must be refreshed, not preserved"
-        );
-
-        let temp = seeded.temp_path.clone();
-        drop(seeded);
-        std::fs::remove_file(&temp).ok();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// feedback-101: the splice seeds the LOCAL `db.lbug` while the
-    /// manifest/delta live in the SHARED store (`<git-common-dir>/apg/facts`).
-    /// When another worktree scans in between, the shared `scan.json`/manifest
-    /// advances past this worktree's DB; the empty-target case then upserts no
-    /// code unit and the stale seeded rows survive — the published DB is NOT a
-    /// full rebuild, and the next freshness fast-path reuses it. The
-    /// equivalence-guarded seed must refuse such a DB and hand the caller to the
-    /// full load.
-    #[test]
-    fn stale_local_seed_is_refused_when_another_worktree_advanced_the_store() {
-        use crate::cache::{CacheKey, Manifest, ScanConfigKey};
-        use crate::delta::ScanRecord;
-
-        let dir = scratch("stale-seed");
-        let prev_path = dir.join("db.lbug");
-        let a = "/x/a.go".to_string();
-        let b = "/x/b.go".to_string();
-        let c = "/x/c.go".to_string();
-
-        // This worktree's LOCAL DB: built by its last scan at content "oldkey".
-        build_db(&prev_path, &previous_graph(&a, &b, &c));
-
-        // The ASSEMBLED graph for this worktree's CURRENT tree, and its full
-        // rebuild (the same graph loaded whole) — the correctness reference.
-        let assembled = assembled_graph(&a, &b);
-        let expected_path = dir.join("expected.lbug");
-        build_db(&expected_path, &assembled);
-        let expected = published_snapshot(&expected_path);
-
-        // Another worktree (B) scanned in between. B's tree content equals this
-        // worktree's current tree, so the SHARED scan record carries the current
-        // key ("newkey") and the shared-manifest diff against the current tree
-        // is EMPTY — the feedback's empty-target case.
-        let store = dir.join("facts");
-        std::fs::create_dir_all(&store).unwrap();
-        let key = CacheKey::compute(&ScanConfigKey::default());
-        ScanRecord {
-            sha: "newsha".into(),
-            cache_key: key,
-            manifest: Manifest::default(),
-            content_key: Some("newkey".into()),
-        }
-        .save(&store)
-        .unwrap();
-        let recorded = ScanRecord::load(&store).unwrap();
-
-        // The unguarded splice — the pre-fix behaviour — applies the
-        // empty-target delta: no code unit is upserted, so the stale seeded
-        // rows survive and the export is the current full tree. The DB therefore
-        // DIVERGES from a full rebuild: exactly the bug this guard prevents.
-        {
-            let seeded = match seed(&prev_path) {
-                SeedDecision::Seed(s) => s,
-                SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
-            };
-            let targets: BTreeSet<String> = BTreeSet::new();
-            let removed: BTreeSet<String> = BTreeSet::new();
-            seeded
-                .apply(&SpliceDelta {
-                    graph: &assembled,
-                    targets: &targets,
-                    removed_fqns: &removed,
-                    scan: ScanRow {
-                        git_sha: Some("newsha".into()),
-                        git_clean: Some(true),
-                        content_key: Some("newkey".into()),
-                        scanned_at: "2026-01-02T00:00:00Z".into(),
-                    },
-                })
-                .unwrap();
-            assert_ne!(
-                code_snapshot(&seeded.db),
-                expected,
-                "an empty-target splice of a stale seed must diverge from a full rebuild"
-            );
-            let temp = seeded.temp_path.clone();
-            drop(seeded);
-            std::fs::remove_file(&temp).ok();
-        }
-
-        // The fix: the shared recorded key ("newkey") does not match the local
-        // seed's own key ("oldkey"), so the splice is REFUSED — the caller runs
-        // the full load, which is the correctness reference.
-        match seed_checked(&prev_path, recorded.content_key.as_deref()) {
-            SeedDecision::FullLoad(SeedFallback::StaleSeed { seed, recorded }) => {
-                assert_eq!(seed, "oldkey");
-                assert_eq!(recorded, "newkey");
-            }
-            SeedDecision::FullLoad(other) => {
-                panic!("expected StaleSeed, got: {}", other.describe())
-            }
-            SeedDecision::Seed(_) => panic!("a stale local seed must never seed"),
-        }
-
-        // The common single-worktree case still seeds: the shared recorded key
-        // IS the local DB's own key.
-        match seed_checked(&prev_path, Some("oldkey")) {
-            SeedDecision::Seed(s) => s.discard().unwrap(),
-            SeedDecision::FullLoad(f) => {
-                panic!("a current local seed must still splice: {}", f.describe())
-            }
-        }
-
-        // A missing key on either side is ineligible — equivalence cannot be
-        // verified.
-        assert!(matches!(
-            seed_checked(&prev_path, None),
-            SeedDecision::FullLoad(SeedFallback::StaleSeed { .. })
-        ));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     /// The previous full graph for the two-language fixture: a changed language
     /// (`godemo` -> `godemo/changed`, one file `changed`) and a skipped
     /// language whose hierarchy has two pure-intermediate modules
@@ -2409,248 +3095,6 @@ mod tests {
         g
     }
 
-    /// The win-C spawn skip must not delete a skipped language's global module
-    /// scaffolding (feedback-100). The assembled graph is MISSING the skipped
-    /// language's pure-intermediate modules and every `Module -> Module`
-    /// hierarchy edge — exactly what a partial scan that skips that language
-    /// produces — yet the spliced DB must equal a full rebuild of the TRUE tree
-    /// (same node set incl. modules, per-rel-type Contains counts, the
-    /// UnresolvedTarget set, and the Scan row). Before the fix the splice
-    /// treated every seeded module as in scope and `DETACH DELETE`d the
-    /// scaffolding the assembled graph could not vouch for.
-    #[test]
-    fn module_scaffolding_survives_a_partial_scan_that_skips_a_language() {
-        let dir = scratch("skipped-lang");
-        let prev_path = dir.join("db.lbug");
-        let changed = "/x/go/changed.go".to_string();
-        let skipped = "/x/csharp/Tests.cs".to_string();
-
-        build_db(&prev_path, &multi_lang_previous(&changed, &skipped));
-        let seeded = match seed(&prev_path) {
-            SeedDecision::Seed(s) => s,
-            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
-        };
-
-        // The win-B assembled graph: the changed language re-emitted, the
-        // skipped language's cached file facts only (no global scaffolding).
-        let assembled = multi_lang_assembled(&changed, &skipped);
-        // The delete scope is exactly the changed language's file.
-        let targets: BTreeSet<String> = [changed.clone()].into_iter().collect();
-        let removed: BTreeSet<String> = BTreeSet::new();
-        let report = seeded
-            .apply(&SpliceDelta {
-                graph: &assembled,
-                targets: &targets,
-                removed_fqns: &removed,
-                scan: ScanRow {
-                    git_sha: Some("newsha".into()),
-                    git_clean: Some(true),
-                    content_key: Some("newkey".into()),
-                    scanned_at: "2026-01-02T00:00:00Z".into(),
-                },
-            })
-            .unwrap();
-
-        // The skipped language is untouched, so nothing disappears.
-        assert_eq!(
-            report.nodes_deleted, 0,
-            "an untouched skipped language has no disappearing units: {report:?}"
-        );
-        let spliced = code_snapshot(&seeded.db);
-        for row in [
-            "Module:Apg:",
-            "Module:Apg.CsharpFrontend:",
-            "Module:Apg.CsharpFrontend.Tests:",
-            "Contains:Apg->Apg.CsharpFrontend",
-            "Contains:Apg.CsharpFrontend->Apg.CsharpFrontend.Tests",
-        ] {
-            assert!(
-                spliced.contains(row),
-                "the skipped language's scaffolding must survive: {row}\n{spliced:?}"
-            );
-        }
-
-        // The full-rebuild reference: the TRUE new tree, loaded whole — NOT the
-        // same assembled graph (which would make the oracle miss the bug).
-        let expected_path = dir.join("expected.lbug");
-        build_db(&expected_path, &multi_lang_new(&changed, &skipped));
-        let expected = {
-            let db =
-                Database::new(&expected_path, SystemConfig::default().read_only(true)).unwrap();
-            let snap = code_snapshot(&db);
-            drop(db);
-            snap
-        };
-        assert_eq!(
-            spliced, expected,
-            "a spliced DB must answer identically to a full rebuild"
-        );
-
-        let temp = seeded.temp_path.clone();
-        drop(seeded);
-        std::fs::remove_file(&temp).ok();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The EXPORT half of the partial-skip oracle (feedback-102): a partial
-    /// scan that spawns one language and skips another must render a
-    /// `graph.jsonl` byte-equal to a full rebuild's. The win-B assembly is the
-    /// export source, so the skipped language's global scaffolding —
-    /// pure-intermediate modules and every `Module -> Module` edge, which no
-    /// per-file fact unit carries — must be replayed from the store into that
-    /// assembly. Before the fix the assembled graph structurally could not carry
-    /// it and the export differed even though the spliced DB matched.
-    #[test]
-    fn partial_scan_export_matches_a_full_rebuild() {
-        use crate::cache::{CacheKey, FactStore, FileFragment, ModuleScaffolding, ScanConfigKey};
-        use crate::ingest::{IngestOptions, Reuse, ingest_with_reuse};
-        use crate::schema::Record;
-
-        let dir = scratch("export-equiv");
-        let changed = "/x/go/changed.go".to_string();
-        let skipped = "/x/csharp/Tests.cs".to_string();
-        let cache_key = CacheKey::compute(&ScanConfigKey::default());
-
-        // The last FULL scan's graph: both languages' complete scaffolding.
-        let previous = multi_lang_previous(&changed, &skipped);
-        let mut store = FactStore::at(dir.join("facts"));
-        let frag = FileFragment::from_graph(
-            &previous,
-            &skipped,
-            "csharp/Tests.cs",
-            "oid-skipped",
-            "csharp",
-        );
-        store.put(&frag, "/x", &cache_key).unwrap();
-        let scaffolding = ModuleScaffolding::extract(&previous, Path::new("/x"));
-        store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
-
-        // The win-B assembly: only the changed language re-emits facts; the
-        // skipped file comes from the cache and its scaffolding from the store.
-        let reuse = Reuse {
-            store: &store,
-            cache_key: &cache_key,
-            files: vec![(
-                "csharp/Tests.cs".to_string(),
-                "csharp".to_string(),
-                "oid-skipped".to_string(),
-            )],
-            reader_root: "/x".to_string(),
-            skipped_langs: ["csharp".to_string()].into_iter().collect(),
-        };
-        let records = vec![
-            Record::ScanMeta {
-                git_sha: Some("newsha".into()),
-                git_clean: Some(true),
-                content_key: Some("newkey".into()),
-                scanned_at: "2026-01-02T00:00:00Z".into(),
-            },
-            Record::LangSwitch {
-                language: "go".into(),
-            },
-            Record::Module {
-                fqn: "godemo".into(),
-            },
-            Record::Module {
-                fqn: "godemo/changed".into(),
-            },
-            Record::File {
-                path: changed.clone(),
-                parent: "godemo/changed".into(),
-                start_line: 1,
-                end_line: 30,
-            },
-            Record::Struct {
-                id: "s1".into(),
-                parent: "godemo.changed".into(),
-                name: "S".into(),
-                path: changed.clone(),
-                start: 0,
-                end: 1,
-                start_line: 1,
-                end_line: 30,
-            },
-            Record::Function {
-                id: "f1".into(),
-                parent: "godemo.changed.S".into(),
-                name: "f".into(),
-                params: Vec::new(),
-                file: changed.clone(),
-                path: changed.clone(),
-                start: 0,
-                end: 1,
-                start_line: 2,
-                end_line: 10,
-            },
-            Record::Function {
-                id: "f2".into(),
-                parent: "godemo.changed.S".into(),
-                name: "h".into(),
-                params: Vec::new(),
-                file: changed.clone(),
-                path: changed.clone(),
-                start: 0,
-                end: 1,
-                start_line: 12,
-                end_line: 20,
-            },
-            Record::Contains {
-                from: "godemo".into(),
-                to: "godemo/changed".into(),
-            },
-            Record::Contains {
-                from: "s1".into(),
-                to: "f1".into(),
-            },
-            Record::Contains {
-                from: "s1".into(),
-                to: "f2".into(),
-            },
-        ];
-        let (assembled, _) = ingest_with_reuse(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
-            Some(&reuse),
-        );
-
-        // The TRUE new tree, loaded whole — the full-rebuild reference.
-        let reference = multi_lang_new(&changed, &skipped);
-        let assembled_path = dir.join("assembled.jsonl");
-        let reference_path = dir.join("reference.jsonl");
-        load::write_graph_jsonl(&assembled, &assembled_path).unwrap();
-        load::write_graph_jsonl(&reference, &reference_path).unwrap();
-        let assembled_jsonl = std::fs::read_to_string(&assembled_path).unwrap();
-        let reference_jsonl = std::fs::read_to_string(&reference_path).unwrap();
-        // `Graph`'s node/edge maps are unordered (HashMap/HashSet), so line
-        // order is not part of the export's contract; equality is the SET of
-        // records. The `scan_meta` control record still leads line 1.
-        let canonical =
-            |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
-        assert_eq!(
-            canonical(&assembled_jsonl),
-            canonical(&reference_jsonl),
-            "a partial scan that skips a language must export a full rebuild's graph.jsonl"
-        );
-        assert!(assembled_jsonl.starts_with("{\"type\":\"scan_meta\""));
-        assert!(reference_jsonl.starts_with("{\"type\":\"scan_meta\""));
-        // The skipped language's scaffolding is present in the export itself.
-        for needle in [
-            "\"type\":\"module\",\"fqn\":\"Apg\"",
-            "\"type\":\"module\",\"fqn\":\"Apg.CsharpFrontend\"",
-            "\"type\":\"contains\",\"from\":\"Apg\",\"to\":\"Apg.CsharpFrontend\"",
-        ] {
-            assert!(
-                assembled_jsonl.contains(needle),
-                "the export must carry the skipped language's scaffolding: {needle}"
-            );
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     /// The TRUE new tree of the multi-package Java fixture — the full-rebuild
     /// reference: `pkg`, `pkg.a` (unchanged), `pkg.b` (changed), `pkg.c`
     /// (unchanged), each package's `Module` record and `Module -> Module`
@@ -2693,272 +3137,6 @@ mod tests {
         );
         g
     }
-
-    /// feedback-103: a **spawned** language's global `Module -> Module`
-    /// scaffolding must reach the EXPORT even when its per-file facts are
-    /// filtered to a target set. `partial_scan_export_matches_a_full_rebuild`
-    /// covers the SKIPPED language (its scaffolding is replayed from the store);
-    /// this covers the SPAWNED one, where `Reuse.skipped_langs` is EMPTY so pass
-    /// 2b replays nothing — the scaffolding can only come from the scanned
-    /// stream. The condition is Java's: a multi-package tree (`pkg`, `pkg.a`
-    /// unchanged, `pkg.b` changed, `pkg.c` unchanged) where the targeted scan
-    /// re-emits only `pkg.b`'s per-file facts, yet the walk covers every package.
-    /// The fixed scanner emits the global package hierarchy for every walked
-    /// package; before the fix it emitted only the target package's, so the
-    /// assembled export lacked `pkg -> pkg.a` while Java was not in
-    /// `skipped_langs`, and the export diverged from a full rebuild.
-    #[test]
-    fn java_targeted_scan_scaffolding_reaches_the_export() {
-        use crate::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
-        use crate::ingest::{IngestOptions, Reuse, ingest_with_reuse};
-        use crate::schema::Record;
-
-        let dir = scratch("java-targeted-export");
-        let a = "/x/java/pkg/a/A.java".to_string();
-        let b = "/x/java/pkg/b/B.java".to_string();
-        let c = "/x/java/pkg/c/C.java".to_string();
-        let cache_key = CacheKey::compute(&ScanConfigKey::default());
-
-        // The TRUE new tree: the full-rebuild reference AND the source of the
-        // unchanged files' cached per-file units.
-        let reference = java_pkg_tree(&a, &b, &c);
-        let mut store = FactStore::at(dir.join("facts"));
-        for (abs, rel, oid) in [
-            (a.as_str(), "java/pkg/a/A.java", "oid-a"),
-            (c.as_str(), "java/pkg/c/C.java", "oid-c"),
-        ] {
-            let frag = FileFragment::from_graph(&reference, abs, rel, oid, "java");
-            store.put(&frag, "/x", &cache_key).unwrap();
-        }
-        // Deliberately NO stored scaffolding: pass 2b only replays for a SKIPPED
-        // language, and `skipped_langs` below is empty.
-
-        // The stream the FIXED Java frontend emits for a targeted scan of
-        // `pkg/b/B.java` ONLY: the global package hierarchy for every walked
-        // package, then the target file's per-file facts.
-        let scaffolding = || {
-            vec![
-                Record::Module { fqn: "pkg".into() },
-                Record::Module {
-                    fqn: "pkg.a".into(),
-                },
-                Record::Module {
-                    fqn: "pkg.b".into(),
-                },
-                Record::Module {
-                    fqn: "pkg.c".into(),
-                },
-                Record::Contains {
-                    from: "pkg".into(),
-                    to: "pkg.a".into(),
-                },
-                Record::Contains {
-                    from: "pkg".into(),
-                    to: "pkg.b".into(),
-                },
-                Record::Contains {
-                    from: "pkg".into(),
-                    to: "pkg.c".into(),
-                },
-            ]
-        };
-        let target_facts = || {
-            vec![
-                Record::LangSwitch {
-                    language: "java".into(),
-                },
-                Record::File {
-                    path: b.clone(),
-                    parent: "pkg.b".into(),
-                    start_line: 1,
-                    end_line: 20,
-                },
-                Record::Struct {
-                    id: "sb".into(),
-                    parent: "pkg.b".into(),
-                    name: "B".into(),
-                    path: b.clone(),
-                    start: 0,
-                    end: 1,
-                    start_line: 1,
-                    end_line: 20,
-                },
-                Record::Function {
-                    id: "fb".into(),
-                    parent: "pkg.b.B".into(),
-                    name: "f".into(),
-                    params: Vec::new(),
-                    file: b.clone(),
-                    path: b.clone(),
-                    start: 0,
-                    end: 1,
-                    start_line: 2,
-                    end_line: 10,
-                },
-                Record::Contains {
-                    from: "sb".into(),
-                    to: "fb".into(),
-                },
-            ]
-        };
-        let scan_meta = || Record::ScanMeta {
-            git_sha: Some("newsha".into()),
-            git_clean: Some(true),
-            content_key: Some("newkey".into()),
-            scanned_at: "2026-01-02T00:00:00Z".into(),
-        };
-
-        // The spawned-language reuse: the unchanged Java FILES are spliced from
-        // the cache, but Java is NOT in `skipped_langs` (it was spawned), so the
-        // store's scaffolding is never replayed.
-        let reuse = Reuse {
-            store: &store,
-            cache_key: &cache_key,
-            files: vec![
-                (
-                    "java/pkg/a/A.java".to_string(),
-                    "java".to_string(),
-                    "oid-a".to_string(),
-                ),
-                (
-                    "java/pkg/c/C.java".to_string(),
-                    "java".to_string(),
-                    "oid-c".to_string(),
-                ),
-            ],
-            reader_root: "/x".to_string(),
-            skipped_langs: BTreeSet::new(),
-        };
-        assert!(
-            reuse.skipped_langs.is_empty(),
-            "Java is spawned, not skipped: pass 2b must replay nothing"
-        );
-
-        let opts = IngestOptions {
-            blacklist: &[],
-            language: "java",
-            config: None,
-        };
-        let mut fixed: Vec<Record> = vec![scan_meta()];
-        fixed.extend(scaffolding());
-        fixed.extend(target_facts());
-        let (assembled, _) = ingest_with_reuse(fixed, &opts, Some(&reuse));
-
-        let assembled_path = dir.join("assembled.jsonl");
-        let reference_path = dir.join("reference.jsonl");
-        load::write_graph_jsonl(&assembled, &assembled_path).unwrap();
-        load::write_graph_jsonl(&reference, &reference_path).unwrap();
-        let assembled_jsonl = std::fs::read_to_string(&assembled_path).unwrap();
-        let reference_jsonl = std::fs::read_to_string(&reference_path).unwrap();
-        let canonical =
-            |text: &str| -> BTreeSet<String> { text.lines().map(str::to_string).collect() };
-
-        // The scaffolding is in the export itself...
-        assert!(
-            assembled_jsonl.contains("\"type\":\"module\",\"fqn\":\"pkg.a\""),
-            "the export must carry the unchanged package's module record"
-        );
-        assert!(
-            assembled_jsonl.contains("\"type\":\"contains\",\"from\":\"pkg\",\"to\":\"pkg.a\""),
-            "the export must carry the spawned stream's pkg -> pkg.a scaffolding:\n{assembled_jsonl}"
-        );
-        // ...and the whole export equals a full rebuild's.
-        assert_eq!(
-            canonical(&assembled_jsonl),
-            canonical(&reference_jsonl),
-            "a spawned targeted Java scan must export a full rebuild's graph.jsonl"
-        );
-        assert!(assembled_jsonl.starts_with("{\"type\":\"scan_meta\""));
-
-        // Sensitivity / non-blindness: re-assemble the stream the PRE-FIX
-        // scanner emitted — the target package's hierarchy only. `skipped_langs`
-        // is STILL empty (Java is spawned), so nothing can recover the missing
-        // hierarchy: the export lacks the `pkg -> pkg.a` edge even though `pkg.a`
-        // itself survives as the reused file's cached direct-parent module, and
-        // it diverges from the full rebuild. The hierarchy EDGE — not the module
-        // record — is the discriminating assertion above.
-        let mut pre_fix: Vec<Record> = vec![scan_meta()];
-        pre_fix.push(Record::Module { fqn: "pkg".into() });
-        pre_fix.push(Record::Module {
-            fqn: "pkg.b".into(),
-        });
-        pre_fix.push(Record::Contains {
-            from: "pkg".into(),
-            to: "pkg.b".into(),
-        });
-        pre_fix.extend(target_facts());
-        let (before_fix, _) = ingest_with_reuse(pre_fix, &opts, Some(&reuse));
-        let before_path = dir.join("before-fix.jsonl");
-        load::write_graph_jsonl(&before_fix, &before_path).unwrap();
-        let before_jsonl = std::fs::read_to_string(&before_path).unwrap();
-        assert!(
-            before_jsonl.contains("\"type\":\"module\",\"fqn\":\"pkg.a\""),
-            "the reused file's cached direct-parent module survives even pre-fix"
-        );
-        assert!(
-            !before_jsonl.contains("\"type\":\"contains\",\"from\":\"pkg\",\"to\":\"pkg.a\""),
-            "the pre-fix stream cannot carry pkg -> pkg.a:\n{before_jsonl}"
-        );
-        assert_ne!(
-            canonical(&before_jsonl),
-            canonical(&reference_jsonl),
-            "the pre-fix stream's export must diverge from a full rebuild"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A removed file named only by `removed_fqns` (not by a target path) is
-    /// still detached — the subtraction half of the full-universe seam.
-    #[test]
-    fn removed_fqns_are_detached_even_outside_the_target_paths() {
-        let dir = scratch("removed-fqns");
-        let prev_path = dir.join("db.lbug");
-        let a = "/x/a.go".to_string();
-        let b = "/x/b.go".to_string();
-        let c = "/x/c.go".to_string();
-        build_db(&prev_path, &previous_graph(&a, &b, &c));
-
-        let seeded = match seed(&prev_path) {
-            SeedDecision::Seed(s) => s,
-            SeedDecision::FullLoad(f) => panic!("expected a seed, got: {}", f.describe()),
-        };
-        let assembled = assembled_graph(&a, &b);
-        let targets: BTreeSet<String> = [a.clone()].into_iter().collect();
-        let removed: BTreeSet<String> = ["m.C.q".to_string()].into_iter().collect();
-        seeded
-            .apply(&SpliceDelta {
-                graph: &assembled,
-                targets: &targets,
-                removed_fqns: &removed,
-                scan: ScanRow {
-                    git_sha: None,
-                    git_clean: None,
-                    content_key: None,
-                    scanned_at: "2026-01-02T00:00:00Z".into(),
-                },
-            })
-            .unwrap();
-
-        let snap = code_snapshot(&seeded.db);
-        assert!(
-            !snap.contains("Function:m.C.q:"),
-            "an FQN named by removed_fqns must be detached: {snap:?}"
-        );
-        // An empty git state writes empty strings, exactly as the full load does.
-        assert!(
-            snap.contains("Scan:scan/HEAD||||2026-01-02T00:00:00Z"),
-            "a non-git scan's Scan row is all-empty but scanned_at: {snap:?}"
-        );
-        let temp = seeded.temp_path.clone();
-        drop(seeded);
-        std::fs::remove_file(&temp).ok();
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    // -----------------------------------------------------------------------
-    // Atomic publish + rollback (phase-03 task-3)
-    // -----------------------------------------------------------------------
 
     /// The dot-prefixed transient files this module creates (seed copy, publish
     /// temp, backup). Ignores unrelated dotfiles such as `.DS_Store`.
@@ -3008,159 +3186,5 @@ mod tests {
         let snap = code_snapshot(&db);
         drop(db);
         snap
-    }
-
-    /// The happy path: both artifacts flip, the export is `write_graph_jsonl`'s
-    /// rendering of the in-memory graph, the DB answers the spliced snapshot,
-    /// and no temp/backup/WAL debris is left behind.
-    #[test]
-    fn publish_swaps_both_artifacts_and_leaves_no_debris() {
-        let dir = scratch("publish-ok");
-        let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
-        let a = "/x/a.go".to_string();
-        let b = "/x/b.go".to_string();
-        let c = "/x/c.go".to_string();
-        build_db(&prev_path, &previous_graph(&a, &b, &c));
-        std::fs::write(&export, b"previous export\n").unwrap();
-
-        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
-        publish(seeded, &assembled, &export).unwrap();
-
-        // The export is exactly the existing writer's rendering of the graph —
-        // written from memory, never projected back out of the DB.
-        let reference = dir.join("reference.jsonl");
-        load::write_graph_jsonl(&assembled, &reference).unwrap();
-        assert_eq!(
-            std::fs::read(&export).unwrap(),
-            std::fs::read(&reference).unwrap(),
-            "the published export must be `write_graph_jsonl`'s output"
-        );
-
-        let snap = published_snapshot(&prev_path);
-        assert!(
-            snap.contains("Function:m.A.h:"),
-            "the added unit is present: {snap:?}"
-        );
-        assert!(
-            snap.contains("Function:m.A.f:"),
-            "the changed unit persists: {snap:?}"
-        );
-        assert!(
-            !snap.contains("Function:m.C.q:"),
-            "the removed unit is gone: {snap:?}"
-        );
-
-        assert!(
-            transient_entries(&dir).is_empty(),
-            "no temp/backup debris: {:?}",
-            transient_entries(&dir)
-        );
-        assert!(
-            !dir.join("db.lbug.wal").exists() && !dir.join("db.lbug.shm").exists(),
-            "the closed DB must have no WAL/shm sidecar"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A failure after the DB swap (the export rename) restores `db.lbug` from
-    /// its backup, so both targets return to the previous bytes and no debris
-    /// remains.
-    #[test]
-    fn export_rename_failure_rolls_back_and_restores_previous_bytes() {
-        let dir = scratch("publish-rollback");
-        let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
-        let a = "/x/a.go".to_string();
-        let b = "/x/b.go".to_string();
-        let c = "/x/c.go".to_string();
-        build_db(&prev_path, &previous_graph(&a, &b, &c));
-        std::fs::write(&export, b"previous export\n").unwrap();
-        let prev_db = std::fs::read(&prev_path).unwrap();
-        let prev_export = std::fs::read(&export).unwrap();
-
-        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
-        install_publish_hook(PublishStage::BeforeExportRename, || {
-            Err(anyhow::anyhow!("injected export rename failure"))
-        });
-        let err = publish(seeded, &assembled, &export).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("injected export rename failure"),
-            "the original cause must surface: {err:#}"
-        );
-
-        assert_eq!(
-            std::fs::read(&prev_path).unwrap(),
-            prev_db,
-            "db.lbug must be restored byte-identical to the previous database"
-        );
-        assert_eq!(
-            std::fs::read(&export).unwrap(),
-            prev_export,
-            "graph.jsonl must still be the previous export"
-        );
-        assert!(
-            transient_entries(&dir).is_empty(),
-            "rollback must not leak temps/backups: {:?}",
-            transient_entries(&dir)
-        );
-
-        // The restored DB is genuinely the previous graph, not the spliced one.
-        let snap = published_snapshot(&prev_path);
-        assert!(
-            !snap.contains("Function:m.A.h:"),
-            "the rollback must restore the previous graph: {snap:?}"
-        );
-        assert!(
-            snap.contains("Function:m.C.q:"),
-            "the removed unit must be back: {snap:?}"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A failure before the DB swap (the export build) leaves both targets
-    /// byte-identical — the previous DB is never replaced.
-    #[test]
-    fn export_build_failure_leaves_the_previous_artifacts_byte_identical() {
-        let dir = scratch("publish-early");
-        let prev_path = dir.join("db.lbug");
-        let export = dir.join("graph.jsonl");
-        let a = "/x/a.go".to_string();
-        let b = "/x/b.go".to_string();
-        let c = "/x/c.go".to_string();
-        build_db(&prev_path, &previous_graph(&a, &b, &c));
-        std::fs::write(&export, b"previous export\n").unwrap();
-        let prev_db = std::fs::read(&prev_path).unwrap();
-        let prev_export = std::fs::read(&export).unwrap();
-
-        let (seeded, assembled) = seed_and_splice(&prev_path, &a, &b, &c);
-        install_publish_hook(PublishStage::BeforeExportWrite, || {
-            Err(anyhow::anyhow!("injected export build failure"))
-        });
-        let err = publish(seeded, &assembled, &export).unwrap_err();
-        assert!(
-            format!("{err:#}").contains("injected export build failure"),
-            "the original cause must surface: {err:#}"
-        );
-
-        assert_eq!(
-            std::fs::read(&prev_path).unwrap(),
-            prev_db,
-            "an earlier failure leaves db.lbug byte-identical"
-        );
-        assert_eq!(
-            std::fs::read(&export).unwrap(),
-            prev_export,
-            "an earlier failure leaves graph.jsonl byte-identical"
-        );
-        assert!(
-            transient_entries(&dir).is_empty(),
-            "an earlier failure must clean up its temps: {:?}",
-            transient_entries(&dir)
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
