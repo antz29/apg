@@ -707,8 +707,15 @@ fn spawn_frontend(
     if multi {
         child.arg("--id-prefix").arg(id_prefix_for(lang));
     }
-    // Win-B target-set hand-off (task-9): only on the incremental path.
-    if handoff.targets_enabled {
+    // Win-B target-set hand-off (task-9) plus the pinned cache hand-off on the
+    // full-scan path (phase-04 tasks 33/34): append whenever ANY part of the
+    // hand-off is present. `--targets` is still emitted only when
+    // `targets_enabled`, while `--cache-dir`/`--cache-key` are appended whenever
+    // set — so a full scan (`targets_enabled == false`) passes the cache flags
+    // and NO `--targets`, and the incremental argv is unchanged in flags AND
+    // order (AC (b)). With no hand-off at all (no store / `NotAGitRepo`) nothing
+    // is appended (AC (c)).
+    if handoff.targets_enabled || handoff.cache_dir.is_some() || handoff.cache_key.is_some() {
         handoff.append(&mut child, tmp, lang, targets);
     }
     child
@@ -1519,6 +1526,17 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let mut reuse_plan: Option<incremental::ReusePlan> = None;
     if let Some(reason) = &incremental.full_scan {
         log.ln(&format!("[scan] {}", reason.describe()));
+        // Phase-04 task-33: carry the pinned cache hand-off on the FULL-scan
+        // path too, so each frontend's full-scan native-artifact seeding (the
+        // Java class surface behind tasks 17/32) is reachable through the CLI.
+        // `targets_enabled` stays FALSE — a full scan emits everything and must
+        // carry NO `--targets` (phase-02 task-9). The no-store case
+        // (`FullScanReason::NotAGitRepo` leaves `store_root` empty) yields
+        // `None`/`None`: never a fabricated or defaulted cache path (AC (c)).
+        if !incremental.store_root.as_os_str().is_empty() {
+            handoff.cache_dir = Some(incremental.store_root.clone());
+            handoff.cache_key = Some(incremental.cache_key.token());
+        }
     } else {
         log.ln(&format!(
             "[scan] incremental: {} target file(s), {} reusable file(s)",
@@ -2886,6 +2904,26 @@ mod tests {
             }
         }
         false
+    }
+
+    /// Recursively collects every Java class-cache artifact (`surface.tsv` file
+    /// or `classes/` directory) under `root`. The task-25 no-hand-off control
+    /// uses it to catch a fabricated/defaulted cache path ANYWHERE in the
+    /// scratch tree, not merely under the shared store.
+    fn collect_class_cache_artifacts(root: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name == "surface.tsv" || (name == "classes" && p.is_dir()) {
+                out.push(p.display().to_string());
+            }
+            if p.is_dir() {
+                collect_class_cache_artifacts(&p, out);
+            }
+        }
     }
 
     /// The `N` of a Java frontend `compiling N unchanged-package file(s)` line,
@@ -6008,23 +6046,27 @@ mod tests {
         /// does not rebuild the Java class cache. With the candidate binary on a
         /// scratch /tmp Java repo and an isolated java-only frontend dir:
         /// (a) the first incremental frontend log reports ZERO
-        /// `compiling … unchanged-package file(s)` — the full scan seeded the
-        /// class cache, and the pre-fix rebuild of every unchanged file fails
-        /// this; (b) the incremental graph still equals a full scan of the same
-        /// changed tree under the enumerated per-rel-type + UnresolvedTarget
-        /// oracle; (c) the control — a full scan invoked without the cache
-        /// hand-off writes no class-cache artifact
-        /// (`<git-common-dir>/apg/facts/java` absent).
+        /// `compiling … unchanged-package file(s)` — the cold full scan seeded
+        /// the class cache (phase-04 tasks 33/34 carry the pinned
+        /// `--cache-dir`/`--cache-key` hand-off through the full-scan path), and
+        /// the pre-fix rebuild of every unchanged file fails this; (b) the
+        /// incremental graph still equals a full scan of the same changed tree
+        /// under the enumerated per-rel-type + UnresolvedTarget oracle; (c) the
+        /// control — RE-POINTED (feedback-131) at a SEPARATE invocation that
+        /// genuinely has no cache hand-off, NEVER the (a) cold scan: once tasks
+        /// 33/34 land, that cold scan always carries the cache flags on the
+        /// full-scan branch, so requiring it to write no artifact is
+        /// unsatisfiable. Invocation: a full scan in a NON-GIT scratch layout,
+        /// where `FactStore::resolve` fails and `incremental::prepare` returns an
+        /// empty `store_root` with `FullScanReason::NotAGitRepo`, so
+        /// `handoff.cache_dir`/`handoff.cache_key` stay `None`. It asserts
+        /// non-vacuously that (i) that run's frontend log carries NO
+        /// `seeding java class cache for …` line, (ii) NO `surface.tsv`/`classes/`
+        /// artifact exists ANYWHERE under that scratch tree — not merely under
+        /// the (a) store, so a fabricated/defaulted cache path is caught — and
+        /// (iii) the full scan itself SUCCEEDED (a real invocation, not a no-op).
         ///
-        /// MEASURED STATUS (this branch): (b) and (c) hold; (a) FAILS. The cold
-        /// `apg scan` never receives the pinned `--cache-dir`/`--cache-key`
-        /// hand-off — `apg.cmd_scan` sets `FrontendHandoff::cache_dir` only on
-        /// the incremental path — so the Java frontend's `runFullScan` seeding
-        /// (phase-04 tasks 17/32) is unreachable through the CLI, and the first
-        /// targeted scan still recompiles every unchanged-package file
-        /// (measured 7 of the 8-file fixture). The AC is deliberately NOT
-        /// weakened: making it green needs a source task that wires the pinned
-        /// hand-off through the full-scan path (target `apg.cmd_scan`).
+        /// (a) and (b) are asserted exactly as filed and are never weakened.
         #[test]
         #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
         fn java_first_targeted_scan_after_a_seeded_full_scan_compiles_no_unchanged_package() {
@@ -6038,8 +6080,10 @@ mod tests {
             );
             scratch_commit_all(&repo_dir, "apg init");
 
-            // Cold FULL scan (no cache hand-off: apg only passes `--cache-dir` /
-            // `--cache-key` on the incremental path).
+            // Cold FULL scan. With phase-04 tasks 33/34 the full-scan branch now
+            // carries the pinned `--cache-dir`/`--cache-key` hand-off (and still
+            // NO `--targets`), so this scan seeds the Java class surface that the
+            // first targeted re-scan consumes.
             let cold = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
             assert!(
                 cold.status.success(),
@@ -6051,11 +6095,14 @@ mod tests {
                 store.is_dir(),
                 "the cold scan must record the shared fact store"
             );
-            // (c) control: a full scan invoked without the cache hand-off writes
-            // no class-cache artifact (today's behaviour preserved). The
-            // `java/` bucket itself is the FactStore's fact units; the class
-            // cache is the `surface.tsv` / `classes/` artifact inside it.
-            let seeded_by_the_full_scan = java_class_cache_seeded(&store);
+            // Task-33 AC (b): the cold full scan — now carrying the pinned cache
+            // hand-off — must actually seed the Java class surface the first
+            // targeted re-scan consumes (the mechanism behind (a)).
+            assert!(
+                java_class_cache_seeded(&store),
+                "the cold full scan must seed the java class cache under {}",
+                store.display()
+            );
 
             // Localized body-only edit of the target package.
             std::fs::write(
@@ -6103,12 +6150,73 @@ mod tests {
             let full_counts = java_rel_counts(&repo_dir);
             let full_unresolved = java_unresolved(&repo_dir);
 
+            // (c) control — the genuine no-hand-off case: a full scan in a
+            // SEPARATE, NON-GIT scratch layout. `FactStore::resolve` fails there,
+            // so `incremental::prepare` returns `FullScanReason::NotAGitRepo`
+            // with an empty `store_root` and the hand-off carries neither cache
+            // flag. Assert (i) no seeding line, (ii) no class-cache artifact
+            // ANYWHERE under this scratch tree, (iii) the full scan succeeded.
+            let (nongit_base, nongit_repo, nongit_home, nongit_frontend_dir) =
+                java_scratch("class-cache-nogit", &java_seeding_fixture());
+            let nongit_init = java_run(
+                &nongit_repo,
+                &nongit_home,
+                &nongit_frontend_dir,
+                &["init", "."],
+            );
+            assert!(
+                nongit_init.status.success(),
+                "non-git control apg init: {}",
+                String::from_utf8_lossy(&nongit_init.stderr)
+            );
+            scratch_commit_all(&nongit_repo, "apg init");
+            // Strip `.git` AFTER init: the layout stays versioned, but
+            // `FactStore::resolve` can no longer find a store (NotAGitRepo).
+            std::fs::remove_dir_all(nongit_repo.join(".git")).unwrap();
+            let nongit = java_run(
+                &nongit_repo,
+                &nongit_home,
+                &nongit_frontend_dir,
+                &["scan", "."],
+            );
+            let mut c_failures: Vec<String> = Vec::new();
+            if !nongit.status.success() {
+                c_failures.push(format!(
+                    "(c) the no-hand-off full scan failed: {}",
+                    String::from_utf8_lossy(&nongit.stderr)
+                ));
+            }
+            let nongit_log_path = nongit_repo.join("apg/.trans/apg-frontend.log");
+            let nongit_log = std::fs::read_to_string(&nongit_log_path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", nongit_log_path.display()));
+            // (iii) a real invocation, not a no-op: the java frontend ran and the
+            // scan produced a graph.
+            if !nongit_log.contains("running java frontend") {
+                c_failures.push("(c) the no-hand-off scan never ran the java frontend".to_string());
+            }
+            if !nongit_repo.join("apg/.trans/graph.jsonl").is_file() {
+                c_failures.push("(c) the no-hand-off scan wrote no graph.jsonl".to_string());
+            }
+            // (i) no seeding line (there was no --cache-dir/--cache-key flag).
+            if nongit_log.contains("seeding java class cache for") {
+                c_failures
+                    .push("(c) the no-hand-off full scan seeded the java class cache".to_string());
+            }
+            // (ii) no class-cache artifact ANYWHERE under the control's scratch
+            // tree — a fabricated/defaulted cache path is caught here.
+            let mut artifacts: Vec<String> = Vec::new();
+            collect_class_cache_artifacts(&nongit_base, &mut artifacts);
+            if !artifacts.is_empty() {
+                c_failures.push(format!(
+                    "(c) the no-hand-off full scan wrote class-cache artifacts: {artifacts:?}"
+                ));
+            }
+            let _ = std::fs::remove_dir_all(&nongit_base);
+
             // Report ALL THREE ACs from one run: the test still fails if any is
             // violated, but a failure names every measured number.
             let mut failures: Vec<String> = Vec::new();
-            if seeded_by_the_full_scan {
-                failures.push("(c) the full scan wrote a class-cache artifact".to_string());
-            }
+            failures.extend(c_failures);
             if compiled != 0 {
                 failures.push(format!(
                     "(a) the first targeted scan compiled {compiled} unchanged-package file(s) \
