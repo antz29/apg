@@ -2738,6 +2738,242 @@ mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Phase-04 Java targeted-emission / class-cache helpers (tasks 23/25).
+    // Non-#[test] helpers, so they live at the `mod tests` root.
+    // -----------------------------------------------------------------------
+
+    /// A scratch /tmp git repo holding a Java fixture plus an isolated
+    /// `APG_FRONTEND_DIR` carrying ONLY the candidate's staged `java-classes`
+    /// (so auto-detection yields exactly `java`, never every installed
+    /// frontend). Returns `(base, repo_dir, home, frontend_dir)`; the caller
+    /// removes `base` at teardown. Candidate binary only — never a real project
+    /// (`global.constraint.no-real-project-test`).
+    fn java_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("apg-java-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
+        // it never shells out to npm.
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        scratch_repo_init(&repo_dir);
+        for (rel, body) in files {
+            let p = repo_dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        scratch_commit_all(&repo_dir, "init source");
+        // The isolated java-only frontend dir (the candidate's staged artifact).
+        let frontend_dir = base.join("frontends");
+        let src = testutil::apg_bin()
+            .parent()
+            .expect("apg binary parent")
+            .join("frontends")
+            .join("java-classes");
+        assert!(
+            src.is_dir(),
+            "the staged Java frontend must exist at {} — run `cargo build` first",
+            src.display()
+        );
+        testutil::copy_dir(&src, &frontend_dir.join("java-classes"))
+            .unwrap_or_else(|e| panic!("stage the isolated java frontend: {e:#}"));
+        (base, repo_dir, home, frontend_dir)
+    }
+
+    /// Runs the candidate `apg` against a java scratch repo with the isolated
+    /// `HOME` + java-only `APG_FRONTEND_DIR`.
+    fn java_run(
+        repo_dir: &Path,
+        home: &Path,
+        frontend_dir: &Path,
+        args: &[&str],
+    ) -> std::process::Output {
+        testutil::ApgCommand::new(args)
+            .cwd(repo_dir)
+            .env("HOME", &home.to_string_lossy())
+            .env("APG_FRONTEND_DIR", &frontend_dir.to_string_lossy())
+            .output()
+    }
+
+    /// The shared `<git-common-dir>/apg/facts` store for a scratch repo.
+    fn java_store(repo_dir: &Path) -> PathBuf {
+        repo_dir.join(".git/apg/facts")
+    }
+
+    /// The enumerated per-rel-type oracle: rel type -> record count for the four
+    /// Java rel types the task names (`Calls`/`Uses`/`UnresolvedCall`/
+    /// `UnresolvedUse`, i.e. wire `calls`/`uses`/`unresolved_call`/
+    /// `unresolved_use`). Every type is present with `0` when it has no records,
+    /// so a dropped rel type is a divergence rather than an absent key.
+    fn java_rel_counts(repo_dir: &Path) -> std::collections::BTreeMap<String, usize> {
+        let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+        let mut counts = std::collections::BTreeMap::new();
+        for ty in ["calls", "uses", "unresolved_call", "unresolved_use"] {
+            counts.insert(ty.to_string(), 0usize);
+        }
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            if let Some(c) = counts.get_mut(ty) {
+                *c += 1;
+            }
+        }
+        counts
+    }
+
+    /// The `UnresolvedTarget` set by FQN -> category (the task's oracle: the set
+    /// must be EQUAL by FQN *with* categories, not by FQN alone).
+    fn java_unresolved(repo_dir: &Path) -> std::collections::BTreeMap<String, String> {
+        let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+        let mut out = std::collections::BTreeMap::new();
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            if v.get("type").and_then(|t| t.as_str()) != Some("unresolved") {
+                continue;
+            }
+            let fqn = v
+                .get("fqn")
+                .and_then(|f| f.as_str())
+                .unwrap_or("")
+                .to_string();
+            let cat = v
+                .get("category")
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string();
+            if let Some(prev) = out.insert(fqn.clone(), cat.clone()) {
+                assert_eq!(prev, cat, "the unresolved target {fqn} has two categories");
+            }
+        }
+        out
+    }
+
+    /// The simple names of every project `struct` the scan declared (the
+    /// "project class" set the bare-name leak is checked against).
+    fn java_project_class_simple_names(repo_dir: &Path) -> std::collections::BTreeSet<String> {
+        let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+        let mut out = std::collections::BTreeSet::new();
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            if v.get("type").and_then(|t| t.as_str()) != Some("struct") {
+                continue;
+            }
+            if let Some(fqn) = v.get("fqn").and_then(|f| f.as_str())
+                && let Some(simple) = fqn.rsplit('.').next()
+            {
+                out.insert(simple.to_string());
+            }
+        }
+        out
+    }
+
+    /// True when the shared store holds a Java CLASS-cache artifact — the
+    /// `<cache-dir>/java/<cache-key>/surface.tsv` (or `classes/` dir) the
+    /// targeted path consumes. The `<cache-dir>/java/<cache-key>/` directory
+    /// itself is ALSO the FactStore's per-language fact-unit bucket, so its mere
+    /// existence is not a class-cache artifact.
+    fn java_class_cache_seeded(store: &Path) -> bool {
+        let java = store.join("java");
+        let Ok(keys) = std::fs::read_dir(&java) else {
+            return false;
+        };
+        for k in keys.flatten() {
+            let d = k.path();
+            if d.join("surface.tsv").exists() || d.join("classes").is_dir() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The `N` of a Java frontend `compiling N unchanged-package file(s)` line,
+    /// or `None` when the log carries no such line (i.e. nothing was rebuilt).
+    fn java_unchanged_package_compiles(log: &str) -> Option<usize> {
+        for line in log.lines() {
+            let Some(rest) = line.split("compiling ").nth(1) else {
+                continue;
+            };
+            if !rest.contains("unchanged-package") {
+                continue;
+            }
+            return rest.split_whitespace().next().and_then(|s| s.parse().ok());
+        }
+        None
+    }
+
+    /// The task-23 Java fixture: a changed package (`pkg.b`) whose type is
+    /// referenced from an unchanged package (`pkg.c`) and which itself calls
+    /// into an unchanged package (`pkg.a`) — the cross-package resolution shape
+    /// note-87's divergence class exercised on jgrapht (resolved -> unresolved
+    /// when the context is incomplete).
+    fn java_edge_exactness_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (
+                "pkg/a/A.java",
+                "package pkg.a;\n\npublic class A {\n    public int foo() { return 1; }\n}\n",
+            ),
+            (
+                "pkg/a/Util.java",
+                "package pkg.a;\n\npublic class Util {\n    public static int twice(int n) { return n * 2; }\n}\n",
+            ),
+            (
+                "pkg/b/B.java",
+                "package pkg.b;\n\nimport pkg.a.A;\nimport pkg.a.Util;\n\npublic class B {\n    private final A a = new A();\n\n    public int bar() { return Util.twice(a.foo()); }\n}\n",
+            ),
+            (
+                "pkg/c/C.java",
+                "package pkg.c;\n\nimport pkg.b.B;\n\npublic class C {\n    public int baz() { return new B().bar(); }\n}\n",
+            ),
+            (
+                "pkg/c/ListUser.java",
+                "package pkg.c;\n\nimport java.util.ArrayList;\nimport java.util.List;\n\npublic class ListUser {\n    public int size() {\n        List<String> xs = new ArrayList<>();\n        xs.add(\"x\");\n        return xs.size();\n    }\n}\n",
+            ),
+        ]
+    }
+
+    /// The task-25 fixture: a small target package (`pkg.target`) with several
+    /// UNCHANGED packages around it, so a first targeted scan that still has to
+    /// rebuild the class cache compiles a large fraction of the fixture (the
+    /// pre-fix `compiling N unchanged-package file(s)` failure).
+    fn java_seeding_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (
+                "pkg/target/T.java",
+                "package pkg.target;\n\nimport pkg.dep.Dep;\n\npublic class T {\n    public int go() { return new Dep().v(); }\n}\n",
+            ),
+            (
+                "pkg/dep/Dep.java",
+                "package pkg.dep;\n\npublic class Dep {\n    public int v() { return 1; }\n}\n",
+            ),
+            (
+                "pkg/x/X1.java",
+                "package pkg.x;\n\npublic class X1 {\n    public int one() { return 1; }\n}\n",
+            ),
+            (
+                "pkg/x/X2.java",
+                "package pkg.x;\n\npublic class X2 {\n    public int two() { return 2; }\n}\n",
+            ),
+            (
+                "pkg/y/Y1.java",
+                "package pkg.y;\n\npublic class Y1 {\n    public int one() { return 1; }\n}\n",
+            ),
+            (
+                "pkg/y/Y2.java",
+                "package pkg.y;\n\npublic class Y2 {\n    public int two() { return 2; }\n}\n",
+            ),
+            (
+                "pkg/z/Z1.java",
+                "package pkg.z;\n\npublic class Z1 {\n    public int one() { return 1; }\n}\n",
+            ),
+            (
+                "pkg/z/Z2.java",
+                "package pkg.z;\n\npublic class Z2 {\n    public int two() { return 2; }\n}\n",
+            ),
+        ]
+    }
+
     /// unit tier -- pure in-memory: no filesystem, database, git or process.
     mod unit {
         use super::*;
@@ -5670,6 +5906,233 @@ mod tests {
             );
 
             h.discard();
+        }
+
+        /// Phase-04 task-23 (e2e): a Java TARGETED scan is edge-exact against a
+        /// forced from-scratch FULL scan of the same tree. The enumerated oracle
+        /// is the per-rel-type counts (`Calls`/`Uses`/`UnresolvedCall`/
+        /// `UnresolvedUse`) AND the `UnresolvedTarget` set by FQN-with-categories
+        /// — the exact divergence class note-87 measured on jgrapht (graph.jsonl
+        /// missing 1 914 / extra 2 145, all resolved -> unresolved), scaled down.
+        /// It additionally rejects the javac error-symbol leak: no
+        /// `UnresolvedTarget` may carry a project-class simple name or an error
+        /// symbol. Candidate binary only, scratch /tmp repo, java-only frontend.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn java_targeted_scan_is_edge_exact_against_a_full_scan() {
+            let (base, repo_dir, home, frontend_dir) =
+                java_scratch("targeted-exact", &java_edge_exactness_fixture());
+            let init = java_run(&repo_dir, &home, &frontend_dir, &["init", "."]);
+            assert!(
+                init.status.success(),
+                "apg init: {}",
+                String::from_utf8_lossy(&init.stderr)
+            );
+            scratch_commit_all(&repo_dir, "apg init");
+
+            // Cold full scan: records the manifest + the shared fact store.
+            let cold = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
+            assert!(
+                cold.status.success(),
+                "cold scan: {}",
+                String::from_utf8_lossy(&cold.stderr)
+            );
+
+            // A body-only edit to `pkg.b.B`: `pkg.c` references B and `pkg.b`
+            // calls into `pkg.a`, so the targeted scan must resolve across the
+            // package edge against the classes of the unchanged packages.
+            std::fs::write(
+                repo_dir.join("pkg/b/B.java"),
+                "package pkg.b;\n\nimport pkg.a.A;\nimport pkg.a.Util;\n\npublic class B {\n    private final A a = new A();\n\n    public int bar() { return Util.twice(a.foo()) + 1; }\n}\n",
+            )
+            .unwrap();
+
+            let inc = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
+            assert!(
+                inc.status.success(),
+                "targeted scan: {}",
+                String::from_utf8_lossy(&inc.stderr)
+            );
+            let inc_err = String::from_utf8_lossy(&inc.stderr);
+            assert!(
+                inc_err.contains("[scan] incremental:"),
+                "the targeted scan must be incremental, not a full scan: {inc_err}"
+            );
+            let inc_counts = java_rel_counts(&repo_dir);
+            let inc_unresolved = java_unresolved(&repo_dir);
+            let class_names = java_project_class_simple_names(&repo_dir);
+
+            // Forced from-scratch FULL scan of the SAME tree: db.lbug +
+            // graph.jsonl + the shared fact store cleared — never the
+            // incremental run compared against itself.
+            std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
+            std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+            let _ = std::fs::remove_dir_all(java_store(&repo_dir));
+            let full = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
+            assert!(
+                full.status.success(),
+                "full-scan oracle: {}",
+                String::from_utf8_lossy(&full.stderr)
+            );
+            let full_counts = java_rel_counts(&repo_dir);
+            let full_unresolved = java_unresolved(&repo_dir);
+
+            assert_eq!(
+                inc_counts, full_counts,
+                "the per-rel-type counts must be exactly equal (targeted vs forced full)"
+            );
+            assert_eq!(
+                inc_unresolved, full_unresolved,
+                "the UnresolvedTarget set by FQN-with-categories must be exactly equal"
+            );
+
+            // No bare project-class simple name and no error symbol in EITHER
+            // scan's unresolved set (the javac error-symbol leak, note-87).
+            for (tag, set) in [("targeted", &inc_unresolved), ("full", &full_unresolved)] {
+                for fqn in set.keys() {
+                    assert!(
+                        !class_names.contains(fqn),
+                        "{tag}: UnresolvedTarget {fqn} is a bare project-class simple name"
+                    );
+                    assert!(
+                        !fqn.contains("<error>") && !fqn.to_lowercase().contains("error:"),
+                        "{tag}: UnresolvedTarget {fqn} carries a javac error symbol"
+                    );
+                }
+            }
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-04 task-25 (e2e): the first targeted scan after a cold full scan
+        /// does not rebuild the Java class cache. With the candidate binary on a
+        /// scratch /tmp Java repo and an isolated java-only frontend dir:
+        /// (a) the first incremental frontend log reports ZERO
+        /// `compiling … unchanged-package file(s)` — the full scan seeded the
+        /// class cache, and the pre-fix rebuild of every unchanged file fails
+        /// this; (b) the incremental graph still equals a full scan of the same
+        /// changed tree under the enumerated per-rel-type + UnresolvedTarget
+        /// oracle; (c) the control — a full scan invoked without the cache
+        /// hand-off writes no class-cache artifact
+        /// (`<git-common-dir>/apg/facts/java` absent).
+        ///
+        /// MEASURED STATUS (this branch): (b) and (c) hold; (a) FAILS. The cold
+        /// `apg scan` never receives the pinned `--cache-dir`/`--cache-key`
+        /// hand-off — `apg.cmd_scan` sets `FrontendHandoff::cache_dir` only on
+        /// the incremental path — so the Java frontend's `runFullScan` seeding
+        /// (phase-04 tasks 17/32) is unreachable through the CLI, and the first
+        /// targeted scan still recompiles every unchanged-package file
+        /// (measured 7 of the 8-file fixture). The AC is deliberately NOT
+        /// weakened: making it green needs a source task that wires the pinned
+        /// hand-off through the full-scan path (target `apg.cmd_scan`).
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn java_first_targeted_scan_after_a_seeded_full_scan_compiles_no_unchanged_package() {
+            let (base, repo_dir, home, frontend_dir) =
+                java_scratch("class-cache-seed", &java_seeding_fixture());
+            let init = java_run(&repo_dir, &home, &frontend_dir, &["init", "."]);
+            assert!(
+                init.status.success(),
+                "apg init: {}",
+                String::from_utf8_lossy(&init.stderr)
+            );
+            scratch_commit_all(&repo_dir, "apg init");
+
+            // Cold FULL scan (no cache hand-off: apg only passes `--cache-dir` /
+            // `--cache-key` on the incremental path).
+            let cold = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
+            assert!(
+                cold.status.success(),
+                "cold full scan: {}",
+                String::from_utf8_lossy(&cold.stderr)
+            );
+            let store = java_store(&repo_dir);
+            assert!(
+                store.is_dir(),
+                "the cold scan must record the shared fact store"
+            );
+            // (c) control: a full scan invoked without the cache hand-off writes
+            // no class-cache artifact (today's behaviour preserved). The
+            // `java/` bucket itself is the FactStore's fact units; the class
+            // cache is the `surface.tsv` / `classes/` artifact inside it.
+            let seeded_by_the_full_scan = java_class_cache_seeded(&store);
+
+            // Localized body-only edit of the target package.
+            std::fs::write(
+                repo_dir.join("pkg/target/T.java"),
+                "package pkg.target;\n\nimport pkg.dep.Dep;\n\npublic class T {\n    public int go() { return new Dep().v() + 1; }\n}\n",
+            )
+            .unwrap();
+
+            // First targeted scan after the cold full scan.
+            let inc = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
+            assert!(
+                inc.status.success(),
+                "targeted scan: {}",
+                String::from_utf8_lossy(&inc.stderr)
+            );
+            let inc_err = String::from_utf8_lossy(&inc.stderr);
+            assert!(
+                inc_err.contains("[scan] incremental:"),
+                "the first re-scan must be incremental: {inc_err}"
+            );
+
+            // (a) the seeded-cache observable: ZERO unchanged-package compiles.
+            let log_path = repo_dir.join("apg/.trans/apg-frontend.log");
+            let log = std::fs::read_to_string(&log_path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", log_path.display()));
+            assert!(
+                log.contains("running java frontend"),
+                "the java frontend must have run: {log}"
+            );
+            let compiled = java_unchanged_package_compiles(&log).unwrap_or(0);
+
+            let inc_counts = java_rel_counts(&repo_dir);
+            let inc_unresolved = java_unresolved(&repo_dir);
+
+            // (b) forced from-scratch FULL scan oracle of the same changed tree.
+            std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
+            std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+            let _ = std::fs::remove_dir_all(&store);
+            let full = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
+            assert!(
+                full.status.success(),
+                "full-scan oracle: {}",
+                String::from_utf8_lossy(&full.stderr)
+            );
+            let full_counts = java_rel_counts(&repo_dir);
+            let full_unresolved = java_unresolved(&repo_dir);
+
+            // Report ALL THREE ACs from one run: the test still fails if any is
+            // violated, but a failure names every measured number.
+            let mut failures: Vec<String> = Vec::new();
+            if seeded_by_the_full_scan {
+                failures.push("(c) the full scan wrote a class-cache artifact".to_string());
+            }
+            if compiled != 0 {
+                failures.push(format!(
+                    "(a) the first targeted scan compiled {compiled} unchanged-package file(s) \
+                     (expected ZERO — the cold full scan seeded the class cache)"
+                ));
+            }
+            if inc_counts != full_counts {
+                failures.push(format!(
+                    "(b) per-rel-type counts differ: incremental {inc_counts:?} vs full {full_counts:?}"
+                ));
+            }
+            if inc_unresolved != full_unresolved {
+                failures.push(format!(
+                    "(b) UnresolvedTarget sets differ: incremental {inc_unresolved:?} vs full {full_unresolved:?}"
+                ));
+            }
+            assert!(
+                failures.is_empty(),
+                "task-25 AC(s) violated:\n{}\n\nLog tail:\n{}",
+                failures.join("\n"),
+                log.lines().rev().take(12).collect::<Vec<_>>().join("\n")
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
         }
     }
 }
