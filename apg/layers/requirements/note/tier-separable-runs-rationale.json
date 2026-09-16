@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "tier-separable-runs-rationale",
+  "body": "source statement (human/user brief): the test harness must be able to run each tier separately — three distinct invocations: unit only, integration only, and e2e only — in addition to the fast default gate (unit+integration together, staying seconds). The gap: the existing test-hygiene tree required only that e2e be excluded from the default gate; it did not require unit-only and integration-only selection, nor that tier selection be a first-class named harness capability. This requirement closes that gap.\n\nDECISION [with user]: the rule lands BOTH as a requirement (requirements.requirement.tier-separable-runs, with falsifiable ACs) and as a TIER SEPARABILITY clause in the whole-suite law global.constraint.test-tier-boundaries — tier selectability is a structural property of the whole suite, like the DEFAULT GATE rule already in that law. The existing law prose is preserved verbatim; TIER SEPARABILITY is the only added paragraph.\n\nSCOPE [with user]: this delivery writes NO new tests and builds NO fakes/seam infrastructure. It (a) makes the harness tier-separable and (b) classifies the existing tests into the tiers. The unit/integration definitions (\"collaborators are in-memory fakes\") remain the classification law exactly as written; existing real-I/O tests therefore classify as e2e. No existing requirement body was changed.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
