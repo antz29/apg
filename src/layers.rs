@@ -2260,1235 +2260,9 @@ mod tests {
     use super::*;
     use crate::testutil::{self, Repo};
 
-    /// The catalog is the SPEC §3.1 table: per-layer dirs and node types,
-    /// verbatim (global holds constraint before note; implementation holds
-    /// only the attach-only pair).
-    #[test]
-    fn catalog_matches_the_spec_table() {
-        let rows: Vec<(&str, &[&str])> = Layer::ALL
-            .into_iter()
-            .map(|l| (l.layer_dir(), l.node_types()))
-            .collect();
-        assert_eq!(
-            rows,
-            vec![
-                (
-                    "requirements",
-                    &["stakeholder", "user", "requirement", "note", "constraint"][..]
-                ),
-                (
-                    "domain",
-                    &["group", "entity", "value", "service", "note", "constraint"][..]
-                ),
-                (
-                    "solution",
-                    &[
-                        "system",
-                        "container",
-                        "component",
-                        "person",
-                        "note",
-                        "constraint"
-                    ][..]
-                ),
-                (
-                    "plans",
-                    &["plan-phase", "task", "module", "file", "struct", "function"][..]
-                ),
-                ("implementation", &["note", "constraint"][..]),
-                ("global", &["constraint", "note"][..]),
-            ]
-        );
-    }
-
-    /// Storage policy (SPEC §3.1): the four file-backed layers are durable,
-    /// plans is the only transient layer (`.trans/plans/` only, per branch),
-    /// implementation is scanned code.
-    #[test]
-    fn storage_policy_marks_only_plans_transient() {
-        for l in Layer::ALL {
-            match l.storage() {
-                StoragePolicy::Durable => assert!(
-                    matches!(
-                        l,
-                        Layer::Requirements | Layer::Domain | Layer::Solution | Layer::Global
-                    ),
-                    "{l:?} must not be durable"
-                ),
-                StoragePolicy::TransientPlans => {
-                    assert_eq!(l, Layer::Plans, "only plans is transient")
-                }
-                StoragePolicy::ScannedCode => {
-                    assert_eq!(
-                        l,
-                        Layer::Implementation,
-                        "only implementation is scanned code"
-                    )
-                }
-            }
-        }
-    }
-
-    /// Implementation holds exactly the attach-only types; global holds the
-    /// laws (constraint) and the notes on them.
-    #[test]
-    fn implementation_is_attach_only() {
-        assert_eq!(Layer::Implementation.storage(), StoragePolicy::ScannedCode);
-        assert_eq!(Layer::Implementation.node_types(), &["note", "constraint"]);
-        assert_eq!(Layer::Global.node_types(), &["constraint", "note"]);
-    }
-
-    /// The durable tree constant is exactly the catalog projection over the
-    /// non-transient layers (plans has no durable dir; implementation's
-    /// attach-only dirs are durable) — the durable dir list matches the
-    /// layout constants, in layout order.
-    #[test]
-    fn layers_tree_rows_match_the_catalog() {
-        let durable: Vec<(&str, &[&str])> = Layer::ALL
-            .into_iter()
-            .filter(|l| l.storage() != StoragePolicy::TransientPlans)
-            .map(|l| (l.layer_dir(), l.node_types()))
-            .collect();
-        assert_eq!(LAYERS_TREE, durable.as_slice());
-    }
-
-    /// The `.trans` mirrors are complete: all six tiers in the §4.1 diagram
-    /// order — plans first, then the five feedback mirrors incl. global —
-    /// with unique dirs.
-    #[test]
-    fn trans_mirrors_cover_all_six_layers() {
-        assert_eq!(
-            TRANS_MIRRORS,
-            [
-                Layer::Plans,
-                Layer::Requirements,
-                Layer::Domain,
-                Layer::Solution,
-                Layer::Implementation,
-                Layer::Global,
-            ]
-        );
-        let dirs: Vec<&str> = TRANS_MIRRORS.iter().map(|l| l.layer_dir()).collect();
-        let mut unique = dirs.clone();
-        unique.sort_unstable();
-        unique.dedup();
-        assert_eq!(unique.len(), dirs.len(), "mirror tier dirs must be unique");
-    }
-
-    /// The SPEC §3.3 name allowlist `[a-z0-9][a-z0-9-]*`: lowercase letters,
-    /// digits, and hyphens (not first); a leading digit and a trailing hyphen
-    /// are fine. Refuse — never sanitize.
-    #[test]
-    fn name_allowlist_refuses_invalid_names() {
-        let empty = BTreeSet::new();
-        let props = BTreeMap::new();
-        for name in [
-            "customer",
-            "a",
-            "0",
-            "order-line",
-            "a-b-c",
-            "123",
-            "line-",
-            "x0",
-        ] {
-            assert!(
-                validate_node(Layer::Domain, "value", name, &props, &empty).is_ok(),
-                "{name} must pass the allowlist"
-            );
-        }
-        for name in [
-            "CamelCase",
-            "with.dot",
-            "with space",
-            "with_underscore",
-            "-lead",
-            "",
-            "UPPER",
-        ] {
-            assert!(
-                validate_node(Layer::Domain, "value", name, &props, &empty).is_err(),
-                "{name} must be refused (never sanitized)"
-            );
-        }
-    }
-
-    /// Type must exist in its layer (SPEC §3.3) — case-sensitive exact match
-    /// against the catalog's lowercase type spellings. The cryptic DDD names
-    /// are not types (SPEC §3.1 collapses them into Group).
-    #[test]
-    fn type_must_exist_in_its_layer() {
-        let empty = BTreeSet::new();
-        let props = BTreeMap::new();
-        for bad in [
-            "aggregate",
-            "bounded-context",
-            "subdomain",
-            "domain-rule",
-            "domain-process",
-        ] {
-            let err = validate_node(Layer::Domain, bad, "x", &props, &empty).unwrap_err();
-            assert!(
-                err.to_string().contains("does not exist in layer"),
-                "{bad}: {err}"
-            );
-        }
-        // Case-sensitive: the catalog spells types lowercase.
-        assert!(validate_node(Layer::Domain, "Entity", "x", &props, &empty).is_err());
-        // A type of another layer is refused here.
-        assert!(validate_node(Layer::Domain, "stakeholder", "x", &props, &empty).is_err());
-        // The exact lowercase spelling passes the type check; the Entity kind
-        // rule is then what fires.
-        let err = validate_node(Layer::Domain, "entity", "customer", &props, &empty).unwrap_err();
-        assert!(err.to_string().contains("requires"), "{err}");
-    }
-
-    /// Entity requires `kind` ∈ {entity, event} — the spec's only "requires".
-    #[test]
-    fn entity_kind_is_required_and_validated() {
-        let empty = BTreeSet::new();
-        let err = validate_node(
-            Layer::Domain,
-            "entity",
-            "customer",
-            &BTreeMap::new(),
-            &empty,
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("requires"), "{err}");
-        for kind in ["entity", "event"] {
-            let props = BTreeMap::from([("kind".to_string(), kind.to_string())]);
-            assert!(
-                validate_node(Layer::Domain, "entity", "customer", &props, &empty).is_ok(),
-                "kind {kind} must be accepted"
-            );
-        }
-        let props = BTreeMap::from([("kind".to_string(), "thing".to_string())]);
-        let err = validate_node(Layer::Domain, "entity", "customer", &props, &empty).unwrap_err();
-        assert!(err.to_string().contains("entity|event"), "{err}");
-    }
-
-    /// Group: `attribute` ∈ {core, supporting, generic} and `root` are both
-    /// optional; when present they are validated — root against the name
-    /// allowlist, independent of the attribute.
-    #[test]
-    fn group_attribute_and_root_optional_but_validated() {
-        let empty = BTreeSet::new();
-        // No properties at all — valid.
-        assert!(validate_node(Layer::Domain, "group", "sales", &BTreeMap::new(), &empty).is_ok());
-        for attr in ["core", "supporting", "generic"] {
-            let props = BTreeMap::from([("attribute".to_string(), attr.to_string())]);
-            assert!(
-                validate_node(Layer::Domain, "group", "sales", &props, &empty).is_ok(),
-                "attribute {attr} must be accepted"
-            );
-        }
-        let props = BTreeMap::from([("attribute".to_string(), "dubious".to_string())]);
-        let err = validate_node(Layer::Domain, "group", "sales", &props, &empty).unwrap_err();
-        assert!(err.to_string().contains("core|supporting|generic"), "{err}");
-        // root is independent of attribute and format-validated.
-        let props = BTreeMap::from([("root".to_string(), "sales-root".to_string())]);
-        assert!(validate_node(Layer::Domain, "group", "sales", &props, &empty).is_ok());
-        let props = BTreeMap::from([("root".to_string(), "SalesRoot".to_string())]);
-        let err = validate_node(Layer::Domain, "group", "sales", &props, &empty).unwrap_err();
-        assert!(err.to_string().contains("allowlist"), "{err}");
-    }
-
-    /// Container `kind` ∈ {app, service, db, queue} — validated when present,
-    /// optional otherwise (SPEC §3.1 "takes").
-    #[test]
-    fn container_kind_validated_when_present() {
-        let empty = BTreeSet::new();
-        assert!(
-            validate_node(
-                Layer::Solution,
-                "container",
-                "api",
-                &BTreeMap::new(),
-                &empty
-            )
-            .is_ok()
-        );
-        for kind in ["app", "service", "db", "queue"] {
-            let props = BTreeMap::from([("kind".to_string(), kind.to_string())]);
-            assert!(
-                validate_node(Layer::Solution, "container", "api", &props, &empty).is_ok(),
-                "kind {kind} must be accepted"
-            );
-        }
-        let props = BTreeMap::from([("kind".to_string(), "web".to_string())]);
-        let err = validate_node(Layer::Solution, "container", "api", &props, &empty).unwrap_err();
-        assert!(err.to_string().contains("app|service|db|queue"), "{err}");
-    }
-
-    /// Unknown property keys are metadata — allowed, never identity (SPEC
-    /// §4.1: short ids "may exist as metadata only"); a known key on a type
-    /// that does not take it is left alone too.
-    #[test]
-    fn unknown_metadata_keys_are_allowed() {
-        let empty = BTreeSet::new();
-        let props = BTreeMap::from([
-            ("id".to_string(), "R1".to_string()),
-            ("kind".to_string(), "thing".to_string()),
-        ]);
-        assert!(validate_node(Layer::Requirements, "requirement", "login", &props, &empty).is_ok());
-    }
-
-    /// Names are unique per (layer, type) — the same name in two different
-    /// types (or layers) is fine; a duplicate in the same (layer, type) is
-    /// refused.
-    #[test]
-    fn names_unique_per_layer_and_type() {
-        let existing: BTreeSet<(Layer, String, String)> =
-            BTreeSet::from([(Layer::Domain, "entity".to_string(), "customer".to_string())]);
-        let props = BTreeMap::from([("kind".to_string(), "entity".to_string())]);
-        // Same name, different type in the same layer — fine.
-        assert!(validate_node(Layer::Domain, "value", "customer", &props, &existing).is_ok());
-        // Same name, different layer — fine.
-        assert!(validate_node(Layer::Solution, "component", "customer", &props, &existing).is_ok());
-        // Same (layer, type, name) — refused.
-        let err =
-            validate_node(Layer::Domain, "entity", "customer", &props, &existing).unwrap_err();
-        assert!(err.to_string().contains("duplicate"), "{err}");
-    }
-
-    /// contains/depends-on trees must be acyclic (SPEC §3.3). The helper
-    /// validates the per-change edge set; every endpoint must resolve into
-    /// the change universe (existing nodes plus co-proposed nodes).
-    #[test]
-    fn tree_acyclicity_refuses_contains_and_depends_on_cycles() {
-        let universe: BTreeSet<(Layer, String, String)> = BTreeSet::from([
-            (
-                Layer::Requirements,
-                "requirement".to_string(),
-                "r1".to_string(),
-            ),
-            (
-                Layer::Requirements,
-                "requirement".to_string(),
-                "r2".to_string(),
-            ),
-            (
-                Layer::Requirements,
-                "requirement".to_string(),
-                "r3".to_string(),
-            ),
-            (Layer::Domain, "group".to_string(), "g1".to_string()),
-            (Layer::Domain, "group".to_string(), "g2".to_string()),
-        ]);
-        // A contains cycle (Group nesting) is refused.
-        let contains_cycle: &[(&str, &str)] = &[
-            ("domain.group.g1", "domain.group.g2"),
-            ("domain.group.g2", "domain.group.g1"),
-        ];
-        let err = validate_trees_acyclic(contains_cycle, &universe).unwrap_err();
-        assert!(err.to_string().contains("cycle"), "{err}");
-        // A depends-on cycle (Requirement) is refused.
-        let depends_cycle: &[(&str, &str)] = &[
-            ("requirements.requirement.r1", "requirements.requirement.r2"),
-            ("requirements.requirement.r2", "requirements.requirement.r3"),
-            ("requirements.requirement.r3", "requirements.requirement.r1"),
-        ];
-        let err = validate_trees_acyclic(depends_cycle, &universe).unwrap_err();
-        assert!(err.to_string().contains("cycle"), "{err}");
-        // A self-loop is a cycle too ("a node cannot contain itself").
-        let self_loop: &[(&str, &str)] =
-            &[("requirements.requirement.r1", "requirements.requirement.r1")];
-        assert!(validate_trees_acyclic(self_loop, &universe).is_err());
-        // A DAG passes.
-        let dag: &[(&str, &str)] = &[
-            ("requirements.requirement.r1", "requirements.requirement.r2"),
-            ("requirements.requirement.r2", "requirements.requirement.r3"),
-        ];
-        assert!(validate_trees_acyclic(dag, &universe).is_ok());
-        // A dangling endpoint is refused (write-time error, SPEC §3.3).
-        let dangling: &[(&str, &str)] = &[(
-            "requirements.requirement.r1",
-            "requirements.requirement.nope",
-        )];
-        let err = validate_trees_acyclic(dangling, &universe).unwrap_err();
-        assert!(
-            err.to_string().contains("not a node of the change"),
-            "{err}"
-        );
-    }
-
-    /// Every §3.3 edge kind accepts at least one valid (source, target) shape:
-    /// each matrix row, both code-exempt kinds (`implemented-by` with a code
-    /// FQN target, `details` from a note in every authoring layer to any
-    /// target), and the `represents` pair.
-    #[test]
-    fn every_edge_kind_accepts_a_valid_shape() {
-        let ok: &[(&str, &str, &str)] = &[
-            (
-                "contains",
-                "requirements.stakeholder.s1",
-                "requirements.requirement.r1",
-            ),
-            (
-                "contains",
-                "requirements.user.u1",
-                "requirements.requirement.r1",
-            ),
-            (
-                "contains",
-                "requirements.requirement.r1",
-                "requirements.requirement.r2",
-            ),
-            ("contains", "domain.group.g1", "domain.group.g2"),
-            ("contains", "domain.group.g1", "domain.entity.e1"),
-            ("contains", "domain.group.g1", "domain.value.v1"),
-            ("contains", "domain.group.g1", "domain.service.svc1"),
-            ("contains", "solution.system.sys1", "solution.container.c1"),
-            (
-                "contains",
-                "solution.container.c1",
-                "solution.component.cmp1",
-            ),
-            ("drives", "requirements.requirement.r1", "domain.group.g1"),
-            ("drives", "requirements.requirement.r1", "domain.entity.e1"),
-            ("drives", "requirements.requirement.r1", "domain.value.v1"),
-            (
-                "drives",
-                "requirements.requirement.r1",
-                "domain.service.svc1",
-            ),
-            ("realised-by", "domain.group.g1", "solution.system.sys1"),
-            ("realised-by", "domain.entity.e1", "solution.container.c1"),
-            (
-                "realised-by",
-                "domain.service.svc1",
-                "solution.component.cmp1",
-            ),
-            (
-                "implemented-by",
-                "solution.system.sys1",
-                "apg.artifacts.write_jsonl_and_reingest",
-            ),
-            (
-                "implemented-by",
-                "solution.container.c1",
-                "apg.layers.validate_edges",
-            ),
-            ("implemented-by", "solution.component.cmp1", "apg.main"),
-            ("calls", "domain.service.svc1", "domain.service.svc2"),
-            ("publishes", "domain.service.svc1", "domain.entity.e1"),
-            ("subscribes", "domain.service.svc1", "domain.entity.e1"),
-            (
-                "depends-on",
-                "requirements.requirement.r1",
-                "requirements.requirement.r2",
-            ),
-            ("uses", "solution.person.p1", "solution.system.sys1"),
-            ("represents", "requirements.user.u1", "domain.entity.e1"),
-            ("represents", "domain.entity.e1", "solution.person.p1"),
-            (
-                "details",
-                "requirements.note.n1",
-                "requirements.requirement.r1",
-            ),
-            ("details", "domain.note.n1", "domain.entity.e1"),
-            ("details", "solution.note.n1", "solution.system.sys1"),
-            (
-                "details",
-                "implementation.note.n1",
-                "requirements.requirement.r1",
-            ),
-            ("details", "global.note.n1", "requirements.requirement.r1"),
-        ];
-        for &(kind, src, dst) in ok {
-            assert!(
-                validate_edge(kind, src, dst).is_ok(),
-                "{kind} {src} -> {dst} must be accepted"
-            );
-        }
-    }
-
-    /// A rejected (kind, source, target) shape errors naming the kind, the
-    /// source, and the target — tier skips and wrong-type shapes included.
-    #[test]
-    fn rejected_shapes_name_kind_source_and_target() {
-        let bad: &[(&str, &str, &str)] = &[
-            // calls from an Entity (not Service).
-            ("calls", "domain.entity.e1", "domain.service.svc1"),
-            // drives from a Group — a tier skip (Domain → Solution).
-            ("drives", "domain.group.g1", "solution.system.sys1"),
-            // contains from a Container to a Requirement — a tier skip.
-            (
-                "contains",
-                "solution.container.c1",
-                "requirements.requirement.r1",
-            ),
-            // depends-on from a Domain entity.
-            (
-                "depends-on",
-                "domain.entity.e1",
-                "requirements.requirement.r1",
-            ),
-            // realised-by from a Requirement — a tier skip.
-            (
-                "realised-by",
-                "requirements.requirement.r1",
-                "solution.system.sys1",
-            ),
-            // uses from a Service (must be Person).
-            ("uses", "domain.service.svc1", "solution.system.sys1"),
-            // publishes from a Group (must be Service).
-            ("publishes", "domain.group.g1", "domain.entity.e1"),
-            // subscribes to a Group (target must be an Entity).
-            ("subscribes", "domain.service.svc1", "domain.group.g1"),
-            // represents Entity → System (must be Entity → Person).
-            ("represents", "domain.entity.e1", "solution.system.sys1"),
-        ];
-        for &(kind, src, dst) in bad {
-            let msg = validate_edge(kind, src, dst).unwrap_err().to_string();
-            assert!(msg.contains(kind), "must name kind: {msg}");
-            assert!(msg.contains(src), "must name source: {msg}");
-            assert!(msg.contains(dst), "must name target: {msg}");
-        }
-    }
-
-    /// `implemented-by` accepts a code-FQN target (exempt — `validate_code_refs`
-    /// owns it, task-10) and refuses any non-Solution source.
-    #[test]
-    fn implemented_by_accepts_code_fqn_target_and_refuses_non_solution_source() {
-        for src in [
-            "solution.system.payments",
-            "solution.container.api",
-            "solution.component.checkout",
-        ] {
-            assert!(
-                validate_edge(
-                    "implemented-by",
-                    src,
-                    "apg.artifacts.write_jsonl_and_reingest"
-                )
-                .is_ok(),
-                "{src} must be a valid implemented-by source"
-            );
-        }
-        for src in [
-            "domain.service.checkout",
-            "requirements.requirement.r1",
-            "domain.entity.customer",
-            "solution.person.p1",
-        ] {
-            let msg = validate_edge("implemented-by", src, "apg.main")
-                .unwrap_err()
-                .to_string();
-            assert!(msg.contains("implemented-by"), "{msg}");
-            assert!(msg.contains(src), "{msg}");
-        }
-    }
-
-    /// `details` accepts any target — authored OR code — and enforces that the
-    /// source is a `note` (spanning every authoring layer).
-    #[test]
-    fn details_accepts_any_target_and_enforces_note_source() {
-        for target in [
-            "requirements.requirement.r1",
-            "domain.entity.e1",
-            "solution.system.sys1",
-            // A code FQN target is exempt (not parsed).
-            "apg.artifacts.write_jsonl_and_reingest",
-        ] {
-            assert!(
-                validate_edge("details", "requirements.note.n1", target).is_ok(),
-                "details target {target} must be accepted"
-            );
-        }
-        for src in [
-            "requirements.note.n1",
-            "domain.note.n1",
-            "solution.note.n1",
-            "implementation.note.n1",
-            "global.note.n1",
-        ] {
-            assert!(
-                validate_edge("details", src, "requirements.requirement.r1").is_ok(),
-                "{src} must be a valid details source"
-            );
-        }
-        for src in [
-            "requirements.requirement.r1",
-            "domain.entity.e1",
-            "solution.system.sys1",
-        ] {
-            let msg = validate_edge("details", src, "requirements.requirement.r1")
-                .unwrap_err()
-                .to_string();
-            assert!(msg.contains("details"), "{msg}");
-            assert!(msg.contains(src), "{msg}");
-        }
-    }
-
-    /// A dangling authored endpoint — malformed FQN or unknown layer — is a
-    /// write-time error for every matrix kind (SPEC §3.3). Code FQNs only pass
-    /// through the exempt endpoints (`implemented-by`/`details` targets).
-    #[test]
-    fn dangling_authored_endpoint_is_a_write_time_error() {
-        // Unknown layer in the source.
-        let msg = validate_edge("drives", "banana.type.name", "domain.group.g1")
-            .unwrap_err()
-            .to_string();
-        assert!(msg.contains("banana"), "{msg}");
-        // Unknown layer in the target.
-        let msg = validate_edge("drives", "requirements.requirement.r1", "banana.type.name")
-            .unwrap_err()
-            .to_string();
-        assert!(msg.contains("banana"), "{msg}");
-        // Malformed FQN (not <layer>.<type>.<name>) on a matrix-kind endpoint.
-        let msg = validate_edge(
-            "contains",
-            "requirements.requirement",
-            "requirements.requirement.r1",
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(msg.contains("FQN"), "{msg}");
-        // A code FQN in a non-exempt endpoint (drives target) is a dangling ref.
-        let msg = validate_edge("drives", "requirements.requirement.r1", "apg.main")
-            .unwrap_err()
-            .to_string();
-        assert!(msg.contains("apg.main"), "{msg}");
-    }
-
-    /// Anything outside the §3.3 durable list — §5 plan/feedback edges
-    /// (`reviews`, `gates`, `satisfies`, task verbs) and gibberish — is refused
-    /// as an unknown edge kind.
-    #[test]
-    fn unknown_edge_kind_is_refused() {
-        for kind in [
-            "reviews",
-            "gates",
-            "satisfies",
-            "creates",
-            "modifies",
-            "deletes",
-            "banana",
-        ] {
-            let msg = validate_edge(
-                kind,
-                "requirements.requirement.r1",
-                "requirements.requirement.r2",
-            )
-            .unwrap_err()
-            .to_string();
-            assert!(msg.contains("unknown edge kind"), "{msg}");
-            assert!(msg.contains(kind), "{msg}");
-        }
-    }
-
-    /// `represents` has exactly the two matrix rows — User → Entity and Entity
-    /// → Person; an Entity → System hop is refused (that would be a tier skip).
-    #[test]
-    fn represents_both_rows_and_refuses_tier_skips() {
-        assert!(validate_edge("represents", "requirements.user.u1", "domain.entity.e1").is_ok());
-        assert!(validate_edge("represents", "domain.entity.e1", "solution.person.p1").is_ok());
-        let msg = validate_edge("represents", "domain.entity.e1", "solution.system.sys1")
-            .unwrap_err()
-            .to_string();
-        assert!(msg.contains("represents"), "{msg}");
-        assert!(msg.contains("domain.entity.e1"), "{msg}");
-        assert!(msg.contains("solution.system.sys1"), "{msg}");
-    }
-
-    /// The batch entry point loops [`validate_edge`] over every edge; any bad
-    /// edge in the set fails the whole batch.
-    #[test]
-    fn validate_edges_batch_loops_validate_edge() {
-        let ok: &[(&str, &str, &str)] = &[
-            (
-                "contains",
-                "requirements.requirement.r1",
-                "requirements.requirement.r2",
-            ),
-            ("drives", "requirements.requirement.r1", "domain.group.g1"),
-        ];
-        assert!(validate_edges(ok).is_ok());
-        let bad: &[(&str, &str, &str)] = &[
-            (
-                "contains",
-                "requirements.requirement.r1",
-                "requirements.requirement.r2",
-            ),
-            ("drives", "domain.group.g1", "solution.system.sys1"),
-        ];
-        let msg = validate_edges(bad).unwrap_err().to_string();
-        assert!(msg.contains("drives"), "{msg}");
-    }
-
-    /// The plain-named domain types are accepted: the catalog's `group`,
-    /// `entity`, `value`, `service` (SPEC §3.1 — the cryptic DDD type names
-    /// collapse into these; their refusal is covered in
-    /// [`type_must_exist_in_its_layer`]). A plain-named node validates
-    /// end-to-end with its own type's kind/attribute rule applied.
-    #[test]
-    fn plain_domain_types_accepted_with_plain_names() {
-        let empty = BTreeSet::new();
-        // group/value/service need no properties and pass untouched.
-        for (node_type, name) in [
-            ("group", "order-fulfilment"),
-            ("value", "money"),
-            ("service", "checkout"),
-        ] {
-            assert!(
-                validate_node(Layer::Domain, node_type, name, &BTreeMap::new(), &empty).is_ok(),
-                "plain {node_type} `{name}` must be accepted"
-            );
-        }
-        // Entity is accepted once its required kind is present.
-        let props = BTreeMap::from([("kind".to_string(), "entity".to_string())]);
-        assert!(validate_node(Layer::Domain, "entity", "customer", &props, &empty).is_ok());
-    }
-
-    /// A `requirement` node is the ONE requirement type at every depth (SPEC
-    /// §3.1: theme/epic/story/feature are not types — everything is
-    /// `requirement`); a four-level requirement tree validates acyclically,
-    /// and `contains`/`depends-on` between requirement nodes are both
-    /// matrix-legal at any depth.
-    #[test]
-    fn requirement_tree_at_all_depths_is_one_node_type() {
-        let empty = BTreeSet::new();
-        let props = BTreeMap::new();
-        for pseudo in ["theme", "epic", "story", "feature"] {
-            let err = validate_node(Layer::Requirements, pseudo, "x", &props, &empty).unwrap_err();
-            assert!(
-                err.to_string().contains("does not exist in layer"),
-                "{pseudo}: {err}"
-            );
-        }
-        let universe: BTreeSet<(Layer, String, String)> = ["r1", "r2", "r3", "r4"]
-            .into_iter()
-            .map(|n| {
-                (
-                    Layer::Requirements,
-                    "requirement".to_string(),
-                    n.to_string(),
-                )
-            })
-            .collect();
-        // Four levels of contains, plus a depends-on cross-link — still a DAG.
-        let contains: &[(&str, &str)] = &[
-            ("requirements.requirement.r1", "requirements.requirement.r2"),
-            ("requirements.requirement.r2", "requirements.requirement.r3"),
-            ("requirements.requirement.r3", "requirements.requirement.r4"),
-        ];
-        let depends: &[(&str, &str)] =
-            &[("requirements.requirement.r1", "requirements.requirement.r4")];
-        let all: Vec<(&str, &str)> = contains
-            .iter()
-            .copied()
-            .chain(depends.iter().copied())
-            .collect();
-        assert!(
-            validate_trees_acyclic(&all, &universe).is_ok(),
-            "a four-level requirement tree must stay acyclic"
-        );
-        for &(src, dst) in contains {
-            assert!(
-                validate_edge("contains", src, dst).is_ok(),
-                "contains {src} -> {dst} must be matrix-legal"
-            );
-        }
-        for &(src, dst) in depends {
-            assert!(
-                validate_edge("depends-on", src, dst).is_ok(),
-                "depends-on {src} -> {dst} must be matrix-legal"
-            );
-        }
-    }
-
-    /// The sequential spine (SPEC §3.2) is tier-locked by the matrix: the
-    /// full legal chain Requirement --drives--> Domain --realised-by-->
-    /// Solution --implemented-by--> code passes hop-by-hop, and a tier skip
-    /// (Requirement directly realised-by a Solution — no Domain hop) is
-    /// refused.
-    #[test]
-    fn sequential_spine_is_tier_locked() {
-        // The full, legal spine from Requirement to code.
-        assert!(validate_edge("drives", "requirements.requirement.r1", "domain.group.g1").is_ok());
-        assert!(validate_edge("realised-by", "domain.group.g1", "solution.system.sys1").is_ok());
-        assert!(validate_edge("implemented-by", "solution.system.sys1", "apg.main").is_ok());
-        // A tier skip: Requirement realised-by Solution, skipping the Domain hop.
-        let msg = validate_edge(
-            "realised-by",
-            "requirements.requirement.r1",
-            "solution.system.sys1",
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(msg.contains("realised-by"), "{msg}");
-        assert!(msg.contains("requirements.requirement.r1"), "{msg}");
-        assert!(msg.contains("solution.system.sys1"), "{msg}");
-    }
-
-    /// The §3.3 edge-kind matrix is complete and internally consistent: its
-    /// rows cover exactly the two-authored-endpoint kinds (all of
-    /// [`EDGE_KINDS`] except the code-exempt `implemented-by`/`details`), and
-    /// every row's source/target type is a real type of its layer's catalog.
-    #[test]
-    fn edge_kind_matrix_is_complete_and_consistent() {
-        let exempt = ["implemented-by", "details"];
-        let kinds: BTreeSet<&str> = MATRIX.iter().map(|(k, ..)| *k).collect();
-        let expected: BTreeSet<&str> = EDGE_KINDS
-            .iter()
-            .copied()
-            .filter(|k| !exempt.contains(k))
-            .collect();
-        assert_eq!(
-            kinds, expected,
-            "matrix rows must cover exactly the non-exempt edge kinds"
-        );
-        for &(kind, sl, sts, tl, tts) in MATRIX {
-            for t in sts {
-                assert!(
-                    sl.node_types().contains(t),
-                    "{kind}: source type `{t}` not in layer {}",
-                    sl.layer_dir()
-                );
-            }
-            for t in tts {
-                assert!(
-                    tl.node_types().contains(t),
-                    "{kind}: target type `{t}` not in layer {}",
-                    tl.layer_dir()
-                );
-            }
-        }
-    }
-
-    /// Two services that call each other are coupled: their owning groups are
-    /// one derived pair — symmetric, nothing stored (SPEC §3.1).
-    #[test]
-    fn mutual_calls_couple_their_groups() {
-        let edges: &[(&str, &str, &str)] = &[
-            ("calls", "domain.service.orders", "domain.service.billing"),
-            ("calls", "domain.service.billing", "domain.service.orders"),
-        ];
-        let owner = BTreeMap::from([
-            (
-                "domain.service.orders".to_string(),
-                "domain.group.sales".to_string(),
-            ),
-            (
-                "domain.service.billing".to_string(),
-                "domain.group.billing".to_string(),
-            ),
-        ]);
-        let coupled = derive_coupling(edges, &owner);
-        assert_eq!(
-            coupled,
-            BTreeSet::from([(
-                "domain.group.billing".to_string(),
-                "domain.group.sales".to_string()
-            )])
-        );
-    }
-
-    /// A publisher and a subscriber sharing one event are coupled through the
-    /// event medium; the event itself names no coupled group.
-    #[test]
-    fn publish_subscribe_via_shared_event_couples() {
-        let edges: &[(&str, &str, &str)] = &[
-            (
-                "publishes",
-                "domain.service.orders",
-                "domain.entity.order-placed",
-            ),
-            (
-                "subscribes",
-                "domain.service.shipping",
-                "domain.entity.order-placed",
-            ),
-        ];
-        let owner = BTreeMap::from([
-            (
-                "domain.service.orders".to_string(),
-                "domain.group.sales".to_string(),
-            ),
-            (
-                "domain.service.shipping".to_string(),
-                "domain.group.fulfilment".to_string(),
-            ),
-        ]);
-        let coupled = derive_coupling(edges, &owner);
-        assert_eq!(
-            coupled,
-            BTreeSet::from([(
-                "domain.group.fulfilment".to_string(),
-                "domain.group.sales".to_string()
-            )])
-        );
-    }
-
-    /// A calls chain A→B→C couples A and C — coupling is the transitive
-    /// closure, every pair in the component.
-    #[test]
-    fn transitive_call_chain_couples_endpoints() {
-        let edges: &[(&str, &str, &str)] = &[
-            (
-                "calls",
-                "domain.service.checkout",
-                "domain.service.inventory",
-            ),
-            (
-                "calls",
-                "domain.service.inventory",
-                "domain.service.payments",
-            ),
-        ];
-        let owner = BTreeMap::from([
-            (
-                "domain.service.checkout".to_string(),
-                "domain.group.storefront".to_string(),
-            ),
-            (
-                "domain.service.inventory".to_string(),
-                "domain.group.stock".to_string(),
-            ),
-            (
-                "domain.service.payments".to_string(),
-                "domain.group.money".to_string(),
-            ),
-        ]);
-        let coupled = derive_coupling(edges, &owner);
-        // All three groups are pairwise coupled (3 unordered pairs).
-        assert_eq!(
-            coupled,
-            BTreeSet::from([
-                (
-                    "domain.group.money".to_string(),
-                    "domain.group.stock".to_string()
-                ),
-                (
-                    "domain.group.money".to_string(),
-                    "domain.group.storefront".to_string()
-                ),
-                (
-                    "domain.group.stock".to_string(),
-                    "domain.group.storefront".to_string()
-                ),
-            ])
-        );
-    }
-
-    /// Two services with no connecting edge chain are NOT coupled —
-    /// disconnected components yield no cross-component pair.
-    #[test]
-    fn unconnected_services_are_not_coupled() {
-        let edges: &[(&str, &str, &str)] = &[
-            ("calls", "domain.service.orders", "domain.service.billing"),
-            ("calls", "domain.service.catalog", "domain.service.search"),
-        ];
-        let owner = BTreeMap::from([
-            (
-                "domain.service.orders".to_string(),
-                "domain.group.sales".to_string(),
-            ),
-            (
-                "domain.service.billing".to_string(),
-                "domain.group.billing".to_string(),
-            ),
-            (
-                "domain.service.catalog".to_string(),
-                "domain.group.catalog".to_string(),
-            ),
-            (
-                "domain.service.search".to_string(),
-                "domain.group.search".to_string(),
-            ),
-        ]);
-        let coupled = derive_coupling(edges, &owner);
-        assert_eq!(
-            coupled,
-            BTreeSet::from([
-                (
-                    "domain.group.billing".to_string(),
-                    "domain.group.sales".to_string()
-                ),
-                (
-                    "domain.group.catalog".to_string(),
-                    "domain.group.search".to_string()
-                ),
-            ])
-        );
-    }
-
-    /// Coupling is DERIVED: the result is only group-FQN pairs — no edge
-    /// kinds, no flavor values, no coupling node. The context-map flavor rides
-    /// on the edge (an attribute the caller keeps), never in the derived
-    /// structure.
-    #[test]
-    fn coupling_is_derived_and_flavor_is_not_structure() {
-        let edges: &[(&str, &str, &str)] = &[
-            ("calls", "domain.service.orders", "domain.service.billing"),
-            (
-                "publishes",
-                "domain.service.orders",
-                "domain.entity.order-placed",
-            ),
-            (
-                "subscribes",
-                "domain.service.shipping",
-                "domain.entity.order-placed",
-            ),
-        ];
-        let owner = BTreeMap::from([
-            (
-                "domain.service.orders".to_string(),
-                "domain.group.sales".to_string(),
-            ),
-            (
-                "domain.service.billing".to_string(),
-                "domain.group.billing".to_string(),
-            ),
-            (
-                "domain.service.shipping".to_string(),
-                "domain.group.fulfilment".to_string(),
-            ),
-        ]);
-        let coupled = derive_coupling(edges, &owner);
-        // Three groups, all pairwise coupled through the call + the shared
-        // event — but as DERIVED pairs, nothing stored.
-        assert_eq!(coupled.len(), 3);
-        for (a, b) in &coupled {
-            // Every endpoint is a group FQN.
-            assert!(a.starts_with("domain.group."), "{a}");
-            assert!(b.starts_with("domain.group."), "{b}");
-            // No flavor (edge attribute) leaks into the derived pair.
-            for flavor in ["direct", "published", "translated", "shared", "coevolving"] {
-                assert!(!a.contains(flavor), "flavor {flavor} leaked into {a}");
-                assert!(!b.contains(flavor), "flavor {flavor} leaked into {b}");
-            }
-        }
-    }
-
-    /// Coupling is derived, never stored as a Group->Group edge: the §3.3
-    /// matrix has no coupling row between groups — no coupling verb is an edge
-    /// kind, the coupling edges (`calls`/`publishes`/`subscribes`) touch only
-    /// Service/Entity, and the one Group->Group row (`contains`) is containment
-    /// (nesting), not coupling.
-    #[test]
-    fn coupling_is_never_a_group_to_group_edge() {
-        // No coupling verb is a durable edge kind — coupling is derived, not an
-        // edge kind and not a stored artifact.
-        for verb in ["couples", "coupled", "coupling", "coupled-to"] {
-            assert!(
-                !EDGE_KINDS.contains(&verb),
-                "`{verb}` must not be an edge kind — coupling is derived, never stored"
-            );
-        }
-        for &(kind, _, sts, _, tts) in MATRIX {
-            let src_is_group = sts.contains(&"group");
-            let dst_is_group = tts.contains(&"group");
-            // The coupling edges never touch a Group endpoint (they are
-            // Service->Service / Service->Entity).
-            if matches!(kind, "calls" | "publishes" | "subscribes") {
-                assert!(
-                    !src_is_group && !dst_is_group,
-                    "coupling edge `{kind}` must have no Group endpoint"
-                );
-            }
-            // The only Group->Group row is `contains` (nesting).
-            if src_is_group && dst_is_group {
-                assert_eq!(
-                    kind, "contains",
-                    "Group->Group must be containment, never `{kind}`"
-                );
-            }
-        }
-    }
-
-    /// The context-map flavor (direct/published/translated/shared/coevolving)
-    /// is an EDGE attribute — never a node type, never an edge kind. A type
-    /// named after a flavor is refused (it is not a catalog type); a flavor
-    /// used as an edge kind is refused (unknown kind); the edge verb is
-    /// `publishes`, not the flavor `published`.
-    #[test]
-    fn flavors_are_edge_attributes_never_types_or_kinds() {
-        let empty = BTreeSet::new();
-        let props = BTreeMap::new();
-        for flavor in ["direct", "published", "translated", "shared", "coevolving"] {
-            // Not a node type — validate_node refuses a type named after a flavor.
-            let err = validate_node(Layer::Domain, flavor, "x", &props, &empty).unwrap_err();
-            assert!(
-                err.to_string().contains("does not exist in layer"),
-                "flavor `{flavor}` as a node type: {err}"
-            );
-            // Not an edge kind — validate_edge refuses a flavor used as a kind.
-            let err = validate_edge(flavor, "domain.service.a", "domain.service.b")
-                .unwrap_err()
-                .to_string();
-            assert!(
-                err.contains("unknown edge kind"),
-                "flavor `{flavor}` as an edge kind: {err}"
-            );
-        }
-        // The edge verb is `publishes`, not the flavor `published`.
-        assert!(validate_edge("publishes", "domain.service.a", "domain.entity.e").is_ok());
-    }
-
-    /// A global constraint (layer Global) is well-formed with no attachment: it
-    /// guards the whole graph, so it carries nothing but prose.
-    #[test]
-    fn global_constraint_needs_no_attachment() {
-        let empty = BTreeSet::new();
-        assert!(eval_constraint(Layer::Global, "g1", &BTreeMap::new(), &empty).is_ok());
-    }
-
-    /// A local constraint (requirements/domain/solution) is well-formed when
-    /// its `attaches-to` resolves to an existing tier-1–3 node; a local
-    /// constraint without an attachment is also fine ("may attach").
-    #[test]
-    fn local_constraint_with_resolving_attachment_is_well_formed() {
-        let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
-            (
-                Layer::Requirements,
-                "requirement".to_string(),
-                "place-order".to_string(),
-            ),
-            (Layer::Domain, "entity".to_string(), "customer".to_string()),
-            (
-                Layer::Solution,
-                "system".to_string(),
-                "payments".to_string(),
-            ),
-        ]);
-        for (layer, target) in [
-            (
-                Layer::Requirements,
-                "requirements.requirement.place-order".to_string(),
-            ),
-            (Layer::Domain, "domain.entity.customer".to_string()),
-            (Layer::Solution, "solution.system.payments".to_string()),
-        ] {
-            let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), target.clone())]);
-            assert!(
-                eval_constraint(layer, "law", &props, &existing).is_ok(),
-                "{layer:?} attaching to {target} must validate"
-            );
-        }
-        // A local constraint without an attachment is fine ("may attach").
-        assert!(eval_constraint(Layer::Domain, "law", &BTreeMap::new(), &existing).is_ok());
-    }
-
-    /// A local constraint referencing a non-existent node is refused — "never a
-    /// non-thing": the reference must resolve, not merely parse.
-    #[test]
-    fn local_constraint_attaching_to_a_non_thing_bails() {
-        let existing: BTreeSet<(Layer, String, String)> =
-            BTreeSet::from([(Layer::Domain, "entity".to_string(), "customer".to_string())]);
-        let props = BTreeMap::from([(
-            PROP_ATTACHES_TO.to_string(),
-            "domain.entity.ghost".to_string(),
-        )]);
-        let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("never a non-thing"), "{msg}");
-        assert!(msg.contains("domain.entity.ghost"), "{msg}");
-    }
-
-    /// A local constraint attaches to a tier-1–3 node: a non-tier target (a
-    /// global node) is refused, and a malformed FQN does not even parse.
-    #[test]
-    fn local_constraint_attachment_must_be_a_tier_1_3_node() {
-        let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
-            (Layer::Global, "constraint".to_string(), "g1".to_string()),
-            (Layer::Domain, "entity".to_string(), "customer".to_string()),
-        ]);
-        // A global node is not a tier-1–3 node.
-        let props = BTreeMap::from([(
-            PROP_ATTACHES_TO.to_string(),
-            "global.constraint.g1".to_string(),
-        )]);
-        let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
-        assert!(err.to_string().contains("tier-1–3"), "{err}");
-        // A malformed FQN does not parse.
-        let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), "not-an-fqn".to_string())]);
-        let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
-        assert!(err.to_string().contains("FQN"), "{err}");
-        // A global constraint must not declare an attachment at all.
-        let props = BTreeMap::from([(
-            PROP_ATTACHES_TO.to_string(),
-            "domain.entity.customer".to_string(),
-        )]);
-        let err = eval_constraint(Layer::Global, "g2", &props, &existing).unwrap_err();
-        assert!(err.to_string().contains("guards the whole graph"), "{err}");
-    }
-
-    /// A local constraint attaches to a tier-1–3 node — an EXISTING node
-    /// outside tiers 1–3 (an implementation note, a plans task) is still
-    /// refused: "never a non-thing" means the target must be a tier-1–3 thing,
-    /// not merely resolve. The contrast — an existing tier-1–3 thing — passes.
-    #[test]
-    fn constraint_attachment_to_existing_non_tier_node_refused() {
-        let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
-            (Layer::Implementation, "note".to_string(), "n1".to_string()),
-            (Layer::Plans, "task".to_string(), "t1".to_string()),
-            (Layer::Domain, "entity".to_string(), "customer".to_string()),
-        ]);
-        for target in ["implementation.note.n1", "plans.task.t1"] {
-            let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), target.to_string())]);
-            let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
-            let msg = err.to_string();
-            assert!(msg.contains("not a tier"), "{target}: {msg}");
-            assert!(msg.contains(target), "{target}: {msg}");
-        }
-        // An existing tier-1–3 thing validates (the contrast).
-        let props = BTreeMap::from([(
-            PROP_ATTACHES_TO.to_string(),
-            "domain.entity.customer".to_string(),
-        )]);
-        assert!(eval_constraint(Layer::Domain, "law", &props, &existing).is_ok());
-    }
-
-    /// A `constraint` type is refused in a layer that does not host constraints
-    /// (plans); implementation hosts the attach-only pair, so it is NOT refused.
-    #[test]
-    fn constraint_type_refused_in_a_layer_without_constraints() {
-        let empty = BTreeSet::new();
-        let props = BTreeMap::new();
-        let err = eval_constraint(Layer::Plans, "x", &props, &empty).unwrap_err();
-        assert!(err.to_string().contains("does not exist in layer"), "{err}");
-        // Implementation hosts note/constraint (attach-only) — a constraint
-        // there is a real type.
-        assert!(eval_constraint(Layer::Implementation, "x", &props, &empty).is_ok());
-    }
-
-    /// Satisfaction is NEVER evaluated: there is no constraint-expression
-    /// language, and this function takes no prose input (the prose `body` is
-    /// the node-file's top-level field, never read here). A constraint whose
-    /// prose "would fail" — contradictory, or even expression-looking — still
-    /// passes structure/reference validation, because satisfaction is assessed
-    /// by review only.
-    #[test]
-    fn satisfaction_is_review_only_never_evaluated() {
-        let existing: BTreeSet<(Layer, String, String)> =
-            BTreeSet::from([(Layer::Domain, "entity".to_string(), "customer".to_string())]);
-        // Contradictory prose (stands in for the top-level `body`) — the binary
-        // never reads or evaluates it; only the reference is checked.
-        let props = BTreeMap::from([
-            (
-                PROP_ATTACHES_TO.to_string(),
-                "domain.entity.customer".to_string(),
-            ),
-            (
-                "body".to_string(),
-                "every order has a customer AND every order has no customer".to_string(),
-            ),
-        ]);
-        assert!(eval_constraint(Layer::Domain, "law", &props, &existing).is_ok());
-        // A global constraint with expression-looking prose is equally
-        // unevaluated.
-        let props = BTreeMap::from([(
-            "body".to_string(),
-            "count(entities) == 0 AND count(entities) > 0".to_string(),
-        )]);
-        assert!(eval_constraint(Layer::Global, "law", &props, &existing).is_ok());
-    }
-
-    // --- Node-file schema + single-node writer (phase-3 task-8) ---
+    /// The module/fqn namespace the scan payloads use.
+    const SCAN_MOD: &str = "fixture.mod";
+    const SCAN_FILE: &str = "/abs/store.go";
 
     /// A unique temp dir for one test (removed on cleanup) — the node-file
     /// writer is the first I/O in this module, so tests stage under
@@ -3519,110 +2293,6 @@ mod tests {
             }],
         }
     }
-
-    /// write_node writes one file at
-    /// `<root>/layers/<layer>/<type>/<name>.json`; the layer/type/name/body/
-    /// properties/out/in round-trip (write → read → deserialize == original),
-    /// and the FQN derived from the path's segments equals layer.type.name.
-    #[test]
-    fn write_node_writes_file_with_round_tripping_identity() {
-        let root = temp_root("roundtrip");
-        let node = sample_node();
-        let path = write_node(&root, &node).unwrap();
-        assert_eq!(
-            path,
-            root.join("layers")
-                .join("requirements")
-                .join("requirement")
-                .join("place-order.json")
-        );
-        let text = std::fs::read_to_string(&path).unwrap();
-        let back: NodeFile = serde_json::from_str(&text).unwrap();
-        assert_eq!(back, node);
-        // The file name IS the identity: the FQN is the path's segments.
-        assert_eq!(
-            fqn(Layer::Requirements, &back.node_type, &back.name),
-            "requirements.requirement.place-order"
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// The FQN builder is the inverse of [`parse_fqn`]: `<layer>.<type>.<name>`,
-    /// no project prefix.
-    #[test]
-    fn fqn_builder_returns_layer_type_name() {
-        assert_eq!(
-            fqn(Layer::Requirements, "requirement", "place-order"),
-            "requirements.requirement.place-order"
-        );
-        assert_eq!(
-            fqn(Layer::Domain, "service", "checkout"),
-            "domain.service.checkout"
-        );
-        assert_eq!(
-            fqn(Layer::Global, "constraint", "law"),
-            "global.constraint.law"
-        );
-        // And it is the inverse of parse_fqn.
-        let (layer, node_type, name) = parse_fqn("domain.entity.customer").unwrap();
-        assert_eq!(fqn(layer, &node_type, &name), "domain.entity.customer");
-    }
-
-    /// A plans-layer node is refused — plans is transient (apg/.trans/plans/),
-    /// never a durable node-file layer — and nothing is written.
-    #[test]
-    fn write_node_refuses_plans_layer() {
-        let root = temp_root("plans");
-        let mut node = sample_node();
-        node.layer = "plans".to_string();
-        node.node_type = "task".to_string();
-        let err = write_node(&root, &node).unwrap_err().to_string();
-        assert!(err.contains("plans"), "{err}");
-        assert!(!root.join("layers").exists());
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// An allowlist-violating name is refused (never sanitized) — the file name
-    /// must stay safe. Also covers an unknown layer.
-    #[test]
-    fn write_node_refuses_allowlist_violating_name() {
-        let root = temp_root("badname");
-        for bad in ["CamelCase", "with.dot", "with space", "-lead", ""] {
-            let mut node = sample_node();
-            node.name = bad.to_string();
-            let err = write_node(&root, &node).unwrap_err().to_string();
-            assert!(err.contains("allowlist"), "{bad}: {err}");
-        }
-        // An unknown layer is refused too.
-        let mut node = sample_node();
-        node.layer = "banana".to_string();
-        let err = write_node(&root, &node).unwrap_err().to_string();
-        assert!(err.contains("banana"), "{err}");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// Metadata properties (short ids) are stored verbatim, never treated as
-    /// identity — the file name stays layer.type.name even when an `id` is
-    /// present.
-    #[test]
-    fn write_node_preserves_metadata_properties_verbatim() {
-        let root = temp_root("metadata");
-        let mut node = sample_node();
-        node.properties = BTreeMap::from([("id".to_string(), "R1".to_string())]);
-        let path = write_node(&root, &node).unwrap();
-        // The identity is the path, never the short id.
-        assert_eq!(
-            path.file_name().and_then(|n| n.to_str()),
-            Some("place-order.json")
-        );
-        let text = std::fs::read_to_string(&path).unwrap();
-        let back: NodeFile = serde_json::from_str(&text).unwrap();
-        assert_eq!(back.properties.get("id").map(String::as_str), Some("R1"));
-        assert_eq!(back, node);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    // --- In/out edge pairing (phase-3 task-9) ---
 
     /// A bare node file with no edges, for building the pairing test fixtures.
     fn node(layer: &str, node_type: &str, name: &str) -> NodeFile {
@@ -3655,187 +2325,1675 @@ mod tests {
         }
     }
 
-    /// A fully paired set — A's out `contains -> B` and B's in `contains <-
-    /// A`, matching source/kind/target/properties — passes.
-    #[test]
-    fn paired_in_and_out_edges_pass() {
-        let mut a = node("requirements", "requirement", "a");
-        a.out
-            .push(out_edge("contains", "requirements.requirement.b"));
-        let mut b = node("requirements", "requirement", "b");
-        b.in_edges
-            .push(in_edge("contains", "requirements.requirement.a"));
-        assert!(check_edge_pairing(&[a, b]).is_ok());
-    }
-
-    /// An out edge in A without the matching in edge in B is an ERROR — the
-    /// error names the node, the kind, and the missing counterpart.
-    #[test]
-    fn out_edge_without_matching_in_edge_errors() {
-        let mut a = node("requirements", "requirement", "a");
-        a.out
-            .push(out_edge("contains", "requirements.requirement.b"));
-        let b = node("requirements", "requirement", "b");
-        let msg = check_edge_pairing(&[a, b]).unwrap_err().to_string();
-        assert!(msg.contains("requirements.requirement.a"), "{msg}");
-        assert!(msg.contains("contains"), "{msg}");
-        assert!(msg.contains("BOTH endpoint files"), "{msg}");
-    }
-
-    /// An in edge in B without the matching out edge in A is an ERROR — the
-    /// symmetric half of the pairwise rule.
-    #[test]
-    fn in_edge_without_matching_out_edge_errors() {
-        let a = node("requirements", "requirement", "a");
-        let mut b = node("requirements", "requirement", "b");
-        b.in_edges
-            .push(in_edge("contains", "requirements.requirement.a"));
-        let msg = check_edge_pairing(&[a, b]).unwrap_err().to_string();
-        assert!(msg.contains("requirements.requirement.b"), "{msg}");
-        assert!(msg.contains("contains"), "{msg}");
-        assert!(msg.contains("BOTH endpoint files"), "{msg}");
-    }
-
-    /// The SAME endpoints but DIFFERENT edge properties is a mismatch — a
-    /// match requires identical properties, not merely endpoint existence.
-    #[test]
-    fn same_endpoints_different_properties_is_a_mismatch() {
-        let mut a = node("requirements", "requirement", "a");
-        let mut oe = out_edge("contains", "requirements.requirement.b");
-        oe.properties
-            .insert("flavor".to_string(), "direct".to_string());
-        a.out.push(oe);
-        let mut b = node("requirements", "requirement", "b");
-        b.in_edges
-            .push(in_edge("contains", "requirements.requirement.a"));
-        let msg = check_edge_pairing(&[a, b]).unwrap_err().to_string();
-        assert!(msg.contains("contains"), "{msg}");
-        assert!(msg.contains("properties"), "{msg}");
-    }
-
-    /// A dangling authored target — parses as `<layer>.<type>.<name>` but no
-    /// such node file exists — is an error, not a silent skip.
-    #[test]
-    fn dangling_authored_target_errors() {
-        let mut a = node("requirements", "requirement", "a");
-        a.out
-            .push(out_edge("contains", "requirements.requirement.ghost"));
-        let msg = check_edge_pairing(&[a]).unwrap_err().to_string();
-        assert!(msg.contains("requirements.requirement.ghost"), "{msg}");
-    }
-
-    /// A dangling authored source on an in edge is the symmetric error.
-    #[test]
-    fn dangling_authored_source_errors() {
-        let mut b = node("requirements", "requirement", "b");
-        b.in_edges
-            .push(in_edge("contains", "requirements.requirement.ghost"));
-        let msg = check_edge_pairing(&[b]).unwrap_err().to_string();
-        assert!(msg.contains("requirements.requirement.ghost"), "{msg}");
-    }
-
-    /// An `implemented-by` out edge to a code FQN (non-parsing target) is NOT
-    /// flagged — code endpoints are exempt from the pairwise rule.
-    #[test]
-    fn implemented_by_to_code_fqn_is_not_flagged() {
-        let mut sys = node("solution", "system", "payments");
-        sys.out.push(out_edge("implemented-by", "apg.main"));
-        assert!(check_edge_pairing(&[sys]).is_ok());
-    }
-
-    /// A `details` out edge to a code FQN is NOT flagged — the target is a
-    /// code node (no file), so there is only the spec-side half.
-    #[test]
-    fn details_to_code_fqn_is_not_flagged() {
-        let mut n = node("requirements", "note", "n1");
-        n.out.push(out_edge(
-            "details",
-            "apg.artifacts.write_jsonl_and_reingest",
-        ));
-        assert!(check_edge_pairing(&[n]).is_ok());
-    }
-
-    /// A symmetric in edge whose source is a code FQN (non-parsing) is NOT
-    /// flagged — the parse-based rule treats code endpoints as exempt in both
-    /// directions.
-    #[test]
-    fn in_edge_from_code_fqn_is_not_flagged() {
-        let mut sys = node("solution", "system", "payments");
-        sys.in_edges.push(in_edge("implemented-by", "apg.main"));
-        assert!(check_edge_pairing(&[sys]).is_ok());
-    }
-
-    // --- Code-endpoint validation (phase-3 task-10) ---
-
     /// A caller-supplied code-FQN universe: the scanned set or the planned
     /// set, both plain [`BTreeSet`]s of opaque FQN strings.
     fn code_universe(fqns: &[&str]) -> BTreeSet<String> {
         fqns.iter().map(|s| s.to_string()).collect()
     }
 
-    /// The three-way split (SPEC §4.1): a scanned FQN is Real, a planned-only
-    /// FQN is Pending, a FQN in neither universe is Drift.
-    #[test]
-    fn classify_code_ref_three_ways() {
-        let scanned = code_universe(&["apg.layers.validate_edges", "apg.main"]);
-        let planned = code_universe(&["apg.layers.ingest_tree"]);
-        assert_eq!(
-            classify_code_ref("apg.layers.validate_edges", &scanned, &planned),
-            CodeRefStatus::Real
-        );
-        assert_eq!(
-            classify_code_ref("apg.layers.ingest_tree", &scanned, &planned),
-            CodeRefStatus::Pending
-        );
-        assert_eq!(
-            classify_code_ref("apg.layers.gone", &scanned, &planned),
-            CodeRefStatus::Drift
-        );
+    /// The small paired node set the rewrite regression authors: A --contains-->
+    /// B, with A's out and B's in matching (the SPEC §4.1 pairwise invariant).
+    fn authored_pair(a_name: &str, b_name: &str) -> (NodeFile, NodeFile) {
+        let a_fqn = fqn(Layer::Requirements, "requirement", a_name);
+        let b_fqn = fqn(Layer::Requirements, "requirement", b_name);
+        let mut a = node("requirements", "requirement", a_name);
+        a.out.push(out_edge("contains", &b_fqn));
+        let mut b = node("requirements", "requirement", b_name);
+        b.in_edges.push(in_edge("contains", &a_fqn));
+        (a, b)
     }
 
-    /// The scanned graph is the stronger check: a FQN in BOTH scanned and
-    /// planned is Real (it has landed), not Pending.
-    #[test]
-    fn scanned_wins_over_planned() {
-        let scanned = code_universe(&["apg.main"]);
-        let planned = code_universe(&["apg.main"]);
-        assert_eq!(
-            classify_code_ref("apg.main", &scanned, &planned),
-            CodeRefStatus::Real
+    /// Read one node file back from its derived path (the file name IS the
+    /// identity) — the post-rewrite state the pairing check runs on.
+    fn read_node_file(root: &Path, layer: &str, node_type: &str, name: &str) -> NodeFile {
+        let path = root
+            .join("layers")
+            .join(layer)
+            .join(node_type)
+            .join(format!("{name}.json"));
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
+    }
+
+    /// Write a set of node files under `<root>/layers/…` at their derived
+    /// paths — the durable tree `ingest_tree` walks.
+    fn write_tree(root: &Path, nodes: &[NodeFile]) {
+        for n in nodes {
+            write_node(root, n).unwrap();
+        }
+    }
+
+    /// A sample spine tree: a requirement `drives` a group, the group is
+    /// `realised-by` a system, the system is `implemented-by` a code FQN.
+    /// Fully paired in/out halves.
+    fn sample_tree() -> Vec<NodeFile> {
+        let mut req = node("requirements", "requirement", "place-order");
+        req.out.push(out_edge("drives", "domain.group.sales"));
+        let mut grp = node("domain", "group", "sales");
+        grp.in_edges
+            .push(in_edge("drives", "requirements.requirement.place-order"));
+        grp.out
+            .push(out_edge("realised-by", "solution.system.payments"));
+        let mut sys = node("solution", "system", "payments");
+        sys.in_edges
+            .push(in_edge("realised-by", "domain.group.sales"));
+        sys.out.push(out_edge("implemented-by", "apg.main"));
+        vec![req, grp, sys]
+    }
+
+    /// A real project context for `write_project` tests: the scan fixture's
+    /// repo plus a worktree `foo` branched off it and a branch DB built by the
+    /// hermetic scan (mirrors node_cmd's mutation fixture). Returns
+    /// `(wt_apg_root, repo, wt_root)`.
+    fn mutation_fixture(tag: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = scan_repo(tag);
+        let wt = repo.start_project("foo");
+        testutil::scan_checkout(&wt).unwrap();
+        (wt.join(crate::specs::LAYOUT), repo, wt)
+    }
+
+    /// A fixture repo carrying a scanned-code payload, committed.
+    fn scan_repo(tag: &str) -> Repo {
+        let repo = Repo::new(&format!("layers-scan-{tag}"));
+        repo.write(
+            "code/seed.scan.jsonl",
+            &crate::testutil::code_payload(SCAN_MOD, SCAN_FILE, &["Store"]),
         );
+        repo.commit_all("seed code");
+        repo
     }
 
-    /// Pending is NOT an error — a planned-only FQN validates Ok (it realizes
-    /// once the code lands), never a spec-drift bail.
-    #[test]
-    fn pending_code_ref_is_not_an_error() {
-        let scanned = code_universe(&["apg.main"]);
-        let planned = code_universe(&["apg.layers.ingest_tree"]);
-        assert!(validate_code_refs(&["apg.layers.ingest_tree"], &scanned, &planned).is_ok());
-    }
+    /// unit tier -- pure in-memory: no filesystem, database, git or process.
+    mod unit {
+        use super::*;
 
-    /// A batch mixing Real and Pending refs validates Ok; a batch with one
-    /// Drift bails naming the offending FQN.
-    #[test]
-    fn validate_code_refs_ok_on_real_and_pending_errors_on_drift() {
-        let scanned = code_universe(&["apg.layers.validate_edges", "apg.main"]);
-        let planned = code_universe(&["apg.layers.ingest_tree"]);
-        // Real + Pending -> Ok.
-        assert!(
-            validate_code_refs(
-                &["apg.layers.validate_edges", "apg.layers.ingest_tree"],
-                &scanned,
-                &planned
+        /// The catalog is the SPEC §3.1 table: per-layer dirs and node types,
+        /// verbatim (global holds constraint before note; implementation holds
+        /// only the attach-only pair).
+        #[test]
+        fn catalog_matches_the_spec_table() {
+            let rows: Vec<(&str, &[&str])> = Layer::ALL
+                .into_iter()
+                .map(|l| (l.layer_dir(), l.node_types()))
+                .collect();
+            assert_eq!(
+                rows,
+                vec![
+                    (
+                        "requirements",
+                        &["stakeholder", "user", "requirement", "note", "constraint"][..]
+                    ),
+                    (
+                        "domain",
+                        &["group", "entity", "value", "service", "note", "constraint"][..]
+                    ),
+                    (
+                        "solution",
+                        &[
+                            "system",
+                            "container",
+                            "component",
+                            "person",
+                            "note",
+                            "constraint"
+                        ][..]
+                    ),
+                    (
+                        "plans",
+                        &["plan-phase", "task", "module", "file", "struct", "function"][..]
+                    ),
+                    ("implementation", &["note", "constraint"][..]),
+                    ("global", &["constraint", "note"][..]),
+                ]
+            );
+        }
+
+        /// Storage policy (SPEC §3.1): the four file-backed layers are durable,
+        /// plans is the only transient layer (`.trans/plans/` only, per branch),
+        /// implementation is scanned code.
+        #[test]
+        fn storage_policy_marks_only_plans_transient() {
+            for l in Layer::ALL {
+                match l.storage() {
+                    StoragePolicy::Durable => assert!(
+                        matches!(
+                            l,
+                            Layer::Requirements | Layer::Domain | Layer::Solution | Layer::Global
+                        ),
+                        "{l:?} must not be durable"
+                    ),
+                    StoragePolicy::TransientPlans => {
+                        assert_eq!(l, Layer::Plans, "only plans is transient")
+                    }
+                    StoragePolicy::ScannedCode => {
+                        assert_eq!(
+                            l,
+                            Layer::Implementation,
+                            "only implementation is scanned code"
+                        )
+                    }
+                }
+            }
+        }
+
+        /// Implementation holds exactly the attach-only types; global holds the
+        /// laws (constraint) and the notes on them.
+        #[test]
+        fn implementation_is_attach_only() {
+            assert_eq!(Layer::Implementation.storage(), StoragePolicy::ScannedCode);
+            assert_eq!(Layer::Implementation.node_types(), &["note", "constraint"]);
+            assert_eq!(Layer::Global.node_types(), &["constraint", "note"]);
+        }
+
+        /// The durable tree constant is exactly the catalog projection over the
+        /// non-transient layers (plans has no durable dir; implementation's
+        /// attach-only dirs are durable) — the durable dir list matches the
+        /// layout constants, in layout order.
+        #[test]
+        fn layers_tree_rows_match_the_catalog() {
+            let durable: Vec<(&str, &[&str])> = Layer::ALL
+                .into_iter()
+                .filter(|l| l.storage() != StoragePolicy::TransientPlans)
+                .map(|l| (l.layer_dir(), l.node_types()))
+                .collect();
+            assert_eq!(LAYERS_TREE, durable.as_slice());
+        }
+
+        /// The `.trans` mirrors are complete: all six tiers in the §4.1 diagram
+        /// order — plans first, then the five feedback mirrors incl. global —
+        /// with unique dirs.
+        #[test]
+        fn trans_mirrors_cover_all_six_layers() {
+            assert_eq!(
+                TRANS_MIRRORS,
+                [
+                    Layer::Plans,
+                    Layer::Requirements,
+                    Layer::Domain,
+                    Layer::Solution,
+                    Layer::Implementation,
+                    Layer::Global,
+                ]
+            );
+            let dirs: Vec<&str> = TRANS_MIRRORS.iter().map(|l| l.layer_dir()).collect();
+            let mut unique = dirs.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            assert_eq!(unique.len(), dirs.len(), "mirror tier dirs must be unique");
+        }
+
+        /// The SPEC §3.3 name allowlist `[a-z0-9][a-z0-9-]*`: lowercase letters,
+        /// digits, and hyphens (not first); a leading digit and a trailing hyphen
+        /// are fine. Refuse — never sanitize.
+        #[test]
+        fn name_allowlist_refuses_invalid_names() {
+            let empty = BTreeSet::new();
+            let props = BTreeMap::new();
+            for name in [
+                "customer",
+                "a",
+                "0",
+                "order-line",
+                "a-b-c",
+                "123",
+                "line-",
+                "x0",
+            ] {
+                assert!(
+                    validate_node(Layer::Domain, "value", name, &props, &empty).is_ok(),
+                    "{name} must pass the allowlist"
+                );
+            }
+            for name in [
+                "CamelCase",
+                "with.dot",
+                "with space",
+                "with_underscore",
+                "-lead",
+                "",
+                "UPPER",
+            ] {
+                assert!(
+                    validate_node(Layer::Domain, "value", name, &props, &empty).is_err(),
+                    "{name} must be refused (never sanitized)"
+                );
+            }
+        }
+
+        /// Type must exist in its layer (SPEC §3.3) — case-sensitive exact match
+        /// against the catalog's lowercase type spellings. The cryptic DDD names
+        /// are not types (SPEC §3.1 collapses them into Group).
+        #[test]
+        fn type_must_exist_in_its_layer() {
+            let empty = BTreeSet::new();
+            let props = BTreeMap::new();
+            for bad in [
+                "aggregate",
+                "bounded-context",
+                "subdomain",
+                "domain-rule",
+                "domain-process",
+            ] {
+                let err = validate_node(Layer::Domain, bad, "x", &props, &empty).unwrap_err();
+                assert!(
+                    err.to_string().contains("does not exist in layer"),
+                    "{bad}: {err}"
+                );
+            }
+            // Case-sensitive: the catalog spells types lowercase.
+            assert!(validate_node(Layer::Domain, "Entity", "x", &props, &empty).is_err());
+            // A type of another layer is refused here.
+            assert!(validate_node(Layer::Domain, "stakeholder", "x", &props, &empty).is_err());
+            // The exact lowercase spelling passes the type check; the Entity kind
+            // rule is then what fires.
+            let err =
+                validate_node(Layer::Domain, "entity", "customer", &props, &empty).unwrap_err();
+            assert!(err.to_string().contains("requires"), "{err}");
+        }
+
+        /// Entity requires `kind` ∈ {entity, event} — the spec's only "requires".
+        #[test]
+        fn entity_kind_is_required_and_validated() {
+            let empty = BTreeSet::new();
+            let err = validate_node(
+                Layer::Domain,
+                "entity",
+                "customer",
+                &BTreeMap::new(),
+                &empty,
             )
-            .is_ok()
-        );
-        // One Drift -> Err, naming the FQN.
-        let err =
-            validate_code_refs(&["apg.main", "apg.layers.gone"], &scanned, &planned).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("spec drift"), "{msg}");
-        assert!(msg.contains("apg.layers.gone"), "{msg}");
+            .unwrap_err();
+            assert!(err.to_string().contains("requires"), "{err}");
+            for kind in ["entity", "event"] {
+                let props = BTreeMap::from([("kind".to_string(), kind.to_string())]);
+                assert!(
+                    validate_node(Layer::Domain, "entity", "customer", &props, &empty).is_ok(),
+                    "kind {kind} must be accepted"
+                );
+            }
+            let props = BTreeMap::from([("kind".to_string(), "thing".to_string())]);
+            let err =
+                validate_node(Layer::Domain, "entity", "customer", &props, &empty).unwrap_err();
+            assert!(err.to_string().contains("entity|event"), "{err}");
+        }
+
+        /// Group: `attribute` ∈ {core, supporting, generic} and `root` are both
+        /// optional; when present they are validated — root against the name
+        /// allowlist, independent of the attribute.
+        #[test]
+        fn group_attribute_and_root_optional_but_validated() {
+            let empty = BTreeSet::new();
+            // No properties at all — valid.
+            assert!(
+                validate_node(Layer::Domain, "group", "sales", &BTreeMap::new(), &empty).is_ok()
+            );
+            for attr in ["core", "supporting", "generic"] {
+                let props = BTreeMap::from([("attribute".to_string(), attr.to_string())]);
+                assert!(
+                    validate_node(Layer::Domain, "group", "sales", &props, &empty).is_ok(),
+                    "attribute {attr} must be accepted"
+                );
+            }
+            let props = BTreeMap::from([("attribute".to_string(), "dubious".to_string())]);
+            let err = validate_node(Layer::Domain, "group", "sales", &props, &empty).unwrap_err();
+            assert!(err.to_string().contains("core|supporting|generic"), "{err}");
+            // root is independent of attribute and format-validated.
+            let props = BTreeMap::from([("root".to_string(), "sales-root".to_string())]);
+            assert!(validate_node(Layer::Domain, "group", "sales", &props, &empty).is_ok());
+            let props = BTreeMap::from([("root".to_string(), "SalesRoot".to_string())]);
+            let err = validate_node(Layer::Domain, "group", "sales", &props, &empty).unwrap_err();
+            assert!(err.to_string().contains("allowlist"), "{err}");
+        }
+
+        /// Container `kind` ∈ {app, service, db, queue} — validated when present,
+        /// optional otherwise (SPEC §3.1 "takes").
+        #[test]
+        fn container_kind_validated_when_present() {
+            let empty = BTreeSet::new();
+            assert!(
+                validate_node(
+                    Layer::Solution,
+                    "container",
+                    "api",
+                    &BTreeMap::new(),
+                    &empty
+                )
+                .is_ok()
+            );
+            for kind in ["app", "service", "db", "queue"] {
+                let props = BTreeMap::from([("kind".to_string(), kind.to_string())]);
+                assert!(
+                    validate_node(Layer::Solution, "container", "api", &props, &empty).is_ok(),
+                    "kind {kind} must be accepted"
+                );
+            }
+            let props = BTreeMap::from([("kind".to_string(), "web".to_string())]);
+            let err =
+                validate_node(Layer::Solution, "container", "api", &props, &empty).unwrap_err();
+            assert!(err.to_string().contains("app|service|db|queue"), "{err}");
+        }
+
+        /// Unknown property keys are metadata — allowed, never identity (SPEC
+        /// §4.1: short ids "may exist as metadata only"); a known key on a type
+        /// that does not take it is left alone too.
+        #[test]
+        fn unknown_metadata_keys_are_allowed() {
+            let empty = BTreeSet::new();
+            let props = BTreeMap::from([
+                ("id".to_string(), "R1".to_string()),
+                ("kind".to_string(), "thing".to_string()),
+            ]);
+            assert!(
+                validate_node(Layer::Requirements, "requirement", "login", &props, &empty).is_ok()
+            );
+        }
+
+        /// Names are unique per (layer, type) — the same name in two different
+        /// types (or layers) is fine; a duplicate in the same (layer, type) is
+        /// refused.
+        #[test]
+        fn names_unique_per_layer_and_type() {
+            let existing: BTreeSet<(Layer, String, String)> =
+                BTreeSet::from([(Layer::Domain, "entity".to_string(), "customer".to_string())]);
+            let props = BTreeMap::from([("kind".to_string(), "entity".to_string())]);
+            // Same name, different type in the same layer — fine.
+            assert!(validate_node(Layer::Domain, "value", "customer", &props, &existing).is_ok());
+            // Same name, different layer — fine.
+            assert!(
+                validate_node(Layer::Solution, "component", "customer", &props, &existing).is_ok()
+            );
+            // Same (layer, type, name) — refused.
+            let err =
+                validate_node(Layer::Domain, "entity", "customer", &props, &existing).unwrap_err();
+            assert!(err.to_string().contains("duplicate"), "{err}");
+        }
+
+        /// contains/depends-on trees must be acyclic (SPEC §3.3). The helper
+        /// validates the per-change edge set; every endpoint must resolve into
+        /// the change universe (existing nodes plus co-proposed nodes).
+        #[test]
+        fn tree_acyclicity_refuses_contains_and_depends_on_cycles() {
+            let universe: BTreeSet<(Layer, String, String)> = BTreeSet::from([
+                (
+                    Layer::Requirements,
+                    "requirement".to_string(),
+                    "r1".to_string(),
+                ),
+                (
+                    Layer::Requirements,
+                    "requirement".to_string(),
+                    "r2".to_string(),
+                ),
+                (
+                    Layer::Requirements,
+                    "requirement".to_string(),
+                    "r3".to_string(),
+                ),
+                (Layer::Domain, "group".to_string(), "g1".to_string()),
+                (Layer::Domain, "group".to_string(), "g2".to_string()),
+            ]);
+            // A contains cycle (Group nesting) is refused.
+            let contains_cycle: &[(&str, &str)] = &[
+                ("domain.group.g1", "domain.group.g2"),
+                ("domain.group.g2", "domain.group.g1"),
+            ];
+            let err = validate_trees_acyclic(contains_cycle, &universe).unwrap_err();
+            assert!(err.to_string().contains("cycle"), "{err}");
+            // A depends-on cycle (Requirement) is refused.
+            let depends_cycle: &[(&str, &str)] = &[
+                ("requirements.requirement.r1", "requirements.requirement.r2"),
+                ("requirements.requirement.r2", "requirements.requirement.r3"),
+                ("requirements.requirement.r3", "requirements.requirement.r1"),
+            ];
+            let err = validate_trees_acyclic(depends_cycle, &universe).unwrap_err();
+            assert!(err.to_string().contains("cycle"), "{err}");
+            // A self-loop is a cycle too ("a node cannot contain itself").
+            let self_loop: &[(&str, &str)] =
+                &[("requirements.requirement.r1", "requirements.requirement.r1")];
+            assert!(validate_trees_acyclic(self_loop, &universe).is_err());
+            // A DAG passes.
+            let dag: &[(&str, &str)] = &[
+                ("requirements.requirement.r1", "requirements.requirement.r2"),
+                ("requirements.requirement.r2", "requirements.requirement.r3"),
+            ];
+            assert!(validate_trees_acyclic(dag, &universe).is_ok());
+            // A dangling endpoint is refused (write-time error, SPEC §3.3).
+            let dangling: &[(&str, &str)] = &[(
+                "requirements.requirement.r1",
+                "requirements.requirement.nope",
+            )];
+            let err = validate_trees_acyclic(dangling, &universe).unwrap_err();
+            assert!(
+                err.to_string().contains("not a node of the change"),
+                "{err}"
+            );
+        }
+
+        /// Every §3.3 edge kind accepts at least one valid (source, target) shape:
+        /// each matrix row, both code-exempt kinds (`implemented-by` with a code
+        /// FQN target, `details` from a note in every authoring layer to any
+        /// target), and the `represents` pair.
+        #[test]
+        fn every_edge_kind_accepts_a_valid_shape() {
+            let ok: &[(&str, &str, &str)] = &[
+                (
+                    "contains",
+                    "requirements.stakeholder.s1",
+                    "requirements.requirement.r1",
+                ),
+                (
+                    "contains",
+                    "requirements.user.u1",
+                    "requirements.requirement.r1",
+                ),
+                (
+                    "contains",
+                    "requirements.requirement.r1",
+                    "requirements.requirement.r2",
+                ),
+                ("contains", "domain.group.g1", "domain.group.g2"),
+                ("contains", "domain.group.g1", "domain.entity.e1"),
+                ("contains", "domain.group.g1", "domain.value.v1"),
+                ("contains", "domain.group.g1", "domain.service.svc1"),
+                ("contains", "solution.system.sys1", "solution.container.c1"),
+                (
+                    "contains",
+                    "solution.container.c1",
+                    "solution.component.cmp1",
+                ),
+                ("drives", "requirements.requirement.r1", "domain.group.g1"),
+                ("drives", "requirements.requirement.r1", "domain.entity.e1"),
+                ("drives", "requirements.requirement.r1", "domain.value.v1"),
+                (
+                    "drives",
+                    "requirements.requirement.r1",
+                    "domain.service.svc1",
+                ),
+                ("realised-by", "domain.group.g1", "solution.system.sys1"),
+                ("realised-by", "domain.entity.e1", "solution.container.c1"),
+                (
+                    "realised-by",
+                    "domain.service.svc1",
+                    "solution.component.cmp1",
+                ),
+                (
+                    "implemented-by",
+                    "solution.system.sys1",
+                    "apg.artifacts.write_jsonl_and_reingest",
+                ),
+                (
+                    "implemented-by",
+                    "solution.container.c1",
+                    "apg.layers.validate_edges",
+                ),
+                ("implemented-by", "solution.component.cmp1", "apg.main"),
+                ("calls", "domain.service.svc1", "domain.service.svc2"),
+                ("publishes", "domain.service.svc1", "domain.entity.e1"),
+                ("subscribes", "domain.service.svc1", "domain.entity.e1"),
+                (
+                    "depends-on",
+                    "requirements.requirement.r1",
+                    "requirements.requirement.r2",
+                ),
+                ("uses", "solution.person.p1", "solution.system.sys1"),
+                ("represents", "requirements.user.u1", "domain.entity.e1"),
+                ("represents", "domain.entity.e1", "solution.person.p1"),
+                (
+                    "details",
+                    "requirements.note.n1",
+                    "requirements.requirement.r1",
+                ),
+                ("details", "domain.note.n1", "domain.entity.e1"),
+                ("details", "solution.note.n1", "solution.system.sys1"),
+                (
+                    "details",
+                    "implementation.note.n1",
+                    "requirements.requirement.r1",
+                ),
+                ("details", "global.note.n1", "requirements.requirement.r1"),
+            ];
+            for &(kind, src, dst) in ok {
+                assert!(
+                    validate_edge(kind, src, dst).is_ok(),
+                    "{kind} {src} -> {dst} must be accepted"
+                );
+            }
+        }
+
+        /// A rejected (kind, source, target) shape errors naming the kind, the
+        /// source, and the target — tier skips and wrong-type shapes included.
+        #[test]
+        fn rejected_shapes_name_kind_source_and_target() {
+            let bad: &[(&str, &str, &str)] = &[
+                // calls from an Entity (not Service).
+                ("calls", "domain.entity.e1", "domain.service.svc1"),
+                // drives from a Group — a tier skip (Domain → Solution).
+                ("drives", "domain.group.g1", "solution.system.sys1"),
+                // contains from a Container to a Requirement — a tier skip.
+                (
+                    "contains",
+                    "solution.container.c1",
+                    "requirements.requirement.r1",
+                ),
+                // depends-on from a Domain entity.
+                (
+                    "depends-on",
+                    "domain.entity.e1",
+                    "requirements.requirement.r1",
+                ),
+                // realised-by from a Requirement — a tier skip.
+                (
+                    "realised-by",
+                    "requirements.requirement.r1",
+                    "solution.system.sys1",
+                ),
+                // uses from a Service (must be Person).
+                ("uses", "domain.service.svc1", "solution.system.sys1"),
+                // publishes from a Group (must be Service).
+                ("publishes", "domain.group.g1", "domain.entity.e1"),
+                // subscribes to a Group (target must be an Entity).
+                ("subscribes", "domain.service.svc1", "domain.group.g1"),
+                // represents Entity → System (must be Entity → Person).
+                ("represents", "domain.entity.e1", "solution.system.sys1"),
+            ];
+            for &(kind, src, dst) in bad {
+                let msg = validate_edge(kind, src, dst).unwrap_err().to_string();
+                assert!(msg.contains(kind), "must name kind: {msg}");
+                assert!(msg.contains(src), "must name source: {msg}");
+                assert!(msg.contains(dst), "must name target: {msg}");
+            }
+        }
+
+        /// `implemented-by` accepts a code-FQN target (exempt — `validate_code_refs`
+        /// owns it, task-10) and refuses any non-Solution source.
+        #[test]
+        fn implemented_by_accepts_code_fqn_target_and_refuses_non_solution_source() {
+            for src in [
+                "solution.system.payments",
+                "solution.container.api",
+                "solution.component.checkout",
+            ] {
+                assert!(
+                    validate_edge(
+                        "implemented-by",
+                        src,
+                        "apg.artifacts.write_jsonl_and_reingest"
+                    )
+                    .is_ok(),
+                    "{src} must be a valid implemented-by source"
+                );
+            }
+            for src in [
+                "domain.service.checkout",
+                "requirements.requirement.r1",
+                "domain.entity.customer",
+                "solution.person.p1",
+            ] {
+                let msg = validate_edge("implemented-by", src, "apg.main")
+                    .unwrap_err()
+                    .to_string();
+                assert!(msg.contains("implemented-by"), "{msg}");
+                assert!(msg.contains(src), "{msg}");
+            }
+        }
+
+        /// `details` accepts any target — authored OR code — and enforces that the
+        /// source is a `note` (spanning every authoring layer).
+        #[test]
+        fn details_accepts_any_target_and_enforces_note_source() {
+            for target in [
+                "requirements.requirement.r1",
+                "domain.entity.e1",
+                "solution.system.sys1",
+                // A code FQN target is exempt (not parsed).
+                "apg.artifacts.write_jsonl_and_reingest",
+            ] {
+                assert!(
+                    validate_edge("details", "requirements.note.n1", target).is_ok(),
+                    "details target {target} must be accepted"
+                );
+            }
+            for src in [
+                "requirements.note.n1",
+                "domain.note.n1",
+                "solution.note.n1",
+                "implementation.note.n1",
+                "global.note.n1",
+            ] {
+                assert!(
+                    validate_edge("details", src, "requirements.requirement.r1").is_ok(),
+                    "{src} must be a valid details source"
+                );
+            }
+            for src in [
+                "requirements.requirement.r1",
+                "domain.entity.e1",
+                "solution.system.sys1",
+            ] {
+                let msg = validate_edge("details", src, "requirements.requirement.r1")
+                    .unwrap_err()
+                    .to_string();
+                assert!(msg.contains("details"), "{msg}");
+                assert!(msg.contains(src), "{msg}");
+            }
+        }
+
+        /// A dangling authored endpoint — malformed FQN or unknown layer — is a
+        /// write-time error for every matrix kind (SPEC §3.3). Code FQNs only pass
+        /// through the exempt endpoints (`implemented-by`/`details` targets).
+        #[test]
+        fn dangling_authored_endpoint_is_a_write_time_error() {
+            // Unknown layer in the source.
+            let msg = validate_edge("drives", "banana.type.name", "domain.group.g1")
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("banana"), "{msg}");
+            // Unknown layer in the target.
+            let msg = validate_edge("drives", "requirements.requirement.r1", "banana.type.name")
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("banana"), "{msg}");
+            // Malformed FQN (not <layer>.<type>.<name>) on a matrix-kind endpoint.
+            let msg = validate_edge(
+                "contains",
+                "requirements.requirement",
+                "requirements.requirement.r1",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(msg.contains("FQN"), "{msg}");
+            // A code FQN in a non-exempt endpoint (drives target) is a dangling ref.
+            let msg = validate_edge("drives", "requirements.requirement.r1", "apg.main")
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("apg.main"), "{msg}");
+        }
+
+        /// Anything outside the §3.3 durable list — §5 plan/feedback edges
+        /// (`reviews`, `gates`, `satisfies`, task verbs) and gibberish — is refused
+        /// as an unknown edge kind.
+        #[test]
+        fn unknown_edge_kind_is_refused() {
+            for kind in [
+                "reviews",
+                "gates",
+                "satisfies",
+                "creates",
+                "modifies",
+                "deletes",
+                "banana",
+            ] {
+                let msg = validate_edge(
+                    kind,
+                    "requirements.requirement.r1",
+                    "requirements.requirement.r2",
+                )
+                .unwrap_err()
+                .to_string();
+                assert!(msg.contains("unknown edge kind"), "{msg}");
+                assert!(msg.contains(kind), "{msg}");
+            }
+        }
+
+        /// `represents` has exactly the two matrix rows — User → Entity and Entity
+        /// → Person; an Entity → System hop is refused (that would be a tier skip).
+        #[test]
+        fn represents_both_rows_and_refuses_tier_skips() {
+            assert!(
+                validate_edge("represents", "requirements.user.u1", "domain.entity.e1").is_ok()
+            );
+            assert!(validate_edge("represents", "domain.entity.e1", "solution.person.p1").is_ok());
+            let msg = validate_edge("represents", "domain.entity.e1", "solution.system.sys1")
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("represents"), "{msg}");
+            assert!(msg.contains("domain.entity.e1"), "{msg}");
+            assert!(msg.contains("solution.system.sys1"), "{msg}");
+        }
+
+        /// The batch entry point loops [`validate_edge`] over every edge; any bad
+        /// edge in the set fails the whole batch.
+        #[test]
+        fn validate_edges_batch_loops_validate_edge() {
+            let ok: &[(&str, &str, &str)] = &[
+                (
+                    "contains",
+                    "requirements.requirement.r1",
+                    "requirements.requirement.r2",
+                ),
+                ("drives", "requirements.requirement.r1", "domain.group.g1"),
+            ];
+            assert!(validate_edges(ok).is_ok());
+            let bad: &[(&str, &str, &str)] = &[
+                (
+                    "contains",
+                    "requirements.requirement.r1",
+                    "requirements.requirement.r2",
+                ),
+                ("drives", "domain.group.g1", "solution.system.sys1"),
+            ];
+            let msg = validate_edges(bad).unwrap_err().to_string();
+            assert!(msg.contains("drives"), "{msg}");
+        }
+
+        /// The plain-named domain types are accepted: the catalog's `group`,
+        /// `entity`, `value`, `service` (SPEC §3.1 — the cryptic DDD type names
+        /// collapse into these; their refusal is covered in
+        /// [`type_must_exist_in_its_layer`]). A plain-named node validates
+        /// end-to-end with its own type's kind/attribute rule applied.
+        #[test]
+        fn plain_domain_types_accepted_with_plain_names() {
+            let empty = BTreeSet::new();
+            // group/value/service need no properties and pass untouched.
+            for (node_type, name) in [
+                ("group", "order-fulfilment"),
+                ("value", "money"),
+                ("service", "checkout"),
+            ] {
+                assert!(
+                    validate_node(Layer::Domain, node_type, name, &BTreeMap::new(), &empty).is_ok(),
+                    "plain {node_type} `{name}` must be accepted"
+                );
+            }
+            // Entity is accepted once its required kind is present.
+            let props = BTreeMap::from([("kind".to_string(), "entity".to_string())]);
+            assert!(validate_node(Layer::Domain, "entity", "customer", &props, &empty).is_ok());
+        }
+
+        /// A `requirement` node is the ONE requirement type at every depth (SPEC
+        /// §3.1: theme/epic/story/feature are not types — everything is
+        /// `requirement`); a four-level requirement tree validates acyclically,
+        /// and `contains`/`depends-on` between requirement nodes are both
+        /// matrix-legal at any depth.
+        #[test]
+        fn requirement_tree_at_all_depths_is_one_node_type() {
+            let empty = BTreeSet::new();
+            let props = BTreeMap::new();
+            for pseudo in ["theme", "epic", "story", "feature"] {
+                let err =
+                    validate_node(Layer::Requirements, pseudo, "x", &props, &empty).unwrap_err();
+                assert!(
+                    err.to_string().contains("does not exist in layer"),
+                    "{pseudo}: {err}"
+                );
+            }
+            let universe: BTreeSet<(Layer, String, String)> = ["r1", "r2", "r3", "r4"]
+                .into_iter()
+                .map(|n| {
+                    (
+                        Layer::Requirements,
+                        "requirement".to_string(),
+                        n.to_string(),
+                    )
+                })
+                .collect();
+            // Four levels of contains, plus a depends-on cross-link — still a DAG.
+            let contains: &[(&str, &str)] = &[
+                ("requirements.requirement.r1", "requirements.requirement.r2"),
+                ("requirements.requirement.r2", "requirements.requirement.r3"),
+                ("requirements.requirement.r3", "requirements.requirement.r4"),
+            ];
+            let depends: &[(&str, &str)] =
+                &[("requirements.requirement.r1", "requirements.requirement.r4")];
+            let all: Vec<(&str, &str)> = contains
+                .iter()
+                .copied()
+                .chain(depends.iter().copied())
+                .collect();
+            assert!(
+                validate_trees_acyclic(&all, &universe).is_ok(),
+                "a four-level requirement tree must stay acyclic"
+            );
+            for &(src, dst) in contains {
+                assert!(
+                    validate_edge("contains", src, dst).is_ok(),
+                    "contains {src} -> {dst} must be matrix-legal"
+                );
+            }
+            for &(src, dst) in depends {
+                assert!(
+                    validate_edge("depends-on", src, dst).is_ok(),
+                    "depends-on {src} -> {dst} must be matrix-legal"
+                );
+            }
+        }
+
+        /// The sequential spine (SPEC §3.2) is tier-locked by the matrix: the
+        /// full legal chain Requirement --drives--> Domain --realised-by-->
+        /// Solution --implemented-by--> code passes hop-by-hop, and a tier skip
+        /// (Requirement directly realised-by a Solution — no Domain hop) is
+        /// refused.
+        #[test]
+        fn sequential_spine_is_tier_locked() {
+            // The full, legal spine from Requirement to code.
+            assert!(
+                validate_edge("drives", "requirements.requirement.r1", "domain.group.g1").is_ok()
+            );
+            assert!(
+                validate_edge("realised-by", "domain.group.g1", "solution.system.sys1").is_ok()
+            );
+            assert!(validate_edge("implemented-by", "solution.system.sys1", "apg.main").is_ok());
+            // A tier skip: Requirement realised-by Solution, skipping the Domain hop.
+            let msg = validate_edge(
+                "realised-by",
+                "requirements.requirement.r1",
+                "solution.system.sys1",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(msg.contains("realised-by"), "{msg}");
+            assert!(msg.contains("requirements.requirement.r1"), "{msg}");
+            assert!(msg.contains("solution.system.sys1"), "{msg}");
+        }
+
+        /// The §3.3 edge-kind matrix is complete and internally consistent: its
+        /// rows cover exactly the two-authored-endpoint kinds (all of
+        /// [`EDGE_KINDS`] except the code-exempt `implemented-by`/`details`), and
+        /// every row's source/target type is a real type of its layer's catalog.
+        #[test]
+        fn edge_kind_matrix_is_complete_and_consistent() {
+            let exempt = ["implemented-by", "details"];
+            let kinds: BTreeSet<&str> = MATRIX.iter().map(|(k, ..)| *k).collect();
+            let expected: BTreeSet<&str> = EDGE_KINDS
+                .iter()
+                .copied()
+                .filter(|k| !exempt.contains(k))
+                .collect();
+            assert_eq!(
+                kinds, expected,
+                "matrix rows must cover exactly the non-exempt edge kinds"
+            );
+            for &(kind, sl, sts, tl, tts) in MATRIX {
+                for t in sts {
+                    assert!(
+                        sl.node_types().contains(t),
+                        "{kind}: source type `{t}` not in layer {}",
+                        sl.layer_dir()
+                    );
+                }
+                for t in tts {
+                    assert!(
+                        tl.node_types().contains(t),
+                        "{kind}: target type `{t}` not in layer {}",
+                        tl.layer_dir()
+                    );
+                }
+            }
+        }
+
+        /// Two services that call each other are coupled: their owning groups are
+        /// one derived pair — symmetric, nothing stored (SPEC §3.1).
+        #[test]
+        fn mutual_calls_couple_their_groups() {
+            let edges: &[(&str, &str, &str)] = &[
+                ("calls", "domain.service.orders", "domain.service.billing"),
+                ("calls", "domain.service.billing", "domain.service.orders"),
+            ];
+            let owner = BTreeMap::from([
+                (
+                    "domain.service.orders".to_string(),
+                    "domain.group.sales".to_string(),
+                ),
+                (
+                    "domain.service.billing".to_string(),
+                    "domain.group.billing".to_string(),
+                ),
+            ]);
+            let coupled = derive_coupling(edges, &owner);
+            assert_eq!(
+                coupled,
+                BTreeSet::from([(
+                    "domain.group.billing".to_string(),
+                    "domain.group.sales".to_string()
+                )])
+            );
+        }
+
+        /// A publisher and a subscriber sharing one event are coupled through the
+        /// event medium; the event itself names no coupled group.
+        #[test]
+        fn publish_subscribe_via_shared_event_couples() {
+            let edges: &[(&str, &str, &str)] = &[
+                (
+                    "publishes",
+                    "domain.service.orders",
+                    "domain.entity.order-placed",
+                ),
+                (
+                    "subscribes",
+                    "domain.service.shipping",
+                    "domain.entity.order-placed",
+                ),
+            ];
+            let owner = BTreeMap::from([
+                (
+                    "domain.service.orders".to_string(),
+                    "domain.group.sales".to_string(),
+                ),
+                (
+                    "domain.service.shipping".to_string(),
+                    "domain.group.fulfilment".to_string(),
+                ),
+            ]);
+            let coupled = derive_coupling(edges, &owner);
+            assert_eq!(
+                coupled,
+                BTreeSet::from([(
+                    "domain.group.fulfilment".to_string(),
+                    "domain.group.sales".to_string()
+                )])
+            );
+        }
+
+        /// A calls chain A→B→C couples A and C — coupling is the transitive
+        /// closure, every pair in the component.
+        #[test]
+        fn transitive_call_chain_couples_endpoints() {
+            let edges: &[(&str, &str, &str)] = &[
+                (
+                    "calls",
+                    "domain.service.checkout",
+                    "domain.service.inventory",
+                ),
+                (
+                    "calls",
+                    "domain.service.inventory",
+                    "domain.service.payments",
+                ),
+            ];
+            let owner = BTreeMap::from([
+                (
+                    "domain.service.checkout".to_string(),
+                    "domain.group.storefront".to_string(),
+                ),
+                (
+                    "domain.service.inventory".to_string(),
+                    "domain.group.stock".to_string(),
+                ),
+                (
+                    "domain.service.payments".to_string(),
+                    "domain.group.money".to_string(),
+                ),
+            ]);
+            let coupled = derive_coupling(edges, &owner);
+            // All three groups are pairwise coupled (3 unordered pairs).
+            assert_eq!(
+                coupled,
+                BTreeSet::from([
+                    (
+                        "domain.group.money".to_string(),
+                        "domain.group.stock".to_string()
+                    ),
+                    (
+                        "domain.group.money".to_string(),
+                        "domain.group.storefront".to_string()
+                    ),
+                    (
+                        "domain.group.stock".to_string(),
+                        "domain.group.storefront".to_string()
+                    ),
+                ])
+            );
+        }
+
+        /// Two services with no connecting edge chain are NOT coupled —
+        /// disconnected components yield no cross-component pair.
+        #[test]
+        fn unconnected_services_are_not_coupled() {
+            let edges: &[(&str, &str, &str)] = &[
+                ("calls", "domain.service.orders", "domain.service.billing"),
+                ("calls", "domain.service.catalog", "domain.service.search"),
+            ];
+            let owner = BTreeMap::from([
+                (
+                    "domain.service.orders".to_string(),
+                    "domain.group.sales".to_string(),
+                ),
+                (
+                    "domain.service.billing".to_string(),
+                    "domain.group.billing".to_string(),
+                ),
+                (
+                    "domain.service.catalog".to_string(),
+                    "domain.group.catalog".to_string(),
+                ),
+                (
+                    "domain.service.search".to_string(),
+                    "domain.group.search".to_string(),
+                ),
+            ]);
+            let coupled = derive_coupling(edges, &owner);
+            assert_eq!(
+                coupled,
+                BTreeSet::from([
+                    (
+                        "domain.group.billing".to_string(),
+                        "domain.group.sales".to_string()
+                    ),
+                    (
+                        "domain.group.catalog".to_string(),
+                        "domain.group.search".to_string()
+                    ),
+                ])
+            );
+        }
+
+        /// Coupling is DERIVED: the result is only group-FQN pairs — no edge
+        /// kinds, no flavor values, no coupling node. The context-map flavor rides
+        /// on the edge (an attribute the caller keeps), never in the derived
+        /// structure.
+        #[test]
+        fn coupling_is_derived_and_flavor_is_not_structure() {
+            let edges: &[(&str, &str, &str)] = &[
+                ("calls", "domain.service.orders", "domain.service.billing"),
+                (
+                    "publishes",
+                    "domain.service.orders",
+                    "domain.entity.order-placed",
+                ),
+                (
+                    "subscribes",
+                    "domain.service.shipping",
+                    "domain.entity.order-placed",
+                ),
+            ];
+            let owner = BTreeMap::from([
+                (
+                    "domain.service.orders".to_string(),
+                    "domain.group.sales".to_string(),
+                ),
+                (
+                    "domain.service.billing".to_string(),
+                    "domain.group.billing".to_string(),
+                ),
+                (
+                    "domain.service.shipping".to_string(),
+                    "domain.group.fulfilment".to_string(),
+                ),
+            ]);
+            let coupled = derive_coupling(edges, &owner);
+            // Three groups, all pairwise coupled through the call + the shared
+            // event — but as DERIVED pairs, nothing stored.
+            assert_eq!(coupled.len(), 3);
+            for (a, b) in &coupled {
+                // Every endpoint is a group FQN.
+                assert!(a.starts_with("domain.group."), "{a}");
+                assert!(b.starts_with("domain.group."), "{b}");
+                // No flavor (edge attribute) leaks into the derived pair.
+                for flavor in ["direct", "published", "translated", "shared", "coevolving"] {
+                    assert!(!a.contains(flavor), "flavor {flavor} leaked into {a}");
+                    assert!(!b.contains(flavor), "flavor {flavor} leaked into {b}");
+                }
+            }
+        }
+
+        /// Coupling is derived, never stored as a Group->Group edge: the §3.3
+        /// matrix has no coupling row between groups — no coupling verb is an edge
+        /// kind, the coupling edges (`calls`/`publishes`/`subscribes`) touch only
+        /// Service/Entity, and the one Group->Group row (`contains`) is containment
+        /// (nesting), not coupling.
+        #[test]
+        fn coupling_is_never_a_group_to_group_edge() {
+            // No coupling verb is a durable edge kind — coupling is derived, not an
+            // edge kind and not a stored artifact.
+            for verb in ["couples", "coupled", "coupling", "coupled-to"] {
+                assert!(
+                    !EDGE_KINDS.contains(&verb),
+                    "`{verb}` must not be an edge kind — coupling is derived, never stored"
+                );
+            }
+            for &(kind, _, sts, _, tts) in MATRIX {
+                let src_is_group = sts.contains(&"group");
+                let dst_is_group = tts.contains(&"group");
+                // The coupling edges never touch a Group endpoint (they are
+                // Service->Service / Service->Entity).
+                if matches!(kind, "calls" | "publishes" | "subscribes") {
+                    assert!(
+                        !src_is_group && !dst_is_group,
+                        "coupling edge `{kind}` must have no Group endpoint"
+                    );
+                }
+                // The only Group->Group row is `contains` (nesting).
+                if src_is_group && dst_is_group {
+                    assert_eq!(
+                        kind, "contains",
+                        "Group->Group must be containment, never `{kind}`"
+                    );
+                }
+            }
+        }
+
+        /// The context-map flavor (direct/published/translated/shared/coevolving)
+        /// is an EDGE attribute — never a node type, never an edge kind. A type
+        /// named after a flavor is refused (it is not a catalog type); a flavor
+        /// used as an edge kind is refused (unknown kind); the edge verb is
+        /// `publishes`, not the flavor `published`.
+        #[test]
+        fn flavors_are_edge_attributes_never_types_or_kinds() {
+            let empty = BTreeSet::new();
+            let props = BTreeMap::new();
+            for flavor in ["direct", "published", "translated", "shared", "coevolving"] {
+                // Not a node type — validate_node refuses a type named after a flavor.
+                let err = validate_node(Layer::Domain, flavor, "x", &props, &empty).unwrap_err();
+                assert!(
+                    err.to_string().contains("does not exist in layer"),
+                    "flavor `{flavor}` as a node type: {err}"
+                );
+                // Not an edge kind — validate_edge refuses a flavor used as a kind.
+                let err = validate_edge(flavor, "domain.service.a", "domain.service.b")
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    err.contains("unknown edge kind"),
+                    "flavor `{flavor}` as an edge kind: {err}"
+                );
+            }
+            // The edge verb is `publishes`, not the flavor `published`.
+            assert!(validate_edge("publishes", "domain.service.a", "domain.entity.e").is_ok());
+        }
+
+        /// A global constraint (layer Global) is well-formed with no attachment: it
+        /// guards the whole graph, so it carries nothing but prose.
+        #[test]
+        fn global_constraint_needs_no_attachment() {
+            let empty = BTreeSet::new();
+            assert!(eval_constraint(Layer::Global, "g1", &BTreeMap::new(), &empty).is_ok());
+        }
+
+        /// A local constraint (requirements/domain/solution) is well-formed when
+        /// its `attaches-to` resolves to an existing tier-1–3 node; a local
+        /// constraint without an attachment is also fine ("may attach").
+        #[test]
+        fn local_constraint_with_resolving_attachment_is_well_formed() {
+            let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
+                (
+                    Layer::Requirements,
+                    "requirement".to_string(),
+                    "place-order".to_string(),
+                ),
+                (Layer::Domain, "entity".to_string(), "customer".to_string()),
+                (
+                    Layer::Solution,
+                    "system".to_string(),
+                    "payments".to_string(),
+                ),
+            ]);
+            for (layer, target) in [
+                (
+                    Layer::Requirements,
+                    "requirements.requirement.place-order".to_string(),
+                ),
+                (Layer::Domain, "domain.entity.customer".to_string()),
+                (Layer::Solution, "solution.system.payments".to_string()),
+            ] {
+                let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), target.clone())]);
+                assert!(
+                    eval_constraint(layer, "law", &props, &existing).is_ok(),
+                    "{layer:?} attaching to {target} must validate"
+                );
+            }
+            // A local constraint without an attachment is fine ("may attach").
+            assert!(eval_constraint(Layer::Domain, "law", &BTreeMap::new(), &existing).is_ok());
+        }
+
+        /// A local constraint referencing a non-existent node is refused — "never a
+        /// non-thing": the reference must resolve, not merely parse.
+        #[test]
+        fn local_constraint_attaching_to_a_non_thing_bails() {
+            let existing: BTreeSet<(Layer, String, String)> =
+                BTreeSet::from([(Layer::Domain, "entity".to_string(), "customer".to_string())]);
+            let props = BTreeMap::from([(
+                PROP_ATTACHES_TO.to_string(),
+                "domain.entity.ghost".to_string(),
+            )]);
+            let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("never a non-thing"), "{msg}");
+            assert!(msg.contains("domain.entity.ghost"), "{msg}");
+        }
+
+        /// A local constraint attaches to a tier-1–3 node: a non-tier target (a
+        /// global node) is refused, and a malformed FQN does not even parse.
+        #[test]
+        fn local_constraint_attachment_must_be_a_tier_1_3_node() {
+            let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
+                (Layer::Global, "constraint".to_string(), "g1".to_string()),
+                (Layer::Domain, "entity".to_string(), "customer".to_string()),
+            ]);
+            // A global node is not a tier-1–3 node.
+            let props = BTreeMap::from([(
+                PROP_ATTACHES_TO.to_string(),
+                "global.constraint.g1".to_string(),
+            )]);
+            let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
+            assert!(err.to_string().contains("tier-1–3"), "{err}");
+            // A malformed FQN does not parse.
+            let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), "not-an-fqn".to_string())]);
+            let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
+            assert!(err.to_string().contains("FQN"), "{err}");
+            // A global constraint must not declare an attachment at all.
+            let props = BTreeMap::from([(
+                PROP_ATTACHES_TO.to_string(),
+                "domain.entity.customer".to_string(),
+            )]);
+            let err = eval_constraint(Layer::Global, "g2", &props, &existing).unwrap_err();
+            assert!(err.to_string().contains("guards the whole graph"), "{err}");
+        }
+
+        /// A local constraint attaches to a tier-1–3 node — an EXISTING node
+        /// outside tiers 1–3 (an implementation note, a plans task) is still
+        /// refused: "never a non-thing" means the target must be a tier-1–3 thing,
+        /// not merely resolve. The contrast — an existing tier-1–3 thing — passes.
+        #[test]
+        fn constraint_attachment_to_existing_non_tier_node_refused() {
+            let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
+                (Layer::Implementation, "note".to_string(), "n1".to_string()),
+                (Layer::Plans, "task".to_string(), "t1".to_string()),
+                (Layer::Domain, "entity".to_string(), "customer".to_string()),
+            ]);
+            for target in ["implementation.note.n1", "plans.task.t1"] {
+                let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), target.to_string())]);
+                let err = eval_constraint(Layer::Domain, "law", &props, &existing).unwrap_err();
+                let msg = err.to_string();
+                assert!(msg.contains("not a tier"), "{target}: {msg}");
+                assert!(msg.contains(target), "{target}: {msg}");
+            }
+            // An existing tier-1–3 thing validates (the contrast).
+            let props = BTreeMap::from([(
+                PROP_ATTACHES_TO.to_string(),
+                "domain.entity.customer".to_string(),
+            )]);
+            assert!(eval_constraint(Layer::Domain, "law", &props, &existing).is_ok());
+        }
+
+        /// A `constraint` type is refused in a layer that does not host constraints
+        /// (plans); implementation hosts the attach-only pair, so it is NOT refused.
+        #[test]
+        fn constraint_type_refused_in_a_layer_without_constraints() {
+            let empty = BTreeSet::new();
+            let props = BTreeMap::new();
+            let err = eval_constraint(Layer::Plans, "x", &props, &empty).unwrap_err();
+            assert!(err.to_string().contains("does not exist in layer"), "{err}");
+            // Implementation hosts note/constraint (attach-only) — a constraint
+            // there is a real type.
+            assert!(eval_constraint(Layer::Implementation, "x", &props, &empty).is_ok());
+        }
+
+        /// Satisfaction is NEVER evaluated: there is no constraint-expression
+        /// language, and this function takes no prose input (the prose `body` is
+        /// the node-file's top-level field, never read here). A constraint whose
+        /// prose "would fail" — contradictory, or even expression-looking — still
+        /// passes structure/reference validation, because satisfaction is assessed
+        /// by review only.
+        #[test]
+        fn satisfaction_is_review_only_never_evaluated() {
+            let existing: BTreeSet<(Layer, String, String)> =
+                BTreeSet::from([(Layer::Domain, "entity".to_string(), "customer".to_string())]);
+            // Contradictory prose (stands in for the top-level `body`) — the binary
+            // never reads or evaluates it; only the reference is checked.
+            let props = BTreeMap::from([
+                (
+                    PROP_ATTACHES_TO.to_string(),
+                    "domain.entity.customer".to_string(),
+                ),
+                (
+                    "body".to_string(),
+                    "every order has a customer AND every order has no customer".to_string(),
+                ),
+            ]);
+            assert!(eval_constraint(Layer::Domain, "law", &props, &existing).is_ok());
+            // A global constraint with expression-looking prose is equally
+            // unevaluated.
+            let props = BTreeMap::from([(
+                "body".to_string(),
+                "count(entities) == 0 AND count(entities) > 0".to_string(),
+            )]);
+            assert!(eval_constraint(Layer::Global, "law", &props, &existing).is_ok());
+        }
+
+        /// The FQN builder is the inverse of [`parse_fqn`]: `<layer>.<type>.<name>`,
+        /// no project prefix.
+        #[test]
+        fn fqn_builder_returns_layer_type_name() {
+            assert_eq!(
+                fqn(Layer::Requirements, "requirement", "place-order"),
+                "requirements.requirement.place-order"
+            );
+            assert_eq!(
+                fqn(Layer::Domain, "service", "checkout"),
+                "domain.service.checkout"
+            );
+            assert_eq!(
+                fqn(Layer::Global, "constraint", "law"),
+                "global.constraint.law"
+            );
+            // And it is the inverse of parse_fqn.
+            let (layer, node_type, name) = parse_fqn("domain.entity.customer").unwrap();
+            assert_eq!(fqn(layer, &node_type, &name), "domain.entity.customer");
+        }
+
+        /// A fully paired set — A's out `contains -> B` and B's in `contains <-
+        /// A`, matching source/kind/target/properties — passes.
+        #[test]
+        fn paired_in_and_out_edges_pass() {
+            let mut a = node("requirements", "requirement", "a");
+            a.out
+                .push(out_edge("contains", "requirements.requirement.b"));
+            let mut b = node("requirements", "requirement", "b");
+            b.in_edges
+                .push(in_edge("contains", "requirements.requirement.a"));
+            assert!(check_edge_pairing(&[a, b]).is_ok());
+        }
+
+        /// An out edge in A without the matching in edge in B is an ERROR — the
+        /// error names the node, the kind, and the missing counterpart.
+        #[test]
+        fn out_edge_without_matching_in_edge_errors() {
+            let mut a = node("requirements", "requirement", "a");
+            a.out
+                .push(out_edge("contains", "requirements.requirement.b"));
+            let b = node("requirements", "requirement", "b");
+            let msg = check_edge_pairing(&[a, b]).unwrap_err().to_string();
+            assert!(msg.contains("requirements.requirement.a"), "{msg}");
+            assert!(msg.contains("contains"), "{msg}");
+            assert!(msg.contains("BOTH endpoint files"), "{msg}");
+        }
+
+        /// An in edge in B without the matching out edge in A is an ERROR — the
+        /// symmetric half of the pairwise rule.
+        #[test]
+        fn in_edge_without_matching_out_edge_errors() {
+            let a = node("requirements", "requirement", "a");
+            let mut b = node("requirements", "requirement", "b");
+            b.in_edges
+                .push(in_edge("contains", "requirements.requirement.a"));
+            let msg = check_edge_pairing(&[a, b]).unwrap_err().to_string();
+            assert!(msg.contains("requirements.requirement.b"), "{msg}");
+            assert!(msg.contains("contains"), "{msg}");
+            assert!(msg.contains("BOTH endpoint files"), "{msg}");
+        }
+
+        /// The SAME endpoints but DIFFERENT edge properties is a mismatch — a
+        /// match requires identical properties, not merely endpoint existence.
+        #[test]
+        fn same_endpoints_different_properties_is_a_mismatch() {
+            let mut a = node("requirements", "requirement", "a");
+            let mut oe = out_edge("contains", "requirements.requirement.b");
+            oe.properties
+                .insert("flavor".to_string(), "direct".to_string());
+            a.out.push(oe);
+            let mut b = node("requirements", "requirement", "b");
+            b.in_edges
+                .push(in_edge("contains", "requirements.requirement.a"));
+            let msg = check_edge_pairing(&[a, b]).unwrap_err().to_string();
+            assert!(msg.contains("contains"), "{msg}");
+            assert!(msg.contains("properties"), "{msg}");
+        }
+
+        /// A dangling authored target — parses as `<layer>.<type>.<name>` but no
+        /// such node file exists — is an error, not a silent skip.
+        #[test]
+        fn dangling_authored_target_errors() {
+            let mut a = node("requirements", "requirement", "a");
+            a.out
+                .push(out_edge("contains", "requirements.requirement.ghost"));
+            let msg = check_edge_pairing(&[a]).unwrap_err().to_string();
+            assert!(msg.contains("requirements.requirement.ghost"), "{msg}");
+        }
+
+        /// A dangling authored source on an in edge is the symmetric error.
+        #[test]
+        fn dangling_authored_source_errors() {
+            let mut b = node("requirements", "requirement", "b");
+            b.in_edges
+                .push(in_edge("contains", "requirements.requirement.ghost"));
+            let msg = check_edge_pairing(&[b]).unwrap_err().to_string();
+            assert!(msg.contains("requirements.requirement.ghost"), "{msg}");
+        }
+
+        /// An `implemented-by` out edge to a code FQN (non-parsing target) is NOT
+        /// flagged — code endpoints are exempt from the pairwise rule.
+        #[test]
+        fn implemented_by_to_code_fqn_is_not_flagged() {
+            let mut sys = node("solution", "system", "payments");
+            sys.out.push(out_edge("implemented-by", "apg.main"));
+            assert!(check_edge_pairing(&[sys]).is_ok());
+        }
+
+        /// A `details` out edge to a code FQN is NOT flagged — the target is a
+        /// code node (no file), so there is only the spec-side half.
+        #[test]
+        fn details_to_code_fqn_is_not_flagged() {
+            let mut n = node("requirements", "note", "n1");
+            n.out.push(out_edge(
+                "details",
+                "apg.artifacts.write_jsonl_and_reingest",
+            ));
+            assert!(check_edge_pairing(&[n]).is_ok());
+        }
+
+        /// A symmetric in edge whose source is a code FQN (non-parsing) is NOT
+        /// flagged — the parse-based rule treats code endpoints as exempt in both
+        /// directions.
+        #[test]
+        fn in_edge_from_code_fqn_is_not_flagged() {
+            let mut sys = node("solution", "system", "payments");
+            sys.in_edges.push(in_edge("implemented-by", "apg.main"));
+            assert!(check_edge_pairing(&[sys]).is_ok());
+        }
+
+        /// The three-way split (SPEC §4.1): a scanned FQN is Real, a planned-only
+        /// FQN is Pending, a FQN in neither universe is Drift.
+        #[test]
+        fn classify_code_ref_three_ways() {
+            let scanned = code_universe(&["apg.layers.validate_edges", "apg.main"]);
+            let planned = code_universe(&["apg.layers.ingest_tree"]);
+            assert_eq!(
+                classify_code_ref("apg.layers.validate_edges", &scanned, &planned),
+                CodeRefStatus::Real
+            );
+            assert_eq!(
+                classify_code_ref("apg.layers.ingest_tree", &scanned, &planned),
+                CodeRefStatus::Pending
+            );
+            assert_eq!(
+                classify_code_ref("apg.layers.gone", &scanned, &planned),
+                CodeRefStatus::Drift
+            );
+        }
+
+        /// The scanned graph is the stronger check: a FQN in BOTH scanned and
+        /// planned is Real (it has landed), not Pending.
+        #[test]
+        fn scanned_wins_over_planned() {
+            let scanned = code_universe(&["apg.main"]);
+            let planned = code_universe(&["apg.main"]);
+            assert_eq!(
+                classify_code_ref("apg.main", &scanned, &planned),
+                CodeRefStatus::Real
+            );
+        }
+
+        /// Pending is NOT an error — a planned-only FQN validates Ok (it realizes
+        /// once the code lands), never a spec-drift bail.
+        #[test]
+        fn pending_code_ref_is_not_an_error() {
+            let scanned = code_universe(&["apg.main"]);
+            let planned = code_universe(&["apg.layers.ingest_tree"]);
+            assert!(validate_code_refs(&["apg.layers.ingest_tree"], &scanned, &planned).is_ok());
+        }
+
+        /// A batch mixing Real and Pending refs validates Ok; a batch with one
+        /// Drift bails naming the offending FQN.
+        #[test]
+        fn validate_code_refs_ok_on_real_and_pending_errors_on_drift() {
+            let scanned = code_universe(&["apg.layers.validate_edges", "apg.main"]);
+            let planned = code_universe(&["apg.layers.ingest_tree"]);
+            // Real + Pending -> Ok.
+            assert!(
+                validate_code_refs(
+                    &["apg.layers.validate_edges", "apg.layers.ingest_tree"],
+                    &scanned,
+                    &planned
+                )
+                .is_ok()
+            );
+            // One Drift -> Err, naming the FQN.
+            let err = validate_code_refs(&["apg.main", "apg.layers.gone"], &scanned, &planned)
+                .unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("spec drift"), "{msg}");
+            assert!(msg.contains("apg.layers.gone"), "{msg}");
+        }
+
+        /// Transient edges can never reach a committed durable node file: the §5
+        /// plan/review/feedback kinds (`reviews`, `gates`, `satisfies`) live
+        /// ENTIRELY under `.trans` (both halves there) — [`validate_edges`]
+        /// (task-4) refuses them upstream of any durable write, so a durable node
+        /// file whose `out` or `in` carries a transient kind is refused at
+        /// validation and can never reach a committed file. The full `.trans`-side
+        /// pairing (both halves in `.trans`) is phase-4/task-15 — NOT built here;
+        /// this asserts only the durable-side refusal gate.
+        #[test]
+        fn durable_node_file_carrying_a_transient_edge_is_refused() {
+            for kind in ["reviews", "gates", "satisfies"] {
+                // A durable requirement file carrying the transient kind on an
+                // out-edge — the edge is refused as an unknown durable kind.
+                let mut a = node("requirements", "requirement", "a");
+                a.out.push(out_edge(kind, "requirements.requirement.b"));
+                let edges: Vec<(&str, &str, &str)> = a
+                    .out
+                    .iter()
+                    .map(|oe| {
+                        (
+                            oe.kind.as_str(),
+                            "requirements.requirement.a",
+                            oe.target.as_str(),
+                        )
+                    })
+                    .collect();
+                let msg = validate_edges(&edges).unwrap_err().to_string();
+                assert!(msg.contains("unknown edge kind"), "{kind}: {msg}");
+                assert!(msg.contains(kind), "{kind}: {msg}");
+
+                // The same transient kind on an in-edge — equally refused.
+                let mut a = node("requirements", "requirement", "a");
+                a.in_edges.push(in_edge(kind, "requirements.requirement.b"));
+                let edges: Vec<(&str, &str, &str)> = a
+                    .in_edges
+                    .iter()
+                    .map(|ie| {
+                        (
+                            ie.kind.as_str(),
+                            ie.source.as_str(),
+                            "requirements.requirement.a",
+                        )
+                    })
+                    .collect();
+                let msg = validate_edges(&edges).unwrap_err().to_string();
+                assert!(msg.contains("unknown edge kind"), "{kind}: {msg}");
+                assert!(msg.contains(kind), "{kind}: {msg}");
+            }
+        }
     }
+
+    /// e2e tier -- real I/O: every test here writes node files / `apg/layers`
+    /// trees under the temp dir, reads them back, or opens `db.lbug` / runs
+    /// git. Each is `#[ignore]`d, so a plain `cargo test` never runs one; the
+    /// only entry point is the named guard `cargo test-e2e`
+    /// (= `cargo test tests::e2e:: -- --ignored`).
+    mod e2e {
+        use super::*;
+
+    // --- Node-file schema + single-node writer (phase-3 task-8) ---
+
+    /// write_node writes one file at
+    /// `<root>/layers/<layer>/<type>/<name>.json`; the layer/type/name/body/
+    /// properties/out/in round-trip (write → read → deserialize == original),
+    /// and the FQN derived from the path's segments equals layer.type.name.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
+    fn write_node_writes_file_with_round_tripping_identity() {
+        let root = temp_root("roundtrip");
+        let node = sample_node();
+        let path = write_node(&root, &node).unwrap();
+        assert_eq!(
+            path,
+            root.join("layers")
+                .join("requirements")
+                .join("requirement")
+                .join("place-order.json")
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        let back: NodeFile = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, node);
+        // The file name IS the identity: the FQN is the path's segments.
+        assert_eq!(
+            fqn(Layer::Requirements, &back.node_type, &back.name),
+            "requirements.requirement.place-order"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A plans-layer node is refused — plans is transient (apg/.trans/plans/),
+    /// never a durable node-file layer — and nothing is written.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
+    fn write_node_refuses_plans_layer() {
+        let root = temp_root("plans");
+        let mut node = sample_node();
+        node.layer = "plans".to_string();
+        node.node_type = "task".to_string();
+        let err = write_node(&root, &node).unwrap_err().to_string();
+        assert!(err.contains("plans"), "{err}");
+        assert!(!root.join("layers").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An allowlist-violating name is refused (never sanitized) — the file name
+    /// must stay safe. Also covers an unknown layer.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
+    fn write_node_refuses_allowlist_violating_name() {
+        let root = temp_root("badname");
+        for bad in ["CamelCase", "with.dot", "with space", "-lead", ""] {
+            let mut node = sample_node();
+            node.name = bad.to_string();
+            let err = write_node(&root, &node).unwrap_err().to_string();
+            assert!(err.contains("allowlist"), "{bad}: {err}");
+        }
+        // An unknown layer is refused too.
+        let mut node = sample_node();
+        node.layer = "banana".to_string();
+        let err = write_node(&root, &node).unwrap_err().to_string();
+        assert!(err.contains("banana"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Metadata properties (short ids) are stored verbatim, never treated as
+    /// identity — the file name stays layer.type.name even when an `id` is
+    /// present.
+    #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
+    fn write_node_preserves_metadata_properties_verbatim() {
+        let root = temp_root("metadata");
+        let mut node = sample_node();
+        node.properties = BTreeMap::from([("id".to_string(), "R1".to_string())]);
+        let path = write_node(&root, &node).unwrap();
+        // The identity is the path, never the short id.
+        assert_eq!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some("place-order.json")
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        let back: NodeFile = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.properties.get("id").map(String::as_str), Some("R1"));
+        assert_eq!(back, node);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // --- In/out edge pairing (phase-3 task-9) ---
+
+    // --- Code-endpoint validation (phase-3 task-10) ---
 
     // --- Atomic multi-file write-through (phase-3 task-11) ---
 
@@ -3843,6 +4001,7 @@ mod tests {
     /// present and deserialize back to their original [`NodeFile`] afterward
     /// (a non-git temp dir — the commit is skipped, the files still land).
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn write_through_writes_all_files() {
         let root = temp_root("multiwrite");
         let mut a = node("requirements", "requirement", "place-order");
@@ -3878,6 +4037,7 @@ mod tests {
     /// A pre-check failure — a plans-layer node, an allowlist-violating name,
     /// or a duplicate path — writes NOTHING (no `layers/` tree is created).
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn write_through_precheck_failure_writes_nothing() {
         // Plans layer is transient — refused before anything is written.
         let root = temp_root("precheck-plans");
@@ -3912,6 +4072,7 @@ mod tests {
     /// existing file is restored byte-for-byte, a newly-created file is
     /// removed, and the failure is surfaced.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn write_through_restores_prior_state_on_failure() {
         let root = temp_root("rollback");
         let mut existing = node("requirements", "requirement", "existing");
@@ -3959,79 +4120,6 @@ mod tests {
 
     // --- Pairing/atomicity regression (phase-3 task-12) ---
 
-    /// The small paired node set the rewrite regression authors: A --contains-->
-    /// B, with A's out and B's in matching (the SPEC §4.1 pairwise invariant).
-    fn authored_pair(a_name: &str, b_name: &str) -> (NodeFile, NodeFile) {
-        let a_fqn = fqn(Layer::Requirements, "requirement", a_name);
-        let b_fqn = fqn(Layer::Requirements, "requirement", b_name);
-        let mut a = node("requirements", "requirement", a_name);
-        a.out.push(out_edge("contains", &b_fqn));
-        let mut b = node("requirements", "requirement", b_name);
-        b.in_edges.push(in_edge("contains", &a_fqn));
-        (a, b)
-    }
-
-    /// Read one node file back from its derived path (the file name IS the
-    /// identity) — the post-rewrite state the pairing check runs on.
-    fn read_node_file(root: &Path, layer: &str, node_type: &str, name: &str) -> NodeFile {
-        let path = root
-            .join("layers")
-            .join(layer)
-            .join(node_type)
-            .join(format!("{name}.json"));
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
-    }
-
-    /// Transient edges can never reach a committed durable node file: the §5
-    /// plan/review/feedback kinds (`reviews`, `gates`, `satisfies`) live
-    /// ENTIRELY under `.trans` (both halves there) — [`validate_edges`]
-    /// (task-4) refuses them upstream of any durable write, so a durable node
-    /// file whose `out` or `in` carries a transient kind is refused at
-    /// validation and can never reach a committed file. The full `.trans`-side
-    /// pairing (both halves in `.trans`) is phase-4/task-15 — NOT built here;
-    /// this asserts only the durable-side refusal gate.
-    #[test]
-    fn durable_node_file_carrying_a_transient_edge_is_refused() {
-        for kind in ["reviews", "gates", "satisfies"] {
-            // A durable requirement file carrying the transient kind on an
-            // out-edge — the edge is refused as an unknown durable kind.
-            let mut a = node("requirements", "requirement", "a");
-            a.out.push(out_edge(kind, "requirements.requirement.b"));
-            let edges: Vec<(&str, &str, &str)> = a
-                .out
-                .iter()
-                .map(|oe| {
-                    (
-                        oe.kind.as_str(),
-                        "requirements.requirement.a",
-                        oe.target.as_str(),
-                    )
-                })
-                .collect();
-            let msg = validate_edges(&edges).unwrap_err().to_string();
-            assert!(msg.contains("unknown edge kind"), "{kind}: {msg}");
-            assert!(msg.contains(kind), "{kind}: {msg}");
-
-            // The same transient kind on an in-edge — equally refused.
-            let mut a = node("requirements", "requirement", "a");
-            a.in_edges.push(in_edge(kind, "requirements.requirement.b"));
-            let edges: Vec<(&str, &str, &str)> = a
-                .in_edges
-                .iter()
-                .map(|ie| {
-                    (
-                        ie.kind.as_str(),
-                        ie.source.as_str(),
-                        "requirements.requirement.a",
-                    )
-                })
-                .collect();
-            let msg = validate_edges(&edges).unwrap_err().to_string();
-            assert!(msg.contains("unknown edge kind"), "{kind}: {msg}");
-            assert!(msg.contains(kind), "{kind}: {msg}");
-        }
-    }
-
     /// note-18 regression: a node rewrite (rename or delete) must leave every
     /// incident edge intact — the source's out-half AND the target's in-half
     /// are rewritten or removed together, never dropped on one side.
@@ -4040,6 +4128,7 @@ mod tests {
     /// files then proves the rewrite left no dangling pairing and no
     /// silently-dropped edge.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn incident_edges_survive_node_rewrites_rename_and_delete() {
         // --- RENAME: author A --contains--> B, then rename B -> C. ---
         let root = temp_root("rename");
@@ -4094,6 +4183,7 @@ mod tests {
     /// merges body/properties (set + explicit unset) while keeping the exact
     /// count/content of the node's out/in edges — and refuses an absent node.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn update_node_file_preserves_edges_and_merges_body_and_properties() {
         let root = temp_root("node-update");
         let (mut a, b) = authored_pair("a", "b");
@@ -4194,37 +4284,12 @@ mod tests {
 
     // --- Tree ingestion (phase-3 task-15) ---
 
-    /// Write a set of node files under `<root>/layers/…` at their derived
-    /// paths — the durable tree `ingest_tree` walks.
-    fn write_tree(root: &Path, nodes: &[NodeFile]) {
-        for n in nodes {
-            write_node(root, n).unwrap();
-        }
-    }
-
-    /// A sample spine tree: a requirement `drives` a group, the group is
-    /// `realised-by` a system, the system is `implemented-by` a code FQN.
-    /// Fully paired in/out halves.
-    fn sample_tree() -> Vec<NodeFile> {
-        let mut req = node("requirements", "requirement", "place-order");
-        req.out.push(out_edge("drives", "domain.group.sales"));
-        let mut grp = node("domain", "group", "sales");
-        grp.in_edges
-            .push(in_edge("drives", "requirements.requirement.place-order"));
-        grp.out
-            .push(out_edge("realised-by", "solution.system.payments"));
-        let mut sys = node("solution", "system", "payments");
-        sys.in_edges
-            .push(in_edge("realised-by", "domain.group.sales"));
-        sys.out.push(out_edge("implemented-by", "apg.main"));
-        vec![req, grp, sys]
-    }
-
     /// `ingest_tree` on a small tree produces the right records: the three
     /// node records at their derived `<layer>.<type>.<name>` FQNs, the three
     /// edge records (drives / realised-by / implemented-by), and nothing from
     /// the in-edge halves (out is canonical).
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn ingest_tree_produces_node_and_edge_records() {
         let root = temp_root("ingest-tree");
         write_tree(&root, &sample_tree());
@@ -4282,6 +4347,7 @@ mod tests {
     /// A pairing mismatch — an out-edge in one file without the matching
     /// in-edge in the target's file — is an ERROR at ingestion.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn ingest_tree_pairing_mismatch_errors() {
         let root = temp_root("ingest-mismatch");
         let mut nodes = sample_tree();
@@ -4299,6 +4365,7 @@ mod tests {
     /// planned node) is a spec-drift ERROR; a planned-only FQN ingests fine
     /// (pending, not an error).
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn ingest_tree_code_ref_gone_errors_planned_ingests() {
         let root = temp_root("ingest-drift");
         let nodes = sample_tree();
@@ -4325,6 +4392,7 @@ mod tests {
     /// halves of every edge are present) — the acyclicity rule is what stops
     /// it.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn ingest_tree_refuses_contains_and_depends_on_cycles() {
         for kind in ["contains", "depends-on"] {
             let root = temp_root(&format!("ingest-cycle-{kind}"));
@@ -4349,6 +4417,7 @@ mod tests {
     /// `kind: event` — the scan leg refuses a plain entity (or a target whose
     /// file lacks the property) and ingests the event-targeted edge.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn ingest_tree_requires_publishes_subscribes_targets_to_be_events() {
         let empty: BTreeSet<String> = BTreeSet::new();
         for kind in ["publishes", "subscribes"] {
@@ -4394,6 +4463,7 @@ mod tests {
     /// `validate_change` accepts a valid add and refuses an invalid one (bad
     /// name) without writing anything — the complete change is validated first.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn validate_change_rejects_invalid_node_without_writing() {
         let root = temp_root("validate-change");
         let a = node("requirements", "requirement", "a");
@@ -4411,6 +4481,7 @@ mod tests {
     /// over the assembled post-mutation edge set (pairing alone passes — both
     /// halves of every edge are present), and nothing is written.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn validate_change_refuses_contains_and_depends_on_cycles() {
         for kind in ["contains", "depends-on"] {
             let root = temp_root(&format!("write-cycle-{kind}"));
@@ -4445,6 +4516,7 @@ mod tests {
     /// `kind: event` — `validate_change` refuses a plain entity (the edge
     /// matrix is type-only) and accepts the event-targeted edge.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn validate_change_requires_publishes_subscribes_targets_to_be_events() {
         let root = temp_root("write-event-targets");
         for kind in ["publishes", "subscribes"] {
@@ -4482,23 +4554,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A real project context for `write_project` tests: the scan fixture's
-    /// repo plus a worktree `foo` branched off it and a branch DB built by the
-    /// hermetic scan (mirrors node_cmd's mutation fixture). Returns
-    /// `(wt_apg_root, repo, wt_root)`.
-    fn mutation_fixture(tag: &str) -> (PathBuf, Repo, PathBuf) {
-        let repo = scan_repo(tag);
-        let wt = repo.start_project("foo");
-        testutil::scan_checkout(&wt).unwrap();
-        (wt.join(crate::specs::LAYOUT), repo, wt)
-    }
-
     /// SPEC §4.1: the code-ref drift check runs BEFORE anything is written —
     /// `write_project` with `implemented-by` targeting a FQN gone from the
     /// scanned graph is refused with no file and no commit (the class note-24
     /// fixed for constraints); the same edge to a `.trans` planned FQN is
     /// pending, not an error, and is accepted at write time.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn write_project_checks_code_ref_drift_before_writing_or_committing() {
         let (wt_apg, repo, wt) = mutation_fixture("write-drift");
 
@@ -4576,6 +4638,7 @@ mod tests {
     /// file and fails with a libgit2 NotFound (the latent bug the repo-less
     /// test could never see).
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn write_through_with_deletes_removes_file_and_rewrites_referencing() {
         // A real project worktree: `write_through` commits on the branch.
         let repo = Repo::new("layers-delete-commit");
@@ -4646,21 +4709,6 @@ mod tests {
     // (a real git repo, a real payload scan, a real db.lbug), mirroring
     // `cmd_scan`'s assembly.
 
-    /// The module/fqn namespace the scan payloads use.
-    const SCAN_MOD: &str = "fixture.mod";
-    const SCAN_FILE: &str = "/abs/store.go";
-
-    /// A fixture repo carrying a scanned-code payload, committed.
-    fn scan_repo(tag: &str) -> Repo {
-        let repo = Repo::new(&format!("layers-scan-{tag}"));
-        repo.write(
-            "code/seed.scan.jsonl",
-            &crate::testutil::code_payload(SCAN_MOD, SCAN_FILE, &["Store"]),
-        );
-        repo.commit_all("seed code");
-        repo
-    }
-
     /// R17 VI: the scan never opens `apg/specs/*.jsonl` or `apg/notes/` — a
     /// fixture whose committed legacy durable files are poisoned (malformed
     /// JSONL AND old-model sentinel records whose types the post-removal
@@ -4668,6 +4716,7 @@ mod tests {
     /// them, and leaves them byte-identical. Spec data comes from the
     /// `apg/layers` tree + the `.trans/plans` mirror only.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_ignores_poisoned_legacy_spec_and_note_files() {
         let repo = scan_repo("vi-unread");
         repo.write("apg/specs/foo.jsonl", "this is not json\n");
@@ -4721,6 +4770,7 @@ mod tests {
     /// edge in the other endpoint's file FAILS the scan — the pairing
     /// mismatch is caught at ingestion, not silently tolerated.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_fails_on_pairing_mismatch_between_node_files() {
         let repo = scan_repo("scan-mismatch");
         // A's out `contains -> B` with no matching in-edge on B's file.
@@ -4742,6 +4792,7 @@ mod tests {
     /// halves are present) — the acyclicity rule is what stops the scan,
     /// proving it is wired into the scan leg.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_fails_on_contains_cycle_between_node_files() {
         let repo = scan_repo("scan-cycle");
         let a_fqn = "requirements.requirement.a";
@@ -4763,6 +4814,7 @@ mod tests {
     /// properties is a mismatch — a match requires identical properties —
     /// and fails the scan.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_fails_on_same_endpoints_with_different_edge_properties() {
         let repo = scan_repo("scan-prop-mismatch");
         // The out half carries a flavor the in half does not.
@@ -4786,6 +4838,7 @@ mod tests {
     /// spec drift and FAILS the scan; a `.trans` planned FQN ingests as
     /// pending, not an error.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_fails_on_implemented_by_drift_and_ingests_transient_planned_pending() {
         let repo = scan_repo("scan-drift");
         let mut sys = node("solution", "system", "payments");
@@ -4830,6 +4883,7 @@ mod tests {
     /// the scan — a constraint is never a non-thing, and the reference is
     /// checked at every scan over the assembled graph.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_fails_on_constraint_with_unresolvable_reference() {
         let repo = scan_repo("scan-constraint-ref");
         // A local constraint attaching to a node that does not exist.
@@ -4852,6 +4906,7 @@ mod tests {
     /// references resolve; the scan validates structure + references only, no
     /// expression parsing, no evaluation.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_never_evaluates_constraint_prose() {
         let repo = scan_repo("scan-constraint-prose");
         let mut ent = node("domain", "entity", "customer");
@@ -4878,6 +4933,7 @@ mod tests {
     /// requirements tier mirror, `.trans/requirements/foo.jsonl` — and its
     /// Reviews edge points at the durable requirement and lands in the DB.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_ingests_transient_plans_and_feedback_paired_to_durable_nodes() {
         let repo = scan_repo("scan-plans-feedback");
         // The durable side: one requirement node file.
@@ -4990,6 +5046,7 @@ mod tests {
     ///   lbug write-lock collision.
     /// - The projection delta is applied write-through when a DB exists.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn write_project_decoupled_from_db_validates_export_and_records_unvalidated() {
         // (a) Both artifacts gone: structural refs still validated, code refs
         // recorded unvalidated. A fresh fixture's db.lbug + graph.jsonl are
@@ -5086,6 +5143,7 @@ mod tests {
     /// apply**: the durable store holds the committed mutation while the
     /// projection stays prior; the next rebuild reproduces the committed state.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn commit_then_project_orders_durable_write_before_projection() {
         let (wt_apg, repo, wt) = mutation_fixture("commit-project");
         let r2_path = node_file_path(&wt_apg, Layer::Requirements, "requirement", "r2");
@@ -5162,6 +5220,7 @@ mod tests {
     /// durable (`write_project`) and transient (`write_jsonl_and_reingest`)
     /// paths; **no scan runs** to reach this state.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn projection_equals_sources_two_way_nodes_and_edges() {
         let (wt_apg, repo, _wt) = mutation_fixture("projection-eq");
 
@@ -5405,6 +5464,7 @@ mod tests {
     /// fix-reviews-edge bug). No `apg scan` and no transient write runs between
     /// the durable mutation and the fresh read here.
     #[test]
+    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn durable_mutation_preserves_transient_review_pairing() {
         let (wt_apg, repo, _wt) = mutation_fixture("review-pairing");
         let req_fqn = "requirements.requirement.timer";
@@ -5502,5 +5562,6 @@ mod tests {
         drop(db);
 
         testutil::remove(&repo);
+    }
     }
 }
