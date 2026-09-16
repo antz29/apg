@@ -6,7 +6,13 @@
   "properties": {
     "feature": "test-hygiene"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "depends-on",
+      "target": "requirements.requirement.no-real-io-boundary",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
