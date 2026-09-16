@@ -346,6 +346,10 @@ reviewer:    apg_review_reject <f>                               → status = op
   `cargo build *` grant. Env-prefixed forms (`APG_BUILD_FRONTENDS=0 cargo
   build`) are deliberately **not** granted: they match no allowed pattern, and a
   glob that accepted them would invite smuggling.
+- **A `kind=gate` task is marked done only on a real, observed green run** —
+  never inferred from a partial run, from reading the code, or from a previous
+  phase. Gate greenness is *your* asserted contract: the phase is not handed
+  back for review with a red or unrun gate, and the reviewer never re-runs it.
 - The release gate is **`cargo test` GREEN**. Before any commit, run the gates
   (`cargo fmt`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D
   warnings`, `cargo build`, `cargo test` — separate calls) and fix everything

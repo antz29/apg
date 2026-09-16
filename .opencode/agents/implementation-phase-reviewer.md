@@ -270,7 +270,10 @@ navigator scans the branch after the user approves; you never scan yourself.
 Read tasks with `apg_plan_tasks` (phase, kind, tier, status, verb, target,
 new_fqn). If a plan tool errors or returns nothing — or returns something you
 cannot interpret — **stop and report the exact failure to the coordinator**;
-never guess and never read the transient store directly.
+never guess and never read the transient store directly. **Before you review
+anything, confirm the phase's `kind=gate` task is `done`**: a phase whose gate
+is red, unrun, or unasserted is returned to the coordinator **unreviewed** — you
+never run it yourself and never infer greenness from the code.
 
 1. **Understand the phase.** `apg_plan` (overview), `apg_plan_phases` (health:
    unsatisfied requirements, gates cycles, phases with no tasks, done-but-
@@ -346,7 +349,13 @@ spec and the implementation:
 - You **never scan** — if the graph is missing or stale, stop and report the
   exact failure to the coordinator, who runs the scan.
 - You **never run build gates** — verifying `cargo test` green is the
-  implementer's done-gate; your gate is structural: code exists, is wired, and
-  matches the spec contract, with all `Feedback` resolved.
+  implementer's **asserted** done-gate; your gate is structural: code exists, is
+  wired, and matches the spec contract, with all `Feedback` resolved. You hold
+  **no build/run surface at all** (no `cargo …`, no `scripts/gate.sh`) and are
+  never to be granted one: review is subjective judgment of the artifact against
+  the plan and the spec, not the machine's exit status. **A phase whose gate is
+  red, unrun, or unasserted is not reviewed** — if the phase's `kind=gate` task
+  is not `done`, return the phase to the coordinator unreviewed; never re-run
+  anything and never infer greenness from reading the code.
 - You **never merge** — the merge act (and `apg project start`) belongs to the
   navigator.
