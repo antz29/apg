@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "db-splice-from-previous",
-  "body": "At netbeans scale the DB load is a multi-minute floor, so the DB must be seeded/spliced from the previous DB rather than rebuilt from scratch. A global projection pass over cached + re-emitted facts is allowed, but it must not require re-running the frontends for unchanged content. AC: a localized re-scan does not perform a full DB rebuild, and the resulting DB answers the same queries as a full rebuild.",
+  "body": "At netbeans scale (a motivating case, not an acceptance workload) the DB load is a multi-minute floor, so the DB must be seeded/spliced from the previous DB rather than rebuilt from scratch; the recorded jgrapht DB load is ~2s of its ~16s full scan. A global projection pass over cached + re-emitted facts is allowed, but it must not require re-running the frontends for unchanged content. AC: a localized re-scan does not perform a full DB rebuild, and the resulting DB answers the same queries as a full rebuild.",
   "properties": {
     "feature": "incremental-graph"
   },
