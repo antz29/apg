@@ -2157,7 +2157,414 @@ fn scan_row_from_graph(graph: &graph::Graph) -> Option<splice::ScanRow> {
 mod tests {
     use super::*;
 
+    /// The version this release gate guards. Bump this literal in lockstep with
+    /// the `[package] version` line on every release: the assertions below fail
+    /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
+    /// advertised release), so a bump commit cannot silently skip it.
+    const RELEASE_VERSION: &str = "0.13.3";
+
+    /// The `version = "..."` declared directly under a Cargo.toml `[package]`
+    /// header.
+    fn cargo_manifest_version(manifest: &str) -> Option<&str> {
+        let in_package = manifest
+            .lines()
+            .position(|l| l.trim() == "[package]")
+            .map(|i| i + 1)?;
+        manifest.lines().skip(in_package).find_map(|l| {
+            l.trim()
+                .strip_prefix("version = ")
+                .map(|v| v.trim_matches('"'))
+        })
+    }
+
+    /// The `version = "..."` of the named `[[package]]` entry in a Cargo.lock.
+    fn cargo_lock_package_version<'a>(lock: &'a str, name: &str) -> Option<&'a str> {
+        let lines: Vec<&str> = lock.lines().collect();
+        let start = lines.iter().position(|l| l.trim() == "[[package]]")?;
+        let mut pkg = String::new();
+        for l in lines.iter().skip(start) {
+            let t = l.trim();
+            if t == "[[package]]" {
+                pkg.clear();
+                continue;
+            }
+            if let Some(n) = t.strip_prefix("name = ") {
+                pkg = n.trim_matches('"').to_string();
+            } else if let Some(v) = t.strip_prefix("version = ")
+                && pkg == name
+            {
+                return Some(v.trim_matches('"'));
+            }
+        }
+        None
+    }
+
+    /// `&[&str]` → the `Vec<String>` argv shape `cmd_node`/`cmd_edge`/`cmd_plan`
+    /// take (the top-level dispatch slice `main` would hand them).
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Runs `f` with the process cwd temporarily set to `dir` — the top-level
+    /// `cmd_*` dispatch functions resolve `apg/` by walking up from cwd.
+    /// Serialized behind the shared cwd lock so it never interleaves with a
+    /// concurrent `scan_checkout`.
+    fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let old = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir).unwrap();
+        let out = f();
+        std::env::set_current_dir(old).unwrap();
+        out
+    }
+
+    /// A real project context for the strict-surface acceptance sweep: a git
+    /// repo whose worktree `foo` on branch `foo` carries a real branch DB
+    /// (scanned from a committed hermetic payload) and a fresh scan_meta — so
+    /// the top-level `cmd_node`/`cmd_edge`/`cmd_plan` dispatch runs exactly as
+    /// it does inside a project. Returns `(wt_apg_root, repo, wt_root)`.
+    fn strict_surface_fixture(tag: &str) -> (PathBuf, testutil::Repo, PathBuf) {
+        let repo = testutil::Repo::new(&format!("strict-{tag}"));
+        let wt = repo.start_project("foo");
+        let seed = wt.join("code/seed.scan.jsonl");
+        std::fs::create_dir_all(seed.parent().unwrap()).unwrap();
+        std::fs::write(
+            &seed,
+            testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]),
+        )
+        .unwrap();
+        {
+            let r = git2::Repository::open(&wt).unwrap();
+            let mut index = r.index().unwrap();
+            index.add_path(Path::new("code/seed.scan.jsonl")).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = r.find_tree(tree_id).unwrap();
+            let sig = r.signature().unwrap();
+            let head = r.head().unwrap().peel_to_commit().unwrap();
+            r.commit(Some("HEAD"), &sig, &sig, "seed code", &tree, &[&head])
+                .unwrap();
+        }
+        testutil::scan_checkout(&wt).unwrap();
+        (wt.join(specs::LAYOUT), repo, wt)
+    }
+
+    /// Initializes a bare scratch git repo at `dir` (branch `main`) with the
+    /// test identity configured — the fresh NON-FIXTURE target of the
+    /// external-project acceptance (no `apg/` layout: the real `apg init` is
+    /// part of the test).
+    fn scratch_repo_init(dir: &Path) -> git2::Repository {
+        std::fs::create_dir_all(dir).unwrap();
+        let mut opts = git2::RepositoryInitOptions::new();
+        opts.initial_head("refs/heads/main");
+        let repo = git2::Repository::init_opts(dir, &opts).unwrap();
+        {
+            let mut cfg = repo.config().unwrap();
+            cfg.set_str("user.name", "apg scratch test").unwrap();
+            cfg.set_str("user.email", "apg-scratch@example.com")
+                .unwrap();
+        }
+        repo
+    }
+
+    /// Commits every change under `dir` (git2 — the git CLI is never shelled
+    /// out to anywhere in src). Tolerates an unborn HEAD (the first commit).
+    fn scratch_commit_all(dir: &Path, msg: &str) {
+        let repo = git2::Repository::open(dir).unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo.head().ok().map(|h| h.peel_to_commit().unwrap());
+        let parents: Vec<&git2::Commit> = head.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, parents.as_slice())
+            .unwrap();
+    }
+
+    /// A scratch repo with real Go sources, a `go.mod`, and an `apg/` layout at
+    /// the binary's version. Returns `(base, repo_dir)` (base for teardown).
+    fn winb_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("apg-winb-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+        for (rel, body) in files {
+            let p = repo_dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        scratch_commit_all(&repo_dir, "init source");
+        (base, repo_dir)
+    }
+
+    /// The standard three-package Go fixture: `a` (leaf), `b` (depends on a),
+    /// `c` (depends on b).
+    fn winb_go_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (
+                "a/a.go",
+                "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 1 }\n",
+            ),
+            (
+                "b/b.go",
+                "package b\n\nimport \"scratch/a\"\n\n// B is a struct.\ntype B struct {\n\tA a.A\n}\n\n// Foo calls the leaf.\nfunc Foo() int { return a.Leaf() }\n",
+            ),
+            (
+                "c/c.go",
+                "package c\n\nimport \"scratch/b\"\n\n// Bar calls Foo.\nfunc Bar() int { return b.Foo() }\n",
+            ),
+        ]
+    }
+
+    fn winb_run(repo_dir: &Path, home: &Path, args: &[&str]) -> std::process::Output {
+        testutil::ApgCommand::new(args)
+            .cwd(repo_dir)
+            .env("HOME", &home.to_string_lossy())
+            .output()
+    }
+
+    /// Parse the export into comparable node/edge/unresolved sets.
+    fn winb_graph(
+        repo_dir: &Path,
+    ) -> (
+        BTreeSet<String>,
+        BTreeSet<(String, String)>,
+        BTreeSet<String>,
+    ) {
+        let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+        let mut nodes = BTreeSet::new();
+        let mut edges = BTreeSet::new();
+        let mut unresolved = BTreeSet::new();
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line).unwrap();
+            let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            match ty {
+                "module" | "file" | "struct" | "function" => {
+                    nodes.insert(format!(
+                        "{}:{}",
+                        ty,
+                        v.get("fqn").and_then(|f| f.as_str()).unwrap_or("")
+                    ));
+                }
+                "contains" | "calls" | "uses" | "unresolved_call" | "unresolved_use" => {
+                    edges.insert((
+                        ty.to_string(),
+                        format!(
+                            "{}->{}",
+                            v.get("from").and_then(|f| f.as_str()).unwrap_or(""),
+                            v.get("to").and_then(|f| f.as_str()).unwrap_or("")
+                        ),
+                    ));
+                }
+                "unresolved" => {
+                    unresolved.insert(format!(
+                        "{}:{}",
+                        v.get("fqn").and_then(|f| f.as_str()).unwrap_or(""),
+                        v.get("category").and_then(|c| c.as_str()).unwrap_or("")
+                    ));
+                }
+                _ => {}
+            }
+        }
+        (nodes, edges, unresolved)
+    }
+
+    /// Builds a real on-disk DB at `path` through the same
+    /// `create_schema + copy_from` full load the scan path uses, so the dispatch
+    /// under test sees a genuine previous database.
+    fn win_c_build_db(path: &Path, graph: &graph::Graph) {
+        let ldir = path.parent().unwrap().join("load");
+        std::fs::create_dir_all(&ldir).unwrap();
+        load::build_load_files(graph, &ldir).unwrap();
+        let db = Database::new(path, SystemConfig::default()).unwrap();
+        let conn = Connection::new(&db).unwrap();
+        load::create_schema(&conn).unwrap();
+        load::copy_from(&conn, &ldir).unwrap();
+        drop(conn);
+        drop(db);
+    }
+
+    /// A previous/next graph for the dispatch fixtures: the module, the target
+    /// file, a struct and one function, plus the single `Scan` head.
+    fn win_c_fixture(abs_file: &str, scan_sha: &str) -> graph::Graph {
+        use crate::graph::{Graph, Location, Node, NodeKind};
+        let located = |kind: NodeKind| Node {
+            kind,
+            location: Some(Location {
+                path: PathBuf::from(abs_file),
+                start: 0,
+                end: 1,
+                start_line: 1,
+                end_line: 1,
+            }),
+            ..Node::default()
+        };
+        let mut g = Graph::default();
+        g.nodes.insert(
+            "mod".to_string(),
+            Node {
+                kind: NodeKind::Module,
+                ..Node::default()
+            },
+        );
+        g.nodes
+            .insert(abs_file.to_string(), located(NodeKind::File));
+        g.nodes
+            .insert("mod.A".to_string(), located(NodeKind::Struct));
+        g.nodes
+            .insert("mod.A.f".to_string(), located(NodeKind::Function));
+        g.nodes.insert(
+            schema::SCAN_HEAD.to_string(),
+            Node {
+                kind: NodeKind::Scan,
+                git_sha: Some(scan_sha.to_string()),
+                content_key: Some(format!("key-{scan_sha}")),
+                scanned_at: Some(format!("t-{scan_sha}")),
+                ..Node::default()
+            },
+        );
+        g.contains.insert(("mod".to_string(), abs_file.to_string()));
+        g.contains
+            .insert((abs_file.to_string(), "mod.A".to_string()));
+        g.contains
+            .insert(("mod.A".to_string(), "mod.A.f".to_string()));
+        g
+    }
+
+    /// The incremental `PipelineInput` the dispatch fixtures pass: the win-B
+    /// reuse plan (the eligibility marker) plus the phase-2 target set.
+    fn win_c_input(
+        base: &Path,
+        scan_root: &Path,
+        targets_rel: &[&str],
+    ) -> incremental::PipelineInput {
+        use crate::cache::{CacheKey, Manifest, ScanConfigKey};
+        let key = CacheKey::compute(&ScanConfigKey::default());
+        incremental::PipelineInput {
+            store_root: Some(base.join("store")),
+            cache_key: key.clone(),
+            scan_root: scan_root.to_path_buf(),
+            manifest: Manifest::default(),
+            sha: "new".to_string(),
+            reuse: Some(incremental::ReusePlan {
+                store_root: base.join("store"),
+                cache_key: key,
+                files: Vec::new(),
+                reader_root: scan_root.to_string_lossy().into_owned(),
+                skipped_langs: BTreeSet::new(),
+            }),
+            targets_rel: targets_rel.iter().map(|s| s.to_string()).collect(),
+            removed_fqns: BTreeSet::new(),
+            recorded_content_key: Some("key-old".to_string()),
+        }
+    }
+
+    /// unit tier -- pure in-memory: no filesystem, database, git or process.
+    mod unit {
+        use super::*;
+
+        /// Phase-7 task-7 (gate): the `apg --help` text documents the strict
+        /// `add|update|rm` surface for node/edge/plan, no longer names the retired
+        /// `plan init`/`plan link` verbs, and leaves the `apg review` line
+        /// unchanged.
+        #[test]
+        fn help_text_documents_strict_surface_and_preserves_review() {
+            let help = help_text();
+            // node/edge/plan all document add|update|rm.
+            assert!(help.contains("apg node <sub>"), "node block present");
+            assert!(help.contains("apg edge <sub>"), "edge block present");
+            assert!(help.contains("apg session <sub>"), "session block present");
+            assert!(
+                help.contains("single-writer coordinator"),
+                "the session block documents the coordinator"
+            );
+            assert!(help.contains("apg plan <sub>"), "plan block present");
+            assert!(
+                help.contains("add/update/rm/done/undone/note/complete/render/verify"),
+                "the plan subcommand surface names add/update/rm progress verbs"
+            );
+            assert!(
+                help.contains("add/update/rm (type-as-argument"),
+                "the node surface names add/update/rm"
+            );
+            assert!(
+                help.contains("add/update/rm (kind/from/to"),
+                "the edge surface names add/update/rm"
+            );
+            // The retired plan verbs are gone.
+            assert!(!help.contains("plan init"), "plan init is retired: {help}");
+            assert!(!help.contains("plan link"), "plan link is retired: {help}");
+            // The review block is untouched: the same header + the exact five-verb
+            // dispatch line.
+            let review_block = help
+                .lines()
+                .skip_while(|l| !l.contains("apg review <sub>"))
+                .take(2)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                review_block.contains("Writer↔reviewer feedback cycle:"),
+                "the apg review header must be unchanged: {review_block}"
+            );
+            assert!(
+                review_block.contains("add/action/resolve/reject/list"),
+                "the apg review verbs must be unchanged: {review_block}"
+            );
+        }
+
+        /// Phase-03 task-5: the per-language spawn verdict. On the incremental
+        /// path, in the PARTIAL case (the scan has other changed languages) a
+        /// language whose target set is empty is SKIPPED entirely (no process
+        /// spawn), while a language with targets spawns. When the whole target set
+        /// is empty phase-02's unfiltered path runs every language, and on a full
+        /// scan every language spawns. The verdict is derived from the SAME
+        /// phase-2 `targets_rel` set that drives the win-C DB splice, via
+        /// `targets_for_language`, never a fresh detection walk.
+        #[test]
+        fn spawn_verdict_skips_unchanged_languages_only_on_the_incremental_path() {
+            // A partial (win-C) delta: go changed, ts untouched.
+            let mut rel = BTreeSet::new();
+            rel.insert("a/a.go".to_string());
+            let go_targets = targets_for_language(&rel, Path::new("/root"), "go");
+            let ts_targets = targets_for_language(&rel, Path::new("/root"), "ts");
+            let any = !rel.is_empty();
+
+            // Incremental PARTIAL case: the changed language spawns; the unchanged
+            // one is skipped entirely (not merely emission-filtered).
+            assert!(should_spawn_language(false, go_targets.is_empty(), any));
+            assert!(!should_spawn_language(false, ts_targets.is_empty(), any));
+
+            // Incremental with NO targets anywhere: phase-02's unfiltered path runs
+            // every language (an empty target file means "no filter"), so the
+            // frontends still emit their global module scaffolding + full universe.
+            assert!(should_spawn_language(false, true, false));
+            assert!(should_spawn_language(false, false, false));
+
+            // Full scan: every detected/requested language still spawns, even with
+            // an empty target set (no emission filter is passed on this path).
+            assert!(should_spawn_language(true, true, false));
+            assert!(should_spawn_language(true, go_targets.is_empty(), any));
+        }
+    }
+
+    /// e2e tier -- real I/O: these tests read repo files (README/Cargo.toml/
+    /// suite sources), build scratch git repos, drive the candidate `apg`
+    /// binary or open `db.lbug`. Each is `#[ignore]`d, so a plain `cargo test`
+    /// never runs one; the only entry point is the named guard `cargo test-e2e`
+    /// (= `cargo test tests::e2e:: -- --ignored`).
+    mod e2e {
+        use super::*;
+
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn query_json_emits_rows() {
         // `emit_json_rows` renders a query result as a JSON array of objects,
         // one per row, keyed by column name with string-typed values. The DB
@@ -2214,6 +2621,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn duplicate_install_files_detects_overlap() {
         let proj = std::env::temp_dir().join(format!("apg-proj-oc-{}", std::process::id()));
         let user = std::env::temp_dir().join(format!("apg-user-oc-{}", std::process::id()));
@@ -2270,6 +2678,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn duplicate_install_files_absent_when_no_project_opencode() {
         let proj = std::env::temp_dir().join(format!("apg-no-oc-{}", std::process::id()));
         let user = std::env::temp_dir().join(format!("apg-no-oc-user-{}", std::process::id()));
@@ -2283,6 +2692,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn prune_stale_suite_removes_apg_files_preserves_others() {
         let dir = std::env::temp_dir().join(format!("apg-prune-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2314,6 +2724,7 @@ mod tests {
     /// and the retired spec/invariant tools are gone from both the embed list
     /// and the installed set (a stale file in the target is pruned).
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn suite_installs_node_edge_project_tools_and_retires_spec_invariant() {
         let dir = std::env::temp_dir().join(format!("apg-suite-install-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2437,6 +2848,7 @@ mod tests {
     /// inherit the rule. `codebase-navigator.md` is deliberately excluded (see
     /// below).
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn installed_agent_prompts_state_file_access_read_guard() {
         const RULE: &str = "graph state is reached only through the apg tools";
         const NEVER_READ: &str = "never read directly";
@@ -2502,6 +2914,7 @@ mod tests {
     /// `apg_review_action` tool point the action step at the coordinator, never
     /// the writer.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn coordinator_agent_carries_review_action_and_dispatch_prose() {
         fn agent(name: &str) -> &'static str {
             AGENTS
@@ -2577,6 +2990,7 @@ mod tests {
     /// re-points the implementer and every test-implementer it scaffolds to
     /// that same read-only/claim-only grant shape.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn writer_and_test_implementer_agents_hold_read_only_feedback() {
         fn agent(name: &str) -> &'static str {
             AGENTS
@@ -2668,6 +3082,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn scaffold_gitignore_adds_layout_entries_once() {
         let d = std::env::temp_dir().join(format!("apg-gitignore-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -2691,6 +3106,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn scaffold_gitignore_accepts_existing_entries_in_either_spelling() {
         let d = std::env::temp_dir().join(format!("apg-gitignore-spell-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -2705,6 +3121,7 @@ mod tests {
     /// the mismatch detection, and the upgrade steps — the R10 block text
     /// points users at it.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn upgrade_doc_covers_version_field_gate_and_fix_steps() {
         for needle in [
             "version",
@@ -2722,49 +3139,8 @@ mod tests {
         }
     }
 
-    /// The version this release gate guards. Bump this literal in lockstep with
-    /// the `[package] version` line on every release: the assertions below fail
-    /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
-    /// advertised release), so a bump commit cannot silently skip it.
-    const RELEASE_VERSION: &str = "0.13.3";
-
-    /// The `version = "..."` declared directly under a Cargo.toml `[package]`
-    /// header.
-    fn cargo_manifest_version(manifest: &str) -> Option<&str> {
-        let in_package = manifest
-            .lines()
-            .position(|l| l.trim() == "[package]")
-            .map(|i| i + 1)?;
-        manifest.lines().skip(in_package).find_map(|l| {
-            l.trim()
-                .strip_prefix("version = ")
-                .map(|v| v.trim_matches('"'))
-        })
-    }
-
-    /// The `version = "..."` of the named `[[package]]` entry in a Cargo.lock.
-    fn cargo_lock_package_version<'a>(lock: &'a str, name: &str) -> Option<&'a str> {
-        let lines: Vec<&str> = lock.lines().collect();
-        let start = lines.iter().position(|l| l.trim() == "[[package]]")?;
-        let mut pkg = String::new();
-        for l in lines.iter().skip(start) {
-            let t = l.trim();
-            if t == "[[package]]" {
-                pkg.clear();
-                continue;
-            }
-            if let Some(n) = t.strip_prefix("name = ") {
-                pkg = n.trim_matches('"').to_string();
-            } else if let Some(v) = t.strip_prefix("version = ")
-                && pkg == name
-            {
-                return Some(v.trim_matches('"'));
-            }
-        }
-        None
-    }
-
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn cargo_manifest_and_lockfile_declare_release_version() {
         let root = env!("CARGO_MANIFEST_DIR");
         let manifest = std::fs::read_to_string(format!("{root}/Cargo.toml")).unwrap();
@@ -2781,6 +3157,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn readme_documents_release_version() {
         let readme =
             std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
@@ -2797,56 +3174,6 @@ mod tests {
         assert!(!readme.contains("0.11"), "README must not reference 0.11");
     }
 
-    /// `&[&str]` → the `Vec<String>` argv shape `cmd_node`/`cmd_edge`/`cmd_plan`
-    /// take (the top-level dispatch slice `main` would hand them).
-    fn argv(args: &[&str]) -> Vec<String> {
-        args.iter().map(|s| s.to_string()).collect()
-    }
-
-    /// Runs `f` with the process cwd temporarily set to `dir` — the top-level
-    /// `cmd_*` dispatch functions resolve `apg/` by walking up from cwd.
-    /// Serialized behind the shared cwd lock so it never interleaves with a
-    /// concurrent `scan_checkout`.
-    fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
-        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let old = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir).unwrap();
-        let out = f();
-        std::env::set_current_dir(old).unwrap();
-        out
-    }
-
-    /// A real project context for the strict-surface acceptance sweep: a git
-    /// repo whose worktree `foo` on branch `foo` carries a real branch DB
-    /// (scanned from a committed hermetic payload) and a fresh scan_meta — so
-    /// the top-level `cmd_node`/`cmd_edge`/`cmd_plan` dispatch runs exactly as
-    /// it does inside a project. Returns `(wt_apg_root, repo, wt_root)`.
-    fn strict_surface_fixture(tag: &str) -> (PathBuf, testutil::Repo, PathBuf) {
-        let repo = testutil::Repo::new(&format!("strict-{tag}"));
-        let wt = repo.start_project("foo");
-        let seed = wt.join("code/seed.scan.jsonl");
-        std::fs::create_dir_all(seed.parent().unwrap()).unwrap();
-        std::fs::write(
-            &seed,
-            testutil::code_payload("fixture.mod", "/abs/store.go", &["Store"]),
-        )
-        .unwrap();
-        {
-            let r = git2::Repository::open(&wt).unwrap();
-            let mut index = r.index().unwrap();
-            index.add_path(Path::new("code/seed.scan.jsonl")).unwrap();
-            index.write().unwrap();
-            let tree_id = index.write_tree().unwrap();
-            let tree = r.find_tree(tree_id).unwrap();
-            let sig = r.signature().unwrap();
-            let head = r.head().unwrap().peel_to_commit().unwrap();
-            r.commit(Some("HEAD"), &sig, &sig, "seed code", &tree, &[&head])
-                .unwrap();
-        }
-        testutil::scan_checkout(&wt).unwrap();
-        (wt.join(specs::LAYOUT), repo, wt)
-    }
-
     /// Phase-7 task-1 (E2E, top-level dispatch): the strict-mutation surface's
     /// refusal sweep. Every create arm — `node add`, `edge add`, `plan add`
     /// (the plan itself), and `plan add phase|task|planned` — refuses an
@@ -2854,6 +3181,7 @@ mod tests {
     /// store change); `rm` on an absent entity is non-zero, never a silent
     /// no-op.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn strict_surface_top_level_dispatch_refuses_existing_and_absent_rm() {
         let (apg_root, repo, wt) = strict_surface_fixture("dispatch-refusal");
 
@@ -3069,55 +3397,6 @@ mod tests {
         testutil::remove(&repo);
     }
 
-    /// Phase-7 task-7 (gate): the `apg --help` text documents the strict
-    /// `add|update|rm` surface for node/edge/plan, no longer names the retired
-    /// `plan init`/`plan link` verbs, and leaves the `apg review` line
-    /// unchanged.
-    #[test]
-    fn help_text_documents_strict_surface_and_preserves_review() {
-        let help = help_text();
-        // node/edge/plan all document add|update|rm.
-        assert!(help.contains("apg node <sub>"), "node block present");
-        assert!(help.contains("apg edge <sub>"), "edge block present");
-        assert!(help.contains("apg session <sub>"), "session block present");
-        assert!(
-            help.contains("single-writer coordinator"),
-            "the session block documents the coordinator"
-        );
-        assert!(help.contains("apg plan <sub>"), "plan block present");
-        assert!(
-            help.contains("add/update/rm/done/undone/note/complete/render/verify"),
-            "the plan subcommand surface names add/update/rm progress verbs"
-        );
-        assert!(
-            help.contains("add/update/rm (type-as-argument"),
-            "the node surface names add/update/rm"
-        );
-        assert!(
-            help.contains("add/update/rm (kind/from/to"),
-            "the edge surface names add/update/rm"
-        );
-        // The retired plan verbs are gone.
-        assert!(!help.contains("plan init"), "plan init is retired: {help}");
-        assert!(!help.contains("plan link"), "plan link is retired: {help}");
-        // The review block is untouched: the same header + the exact five-verb
-        // dispatch line.
-        let review_block = help
-            .lines()
-            .skip_while(|l| !l.contains("apg review <sub>"))
-            .take(2)
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            review_block.contains("Writer↔reviewer feedback cycle:"),
-            "the apg review header must be unchanged: {review_block}"
-        );
-        assert!(
-            review_block.contains("add/action/resolve/reject/list"),
-            "the apg review verbs must be unchanged: {review_block}"
-        );
-    }
-
     /// Phase-04 task-4 (acceptance): the `apg node` / `apg edge` command
     /// surface is transparent — the SAME literal forms the CLI documents appear
     /// in `help_text`, the node/edge suite tools, and the distributed agent
@@ -3127,6 +3406,7 @@ mod tests {
     /// consts: a test that compares `AGENTS`/`SUITE_TOOLS` to themselves is a
     /// tautology and would pass even after a surface drift.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn acceptance_node_edge_surface_is_transparent_and_pinned_in_help_tools_and_agents() {
         // 1. `apg --help` documents the exact command surface (literal lines).
         let help = help_text();
@@ -3210,6 +3490,7 @@ mod tests {
     /// out of contract — lbug errors rather than waiting. After `apg session
     /// end` a fresh query opens the DB directly and reads the same state.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn read_access_during_a_live_session_routes_and_after_end_reads_directly() {
         let (repo, wt, wt_apg) = testutil::project_with_db("read-access");
         let home = repo.root.join("home");
@@ -3289,6 +3570,7 @@ mod tests {
     /// timestamp; the mutation re-anchor preserves it), and the scan pipeline's
     /// `apg-frontend.log` is never recreated.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn metadata_mutations_are_immediately_queryable_without_a_scan() {
         use std::os::unix::fs::MetadataExt;
 
@@ -3503,6 +3785,7 @@ mod tests {
     /// scan-meta is never restamped, and the scan pipeline's
     /// `apg-frontend.log` is never recreated.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn acceptance_read_your_writes_across_the_real_cli_without_a_scan() {
         use std::os::unix::fs::MetadataExt;
 
@@ -3578,42 +3861,6 @@ mod tests {
         testutil::remove(&repo);
     }
 
-    /// Initializes a bare scratch git repo at `dir` (branch `main`) with the
-    /// test identity configured — the fresh NON-FIXTURE target of the
-    /// external-project acceptance (no `apg/` layout: the real `apg init` is
-    /// part of the test).
-    fn scratch_repo_init(dir: &Path) -> git2::Repository {
-        std::fs::create_dir_all(dir).unwrap();
-        let mut opts = git2::RepositoryInitOptions::new();
-        opts.initial_head("refs/heads/main");
-        let repo = git2::Repository::init_opts(dir, &opts).unwrap();
-        {
-            let mut cfg = repo.config().unwrap();
-            cfg.set_str("user.name", "apg scratch test").unwrap();
-            cfg.set_str("user.email", "apg-scratch@example.com")
-                .unwrap();
-        }
-        repo
-    }
-
-    /// Commits every change under `dir` (git2 — the git CLI is never shelled
-    /// out to anywhere in src). Tolerates an unborn HEAD (the first commit).
-    fn scratch_commit_all(dir: &Path, msg: &str) {
-        let repo = git2::Repository::open(dir).unwrap();
-        let mut index = repo.index().unwrap();
-        index
-            .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
-            .unwrap();
-        index.write().unwrap();
-        let tree_id = index.write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let sig = repo.signature().unwrap();
-        let head = repo.head().ok().map(|h| h.peel_to_commit().unwrap());
-        let parents: Vec<&git2::Commit> = head.iter().collect();
-        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, parents.as_slice())
-            .unwrap();
-    }
-
     /// Phase-04 task-8 (acceptance): the hermetic external-project scratch-repo
     /// acceptance — a FRESH NON-FIXTURE repo driven by a REAL `apg init` + REAL
     /// `apg scan` (the genuine added dimension; every other test uses the
@@ -3630,6 +3877,7 @@ mod tests {
     /// `<scratch>/apg/.worktrees/<name>`. Both the `/tmp` scratch repo and the
     /// isolated HOME are torn down at the end.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn acceptance_scratch_repo_real_init_scan_burst_read_your_writes_and_session() {
         let base = std::env::temp_dir().join(format!("apg-accept-scratch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -3861,6 +4109,7 @@ mod tests {
     /// boundary and return the verbatim message. It fails on the pre-fix suite
     /// (where `csvToRows` split `out` directly and the guard was dead code).
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn suite_tools_query_error_guard_is_structural() {
         // Extract a top-level function's source (signature through its closing
         // brace) from the embedded lib, so the assertions speak about the
@@ -3984,6 +4233,7 @@ mod tests {
     /// recorded-dirty tree whose content digest changed at the SAME sha prints
     /// STALE and falls through the full pipeline.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn acceptance_scan_freshness_fast_path_noop_and_content_edit_fallback() {
         let base = std::env::temp_dir().join(format!("apg-freshness-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -4109,6 +4359,7 @@ mod tests {
     /// lines ignored), and the same list is written per language from the
     /// checkout-relative target set. The channel is argv — stdin stays null.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn frontend_handoff_targets_file_is_newline_delimited_absolute_paths() {
         let tmp = std::env::temp_dir().join(format!("apg-handoff-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
@@ -4173,138 +4424,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    /// Phase-03 task-5: the per-language spawn verdict. On the incremental
-    /// path, in the PARTIAL case (the scan has other changed languages) a
-    /// language whose target set is empty is SKIPPED entirely (no process
-    /// spawn), while a language with targets spawns. When the whole target set
-    /// is empty phase-02's unfiltered path runs every language, and on a full
-    /// scan every language spawns. The verdict is derived from the SAME
-    /// phase-2 `targets_rel` set that drives the win-C DB splice, via
-    /// `targets_for_language`, never a fresh detection walk.
-    #[test]
-    fn spawn_verdict_skips_unchanged_languages_only_on_the_incremental_path() {
-        // A partial (win-C) delta: go changed, ts untouched.
-        let mut rel = BTreeSet::new();
-        rel.insert("a/a.go".to_string());
-        let go_targets = targets_for_language(&rel, Path::new("/root"), "go");
-        let ts_targets = targets_for_language(&rel, Path::new("/root"), "ts");
-        let any = !rel.is_empty();
-
-        // Incremental PARTIAL case: the changed language spawns; the unchanged
-        // one is skipped entirely (not merely emission-filtered).
-        assert!(should_spawn_language(false, go_targets.is_empty(), any));
-        assert!(!should_spawn_language(false, ts_targets.is_empty(), any));
-
-        // Incremental with NO targets anywhere: phase-02's unfiltered path runs
-        // every language (an empty target file means "no filter"), so the
-        // frontends still emit their global module scaffolding + full universe.
-        assert!(should_spawn_language(false, true, false));
-        assert!(should_spawn_language(false, false, false));
-
-        // Full scan: every detected/requested language still spawns, even with
-        // an empty target set (no emission filter is passed on this path).
-        assert!(should_spawn_language(true, true, false));
-        assert!(should_spawn_language(true, go_targets.is_empty(), any));
-    }
-
-    /// A scratch repo with real Go sources, a `go.mod`, and an `apg/` layout at
-    /// the binary's version. Returns `(base, repo_dir)` (base for teardown).
-    fn winb_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
-        let base = std::env::temp_dir().join(format!("apg-winb-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let repo_dir = base.join("repo");
-        let home = base.join("home");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
-        scratch_repo_init(&repo_dir);
-        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
-        for (rel, body) in files {
-            let p = repo_dir.join(rel);
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, body).unwrap();
-        }
-        scratch_commit_all(&repo_dir, "init source");
-        (base, repo_dir)
-    }
-
-    /// The standard three-package Go fixture: `a` (leaf), `b` (depends on a),
-    /// `c` (depends on b).
-    fn winb_go_fixture() -> Vec<(&'static str, &'static str)> {
-        vec![
-            (
-                "a/a.go",
-                "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 1 }\n",
-            ),
-            (
-                "b/b.go",
-                "package b\n\nimport \"scratch/a\"\n\n// B is a struct.\ntype B struct {\n\tA a.A\n}\n\n// Foo calls the leaf.\nfunc Foo() int { return a.Leaf() }\n",
-            ),
-            (
-                "c/c.go",
-                "package c\n\nimport \"scratch/b\"\n\n// Bar calls Foo.\nfunc Bar() int { return b.Foo() }\n",
-            ),
-        ]
-    }
-
-    fn winb_run(repo_dir: &Path, home: &Path, args: &[&str]) -> std::process::Output {
-        testutil::ApgCommand::new(args)
-            .cwd(repo_dir)
-            .env("HOME", &home.to_string_lossy())
-            .output()
-    }
-
-    /// Parse the export into comparable node/edge/unresolved sets.
-    fn winb_graph(
-        repo_dir: &Path,
-    ) -> (
-        BTreeSet<String>,
-        BTreeSet<(String, String)>,
-        BTreeSet<String>,
-    ) {
-        let text = std::fs::read_to_string(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
-        let mut nodes = BTreeSet::new();
-        let mut edges = BTreeSet::new();
-        let mut unresolved = BTreeSet::new();
-        for line in text.lines() {
-            let v: serde_json::Value = serde_json::from_str(line).unwrap();
-            let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-            match ty {
-                "module" | "file" | "struct" | "function" => {
-                    nodes.insert(format!(
-                        "{}:{}",
-                        ty,
-                        v.get("fqn").and_then(|f| f.as_str()).unwrap_or("")
-                    ));
-                }
-                "contains" | "calls" | "uses" | "unresolved_call" | "unresolved_use" => {
-                    edges.insert((
-                        ty.to_string(),
-                        format!(
-                            "{}->{}",
-                            v.get("from").and_then(|f| f.as_str()).unwrap_or(""),
-                            v.get("to").and_then(|f| f.as_str()).unwrap_or("")
-                        ),
-                    ));
-                }
-                "unresolved" => {
-                    unresolved.insert(format!(
-                        "{}:{}",
-                        v.get("fqn").and_then(|f| f.as_str()).unwrap_or(""),
-                        v.get("category").and_then(|c| c.as_str()).unwrap_or("")
-                    ));
-                }
-                _ => {}
-            }
-        }
-        (nodes, edges, unresolved)
-    }
-
     /// Phase-02 task-17 (int): a targeted re-scan of each change class yields a
     /// graph exactly equal to a fresh full scan of the same tree — same node
     /// set, same edge set, same unresolved targets. The full-scan oracle runs
     /// with the shared fact store cleared (no reuse, no splice). Scratch /tmp
     /// repos, CANDIDATE binary only.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     #[allow(clippy::type_complexity)]
     fn acceptance_targeted_rescan_equivalence_leaf_body_signature_rename() {
         // Change classes. Go has no overloads, so the overload-peer rule is
@@ -4434,6 +4560,7 @@ mod tests {
     /// full scan (same node set, edge set, unresolved targets). Candidate
     /// binary only, scratch /tmp repo.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn acceptance_cross_worktree_cache_sharing_exactness() {
         let (base, repo_dir) = winb_scratch("xwt", &winb_go_fixture());
         let home = base.join("home");
@@ -4536,97 +4663,8 @@ mod tests {
     // Win-C DB-build dispatch (phase-03 task-4)
     // -----------------------------------------------------------------------
 
-    /// Builds a real on-disk DB at `path` through the same
-    /// `create_schema + copy_from` full load the scan path uses, so the dispatch
-    /// under test sees a genuine previous database.
-    fn win_c_build_db(path: &Path, graph: &graph::Graph) {
-        let ldir = path.parent().unwrap().join("load");
-        std::fs::create_dir_all(&ldir).unwrap();
-        load::build_load_files(graph, &ldir).unwrap();
-        let db = Database::new(path, SystemConfig::default()).unwrap();
-        let conn = Connection::new(&db).unwrap();
-        load::create_schema(&conn).unwrap();
-        load::copy_from(&conn, &ldir).unwrap();
-        drop(conn);
-        drop(db);
-    }
-
-    /// A previous/next graph for the dispatch fixtures: the module, the target
-    /// file, a struct and one function, plus the single `Scan` head.
-    fn win_c_fixture(abs_file: &str, scan_sha: &str) -> graph::Graph {
-        use crate::graph::{Graph, Location, Node, NodeKind};
-        let located = |kind: NodeKind| Node {
-            kind,
-            location: Some(Location {
-                path: PathBuf::from(abs_file),
-                start: 0,
-                end: 1,
-                start_line: 1,
-                end_line: 1,
-            }),
-            ..Node::default()
-        };
-        let mut g = Graph::default();
-        g.nodes.insert(
-            "mod".to_string(),
-            Node {
-                kind: NodeKind::Module,
-                ..Node::default()
-            },
-        );
-        g.nodes
-            .insert(abs_file.to_string(), located(NodeKind::File));
-        g.nodes
-            .insert("mod.A".to_string(), located(NodeKind::Struct));
-        g.nodes
-            .insert("mod.A.f".to_string(), located(NodeKind::Function));
-        g.nodes.insert(
-            schema::SCAN_HEAD.to_string(),
-            Node {
-                kind: NodeKind::Scan,
-                git_sha: Some(scan_sha.to_string()),
-                content_key: Some(format!("key-{scan_sha}")),
-                scanned_at: Some(format!("t-{scan_sha}")),
-                ..Node::default()
-            },
-        );
-        g.contains.insert(("mod".to_string(), abs_file.to_string()));
-        g.contains
-            .insert((abs_file.to_string(), "mod.A".to_string()));
-        g.contains
-            .insert(("mod.A".to_string(), "mod.A.f".to_string()));
-        g
-    }
-
-    /// The incremental `PipelineInput` the dispatch fixtures pass: the win-B
-    /// reuse plan (the eligibility marker) plus the phase-2 target set.
-    fn win_c_input(
-        base: &Path,
-        scan_root: &Path,
-        targets_rel: &[&str],
-    ) -> incremental::PipelineInput {
-        use crate::cache::{CacheKey, Manifest, ScanConfigKey};
-        let key = CacheKey::compute(&ScanConfigKey::default());
-        incremental::PipelineInput {
-            store_root: Some(base.join("store")),
-            cache_key: key.clone(),
-            scan_root: scan_root.to_path_buf(),
-            manifest: Manifest::default(),
-            sha: "new".to_string(),
-            reuse: Some(incremental::ReusePlan {
-                store_root: base.join("store"),
-                cache_key: key,
-                files: Vec::new(),
-                reader_root: scan_root.to_string_lossy().into_owned(),
-                skipped_langs: BTreeSet::new(),
-            }),
-            targets_rel: targets_rel.iter().map(|s| s.to_string()).collect(),
-            removed_fqns: BTreeSet::new(),
-            recorded_content_key: Some("key-old".to_string()),
-        }
-    }
-
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn splice_dispatch_seeds_applies_and_publishes() {
         let base = std::env::temp_dir().join(format!("apg-splice-dispatch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -4713,6 +4751,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn splice_dispatch_falls_back_when_ineligible() {
         let base = std::env::temp_dir().join(format!("apg-splice-fallback-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -4770,6 +4809,7 @@ mod tests {
     /// refuse the seed (falling back to the full load) rather than publish a DB
     /// that is not a full rebuild — and must leave the previous DB untouched.
     #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn splice_dispatch_falls_back_when_the_local_seed_is_stale() {
         let base = std::env::temp_dir().join(format!("apg-splice-stale-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -4817,5 +4857,6 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
     }
 }

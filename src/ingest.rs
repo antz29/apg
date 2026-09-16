@@ -1403,933 +1403,965 @@ mod tests {
         render_function_fqns(decls).into_iter().collect()
     }
 
-    #[test]
-    fn unique_function_keeps_simple_name() {
-        let decls = [fd("n1", "pkg", "foo", &[], "/x/a.go")];
-        let m = fqns(&decls);
-        assert_eq!(m["n1"], "pkg.foo");
-    }
+    /// unit tier -- pure in-memory: no filesystem, database, git or process.
+    mod unit {
+        use super::*;
 
-    #[test]
-    fn overloads_get_param_suffix() {
-        let decls = [
-            fd("n1", "pkg.C", "foo", &["int"], "/x/a.go"),
-            fd("n2", "pkg.C", "foo", &["java.lang.String"], "/x/a.go"),
-        ];
-        let m = fqns(&decls);
-        assert_eq!(m["n1"], "pkg.C.foo(int)");
-        assert_eq!(m["n2"], "pkg.C.foo(java.lang.String)");
-    }
-
-    #[test]
-    fn go_init_disambiguated_by_file() {
-        let decls = [
-            fd("n1", "pkg", "init", &[], "/x/a.go"),
-            fd("n2", "pkg", "init", &[], "/x/b.go"),
-        ];
-        let m = fqns(&decls);
-        assert_eq!(m["n1"], "pkg.init#a.go");
-        assert_eq!(m["n2"], "pkg.init#b.go");
-    }
-
-    #[test]
-    fn zero_param_overload_gets_empty_suffix() {
-        let decls = [
-            fd("n1", "pkg.C", "foo", &[], "/x/a.go"),
-            fd("n2", "pkg.C", "foo", &["int"], "/x/a.go"),
-        ];
-        let m = fqns(&decls);
-        assert_eq!(m["n1"], "pkg.C.foo()");
-        assert_eq!(m["n2"], "pkg.C.foo(int)");
-    }
-
-    #[test]
-    #[should_panic(expected = "FQN collision")]
-    fn duplicate_fqn_panics() {
-        let records = vec![
-            Record::Module {
-                fqn: "pkg".to_string(),
-            },
-            srec("n1", "pkg", "A", "/x/a.go"),
-            srec("n2", "pkg", "A", "/x/b.go"),
-        ];
-        ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
-        );
-    }
-
-    #[test]
-    fn module_shadowed_by_type_does_not_panic() {
-        // Java permits a package `org.pkg.A` and a class `org.pkg.A` to coexist.
-        // The type wins; the shadowed module is dropped and its Module→File edge
-        // pruned (the File node stays, containing the units declared in it),
-        // while unrelated modules, files, and edges survive.
-        let records = vec![
-            Record::Module {
-                fqn: "org.pkg".to_string(),
-            },
-            Record::Module {
-                fqn: "org.pkg.A".to_string(),
-            },
-            Record::Module {
-                fqn: "org.pkg.A.deep".to_string(),
-            },
-            srec("n1", "org.pkg", "A", "/x/A.java"),
-            srec("n2", "org.pkg.A.deep", "B", "/y/B.java"),
-            file_rec("/x/A.java", "org.pkg", 30),
-            file_rec("/y/B.java", "org.pkg.A.deep", 40),
-            Record::Contains {
-                from: "org.pkg".to_string(),
-                to: "org.pkg.A".to_string(),
-            },
-            Record::Contains {
-                from: "org.pkg.A".to_string(),
-                to: "org.pkg.A.deep".to_string(),
-            },
-        ];
-        let (graph, report) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "java",
-                config: None,
-            },
-        );
-        assert_eq!(report.shadowed_modules, 1);
-        // The class survives with its canonical FQN.
-        assert!(graph.nodes.contains_key("org.pkg.A"));
-        assert_eq!(graph.nodes["org.pkg.A"].kind, NodeKind::Struct);
-        // The parent package and the package nested under the shadowed name
-        // survive; the shadowed package itself is not present.
-        assert!(graph.nodes.contains_key("org.pkg"));
-        assert!(graph.nodes.contains_key("org.pkg.A.deep"));
-        assert!(graph.nodes.contains_key("org.pkg.A.deep.B"));
-        // Files survive with their own module·file·unit containment chains.
-        assert!(graph.nodes.contains_key("/x/A.java"));
-        assert!(graph.nodes.contains_key("/y/B.java"));
-        assert_eq!(graph.nodes["/x/A.java"].kind, NodeKind::File);
-        assert!(
-            graph
-                .contains
-                .contains(&("org.pkg".to_string(), "/x/A.java".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/x/A.java".to_string(), "org.pkg.A".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("org.pkg.A.deep".to_string(), "/y/B.java".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/y/B.java".to_string(), "org.pkg.A.deep.B".to_string()))
-        );
-        // But the shadowed package is not a parent: its Module→File edge and the
-        // package chain through it are pruned.
-        assert!(
-            !graph
-                .contains
-                .contains(&("org.pkg.A".to_string(), "/x/A.java".to_string()))
-        );
-        assert!(
-            !graph
-                .contains
-                .contains(&("org.pkg.A".to_string(), "org.pkg.A.deep".to_string()))
-        );
-    }
-
-    #[test]
-    fn function_shadowed_by_struct_does_not_panic() {
-        // A class in a shadowed package (`p.A.test` in package `p.A`) renders
-        // the same FQN as a method of the class `p.A`; the struct wins and the
-        // function is dropped. Function-vs-function still panics.
-        let records = vec![
-            Record::Module {
-                fqn: "p".to_string(),
-            },
-            Record::Module {
-                fqn: "p.A".to_string(),
-            },
-            srec("n1", "p", "A", "/x/A.java"),
-            srec("n2", "p.A", "test", "/y/test.java"),
-            frec("n3", "p.A", "test", "/x/A.java"),
-            frec("n5", "p.A", "other", "/x/A.java"),
-            file_rec("/x/A.java", "p", 60),
-            file_rec("/y/test.java", "p.A", 20),
-            Record::Contains {
-                from: "p".to_string(),
-                to: "p.A".to_string(),
-            },
-            Record::Contains {
-                from: "n1".to_string(),
-                to: "n3".to_string(),
-            },
-            Record::Contains {
-                from: "n1".to_string(),
-                to: "n5".to_string(),
-            },
-        ];
-        let (graph, report) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "java",
-                config: None,
-            },
-        );
-        // The struct `p.A.test` (from the shadowed package) wins over the
-        // method `p.A.test`; the distinct method `p.A.other` survives.
-        assert_eq!(report.shadowed_functions, 1);
-        assert_eq!(report.shadowed_modules, 1);
-        assert!(graph.nodes.contains_key("p.A.test"));
-        assert_eq!(graph.nodes["p.A.test"].kind, NodeKind::Struct);
-        assert!(graph.nodes.contains_key("p.A.other"));
-        // The shadowed module is gone as a module — `p.A` exists only as the
-        // winning struct — and the file in it survives but loses its module
-        // parent chain (`p→p.A` module edge pruned).
-        assert_eq!(graph.nodes["p.A"].kind, NodeKind::Struct);
-        assert!(graph.nodes.contains_key("/x/A.java"));
-        assert!(graph.nodes.contains_key("/y/test.java"));
-        assert!(
-            graph
-                .contains
-                .contains(&("p".to_string(), "/x/A.java".to_string()))
-        );
-        assert!(
-            !graph
-                .contains
-                .contains(&("p".to_string(), "p.A".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/x/A.java".to_string(), "p.A".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/y/test.java".to_string(), "p.A.test".to_string()))
-        );
-        // The dropped function's containment (by struct and by file) is pruned;
-        // the surviving function's edges stay.
-        assert!(
-            !graph
-                .contains
-                .contains(&("p.A".to_string(), "p.A.test".to_string()))
-        );
-        assert!(
-            !graph
-                .contains
-                .contains(&("/x/A.java".to_string(), "p.A.test".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("p.A".to_string(), "p.A.other".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/x/A.java".to_string(), "p.A.other".to_string()))
-        );
-    }
-
-    #[test]
-    fn module_replaces_unresolved_target() {
-        // An unresolved placeholder node lives only in `graph.nodes`; a real
-        // declaration (here: the `tests` package vs a bare type reference that
-        // was emitted unresolved) replaces it instead of panicking.
-        let records = vec![
-            Record::Unresolved {
-                fqn: "tests".to_string(),
-                category: Some("unknown".to_string()),
-            },
-            Record::Module {
-                fqn: "tests".to_string(),
-            },
-        ];
-        let (graph, _) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "java",
-                config: None,
-            },
-        );
-        assert!(graph.nodes.contains_key("tests"));
-        assert_eq!(graph.nodes["tests"].kind, NodeKind::Module);
-    }
-
-    #[test]
-    fn edge_spool_roundtrip() {
-        let edges = vec![
-            Record::Contains {
-                from: "n1".to_string(),
-                to: "n2".to_string(),
-            },
-            Record::Calls {
-                from: "n1".to_string(),
-                to: "n2".to_string(),
-            },
-            Record::Uses {
-                from: "n1".to_string(),
-                to: "n2".to_string(),
-            },
-            Record::UnresolvedCall {
-                from: "n1".to_string(),
-                to: "java.lang.String.format".to_string(),
-                target_type: String::new(),
-            },
-            Record::UnresolvedUse {
-                from: "n1".to_string(),
-                to: "java.util.List".to_string(),
-            },
-        ];
-        let mut buf: Vec<u8> = Vec::new();
-        for e in &edges {
-            write_edge(&mut buf, e.clone());
+        #[test]
+        fn unique_function_keeps_simple_name() {
+            let decls = [fd("n1", "pkg", "foo", &[], "/x/a.go")];
+            let m = fqns(&decls);
+            assert_eq!(m["n1"], "pkg.foo");
         }
-        let mut er = EdgeReader {
-            r: std::io::Cursor::new(buf),
-        };
-        let mut out = Vec::new();
-        while let Some(e) = er.next_edge() {
-            out.push(e);
+
+        #[test]
+        fn overloads_get_param_suffix() {
+            let decls = [
+                fd("n1", "pkg.C", "foo", &["int"], "/x/a.go"),
+                fd("n2", "pkg.C", "foo", &["java.lang.String"], "/x/a.go"),
+            ];
+            let m = fqns(&decls);
+            assert_eq!(m["n1"], "pkg.C.foo(int)");
+            assert_eq!(m["n2"], "pkg.C.foo(java.lang.String)");
         }
-        assert_eq!(out, edges);
+
+        #[test]
+        fn go_init_disambiguated_by_file() {
+            let decls = [
+                fd("n1", "pkg", "init", &[], "/x/a.go"),
+                fd("n2", "pkg", "init", &[], "/x/b.go"),
+            ];
+            let m = fqns(&decls);
+            assert_eq!(m["n1"], "pkg.init#a.go");
+            assert_eq!(m["n2"], "pkg.init#b.go");
+        }
+
+        #[test]
+        fn zero_param_overload_gets_empty_suffix() {
+            let decls = [
+                fd("n1", "pkg.C", "foo", &[], "/x/a.go"),
+                fd("n2", "pkg.C", "foo", &["int"], "/x/a.go"),
+            ];
+            let m = fqns(&decls);
+            assert_eq!(m["n1"], "pkg.C.foo()");
+            assert_eq!(m["n2"], "pkg.C.foo(int)");
+        }
+
+        /// The edge spool round-trips through an IN-MEMORY `Vec<u8>`/`Cursor`, not a
+        /// file: the evidence listed it as "writes and re-reads a spool file", but
+        /// its body performs no filesystem I/O, so by the law it is unit (the body
+        /// wins over the evidence).
+        #[test]
+        fn edge_spool_roundtrip() {
+            let edges = vec![
+                Record::Contains {
+                    from: "n1".to_string(),
+                    to: "n2".to_string(),
+                },
+                Record::Calls {
+                    from: "n1".to_string(),
+                    to: "n2".to_string(),
+                },
+                Record::Uses {
+                    from: "n1".to_string(),
+                    to: "n2".to_string(),
+                },
+                Record::UnresolvedCall {
+                    from: "n1".to_string(),
+                    to: "java.lang.String.format".to_string(),
+                    target_type: String::new(),
+                },
+                Record::UnresolvedUse {
+                    from: "n1".to_string(),
+                    to: "java.util.List".to_string(),
+                },
+            ];
+            let mut buf: Vec<u8> = Vec::new();
+            for e in &edges {
+                write_edge(&mut buf, e.clone());
+            }
+            let mut er = EdgeReader {
+                r: std::io::Cursor::new(buf),
+            };
+            let mut out = Vec::new();
+            while let Some(e) = er.next_edge() {
+                out.push(e);
+            }
+            assert_eq!(out, edges);
+        }
     }
 
-    #[test]
-    fn lang_switch_classifies_and_renders_per_record() {
-        // A multi-language scan merges several frontend streams, each preceded
-        // by a `lang_switch` record. code_type classification uses each
-        // record's language (ts test rules vs go test rules), and Go `init`
-        // disambiguation applies only to Go declarations.
-        let records = vec![
-            Record::LangSwitch {
-                language: "go".to_string(),
-            },
-            Record::Module {
-                fqn: "github.com/x/y".to_string(),
-            },
-            srec("g1", "github.com/x/y", "Store", "/abs/store.go"),
-            Record::Function {
-                id: "g2".to_string(),
-                parent: "github.com/x/y".to_string(),
-                name: "init".to_string(),
-                params: vec![],
-                file: "/abs/store.go".to_string(),
-                path: "/abs/store.go".to_string(),
-                start: 1,
-                end: 5,
-                start_line: 1,
-                end_line: 5,
-            },
-            file_rec("/abs/store.go", "github.com/x/y", 100),
-            Record::LangSwitch {
-                language: "ts".to_string(),
-            },
-            Record::Module {
-                fqn: "@co/ui".to_string(),
-            },
-            srec("t1", "@co/ui.src.app", "App", "/proj/src/app.ts"),
-            Record::Function {
-                id: "t2".to_string(),
-                parent: "@co/ui.src.app".to_string(),
-                name: "init".to_string(),
-                params: vec![],
-                file: "/proj/src/app.ts".to_string(),
-                path: "/proj/src/app.ts".to_string(),
-                start: 1,
-                end: 5,
-                start_line: 1,
-                end_line: 5,
-            },
-            file_rec("/proj/src/app.ts", "@co/ui", 30),
-            file_rec("/proj/src/app.test.ts", "@co/ui", 20),
-            srec("t3", "@co/ui.src.app", "Helper", "/proj/src/app.test.ts"),
-        ];
-        let (graph, report) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
-        );
-        assert_eq!(report.skipped, 0);
-        // Go init is file-disambiguated; the TS function named `init` is not.
-        assert!(graph.nodes.contains_key("github.com/x/y.init#store.go"));
-        assert!(graph.nodes.contains_key("@co/ui.src.app.init"));
-        // code_type is per-language: the Go store is src, the .test.ts file
-        // (ts test rule) and its struct are test.
-        assert_eq!(graph.nodes["/abs/store.go"].code_type, "src");
-        assert_eq!(graph.nodes["/proj/src/app.ts"].code_type, "src");
-        assert_eq!(graph.nodes["/proj/src/app.test.ts"].code_type, "test");
-        assert_eq!(graph.nodes["@co/ui.src.app.Helper"].code_type, "test");
-    }
+    /// e2e tier -- real I/O: these tests drive `ingest`/`ingest_with_reuse`,
+    /// whose `ingest_records` spools to `std::env::temp_dir()` (two of them also
+    /// stage real temp dirs of their own). Each is `#[ignore]`d, so a plain
+    /// `cargo test` never runs one; the only entry point is the named guard
+    /// `cargo test-e2e` (= `cargo test tests::e2e:: -- --ignored`).
+    mod e2e {
+        use super::*;
 
-    #[test]
-    fn scan_meta_record_becomes_scan_node() {
-        // `apg scan` leads the stream with a scan_meta record (git state at
-        // scan time); the ingestor turns it into the `scan/HEAD` Scan node.
-        let records = vec![
-            Record::ScanMeta {
-                git_sha: Some("abc123".to_string()),
-                git_clean: Some(true),
-                content_key: Some("deadbeef".to_string()),
-                scanned_at: "2026-09-07T00:00:00Z".to_string(),
-            },
-            Record::Module {
-                fqn: "github.com/x/y".to_string(),
-            },
-        ];
-        let (graph, _) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
-        );
-        let n = &graph.nodes[SCAN_HEAD];
-        assert_eq!(n.kind, NodeKind::Scan);
-        assert_eq!(n.git_sha.as_deref(), Some("abc123"));
-        assert_eq!(n.git_clean, Some(true));
-        assert_eq!(
-            n.content_key.as_deref(),
-            Some("deadbeef"),
-            "the stream's content-identity key must reach the DB Scan node"
-        );
-        assert_eq!(n.scanned_at.as_deref(), Some("2026-09-07T00:00:00Z"));
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn duplicate_fqn_panics() {
+            let records = vec![
+                Record::Module {
+                    fqn: "pkg".to_string(),
+                },
+                srec("n1", "pkg", "A", "/x/a.go"),
+                srec("n2", "pkg", "A", "/x/b.go"),
+            ];
+            ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+            );
+        }
 
-        // A non-git scan emits a scan_meta with no git fields; the node still
-        // records the timestamp.
-        let (graph, _) = ingest(
-            vec![Record::ScanMeta {
-                git_sha: None,
-                git_clean: None,
-                content_key: None,
-                scanned_at: "2026-09-07T00:00:00Z".to_string(),
-            }],
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
-        );
-        let n = &graph.nodes[SCAN_HEAD];
-        assert_eq!(n.kind, NodeKind::Scan);
-        assert_eq!(n.git_sha, None);
-        assert_eq!(n.git_clean, None);
-        assert_eq!(n.content_key, None);
-    }
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn module_shadowed_by_type_does_not_panic() {
+            // Java permits a package `org.pkg.A` and a class `org.pkg.A` to coexist.
+            // The type wins; the shadowed module is dropped and its Module→File edge
+            // pruned (the File node stays, containing the units declared in it),
+            // while unrelated modules, files, and edges survive.
+            let records = vec![
+                Record::Module {
+                    fqn: "org.pkg".to_string(),
+                },
+                Record::Module {
+                    fqn: "org.pkg.A".to_string(),
+                },
+                Record::Module {
+                    fqn: "org.pkg.A.deep".to_string(),
+                },
+                srec("n1", "org.pkg", "A", "/x/A.java"),
+                srec("n2", "org.pkg.A.deep", "B", "/y/B.java"),
+                file_rec("/x/A.java", "org.pkg", 30),
+                file_rec("/y/B.java", "org.pkg.A.deep", 40),
+                Record::Contains {
+                    from: "org.pkg".to_string(),
+                    to: "org.pkg.A".to_string(),
+                },
+                Record::Contains {
+                    from: "org.pkg.A".to_string(),
+                    to: "org.pkg.A.deep".to_string(),
+                },
+            ];
+            let (graph, report) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "java",
+                    config: None,
+                },
+            );
+            assert_eq!(report.shadowed_modules, 1);
+            // The class survives with its canonical FQN.
+            assert!(graph.nodes.contains_key("org.pkg.A"));
+            assert_eq!(graph.nodes["org.pkg.A"].kind, NodeKind::Struct);
+            // The parent package and the package nested under the shadowed name
+            // survive; the shadowed package itself is not present.
+            assert!(graph.nodes.contains_key("org.pkg"));
+            assert!(graph.nodes.contains_key("org.pkg.A.deep"));
+            assert!(graph.nodes.contains_key("org.pkg.A.deep.B"));
+            // Files survive with their own module·file·unit containment chains.
+            assert!(graph.nodes.contains_key("/x/A.java"));
+            assert!(graph.nodes.contains_key("/y/B.java"));
+            assert_eq!(graph.nodes["/x/A.java"].kind, NodeKind::File);
+            assert!(
+                graph
+                    .contains
+                    .contains(&("org.pkg".to_string(), "/x/A.java".to_string()))
+            );
+            assert!(
+                graph
+                    .contains
+                    .contains(&("/x/A.java".to_string(), "org.pkg.A".to_string()))
+            );
+            assert!(
+                graph
+                    .contains
+                    .contains(&("org.pkg.A.deep".to_string(), "/y/B.java".to_string()))
+            );
+            assert!(
+                graph
+                    .contains
+                    .contains(&("/y/B.java".to_string(), "org.pkg.A.deep.B".to_string()))
+            );
+            // But the shadowed package is not a parent: its Module→File edge and the
+            // package chain through it are pruned.
+            assert!(
+                !graph
+                    .contains
+                    .contains(&("org.pkg.A".to_string(), "/x/A.java".to_string()))
+            );
+            assert!(
+                !graph
+                    .contains
+                    .contains(&("org.pkg.A".to_string(), "org.pkg.A.deep".to_string()))
+            );
+        }
 
-    #[test]
-    fn end_to_end_ingest_resolves_edges() {
-        let records = vec![
-            Record::Module {
-                fqn: "github.com/x/y".to_string(),
-            },
-            srec("n1", "github.com/x/y", "Store", "/abs/store.go"),
-            frec("n2", "github.com/x/y", "Compute", "/abs/store.go"),
-            Record::Function {
-                id: "n2b".to_string(),
-                parent: "github.com/x/y.Store".to_string(),
-                name: "Get".to_string(),
-                params: vec![],
-                file: "/abs/store.go".to_string(),
-                path: "/abs/store.go".to_string(),
-                start: 1,
-                end: 50,
-                start_line: 1,
-                end_line: 50,
-            },
-            file_rec("/abs/store.go", "github.com/x/y", 100),
-            Record::Unresolved {
-                fqn: "fmt.Errorf".to_string(),
-                category: Some("stdlib".to_string()),
-            },
-            Record::Contains {
-                from: "n1".to_string(),
-                to: "n2b".to_string(),
-            },
-            Record::UnresolvedCall {
-                from: "n2".to_string(),
-                to: "fmt.Errorf".to_string(),
-                target_type: String::new(),
-            },
-        ];
-        let (graph, report) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
-        );
-        assert_eq!(report.skipped, 0);
-        assert!(graph.nodes.contains_key("github.com/x/y.Store"));
-        assert!(graph.nodes.contains_key("github.com/x/y.Compute"));
-        assert!(graph.nodes.contains_key("github.com/x/y.Store.Get"));
-        assert!(graph.nodes.contains_key("fmt.Errorf"));
-        // File layer: module contains the file, the file contains its units,
-        // and methods stay under their struct.
-        assert!(
-            graph
-                .contains
-                .contains(&("github.com/x/y".to_string(), "/abs/store.go".to_string()))
-        );
-        assert!(graph.contains.contains(&(
-            "/abs/store.go".to_string(),
-            "github.com/x/y.Store".to_string()
-        )));
-        assert!(graph.contains.contains(&(
-            "/abs/store.go".to_string(),
-            "github.com/x/y.Compute".to_string()
-        )));
-        assert!(!graph.contains.contains(&(
-            "github.com/x/y".to_string(),
-            "github.com/x/y.Store".to_string()
-        )));
-        assert!(graph.contains.contains(&(
-            "github.com/x/y.Store".to_string(),
-            "github.com/x/y.Store.Get".to_string()
-        )));
-        assert!(graph.unresolved_calls.contains(&(
-            "github.com/x/y.Compute".to_string(),
-            "fmt.Errorf".to_string(),
-            String::new()
-        )));
-    }
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn function_shadowed_by_struct_does_not_panic() {
+            // A class in a shadowed package (`p.A.test` in package `p.A`) renders
+            // the same FQN as a method of the class `p.A`; the struct wins and the
+            // function is dropped. Function-vs-function still panics.
+            let records = vec![
+                Record::Module {
+                    fqn: "p".to_string(),
+                },
+                Record::Module {
+                    fqn: "p.A".to_string(),
+                },
+                srec("n1", "p", "A", "/x/A.java"),
+                srec("n2", "p.A", "test", "/y/test.java"),
+                frec("n3", "p.A", "test", "/x/A.java"),
+                frec("n5", "p.A", "other", "/x/A.java"),
+                file_rec("/x/A.java", "p", 60),
+                file_rec("/y/test.java", "p.A", 20),
+                Record::Contains {
+                    from: "p".to_string(),
+                    to: "p.A".to_string(),
+                },
+                Record::Contains {
+                    from: "n1".to_string(),
+                    to: "n3".to_string(),
+                },
+                Record::Contains {
+                    from: "n1".to_string(),
+                    to: "n5".to_string(),
+                },
+            ];
+            let (graph, report) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "java",
+                    config: None,
+                },
+            );
+            // The struct `p.A.test` (from the shadowed package) wins over the
+            // method `p.A.test`; the distinct method `p.A.other` survives.
+            assert_eq!(report.shadowed_functions, 1);
+            assert_eq!(report.shadowed_modules, 1);
+            assert!(graph.nodes.contains_key("p.A.test"));
+            assert_eq!(graph.nodes["p.A.test"].kind, NodeKind::Struct);
+            assert!(graph.nodes.contains_key("p.A.other"));
+            // The shadowed module is gone as a module — `p.A` exists only as the
+            // winning struct — and the file in it survives but loses its module
+            // parent chain (`p→p.A` module edge pruned).
+            assert_eq!(graph.nodes["p.A"].kind, NodeKind::Struct);
+            assert!(graph.nodes.contains_key("/x/A.java"));
+            assert!(graph.nodes.contains_key("/y/test.java"));
+            assert!(
+                graph
+                    .contains
+                    .contains(&("p".to_string(), "/x/A.java".to_string()))
+            );
+            assert!(
+                !graph
+                    .contains
+                    .contains(&("p".to_string(), "p.A".to_string()))
+            );
+            assert!(
+                graph
+                    .contains
+                    .contains(&("/x/A.java".to_string(), "p.A".to_string()))
+            );
+            assert!(
+                graph
+                    .contains
+                    .contains(&("/y/test.java".to_string(), "p.A.test".to_string()))
+            );
+            // The dropped function's containment (by struct and by file) is pruned;
+            // the surviving function's edges stay.
+            assert!(
+                !graph
+                    .contains
+                    .contains(&("p.A".to_string(), "p.A.test".to_string()))
+            );
+            assert!(
+                !graph
+                    .contains
+                    .contains(&("/x/A.java".to_string(), "p.A.test".to_string()))
+            );
+            assert!(
+                graph
+                    .contains
+                    .contains(&("p.A".to_string(), "p.A.other".to_string()))
+            );
+            assert!(
+                graph
+                    .contains
+                    .contains(&("/x/A.java".to_string(), "p.A.other".to_string()))
+            );
+        }
 
-    #[test]
-    fn planned_node_lands_with_parent_contains() {
-        // A plan-side planned_node record lands as an Implementation node with
-        // `status: planned` (no location); a `parent` names the containing node
-        // via a Contains edge (a valid File→Struct pair).
-        let records = vec![
-            Record::PlannedNode {
-                fqn: "/abs/gateway.go".to_string(),
-                kind: "file".to_string(),
-                name: "gateway.go".to_string(),
-                parent: String::new(),
-            },
-            Record::PlannedNode {
-                fqn: "github.com/x/gateway".to_string(),
-                kind: "struct".to_string(),
-                name: "Gateway".to_string(),
-                parent: "/abs/gateway.go".to_string(),
-            },
-        ];
-        let (graph, _) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
-        );
-        // The planned node lands as a Struct with status=planned (no location).
-        let fqn = "github.com/x/gateway".to_string();
-        assert_eq!(graph.nodes[&fqn].kind, NodeKind::Struct);
-        assert_eq!(graph.nodes[&fqn].status.as_deref(), Some("planned"));
-        assert!(graph.nodes[&fqn].location.is_none());
-        assert_eq!(
-            graph.nodes["/abs/gateway.go"].status.as_deref(),
-            Some("planned")
-        );
-        // The planned File→Struct containment lands (a valid Contains pair).
-        assert!(
-            graph
-                .contains
-                .contains(&("/abs/gateway.go".to_string(), fqn))
-        );
-    }
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn module_replaces_unresolved_target() {
+            // An unresolved placeholder node lives only in `graph.nodes`; a real
+            // declaration (here: the `tests` package vs a bare type reference that
+            // was emitted unresolved) replaces it instead of panicking.
+            let records = vec![
+                Record::Unresolved {
+                    fqn: "tests".to_string(),
+                    category: Some("unknown".to_string()),
+                },
+                Record::Module {
+                    fqn: "tests".to_string(),
+                },
+            ];
+            let (graph, _) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "java",
+                    config: None,
+                },
+            );
+            assert!(graph.nodes.contains_key("tests"));
+            assert_eq!(graph.nodes["tests"].kind, NodeKind::Module);
+        }
 
-    #[test]
-    fn scanner_replace_supersedes_planned_node_and_keeps_edges() {
-        // The scanner-replace (PlanExecution-SPEC.md): a real declaration at a
-        // planned FQN supersedes the planned node (status cleared, location
-        // filled), and FQN-keyed incident edges (implemented-by) re-point to
-        // the real node automatically — the why-to-code chain resolves to real
-        // code.
-        let records = vec![
-            Record::Module {
-                fqn: "github.com/x/y".to_string(),
-            },
-            // The scanner's real declaration of the planned FQN.
-            srec("n1", "github.com/x/y", "Gateway", "/abs/gateway.go"),
-            file_rec("/abs/gateway.go", "github.com/x/y", 50),
-            // A solution component the planned node is implemented-by.
-            Record::Component {
-                fqn: "solution.component.checkout".to_string(),
-                name: "checkout".to_string(),
-                body: String::new(),
-            },
-            Record::SpecImplementedBy {
-                from: "solution.component.checkout".to_string(),
-                to: "github.com/x/y.Gateway".to_string(),
-            },
-            Record::PlannedNode {
-                fqn: "github.com/x/y.Gateway".to_string(),
-                kind: "struct".to_string(),
-                name: "Gateway".to_string(),
-                parent: String::new(),
-            },
-        ];
-        let (graph, _) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
-        );
-        let fqn = "github.com/x/y.Gateway".to_string();
-        let node = &graph.nodes[&fqn];
-        // The real (scanned) node won: present, located, not planned.
-        assert_eq!(node.kind, NodeKind::Struct);
-        assert!(node.status.is_none(), "scanner-replace clears status");
-        assert!(node.location.is_some(), "real node carries its location");
-        // The implemented-by edge re-points to the realized node (FQN-keyed).
-        assert!(
-            graph
-                .spec_implemented_by
-                .contains(&("solution.component.checkout".to_string(), fqn.clone()))
-        );
-        // The real File→Struct containment landed from the scanner.
-        assert!(
-            graph
-                .contains
-                .contains(&("/abs/gateway.go".to_string(), fqn))
-        );
-    }
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn lang_switch_classifies_and_renders_per_record() {
+            // A multi-language scan merges several frontend streams, each preceded
+            // by a `lang_switch` record. code_type classification uses each
+            // record's language (ts test rules vs go test rules), and Go `init`
+            // disambiguation applies only to Go declarations.
+            let records = vec![
+                Record::LangSwitch {
+                    language: "go".to_string(),
+                },
+                Record::Module {
+                    fqn: "github.com/x/y".to_string(),
+                },
+                srec("g1", "github.com/x/y", "Store", "/abs/store.go"),
+                Record::Function {
+                    id: "g2".to_string(),
+                    parent: "github.com/x/y".to_string(),
+                    name: "init".to_string(),
+                    params: vec![],
+                    file: "/abs/store.go".to_string(),
+                    path: "/abs/store.go".to_string(),
+                    start: 1,
+                    end: 5,
+                    start_line: 1,
+                    end_line: 5,
+                },
+                file_rec("/abs/store.go", "github.com/x/y", 100),
+                Record::LangSwitch {
+                    language: "ts".to_string(),
+                },
+                Record::Module {
+                    fqn: "@co/ui".to_string(),
+                },
+                srec("t1", "@co/ui.src.app", "App", "/proj/src/app.ts"),
+                Record::Function {
+                    id: "t2".to_string(),
+                    parent: "@co/ui.src.app".to_string(),
+                    name: "init".to_string(),
+                    params: vec![],
+                    file: "/proj/src/app.ts".to_string(),
+                    path: "/proj/src/app.ts".to_string(),
+                    start: 1,
+                    end: 5,
+                    start_line: 1,
+                    end_line: 5,
+                },
+                file_rec("/proj/src/app.ts", "@co/ui", 30),
+                file_rec("/proj/src/app.test.ts", "@co/ui", 20),
+                srec("t3", "@co/ui.src.app", "Helper", "/proj/src/app.test.ts"),
+            ];
+            let (graph, report) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+            );
+            assert_eq!(report.skipped, 0);
+            // Go init is file-disambiguated; the TS function named `init` is not.
+            assert!(graph.nodes.contains_key("github.com/x/y.init#store.go"));
+            assert!(graph.nodes.contains_key("@co/ui.src.app.init"));
+            // code_type is per-language: the Go store is src, the .test.ts file
+            // (ts test rule) and its struct are test.
+            assert_eq!(graph.nodes["/abs/store.go"].code_type, "src");
+            assert_eq!(graph.nodes["/proj/src/app.ts"].code_type, "src");
+            assert_eq!(graph.nodes["/proj/src/app.test.ts"].code_type, "test");
+            assert_eq!(graph.nodes["@co/ui.src.app.Helper"].code_type, "test");
+        }
 
-    #[test]
-    fn blacklisted_nodes_and_edges_dropped() {
-        let records = vec![
-            Record::Module {
-                fqn: "keep.mod".to_string(),
-            },
-            Record::Module {
-                fqn: "drop.mod".to_string(),
-            },
-            srec("n1", "keep.mod", "A", "/x/a.go"),
-            srec("n2", "drop.mod", "B", "/x/b.go"),
-            file_rec("/x/a.go", "keep.mod", 10),
-            file_rec("/x/b.go", "drop.mod", 10),
-            Record::Contains {
-                from: "drop.mod".to_string(),
-                to: "/x/b.go".to_string(),
-            },
-        ];
-        let (graph, report) = ingest(
-            records,
-            &IngestOptions {
-                blacklist: &["drop.mod".to_string()],
-                language: "go",
-                config: None,
-            },
-        );
-        assert!(report.skipped >= 3);
-        assert!(graph.nodes.contains_key("keep.mod"));
-        assert!(!graph.nodes.contains_key("drop.mod"));
-        assert!(!graph.nodes.contains_key("drop.mod.B"));
-        // A file whose parent module is blacklisted is dropped along with its
-        // units; the surviving file keeps its module and unit edges.
-        assert!(!graph.nodes.contains_key("/x/b.go"));
-        assert!(graph.nodes.contains_key("/x/a.go"));
-        assert!(
-            graph
-                .contains
-                .contains(&("keep.mod".to_string(), "/x/a.go".to_string()))
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("/x/a.go".to_string(), "keep.mod.A".to_string()))
-        );
-        assert!(!graph.contains.is_empty());
-    }
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn scan_meta_record_becomes_scan_node() {
+            // `apg scan` leads the stream with a scan_meta record (git state at
+            // scan time); the ingestor turns it into the `scan/HEAD` Scan node.
+            let records = vec![
+                Record::ScanMeta {
+                    git_sha: Some("abc123".to_string()),
+                    git_clean: Some(true),
+                    content_key: Some("deadbeef".to_string()),
+                    scanned_at: "2026-09-07T00:00:00Z".to_string(),
+                },
+                Record::Module {
+                    fqn: "github.com/x/y".to_string(),
+                },
+            ];
+            let (graph, _) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+            );
+            let n = &graph.nodes[SCAN_HEAD];
+            assert_eq!(n.kind, NodeKind::Scan);
+            assert_eq!(n.git_sha.as_deref(), Some("abc123"));
+            assert_eq!(n.git_clean, Some(true));
+            assert_eq!(
+                n.content_key.as_deref(),
+                Some("deadbeef"),
+                "the stream's content-identity key must reach the DB Scan node"
+            );
+            assert_eq!(n.scanned_at.as_deref(), Some("2026-09-07T00:00:00Z"));
 
-    #[test]
-    fn cached_cross_file_edges_survive_unit_order() {
-        // Regression: the win-B fact splice merges ALL cached nodes before ANY
-        // cached edges, so a cross-file `calls`/`uses` edge whose target unit is
-        // visited later is not dropped. The reuse list is deliberately ordered
-        // so the depending file comes FIRST (its callee lands in a later unit).
-        use crate::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
-        use crate::graph::{Graph, Location, Node, NodeKind};
-        use std::path::PathBuf;
+            // A non-git scan emits a scan_meta with no git fields; the node still
+            // records the timestamp.
+            let (graph, _) = ingest(
+                vec![Record::ScanMeta {
+                    git_sha: None,
+                    git_clean: None,
+                    content_key: None,
+                    scanned_at: "2026-09-07T00:00:00Z".to_string(),
+                }],
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+            );
+            let n = &graph.nodes[SCAN_HEAD];
+            assert_eq!(n.kind, NodeKind::Scan);
+            assert_eq!(n.git_sha, None);
+            assert_eq!(n.git_clean, None);
+            assert_eq!(n.content_key, None);
+        }
 
-        let dir = std::env::temp_dir().join(format!("apg-splice-order-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let cache_key = CacheKey::compute(&ScanConfigKey::default());
-        let mut store = FactStore::at(dir.join("facts"));
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn end_to_end_ingest_resolves_edges() {
+            let records = vec![
+                Record::Module {
+                    fqn: "github.com/x/y".to_string(),
+                },
+                srec("n1", "github.com/x/y", "Store", "/abs/store.go"),
+                frec("n2", "github.com/x/y", "Compute", "/abs/store.go"),
+                Record::Function {
+                    id: "n2b".to_string(),
+                    parent: "github.com/x/y.Store".to_string(),
+                    name: "Get".to_string(),
+                    params: vec![],
+                    file: "/abs/store.go".to_string(),
+                    path: "/abs/store.go".to_string(),
+                    start: 1,
+                    end: 50,
+                    start_line: 1,
+                    end_line: 50,
+                },
+                file_rec("/abs/store.go", "github.com/x/y", 100),
+                Record::Unresolved {
+                    fqn: "fmt.Errorf".to_string(),
+                    category: Some("stdlib".to_string()),
+                },
+                Record::Contains {
+                    from: "n1".to_string(),
+                    to: "n2b".to_string(),
+                },
+                Record::UnresolvedCall {
+                    from: "n2".to_string(),
+                    to: "fmt.Errorf".to_string(),
+                    target_type: String::new(),
+                },
+            ];
+            let (graph, report) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+            );
+            assert_eq!(report.skipped, 0);
+            assert!(graph.nodes.contains_key("github.com/x/y.Store"));
+            assert!(graph.nodes.contains_key("github.com/x/y.Compute"));
+            assert!(graph.nodes.contains_key("github.com/x/y.Store.Get"));
+            assert!(graph.nodes.contains_key("fmt.Errorf"));
+            // File layer: module contains the file, the file contains its units,
+            // and methods stay under their struct.
+            assert!(
+                graph
+                    .contains
+                    .contains(&("github.com/x/y".to_string(), "/abs/store.go".to_string()))
+            );
+            assert!(graph.contains.contains(&(
+                "/abs/store.go".to_string(),
+                "github.com/x/y.Store".to_string()
+            )));
+            assert!(graph.contains.contains(&(
+                "/abs/store.go".to_string(),
+                "github.com/x/y.Compute".to_string()
+            )));
+            assert!(!graph.contains.contains(&(
+                "github.com/x/y".to_string(),
+                "github.com/x/y.Store".to_string()
+            )));
+            assert!(graph.contains.contains(&(
+                "github.com/x/y.Store".to_string(),
+                "github.com/x/y.Store.Get".to_string()
+            )));
+            assert!(graph.unresolved_calls.contains(&(
+                "github.com/x/y.Compute".to_string(),
+                "fmt.Errorf".to_string(),
+                String::new()
+            )));
+        }
 
-        // Build a two-file graph: b/b.go.Later calls a/a.go.Leaf.
-        let mut g = Graph::default();
-        g.nodes.insert(
-            "scratch".to_string(),
-            Node {
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn planned_node_lands_with_parent_contains() {
+            // A plan-side planned_node record lands as an Implementation node with
+            // `status: planned` (no location); a `parent` names the containing node
+            // via a Contains edge (a valid File→Struct pair).
+            let records = vec![
+                Record::PlannedNode {
+                    fqn: "/abs/gateway.go".to_string(),
+                    kind: "file".to_string(),
+                    name: "gateway.go".to_string(),
+                    parent: String::new(),
+                },
+                Record::PlannedNode {
+                    fqn: "github.com/x/gateway".to_string(),
+                    kind: "struct".to_string(),
+                    name: "Gateway".to_string(),
+                    parent: "/abs/gateway.go".to_string(),
+                },
+            ];
+            let (graph, _) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+            );
+            // The planned node lands as a Struct with status=planned (no location).
+            let fqn = "github.com/x/gateway".to_string();
+            assert_eq!(graph.nodes[&fqn].kind, NodeKind::Struct);
+            assert_eq!(graph.nodes[&fqn].status.as_deref(), Some("planned"));
+            assert!(graph.nodes[&fqn].location.is_none());
+            assert_eq!(
+                graph.nodes["/abs/gateway.go"].status.as_deref(),
+                Some("planned")
+            );
+            // The planned File→Struct containment lands (a valid Contains pair).
+            assert!(
+                graph
+                    .contains
+                    .contains(&("/abs/gateway.go".to_string(), fqn))
+            );
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn scanner_replace_supersedes_planned_node_and_keeps_edges() {
+            // The scanner-replace (PlanExecution-SPEC.md): a real declaration at a
+            // planned FQN supersedes the planned node (status cleared, location
+            // filled), and FQN-keyed incident edges (implemented-by) re-point to
+            // the real node automatically — the why-to-code chain resolves to real
+            // code.
+            let records = vec![
+                Record::Module {
+                    fqn: "github.com/x/y".to_string(),
+                },
+                // The scanner's real declaration of the planned FQN.
+                srec("n1", "github.com/x/y", "Gateway", "/abs/gateway.go"),
+                file_rec("/abs/gateway.go", "github.com/x/y", 50),
+                // A solution component the planned node is implemented-by.
+                Record::Component {
+                    fqn: "solution.component.checkout".to_string(),
+                    name: "checkout".to_string(),
+                    body: String::new(),
+                },
+                Record::SpecImplementedBy {
+                    from: "solution.component.checkout".to_string(),
+                    to: "github.com/x/y.Gateway".to_string(),
+                },
+                Record::PlannedNode {
+                    fqn: "github.com/x/y.Gateway".to_string(),
+                    kind: "struct".to_string(),
+                    name: "Gateway".to_string(),
+                    parent: String::new(),
+                },
+            ];
+            let (graph, _) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+            );
+            let fqn = "github.com/x/y.Gateway".to_string();
+            let node = &graph.nodes[&fqn];
+            // The real (scanned) node won: present, located, not planned.
+            assert_eq!(node.kind, NodeKind::Struct);
+            assert!(node.status.is_none(), "scanner-replace clears status");
+            assert!(node.location.is_some(), "real node carries its location");
+            // The implemented-by edge re-points to the realized node (FQN-keyed).
+            assert!(
+                graph
+                    .spec_implemented_by
+                    .contains(&("solution.component.checkout".to_string(), fqn.clone()))
+            );
+            // The real File→Struct containment landed from the scanner.
+            assert!(
+                graph
+                    .contains
+                    .contains(&("/abs/gateway.go".to_string(), fqn))
+            );
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn blacklisted_nodes_and_edges_dropped() {
+            let records = vec![
+                Record::Module {
+                    fqn: "keep.mod".to_string(),
+                },
+                Record::Module {
+                    fqn: "drop.mod".to_string(),
+                },
+                srec("n1", "keep.mod", "A", "/x/a.go"),
+                srec("n2", "drop.mod", "B", "/x/b.go"),
+                file_rec("/x/a.go", "keep.mod", 10),
+                file_rec("/x/b.go", "drop.mod", 10),
+                Record::Contains {
+                    from: "drop.mod".to_string(),
+                    to: "/x/b.go".to_string(),
+                },
+            ];
+            let (graph, report) = ingest(
+                records,
+                &IngestOptions {
+                    blacklist: &["drop.mod".to_string()],
+                    language: "go",
+                    config: None,
+                },
+            );
+            assert!(report.skipped >= 3);
+            assert!(graph.nodes.contains_key("keep.mod"));
+            assert!(!graph.nodes.contains_key("drop.mod"));
+            assert!(!graph.nodes.contains_key("drop.mod.B"));
+            // A file whose parent module is blacklisted is dropped along with its
+            // units; the surviving file keeps its module and unit edges.
+            assert!(!graph.nodes.contains_key("/x/b.go"));
+            assert!(graph.nodes.contains_key("/x/a.go"));
+            assert!(
+                graph
+                    .contains
+                    .contains(&("keep.mod".to_string(), "/x/a.go".to_string()))
+            );
+            assert!(
+                graph
+                    .contains
+                    .contains(&("/x/a.go".to_string(), "keep.mod.A".to_string()))
+            );
+            assert!(!graph.contains.is_empty());
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn cached_cross_file_edges_survive_unit_order() {
+            // Regression: the win-B fact splice merges ALL cached nodes before ANY
+            // cached edges, so a cross-file `calls`/`uses` edge whose target unit is
+            // visited later is not dropped. The reuse list is deliberately ordered
+            // so the depending file comes FIRST (its callee lands in a later unit).
+            use crate::cache::{CacheKey, FactStore, FileFragment, ScanConfigKey};
+            use crate::graph::{Graph, Location, Node, NodeKind};
+            use std::path::PathBuf;
+
+            let dir = std::env::temp_dir().join(format!("apg-splice-order-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let cache_key = CacheKey::compute(&ScanConfigKey::default());
+            let mut store = FactStore::at(dir.join("facts"));
+
+            // Build a two-file graph: b/b.go.Later calls a/a.go.Leaf.
+            let mut g = Graph::default();
+            g.nodes.insert(
+                "scratch".to_string(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+            );
+            for (fqn, path, kind) in [
+                ("scratch/a.Leaf", "/w/a/a.go", NodeKind::Function),
+                ("scratch/b.Later", "/w/b/b.go", NodeKind::Function),
+            ] {
+                g.nodes.insert(
+                    fqn.to_string(),
+                    Node {
+                        kind,
+                        location: Some(Location {
+                            path: PathBuf::from(path),
+                            start: 0,
+                            end: 1,
+                            start_line: 1,
+                            end_line: 1,
+                        }),
+                        code_type: "src".into(),
+                        ..Node::default()
+                    },
+                );
+            }
+            for path in ["/w/a/a.go", "/w/b/b.go"] {
+                g.nodes.insert(
+                    path.to_string(),
+                    Node {
+                        kind: NodeKind::File,
+                        location: Some(Location {
+                            path: PathBuf::from(path),
+                            start: 0,
+                            end: 0,
+                            start_line: 1,
+                            end_line: 1,
+                        }),
+                        ..Node::default()
+                    },
+                );
+                g.contains.insert(("scratch".to_string(), path.to_string()));
+            }
+            g.contains
+                .insert(("/w/a/a.go".to_string(), "scratch/a.Leaf".to_string()));
+            g.contains
+                .insert(("/w/b/b.go".to_string(), "scratch/b.Later".to_string()));
+            g.calls
+                .insert(("scratch/b.Later".to_string(), "scratch/a.Leaf".to_string()));
+
+            for (abs, rel) in [("/w/a/a.go", "a/a.go"), ("/w/b/b.go", "b/b.go")] {
+                let frag = FileFragment::from_graph(&g, abs, rel, &format!("oid-{rel}"), "go");
+                store.put(&frag, "/w", &cache_key).unwrap();
+            }
+
+            // The reuse list puts b/b.go (the caller) BEFORE a/a.go (the callee).
+            let reuse = Reuse {
+                store: &store,
+                cache_key: &cache_key,
+                files: vec![
+                    (
+                        "b/b.go".to_string(),
+                        "go".to_string(),
+                        "oid-b/b.go".to_string(),
+                    ),
+                    (
+                        "a/a.go".to_string(),
+                        "go".to_string(),
+                        "oid-a/a.go".to_string(),
+                    ),
+                ],
+                reader_root: "/fresh".to_string(),
+                skipped_langs: BTreeSet::new(),
+            };
+
+            let (graph, _) = ingest_with_reuse(
+                Vec::<Record>::new(),
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                },
+                Some(&reuse),
+            );
+            // All nodes landed and the cross-file call survived (it would be lost if
+            // edges were merged per-unit before every node existed).
+            assert!(
+                graph.nodes.contains_key("/fresh/b/b.go"),
+                "{:?}",
+                graph.nodes
+            );
+            assert!(graph.nodes.contains_key("/fresh/a/a.go"));
+            assert!(graph.nodes.contains_key("scratch/b.Later"));
+            assert!(graph.nodes.contains_key("scratch/a.Leaf"));
+            assert!(
+                graph
+                    .calls
+                    .contains(&("scratch/b.Later".to_string(), "scratch/a.Leaf".to_string())),
+                "the cached cross-file call must survive unit order: {:?}",
+                graph.calls
+            );
+            assert!(
+                graph
+                    .contains
+                    .contains(&("scratch".to_string(), "/fresh/b/b.go".to_string()))
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// feedback-102: a language whose frontend was skipped re-emits nothing, so
+        /// its global module scaffolding (pure-intermediate modules, file-less
+        /// descendants, and every `Module -> Module` edge) must be replayed from the
+        /// store into the assembled graph — the `graph.jsonl` export source — or the
+        /// export is structurally incomplete even though the spliced DB keeps the
+        /// seed's rows. The replay is gated on the exact `skipped_langs` verdict, so
+        /// a spawned language is never shadowed by stale cache rows.
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn skipped_language_scaffolding_is_replayed_into_the_assembly() {
+            use crate::cache::{
+                CacheKey, FactStore, FileFragment, ModuleScaffolding, ScanConfigKey,
+            };
+            use crate::graph::{Graph, Location, Node, NodeKind};
+            use std::path::PathBuf;
+
+            let dir =
+                std::env::temp_dir().join(format!("apg-splice-scaffold-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let cache_key = CacheKey::compute(&ScanConfigKey::default());
+            let mut store = FactStore::at(dir.join("facts"));
+
+            let module = || Node {
                 kind: NodeKind::Module,
                 ..Node::default()
-            },
-        );
-        for (fqn, path, kind) in [
-            ("scratch/a.Leaf", "/w/a/a.go", NodeKind::Function),
-            ("scratch/b.Later", "/w/b/b.go", NodeKind::Function),
-        ] {
-            g.nodes.insert(
-                fqn.to_string(),
-                Node {
-                    kind,
-                    location: Some(Location {
-                        path: PathBuf::from(path),
-                        start: 0,
-                        end: 1,
-                        start_line: 1,
-                        end_line: 1,
-                    }),
-                    code_type: "src".into(),
-                    ..Node::default()
+            };
+            let located = |kind: NodeKind, path: &str| Node {
+                kind,
+                location: Some(Location {
+                    path: PathBuf::from(path),
+                    start: 0,
+                    end: 1,
+                    start_line: 1,
+                    end_line: 1,
+                }),
+                code_type: "src".into(),
+                ..Node::default()
+            };
+            let skipped = "/x/csharp/T.cs";
+            let mut prev = Graph::default();
+            prev.nodes.insert("Apg".into(), module());
+            prev.nodes.insert("Apg.CsharpFrontend".into(), module());
+            prev.nodes
+                .insert("Apg.CsharpFrontend.Tests".into(), module());
+            prev.nodes
+                .insert("Apg.CsharpFrontend.Tests.Inline".into(), module());
+            prev.nodes
+                .insert(skipped.into(), located(NodeKind::File, skipped));
+            prev.nodes.insert(
+                "Apg.CsharpFrontend.Tests.Program".into(),
+                located(NodeKind::Struct, skipped),
+            );
+            prev.contains
+                .insert(("Apg".into(), "Apg.CsharpFrontend".into()));
+            prev.contains.insert((
+                "Apg.CsharpFrontend".into(),
+                "Apg.CsharpFrontend.Tests".into(),
+            ));
+            prev.contains.insert((
+                "Apg.CsharpFrontend.Tests".into(),
+                "Apg.CsharpFrontend.Tests.Inline".into(),
+            ));
+            prev.contains
+                .insert(("Apg.CsharpFrontend.Tests".into(), skipped.into()));
+            prev.contains
+                .insert((skipped.into(), "Apg.CsharpFrontend.Tests.Program".into()));
+
+            let frag = FileFragment::from_graph(&prev, skipped, "csharp/T.cs", "oid-t", "csharp");
+            store.put(&frag, "/x", &cache_key).unwrap();
+            let scaffolding = ModuleScaffolding::extract(&prev, std::path::Path::new("/x"));
+            store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
+
+            // The whole assembly comes from the cache (the changed language
+            // contributes no records in this unit test).
+            let reuse = Reuse {
+                store: &store,
+                cache_key: &cache_key,
+                files: vec![("csharp/T.cs".into(), "csharp".into(), "oid-t".into())],
+                reader_root: "/x".into(),
+                skipped_langs: ["csharp".into()].into_iter().collect(),
+            };
+            let (graph, _) = ingest_with_reuse(
+                Vec::<Record>::new(),
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "csharp",
+                    config: None,
                 },
+                Some(&reuse),
             );
-        }
-        for path in ["/w/a/a.go", "/w/b/b.go"] {
-            g.nodes.insert(
-                path.to_string(),
-                Node {
-                    kind: NodeKind::File,
-                    location: Some(Location {
-                        path: PathBuf::from(path),
-                        start: 0,
-                        end: 0,
-                        start_line: 1,
-                        end_line: 1,
-                    }),
-                    ..Node::default()
-                },
-            );
-            g.contains.insert(("scratch".to_string(), path.to_string()));
-        }
-        g.contains
-            .insert(("/w/a/a.go".to_string(), "scratch/a.Leaf".to_string()));
-        g.contains
-            .insert(("/w/b/b.go".to_string(), "scratch/b.Later".to_string()));
-        g.calls
-            .insert(("scratch/b.Later".to_string(), "scratch/a.Leaf".to_string()));
-
-        for (abs, rel) in [("/w/a/a.go", "a/a.go"), ("/w/b/b.go", "b/b.go")] {
-            let frag = FileFragment::from_graph(&g, abs, rel, &format!("oid-{rel}"), "go");
-            store.put(&frag, "/w", &cache_key).unwrap();
-        }
-
-        // The reuse list puts b/b.go (the caller) BEFORE a/a.go (the callee).
-        let reuse = Reuse {
-            store: &store,
-            cache_key: &cache_key,
-            files: vec![
-                (
-                    "b/b.go".to_string(),
-                    "go".to_string(),
-                    "oid-b/b.go".to_string(),
-                ),
-                (
-                    "a/a.go".to_string(),
-                    "go".to_string(),
-                    "oid-a/a.go".to_string(),
-                ),
-            ],
-            reader_root: "/fresh".to_string(),
-            skipped_langs: BTreeSet::new(),
-        };
-
-        let (graph, _) = ingest_with_reuse(
-            Vec::<Record>::new(),
-            &IngestOptions {
-                blacklist: &[],
-                language: "go",
-                config: None,
-            },
-            Some(&reuse),
-        );
-        // All nodes landed and the cross-file call survived (it would be lost if
-        // edges were merged per-unit before every node existed).
-        assert!(
-            graph.nodes.contains_key("/fresh/b/b.go"),
-            "{:?}",
-            graph.nodes
-        );
-        assert!(graph.nodes.contains_key("/fresh/a/a.go"));
-        assert!(graph.nodes.contains_key("scratch/b.Later"));
-        assert!(graph.nodes.contains_key("scratch/a.Leaf"));
-        assert!(
-            graph
-                .calls
-                .contains(&("scratch/b.Later".to_string(), "scratch/a.Leaf".to_string())),
-            "the cached cross-file call must survive unit order: {:?}",
-            graph.calls
-        );
-        assert!(
-            graph
-                .contains
-                .contains(&("scratch".to_string(), "/fresh/b/b.go".to_string()))
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// feedback-102: a language whose frontend was skipped re-emits nothing, so
-    /// its global module scaffolding (pure-intermediate modules, file-less
-    /// descendants, and every `Module -> Module` edge) must be replayed from the
-    /// store into the assembled graph — the `graph.jsonl` export source — or the
-    /// export is structurally incomplete even though the spliced DB keeps the
-    /// seed's rows. The replay is gated on the exact `skipped_langs` verdict, so
-    /// a spawned language is never shadowed by stale cache rows.
-    #[test]
-    fn skipped_language_scaffolding_is_replayed_into_the_assembly() {
-        use crate::cache::{CacheKey, FactStore, FileFragment, ModuleScaffolding, ScanConfigKey};
-        use crate::graph::{Graph, Location, Node, NodeKind};
-        use std::path::PathBuf;
-
-        let dir = std::env::temp_dir().join(format!("apg-splice-scaffold-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let cache_key = CacheKey::compute(&ScanConfigKey::default());
-        let mut store = FactStore::at(dir.join("facts"));
-
-        let module = || Node {
-            kind: NodeKind::Module,
-            ..Node::default()
-        };
-        let located = |kind: NodeKind, path: &str| Node {
-            kind,
-            location: Some(Location {
-                path: PathBuf::from(path),
-                start: 0,
-                end: 1,
-                start_line: 1,
-                end_line: 1,
-            }),
-            code_type: "src".into(),
-            ..Node::default()
-        };
-        let skipped = "/x/csharp/T.cs";
-        let mut prev = Graph::default();
-        prev.nodes.insert("Apg".into(), module());
-        prev.nodes.insert("Apg.CsharpFrontend".into(), module());
-        prev.nodes
-            .insert("Apg.CsharpFrontend.Tests".into(), module());
-        prev.nodes
-            .insert("Apg.CsharpFrontend.Tests.Inline".into(), module());
-        prev.nodes
-            .insert(skipped.into(), located(NodeKind::File, skipped));
-        prev.nodes.insert(
-            "Apg.CsharpFrontend.Tests.Program".into(),
-            located(NodeKind::Struct, skipped),
-        );
-        prev.contains
-            .insert(("Apg".into(), "Apg.CsharpFrontend".into()));
-        prev.contains.insert((
-            "Apg.CsharpFrontend".into(),
-            "Apg.CsharpFrontend.Tests".into(),
-        ));
-        prev.contains.insert((
-            "Apg.CsharpFrontend.Tests".into(),
-            "Apg.CsharpFrontend.Tests.Inline".into(),
-        ));
-        prev.contains
-            .insert(("Apg.CsharpFrontend.Tests".into(), skipped.into()));
-        prev.contains
-            .insert((skipped.into(), "Apg.CsharpFrontend.Tests.Program".into()));
-
-        let frag = FileFragment::from_graph(&prev, skipped, "csharp/T.cs", "oid-t", "csharp");
-        store.put(&frag, "/x", &cache_key).unwrap();
-        let scaffolding = ModuleScaffolding::extract(&prev, std::path::Path::new("/x"));
-        store.put_scaffolding_all(&scaffolding, &cache_key).unwrap();
-
-        // The whole assembly comes from the cache (the changed language
-        // contributes no records in this unit test).
-        let reuse = Reuse {
-            store: &store,
-            cache_key: &cache_key,
-            files: vec![("csharp/T.cs".into(), "csharp".into(), "oid-t".into())],
-            reader_root: "/x".into(),
-            skipped_langs: ["csharp".into()].into_iter().collect(),
-        };
-        let (graph, _) = ingest_with_reuse(
-            Vec::<Record>::new(),
-            &IngestOptions {
-                blacklist: &[],
-                language: "csharp",
-                config: None,
-            },
-            Some(&reuse),
-        );
-        for m in [
-            "Apg",
-            "Apg.CsharpFrontend",
-            "Apg.CsharpFrontend.Tests",
-            "Apg.CsharpFrontend.Tests.Inline",
-        ] {
-            assert!(
-                graph.nodes.contains_key(m),
-                "the skipped language's module `{m}` must be replayed: {:?}",
-                graph.nodes.keys().collect::<Vec<_>>()
-            );
-        }
-        for (from, to) in [
-            ("Apg", "Apg.CsharpFrontend"),
-            ("Apg.CsharpFrontend", "Apg.CsharpFrontend.Tests"),
-            (
+            for m in [
+                "Apg",
+                "Apg.CsharpFrontend",
                 "Apg.CsharpFrontend.Tests",
                 "Apg.CsharpFrontend.Tests.Inline",
-            ),
-        ] {
+            ] {
+                assert!(
+                    graph.nodes.contains_key(m),
+                    "the skipped language's module `{m}` must be replayed: {:?}",
+                    graph.nodes.keys().collect::<Vec<_>>()
+                );
+            }
+            for (from, to) in [
+                ("Apg", "Apg.CsharpFrontend"),
+                ("Apg.CsharpFrontend", "Apg.CsharpFrontend.Tests"),
+                (
+                    "Apg.CsharpFrontend.Tests",
+                    "Apg.CsharpFrontend.Tests.Inline",
+                ),
+            ] {
+                assert!(
+                    graph.contains.contains(&(from.to_string(), to.to_string())),
+                    "the `Module -> Module` edge {from} -> {to} must be replayed"
+                );
+            }
+            // The reused file's own unit and its Module→File edge survive.
+            assert!(graph.nodes.contains_key(skipped));
             assert!(
-                graph.contains.contains(&(from.to_string(), to.to_string())),
-                "the `Module -> Module` edge {from} -> {to} must be replayed"
+                graph
+                    .contains
+                    .contains(&("Apg.CsharpFrontend.Tests".to_string(), skipped.to_string()))
             );
-        }
-        // The reused file's own unit and its Module→File edge survive.
-        assert!(graph.nodes.contains_key(skipped));
-        assert!(
-            graph
-                .contains
-                .contains(&("Apg.CsharpFrontend.Tests".to_string(), skipped.to_string()))
-        );
 
-        // The replay is gated on the skipped-language verdict: with an empty
-        // `skipped_langs` the same store contributes no scaffolding.
-        let not_skipped = Reuse {
-            store: &store,
-            cache_key: &cache_key,
-            files: vec![("csharp/T.cs".into(), "csharp".into(), "oid-t".into())],
-            reader_root: "/x".into(),
-            skipped_langs: BTreeSet::new(),
-        };
-        let (bare, _) = ingest_with_reuse(
-            Vec::<Record>::new(),
-            &IngestOptions {
-                blacklist: &[],
-                language: "csharp",
-                config: None,
-            },
-            Some(&not_skipped),
-        );
-        assert!(
-            !bare.nodes.contains_key("Apg"),
-            "a language that was not skipped must not replay cached scaffolding"
-        );
-        let _ = std::fs::remove_dir_all(dir);
+            // The replay is gated on the skipped-language verdict: with an empty
+            // `skipped_langs` the same store contributes no scaffolding.
+            let not_skipped = Reuse {
+                store: &store,
+                cache_key: &cache_key,
+                files: vec![("csharp/T.cs".into(), "csharp".into(), "oid-t".into())],
+                reader_root: "/x".into(),
+                skipped_langs: BTreeSet::new(),
+            };
+            let (bare, _) = ingest_with_reuse(
+                Vec::<Record>::new(),
+                &IngestOptions {
+                    blacklist: &[],
+                    language: "csharp",
+                    config: None,
+                },
+                Some(&not_skipped),
+            );
+            assert!(
+                !bare.nodes.contains_key("Apg"),
+                "a language that was not skipped must not replay cached scaffolding"
+            );
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
