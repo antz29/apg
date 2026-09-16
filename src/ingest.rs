@@ -1501,6 +1501,7 @@ mod tests {
 
         #[test]
         #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        #[should_panic(expected = "FQN collision")]
         fn duplicate_fqn_panics() {
             let records = vec![
                 Record::Module {

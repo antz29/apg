@@ -409,7 +409,24 @@ itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`; `0` to skip all) to
 limit what build.rs compiles — the split brew formulae rely on this.
 
-Run the test suite with `cargo test`.
+The test suite is split into three tiers (`global.constraint.test-tier-boundaries`):
+**unit** (exactly one unit) and **int** (2+ units) are pure in-memory tests that
+fake filesystem/database/git/process; **e2e** is any test that does real I/O (a
+temp dir, `db.lbug`, git, or a spawned process) and is `#[ignore]`d by definition.
+Each test lives in a `unit`/`int`/`e2e` submodule of its module's `mod tests`, so
+the tiers run separately:
+
+```sh
+cargo test          # fast default gate: unit+int only, seconds, no e2e
+cargo test-unit     # unit tier only       (cargo test tests::unit::)
+cargo test-int      # int tier only        (cargo test tests::int::)
+cargo test-e2e      # e2e tier only, opt-in (cargo test tests::e2e:: -- --ignored)
+```
+
+The e2e tier is the opt-in final gate; it exercises a scratch `/tmp` git repo and
+also runs the release-version guard (which reads `Cargo.toml`/`Cargo.lock`/
+`README.md` and is therefore e2e), so a release gate is `cargo build` +
+`cargo test` + `cargo test-e2e`.
 
 ## Project layout
 

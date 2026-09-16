@@ -199,6 +199,66 @@ plus `sha256sums.txt` per tag.
 In the repo itself, run it via `cargo run -- scan <dir>` or
 `target/debug/apg scan <dir>`.
 
+## Test tiers & the tier-separable harness
+
+Every test in the repo belongs to exactly one of three tiers, defined by the law
+`global.constraint.test-tier-boundaries`:
+
+- **unit** — exactly **one** unit under test, everything else faked; **pure
+  in-memory** (no filesystem, database, git or process).
+- **int** — **two or more** units wired together; still **pure in-memory**
+  (filesystem/database/git/process faked).
+- **e2e** — one or more units with **real I/O of any kind**. By definition:
+  any filesystem access (**including `std::env::temp_dir()`/`TempDir`**), opening
+  `db.lbug`, any git operation, or any process spawn is **e2e**, whatever the
+  test is named or wherever it lives. The body wins over any name or evidence
+  list — if it does real I/O, it is e2e.
+
+**Tier-marker convention.** Inside each `#[cfg(test)] mod tests`, every test
+lives in exactly one tier submodule named `unit`, `int` or `e2e`, so libtest's
+path filter selects a tier (`…::tests::unit::`, `…::tests::int::`,
+`…::tests::e2e::`). Every **e2e** test also carries
+`#[ignore = "e2e tier: …; run via cargo test-e2e"]`, so a plain `cargo test` can
+never reach it. Each tier submodule starts with `use super::*;`.
+
+**Helpers stay at the `mod tests` root.** Only `#[test]` functions move into a
+tier. Every non-test helper/fixture/builder/test-util stays at the `mod tests`
+root (or in one shared `common` child module of `mod tests`), is never moved into
+a tier and never duplicated per tier; a helper that sibling tiers must reach
+stays at the root with `pub(super)`/`pub(crate)` visibility.
+
+**A tier may select ZERO tests.** The repo has few genuine pure unit tests, and
+no genuine 2+-unit pure tests at all, so an empty selection is a valid, named
+invocation; a module with no test of a given tier simply omits that submodule.
+
+**The four documented invocations** (aliases live in `.cargo/config.toml`):
+
+```sh
+cargo test          # DEFAULT GATE: unit+int only, seconds, e2e unreachable
+cargo test-unit     # unit tier only     (= cargo test tests::unit::)
+cargo test-int      # int tier only      (= cargo test tests::int::)
+cargo test-e2e      # e2e tier only, opt-in (= cargo test tests::e2e:: -- --ignored)
+```
+
+`cargo test` runs **unit+int only** and stays seconds-fast: the e2e tests are
+`#[ignore]`d and live under `tests::e2e::`, so they are excluded from and
+unreachable through the default gate. **e2e is the FINAL gate only** and obeys
+`global.constraint.no-real-project-test`: the candidate binary is exercised
+against a scratch `/tmp` git repo, never a real project (see below).
+
+Listing quirks (verified): `cargo test -- --list` **includes `#[ignore]`d
+tests**, and `cargo test-e2e -- --list` mis-composes to a double `--` and
+*executes* the e2e tier instead of listing it — to list the e2e tier use the raw
+form `cargo test tests::e2e:: -- --ignored --list`.
+
+**Release gate note.** The release-version guard tests
+(`cargo_manifest_and_lockfile_declare_release_version`,
+`readme_documents_release_version`) read `Cargo.toml`/`Cargo.lock`/`README.md`
+from disk, so they are **e2e** and are **no longer run by a plain `cargo test`**.
+The default gate stays fast and the guard is exercised by the opt-in e2e tier.
+The release gate is therefore `cargo build` + `cargo test` (fast unit+int) +
+`cargo test-e2e` (which runs the guard); see the release section below.
+
 ## Testing a new binary (scratch repo in /tmp)
 
 **Never point a freshly built `apg` at the apg repo** (or any project you care
@@ -286,13 +346,16 @@ on the old version) ships stale `OLD-version` bottles — the v0.10.3 mistake.
 
 Forward release (the `scripts/release.sh <version>` helper automates steps 4–5):
 
-1. **Gate green**: `cargo build` first, then `cargo test` passes (not just
-   `cargo check` — the release-version guard tests only run under `cargo test`,
-   and a stale `RELEASE_VERSION` literal ships the release HEAD red). Build
-   first because the cross-process tests spawn `target/<profile>/apg`
-   (`src/testutil.rs`), which `cargo test` alone does not rebuild: a stale
-   artifact makes the session/lock tests fail against an old CLI with
-   misleading errors.
+1. **Gate green**: `cargo build` first, then **`cargo test` AND `cargo test-e2e`**
+   pass (not just `cargo check`). `cargo test` is the fast unit+int default gate
+   and does **not** run the release-version guard: those tests read
+   `Cargo.toml`/`Cargo.lock`/`README.md` from disk and are therefore **e2e**, so
+   the guard runs under `cargo test-e2e` (`cargo test tests::e2e:: -- --ignored`)
+   — a stale `RELEASE_VERSION` literal ships the release HEAD red unless the e2e
+   tier is run. Build first because the cross-process tests spawn
+   `target/<profile>/apg` (`src/testutil.rs`), which `cargo test` alone does not
+   rebuild: a stale artifact makes the session/lock tests fail against an old CLI
+   with misleading errors.
 2. **Bump the version** in `Cargo.toml`, `Cargo.lock`, **and** `src/main.rs`'s
    `RELEASE_VERSION` literal (`version = "X.Y.Z"`).
 3. **Commit the release content** (the version bump + whatever ships in it).
