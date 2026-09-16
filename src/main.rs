@@ -2465,6 +2465,144 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Phase-05 Rust all-manifest discovery / isolation acceptance helpers
+    // (tasks 5, 6, 9). Non-#[test] helpers, so they live at the `mod tests`
+    // root.
+    // -----------------------------------------------------------------------
+
+    /// Parses a scan's `apg/.trans/graph.jsonl` export into raw JSON records.
+    fn export_records(repo_dir: &Path) -> Vec<serde_json::Value> {
+        let path = repo_dir.join("apg/.trans/graph.jsonl");
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .collect()
+    }
+
+    /// Module FQN → number of module records carrying it. A count above 1 means
+    /// the same project was emitted twice — the workspace double-count that the
+    /// dedup by manifest root must prevent.
+    fn export_module_counts(
+        records: &[serde_json::Value],
+    ) -> std::collections::BTreeMap<String, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for r in records {
+            if r.get("type").and_then(|t| t.as_str()) == Some("module")
+                && let Some(fqn) = r.get("fqn").and_then(|f| f.as_str())
+            {
+                *counts.entry(fqn.to_string()).or_insert(0) += 1;
+            }
+        }
+        counts
+    }
+
+    /// Every code-node location in the export (a File's fqn is its absolute
+    /// path; a Struct/Function carries `path`), so a caller can assert no node
+    /// is drawn from a generated/dependency tree.
+    fn export_code_locations(records: &[serde_json::Value]) -> Vec<String> {
+        let mut out = Vec::new();
+        for r in records {
+            match r.get("type").and_then(|t| t.as_str()) {
+                Some("file") => {
+                    if let Some(v) = r.get("fqn").and_then(|v| v.as_str()) {
+                        out.push(v.to_string());
+                    }
+                }
+                Some("struct") | Some("function") => {
+                    if let Some(v) = r.get("path").and_then(|v| v.as_str()) {
+                        out.push(v.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The Struct/Function FQNs in the export.
+    fn export_symbol_fqns(records: &[serde_json::Value]) -> BTreeSet<String> {
+        records
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.get("type").and_then(|t| t.as_str()),
+                    Some("struct") | Some("function")
+                )
+            })
+            .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    /// True when `path` (absolute) has a directory component named `name` BELOW
+    /// `root` — the discovery/emission exclusion predicate, anchored at the scan
+    /// root so the root path's own leading components never match.
+    fn under_component(root: &Path, path: &str, name: &str) -> bool {
+        let rel = Path::new(path)
+            .strip_prefix(root)
+            .unwrap_or(Path::new(path));
+        rel.components()
+            .any(|c| matches!(c, std::path::Component::Normal(s) if s == name))
+    }
+
+    /// P9 roots a module/symbol FQN under a `<lang>.` segment; strip that root
+    /// so an assertion holds both pre-rooting (bare) and post-rooting. Module
+    /// identities here are `apg` / `apg-rustfrontend` (no dot), their symbols
+    /// `apg.X` / `apg-rustfrontend.X`.
+    fn strip_lang_root(fqn: &str) -> String {
+        match fqn.split_once('.') {
+            Some(("rust", rest)) => rest.to_string(),
+            _ => fqn.to_string(),
+        }
+    }
+
+    /// The rust frontend binary the candidate stages, resolved from
+    /// `testutil::apg_bin()`'s profile dir (`<profile>/frontends/rustfrontend`)
+    /// — the same artifact `apg scan` spawns. Fails loudly naming the build.
+    fn rust_frontend_bin() -> PathBuf {
+        let apg = crate::testutil::apg_bin();
+        let bin = apg
+            .parent()
+            .expect("apg binary has a parent")
+            .join("frontends")
+            .join("rustfrontend");
+        assert!(
+            bin.is_file(),
+            "rust frontend not found at {} — build it first: \
+             cargo build --config 'env.APG_BUILD_FRONTENDS=\"rust\"'",
+            bin.display()
+        );
+        bin
+    }
+
+    /// Runs the rust frontend directly over `repo_dir` and parses its emitted
+    /// unified-schema records — the fixture's scanner spool, fed to the
+    /// in-process ingestor (the in-process shadow counters cannot be observed
+    /// from the CLI's warning line alone).
+    fn rust_frontend_records(repo_dir: &Path) -> Vec<crate::schema::Record> {
+        let bin = rust_frontend_bin();
+        let out = std::process::Command::new(&bin)
+            .arg(repo_dir)
+            .output()
+            .unwrap_or_else(|e| panic!("spawn {}: {e}", bin.display()));
+        assert!(
+            out.status.success(),
+            "rustfrontend failed over {}: {}",
+            repo_dir.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                serde_json::from_str::<crate::schema::Record>(l)
+                    .unwrap_or_else(|e| panic!("bad scanner record `{l}`: {e}"))
+            })
+            .collect()
+    }
+
+    // -----------------------------------------------------------------------
     // Phase-04 acceptance helpers (tasks 7–9): timing-report readers, verdict
     // parsers, and the jgrapht source pickers. Non-#[test] helpers, so they
     // live at the `mod tests` root.
@@ -6481,6 +6619,461 @@ mod tests {
             );
 
             let _ = std::fs::remove_dir_all(&base);
+        }
+
+        // -------------------------------------------------------------------
+        // Phase-05 Rust all-manifest discovery / isolation acceptance
+        // (tasks 5, 6, 9). Scratch /tmp `Repo::new` fixtures + CANDIDATE binary
+        // only — never a real checkout (global.constraint.no-real-project-test).
+        // A real rust-frontend build + scan is real I/O, so every one is
+        // `#[ignore]`-and-invoke (global.constraint.test-tier-boundaries).
+        // -------------------------------------------------------------------
+
+        /// Phase-05 task-5 (e2e): fixture discovery acceptance — (a) a nested
+        /// non-workspace crate yields BOTH its Module node and its symbols;
+        /// (b) a `[workspace]` yields each project exactly once; (c) a nested
+        /// Cargo project under `.worktrees/` is NOT discovered; (d) a generated
+        /// `.rs` under `target/` (incl. the `src/rustlib/target/**/out/*.rs`
+        /// shape) produces NO code node. Scratch /tmp fixtures, candidate
+        /// binary, opt-in only.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust frontend build); run via cargo test-e2e"]
+        fn rust_all_manifest_discovery_nested_workspace_and_exclusions() {
+            let home =
+                std::env::temp_dir().join(format!("apg-rustdisc-home-{}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+
+            // (a) NESTED NON-WORKSPACE CRATE: root package + nested package with
+            // its own manifest/lock, NOT a `[workspace]` member. BOTH the nested
+            // crate's Module node AND its declared symbols must appear.
+            let nested = crate::testutil::Repo::new("rust-disc-nested");
+            nested.write(
+                "Cargo.toml",
+                "[package]\nname = \"root-app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            nested.write(
+                "src/lib.rs",
+                "pub struct RootThing;\npub fn root_fn() -> i32 { 1 }\n",
+            );
+            nested.write(
+                "nested/Cargo.toml",
+                "[package]\nname = \"nested-app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            nested.write(
+                "nested/Cargo.lock",
+                "# This file is automatically @generated by Cargo.\nversion = 4\n\n[[package]]\nname = \"nested-app\"\nversion = \"0.1.0\"\n",
+            );
+            nested.write(
+                "nested/src/lib.rs",
+                "pub struct NestedThing;\npub fn nested_fn() -> i32 { 2 }\n",
+            );
+            nested.commit_all("fixture");
+            let scan = winb_run(&nested.root, &home, &["scan", ".", "--language", "rust"]);
+            assert!(
+                scan.status.success(),
+                "(a) nested non-workspace scan failed:\n{}",
+                String::from_utf8_lossy(&scan.stderr)
+            );
+            let recs = export_records(&nested.root);
+            let modules = export_module_counts(&recs);
+            assert_eq!(
+                modules.get("nested-app"),
+                Some(&1),
+                "(a) the nested crate's Module node must appear exactly once: {modules:?}"
+            );
+            assert_eq!(
+                modules.get("root-app"),
+                Some(&1),
+                "(a) root module: {modules:?}"
+            );
+            let symbols = export_symbol_fqns(&recs);
+            assert!(
+                symbols.contains("nested-app.NestedThing")
+                    && symbols.contains("nested-app.nested_fn"),
+                "(a) the nested crate's declared symbols must appear: {symbols:?}"
+            );
+            assert!(
+                symbols.contains("root-app.RootThing"),
+                "(a) the root crate's symbols must appear: {symbols:?}"
+            );
+            let _ = std::fs::remove_dir_all(&nested.root);
+
+            // (b) WORKSPACE: each member exactly once, discovered-project count
+            // equal to the workspace's project count (2).
+            let ws = crate::testutil::Repo::new("rust-disc-workspace");
+            ws.write(
+                "Cargo.toml",
+                "[workspace]\nmembers = [\"crate-a\", \"crate-b\"]\nresolver = \"2\"\n",
+            );
+            ws.write(
+                "crate-a/Cargo.toml",
+                "[package]\nname = \"crate-a\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            ws.write("crate-a/src/lib.rs", "pub struct AThing;\n");
+            ws.write(
+                "crate-b/Cargo.toml",
+                "[package]\nname = \"crate-b\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            ws.write("crate-b/src/lib.rs", "pub struct BThing;\n");
+            ws.commit_all("fixture");
+            let scan = winb_run(&ws.root, &home, &["scan", ".", "--language", "rust"]);
+            assert!(
+                scan.status.success(),
+                "(b) workspace scan failed:\n{}",
+                String::from_utf8_lossy(&scan.stderr)
+            );
+            let recs = export_records(&ws.root);
+            let modules = export_module_counts(&recs);
+            assert_eq!(
+                modules.get("crate-a"),
+                Some(&1),
+                "(b) crate-a must be discovered exactly once: {modules:?}"
+            );
+            assert_eq!(
+                modules.get("crate-b"),
+                Some(&1),
+                "(b) crate-b must be discovered exactly once: {modules:?}"
+            );
+            assert_eq!(
+                modules.values().sum::<usize>(),
+                2,
+                "(b) discovered projects must equal the workspace's 2 projects: {modules:?}"
+            );
+            let symbols = export_symbol_fqns(&recs);
+            assert!(
+                symbols.contains("crate-a.AThing") && symbols.contains("crate-b.BThing"),
+                "(b) each member's symbols must appear: {symbols:?}"
+            );
+            let _ = std::fs::remove_dir_all(&ws.root);
+
+            // (c) `.worktrees/` EXCLUSION: a nested Cargo project under it is not
+            // discovered (no module node; its FQNs absent).
+            let wt = crate::testutil::Repo::new("rust-disc-worktrees");
+            wt.write(
+                "Cargo.toml",
+                "[package]\nname = \"wt-root\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            wt.write("src/lib.rs", "pub struct WtRoot;\n");
+            wt.write(
+                ".worktrees/hidden/Cargo.toml",
+                "[package]\nname = \"hidden-app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            wt.write(".worktrees/hidden/src/lib.rs", "pub struct HiddenThing;\n");
+            wt.commit_all("fixture");
+            let scan = winb_run(&wt.root, &home, &["scan", ".", "--language", "rust"]);
+            assert!(
+                scan.status.success(),
+                "(c) .worktrees scan failed:\n{}",
+                String::from_utf8_lossy(&scan.stderr)
+            );
+            let recs = export_records(&wt.root);
+            let modules = export_module_counts(&recs);
+            assert!(
+                !modules.contains_key("hidden-app"),
+                "(c) a crate under .worktrees/ must not be discovered: {modules:?}"
+            );
+            let symbols = export_symbol_fqns(&recs);
+            assert!(
+                !symbols.iter().any(|f| f.contains("HiddenThing")),
+                "(c) a .worktrees/ crate's symbols must be absent: {symbols:?}"
+            );
+            assert!(
+                symbols.contains("wt-root.WtRoot"),
+                "(c) the real root crate must still be discovered: {symbols:?}"
+            );
+            let _ = std::fs::remove_dir_all(&wt.root);
+
+            // (d) GENERATED-TREE EXCLUSION. PART 1: a Cargo project under
+            // `target/` is never a scan root. PART 2: no File/Module/Struct/
+            // Function may carry a path under `target/` — including the
+            // `src/rustlib/target/**/out/*.rs` shape, where a nested crate sits
+            // beside its own generated tree.
+            let gen_repo = crate::testutil::Repo::new("rust-disc-generated");
+            gen_repo.write(
+                "Cargo.toml",
+                "[package]\nname = \"gen-root\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            gen_repo.write("src/lib.rs", "pub struct GenRoot;\n");
+            gen_repo.write(
+                "target/nested-crate/Cargo.toml",
+                "[package]\nname = \"target-crate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            gen_repo.write(
+                "target/nested-crate/src/lib.rs",
+                "pub struct TargetCrateThing;\n",
+            );
+            gen_repo.write(
+                "target/gen/out/generated.rs",
+                "pub struct GeneratedInTarget;\n",
+            );
+            gen_repo.write(
+                "src/rustlib/Cargo.toml",
+                "[package]\nname = \"rustlib-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            gen_repo.write("src/rustlib/src/lib.rs", "pub struct RustlibThing;\n");
+            gen_repo.write(
+                "src/rustlib/target/debug/build/x/out/generated.rs",
+                "pub struct OutDirThing;\n",
+            );
+            gen_repo.commit_all("fixture");
+            let scan = winb_run(&gen_repo.root, &home, &["scan", ".", "--language", "rust"]);
+            assert!(
+                scan.status.success(),
+                "(d) generated-tree scan failed:\n{}",
+                String::from_utf8_lossy(&scan.stderr)
+            );
+            let recs = export_records(&gen_repo.root);
+            let symbols = export_symbol_fqns(&recs);
+            // Non-vacuous: the crate BESIDE the generated tree was loaded, so
+            // the exclusion is exercised against a live scan, not an empty one.
+            assert!(
+                symbols.iter().any(|f| f == "rustlib-fixture.RustlibThing"),
+                "(d) the crate beside the generated tree must be discovered: {symbols:?}"
+            );
+            let leaked: Vec<String> = export_code_locations(&recs)
+                .into_iter()
+                .filter(|p| under_component(&gen_repo.root, p, "target"))
+                .collect();
+            assert!(
+                leaked.is_empty(),
+                "(d) no code node may be drawn from a generated target/ path: {leaked:?}"
+            );
+            for absent in ["GeneratedInTarget", "TargetCrateThing", "OutDirThing"] {
+                assert!(
+                    !symbols.iter().any(|f| f.contains(absent)),
+                    "(d) `{absent}` must never be a code node: {symbols:?}"
+                );
+            }
+            assert!(
+                !export_module_counts(&recs).contains_key("target-crate"),
+                "(d) a Cargo project under target/ must not be discovered"
+            );
+            let _ = std::fs::remove_dir_all(&gen_repo.root);
+
+            let _ = std::fs::remove_dir_all(&home);
+        }
+
+        /// Phase-05 task-6 (e2e): nested-FQN acceptance on a scratch /tmp fixture
+        /// reproducing the src/rustlib condition — ROOT package `apg` + NESTED
+        /// non-workspace crate `apg-rustfrontend` (own manifest + lock, two
+        /// differing package names). Candidate binary only; no real checkout.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/rust frontend build); run via cargo test-e2e"]
+        fn rust_nested_fqn_clean_and_unshadowed() {
+            let home =
+                std::env::temp_dir().join(format!("apg-rustfqn-home-{}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+            let repo = crate::testutil::Repo::new("rust-nested-fqn");
+            repo.write(
+                "Cargo.toml",
+                "[package]\nname = \"apg\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            repo.write(
+                "src/lib.rs",
+                "pub struct RootApi;\npub fn root_entry() -> i32 { 1 }\n",
+            );
+            repo.write(
+                "src/rustlib/Cargo.toml",
+                "[package]\nname = \"apg-rustfrontend\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[[bin]]\nname = \"rustfrontend\"\npath = \"src/main.rs\"\n",
+            );
+            repo.write(
+                "src/rustlib/Cargo.lock",
+                "# This file is automatically @generated by Cargo.\nversion = 4\n\n[[package]]\nname = \"apg-rustfrontend\"\nversion = \"0.1.0\"\n",
+            );
+            repo.write(
+                "src/rustlib/src/main.rs",
+                "pub struct Scanner;\nfn main() {}\n",
+            );
+            repo.commit_all("fixture");
+
+            // (1) NO same-kind collision panic: the scan exits 0 with no `claim`
+            // panic text.
+            let scan = winb_run(&repo.root, &home, &["scan", ".", "--language", "rust"]);
+            let stdout = String::from_utf8_lossy(&scan.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&scan.stderr).into_owned();
+            assert!(scan.status.success(), "(1) scan must exit 0:\n{stderr}");
+            for needle in ["FQN collision", "panicked", "duplicate project node"] {
+                assert!(
+                    !stdout.contains(needle) && !stderr.contains(needle),
+                    "(1) scan output must carry no `{needle}`:\n{stdout}\n{stderr}"
+                );
+            }
+
+            // (2) ZERO SHADOWED MODULES — positively, by feeding the fixture's
+            // emitted scanner records through the in-process ingestor. The CLI
+            // logs the shadow warning only when the count is > 0, so the
+            // absence of that line alone is vacuous.
+            let records = rust_frontend_records(&repo.root);
+            assert!(
+                !records.is_empty(),
+                "(2) the rust frontend must emit scanner records"
+            );
+            let (_graph, report) = crate::ingest::ingest(
+                records,
+                &crate::ingest::IngestOptions {
+                    blacklist: &[],
+                    language: "rust",
+                    config: None,
+                },
+            );
+            assert_eq!(
+                report.shadowed_modules, 0,
+                "(2) the nested crate's module must not be shadowed"
+            );
+            assert_eq!(
+                report.shadowed_functions, 0,
+                "(2) no function may be shadowed"
+            );
+            assert!(
+                !stdout.contains("module(s) shadowed by a type of the same name")
+                    && !stderr.contains("module(s) shadowed by a type of the same name"),
+                "(2) the real scan must emit no shadow line:\n{stdout}\n{stderr}"
+            );
+
+            // (3) ROOTING-AGNOSTIC FQN cleanliness: normalize a leading `<lang>.`
+            // root away, then assert the nested crate's identity is
+            // `apg-rustfrontend` exactly once, disjoint from the root package's
+            // `apg`, with each crate's symbols under its own identity.
+            let recs = export_records(&repo.root);
+            let modules: std::collections::BTreeMap<String, usize> = export_module_counts(&recs)
+                .into_iter()
+                .map(|(k, v)| (strip_lang_root(&k), v))
+                .collect();
+            assert_eq!(
+                modules.get("apg-rustfrontend"),
+                Some(&1),
+                "(3) the nested crate's identity must be present exactly once: {modules:?}"
+            );
+            assert_eq!(
+                modules.get("apg"),
+                Some(&1),
+                "(3) the root package's identity must be present exactly once: {modules:?}"
+            );
+            let symbols: BTreeSet<String> = export_symbol_fqns(&recs)
+                .into_iter()
+                .map(|f| strip_lang_root(&f))
+                .collect();
+            assert!(
+                symbols.contains("apg-rustfrontend.Scanner"),
+                "(3) the nested crate's symbol must hang under its own identity: {symbols:?}"
+            );
+            assert!(
+                symbols.contains("apg.RootApi"),
+                "(3) the root package's symbol must hang under `apg`: {symbols:?}"
+            );
+
+            let _ = std::fs::remove_dir_all(&repo.root);
+            let _ = std::fs::remove_dir_all(&home);
+        }
+
+        /// Phase-05 task-9 (e2e): Rust build-isolation acceptance, in-process
+        /// over the real repo — the same pattern as
+        /// `cargo_manifest_and_lockfile_declare_release_version`. Reads the real
+        /// `Cargo.toml`/`Cargo.lock`/`build.rs` and the real build artifacts
+        /// under `src/rustlib/target/` (real filesystem I/O), so it is
+        /// `#[ignore]`-and-invoke. (A) root workspace membership unchanged;
+        /// (B) a separate rustlib lockfile distinct from the root's;
+        /// (C) build.rs still compiles rustlib into its isolated target dir.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/build artifacts under src/rustlib/target); run via cargo test-e2e"]
+        fn rust_build_isolation_preserved() {
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+            // (A) ROOT WORKSPACE MEMBERSHIP UNCHANGED: no `[workspace]` table and
+            // no `members` entry naming `src/rustlib`.
+            let root_manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+            assert!(
+                !root_manifest.contains("[workspace]"),
+                "(A) the root Cargo.toml must declare no [workspace] table"
+            );
+            assert!(
+                !root_manifest.contains("src/rustlib"),
+                "(A) the root Cargo.toml must not name src/rustlib (build isolation)"
+            );
+            assert!(
+                !root_manifest
+                    .lines()
+                    .any(|l| l.trim().starts_with("members")),
+                "(A) the root Cargo.toml must declare no workspace `members`"
+            );
+
+            // (B) SEPARATE LOCKFILE: src/rustlib is a standalone `[package]` with
+            // its own lock carrying the pinned rust-analyzer git deps, DISTINCT
+            // from the root lock (a merged/root lock would mean membership).
+            let rustlib_manifest =
+                std::fs::read_to_string(root.join("src/rustlib/Cargo.toml")).unwrap();
+            assert!(
+                rustlib_manifest.contains("[package]")
+                    && rustlib_manifest.contains("name = \"apg-rustfrontend\""),
+                "(B) src/rustlib/Cargo.toml must be a standalone [package]"
+            );
+            assert!(
+                rustlib_manifest.contains("edition = \"2021\""),
+                "(B) src/rustlib must stay edition 2021"
+            );
+            let root_lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
+            let rustlib_lock_path = root.join("src/rustlib/Cargo.lock");
+            assert!(
+                rustlib_lock_path.is_file(),
+                "(B) src/rustlib/Cargo.lock must exist"
+            );
+            let rustlib_lock = std::fs::read_to_string(&rustlib_lock_path).unwrap();
+            assert!(
+                rustlib_lock.contains("name = \"apg-rustfrontend\""),
+                "(B) the rustlib lock must pin its own package"
+            );
+            assert!(
+                rustlib_lock.contains("git+https://github.com/rust-lang/rust-analyzer"),
+                "(B) the rustlib lock must carry the pinned rust-analyzer git-dependency crates"
+            );
+            assert_ne!(
+                root_lock, rustlib_lock,
+                "(B) the rustlib lock must be distinct from the root lock"
+            );
+            assert!(
+                !root_lock.contains("apg-rustfrontend")
+                    && !root_lock.contains("git+https://github.com/rust-lang/rust-analyzer"),
+                "(B) the root lock must not carry the rustlib package or its git deps"
+            );
+
+            // (C) BUILD.RS STILL COMPILES RUSTLIB IN ISOLATION: `cargo build
+            // --manifest-path src/rustlib/Cargo.toml ... --bin rustfrontend`,
+            // targeting the isolated `src/rustlib/target/<profile>/`.
+            let build_rs = std::fs::read_to_string(root.join("build.rs")).unwrap();
+            assert!(
+                build_rs.contains("--manifest-path") && build_rs.contains("src/rustlib/Cargo.toml"),
+                "(C) build.rs must build via --manifest-path src/rustlib/Cargo.toml"
+            );
+            assert!(
+                build_rs.contains("--bin") && build_rs.contains("rustfrontend"),
+                "(C) build.rs must build the rustfrontend bin"
+            );
+            // The running profile (the candidate's `target/<profile>`) selects
+            // the isolated target dir build.rs compiled into.
+            let profile_dir = crate::testutil::apg_bin()
+                .parent()
+                .expect("apg binary has a parent")
+                .to_path_buf();
+            let profile = profile_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .expect("profile dir name");
+            let isolated = root
+                .join("src/rustlib/target")
+                .join(profile)
+                .join("rustfrontend");
+            assert!(
+                isolated.is_file(),
+                "(C) the rustfrontend must be built into the ISOLATED target dir {} — \
+                 build it first: cargo build --config 'env.APG_BUILD_FRONTENDS=\"rust\"'",
+                isolated.display()
+            );
+            let root_artifact = profile_dir.join("rustfrontend");
+            assert!(
+                !root_artifact.exists(),
+                "(C) the rustfrontend must NOT be compiled into the root target dir: {}",
+                root_artifact.display()
+            );
         }
     }
 }

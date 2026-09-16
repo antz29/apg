@@ -23,7 +23,10 @@ use ide_db::base_db::{CrateOrigin, SourceDatabase};
 use ide_db::FxHashMap;
 use ide_db::RootDatabase;
 use load_cargo::{load_workspace, LoadCargoConfig, ProcMacroServerChoice};
-use project_model::{CargoConfig, CargoFeatures, ProjectManifest, ProjectWorkspace, RustLibSource};
+use project_model::{
+    CargoConfig, CargoFeatures, CargoWorkspace, ProjectManifest, ProjectWorkspace,
+    ProjectWorkspaceKind, RustLibSource,
+};
 use syntax::ast::{self, AstNode};
 use vfs::{AbsPathBuf, FileId, Vfs};
 
@@ -105,6 +108,10 @@ struct Decl {
     start_line: u32,
     end_line: u32,
     src_key: (String, u32),
+    /// Whether this declaration belongs to a crate selected for emission
+    /// (phase-05 task-8). With no `--targets` filter every declaration is
+    /// emitted, so the stream is byte-identical to a full scan.
+    emit: bool,
 }
 
 struct ImplEdge {
@@ -120,6 +127,17 @@ struct State {
     id_by_source: HashMap<(String, u32), String>,
     /// (path, byte offset) -> id, for every declared struct-like node.
     struct_sources: HashMap<(String, u32), String>,
+    /// id -> the canonical FQN the ingestor renders for it (including the
+    /// `parent.name(params)` overload suffix). Built over the FULL collected
+    /// declaration set — the full resolution context — so a cross-crate edge to
+    /// a declaration outside the emission target set can carry its canonical
+    /// FQN instead of a dangling opaque id (phase-05 task-8).
+    id_fqn: HashMap<String, String>,
+    /// The ids whose node records are actually part of the emitted stream (the
+    /// target set, or every declaration when no filter is in force). An edge to
+    /// an id NOT in this set carries the target's canonical FQN, which the
+    /// ingestor's cached-fact splice resolves against the reused unit.
+    emitted_id: HashSet<String>,
     /// Dedup of unresolved records by fqn (first category wins).
     unresolved_seen: HashSet<String>,
     impl_edges: Vec<ImplEdge>,
@@ -132,9 +150,60 @@ impl State {
             struct_id: HashMap::new(),
             id_by_source: HashMap::new(),
             struct_sources: HashMap::new(),
+            id_fqn: HashMap::new(),
+            emitted_id: HashSet::new(),
             unresolved_seen: HashSet::new(),
             impl_edges: Vec::new(),
         }
+    }
+
+    /// The endpoint to emit for an edge target with opaque `id`: the id when the
+    /// declaration is part of the emitted stream, else the declaration's
+    /// canonical FQN. With no filter in force every id is emitted, so this is
+    /// always `id` — byte-identical to a full scan.
+    fn endpoint(&self, id: &str) -> String {
+        if self.emitted_id.contains(id) {
+            id.to_string()
+        } else {
+            self.id_fqn
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| id.to_string())
+        }
+    }
+}
+
+/// Immutable view of the resolution maps used by the pass-2 syntax walk. Bundled
+/// so handlers can resolve an edge target to the opaque id (or its canonical
+/// FQN when the target is outside the emission target set) while the walk still
+/// mutates `unresolved_seen` independently.
+struct Endpoints<'a> {
+    id_by_source: &'a HashMap<(String, u32), String>,
+    struct_sources: &'a HashMap<(String, u32), String>,
+    id_fqn: &'a HashMap<String, String>,
+    emitted_id: &'a HashSet<String>,
+}
+
+impl Endpoints<'_> {
+    fn endpoint(&self, id: &str) -> String {
+        if self.emitted_id.contains(id) {
+            id.to_string()
+        } else {
+            self.id_fqn
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| id.to_string())
+        }
+    }
+
+    /// Endpoint for a function/struct source key, when it resolves.
+    fn fn_id(&self, key: &(String, u32)) -> Option<String> {
+        self.id_by_source.get(key).map(|id| self.endpoint(id))
+    }
+
+    /// Endpoint for a struct-like source key, when it resolves.
+    fn struct_id(&self, key: &(String, u32)) -> Option<String> {
+        self.struct_sources.get(key).map(|id| self.endpoint(id))
     }
 }
 
@@ -142,6 +211,15 @@ struct Ctx<'db> {
     db: &'db RootDatabase,
     sema: Semantics<'db, RootDatabase>,
     vfs: &'db Vfs,
+    /// Cargo package name keyed by the crate-root file's absolute path, for
+    /// every target of every package the loaded project resolved (phase-05
+    /// task-10). Consulted only for crates whose package maps to a single local
+    /// crate, via the per-project `package_prefix` below.
+    package_by_root: HashMap<String, String>,
+    /// Resolved prefix override by crate-root absolute path: the cargo package
+    /// name for a package with exactly one local crate. Populated per loaded
+    /// project by [`scan`]; an empty map means "use the display-name fallback".
+    package_prefix: HashMap<String, String>,
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────
@@ -156,7 +234,8 @@ fn main() {
 fn run(args: Vec<String>) -> Result<()> {
     if args.len() < 2 {
         eprintln!(
-            "Usage: rustfrontend <dir> [--module <dir>]... [--no-build-scripts] [exclude...]"
+            "Usage: rustfrontend <dir> [--module <dir>]... [--no-build-scripts] \
+             [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude...]"
         );
         std::process::exit(1);
     }
@@ -167,6 +246,12 @@ fn run(args: Vec<String>) -> Result<()> {
     // id prefix (`--id-prefix`, default "n") keeps opaque ids unique across
     // frontends when a scan merges multiple languages.
     let mut id_prefix = "n";
+    // The pinned phase-02 target-set hand-off (task-9): `--targets` is an
+    // emission filter, `--cache-dir`/`--cache-key` locate the shared
+    // per-language native-artifact directory.
+    let mut targets_path: Option<String> = None;
+    let mut cache_dir: Option<String> = None;
+    let mut cache_key: Option<String> = None;
     {
         let mut i = 2;
         while i < args.len() {
@@ -178,6 +263,15 @@ fn run(args: Vec<String>) -> Result<()> {
                 no_build_scripts = true;
             } else if a == "--id-prefix" && i + 1 < args.len() {
                 id_prefix = &args[i + 1];
+                i += 1;
+            } else if a == "--targets" && i + 1 < args.len() {
+                targets_path = Some(args[i + 1].clone());
+                i += 1;
+            } else if a == "--cache-dir" && i + 1 < args.len() {
+                cache_dir = Some(args[i + 1].clone());
+                i += 1;
+            } else if a == "--cache-key" && i + 1 < args.len() {
+                cache_key = Some(args[i + 1].clone());
                 i += 1;
             } else {
                 excludes.push(args[i].clone());
@@ -205,39 +299,19 @@ fn run(args: Vec<String>) -> Result<()> {
         })
         .collect();
 
-    let (db, vfs) = load_workspace_at(&root_abs, no_build_scripts)?;
-    let sema = Semantics::new(&db);
-    let ctx = Ctx {
-        db: &db,
-        sema,
-        vfs: &vfs,
-    };
+    // The target set is an EMISSION filter only: every discovered project is
+    // still fully loaded and resolved (global.constraint.frontend-full-context).
+    let target_filter = read_target_set(targets_path.as_deref());
+    ensure_artifact_dir(cache_dir.as_deref(), cache_key.as_deref());
 
-    // Type inference (method resolution, type resolution) interns through a
-    // thread-local db; run the whole scan inside it.
-    hir::attach_db(ctx.db, || scan(ctx, &root_abs, module_dirs, excludes, id_prefix))
-}
-
-fn scan(
-    ctx: Ctx<'_>,
-    root_abs: &std::path::Path,
-    module_dirs: Vec<String>,
-    excludes: Vec<String>,
-    id_prefix: &str,
-) -> Result<()> {
-    let mut state = State::new();
-    let out = std::io::stdout();
-    let mut w = std::io::BufWriter::new(out.lock());
-
-    // ── Pass 1a: module records + Module→Module containment, per crate. ──
-    let mut crates: Vec<Crate> = Crate::all(ctx.db)
-        .into_iter()
-        .filter(|k| k.origin(ctx.db).is_local())
-        .filter(|k| within_module_limit(&ctx, *k, &module_dirs))
-        .collect();
-    crates.sort_by_key(|k| crate_prefix(&ctx, *k));
-
-    if crates.is_empty() {
+    // ── Discover and load every Cargo project under the scan root ──────
+    // Each discovered workspace root is loaded once; its members are resolved
+    // through it and never re-loaded as top-level projects (phase-05 task-2).
+    // The nested `src/rustlib` crate is a standalone project, not a member of
+    // the root workspace, and stays byte-identical on disk — discovery never
+    // mutates a manifest (phase-05 task-4).
+    let manifest_dirs = discover_manifest_dirs(&root_abs);
+    if manifest_dirs.is_empty() {
         eprintln!(
             "Error: no Rust workspace found under {}",
             root_abs.display()
@@ -245,6 +319,101 @@ fn scan(
         std::process::exit(1);
     }
 
+    let out = std::io::stdout();
+    let mut w = std::io::BufWriter::new(out.lock());
+    let mut state = State::new();
+    let mut loaded_roots: Vec<std::path::PathBuf> = Vec::new();
+    let mut total_crates = 0usize;
+    for dir in &manifest_dirs {
+        // Dedupe by manifest root: a candidate directory a previously loaded
+        // workspace already covers (its crate lives under it) is skipped, so a
+        // workspace member is never re-loaded as a top-level project and no
+        // module node is double-counted.
+        if loaded_roots.iter().any(|r| r.starts_with(dir)) {
+            continue;
+        }
+        let (db, vfs, package_by_root) = match load_project(dir, no_build_scripts) {
+            Ok(x) => x,
+            Err(e) => {
+                eprintln!("warning: skipping project {}: {e:#}", dir.display());
+                continue;
+            }
+        };
+        let roots = hir::attach_db(&db, || local_crate_root_files(&db, &vfs));
+        loaded_roots.extend(roots);
+        let sema = Semantics::new(&db);
+        let ctx = Ctx {
+            db: &db,
+            sema,
+            vfs: &vfs,
+            package_by_root,
+            package_prefix: HashMap::new(),
+        };
+        // Type inference (method resolution, type resolution) interns through a
+        // thread-local db; run each project's scan inside it. The opaque-id
+        // counter and resolution maps are shared across projects so ids stay
+        // unique in the merged stream.
+        total_crates += hir::attach_db(ctx.db, || {
+            scan(
+                ctx,
+                &root_abs,
+                module_dirs.clone(),
+                excludes.clone(),
+                id_prefix,
+                target_filter.as_ref(),
+                &mut state,
+                &mut w,
+            )
+        })?;
+    }
+    let _ = w.flush();
+    if total_crates == 0 {
+        eprintln!(
+            "Error: no Rust workspace found under {}",
+            root_abs.display()
+        );
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// Emits facts for one loaded project into the shared stream, returning the
+/// number of local crates scanned. `state` is shared across projects so opaque
+/// ids remain unique across the merged multi-project stream; the project's
+/// `db`/`vfs` stay alive only for the duration of the call.
+#[allow(clippy::too_many_arguments)]
+fn scan(
+    mut ctx: Ctx<'_>,
+    root_abs: &std::path::Path,
+    module_dirs: Vec<String>,
+    excludes: Vec<String>,
+    id_prefix: &str,
+    target_filter: Option<&HashSet<std::path::PathBuf>>,
+    state: &mut State,
+    w: &mut impl Write,
+) -> Result<usize> {
+    // ── Pass 1a: module records + Module→Module containment, per crate. ──
+    let mut crates: Vec<Crate> = Crate::all(ctx.db)
+        .into_iter()
+        .filter(|k| k.origin(ctx.db).is_local())
+        .filter(|k| within_module_limit(&ctx, *k, &module_dirs))
+        .collect();
+    // Prefer the cargo PACKAGE name as each crate's module prefix (phase-05
+    // task-10): `src/rustlib` declares `[package] name = "apg-rustfrontend"`
+    // but `[[bin]] name = "rustfrontend"`, so the target/display name would
+    // otherwise render `rustfrontend.*` and shadow the package identity. The
+    // package name is preferred ONLY when the package maps to exactly one local
+    // crate: a package with several targets (lib + bins/examples) keeps each
+    // target's display name, so distinct crates never collapse onto one prefix
+    // (never worse than the display-name behaviour it replaces).
+    ctx.package_prefix = package_prefix_map(&ctx, &crates);
+    crates.sort_by_key(|k| crate_prefix(&ctx, *k));
+
+    if crates.is_empty() {
+        return Ok(0);
+    }
+
+    let mut targeted: HashSet<Crate> = HashSet::new();
     let mut module_fqn: HashMap<Module, String> = HashMap::new();
     let mut module_nodes: Vec<String> = Vec::new();
     let mut module_edges: Vec<(String, String)> = Vec::new();
@@ -253,9 +422,21 @@ fn scan(
         let root_mod = krate.root_module(ctx.db);
         let mut seen: HashSet<Module> = HashSet::new();
         let mut stack: Vec<Module> = vec![root_mod];
+        // A crate is re-emitted when any of its source files is in the target
+        // set (per-crate/module granularity, phase-05 task-8). No filter in
+        // force selects every crate.
+        let mut crate_emit = target_filter.is_none();
         while let Some(m) = stack.pop() {
             if !seen.insert(m) {
                 continue;
+            }
+            if !crate_emit {
+                if let Some(ed) = m.as_source_file_id(ctx.db) {
+                    let path = path_of(&ctx, ed.file_id(ctx.db));
+                    if target_filter.is_some_and(|t| t.contains(std::path::Path::new(&path))) {
+                        crate_emit = true;
+                    }
+                }
             }
             let fqn = module_fqn_with_prefix(&ctx, m, &prefix);
             module_fqn.insert(m, fqn.clone());
@@ -268,15 +449,23 @@ fn scan(
             }
             stack.extend(children);
         }
+        if crate_emit {
+            targeted.insert(*krate);
+        }
     }
+    // Module records are GLOBAL scaffolding, emitted for every loaded crate
+    // regardless of the emission filter: they carry no location and so are not
+    // part of any per-file fact unit, and a full scan's module set plus
+    // Module→Module hierarchy must be present verbatim for the incremental
+    // graph to equal a full scan. Only the per-file facts are filtered.
     module_nodes.sort();
     module_edges.sort();
     for fqn in &module_nodes {
-        rec(&mut w, Rec::Module { fqn: fqn.clone() });
+        rec(w, Rec::Module { fqn: fqn.clone() });
     }
     for (from, to) in &module_edges {
         rec(
-            &mut w,
+            w,
             Rec::Contains {
                 from: from.clone(),
                 to: to.clone(),
@@ -284,10 +473,12 @@ fn scan(
         );
     }
 
-    // ── Pass 1b: collect declarations (ids assigned as they are collected). ──
+    // ── Pass 1b: collect declarations over the FULL context. ──
     let mut decls: Vec<Decl> = Vec::new();
     let mut file_module: HashMap<FileId, String> = HashMap::new();
+    let mut file_emit: HashMap<FileId, bool> = HashMap::new();
     for krate in &crates {
+        let crate_emit = targeted.contains(krate);
         let prefix = crate_prefix(&ctx, *krate);
         let root_mod = krate.root_module(ctx.db);
         let mut seen: HashSet<Module> = HashSet::new();
@@ -301,35 +492,35 @@ fn scan(
 
             // The file that backs this module (crate root or `mod foo;`).
             if let Some(ed) = m.as_source_file_id(ctx.db) {
-                file_module
-                    .entry(ed.file_id(ctx.db))
-                    .or_insert(mod_fqn.clone());
+                let fid = ed.file_id(ctx.db);
+                file_module.entry(fid).or_insert(mod_fqn.clone());
+                file_emit.entry(fid).or_insert(crate_emit);
             }
 
             for def in m.declarations(ctx.db) {
                 match def {
                     ModuleDef::Function(f) => {
                         if let Some(d) = fn_decl(&ctx, f, &mod_fqn) {
-                            push_decl(&mut state, &mut decls, d);
+                            push_decl(state, &mut decls, d, crate_emit);
                         }
                     }
                     ModuleDef::Adt(adt) => {
                         if let Some(d) = adt_decl(&ctx, adt, &mod_fqn) {
-                            push_decl(&mut state, &mut decls, d);
+                            push_decl(state, &mut decls, d, crate_emit);
                         }
                         if let Adt::Enum(e) = adt {
                             // Enum variants hang under the enum.
                             let enum_fqn = format!("{}.{}", mod_fqn, e.name(ctx.db).as_str());
                             for v in e.variants(ctx.db) {
                                 if let Some(d) = variant_decl(&ctx, v, &enum_fqn) {
-                                    push_decl(&mut state, &mut decls, d);
+                                    push_decl(state, &mut decls, d, crate_emit);
                                 }
                             }
                         }
                     }
                     ModuleDef::Trait(t) => {
                         if let Some(d) = trait_decl(&ctx, t, &mod_fqn) {
-                            push_decl(&mut state, &mut decls, d);
+                            push_decl(state, &mut decls, d, crate_emit);
                         }
                         // Trait methods (declarations and defaults) hang under
                         // the trait, like Go interface methods under a type.
@@ -337,7 +528,7 @@ fn scan(
                         for item in t.items(ctx.db) {
                             if let AssocItem::Function(f) = item {
                                 if let Some(d) = fn_decl(&ctx, f, &trait_fqn) {
-                                    push_decl(&mut state, &mut decls, d);
+                                    push_decl(state, &mut decls, d, crate_emit);
                                 }
                             }
                         }
@@ -346,21 +537,59 @@ fn scan(
                 }
             }
             for imp in m.impl_defs(ctx.db) {
-                process_impl(&ctx, imp, &mod_fqn, &mut state, &mut decls);
+                process_impl(&ctx, imp, &mod_fqn, state, &mut decls, crate_emit);
             }
             stack.extend(m.children(ctx.db));
         }
     }
+    let crate_count = crates.len();
     drop(crates);
 
     decls.sort_by_key(|d| (d.path.clone(), d.start));
 
+    // Canonical FQN per declaration exactly as the ingestor renders it
+    // (SPEC §4): `parent.name`, or `parent.name(params)` for a function whose
+    // `(parent, name)` group is overloaded. Computed over the FULL collected
+    // declaration set — the full resolution context — so an edge to a
+    // declaration outside the emission target set can carry its canonical FQN
+    // instead of a dangling opaque id (phase-05 task-8).
+    let mut fn_groups: HashMap<(String, String), usize> = HashMap::new();
+    for d in &decls {
+        if d.kind == "function" {
+            *fn_groups
+                .entry((d.parent.clone(), d.name.clone()))
+                .or_insert(0) += 1;
+        }
+    }
+
     // Assign opaque ids in sorted emission order (deterministic across runs),
-    // and register the id maps used by pass 2 and structural edges.
+    // and register the id maps used by pass 2 and structural edges. The id maps
+    // cover every collected declaration (the full context); `emitted_id` marks
+    // the subset whose node records are actually emitted.
     for d in &mut decls {
         state.next_id += 1;
         d.id = format!("{}{}", id_prefix, state.next_id);
-        let fqn = format!("{}.{}", d.parent, d.name);
+        let overloaded = d.kind == "function"
+            && fn_groups
+                .get(&(d.parent.clone(), d.name.clone()))
+                .copied()
+                .unwrap_or(0)
+                > 1;
+        let fqn = if overloaded {
+            format!("{}.{}({})", d.parent, d.name, d.params.join(","))
+        } else {
+            format!("{}.{}", d.parent, d.name)
+        };
+        state.id_fqn.insert(d.id.clone(), fqn.clone());
+        // Generated/out-dir declarations are never code nodes (phase-05 task-3
+        // PART 2), so they are withheld from the emitted set even when their
+        // crate is targeted.
+        if d.emit && under_excluded_tree(&d.path, root_abs) {
+            d.emit = false;
+        }
+        if d.emit {
+            state.emitted_id.insert(d.id.clone());
+        }
         let key = d.src_key.clone();
         if d.kind == "struct" {
             state.struct_id.entry(fqn).or_insert_with(|| d.id.clone());
@@ -378,20 +607,24 @@ fn scan(
     // ── Emission: file records, node records, structural edges, impl edges. ──
     let mut files: Vec<FileId> = file_module.keys().copied().collect();
     files.sort_by_key(|f| path_of(&ctx, *f));
-    let total_files = files
-        .iter()
-        .filter(|f| !path_excluded(&path_of(&ctx, **f), &excludes))
-        .count();
+    // A file is emitted when its crate is targeted and its path is neither
+    // user-excluded nor a generated/dependency tree (task-3 PART 2 / task-8).
+    let emitted_file = |fid: &FileId| -> bool {
+        file_emit.get(fid).copied().unwrap_or(false)
+            && !path_excluded(&path_of(&ctx, *fid), &excludes)
+            && !under_excluded_tree(&path_of(&ctx, *fid), root_abs)
+    };
+    let total_files = files.iter().filter(|f| emitted_file(f)).count();
     let mut scanned = 0usize;
     for fid in &files {
-        let path = path_of(&ctx, *fid);
-        if path_excluded(&path, &excludes) {
+        if !emitted_file(fid) {
             continue;
         }
+        let path = path_of(&ctx, *fid);
         let text = ctx.db.file_text(*fid).text(ctx.db).to_string();
         let parent = file_module.get(fid).cloned().unwrap_or_default();
         rec(
-            &mut w,
+            w,
             Rec::File {
                 path: path.clone(),
                 parent,
@@ -409,6 +642,9 @@ fn scan(
     }
 
     for d in &decls {
+        if !d.emit {
+            continue;
+        }
         let _ = writeln!(w, "{}", node_record(d));
     }
 
@@ -416,60 +652,76 @@ fn scan(
     // under it (methods under self type, trait methods under trait, enum
     // variants under enum).
     for d in &decls {
-        if let Some(pid) = state.struct_id.get(&d.parent) {
+        if !d.emit {
+            continue;
+        }
+        if let Some(pid) = state.struct_id.get(&d.parent).cloned() {
             rec(
-                &mut w,
+                w,
                 Rec::Contains {
-                    from: pid.clone(),
-                    to: d.id.clone(),
+                    from: state.endpoint(&pid),
+                    to: state.endpoint(&d.id),
                 },
             );
         }
     }
 
     // `impl Trait for Self`: Uses to a project trait, UnresolvedUse to a
-    // foreign one. Only when the self type is a project struct.
+    // foreign one. Only when the self type is a project struct that is part of
+    // the emitted stream.
     let impl_edges = std::mem::take(&mut state.impl_edges);
     for ie in &impl_edges {
         let Some(from) = state.struct_id.get(&ie.self_fqn).cloned() else {
             continue;
         };
-        if let Some(to) = state.struct_id.get(&ie.trait_fqn) {
+        if !state.emitted_id.contains(&from) {
+            continue;
+        }
+        if let Some(to) = state.struct_id.get(&ie.trait_fqn).cloned() {
             rec(
-                &mut w,
+                w,
                 Rec::Uses {
-                    from: from.clone(),
-                    to: to.clone(),
+                    from: state.endpoint(&from),
+                    to: state.endpoint(&to),
                 },
             );
         } else {
-            emit_unresolved(&mut state, &mut w, &ie.trait_fqn, "external");
+            let from_ep = state.endpoint(&from);
+            emit_unresolved(state, w, &ie.trait_fqn, "external");
             rec(
-                &mut w,
+                w,
                 Rec::UnresolvedUse {
-                    from,
+                    from: from_ep,
                     to: ie.trait_fqn.clone(),
                 },
             );
         }
     }
 
-    // ── Pass 2: edge records from a syntax walk of every project file. ──
-    for fid in &files {
-        let path = path_of(&ctx, *fid);
-        if path_excluded(&path, &excludes) {
-            continue;
+    // ── Pass 2: edge records from a syntax walk of every emitted file. ──
+    {
+        let eps = Endpoints {
+            id_by_source: &state.id_by_source,
+            struct_sources: &state.struct_sources,
+            id_fqn: &state.id_fqn,
+            emitted_id: &state.emitted_id,
+        };
+        for fid in &files {
+            if !emitted_file(fid) {
+                continue;
+            }
+            let _ = ctx.db.file_text(*fid).text(ctx.db);
+            walk_file(&ctx, *fid, &eps, &mut state.unresolved_seen, w);
         }
-        let _ = ctx.db.file_text(*fid).text(ctx.db);
-        walk_file(&ctx, *fid, &mut state, &mut w);
     }
     let _ = w.flush();
-    Ok(())
+    Ok(crate_count)
 }
 
-fn push_decl(state: &mut State, decls: &mut Vec<Decl>, d: Decl) {
+fn push_decl(state: &mut State, decls: &mut Vec<Decl>, mut d: Decl, emit: bool) {
     // Ids are assigned later, in sorted (path, start) order, for deterministic
     // output. Until then the decl carries an empty id.
+    d.emit = emit;
     decls.push(d);
     let _ = state;
 }
@@ -502,12 +754,139 @@ fn node_record(d: &Decl) -> String {
     serde_json::to_string(&rec).unwrap()
 }
 
-// ── workspace load ────────────────────────────────────────────────────
+// ── workspace discovery ───────────────────────────────────────────────
 
-fn load_workspace_at(
+/// Directory names never descended into by the all-manifest discovery walk
+/// (phase-05 task-3 PART 1): a `Cargo.toml` inside any of them is never a scan
+/// root. Matched on a whole path component, so a file named `target.rs` or a
+/// directory named `targets` is unaffected.
+const DISCOVERY_EXCLUDED_DIRS: &[&str] = &["target", "vendor", "node_modules", ".worktrees"];
+
+fn is_discovery_excluded_dir(name: &str) -> bool {
+    DISCOVERY_EXCLUDED_DIRS.contains(&name)
+}
+
+/// True when `path` carries a discovery-excluded directory component BELOW
+/// `root`. The exclusion is relative to the scan root, so a project checked out
+/// under a `.worktrees/` directory (the apg project flow) is not itself
+/// excluded, while a `target/`, `vendor/`, `node_modules/` or nested
+/// `.worktrees/` tree inside it is (phase-05 task-3 PART 2).
+fn under_excluded_tree(path: &str, root: &std::path::Path) -> bool {
+    let p = std::path::Path::new(path);
+    let rel = p.strip_prefix(root).unwrap_or(p);
+    rel.components().any(|c| match c {
+        std::path::Component::Normal(s) => s.to_str().is_some_and(is_discovery_excluded_dir),
+        _ => false,
+    })
+}
+
+/// Every directory at or below `root` that holds a `Cargo.toml`, with the
+/// generated/dependency/other-tree directories pruned (phase-05 task-1/-3).
+/// Nested non-workspace crates are found; members of a discovered workspace are
+/// found too and deduped by the load loop in [`run`].
+fn discover_manifest_dirs(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    let mut stack: Vec<std::path::PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if dir.join("Cargo.toml").is_file() {
+            out.push(dir.clone());
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            if !ft.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            // `.git` is pruned too — it can never hold a manifest and walking it
+            // is pure overhead; it is not part of the task's exclusion set.
+            if is_discovery_excluded_dir(&name) || name == ".git" {
+                continue;
+            }
+            stack.push(entry.path());
+        }
+    }
+    // Shallow-first: a workspace root is loaded before its members, so the
+    // members are then covered (and skipped) by the workspace that loaded them.
+    out.sort_by(|a, b| {
+        a.components()
+            .count()
+            .cmp(&b.components().count())
+            .then_with(|| a.cmp(b))
+    });
+    out.dedup();
+    out
+}
+
+/// The root files of every local crate the loaded workspace resolved. Used to
+/// dedupe discovered projects by manifest root: a candidate directory a
+/// previously loaded workspace already covers is never re-loaded as a top-level
+/// project (phase-05 task-2).
+fn local_crate_root_files(db: &RootDatabase, vfs: &Vfs) -> Vec<std::path::PathBuf> {
+    Crate::all(db)
+        .into_iter()
+        .filter(|k| k.origin(db).is_local())
+        .map(|k| path_of_vfs(vfs, k.root_file(db)))
+        .filter(|p| !p.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect()
+}
+
+/// The absolute target set read from the pinned `--targets <file>` hand-off
+/// (phase-02 task-9). An absent flag, a missing/unreadable file, or an empty
+/// file yields `None` — "no emission filter", the byte-identical full scan.
+fn read_target_set(path: Option<&str>) -> Option<HashSet<std::path::PathBuf>> {
+    let path = path?;
+    let Ok(text) = std::fs::read_to_string(path) else {
+        eprintln!("warning: could not read targets {path}; scanning unfiltered");
+        return None;
+    };
+    let set: HashSet<std::path::PathBuf> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let p = std::path::PathBuf::from(l);
+            // The VFS exposes canonical paths; normalize the target list the
+            // same way so a symlinked scan root still matches.
+            std::fs::canonicalize(&p).unwrap_or(p)
+        })
+        .collect();
+    if set.is_empty() {
+        None
+    } else {
+        Some(set)
+    }
+}
+
+/// The pinned per-language native-artifact location for the Rust frontend,
+/// `<cache-dir>/rust/<cache-key>/` (phase-02 task-9 NATIVE-ARTIFACT RULE).
+/// rust-analyzer resolves through an in-process salsa database, so the
+/// directory carries no separate on-disk compiler cache; creating it makes the
+/// shared store's Rust location exist and keeps it keyed by the global cache
+/// key, so a key drift lands in a fresh directory.
+fn ensure_artifact_dir(cache_dir: Option<&str>, cache_key: Option<&str>) {
+    let Some(dir) = cache_dir else { return };
+    let mut p = std::path::PathBuf::from(dir);
+    p.push("rust");
+    if let Some(k) = cache_key {
+        p.push(k);
+    }
+    if let Err(e) = std::fs::create_dir_all(&p) {
+        eprintln!(
+            "warning: could not create rust artifact dir {}: {e}",
+            p.display()
+        );
+    }
+}
+
+fn load_project(
     root: &std::path::Path,
     no_build_scripts: bool,
-) -> Result<(RootDatabase, Vfs)> {
+) -> Result<(RootDatabase, Vfs, HashMap<String, String>)> {
     let progress = |_msg: String| {};
     let abs = AbsPathBuf::assert_utf8(root.to_path_buf());
     let manifest = ProjectManifest::discover_single(&abs)?;
@@ -538,8 +917,7 @@ fn load_workspace_at(
             eprintln!("warning: workspace load failed ({e}); retrying without sysroot");
             cargo_config.sysroot = None;
             let manifest = ProjectManifest::discover_single(&abs)?;
-            let ws = ProjectWorkspace::load(manifest, &cargo_config, &progress)?;
-            ws
+            ProjectWorkspace::load(manifest, &cargo_config, &progress)?
         }
     };
 
@@ -561,14 +939,74 @@ fn load_workspace_at(
         }
     };
 
+    // The cargo PACKAGE identity per crate-root file, retained from the loaded
+    // project model before it is consumed by `load_workspace` (phase-05
+    // task-10). The target/display name rust-analyzer derives can differ from
+    // the package name (`[[bin]] name` vs `[package] name`), and the module
+    // prefix must carry the package identity.
+    let package_by_root = match &ws.kind {
+        ProjectWorkspaceKind::Cargo { cargo, .. } => package_roots(cargo),
+        _ => HashMap::new(),
+    };
+
     let extra_env: FxHashMap<String, Option<String>> = FxHashMap::default();
     let (db, vfs, _) = load_workspace(ws, &extra_env, &load_config)?;
-    Ok((db, vfs))
+    Ok((db, vfs, package_by_root))
+}
+
+/// Cargo package name by the crate-root file's absolute path, for every target
+/// of every package the loaded workspace resolved (phase-05 task-10). The map
+/// also covers dependency packages; only the local crates' roots are ever
+/// consulted (see [`package_prefix_map`]).
+fn package_roots(cargo: &CargoWorkspace) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> = HashMap::new();
+    for pkg in cargo.packages() {
+        let data = &cargo[pkg];
+        for target in &data.targets {
+            out.insert(cargo[*target].root.to_string(), data.name.clone());
+        }
+    }
+    out
+}
+
+/// The module-prefix override for one loaded project: crate-root path -> cargo
+/// package name, for every local crate whose package has EXACTLY ONE local
+/// crate target (phase-05 task-10). A package with several targets keeps the
+/// display-name fallback, so a lib + bin package does not collapse both crates
+/// onto one module FQN.
+fn package_prefix_map(ctx: &Ctx<'_>, crates: &[Crate]) -> HashMap<String, String> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for k in crates {
+        let root = path_of(ctx, k.root_file(ctx.db));
+        if let Some(pkg) = ctx.package_by_root.get(&root) {
+            *counts.entry(pkg.as_str()).or_insert(0) += 1;
+        }
+    }
+    let mut prefix: HashMap<String, String> = HashMap::new();
+    for k in crates {
+        let root = path_of(ctx, k.root_file(ctx.db));
+        if let Some(pkg) = ctx.package_by_root.get(&root) {
+            if counts.get(pkg.as_str()).copied() == Some(1) {
+                prefix.insert(root, pkg.clone());
+            }
+        }
+    }
+    prefix
 }
 
 // ── FQN / path helpers ────────────────────────────────────────────────
 
 fn crate_prefix(ctx: &Ctx<'_>, krate: Crate) -> String {
+    // Prefer the cargo PACKAGE name (phase-05 task-10) for a crate whose
+    // package maps to a single local target: the target/display name can be the
+    // `[[bin]]` name rather than the package identity (`rustfrontend` vs
+    // `apg-rustfrontend`). Falls back to the display-name-then-root-module-name
+    // chain for synthetic/no-manifest crates, multi-target packages, and
+    // foreign crates.
+    let root = path_of(ctx, krate.root_file(ctx.db));
+    if let Some(pkg) = ctx.package_prefix.get(&root) {
+        return pkg.clone();
+    }
     if let Some(display) = krate.display_name(ctx.db) {
         return display.to_string();
     }
@@ -604,8 +1042,11 @@ fn within_module_limit(ctx: &Ctx<'_>, krate: Crate, module_dirs: &[String]) -> b
 }
 
 fn path_of(ctx: &Ctx<'_>, file_id: FileId) -> String {
-    ctx.vfs
-        .file_path(file_id)
+    path_of_vfs(ctx.vfs, file_id)
+}
+
+fn path_of_vfs(vfs: &Vfs, file_id: FileId) -> String {
+    vfs.file_path(file_id)
         .as_path()
         .map(|p| p.to_string())
         .unwrap_or_default()
@@ -629,12 +1070,12 @@ fn source_key<A: AstNode>(ctx: &Ctx<'_>, f: InFile<A>) -> Option<(String, u32)> 
     Some((path, u32::from(f.value.syntax().text_range().start())))
 }
 
+/// A located item's span: `(path, start, end, start_line, end_line, src_key)`.
+type ItemLoc = (String, u32, u32, u32, u32, (String, u32));
+
 /// (path, start, end, start_line, end_line, src_key) from a real-file item's
 /// span. Macro-generated items return `None` and are skipped.
-fn item_loc<A: AstNode>(
-    ctx: &Ctx<'_>,
-    f: InFile<A>,
-) -> Option<(String, u32, u32, u32, u32, (String, u32))> {
+fn item_loc<A: AstNode>(ctx: &Ctx<'_>, f: InFile<A>) -> Option<ItemLoc> {
     let hir::HirFileId::FileId(real) = f.file_id else {
         return None;
     };
@@ -671,6 +1112,7 @@ fn fn_decl(ctx: &Ctx<'_>, f: Function, parent: &str) -> Option<Decl> {
         start_line: sl,
         end_line: el,
         src_key: key,
+        emit: false,
     })
 }
 
@@ -690,6 +1132,7 @@ fn adt_decl(ctx: &Ctx<'_>, adt: Adt, parent: &str) -> Option<Decl> {
         start_line: sl,
         end_line: el,
         src_key: key,
+        emit: false,
     })
 }
 
@@ -709,6 +1152,7 @@ fn variant_decl(ctx: &Ctx<'_>, v: hir::EnumVariant, parent: &str) -> Option<Decl
         start_line: sl,
         end_line: el,
         src_key: key,
+        emit: false,
     })
 }
 
@@ -728,6 +1172,7 @@ fn trait_decl(ctx: &Ctx<'_>, t: Trait, parent: &str) -> Option<Decl> {
         start_line: sl,
         end_line: el,
         src_key: key,
+        emit: false,
     })
 }
 
@@ -760,7 +1205,14 @@ fn adt_self_fqn(ctx: &Ctx<'_>, adt: Adt) -> Option<String> {
     ))
 }
 
-fn process_impl(ctx: &Ctx<'_>, imp: Impl, mod_fqn: &str, state: &mut State, decls: &mut Vec<Decl>) {
+fn process_impl(
+    ctx: &Ctx<'_>,
+    imp: Impl,
+    mod_fqn: &str,
+    state: &mut State,
+    decls: &mut Vec<Decl>,
+    crate_emit: bool,
+) {
     // Builtin derive impls are macro-generated — skip (the source items are
     // the declarations).
     if imp.source(ctx.db).is_none() {
@@ -789,7 +1241,7 @@ fn process_impl(ctx: &Ctx<'_>, imp: Impl, mod_fqn: &str, state: &mut State, decl
     for item in imp.items(ctx.db) {
         if let AssocItem::Function(f) = item {
             if let Some(d) = fn_decl(ctx, f, &parent) {
-                push_decl(state, decls, d);
+                push_decl(state, decls, d, crate_emit);
             }
         }
     }
@@ -872,26 +1324,23 @@ impl LineIndex {
 
 // ── pass 2: per-file syntax walk for edges ────────────────────────────
 
-fn walk_file(ctx: &Ctx<'_>, file_id: FileId, state: &mut State, w: &mut impl Write) {
+fn walk_file(
+    ctx: &Ctx<'_>,
+    file_id: FileId,
+    eps: &Endpoints<'_>,
+    unresolved: &mut HashSet<String>,
+    w: &mut impl Write,
+) {
     let sf = ctx.sema.parse_guess_edition(file_id);
     let node = sf.syntax().clone();
-    walk_node(
-        ctx,
-        &node,
-        None,
-        &state.id_by_source,
-        &state.struct_sources,
-        &mut state.unresolved_seen,
-        w,
-    );
+    walk_node(ctx, &node, None, eps, unresolved, w);
 }
 
 fn walk_node(
     ctx: &Ctx<'_>,
     node: &syntax::SyntaxNode,
     cur: Option<String>,
-    id_by_source: &HashMap<(String, u32), String>,
-    struct_sources: &HashMap<(String, u32), String>,
+    eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
 ) {
@@ -904,32 +1353,16 @@ fn walk_node(
             .to_fn_def(&f)
             .and_then(|def| def.source(ctx.db))
             .and_then(|src| source_key(ctx, src))
-            .and_then(|k| id_by_source.get(&k).cloned())
+            .and_then(|k| eps.fn_id(&k))
             .or(cur);
         for child in node.children() {
-            walk_node(
-                ctx,
-                &child,
-                new_cur.clone(),
-                id_by_source,
-                struct_sources,
-                unresolved,
-                w,
-            );
+            walk_node(ctx, &child, new_cur.clone(), eps, unresolved, w);
         }
         return;
     }
-    if let Some(c) = current_item_id_for(ctx, struct_sources, node.clone()) {
+    if let Some(c) = current_item_id_for(ctx, eps, node.clone()) {
         for child in node.children() {
-            walk_node(
-                ctx,
-                &child,
-                Some(c.clone()),
-                id_by_source,
-                struct_sources,
-                unresolved,
-                w,
-            );
+            walk_node(ctx, &child, Some(c.clone()), eps, unresolved, w);
         }
         return;
     }
@@ -937,27 +1370,19 @@ fn walk_node(
     // Edge extraction for nodes directly in the current context.
     if let Some(c) = cur.as_ref() {
         if let Some(call) = ast::CallExpr::cast(node.clone()) {
-            handle_call(ctx, &call, c, id_by_source, struct_sources, unresolved, w);
+            handle_call(ctx, &call, c, eps, unresolved, w);
         } else if let Some(mc) = ast::MethodCallExpr::cast(node.clone()) {
-            handle_method_call(ctx, &mc, c, id_by_source, unresolved, w);
+            handle_method_call(ctx, &mc, c, eps, unresolved, w);
         } else if let Some(mac) = ast::MacroCall::cast(node.clone()) {
             handle_macro(ctx, &mac, c, unresolved, w);
         } else if let Some(ty) = ast::Type::cast(node.clone()) {
-            handle_type(ctx, &ty, c, struct_sources, unresolved, w);
+            handle_type(ctx, &ty, c, eps, unresolved, w);
         } else if let Some(re) = ast::RecordExpr::cast(node.clone()) {
-            handle_record(ctx, &re, c, id_by_source, struct_sources, unresolved, w);
+            handle_record(ctx, &re, c, eps, unresolved, w);
         }
     }
     for child in node.children() {
-        walk_node(
-            ctx,
-            &child,
-            cur.clone(),
-            id_by_source,
-            struct_sources,
-            unresolved,
-            w,
-        );
+        walk_node(ctx, &child, cur.clone(), eps, unresolved, w);
     }
 }
 
@@ -966,7 +1391,7 @@ fn walk_node(
 /// the struct itself).
 fn current_item_id_for(
     ctx: &Ctx<'_>,
-    struct_sources: &HashMap<(String, u32), String>,
+    eps: &Endpoints<'_>,
     node: syntax::SyntaxNode,
 ) -> Option<String> {
     let adt = if let Some(s) = ast::Struct::cast(node.clone()) {
@@ -975,15 +1400,14 @@ fn current_item_id_for(
         ctx.sema.to_enum_def(&s).map(Adt::Enum)
     } else if let Some(s) = ast::Union::cast(node.clone()) {
         ctx.sema.to_union_def(&s).map(Adt::Union)
-    } else if let Some(t) = ast::Trait::cast(node.clone()) {
-        let d = ctx.sema.to_trait_def(&t)?;
-        return source_key(ctx, d.source(ctx.db)?).and_then(|k| struct_sources.get(&k).cloned());
     } else {
-        return None;
+        let t = ast::Trait::cast(node.clone())?;
+        let d = ctx.sema.to_trait_def(&t)?;
+        return source_key(ctx, d.source(ctx.db)?).and_then(|k| eps.struct_id(&k));
     };
     let d = adt?;
     let src = d.source(ctx.db)?;
-    source_key(ctx, src).and_then(|k| struct_sources.get(&k).cloned())
+    source_key(ctx, src).and_then(|k| eps.struct_id(&k))
 }
 
 // ── edge handlers ─────────────────────────────────────────────────────
@@ -992,8 +1416,7 @@ fn handle_call(
     ctx: &Ctx<'_>,
     call: &ast::CallExpr,
     source: &str,
-    id_by_source: &HashMap<(String, u32), String>,
-    struct_sources: &HashMap<(String, u32), String>,
+    eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
 ) {
@@ -1003,16 +1426,16 @@ fn handle_call(
             let Some(path) = pe.path() else { return };
             match ctx.sema.resolve_path(&path) {
                 Some(PathResolution::Def(ModuleDef::Function(f))) => {
-                    emit_call(ctx, f, source, id_by_source, unresolved, w)
+                    emit_call(ctx, f, source, eps, unresolved, w)
                 }
                 Some(PathResolution::Def(ModuleDef::Adt(adt))) => {
-                    emit_type_use(ctx, adt, source, struct_sources, unresolved, w)
+                    emit_type_use(ctx, adt, source, eps, unresolved, w)
                 }
                 Some(PathResolution::Def(ModuleDef::EnumVariant(v))) => {
                     if let Some(key) = v
                         .source(ctx.db)
                         .and_then(|src| source_key(ctx, src))
-                        .and_then(|k| id_by_source.get(&k).cloned())
+                        .and_then(|k| eps.fn_id(&k))
                     {
                         edge(
                             w,
@@ -1065,12 +1488,12 @@ fn handle_method_call(
     ctx: &Ctx<'_>,
     call: &ast::MethodCallExpr,
     source: &str,
-    id_by_source: &HashMap<(String, u32), String>,
+    eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
 ) {
     match ctx.sema.resolve_method_call(call) {
-        Some(f) => emit_call(ctx, f, source, id_by_source, unresolved, w),
+        Some(f) => emit_call(ctx, f, source, eps, unresolved, w),
         None => {
             let name = call
                 .name_ref()
@@ -1091,7 +1514,7 @@ fn handle_macro(
     let name = mac
         .path()
         .map(|p| p.syntax().text().to_string())
-        .unwrap_or_else(|| String::new());
+        .unwrap_or_default();
     if name.is_empty() {
         return;
     }
@@ -1109,7 +1532,7 @@ fn handle_type(
     ctx: &Ctx<'_>,
     ty: &ast::Type,
     source: &str,
-    struct_sources: &HashMap<(String, u32), String>,
+    eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
 ) {
@@ -1120,21 +1543,20 @@ fn handle_type(
     let Some(adt) = resolved.autoderef(ctx.db).find_map(|t| t.as_adt()) else {
         return;
     };
-    emit_type_use(ctx, adt, source, struct_sources, unresolved, w);
+    emit_type_use(ctx, adt, source, eps, unresolved, w);
 }
 
 fn handle_record(
     ctx: &Ctx<'_>,
     rec_expr: &ast::RecordExpr,
     source: &str,
-    id_by_source: &HashMap<(String, u32), String>,
-    struct_sources: &HashMap<(String, u32), String>,
+    eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
 ) {
     if let Some(path) = rec_expr.path() {
         if let Some(PathResolution::Def(ModuleDef::Adt(adt))) = ctx.sema.resolve_path(&path) {
-            emit_type_use(ctx, adt, source, struct_sources, unresolved, w);
+            emit_type_use(ctx, adt, source, eps, unresolved, w);
             return;
         }
     }
@@ -1144,7 +1566,7 @@ fn handle_record(
                 if let Some(key) = s
                     .source(ctx.db)
                     .and_then(|src| source_key(ctx, src))
-                    .and_then(|k| id_by_source.get(&k).cloned())
+                    .and_then(|k| eps.struct_id(&k))
                 {
                     edge(
                         w,
@@ -1159,7 +1581,7 @@ fn handle_record(
                 if let Some(key) = v
                     .source(ctx.db)
                     .and_then(|src| source_key(ctx, src))
-                    .and_then(|k| id_by_source.get(&k).cloned())
+                    .and_then(|k| eps.struct_id(&k))
                 {
                     edge(
                         w,
@@ -1180,18 +1602,18 @@ fn emit_call(
     ctx: &Ctx<'_>,
     f: Function,
     source: &str,
-    id_by_source: &HashMap<(String, u32), String>,
+    eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
 ) {
     let key = f.source(ctx.db).and_then(|src| source_key(ctx, src));
     if let Some(key) = key {
-        if let Some(tgt) = id_by_source.get(&key) {
+        if let Some(tgt) = eps.fn_id(&key) {
             edge(
                 w,
                 Rec::Calls {
                     from: source.to_string(),
-                    to: tgt.clone(),
+                    to: tgt,
                 },
             );
             return;
@@ -1213,18 +1635,18 @@ fn emit_type_use(
     ctx: &Ctx<'_>,
     adt: Adt,
     source: &str,
-    struct_sources: &HashMap<(String, u32), String>,
+    eps: &Endpoints<'_>,
     unresolved: &mut HashSet<String>,
     w: &mut impl Write,
 ) {
     let key = adt.source(ctx.db).and_then(|src| source_key(ctx, src));
     if let Some(key) = key {
-        if let Some(tgt) = struct_sources.get(&key) {
+        if let Some(tgt) = eps.struct_id(&key) {
             edge(
                 w,
                 Rec::Uses {
                     from: source.to_string(),
-                    to: tgt.clone(),
+                    to: tgt,
                 },
             );
             return;
