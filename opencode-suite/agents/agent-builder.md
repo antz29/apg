@@ -138,7 +138,31 @@ never a mutation place.
   they prompt for explicit human approval before running. (Git commands run
   with cwd inside the worktree via the allowed `cd *`; they need no path
   variants.)
-- **Build gates** as exact, verified bash patterns (the repo's real commands).
+- **Build gates** as exact, verified bash patterns (the repo's real commands),
+  plus these three rules:
+  - **A documented invocation must be runnable.** When the repo documents named
+    cargo aliases (e.g. `cargo test-unit`), grant each alias name explicitly —
+    a hyphenated name is NOT matched by `cargo test *`, and an agent whose
+    documented command is denied burns a turn and then improvises, which is
+    exactly what a deny-by-default grant is meant to prevent. Grant the bare
+    name and its `… *` argument variant.
+  - **Never grant an env-prefixed command** (`FOO=1 cargo build`): the command
+    no longer matches the `cargo …` pattern, and a glob like `FOO=* cargo build`
+    invites smuggling (`FOO=x; rm … cargo build`). When a build needs an env
+    var, use a form the grant already covers — cargo's own `--config`
+    (`cargo build --config 'env.FOO="1"'` matches `cargo build *`) — or the
+    pinned gate entry point below.
+  - **A multi-command gate is ONE coordinator-owned entry point.** When the
+    repo's done-contract is a fixed sequence (fmt → check → clippy → build →
+    test), express it as a single script (`set -e`, stops at the first failure,
+    e.g. `scripts/gate.sh`) and grant the invocation as an exact bash pattern
+    (`scripts/gate.sh`, `scripts/gate.sh *`) — granting **run, not edit**: the
+    script's directory stays out of the agent's edit scope, so the sequence
+    cannot be rewritten. Chaining is banned, so without this the agent runs the
+    steps as N separate calls and nothing enforces that it ran them all. A cargo
+    alias cannot do it (an alias value is a cargo subcommand; arbitrary-command
+    aliases remain an unimplemented proposal, rust-lang/cargo#6575) and
+    `make`/`just` add a tool dependency the repo may not have.
 - The read-only apg suite — `apg_query`, `apg_find_symbol`, `apg_modules`,
   `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`,
   `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
@@ -180,6 +204,16 @@ never a mutation place.
   (`apg_node`/`apg_edge`/`apg_plan_add`).** It either attaches/approves
   Feedback or marks the phase complete; it never writes code and never marks
   tasks done.
+- **Verification surface (interview; default = static).** By default the
+  reviewer holds no build/run surface, so a phase's gate numbers (test counts,
+  wall times, "e2e green") are *claims* it cannot check. If the repo wants them
+  *verified*, grant the read-only execution surface only — the test tiers
+  (`cargo test`, `cargo test tests::…`) and the pinned gate entry point
+  (`scripts/gate.sh`) — and never free-form `cargo build`/`clippy`/`fmt`, which
+  would let it rewrite the gate's meaning; the pinned entry point is safe
+  precisely because its contents are reviewed. State in its body that it runs
+  the gate to check the implementer's numbers rather than trusting them. No
+  edit, no commit, no scan, ever.
 - **Never actions Feedback.** The reviewer attaches, resolves, or rejects
   items; the implementing writer returns an ACTIONED/WONT-FIX claim and the
   **coordinator** performs the shallow claim-vs-change check and then actions
