@@ -43,6 +43,18 @@ permission:
     "apg/layers/**": deny
     "apg/.worktrees/*/apg/.trans/**": deny
     "apg/.worktrees/*/apg/layers/**": deny
+  glob:
+    "*": allow
+    "apg/.trans/**": deny
+    "apg/layers/**": deny
+    "apg/.worktrees/*/apg/.trans/**": deny
+    "apg/.worktrees/*/apg/layers/**": deny
+  grep:
+    "*": allow
+    "apg/.trans/**": deny
+    "apg/layers/**": deny
+    "apg/.worktrees/*/apg/.trans/**": deny
+    "apg/.worktrees/*/apg/layers/**": deny
   external_directory:
     "*": deny
     "/tmp/**": allow
