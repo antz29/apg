@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.e2e-final-gate-only",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.tier-separable-runs",
+      "properties": {}
     }
   ],
   "in": [
