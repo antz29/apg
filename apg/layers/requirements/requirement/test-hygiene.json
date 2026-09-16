@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.test-tier-definitions",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.fast-default-suite",
+      "properties": {}
     }
   ],
   "in": [
