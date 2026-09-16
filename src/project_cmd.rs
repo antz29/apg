@@ -662,307 +662,6 @@ mod tests {
     // identity correct in worktree vs main.
     // ------------------------------------------------------------------
 
-    #[test]
-    fn start_creates_worktree_branch_and_branch_db() {
-        let repo = Repo::new("start-ac");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        let main_sha = repo.commit_all("seed code");
-
-        let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
-        assert_eq!(wt, repo.project_worktree_dir("foo").canonicalize().unwrap());
-        assert!(wt.is_dir());
-
-        // The branch exists, off the default branch (main), at main's tip.
-        let main_repo = git2::Repository::open(&repo.root).unwrap();
-        let branch = main_repo
-            .find_branch("foo", git2::BranchType::Local)
-            .unwrap();
-        assert!(!branch.is_head());
-        let branch_commit = branch.get().peel_to_commit().unwrap();
-        assert_eq!(branch_commit.id().to_string(), main_sha);
-
-        // The worktree's HEAD is the project branch.
-        let wt_repo = git2::Repository::open(&wt).unwrap();
-        assert_eq!(wt_repo.head().unwrap().shorthand(), Some("foo"));
-
-        // The branch DB exists after start (AC-1).
-        assert!(wt.join("apg").join(specs::TRANS).join("db.lbug").exists());
-
-        // Identity correct in worktree vs main (R7).
-        let id_wt = git::repo_identity(&wt.join(specs::LAYOUT)).unwrap();
-        assert!(id_wt.is_worktree);
-        assert_eq!(id_wt.branch.as_deref(), Some("foo"));
-        assert_eq!(id_wt.default_branch.as_deref(), Some("main"));
-        let id_main = git::repo_identity(&repo.apg_root()).unwrap();
-        assert!(!id_main.is_worktree);
-        assert_eq!(id_main.branch.as_deref(), Some("main"));
-
-        // In-context re-run: no-op, prints the path, still Ok.
-        let again = project_start_at(&wt.join(specs::LAYOUT), "foo", Some(&start_scan)).unwrap();
-        assert_eq!(again, wt);
-
-        // From the main checkout the same name is a hard collision.
-        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
-        assert!(format!("{err:#}").contains("already exists"), "{err:#}");
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_branches_off_the_repo_default_not_literal_main() {
-        // The default branch is the main checkout's symbolic HEAD (fallback:
-        // main). The project branch must sit exactly on it.
-        let repo = Repo::new("start-default");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        repo.commit_all("seed code");
-        // Rename the default to `trunk` (like a repo whose default is trunk).
-        let main_repo = git2::Repository::open(&repo.root).unwrap();
-        let mut branch = main_repo
-            .find_branch("main", git2::BranchType::Local)
-            .unwrap();
-        branch.rename("trunk", true).unwrap();
-        main_repo.set_head("refs/heads/trunk").unwrap();
-
-        let _wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
-        let head = main_repo.head().unwrap().peel_to_commit().unwrap();
-        let branch = main_repo
-            .find_branch("foo", git2::BranchType::Local)
-            .unwrap();
-        assert_eq!(
-            branch.get().peel_to_commit().unwrap().id(),
-            head.id(),
-            "project branch must sit on the default branch tip"
-        );
-        testutil::remove(&repo);
-    }
-
-    // ------------------------------------------------------------------
-    // task-6 AC (unit): every refusal exits 1 naming the actual state and
-    // one actionable fix command; run-from-worktree hard-fails.
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn start_refuses_non_git_with_apg_init_suggestion() {
-        let dir = std::env::temp_dir().join(format!("apg-start-nongit-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
-        let err = project_start_at(&dir.join("apg"), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("git repository"), "{msg}");
-        assert!(msg.contains("apg init"), "{msg}");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn start_refuses_unborn_head() {
-        let root = std::env::temp_dir().join(format!("apg-start-unborn-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let mut opts = git2::RepositoryInitOptions::new();
-        opts.initial_head("refs/heads/main");
-        git2::Repository::init_opts(&root, &opts).unwrap();
-        std::fs::create_dir_all(root.join("apg").join(specs::TRANS)).unwrap();
-        let err = project_start_at(&root.join("apg"), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("unborn HEAD"), "{msg}");
-        assert!(msg.contains("commit an initial state"), "{msg}");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn start_refuses_inside_a_worktree() {
-        let repo = Repo::new("start-wt-escape");
-        repo.start_project("foo");
-        let wt_apg = repo.project_apg_root("foo");
-        let err = project_start_at(&wt_apg, "bar", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("one project at a time"), "{msg}");
-        assert!(msg.contains("main checkout"), "{msg}");
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_refuses_dirty_main() {
-        let repo = Repo::new("start-dirty");
-        repo.write("junk.txt", "untracked junk");
-        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("dirty"), "{msg}");
-        assert!(msg.contains("git status"), "{msg}");
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_refuses_invalid_names_never_sanitized() {
-        let repo = Repo::new("start-names");
-        for bad in ["", "a/b", "bad name", "bad~name", "..", "HEAD", ".lock"] {
-            let err = project_start_at(&repo.apg_root(), bad, Some(&start_scan)).unwrap_err();
-            let msg = format!("{err:#}");
-            assert!(
-                msg.contains("refused") && (msg.contains("not a valid") || msg.contains("empty")),
-                "name `{bad}` must refuse with a validity message: {msg}"
-            );
-        }
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_refuses_branch_without_worktree_collision() {
-        let repo = Repo::new("start-collision-branch");
-        let main_repo = git2::Repository::open(&repo.root).unwrap();
-        let head = main_repo.head().unwrap().peel_to_commit().unwrap();
-        main_repo.branch("foo", &head, false).unwrap();
-        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("already exists"), "{msg}");
-        assert!(msg.contains("no worktree hosts it"), "{msg}");
-        assert!(msg.contains("git branch -D foo"), "{msg}");
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_refuses_branch_checked_out_in_main_checkout() {
-        // Bootstrap-style: the branch is the main checkout's HEAD.
-        let repo = Repo::new("start-collision-head");
-        let main_repo = git2::Repository::open(&repo.root).unwrap();
-        let head = main_repo.head().unwrap().peel_to_commit().unwrap();
-        main_repo.branch("foo", &head, false).unwrap();
-        main_repo.set_head("refs/heads/foo").unwrap();
-        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("already exists"), "{msg}");
-        assert!(msg.contains("checked out in the main checkout"), "{msg}");
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_refuses_branch_checked_out_in_another_worktree() {
-        let repo = Repo::new("start-collision-wt");
-        repo.start_project("foo");
-        // From the main checkout, starting `foo` again: checked out in the
-        // project's worktree.
-        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("already exists"), "{msg}");
-        assert!(msg.contains("checked out in worktree"), "{msg}");
-        assert!(
-            msg.contains(
-                repo.project_worktree_dir("foo")
-                    .display()
-                    .to_string()
-                    .as_str()
-            ),
-            "{msg}"
-        );
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_refuses_dir_that_is_not_a_worktree() {
-        let repo = Repo::new("start-collision-dir");
-        // A plain directory at the worktree location (no branch, no worktree).
-        std::fs::create_dir_all(repo.project_worktree_dir("foo")).unwrap();
-        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("not a project worktree"), "{msg}");
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_self_heals_missing_worktrees_gitignore_entry() {
-        // A repo whose .gitignore dropped the worktrees entry (or was
-        // cloned before it existed): start must scaffold it + commit the
-        // scaffold (the main checkout stays clean), then proceed.
-        let repo = Repo::new("start-selfheal");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        repo.write(".gitignore", "apg/.trans/\n");
-        repo.commit_all("drop worktrees ignore");
-        let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
-        assert!(wt.is_dir());
-        // The entry is back in the main checkout's .gitignore — committed,
-        // so the main checkout is clean again (a later start would refuse a
-        // dirty main).
-        let ignore = std::fs::read_to_string(repo.root.join(".gitignore")).unwrap();
-        assert!(ignore.contains("apg/.worktrees/"), "{ignore}");
-        assert!(repo.is_clean(), "self-heal must commit the scaffold");
-        // The worktree (checked out from the scaffolded HEAD) carries it too.
-        let wt_ignore = std::fs::read_to_string(wt.join(".gitignore")).unwrap();
-        assert!(wt_ignore.contains("apg/.worktrees/"), "{wt_ignore}");
-        testutil::remove(&repo);
-    }
-
-    // ------------------------------------------------------------------
-    // R10 version gate on start (task-3/task-5): blocks — never warns —
-    // on missing version and on major/minor mismatch in either direction,
-    // with upgrade guidance; a patch diff proceeds.
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn start_blocks_unversioned_layout_with_init_guidance() {
-        let repo = Repo::new("start-gate-unversioned");
-        set_layout_version(&repo, None);
-        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        for needle in [
-            "no layout version",
-            "apg init",
-            "re-run `apg project start foo`",
-            "apg-upgrade.md",
-        ] {
-            assert!(msg.contains(needle), "{msg}");
-        }
-        // Nothing was created.
-        assert!(!repo.project_worktree_dir("foo").exists());
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_blocks_older_layout_with_upgrade_guidance() {
-        let repo = Repo::new("start-gate-older");
-        set_layout_version(&repo, Some(&older_minor_version()));
-        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("predates"), "{msg}");
-        assert!(msg.contains("apg init"), "{msg}");
-        assert!(msg.contains("apg-upgrade.md"), "{msg}");
-        assert!(!repo.project_worktree_dir("foo").exists());
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_blocks_newer_layout_with_upgrade_guidance() {
-        let repo = Repo::new("start-gate-newer");
-        set_layout_version(&repo, Some(&newer_minor_version()));
-        let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("NEWER apg"), "{msg}");
-        assert!(msg.contains("upgrade apg"), "{msg}");
-        assert!(msg.contains("apg init"), "{msg}");
-        assert!(msg.contains("apg-upgrade.md"), "{msg}");
-        assert!(!repo.project_worktree_dir("foo").exists());
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn start_proceeds_on_patch_diff_layout() {
-        let repo = Repo::new("start-gate-patch");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        set_layout_version(&repo, Some(&patch_shifted_version()));
-        let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
-        assert!(wt.is_dir(), "same major.minor must proceed");
-        testutil::remove(&repo);
-    }
-
     // ------------------------------------------------------------------
     // task-12 (e2e): start on main -> mutate -> verify -> merge -> main
     // rebuild; verify rejects unrealized planned nodes, dangling targets,
@@ -1040,121 +739,6 @@ mod tests {
             });
         }
         r
-    }
-
-    #[test]
-    fn merge_round_trip_start_mutate_verify_merge_rebuild() {
-        let repo = Repo::new("merge-e2e");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        repo.commit_all("seed code");
-
-        // start -> worktree + branch + branch DB (payload has only Store).
-        let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
-        let wt_apg = wt.join(specs::LAYOUT);
-
-        // mutate: author the spec (a durable node file -> auto-commits on the
-        // branch) and the plan (transient -> never commits), both through the
-        // funnel.
-        write_spec_node(&wt_apg);
-        let plan_path = wt_apg.join(specs::TRANS).join("plans").join("foo.jsonl");
-        artifacts::write_jsonl_and_reingest(&wt_apg, &plan_path, "foo", &plan_records(true))
-            .unwrap();
-        // The spec mutation auto-committed; the plan mutation committed
-        // nothing (R8 — .trans never commits).
-        let wt_repo = git2::Repository::open(&wt).unwrap();
-        let foo_tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
-        assert!(
-            foo_tip
-                .tree()
-                .unwrap()
-                .get_path(Path::new("apg/layers/requirements/requirement/timer.json"))
-                .is_ok(),
-            "spec node file must be committed on the project branch"
-        );
-        assert!(
-            foo_tip
-                .tree()
-                .unwrap()
-                .get_path(Path::new("apg/.trans/plans/foo.jsonl"))
-                .is_err(),
-            "plan JSONL must never be committed (.trans is transient)"
-        );
-
-        // verify rejects: unrealized planned node (dangling — no code at its
-        // FQN yet) AND unresolved feedback, in one refusal listing both.
-        let err = plan_cmd::plan_verify_at(&wt_apg, "foo").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("Widget"), "unrealized planned node: {msg}");
-        assert!(msg.contains("unresolved review feedback"), "{msg}");
-
-        // resolve the feedback (writer action + reviewer resolve, via the
-        // funnel on the transient plan).
-        let mut recs = plan_records(false);
-        recs.push(Record::Feedback {
-            fqn: "foo/feedback-1".into(),
-            body: "unresolved".into(),
-            status: "resolved".into(),
-            disposition: "fixed".into(),
-        });
-        recs.push(Record::Reviews {
-            from: "foo/feedback-1".into(),
-            to: "foo/plan.phase-01.task-1".into(),
-        });
-        artifacts::write_jsonl_and_reingest(&wt_apg, &plan_path, "foo", &recs).unwrap();
-
-        // realize the planned node: the implementer's code lands on the
-        // branch (payload gains Widget), is committed, and the branch DB is
-        // rebuilt with a scan.
-        let payload = testutil::code_payload(MOD, FILE, &["Store", "Widget"]);
-        std::fs::write(wt.join("code/seed.scan.jsonl"), payload).unwrap();
-        wt_commit(&wt, "code/seed.scan.jsonl", "implement Widget");
-        start_scan(&wt).unwrap();
-        let foo_tip = git2::Repository::open(&wt)
-            .unwrap()
-            .head()
-            .unwrap()
-            .peel_to_commit()
-            .unwrap()
-            .id();
-
-        // verify passes: planned node realized, all feedback resolved.
-        plan_cmd::plan_verify_at(&wt_apg, "foo").unwrap();
-
-        // merge from the main checkout: verify gate -> ff merge -> main
-        // rebuild (the rebuild is a plain unguarded scan on main).
-        project_merge_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
-
-        // The default branch now holds the project's tip.
-        let main_repo = git2::Repository::open(&repo.root).unwrap();
-        let main_tip = main_repo.head().unwrap().peel_to_commit().unwrap();
-        assert_eq!(
-            main_tip.id(),
-            foo_tip,
-            "main must fast-forward to the project tip"
-        );
-        // The main checkout carries the merged content (the spec node file).
-        assert!(
-            repo.root
-                .join("apg/layers/requirements/requirement/timer.json")
-                .exists()
-        );
-        assert!(repo.is_clean(), "merged main must be clean");
-
-        // Main rebuild: the main DB has the code (Store + Widget) and the
-        // merged spec; the transient plan did not cross the merge.
-        let main_apg = repo.apg_root();
-        let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
-        assert!(db.has_node("requirements.requirement.timer"));
-        assert!(db.has_node(format!("{MOD}.Store").as_str()));
-        assert!(db.has_node(format!("{MOD}.Widget").as_str()));
-        assert!(!db.has_node("foo/plan"), "transient plans never reach main");
-        drop(db);
-        // The main DB is fresh (scan_meta re-anchored by the rebuild scan).
-        assert!(!git::is_stale(&main_apg));
-        testutil::remove(&repo);
     }
 
     // ------------------------------------------------------------------
@@ -1824,637 +1408,6 @@ mod tests {
         fqns
     }
 
-    #[test]
-    fn dogfood_round_trip_re_materializes_tiers_start_author_scan_verify_merge() {
-        // A main checkout whose scanned code carries the structs the solution
-        // tier's implemented-by edges claim (SPEC §4.1: resolves → real).
-        let repo = Repo::new("dogfood-e2e");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(
-                MOD,
-                FILE,
-                &[
-                    "Store",
-                    "ProjectStart",
-                    "MutationGuard",
-                    "LayersSerializer",
-                    "PlanBridge",
-                    "InitVersionGate",
-                ],
-            ),
-        );
-        repo.commit_all("seed code");
-
-        // start: one command yields worktree + branch + branch DB, off the
-        // default branch (the dogfood flow the next feature will run).
-        let wt = project_start_at(&repo.apg_root(), "apg-projects", Some(&start_scan)).unwrap();
-        let wt_apg = wt.join(specs::LAYOUT);
-
-        // author: the re-materialized tiers land as node files through the
-        // write_project funnel (the exact surface `apg node`/`apg edge`
-        // use): membership guard → validate → atomic write → auto-commit →
-        // DB re-merge.
-        layers::write_project(&wt_apg, &apg_projects_tier_nodes(), &[]).unwrap();
-
-        // author: the transient plan (SPEC §5) — never committed, but it must
-        // ingest alongside the durable tiers.
-        let plan_path = wt_apg
-            .join(specs::TRANS)
-            .join("plans")
-            .join("apg-projects.jsonl");
-        artifacts::write_jsonl_and_reingest(
-            &wt_apg,
-            &plan_path,
-            "apg-projects",
-            &apg_projects_plan_records("apg-projects"),
-        )
-        .unwrap();
-
-        // The branch carries the node files (one auto-commit) and never the
-        // plan (R8 — .trans is transient).
-        let wt_repo = git2::Repository::open(&wt).unwrap();
-        let tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
-        assert!(
-            tip.tree()
-                .unwrap()
-                .get_path(Path::new("apg/layers/requirements/requirement/r1.json"))
-                .is_ok(),
-            "the tier node files must be committed on the project branch"
-        );
-        assert!(
-            tip.tree()
-                .unwrap()
-                .get_path(Path::new("apg/.trans/plans/apg-projects.jsonl"))
-                .is_err(),
-            "the plan JSONL must never be committed (.trans is transient)"
-        );
-
-        // scan: the branch DB is rebuilt from code + layers + .trans plans —
-        // the tiers appear and the transient plan ingests alongside them.
-        start_scan(&wt).unwrap();
-        let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
-        for f in expected_tier_fqns() {
-            assert!(db.has_node(&f), "branch DB must hold tier node `{f}`");
-        }
-        for f in [
-            "apg-projects/plan",
-            "apg-projects/plan.phase-01",
-            "apg-projects/plan.phase-01.task-1",
-            "apg-projects/plan.phase-01.task-5",
-        ] {
-            assert!(
-                db.has_node(f),
-                "branch DB must hold transient plan node `{f}`"
-            );
-        }
-        // The spine is real in the DB: 20 drives edges, the domain→solution
-        // realised-by hop, the 5 implemented-by claims onto scanned structs,
-        // and the User→Requirement contains tree.
-        let count = |q: &str| -> i64 {
-            db.q(q)
-                .unwrap()
-                .lines()
-                .last()
-                .unwrap_or_default()
-                .trim()
-                .parse()
-                .unwrap_or(0)
-        };
-        assert_eq!(
-            count("MATCH (:Requirement)-[:Drives]->(:DomainGroup) RETURN count(*)"),
-            20
-        );
-        assert_eq!(
-            count("MATCH (:DomainGroup)-[:RealisedBy]->(:System) RETURN count(*)"),
-            1
-        );
-        assert_eq!(
-            count("MATCH (:Container)-[:SpecImplementedBy]->(:Struct) RETURN count(*)"),
-            5
-        );
-        assert_eq!(
-            count("MATCH (:User)-[:Contains]->(:Requirement) RETURN count(*)"),
-            20
-        );
-        assert_eq!(
-            count("MATCH (:Note)-[:Details]->(:Requirement) RETURN count(*)"),
-            1
-        );
-        drop(db);
-
-        // verify: the coherence gate passes — no planned nodes, no feedback,
-        // and every implemented-by FQN is touched by a plan task.
-        plan_cmd::plan_verify_at(&wt_apg, "apg-projects").unwrap();
-
-        // merge: verify gate → fast-forward into the default branch → main
-        // rebuild (a plain unguarded scan on main).
-        project_merge_at(&repo.apg_root(), "apg-projects", Some(&start_scan)).unwrap();
-
-        // The default branch now holds the project's tip with the node files.
-        let main_repo = git2::Repository::open(&repo.root).unwrap();
-        assert_eq!(
-            main_repo.head().unwrap().peel_to_commit().unwrap().id(),
-            tip.id(),
-            "main must fast-forward to the project tip"
-        );
-        assert!(
-            repo.root
-                .join("apg/layers/solution/container/project-commands.json")
-                .exists(),
-            "the merged main checkout carries the tier node files"
-        );
-        assert!(repo.is_clean(), "merged main must be clean");
-
-        // Main rebuild: the main DB has the code + the re-materialized tiers;
-        // the transient plan did not cross the merge.
-        let main_apg = repo.apg_root();
-        let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
-        for f in [
-            "requirements.requirement.r1",
-            "requirements.requirement.r20",
-            "domain.group.change-sets",
-            "solution.system.apg-cli",
-            "fixture.mod.Store",
-            "fixture.mod.ProjectStart",
-        ] {
-            assert!(db.has_node(f), "main DB must hold `{f}` after the rebuild");
-        }
-        assert!(
-            !db.has_node("apg-projects/plan"),
-            "transient plans never reach main"
-        );
-        drop(db);
-        assert!(!git::is_stale(&main_apg));
-        testutil::remove(&repo);
-    }
-
-    // ------------------------------------------------------------------
-    // phase-5 task-4 (e2e): the FULL dogfood round trip — suite-tool
-    // lookups and mutations with cwd inside the worktree (SPEC §6: walk-up
-    // discovery finds the worktree's own apg/ + branch DB, even though the
-    // worktree lives INSIDE the main checkout's apg/), verify, merge, main
-    // rebuilds unguarded. The main checkout's apg/ is untouched by every
-    // in-worktree operation.
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn full_dogfood_round_trip_suite_tool_ops_inside_the_worktree() {
-        // A main checkout whose scanned code carries the structs the solution
-        // tier's implemented-by edges claim (resolves -> real), plus one
-        // function so the branch-DB lookups assert the
-        // module/struct/function triple from the scanned payload.
-        let repo = Repo::new("dogfood-full-e2e");
-        let mut payload = testutil::code_payload(
-            MOD,
-            FILE,
-            &[
-                "Store",
-                "ProjectStart",
-                "MutationGuard",
-                "LayersSerializer",
-                "PlanBridge",
-                "InitVersionGate",
-            ],
-        );
-        payload.push_str(&testutil::function_line("n7", MOD, "Lookup", FILE));
-        repo.write("code/seed.scan.jsonl", &payload);
-        repo.commit_all("seed code");
-
-        // A main-checkout scan first: the "untouched" assertions compare
-        // against a real main DB (its db.lbug + graph.jsonl must not move
-        // during in-worktree operation).
-        start_scan(&repo.root).unwrap();
-        let main_apg = repo.apg_root();
-        let main_db = artifacts::ArtifactDb::open(&main_apg).unwrap();
-        assert!(main_db.has_node(format!("{MOD}.Store").as_str()));
-        assert!(main_db.has_node(format!("{MOD}.Lookup").as_str()));
-        drop(main_db);
-        let main_db_bytes = std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap();
-        let main_graph_bytes =
-            std::fs::read(main_apg.join(specs::TRANS).join("graph.jsonl")).unwrap();
-        let main_tip = repo.head_sha();
-
-        // 1. start from main: one command yields worktree + branch + branch
-        // DB. The worktree lives INSIDE main's apg/ (at
-        // <main>/apg/.worktrees/round-trip), so walk-up discovery has a real
-        // choice to make — the worktree's own apg/ vs main's apg/ above it.
-        let wt = project_start_at(&repo.apg_root(), "round-trip", Some(&start_scan)).unwrap();
-        let wt_apg = wt.join(specs::LAYOUT);
-        assert!(wt.is_dir());
-        assert!(wt_apg.join(specs::TRANS).join("db.lbug").exists());
-        let id_wt = git::repo_identity(&wt_apg).unwrap();
-        assert!(id_wt.is_worktree);
-        assert_eq!(id_wt.branch.as_deref(), Some("round-trip"));
-        let id_main = git::repo_identity(&main_apg).unwrap();
-        assert!(!id_main.is_worktree);
-        assert_eq!(id_main.branch.as_deref(), Some("main"));
-
-        // 2. operate in-worktree: the suite tools shell out to `apg` with cwd
-        // inside the worktree, and the binary resolves the layout root by
-        // walking up from current_dir. Simulated here by passing a deep
-        // in-worktree cwd to the same walk-up (tests never mutate the
-        // process-global cwd outside the scan lock).
-        let deep_cwd = wt.join("code").join("deep");
-        std::fs::create_dir_all(&deep_cwd).unwrap();
-        let resolved = specs::find_apg_root(&deep_cwd)
-            .expect("walk-up from an in-worktree cwd must find a layout root");
-        assert_eq!(
-            resolved, wt_apg,
-            "walk-up must find the worktree's OWN apg/, not the main checkout's (its parent)"
-        );
-        assert_ne!(resolved, main_apg);
-        // Negative control: from a cwd deep inside MAIN, the same walk-up
-        // finds main's apg/ — the discovery is checkout-local, not global.
-        let main_deep = repo.root.join("code").join("deep");
-        std::fs::create_dir_all(&main_deep).unwrap();
-        assert_eq!(specs::find_apg_root(&main_deep), Some(main_apg.clone()));
-
-        // 2a. lookups — the `apg query`-equivalent: open the branch DB found
-        // by walk-up and query it; the module/struct/function triple from the
-        // scanned payload is there, and no authored tiers yet (the branch DB
-        // is the fresh start-scan).
-        let db = artifacts::ArtifactDb::open(&resolved).unwrap();
-        assert!(db.has_node(MOD), "module from the scanned payload");
-        assert!(
-            db.has_node(format!("{MOD}.Store").as_str()),
-            "struct from the scanned payload"
-        );
-        assert!(
-            db.has_node(format!("{MOD}.Lookup").as_str()),
-            "function from the scanned payload"
-        );
-        assert!(!db.has_node("requirements.requirement.r1"));
-        let count = |q: &str| -> i64 {
-            db.q(q)
-                .unwrap()
-                .lines()
-                .last()
-                .unwrap_or_default()
-                .trim()
-                .parse()
-                .unwrap_or(0)
-        };
-        assert_eq!(count("MATCH (n:Function) RETURN count(*)"), 1);
-        drop(db);
-
-        // 2b. mutations — the `apg node add`-equivalent (the exact node_cmd
-        // shape through layers::write_project) against the walk-up root:
-        // membership guard -> validate -> atomic write -> auto-commit -> DB
-        // re-merge, and a fresh query sees the new node.
-        layers::write_project(
-            &resolved,
-            &[nf(
-                "requirements",
-                "note",
-                "dogfood-log",
-                "The task-4 dogfood node: authored through the apg node add-equivalent surface with cwd inside the worktree.",
-                &[("kind", "background")],
-            )],
-            &[],
-        )
-        .unwrap();
-        let node_file = wt_apg
-            .join(layers::LAYERS_DIR)
-            .join("requirements")
-            .join("note")
-            .join("dogfood-log.json");
-        assert!(node_file.exists(), "{} must exist", node_file.display());
-        let db = artifacts::ArtifactDb::open(&resolved).unwrap();
-        assert!(
-            db.has_node("requirements.note.dogfood-log"),
-            "the mutation's DB re-merge must make the new node visible to a fresh query"
-        );
-        drop(db);
-        // The node file auto-committed on the project branch (R8).
-        let wt_repo = git2::Repository::open(&wt).unwrap();
-        assert!(
-            wt_repo
-                .head()
-                .unwrap()
-                .peel_to_commit()
-                .unwrap()
-                .tree()
-                .unwrap()
-                .get_path(Path::new("apg/layers/requirements/note/dogfood-log.json"))
-                .is_ok(),
-            "the node file must be committed on the project branch"
-        );
-
-        // 2c. author the re-materialized dogfood tiers (task-1 builder reused)
-        // + the transient plan (task-1 builder, project name parametrized).
-        layers::write_project(&resolved, &apg_projects_tier_nodes(), &[]).unwrap();
-        let plan_path = resolved
-            .join(specs::TRANS)
-            .join("plans")
-            .join("round-trip.jsonl");
-        let tip_before_plan = wt_repo.head().unwrap().peel_to_commit().unwrap().id();
-        artifacts::write_jsonl_and_reingest(
-            &resolved,
-            &plan_path,
-            "round-trip",
-            &apg_projects_plan_records("round-trip"),
-        )
-        .unwrap();
-        // The plan mutation commits nothing (.trans is transient — R8): the
-        // branch tip is unchanged and the plan JSONL never enters a commit.
-        assert!(plan_path.exists(), "the plan JSONL lands under .trans");
-        let wt_tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
-        assert_eq!(
-            wt_tip.id(),
-            tip_before_plan,
-            "plan mutations never commit on the project branch"
-        );
-        assert!(
-            wt_tip
-                .tree()
-                .unwrap()
-                .get_path(Path::new("apg/.trans/plans/round-trip.jsonl"))
-                .is_err(),
-            "the plan JSONL must never be committed"
-        );
-
-        // 2d. the MAIN checkout's apg/ is untouched by all of it: its db.lbug
-        // and graph.jsonl are byte-identical, no apg/layers was created there,
-        // and main's branch never moved.
-        assert_eq!(
-            std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap(),
-            main_db_bytes,
-            "main's db.lbug must be unchanged by the in-worktree operations"
-        );
-        assert_eq!(
-            std::fs::read(main_apg.join(specs::TRANS).join("graph.jsonl")).unwrap(),
-            main_graph_bytes,
-            "main's graph.jsonl must be unchanged by the in-worktree operations"
-        );
-        assert!(
-            !main_apg.join("layers").exists(),
-            "no apg/layers may be created under the main checkout"
-        );
-        assert_eq!(repo.head_sha(), main_tip, "main's branch must not move");
-
-        // 3. scan the worktree (the `apg scan`-equivalent rebuild, cwd inside
-        // the worktree): the branch DB now holds code + tiers + plan together.
-        start_scan(&wt).unwrap();
-        let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
-        for f in expected_tier_fqns() {
-            assert!(db.has_node(&f), "branch DB must hold tier node `{f}`");
-        }
-        assert!(db.has_node("requirements.note.dogfood-log"));
-        for f in [
-            "round-trip/plan",
-            "round-trip/plan.phase-01",
-            "round-trip/plan.phase-01.task-1",
-            "round-trip/plan.phase-01.task-5",
-        ] {
-            assert!(
-                db.has_node(f),
-                "branch DB must hold transient plan node `{f}`"
-            );
-        }
-        drop(db);
-        assert_eq!(
-            std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap(),
-            main_db_bytes,
-            "a worktree scan must not touch main's DB"
-        );
-
-        // 4. verify: the coherence gate passes green — no planned nodes, no
-        // feedback, and derived solution coverage holds.
-        plan_cmd::plan_verify_at(&wt_apg, "round-trip").unwrap();
-
-        // 5. merge from the main checkout: verify gate -> fast-forward -> main
-        // rebuilds unguarded (a plain scan of the main checkout).
-        project_merge_at(&repo.apg_root(), "round-trip", Some(&start_scan)).unwrap();
-
-        // The default branch holds the project tip; the merged main checkout
-        // carries the node files (the tiers + the dogfood node).
-        let main_repo = git2::Repository::open(&repo.root).unwrap();
-        assert_eq!(
-            main_repo.head().unwrap().peel_to_commit().unwrap().id(),
-            wt_tip.id(),
-            "main must fast-forward to the project tip"
-        );
-        assert!(
-            repo.root
-                .join("apg/layers/solution/container/project-commands.json")
-                .exists(),
-            "the merged main checkout carries the tier node files"
-        );
-        assert!(
-            repo.root
-                .join("apg/layers/requirements/note/dogfood-log.json")
-                .exists(),
-            "the merged main checkout carries the dogfood node"
-        );
-        assert!(repo.is_clean(), "merged main must be clean");
-
-        // Main rebuild: the main DB has the code + the merged tiers, does NOT
-        // hold the transient plan, and its scan_meta is fresh (not stale).
-        let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
-        for f in [
-            "requirements.requirement.r1",
-            "requirements.requirement.r20",
-            "requirements.note.dogfood-log",
-            "domain.group.change-sets",
-            "solution.system.apg-cli",
-            "solution.container.project-commands",
-            format!("{MOD}.Store").as_str(),
-            format!("{MOD}.Lookup").as_str(),
-            format!("{MOD}.ProjectStart").as_str(),
-        ] {
-            assert!(db.has_node(f), "main DB must hold `{f}` after the rebuild");
-        }
-        assert!(
-            !db.has_node("round-trip/plan"),
-            "transient plans never reach main"
-        );
-        drop(db);
-        assert!(!git::is_stale(&main_apg), "main's scan_meta must be fresh");
-        testutil::remove(&repo);
-    }
-
-    #[test]
-    fn merge_keeps_worktree_and_branch_cleanup_deletes_no_branch() {
-        // merge-self-cleanup: `apg project merge <name>` cleans up after
-        // itself. AC (a): a full verify → merge → main rebuild round-trip
-        // removes the merged project's worktree at
-        // `<main>/apg/.worktrees/<name>` and deletes its branch
-        // `refs/heads/<name>`; AC (b): a refused/failed merge leaves both
-        // untouched; AC (c): the default branch and the main checkout are
-        // preserved (never-touch-default-branch).
-        let repo = Repo::new("self-cleanup");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        repo.commit_all("seed code");
-
-        // Refusal path first (AC-b): a merge of a project whose verify gate
-        // fails — a planned node that the branch scan never realized — must
-        // refuse before anything is merged, leaving the worktree, the branch,
-        // and the main checkout untouched.
-        let wt = project_start_at(&repo.apg_root(), "fail", Some(&start_scan)).unwrap();
-        let wt_apg = wt.join(specs::LAYOUT);
-        // A transient plan carrying an unrealized planned node makes the
-        // verify gate refuse (`fixture.mod.Widget` never becomes real code —
-        // the fixture payload only has `Store`).
-        let plan_path = wt_apg.join(specs::TRANS).join("plans").join("fail.jsonl");
-        artifacts::write_jsonl_and_reingest(
-            &wt_apg,
-            &plan_path,
-            "fail",
-            &[
-                Record::Plan {
-                    fqn: "fail/plan".to_string(),
-                    title: "fail plan".to_string(),
-                    strategy: String::new(),
-                },
-                Record::PlanPhase {
-                    fqn: "fail/plan.phase-01".to_string(),
-                    number: 1,
-                    title: "P1".to_string(),
-                    deliverable: "D".to_string(),
-                    status: "pending".to_string(),
-                },
-                Record::Contains {
-                    from: "fail/plan".to_string(),
-                    to: "fail/plan.phase-01".to_string(),
-                },
-                Record::PlannedNode {
-                    fqn: format!("{MOD}.Widget"),
-                    kind: "struct".into(),
-                    name: "Widget".into(),
-                    parent: MOD.into(),
-                },
-            ],
-        )
-        .unwrap();
-        start_scan(&wt).unwrap();
-        let err = plan_cmd::plan_verify_at(&wt_apg, "fail").unwrap_err();
-        assert!(
-            format!("{err:#}").contains("not realized"),
-            "verify must report the unrealized planned node: {err:#}"
-        );
-        let main_tip_before_refusal = repo.head_sha();
-        let err = project_merge_at(&repo.apg_root(), "fail", Some(&start_scan)).unwrap_err();
-        assert!(format!("{err:#}").contains("not realized"), "{err:#}");
-        assert_eq!(
-            repo.head_sha(),
-            main_tip_before_refusal,
-            "a refused merge must not move the main checkout"
-        );
-        assert!(
-            wt.is_dir(),
-            "a refused merge must leave the worktree at apg/.worktrees/fail in place"
-        );
-        let main_repo = git2::Repository::open(&repo.root).unwrap();
-        assert!(
-            main_repo.find_worktree("fail").is_ok(),
-            "a refused merge must leave the worktree registered"
-        );
-        assert!(
-            main_repo
-                .find_branch("fail", git2::BranchType::Local)
-                .is_ok(),
-            "a refused merge must leave the project branch in place"
-        );
-
-        // Success path (AC-a): a project with durable content + a minimal
-        // plan (no planned nodes, no feedback) passes the verify gate, merges,
-        // rebuilds main, and then cleans up after itself.
-        let wt = project_start_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
-        let wt_apg = wt.join(specs::LAYOUT);
-        write_spec_node(&wt_apg);
-        let plan_path = wt_apg.join(specs::TRANS).join("plans").join("test.jsonl");
-        artifacts::write_jsonl_and_reingest(
-            &wt_apg,
-            &plan_path,
-            "test",
-            &[
-                Record::Plan {
-                    fqn: "test/plan".to_string(),
-                    title: "test plan".to_string(),
-                    strategy: String::new(),
-                },
-                Record::PlanPhase {
-                    fqn: "test/plan.phase-01".to_string(),
-                    number: 1,
-                    title: "P1".to_string(),
-                    deliverable: "D".to_string(),
-                    status: "pending".to_string(),
-                },
-                Record::Contains {
-                    from: "test/plan".to_string(),
-                    to: "test/plan.phase-01".to_string(),
-                },
-            ],
-        )
-        .unwrap();
-        start_scan(&wt).unwrap();
-        plan_cmd::plan_verify_at(&wt_apg, "test").unwrap();
-
-        let tip_before_merge = main_repo.head().unwrap().peel_to_commit().unwrap().id();
-        project_merge_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
-
-        // The merge landed main at the project tip (fast-forward), the main
-        // rebuild is fresh, and the merged project cleaned up after itself.
-        assert_ne!(
-            main_repo.head().unwrap().peel_to_commit().unwrap().id(),
-            tip_before_merge,
-            "the merge must advance the default branch to the project tip"
-        );
-        assert!(
-            !wt.exists(),
-            "the merged project's worktree apg/.worktrees/test must be removed (AC-a)"
-        );
-        assert!(
-            main_repo.find_worktree("test").is_err(),
-            "the merged project's worktree must be unregistered (AC-a)"
-        );
-        assert!(
-            main_repo
-                .find_branch("test", git2::BranchType::Local)
-                .is_err(),
-            "the merged project's branch refs/heads/test must be deleted (AC-a)"
-        );
-        assert!(
-            !git::is_stale(&repo.apg_root()),
-            "main's scan_meta must be fresh"
-        );
-        assert!(
-            repo.is_clean(),
-            "after merge self-cleanup the main checkout must be clean"
-        );
-
-        // AC (c): the default branch and the main checkout are preserved.
-        assert!(
-            main_repo
-                .find_branch("main", git2::BranchType::Local)
-                .is_ok(),
-            "the default branch must survive merge self-cleanup"
-        );
-        assert!(repo.root.is_dir(), "the main checkout must survive");
-        assert!(
-            main_repo.head().unwrap().shorthand() == Some("main"),
-            "the main checkout must stay on the default branch"
-        );
-        assert!(
-            repo.root
-                .join("apg/layers/requirements/requirement/timer.json")
-                .exists(),
-            "the merged main checkout carries the merged tier node file"
-        );
-        testutil::remove(&repo);
-    }
-
-    // ------------------------------------------------------------------
-    // phase-02: `apg project delete <name>` — the abandon path. Every
-    // refusal names the actual state + one fix command; success removes the
-    // worktree + deletes the branch (commits discarded); never the default
-    // branch or the main checkout.
-    // ------------------------------------------------------------------
-
     /// Opens the project worktree's repository, mutates one tracked path in a
     /// new commit, and returns its head sha — the "project work in progress"
     /// state a delete abandons.
@@ -2507,214 +1460,1304 @@ mod tests {
         git2::Repository::open(&repo.root).unwrap()
     }
 
-    #[test]
-    fn delete_refuses_invalid_name_and_default_branch() {
-        // delete-refuses-unsafe AC-(a) + never-touch-default-branch: an
-        // invalid project name and `<name>` equal to the default branch are
-        // hard refusals naming the actual state + one fix command.
-        let repo = Repo::new("del-invalid");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        repo.commit_all("seed code");
+    /// e2e tier -- real I/O: every test here creates/merges/deletes real git
+    /// worktrees and branches, or drives the candidate `apg` binary. Each is
+    /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
+    /// point is the named guard `cargo test-e2e`
+    /// (= `cargo test tests::e2e:: -- --ignored`).
+    mod e2e {
+        use super::*;
 
-        let err = project_delete_at(&repo.apg_root(), "bad/name").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("not a valid project name"), "{msg}");
-        assert!(msg.contains("apg project start"), "{msg}");
+        // ------------------------------------------------------------------
+        // task-4 AC (int): one command yields worktree + branch + branch DB off
+        // the DEFAULT branch; in-context re-run no-ops and prints the path;
+        // identity correct in worktree vs main.
+        // ------------------------------------------------------------------
 
-        let err = project_delete_at(&repo.apg_root(), "main").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("default branch"), "{msg}");
-        assert!(msg.contains("never deleted"), "{msg}");
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_creates_worktree_branch_and_branch_db() {
+            let repo = Repo::new("start-ac");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            let main_sha = repo.commit_all("seed code");
 
-        // Nothing was removed.
-        assert!(repo.is_clean(), "refusals must not dirty the main checkout");
-        testutil::remove(&repo);
-    }
+            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            assert_eq!(wt, repo.project_worktree_dir("foo").canonicalize().unwrap());
+            assert!(wt.is_dir());
 
-    #[test]
-    fn delete_refuses_missing_and_mismatched_projects() {
-        // delete-refuses-unsafe AC-(c) and AC-(d): a project that does not
-        // exist (no branch), and a leftover branch / mismatched-worktree
-        // state, are refused with a manual fix — never guessed.
-        let repo = Repo::new("del-missing");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        repo.commit_all("seed code");
+            // The branch exists, off the default branch (main), at main's tip.
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            let branch = main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .unwrap();
+            assert!(!branch.is_head());
+            let branch_commit = branch.get().peel_to_commit().unwrap();
+            assert_eq!(branch_commit.id().to_string(), main_sha);
 
-        // AC-(c): no branch, no worktree at the fixed location.
-        let err = project_delete_at(&repo.apg_root(), "ghost").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("branch `ghost` does not exist"), "{msg}");
-        assert!(msg.contains("apg project start ghost"), "{msg}");
+            // The worktree's HEAD is the project branch.
+            let wt_repo = git2::Repository::open(&wt).unwrap();
+            assert_eq!(wt_repo.head().unwrap().shorthand(), Some("foo"));
 
-        // AC-(d): branch exists but no worktree dir at the fixed location
-        // (leftover branch — the state refuse_start already reports).
-        let main_repo = git2_repo_test(&repo);
-        main_repo
-            .branch(
-                "leftover",
-                &main_repo.head().unwrap().peel_to_commit().unwrap(),
-                false,
-            )
-            .unwrap();
-        let err = project_delete_at(&repo.apg_root(), "leftover").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("expected worktree"), "{msg}");
-        assert!(msg.contains("apg project start leftover"), "{msg}");
-        assert!(
-            main_repo
-                .find_branch("leftover", git2::BranchType::Local)
-                .is_ok(),
-            "a refused delete must leave the leftover branch in place"
-        );
+            // The branch DB exists after start (AC-1).
+            assert!(wt.join("apg").join(specs::TRANS).join("db.lbug").exists());
 
-        // AC-(d): worktree dir exists but hosts a DIFFERENT branch (a
-        // mismatched-worktree state). Start project `first`, then check out a
-        // different branch inside its worktree so the worktree at the fixed
-        // location for `first` holds `injected` instead.
-        let wt_first = repo.start_project("first");
-        let wt_repo = git2::Repository::open(&wt_first).unwrap();
-        wt_repo
-            .branch(
-                "injected",
-                &wt_repo.head().unwrap().peel_to_commit().unwrap(),
-                false,
-            )
-            .unwrap();
-        wt_repo.set_head("refs/heads/injected").unwrap();
-        wt_repo
-            .checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
-            .unwrap();
-        let err = project_delete_at(&repo.apg_root(), "first").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(
-            msg.contains("not branch `first`'s worktree"),
-            "the mismatched-worktree refusal must name the actual state: {msg}"
-        );
-        assert!(msg.contains("never guessed"), "{msg}");
-        assert_project_present(&repo, "first");
-        assert!(
-            repo.is_clean(),
-            "the refusal must leave the main checkout clean"
-        );
-        testutil::remove(&repo);
-    }
+            // Identity correct in worktree vs main (R7).
+            let id_wt = git::repo_identity(&wt.join(specs::LAYOUT)).unwrap();
+            assert!(id_wt.is_worktree);
+            assert_eq!(id_wt.branch.as_deref(), Some("foo"));
+            assert_eq!(id_wt.default_branch.as_deref(), Some("main"));
+            let id_main = git::repo_identity(&repo.apg_root()).unwrap();
+            assert!(!id_main.is_worktree);
+            assert_eq!(id_main.branch.as_deref(), Some("main"));
 
-    #[test]
-    fn delete_refuses_dirty_worktree_naming_commit_or_stash() {
-        // delete-refuses-unsafe AC-(e): a project worktree with tracked
-        // uncommitted changes is refused (commit/stash first).
-        let repo = Repo::new("del-dirty");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        repo.commit_all("seed code");
-        let wt = repo.start_project("dirty");
-        // A tracked uncommitted change: modify a committed file, do not commit.
-        let p = wt.join("code/seed.scan.jsonl");
-        let cur = std::fs::read_to_string(&p).unwrap();
-        std::fs::write(&p, format!("{cur}\n// dirty\n")).unwrap();
+            // In-context re-run: no-op, prints the path, still Ok.
+            let again =
+                project_start_at(&wt.join(specs::LAYOUT), "foo", Some(&start_scan)).unwrap();
+            assert_eq!(again, wt);
 
-        let err = project_delete_at(&repo.apg_root(), "dirty").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("tracked uncommitted changes"), "{msg}");
-        assert!(msg.contains("commit or stash"), "{msg}");
-        assert_project_present(&repo, "dirty");
-        testutil::remove(&repo);
-    }
+            // From the main checkout the same name is a hard collision.
+            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            assert!(format!("{err:#}").contains("already exists"), "{err:#}");
+            testutil::remove(&repo);
+        }
 
-    #[test]
-    fn delete_abandons_an_unmerged_project() {
-        // delete-subcommand AC-(b)/(c): delete is the abandon path — it
-        // removes the worktree at <main>/apg/.worktrees/<name> and deletes
-        // the branch, discarding the branch's unmerged commits; the default
-        // branch and the main checkout are untouched.
-        let repo = Repo::new("del-success");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        repo.commit_all("seed code");
-        let wt = repo.start_project("abandon");
-        // Seed the worktree's branch graph (a started project has a DB).
-        testutil::scan_checkout(&wt).unwrap();
-        // Make the project's branch DIVERGE from default (unmerged by design):
-        // a committed project change that delete will discard.
-        wt_append_commit(&wt, "code/extra.txt", "unmerged work\n", "project work");
-        let main_tip_before = repo.head_sha();
-        let main_repo = git2_repo_test(&repo);
-
-        project_delete_at(&repo.apg_root(), "abandon").unwrap();
-
-        // The project is gone: worktree unregistered + dir removed, branch
-        // deleted (its unmerged commits discarded).
-        assert_project_gone(&repo, "abandon");
-        assert!(!wt.exists(), "the abandoned worktree dir must be removed");
-        // The default branch and the main checkout survive untouched.
-        assert_eq!(repo.head_sha(), main_tip_before, "main must not move");
-        assert!(
-            main_repo
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_branches_off_the_repo_default_not_literal_main() {
+            // The default branch is the main checkout's symbolic HEAD (fallback:
+            // main). The project branch must sit exactly on it.
+            let repo = Repo::new("start-default");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+            // Rename the default to `trunk` (like a repo whose default is trunk).
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            let mut branch = main_repo
                 .find_branch("main", git2::BranchType::Local)
-                .is_ok(),
-            "the default branch must survive delete"
-        );
-        assert!(
-            main_repo.head().unwrap().shorthand() == Some("main"),
-            "the main checkout must stay on the default branch"
-        );
-        assert!(repo.is_clean(), "the main checkout must stay clean");
-        testutil::remove(&repo);
-    }
+                .unwrap();
+            branch.rename("trunk", true).unwrap();
+            main_repo.set_head("refs/heads/trunk").unwrap();
 
-    #[test]
-    fn delete_refuses_when_branch_is_main_checkouts_current() {
-        // delete-refuses-unsafe AC-(b): a branch that is the main checkout's
-        // current branch is refused (nothing to delete from here) — the
-        // branch-without-worktree bootstrap state. origin/HEAD pins the
-        // default to `main` while the main checkout holds `current` (like a
-        // real remote-backed repo), so the refusal is the current-branch
-        // refusal, not the default-branch one.
-        let repo = Repo::new("del-current");
-        repo.write(
-            "code/seed.scan.jsonl",
-            &testutil::code_payload(MOD, FILE, &["Store"]),
-        );
-        repo.commit_all("seed code");
-        let main_repo = git2_repo_test(&repo);
-        let head = main_repo.head().unwrap().peel_to_commit().unwrap();
-        main_repo
-            .reference("refs/remotes/origin/main", head.id(), true, "origin main")
-            .unwrap();
-        main_repo
-            .reference_symbolic(
-                "refs/remotes/origin/HEAD",
-                "refs/remotes/origin/main",
-                true,
-                "origin head",
+            let _wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            let head = main_repo.head().unwrap().peel_to_commit().unwrap();
+            let branch = main_repo
+                .find_branch("foo", git2::BranchType::Local)
+                .unwrap();
+            assert_eq!(
+                branch.get().peel_to_commit().unwrap().id(),
+                head.id(),
+                "project branch must sit on the default branch tip"
+            );
+            testutil::remove(&repo);
+        }
+
+        // ------------------------------------------------------------------
+        // task-6 AC (unit): every refusal exits 1 naming the actual state and
+        // one actionable fix command; run-from-worktree hard-fails.
+        // ------------------------------------------------------------------
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_refuses_non_git_with_apg_init_suggestion() {
+            let dir = std::env::temp_dir().join(format!("apg-start-nongit-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
+            let err = project_start_at(&dir.join("apg"), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("git repository"), "{msg}");
+            assert!(msg.contains("apg init"), "{msg}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_refuses_unborn_head() {
+            let root =
+                std::env::temp_dir().join(format!("apg-start-unborn-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            let mut opts = git2::RepositoryInitOptions::new();
+            opts.initial_head("refs/heads/main");
+            git2::Repository::init_opts(&root, &opts).unwrap();
+            std::fs::create_dir_all(root.join("apg").join(specs::TRANS)).unwrap();
+            let err = project_start_at(&root.join("apg"), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("unborn HEAD"), "{msg}");
+            assert!(msg.contains("commit an initial state"), "{msg}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_refuses_inside_a_worktree() {
+            let repo = Repo::new("start-wt-escape");
+            repo.start_project("foo");
+            let wt_apg = repo.project_apg_root("foo");
+            let err = project_start_at(&wt_apg, "bar", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("one project at a time"), "{msg}");
+            assert!(msg.contains("main checkout"), "{msg}");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_refuses_dirty_main() {
+            let repo = Repo::new("start-dirty");
+            repo.write("junk.txt", "untracked junk");
+            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("dirty"), "{msg}");
+            assert!(msg.contains("git status"), "{msg}");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_refuses_invalid_names_never_sanitized() {
+            let repo = Repo::new("start-names");
+            for bad in ["", "a/b", "bad name", "bad~name", "..", "HEAD", ".lock"] {
+                let err = project_start_at(&repo.apg_root(), bad, Some(&start_scan)).unwrap_err();
+                let msg = format!("{err:#}");
+                assert!(
+                    msg.contains("refused")
+                        && (msg.contains("not a valid") || msg.contains("empty")),
+                    "name `{bad}` must refuse with a validity message: {msg}"
+                );
+            }
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_refuses_branch_without_worktree_collision() {
+            let repo = Repo::new("start-collision-branch");
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            let head = main_repo.head().unwrap().peel_to_commit().unwrap();
+            main_repo.branch("foo", &head, false).unwrap();
+            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(msg.contains("no worktree hosts it"), "{msg}");
+            assert!(msg.contains("git branch -D foo"), "{msg}");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_refuses_branch_checked_out_in_main_checkout() {
+            // Bootstrap-style: the branch is the main checkout's HEAD.
+            let repo = Repo::new("start-collision-head");
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            let head = main_repo.head().unwrap().peel_to_commit().unwrap();
+            main_repo.branch("foo", &head, false).unwrap();
+            main_repo.set_head("refs/heads/foo").unwrap();
+            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(msg.contains("checked out in the main checkout"), "{msg}");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_refuses_branch_checked_out_in_another_worktree() {
+            let repo = Repo::new("start-collision-wt");
+            repo.start_project("foo");
+            // From the main checkout, starting `foo` again: checked out in the
+            // project's worktree.
+            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(msg.contains("checked out in worktree"), "{msg}");
+            assert!(
+                msg.contains(
+                    repo.project_worktree_dir("foo")
+                        .display()
+                        .to_string()
+                        .as_str()
+                ),
+                "{msg}"
+            );
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_refuses_dir_that_is_not_a_worktree() {
+            let repo = Repo::new("start-collision-dir");
+            // A plain directory at the worktree location (no branch, no worktree).
+            std::fs::create_dir_all(repo.project_worktree_dir("foo")).unwrap();
+            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("not a project worktree"), "{msg}");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_self_heals_missing_worktrees_gitignore_entry() {
+            // A repo whose .gitignore dropped the worktrees entry (or was
+            // cloned before it existed): start must scaffold it + commit the
+            // scaffold (the main checkout stays clean), then proceed.
+            let repo = Repo::new("start-selfheal");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.write(".gitignore", "apg/.trans/\n");
+            repo.commit_all("drop worktrees ignore");
+            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            assert!(wt.is_dir());
+            // The entry is back in the main checkout's .gitignore — committed,
+            // so the main checkout is clean again (a later start would refuse a
+            // dirty main).
+            let ignore = std::fs::read_to_string(repo.root.join(".gitignore")).unwrap();
+            assert!(ignore.contains("apg/.worktrees/"), "{ignore}");
+            assert!(repo.is_clean(), "self-heal must commit the scaffold");
+            // The worktree (checked out from the scaffolded HEAD) carries it too.
+            let wt_ignore = std::fs::read_to_string(wt.join(".gitignore")).unwrap();
+            assert!(wt_ignore.contains("apg/.worktrees/"), "{wt_ignore}");
+            testutil::remove(&repo);
+        }
+
+        // ------------------------------------------------------------------
+        // R10 version gate on start (task-3/task-5): blocks — never warns —
+        // on missing version and on major/minor mismatch in either direction,
+        // with upgrade guidance; a patch diff proceeds.
+        // ------------------------------------------------------------------
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_blocks_unversioned_layout_with_init_guidance() {
+            let repo = Repo::new("start-gate-unversioned");
+            set_layout_version(&repo, None);
+            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            for needle in [
+                "no layout version",
+                "apg init",
+                "re-run `apg project start foo`",
+                "apg-upgrade.md",
+            ] {
+                assert!(msg.contains(needle), "{msg}");
+            }
+            // Nothing was created.
+            assert!(!repo.project_worktree_dir("foo").exists());
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_blocks_older_layout_with_upgrade_guidance() {
+            let repo = Repo::new("start-gate-older");
+            set_layout_version(&repo, Some(&older_minor_version()));
+            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("predates"), "{msg}");
+            assert!(msg.contains("apg init"), "{msg}");
+            assert!(msg.contains("apg-upgrade.md"), "{msg}");
+            assert!(!repo.project_worktree_dir("foo").exists());
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_blocks_newer_layout_with_upgrade_guidance() {
+            let repo = Repo::new("start-gate-newer");
+            set_layout_version(&repo, Some(&newer_minor_version()));
+            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("NEWER apg"), "{msg}");
+            assert!(msg.contains("upgrade apg"), "{msg}");
+            assert!(msg.contains("apg init"), "{msg}");
+            assert!(msg.contains("apg-upgrade.md"), "{msg}");
+            assert!(!repo.project_worktree_dir("foo").exists());
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn start_proceeds_on_patch_diff_layout() {
+            let repo = Repo::new("start-gate-patch");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            set_layout_version(&repo, Some(&patch_shifted_version()));
+            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            assert!(wt.is_dir(), "same major.minor must proceed");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn merge_round_trip_start_mutate_verify_merge_rebuild() {
+            let repo = Repo::new("merge-e2e");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+
+            // start -> worktree + branch + branch DB (payload has only Store).
+            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            let wt_apg = wt.join(specs::LAYOUT);
+
+            // mutate: author the spec (a durable node file -> auto-commits on the
+            // branch) and the plan (transient -> never commits), both through the
+            // funnel.
+            write_spec_node(&wt_apg);
+            let plan_path = wt_apg.join(specs::TRANS).join("plans").join("foo.jsonl");
+            artifacts::write_jsonl_and_reingest(&wt_apg, &plan_path, "foo", &plan_records(true))
+                .unwrap();
+            // The spec mutation auto-committed; the plan mutation committed
+            // nothing (R8 — .trans never commits).
+            let wt_repo = git2::Repository::open(&wt).unwrap();
+            let foo_tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
+            assert!(
+                foo_tip
+                    .tree()
+                    .unwrap()
+                    .get_path(Path::new("apg/layers/requirements/requirement/timer.json"))
+                    .is_ok(),
+                "spec node file must be committed on the project branch"
+            );
+            assert!(
+                foo_tip
+                    .tree()
+                    .unwrap()
+                    .get_path(Path::new("apg/.trans/plans/foo.jsonl"))
+                    .is_err(),
+                "plan JSONL must never be committed (.trans is transient)"
+            );
+
+            // verify rejects: unrealized planned node (dangling — no code at its
+            // FQN yet) AND unresolved feedback, in one refusal listing both.
+            let err = plan_cmd::plan_verify_at(&wt_apg, "foo").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("Widget"), "unrealized planned node: {msg}");
+            assert!(msg.contains("unresolved review feedback"), "{msg}");
+
+            // resolve the feedback (writer action + reviewer resolve, via the
+            // funnel on the transient plan).
+            let mut recs = plan_records(false);
+            recs.push(Record::Feedback {
+                fqn: "foo/feedback-1".into(),
+                body: "unresolved".into(),
+                status: "resolved".into(),
+                disposition: "fixed".into(),
+            });
+            recs.push(Record::Reviews {
+                from: "foo/feedback-1".into(),
+                to: "foo/plan.phase-01.task-1".into(),
+            });
+            artifacts::write_jsonl_and_reingest(&wt_apg, &plan_path, "foo", &recs).unwrap();
+
+            // realize the planned node: the implementer's code lands on the
+            // branch (payload gains Widget), is committed, and the branch DB is
+            // rebuilt with a scan.
+            let payload = testutil::code_payload(MOD, FILE, &["Store", "Widget"]);
+            std::fs::write(wt.join("code/seed.scan.jsonl"), payload).unwrap();
+            wt_commit(&wt, "code/seed.scan.jsonl", "implement Widget");
+            start_scan(&wt).unwrap();
+            let foo_tip = git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id();
+
+            // verify passes: planned node realized, all feedback resolved.
+            plan_cmd::plan_verify_at(&wt_apg, "foo").unwrap();
+
+            // merge from the main checkout: verify gate -> ff merge -> main
+            // rebuild (the rebuild is a plain unguarded scan on main).
+            project_merge_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+
+            // The default branch now holds the project's tip.
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            let main_tip = main_repo.head().unwrap().peel_to_commit().unwrap();
+            assert_eq!(
+                main_tip.id(),
+                foo_tip,
+                "main must fast-forward to the project tip"
+            );
+            // The main checkout carries the merged content (the spec node file).
+            assert!(
+                repo.root
+                    .join("apg/layers/requirements/requirement/timer.json")
+                    .exists()
+            );
+            assert!(repo.is_clean(), "merged main must be clean");
+
+            // Main rebuild: the main DB has the code (Store + Widget) and the
+            // merged spec; the transient plan did not cross the merge.
+            let main_apg = repo.apg_root();
+            let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+            assert!(db.has_node("requirements.requirement.timer"));
+            assert!(db.has_node(format!("{MOD}.Store").as_str()));
+            assert!(db.has_node(format!("{MOD}.Widget").as_str()));
+            assert!(!db.has_node("foo/plan"), "transient plans never reach main");
+            drop(db);
+            // The main DB is fresh (scan_meta re-anchored by the rebuild scan).
+            assert!(!git::is_stale(&main_apg));
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn dogfood_round_trip_re_materializes_tiers_start_author_scan_verify_merge() {
+            // A main checkout whose scanned code carries the structs the solution
+            // tier's implemented-by edges claim (SPEC §4.1: resolves → real).
+            let repo = Repo::new("dogfood-e2e");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(
+                    MOD,
+                    FILE,
+                    &[
+                        "Store",
+                        "ProjectStart",
+                        "MutationGuard",
+                        "LayersSerializer",
+                        "PlanBridge",
+                        "InitVersionGate",
+                    ],
+                ),
+            );
+            repo.commit_all("seed code");
+
+            // start: one command yields worktree + branch + branch DB, off the
+            // default branch (the dogfood flow the next feature will run).
+            let wt = project_start_at(&repo.apg_root(), "apg-projects", Some(&start_scan)).unwrap();
+            let wt_apg = wt.join(specs::LAYOUT);
+
+            // author: the re-materialized tiers land as node files through the
+            // write_project funnel (the exact surface `apg node`/`apg edge`
+            // use): membership guard → validate → atomic write → auto-commit →
+            // DB re-merge.
+            layers::write_project(&wt_apg, &apg_projects_tier_nodes(), &[]).unwrap();
+
+            // author: the transient plan (SPEC §5) — never committed, but it must
+            // ingest alongside the durable tiers.
+            let plan_path = wt_apg
+                .join(specs::TRANS)
+                .join("plans")
+                .join("apg-projects.jsonl");
+            artifacts::write_jsonl_and_reingest(
+                &wt_apg,
+                &plan_path,
+                "apg-projects",
+                &apg_projects_plan_records("apg-projects"),
             )
             .unwrap();
-        main_repo.branch("current", &head, false).unwrap();
-        main_repo.set_head("refs/heads/current").unwrap();
-        let mut checkout = git2::build::CheckoutBuilder::new();
-        checkout.force();
-        main_repo.checkout_head(Some(&mut checkout)).unwrap();
 
-        let err = project_delete_at(&repo.apg_root(), "current").unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("main checkout's current branch"), "{msg}");
-        assert!(msg.contains("git checkout main"), "{msg}");
-        assert!(
+            // The branch carries the node files (one auto-commit) and never the
+            // plan (R8 — .trans is transient).
+            let wt_repo = git2::Repository::open(&wt).unwrap();
+            let tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
+            assert!(
+                tip.tree()
+                    .unwrap()
+                    .get_path(Path::new("apg/layers/requirements/requirement/r1.json"))
+                    .is_ok(),
+                "the tier node files must be committed on the project branch"
+            );
+            assert!(
+                tip.tree()
+                    .unwrap()
+                    .get_path(Path::new("apg/.trans/plans/apg-projects.jsonl"))
+                    .is_err(),
+                "the plan JSONL must never be committed (.trans is transient)"
+            );
+
+            // scan: the branch DB is rebuilt from code + layers + .trans plans —
+            // the tiers appear and the transient plan ingests alongside them.
+            start_scan(&wt).unwrap();
+            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            for f in expected_tier_fqns() {
+                assert!(db.has_node(&f), "branch DB must hold tier node `{f}`");
+            }
+            for f in [
+                "apg-projects/plan",
+                "apg-projects/plan.phase-01",
+                "apg-projects/plan.phase-01.task-1",
+                "apg-projects/plan.phase-01.task-5",
+            ] {
+                assert!(
+                    db.has_node(f),
+                    "branch DB must hold transient plan node `{f}`"
+                );
+            }
+            // The spine is real in the DB: 20 drives edges, the domain→solution
+            // realised-by hop, the 5 implemented-by claims onto scanned structs,
+            // and the User→Requirement contains tree.
+            let count = |q: &str| -> i64 {
+                db.q(q)
+                    .unwrap()
+                    .lines()
+                    .last()
+                    .unwrap_or_default()
+                    .trim()
+                    .parse()
+                    .unwrap_or(0)
+            };
+            assert_eq!(
+                count("MATCH (:Requirement)-[:Drives]->(:DomainGroup) RETURN count(*)"),
+                20
+            );
+            assert_eq!(
+                count("MATCH (:DomainGroup)-[:RealisedBy]->(:System) RETURN count(*)"),
+                1
+            );
+            assert_eq!(
+                count("MATCH (:Container)-[:SpecImplementedBy]->(:Struct) RETURN count(*)"),
+                5
+            );
+            assert_eq!(
+                count("MATCH (:User)-[:Contains]->(:Requirement) RETURN count(*)"),
+                20
+            );
+            assert_eq!(
+                count("MATCH (:Note)-[:Details]->(:Requirement) RETURN count(*)"),
+                1
+            );
+            drop(db);
+
+            // verify: the coherence gate passes — no planned nodes, no feedback,
+            // and every implemented-by FQN is touched by a plan task.
+            plan_cmd::plan_verify_at(&wt_apg, "apg-projects").unwrap();
+
+            // merge: verify gate → fast-forward into the default branch → main
+            // rebuild (a plain unguarded scan on main).
+            project_merge_at(&repo.apg_root(), "apg-projects", Some(&start_scan)).unwrap();
+
+            // The default branch now holds the project's tip with the node files.
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            assert_eq!(
+                main_repo.head().unwrap().peel_to_commit().unwrap().id(),
+                tip.id(),
+                "main must fast-forward to the project tip"
+            );
+            assert!(
+                repo.root
+                    .join("apg/layers/solution/container/project-commands.json")
+                    .exists(),
+                "the merged main checkout carries the tier node files"
+            );
+            assert!(repo.is_clean(), "merged main must be clean");
+
+            // Main rebuild: the main DB has the code + the re-materialized tiers;
+            // the transient plan did not cross the merge.
+            let main_apg = repo.apg_root();
+            let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+            for f in [
+                "requirements.requirement.r1",
+                "requirements.requirement.r20",
+                "domain.group.change-sets",
+                "solution.system.apg-cli",
+                "fixture.mod.Store",
+                "fixture.mod.ProjectStart",
+            ] {
+                assert!(db.has_node(f), "main DB must hold `{f}` after the rebuild");
+            }
+            assert!(
+                !db.has_node("apg-projects/plan"),
+                "transient plans never reach main"
+            );
+            drop(db);
+            assert!(!git::is_stale(&main_apg));
+            testutil::remove(&repo);
+        }
+
+        // ------------------------------------------------------------------
+        // phase-5 task-4 (e2e): the FULL dogfood round trip — suite-tool
+        // lookups and mutations with cwd inside the worktree (SPEC §6: walk-up
+        // discovery finds the worktree's own apg/ + branch DB, even though the
+        // worktree lives INSIDE the main checkout's apg/), verify, merge, main
+        // rebuilds unguarded. The main checkout's apg/ is untouched by every
+        // in-worktree operation.
+        // ------------------------------------------------------------------
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn full_dogfood_round_trip_suite_tool_ops_inside_the_worktree() {
+            // A main checkout whose scanned code carries the structs the solution
+            // tier's implemented-by edges claim (resolves -> real), plus one
+            // function so the branch-DB lookups assert the
+            // module/struct/function triple from the scanned payload.
+            let repo = Repo::new("dogfood-full-e2e");
+            let mut payload = testutil::code_payload(
+                MOD,
+                FILE,
+                &[
+                    "Store",
+                    "ProjectStart",
+                    "MutationGuard",
+                    "LayersSerializer",
+                    "PlanBridge",
+                    "InitVersionGate",
+                ],
+            );
+            payload.push_str(&testutil::function_line("n7", MOD, "Lookup", FILE));
+            repo.write("code/seed.scan.jsonl", &payload);
+            repo.commit_all("seed code");
+
+            // A main-checkout scan first: the "untouched" assertions compare
+            // against a real main DB (its db.lbug + graph.jsonl must not move
+            // during in-worktree operation).
+            start_scan(&repo.root).unwrap();
+            let main_apg = repo.apg_root();
+            let main_db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+            assert!(main_db.has_node(format!("{MOD}.Store").as_str()));
+            assert!(main_db.has_node(format!("{MOD}.Lookup").as_str()));
+            drop(main_db);
+            let main_db_bytes = std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap();
+            let main_graph_bytes =
+                std::fs::read(main_apg.join(specs::TRANS).join("graph.jsonl")).unwrap();
+            let main_tip = repo.head_sha();
+
+            // 1. start from main: one command yields worktree + branch + branch
+            // DB. The worktree lives INSIDE main's apg/ (at
+            // <main>/apg/.worktrees/round-trip), so walk-up discovery has a real
+            // choice to make — the worktree's own apg/ vs main's apg/ above it.
+            let wt = project_start_at(&repo.apg_root(), "round-trip", Some(&start_scan)).unwrap();
+            let wt_apg = wt.join(specs::LAYOUT);
+            assert!(wt.is_dir());
+            assert!(wt_apg.join(specs::TRANS).join("db.lbug").exists());
+            let id_wt = git::repo_identity(&wt_apg).unwrap();
+            assert!(id_wt.is_worktree);
+            assert_eq!(id_wt.branch.as_deref(), Some("round-trip"));
+            let id_main = git::repo_identity(&main_apg).unwrap();
+            assert!(!id_main.is_worktree);
+            assert_eq!(id_main.branch.as_deref(), Some("main"));
+
+            // 2. operate in-worktree: the suite tools shell out to `apg` with cwd
+            // inside the worktree, and the binary resolves the layout root by
+            // walking up from current_dir. Simulated here by passing a deep
+            // in-worktree cwd to the same walk-up (tests never mutate the
+            // process-global cwd outside the scan lock).
+            let deep_cwd = wt.join("code").join("deep");
+            std::fs::create_dir_all(&deep_cwd).unwrap();
+            let resolved = specs::find_apg_root(&deep_cwd)
+                .expect("walk-up from an in-worktree cwd must find a layout root");
+            assert_eq!(
+                resolved, wt_apg,
+                "walk-up must find the worktree's OWN apg/, not the main checkout's (its parent)"
+            );
+            assert_ne!(resolved, main_apg);
+            // Negative control: from a cwd deep inside MAIN, the same walk-up
+            // finds main's apg/ — the discovery is checkout-local, not global.
+            let main_deep = repo.root.join("code").join("deep");
+            std::fs::create_dir_all(&main_deep).unwrap();
+            assert_eq!(specs::find_apg_root(&main_deep), Some(main_apg.clone()));
+
+            // 2a. lookups — the `apg query`-equivalent: open the branch DB found
+            // by walk-up and query it; the module/struct/function triple from the
+            // scanned payload is there, and no authored tiers yet (the branch DB
+            // is the fresh start-scan).
+            let db = artifacts::ArtifactDb::open(&resolved).unwrap();
+            assert!(db.has_node(MOD), "module from the scanned payload");
+            assert!(
+                db.has_node(format!("{MOD}.Store").as_str()),
+                "struct from the scanned payload"
+            );
+            assert!(
+                db.has_node(format!("{MOD}.Lookup").as_str()),
+                "function from the scanned payload"
+            );
+            assert!(!db.has_node("requirements.requirement.r1"));
+            let count = |q: &str| -> i64 {
+                db.q(q)
+                    .unwrap()
+                    .lines()
+                    .last()
+                    .unwrap_or_default()
+                    .trim()
+                    .parse()
+                    .unwrap_or(0)
+            };
+            assert_eq!(count("MATCH (n:Function) RETURN count(*)"), 1);
+            drop(db);
+
+            // 2b. mutations — the `apg node add`-equivalent (the exact node_cmd
+            // shape through layers::write_project) against the walk-up root:
+            // membership guard -> validate -> atomic write -> auto-commit -> DB
+            // re-merge, and a fresh query sees the new node.
+            layers::write_project(
+            &resolved,
+            &[nf(
+                "requirements",
+                "note",
+                "dogfood-log",
+                "The task-4 dogfood node: authored through the apg node add-equivalent surface with cwd inside the worktree.",
+                &[("kind", "background")],
+            )],
+            &[],
+        )
+        .unwrap();
+            let node_file = wt_apg
+                .join(layers::LAYERS_DIR)
+                .join("requirements")
+                .join("note")
+                .join("dogfood-log.json");
+            assert!(node_file.exists(), "{} must exist", node_file.display());
+            let db = artifacts::ArtifactDb::open(&resolved).unwrap();
+            assert!(
+                db.has_node("requirements.note.dogfood-log"),
+                "the mutation's DB re-merge must make the new node visible to a fresh query"
+            );
+            drop(db);
+            // The node file auto-committed on the project branch (R8).
+            let wt_repo = git2::Repository::open(&wt).unwrap();
+            assert!(
+                wt_repo
+                    .head()
+                    .unwrap()
+                    .peel_to_commit()
+                    .unwrap()
+                    .tree()
+                    .unwrap()
+                    .get_path(Path::new("apg/layers/requirements/note/dogfood-log.json"))
+                    .is_ok(),
+                "the node file must be committed on the project branch"
+            );
+
+            // 2c. author the re-materialized dogfood tiers (task-1 builder reused)
+            // + the transient plan (task-1 builder, project name parametrized).
+            layers::write_project(&resolved, &apg_projects_tier_nodes(), &[]).unwrap();
+            let plan_path = resolved
+                .join(specs::TRANS)
+                .join("plans")
+                .join("round-trip.jsonl");
+            let tip_before_plan = wt_repo.head().unwrap().peel_to_commit().unwrap().id();
+            artifacts::write_jsonl_and_reingest(
+                &resolved,
+                &plan_path,
+                "round-trip",
+                &apg_projects_plan_records("round-trip"),
+            )
+            .unwrap();
+            // The plan mutation commits nothing (.trans is transient — R8): the
+            // branch tip is unchanged and the plan JSONL never enters a commit.
+            assert!(plan_path.exists(), "the plan JSONL lands under .trans");
+            let wt_tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
+            assert_eq!(
+                wt_tip.id(),
+                tip_before_plan,
+                "plan mutations never commit on the project branch"
+            );
+            assert!(
+                wt_tip
+                    .tree()
+                    .unwrap()
+                    .get_path(Path::new("apg/.trans/plans/round-trip.jsonl"))
+                    .is_err(),
+                "the plan JSONL must never be committed"
+            );
+
+            // 2d. the MAIN checkout's apg/ is untouched by all of it: its db.lbug
+            // and graph.jsonl are byte-identical, no apg/layers was created there,
+            // and main's branch never moved.
+            assert_eq!(
+                std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap(),
+                main_db_bytes,
+                "main's db.lbug must be unchanged by the in-worktree operations"
+            );
+            assert_eq!(
+                std::fs::read(main_apg.join(specs::TRANS).join("graph.jsonl")).unwrap(),
+                main_graph_bytes,
+                "main's graph.jsonl must be unchanged by the in-worktree operations"
+            );
+            assert!(
+                !main_apg.join("layers").exists(),
+                "no apg/layers may be created under the main checkout"
+            );
+            assert_eq!(repo.head_sha(), main_tip, "main's branch must not move");
+
+            // 3. scan the worktree (the `apg scan`-equivalent rebuild, cwd inside
+            // the worktree): the branch DB now holds code + tiers + plan together.
+            start_scan(&wt).unwrap();
+            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            for f in expected_tier_fqns() {
+                assert!(db.has_node(&f), "branch DB must hold tier node `{f}`");
+            }
+            assert!(db.has_node("requirements.note.dogfood-log"));
+            for f in [
+                "round-trip/plan",
+                "round-trip/plan.phase-01",
+                "round-trip/plan.phase-01.task-1",
+                "round-trip/plan.phase-01.task-5",
+            ] {
+                assert!(
+                    db.has_node(f),
+                    "branch DB must hold transient plan node `{f}`"
+                );
+            }
+            drop(db);
+            assert_eq!(
+                std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap(),
+                main_db_bytes,
+                "a worktree scan must not touch main's DB"
+            );
+
+            // 4. verify: the coherence gate passes green — no planned nodes, no
+            // feedback, and derived solution coverage holds.
+            plan_cmd::plan_verify_at(&wt_apg, "round-trip").unwrap();
+
+            // 5. merge from the main checkout: verify gate -> fast-forward -> main
+            // rebuilds unguarded (a plain scan of the main checkout).
+            project_merge_at(&repo.apg_root(), "round-trip", Some(&start_scan)).unwrap();
+
+            // The default branch holds the project tip; the merged main checkout
+            // carries the node files (the tiers + the dogfood node).
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            assert_eq!(
+                main_repo.head().unwrap().peel_to_commit().unwrap().id(),
+                wt_tip.id(),
+                "main must fast-forward to the project tip"
+            );
+            assert!(
+                repo.root
+                    .join("apg/layers/solution/container/project-commands.json")
+                    .exists(),
+                "the merged main checkout carries the tier node files"
+            );
+            assert!(
+                repo.root
+                    .join("apg/layers/requirements/note/dogfood-log.json")
+                    .exists(),
+                "the merged main checkout carries the dogfood node"
+            );
+            assert!(repo.is_clean(), "merged main must be clean");
+
+            // Main rebuild: the main DB has the code + the merged tiers, does NOT
+            // hold the transient plan, and its scan_meta is fresh (not stale).
+            let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+            for f in [
+                "requirements.requirement.r1",
+                "requirements.requirement.r20",
+                "requirements.note.dogfood-log",
+                "domain.group.change-sets",
+                "solution.system.apg-cli",
+                "solution.container.project-commands",
+                format!("{MOD}.Store").as_str(),
+                format!("{MOD}.Lookup").as_str(),
+                format!("{MOD}.ProjectStart").as_str(),
+            ] {
+                assert!(db.has_node(f), "main DB must hold `{f}` after the rebuild");
+            }
+            assert!(
+                !db.has_node("round-trip/plan"),
+                "transient plans never reach main"
+            );
+            drop(db);
+            assert!(!git::is_stale(&main_apg), "main's scan_meta must be fresh");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn merge_keeps_worktree_and_branch_cleanup_deletes_no_branch() {
+            // merge-self-cleanup: `apg project merge <name>` cleans up after
+            // itself. AC (a): a full verify → merge → main rebuild round-trip
+            // removes the merged project's worktree at
+            // `<main>/apg/.worktrees/<name>` and deletes its branch
+            // `refs/heads/<name>`; AC (b): a refused/failed merge leaves both
+            // untouched; AC (c): the default branch and the main checkout are
+            // preserved (never-touch-default-branch).
+            let repo = Repo::new("self-cleanup");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+
+            // Refusal path first (AC-b): a merge of a project whose verify gate
+            // fails — a planned node that the branch scan never realized — must
+            // refuse before anything is merged, leaving the worktree, the branch,
+            // and the main checkout untouched.
+            let wt = project_start_at(&repo.apg_root(), "fail", Some(&start_scan)).unwrap();
+            let wt_apg = wt.join(specs::LAYOUT);
+            // A transient plan carrying an unrealized planned node makes the
+            // verify gate refuse (`fixture.mod.Widget` never becomes real code —
+            // the fixture payload only has `Store`).
+            let plan_path = wt_apg.join(specs::TRANS).join("plans").join("fail.jsonl");
+            artifacts::write_jsonl_and_reingest(
+                &wt_apg,
+                &plan_path,
+                "fail",
+                &[
+                    Record::Plan {
+                        fqn: "fail/plan".to_string(),
+                        title: "fail plan".to_string(),
+                        strategy: String::new(),
+                    },
+                    Record::PlanPhase {
+                        fqn: "fail/plan.phase-01".to_string(),
+                        number: 1,
+                        title: "P1".to_string(),
+                        deliverable: "D".to_string(),
+                        status: "pending".to_string(),
+                    },
+                    Record::Contains {
+                        from: "fail/plan".to_string(),
+                        to: "fail/plan.phase-01".to_string(),
+                    },
+                    Record::PlannedNode {
+                        fqn: format!("{MOD}.Widget"),
+                        kind: "struct".into(),
+                        name: "Widget".into(),
+                        parent: MOD.into(),
+                    },
+                ],
+            )
+            .unwrap();
+            start_scan(&wt).unwrap();
+            let err = plan_cmd::plan_verify_at(&wt_apg, "fail").unwrap_err();
+            assert!(
+                format!("{err:#}").contains("not realized"),
+                "verify must report the unrealized planned node: {err:#}"
+            );
+            let main_tip_before_refusal = repo.head_sha();
+            let err = project_merge_at(&repo.apg_root(), "fail", Some(&start_scan)).unwrap_err();
+            assert!(format!("{err:#}").contains("not realized"), "{err:#}");
+            assert_eq!(
+                repo.head_sha(),
+                main_tip_before_refusal,
+                "a refused merge must not move the main checkout"
+            );
+            assert!(
+                wt.is_dir(),
+                "a refused merge must leave the worktree at apg/.worktrees/fail in place"
+            );
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            assert!(
+                main_repo.find_worktree("fail").is_ok(),
+                "a refused merge must leave the worktree registered"
+            );
+            assert!(
+                main_repo
+                    .find_branch("fail", git2::BranchType::Local)
+                    .is_ok(),
+                "a refused merge must leave the project branch in place"
+            );
+
+            // Success path (AC-a): a project with durable content + a minimal
+            // plan (no planned nodes, no feedback) passes the verify gate, merges,
+            // rebuilds main, and then cleans up after itself.
+            let wt = project_start_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
+            let wt_apg = wt.join(specs::LAYOUT);
+            write_spec_node(&wt_apg);
+            let plan_path = wt_apg.join(specs::TRANS).join("plans").join("test.jsonl");
+            artifacts::write_jsonl_and_reingest(
+                &wt_apg,
+                &plan_path,
+                "test",
+                &[
+                    Record::Plan {
+                        fqn: "test/plan".to_string(),
+                        title: "test plan".to_string(),
+                        strategy: String::new(),
+                    },
+                    Record::PlanPhase {
+                        fqn: "test/plan.phase-01".to_string(),
+                        number: 1,
+                        title: "P1".to_string(),
+                        deliverable: "D".to_string(),
+                        status: "pending".to_string(),
+                    },
+                    Record::Contains {
+                        from: "test/plan".to_string(),
+                        to: "test/plan.phase-01".to_string(),
+                    },
+                ],
+            )
+            .unwrap();
+            start_scan(&wt).unwrap();
+            plan_cmd::plan_verify_at(&wt_apg, "test").unwrap();
+
+            let tip_before_merge = main_repo.head().unwrap().peel_to_commit().unwrap().id();
+            project_merge_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
+
+            // The merge landed main at the project tip (fast-forward), the main
+            // rebuild is fresh, and the merged project cleaned up after itself.
+            assert_ne!(
+                main_repo.head().unwrap().peel_to_commit().unwrap().id(),
+                tip_before_merge,
+                "the merge must advance the default branch to the project tip"
+            );
+            assert!(
+                !wt.exists(),
+                "the merged project's worktree apg/.worktrees/test must be removed (AC-a)"
+            );
+            assert!(
+                main_repo.find_worktree("test").is_err(),
+                "the merged project's worktree must be unregistered (AC-a)"
+            );
+            assert!(
+                main_repo
+                    .find_branch("test", git2::BranchType::Local)
+                    .is_err(),
+                "the merged project's branch refs/heads/test must be deleted (AC-a)"
+            );
+            assert!(
+                !git::is_stale(&repo.apg_root()),
+                "main's scan_meta must be fresh"
+            );
+            assert!(
+                repo.is_clean(),
+                "after merge self-cleanup the main checkout must be clean"
+            );
+
+            // AC (c): the default branch and the main checkout are preserved.
+            assert!(
+                main_repo
+                    .find_branch("main", git2::BranchType::Local)
+                    .is_ok(),
+                "the default branch must survive merge self-cleanup"
+            );
+            assert!(repo.root.is_dir(), "the main checkout must survive");
+            assert!(
+                main_repo.head().unwrap().shorthand() == Some("main"),
+                "the main checkout must stay on the default branch"
+            );
+            assert!(
+                repo.root
+                    .join("apg/layers/requirements/requirement/timer.json")
+                    .exists(),
+                "the merged main checkout carries the merged tier node file"
+            );
+            testutil::remove(&repo);
+        }
+
+        // ------------------------------------------------------------------
+        // phase-02: `apg project delete <name>` — the abandon path. Every
+        // refusal names the actual state + one fix command; success removes the
+        // worktree + deletes the branch (commits discarded); never the default
+        // branch or the main checkout.
+        // ------------------------------------------------------------------
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn delete_refuses_invalid_name_and_default_branch() {
+            // delete-refuses-unsafe AC-(a) + never-touch-default-branch: an
+            // invalid project name and `<name>` equal to the default branch are
+            // hard refusals naming the actual state + one fix command.
+            let repo = Repo::new("del-invalid");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+
+            let err = project_delete_at(&repo.apg_root(), "bad/name").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("not a valid project name"), "{msg}");
+            assert!(msg.contains("apg project start"), "{msg}");
+
+            let err = project_delete_at(&repo.apg_root(), "main").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("default branch"), "{msg}");
+            assert!(msg.contains("never deleted"), "{msg}");
+
+            // Nothing was removed.
+            assert!(repo.is_clean(), "refusals must not dirty the main checkout");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn delete_refuses_missing_and_mismatched_projects() {
+            // delete-refuses-unsafe AC-(c) and AC-(d): a project that does not
+            // exist (no branch), and a leftover branch / mismatched-worktree
+            // state, are refused with a manual fix — never guessed.
+            let repo = Repo::new("del-missing");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+
+            // AC-(c): no branch, no worktree at the fixed location.
+            let err = project_delete_at(&repo.apg_root(), "ghost").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("branch `ghost` does not exist"), "{msg}");
+            assert!(msg.contains("apg project start ghost"), "{msg}");
+
+            // AC-(d): branch exists but no worktree dir at the fixed location
+            // (leftover branch — the state refuse_start already reports).
+            let main_repo = git2_repo_test(&repo);
             main_repo
-                .find_branch("current", git2::BranchType::Local)
-                .is_ok(),
-            "a refused delete must leave the current branch in place"
-        );
-        testutil::remove(&repo);
+                .branch(
+                    "leftover",
+                    &main_repo.head().unwrap().peel_to_commit().unwrap(),
+                    false,
+                )
+                .unwrap();
+            let err = project_delete_at(&repo.apg_root(), "leftover").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("expected worktree"), "{msg}");
+            assert!(msg.contains("apg project start leftover"), "{msg}");
+            assert!(
+                main_repo
+                    .find_branch("leftover", git2::BranchType::Local)
+                    .is_ok(),
+                "a refused delete must leave the leftover branch in place"
+            );
+
+            // AC-(d): worktree dir exists but hosts a DIFFERENT branch (a
+            // mismatched-worktree state). Start project `first`, then check out a
+            // different branch inside its worktree so the worktree at the fixed
+            // location for `first` holds `injected` instead.
+            let wt_first = repo.start_project("first");
+            let wt_repo = git2::Repository::open(&wt_first).unwrap();
+            wt_repo
+                .branch(
+                    "injected",
+                    &wt_repo.head().unwrap().peel_to_commit().unwrap(),
+                    false,
+                )
+                .unwrap();
+            wt_repo.set_head("refs/heads/injected").unwrap();
+            wt_repo
+                .checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+                .unwrap();
+            let err = project_delete_at(&repo.apg_root(), "first").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("not branch `first`'s worktree"),
+                "the mismatched-worktree refusal must name the actual state: {msg}"
+            );
+            assert!(msg.contains("never guessed"), "{msg}");
+            assert_project_present(&repo, "first");
+            assert!(
+                repo.is_clean(),
+                "the refusal must leave the main checkout clean"
+            );
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn delete_refuses_dirty_worktree_naming_commit_or_stash() {
+            // delete-refuses-unsafe AC-(e): a project worktree with tracked
+            // uncommitted changes is refused (commit/stash first).
+            let repo = Repo::new("del-dirty");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+            let wt = repo.start_project("dirty");
+            // A tracked uncommitted change: modify a committed file, do not commit.
+            let p = wt.join("code/seed.scan.jsonl");
+            let cur = std::fs::read_to_string(&p).unwrap();
+            std::fs::write(&p, format!("{cur}\n// dirty\n")).unwrap();
+
+            let err = project_delete_at(&repo.apg_root(), "dirty").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("tracked uncommitted changes"), "{msg}");
+            assert!(msg.contains("commit or stash"), "{msg}");
+            assert_project_present(&repo, "dirty");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn delete_abandons_an_unmerged_project() {
+            // delete-subcommand AC-(b)/(c): delete is the abandon path — it
+            // removes the worktree at <main>/apg/.worktrees/<name> and deletes
+            // the branch, discarding the branch's unmerged commits; the default
+            // branch and the main checkout are untouched.
+            let repo = Repo::new("del-success");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+            let wt = repo.start_project("abandon");
+            // Seed the worktree's branch graph (a started project has a DB).
+            testutil::scan_checkout(&wt).unwrap();
+            // Make the project's branch DIVERGE from default (unmerged by design):
+            // a committed project change that delete will discard.
+            wt_append_commit(&wt, "code/extra.txt", "unmerged work\n", "project work");
+            let main_tip_before = repo.head_sha();
+            let main_repo = git2_repo_test(&repo);
+
+            project_delete_at(&repo.apg_root(), "abandon").unwrap();
+
+            // The project is gone: worktree unregistered + dir removed, branch
+            // deleted (its unmerged commits discarded).
+            assert_project_gone(&repo, "abandon");
+            assert!(!wt.exists(), "the abandoned worktree dir must be removed");
+            // The default branch and the main checkout survive untouched.
+            assert_eq!(repo.head_sha(), main_tip_before, "main must not move");
+            assert!(
+                main_repo
+                    .find_branch("main", git2::BranchType::Local)
+                    .is_ok(),
+                "the default branch must survive delete"
+            );
+            assert!(
+                main_repo.head().unwrap().shorthand() == Some("main"),
+                "the main checkout must stay on the default branch"
+            );
+            assert!(repo.is_clean(), "the main checkout must stay clean");
+            testutil::remove(&repo);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+        fn delete_refuses_when_branch_is_main_checkouts_current() {
+            // delete-refuses-unsafe AC-(b): a branch that is the main checkout's
+            // current branch is refused (nothing to delete from here) — the
+            // branch-without-worktree bootstrap state. origin/HEAD pins the
+            // default to `main` while the main checkout holds `current` (like a
+            // real remote-backed repo), so the refusal is the current-branch
+            // refusal, not the default-branch one.
+            let repo = Repo::new("del-current");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+            let main_repo = git2_repo_test(&repo);
+            let head = main_repo.head().unwrap().peel_to_commit().unwrap();
+            main_repo
+                .reference("refs/remotes/origin/main", head.id(), true, "origin main")
+                .unwrap();
+            main_repo
+                .reference_symbolic(
+                    "refs/remotes/origin/HEAD",
+                    "refs/remotes/origin/main",
+                    true,
+                    "origin head",
+                )
+                .unwrap();
+            main_repo.branch("current", &head, false).unwrap();
+            main_repo.set_head("refs/heads/current").unwrap();
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.force();
+            main_repo.checkout_head(Some(&mut checkout)).unwrap();
+
+            let err = project_delete_at(&repo.apg_root(), "current").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("main checkout's current branch"), "{msg}");
+            assert!(msg.contains("git checkout main"), "{msg}");
+            assert!(
+                main_repo
+                    .find_branch("current", git2::BranchType::Local)
+                    .is_ok(),
+                "a refused delete must leave the current branch in place"
+            );
+            testutil::remove(&repo);
+        }
     }
 }

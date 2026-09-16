@@ -2553,6 +2553,38 @@ mod tests {
             assert!(should_spawn_language(true, true, false));
             assert!(should_spawn_language(true, go_targets.is_empty(), any));
         }
+
+        /// The discovered-work protocol: implementation-discovered work is
+        /// re-planned (a planned node plus a `creates` task) before it is
+        /// implemented. The embedded coordinator/authoring prompts must carry it
+        /// so the rule cannot be silently dropped from the distributed agents.
+        #[test]
+        fn discovered_work_is_replanned_before_it_is_implemented() {
+            fn agent(name: &str) -> &'static str {
+                AGENTS
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, c)| *c)
+                    .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+            }
+            assert!(
+                agent("codebase-navigator.md")
+                    .contains("discovered work is planned before it is implemented"),
+                "the coordinator prompt must state the discovered-work order"
+            );
+            assert!(
+                agent("agent-builder.md").contains("stops before editing"),
+                "the agent-builder template must carry the stop-and-report clause"
+            );
+            assert!(
+                agent("plan-writer.md").contains("declared before the code exists"),
+                "the plan-writer prompt must carry the planned-before-code rule"
+            );
+            assert!(
+                agent("spec-writer.md").contains("divergence discovered during implementation"),
+                "the spec-writer prompt must carry the reconciliation route for discovered divergence"
+            );
+        }
     }
 
     /// e2e tier -- real I/O: these tests read repo files (README/Cargo.toml/
@@ -2563,707 +2595,1093 @@ mod tests {
     mod e2e {
         use super::*;
 
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn query_json_emits_rows() {
-        // `emit_json_rows` renders a query result as a JSON array of objects,
-        // one per row, keyed by column name with string-typed values. The DB
-        // is built through the real load pipeline (schema + copy_from).
-        use crate::graph::{Graph, Location, Node, NodeKind};
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn query_json_emits_rows() {
+            // `emit_json_rows` renders a query result as a JSON array of objects,
+            // one per row, keyed by column name with string-typed values. The DB
+            // is built through the real load pipeline (schema + copy_from).
+            use crate::graph::{Graph, Location, Node, NodeKind};
 
-        let dir = std::env::temp_dir().join(format!("apg-qj-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join(specs::TRANS)).unwrap();
+            let dir = std::env::temp_dir().join(format!("apg-qj-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join(specs::TRANS)).unwrap();
 
-        let mut graph = Graph::default();
-        graph.nodes.insert(
-            "github.com/x/y".to_string(),
-            Node {
-                kind: NodeKind::Module,
-                ..Node::default()
-            },
-        );
-        graph.nodes.insert(
-            "github.com/x/y.Store".to_string(),
-            Node {
-                kind: NodeKind::Struct,
-                location: Some(Location {
-                    path: "/abs/store.go".into(),
-                    start: 0,
-                    end: 40,
-                    start_line: 1,
-                    end_line: 40,
-                }),
-                code_type: "src".to_string(),
-                ..Node::default()
-            },
-        );
+            let mut graph = Graph::default();
+            graph.nodes.insert(
+                "github.com/x/y".to_string(),
+                Node {
+                    kind: NodeKind::Module,
+                    ..Node::default()
+                },
+            );
+            graph.nodes.insert(
+                "github.com/x/y.Store".to_string(),
+                Node {
+                    kind: NodeKind::Struct,
+                    location: Some(Location {
+                        path: "/abs/store.go".into(),
+                        start: 0,
+                        end: 40,
+                        start_line: 1,
+                        end_line: 40,
+                    }),
+                    code_type: "src".to_string(),
+                    ..Node::default()
+                },
+            );
 
-        let ldir = dir.join(specs::TRANS).join("load");
-        std::fs::create_dir_all(&ldir).unwrap();
-        load::build_load_files(&graph, &ldir).unwrap();
-        let db = Database::new(dir.join(specs::TRANS).join("db.lbug"), Default::default()).unwrap();
-        let conn = Connection::new(&db).unwrap();
-        load::create_schema(&conn).unwrap();
-        load::copy_from(&conn, &ldir).unwrap();
+            let ldir = dir.join(specs::TRANS).join("load");
+            std::fs::create_dir_all(&ldir).unwrap();
+            load::build_load_files(&graph, &ldir).unwrap();
+            let db =
+                Database::new(dir.join(specs::TRANS).join("db.lbug"), Default::default()).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            load::create_schema(&conn).unwrap();
+            load::copy_from(&conn, &ldir).unwrap();
 
-        let result = conn.query("MATCH (n:Struct) RETURN n.fqn").unwrap();
-        let out = emit_json_rows(result);
-        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
-        let arr = parsed.as_array().expect("array of rows");
-        assert_eq!(arr.len(), 1, "one struct row: {out}");
-        assert_eq!(arr[0]["n.fqn"], "github.com/x/y.Store");
-        assert!(arr[0].get("n.fqn").is_some(), "keyed by column name");
+            let result = conn.query("MATCH (n:Struct) RETURN n.fqn").unwrap();
+            let out = emit_json_rows(result);
+            let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+            let arr = parsed.as_array().expect("array of rows");
+            assert_eq!(arr.len(), 1, "one struct row: {out}");
+            assert_eq!(arr[0]["n.fqn"], "github.com/x/y.Store");
+            assert!(arr[0].get("n.fqn").is_some(), "keyed by column name");
 
-        drop(conn);
-        drop(db);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
+            drop(conn);
+            drop(db);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
 
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn duplicate_install_files_detects_overlap() {
-        let proj = std::env::temp_dir().join(format!("apg-proj-oc-{}", std::process::id()));
-        let user = std::env::temp_dir().join(format!("apg-user-oc-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&proj);
-        let _ = std::fs::remove_dir_all(&user);
-        std::fs::create_dir_all(proj.join("agents")).unwrap();
-        std::fs::create_dir_all(proj.join("tools")).unwrap();
-        std::fs::create_dir_all(user.join("tools")).unwrap();
-        std::fs::create_dir_all(user.join("agents")).unwrap();
-        // Duplicate: same relative path exists in both.
-        std::fs::write(proj.join("tools").join("apg_query.ts"), "x").unwrap();
-        std::fs::write(user.join("tools").join("apg_query.ts"), "x").unwrap();
-        // Project-only (a generated agent): not a duplicate.
-        std::fs::write(proj.join("agents").join("implementer.md"), "x").unwrap();
-        // User-only (a core agent): not a duplicate.
-        std::fs::write(user.join("agents").join("spec-writer.md"), "x").unwrap();
-        // node_modules trees + dep manifests exist in both but are not shadows.
-        let shared_dep = proj
-            .join("node_modules")
-            .join("@opencode-ai")
-            .join("plugin")
-            .join("dist")
-            .join("index.js");
-        std::fs::create_dir_all(shared_dep.parent().unwrap()).unwrap();
-        std::fs::write(&shared_dep, "x").unwrap();
-        std::fs::create_dir_all(
-            user.join("node_modules")
-                .join("@opencode-ai")
-                .join("plugin")
-                .join("dist"),
-        )
-        .unwrap();
-        std::fs::write(
-            user.join("node_modules")
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn duplicate_install_files_detects_overlap() {
+            let proj = std::env::temp_dir().join(format!("apg-proj-oc-{}", std::process::id()));
+            let user = std::env::temp_dir().join(format!("apg-user-oc-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&proj);
+            let _ = std::fs::remove_dir_all(&user);
+            std::fs::create_dir_all(proj.join("agents")).unwrap();
+            std::fs::create_dir_all(proj.join("tools")).unwrap();
+            std::fs::create_dir_all(user.join("tools")).unwrap();
+            std::fs::create_dir_all(user.join("agents")).unwrap();
+            // Duplicate: same relative path exists in both.
+            std::fs::write(proj.join("tools").join("apg_query.ts"), "x").unwrap();
+            std::fs::write(user.join("tools").join("apg_query.ts"), "x").unwrap();
+            // Project-only (a generated agent): not a duplicate.
+            std::fs::write(proj.join("agents").join("implementer.md"), "x").unwrap();
+            // User-only (a core agent): not a duplicate.
+            std::fs::write(user.join("agents").join("spec-writer.md"), "x").unwrap();
+            // node_modules trees + dep manifests exist in both but are not shadows.
+            let shared_dep = proj
+                .join("node_modules")
                 .join("@opencode-ai")
                 .join("plugin")
                 .join("dist")
-                .join("index.js"),
-            "x",
-        )
-        .unwrap();
-        std::fs::write(proj.join("package.json"), "{}").unwrap();
-        std::fs::write(user.join("package.json"), "{}").unwrap();
-        std::fs::write(proj.join("package-lock.json"), "{}").unwrap();
-        std::fs::write(user.join("package-lock.json"), "{}").unwrap();
-        // A project .opencode/.gitignore is git hygiene, not a suite shadow.
-        std::fs::write(proj.join(".gitignore"), "node_modules\n").unwrap();
-        std::fs::write(user.join(".gitignore"), "node_modules\n").unwrap();
-        let dupes = duplicate_install_files(&proj, &user);
-        assert_eq!(dupes.len(), 1);
-        assert!(dupes.contains(&proj.join("tools").join("apg_query.ts")));
-        let _ = std::fs::remove_dir_all(&proj);
-        let _ = std::fs::remove_dir_all(&user);
-    }
-
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn duplicate_install_files_absent_when_no_project_opencode() {
-        let proj = std::env::temp_dir().join(format!("apg-no-oc-{}", std::process::id()));
-        let user = std::env::temp_dir().join(format!("apg-no-oc-user-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&proj);
-        let _ = std::fs::remove_dir_all(&user);
-        std::fs::create_dir_all(&user).unwrap();
-        let dupes = duplicate_install_files(&proj, &user);
-        assert!(dupes.is_empty());
-        let _ = std::fs::remove_dir_all(&proj);
-        let _ = std::fs::remove_dir_all(&user);
-    }
-
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn prune_stale_suite_removes_apg_files_preserves_others() {
-        let dir = std::env::temp_dir().join(format!("apg-prune-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("tools")).unwrap();
-        std::fs::create_dir_all(dir.join("agents")).unwrap();
-        // Stale apg tool (no longer in the suite): pruned.
-        std::fs::write(dir.join("tools").join("apg_oldtool.ts"), "x").unwrap();
-        // Current apg tool: kept.
-        std::fs::write(dir.join("tools").join("apg_query.ts"), "x").unwrap();
-        // Non-apg tool: preserved.
-        std::fs::write(dir.join("tools").join("my_custom_tool.ts"), "x").unwrap();
-        // A current distributed agent: kept.
-        std::fs::write(dir.join("agents").join("codebase-navigator.md"), "x").unwrap();
-        // A user's own agent: preserved.
-        std::fs::write(dir.join("agents").join("my-reviewer.md"), "x").unwrap();
-
-        let pruned = prune_stale_suite(&dir).unwrap();
-        assert_eq!(pruned, 1);
-        assert!(!dir.join("tools").join("apg_oldtool.ts").exists());
-        assert!(dir.join("tools").join("apg_query.ts").exists());
-        assert!(dir.join("tools").join("my_custom_tool.ts").exists());
-        assert!(dir.join("agents").join("codebase-navigator.md").exists());
-        assert!(dir.join("agents").join("my-reviewer.md").exists());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The suite install derives from SUITE_TOOLS: the new project/layers
-    /// tools (apg_node/apg_edge/apg_project/apg_plan_verify) embed + install,
-    /// and the retired spec/invariant tools are gone from both the embed list
-    /// and the installed set (a stale file in the target is pruned).
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn suite_installs_node_edge_project_tools_and_retires_spec_invariant() {
-        let dir = std::env::temp_dir().join(format!("apg-suite-install-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        // A stale pre-rewrite tool already present in the target: pruned by
-        // the install (the old `apg spec`/`apg invariant` surfaces are gone).
-        std::fs::create_dir_all(dir.join("tools")).unwrap();
-        std::fs::write(dir.join("tools").join("apg_spec.ts"), "stale").unwrap();
-
-        let (updated, pruned) = install_suite(&dir).unwrap();
-        assert!(updated > 0, "a fresh install writes files");
-        assert_eq!(pruned, 1, "the retired apg_spec.ts is pruned");
-
-        for name in [
-            "apg_node.ts",
-            "apg_edge.ts",
-            "apg_project.ts",
-            "apg_plan_verify.ts",
-        ] {
-            let p = dir.join("tools").join(name);
-            assert!(p.exists(), "{name} must install");
-            let content = std::fs::read_to_string(&p).unwrap();
-            assert!(
-                content.contains("@opencode-ai/plugin"),
-                "{name} must be a real tool file"
-            );
-        }
-        for name in [
-            "apg_spec.ts",
-            "apg_spec_add.ts",
-            "apg_spec_requirements.ts",
-            "apg_invariants.ts",
-            "apg_invariant_add.ts",
-            "apg_plan_apply.ts",
-        ] {
-            assert!(
-                !dir.join("tools").join(name).exists(),
-                "{name} must not install"
-            );
-        }
-        // The embed list itself: new tools present, old tools gone.
-        let names: Vec<&str> = SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
-        for name in [
-            "apg_node.ts",
-            "apg_edge.ts",
-            "apg_project.ts",
-            "apg_plan_verify.ts",
-        ] {
-            assert!(names.contains(&name), "SUITE_TOOLS embeds {name}");
-        }
-        assert!(
-            names.iter().all(|n| !n.starts_with("apg_spec")),
-            "no apg_spec tools remain in SUITE_TOOLS"
-        );
-        assert!(
-            !names.contains(&"apg_invariants.ts") && !names.contains(&"apg_invariant_add.ts"),
-            "no apg_invariant tools remain in SUITE_TOOLS"
-        );
-        assert!(
-            !names.contains(&"apg_plan_apply.ts"),
-            "apg_plan_apply was renamed verify"
-        );
-
-        // R23 strict surface: the retired plan tools are gone from both the
-        // embed list and the installed set.
-        for name in ["apg_plan_init.ts", "apg_plan_link.ts"] {
-            assert!(
-                !names.contains(&name),
-                "retired {name} must not be embedded"
-            );
-            assert!(
-                !dir.join("tools").join(name).exists(),
-                "retired {name} must not install"
-            );
-        }
-
-        // The re-scoped/new wrappers dispatch the add|update|rm surface:
-        // apg_plan_add also creates the plan (no `kind`); node/edge expose
-        // update/rm.
-        for name in ["apg_plan_add.ts", "apg_node.ts", "apg_edge.ts"] {
-            let content = std::fs::read_to_string(dir.join("tools").join(name)).unwrap();
-            assert!(
-                content.contains("\"update\"") && content.contains("\"rm\""),
-                "{name} must expose the update/rm actions"
-            );
-        }
-        let plan_add = std::fs::read_to_string(dir.join("tools").join("apg_plan_add.ts")).unwrap();
-        assert!(
-            plan_add.contains("\"plan\"") && plan_add.contains("--force"),
-            "apg_plan_add.ts is the plan add/update/rm wrapper"
-        );
-
-        // Ripple consumers: no shipped tool, agent prompt, or AGENTS.md text
-        // names a retired verb.
-        let agents_md = include_str!("../AGENTS.md");
-        for banned in ["plan init", "plan link", "apg_plan_init", "apg_plan_link"] {
-            for (name, content) in SUITE_TOOLS {
-                assert!(
-                    !content.contains(banned),
-                    "tool {name} names the retired verb `{banned}`"
-                );
-            }
-            for (name, content) in AGENTS {
-                assert!(
-                    !content.contains(banned),
-                    "agent prompt {name} names the retired verb `{banned}`"
-                );
-            }
-            assert!(
-                !agents_md.contains(banned),
-                "AGENTS.md names the retired verb `{banned}`"
-            );
-        }
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The read-guard prose holds for exactly the five prompts this change
-    /// touches: the four distributed agents rewritten by read-guard-prose
-    /// (spec-review/spec-writer/plan-writer/plan-review) plus agent-builder.md,
-    /// whose common-shape and step-6 verify text make every generated agent
-    /// inherit the rule. `codebase-navigator.md` is deliberately excluded (see
-    /// below).
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn installed_agent_prompts_state_file_access_read_guard() {
-        const RULE: &str = "graph state is reached only through the apg tools";
-        const NEVER_READ: &str = "never read directly";
-        const BLANKET: &str = "You may read any file";
-
-        for name in [
-            "spec-review.md",
-            "spec-writer.md",
-            "plan-writer.md",
-            "plan-review.md",
-            "agent-builder.md",
-        ] {
-            let content = AGENTS
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, c)| *c)
-                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"));
-            assert!(
-                content.contains(RULE),
-                "{name} must state that graph state is reached only through the apg tools"
-            );
-            assert!(
-                content.contains(NEVER_READ),
-                "{name} must state that node/transient files are never read directly"
-            );
-            assert!(
-                !content.contains(BLANKET),
-                "{name} must not carry the blanket `{BLANKET}` claim"
-            );
-        }
-
-        // `codebase-navigator.md` is excluded from the assertion above: it is a
-        // sixth entry in the embedded AGENTS set that neither phase edits (it
-        // already reaches graph state through the tools and never reads raw
-        // files, per codebase-navigator.md's database section), so a literal
-        // whole-set guard would fail on an unchanged file. Only the five
-        // in-scope prompts are asserted.
-
-        // The inheritance half inspects the agent-builder.md TEMPLATE text
-        // (there is no generated-agent artifact to read): it must require the
-        // positive rule and fail a generated agent whose body claims broader
-        // read access than its grant.
-        let builder = AGENTS
-            .iter()
-            .find(|(n, _)| *n == "agent-builder.md")
-            .map(|(_, c)| *c)
+                .join("index.js");
+            std::fs::create_dir_all(shared_dep.parent().unwrap()).unwrap();
+            std::fs::write(&shared_dep, "x").unwrap();
+            std::fs::create_dir_all(
+                user.join("node_modules")
+                    .join("@opencode-ai")
+                    .join("plugin")
+                    .join("dist"),
+            )
             .unwrap();
-        assert!(
-            builder.contains(RULE) && builder.contains(NEVER_READ),
-            "agent-builder.md must require the positive read-guard rule"
-        );
-        assert!(
-            builder.contains("claims broader read access than its grant"),
-            "agent-builder.md's verify checklist must fail a broader-than-grant body"
-        );
-    }
+            std::fs::write(
+                user.join("node_modules")
+                    .join("@opencode-ai")
+                    .join("plugin")
+                    .join("dist")
+                    .join("index.js"),
+                "x",
+            )
+            .unwrap();
+            std::fs::write(proj.join("package.json"), "{}").unwrap();
+            std::fs::write(user.join("package.json"), "{}").unwrap();
+            std::fs::write(proj.join("package-lock.json"), "{}").unwrap();
+            std::fs::write(user.join("package-lock.json"), "{}").unwrap();
+            // A project .opencode/.gitignore is git hygiene, not a suite shadow.
+            std::fs::write(proj.join(".gitignore"), "node_modules\n").unwrap();
+            std::fs::write(user.join(".gitignore"), "node_modules\n").unwrap();
+            let dupes = duplicate_install_files(&proj, &user);
+            assert_eq!(dupes.len(), 1);
+            assert!(dupes.contains(&proj.join("tools").join("apg_query.ts")));
+            let _ = std::fs::remove_dir_all(&proj);
+            let _ = std::fs::remove_dir_all(&user);
+        }
 
-    /// The coordinator-mediated feedback cycle is embedded in the shipped
-    /// prose: the navigator holds the `apg_review_action` grant and carries the
-    /// dispatch protocol (dispatch one open item to its owning writer → receive
-    /// the single ACTIONED/WONT-FIX claim → shallow claim-vs-change check →
-    /// action or re-dispatch); the two reviewer prompts and the
-    /// `apg_review_action` tool point the action step at the coordinator, never
-    /// the writer.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn coordinator_agent_carries_review_action_and_dispatch_prose() {
-        fn agent(name: &str) -> &'static str {
-            AGENTS
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn duplicate_install_files_absent_when_no_project_opencode() {
+            let proj = std::env::temp_dir().join(format!("apg-no-oc-{}", std::process::id()));
+            let user = std::env::temp_dir().join(format!("apg-no-oc-user-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&proj);
+            let _ = std::fs::remove_dir_all(&user);
+            std::fs::create_dir_all(&user).unwrap();
+            let dupes = duplicate_install_files(&proj, &user);
+            assert!(dupes.is_empty());
+            let _ = std::fs::remove_dir_all(&proj);
+            let _ = std::fs::remove_dir_all(&user);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn prune_stale_suite_removes_apg_files_preserves_others() {
+            let dir = std::env::temp_dir().join(format!("apg-prune-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("tools")).unwrap();
+            std::fs::create_dir_all(dir.join("agents")).unwrap();
+            // Stale apg tool (no longer in the suite): pruned.
+            std::fs::write(dir.join("tools").join("apg_oldtool.ts"), "x").unwrap();
+            // Current apg tool: kept.
+            std::fs::write(dir.join("tools").join("apg_query.ts"), "x").unwrap();
+            // Non-apg tool: preserved.
+            std::fs::write(dir.join("tools").join("my_custom_tool.ts"), "x").unwrap();
+            // A current distributed agent: kept.
+            std::fs::write(dir.join("agents").join("codebase-navigator.md"), "x").unwrap();
+            // A user's own agent: preserved.
+            std::fs::write(dir.join("agents").join("my-reviewer.md"), "x").unwrap();
+
+            let pruned = prune_stale_suite(&dir).unwrap();
+            assert_eq!(pruned, 1);
+            assert!(!dir.join("tools").join("apg_oldtool.ts").exists());
+            assert!(dir.join("tools").join("apg_query.ts").exists());
+            assert!(dir.join("tools").join("my_custom_tool.ts").exists());
+            assert!(dir.join("agents").join("codebase-navigator.md").exists());
+            assert!(dir.join("agents").join("my-reviewer.md").exists());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// The suite install derives from SUITE_TOOLS: the new project/layers
+        /// tools (apg_node/apg_edge/apg_project/apg_plan_verify) embed + install,
+        /// and the retired spec/invariant tools are gone from both the embed list
+        /// and the installed set (a stale file in the target is pruned).
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn suite_installs_node_edge_project_tools_and_retires_spec_invariant() {
+            let dir =
+                std::env::temp_dir().join(format!("apg-suite-install-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            // A stale pre-rewrite tool already present in the target: pruned by
+            // the install (the old `apg spec`/`apg invariant` surfaces are gone).
+            std::fs::create_dir_all(dir.join("tools")).unwrap();
+            std::fs::write(dir.join("tools").join("apg_spec.ts"), "stale").unwrap();
+
+            let (updated, pruned) = install_suite(&dir).unwrap();
+            assert!(updated > 0, "a fresh install writes files");
+            assert_eq!(pruned, 1, "the retired apg_spec.ts is pruned");
+
+            for name in [
+                "apg_node.ts",
+                "apg_edge.ts",
+                "apg_project.ts",
+                "apg_plan_verify.ts",
+            ] {
+                let p = dir.join("tools").join(name);
+                assert!(p.exists(), "{name} must install");
+                let content = std::fs::read_to_string(&p).unwrap();
+                assert!(
+                    content.contains("@opencode-ai/plugin"),
+                    "{name} must be a real tool file"
+                );
+            }
+            for name in [
+                "apg_spec.ts",
+                "apg_spec_add.ts",
+                "apg_spec_requirements.ts",
+                "apg_invariants.ts",
+                "apg_invariant_add.ts",
+                "apg_plan_apply.ts",
+            ] {
+                assert!(
+                    !dir.join("tools").join(name).exists(),
+                    "{name} must not install"
+                );
+            }
+            // The embed list itself: new tools present, old tools gone.
+            let names: Vec<&str> = SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
+            for name in [
+                "apg_node.ts",
+                "apg_edge.ts",
+                "apg_project.ts",
+                "apg_plan_verify.ts",
+            ] {
+                assert!(names.contains(&name), "SUITE_TOOLS embeds {name}");
+            }
+            assert!(
+                names.iter().all(|n| !n.starts_with("apg_spec")),
+                "no apg_spec tools remain in SUITE_TOOLS"
+            );
+            assert!(
+                !names.contains(&"apg_invariants.ts") && !names.contains(&"apg_invariant_add.ts"),
+                "no apg_invariant tools remain in SUITE_TOOLS"
+            );
+            assert!(
+                !names.contains(&"apg_plan_apply.ts"),
+                "apg_plan_apply was renamed verify"
+            );
+
+            // R23 strict surface: the retired plan tools are gone from both the
+            // embed list and the installed set.
+            for name in ["apg_plan_init.ts", "apg_plan_link.ts"] {
+                assert!(
+                    !names.contains(&name),
+                    "retired {name} must not be embedded"
+                );
+                assert!(
+                    !dir.join("tools").join(name).exists(),
+                    "retired {name} must not install"
+                );
+            }
+
+            // The re-scoped/new wrappers dispatch the add|update|rm surface:
+            // apg_plan_add also creates the plan (no `kind`); node/edge expose
+            // update/rm.
+            for name in ["apg_plan_add.ts", "apg_node.ts", "apg_edge.ts"] {
+                let content = std::fs::read_to_string(dir.join("tools").join(name)).unwrap();
+                assert!(
+                    content.contains("\"update\"") && content.contains("\"rm\""),
+                    "{name} must expose the update/rm actions"
+                );
+            }
+            let plan_add =
+                std::fs::read_to_string(dir.join("tools").join("apg_plan_add.ts")).unwrap();
+            assert!(
+                plan_add.contains("\"plan\"") && plan_add.contains("--force"),
+                "apg_plan_add.ts is the plan add/update/rm wrapper"
+            );
+
+            // Ripple consumers: no shipped tool, agent prompt, or AGENTS.md text
+            // names a retired verb.
+            let agents_md = include_str!("../AGENTS.md");
+            for banned in ["plan init", "plan link", "apg_plan_init", "apg_plan_link"] {
+                for (name, content) in SUITE_TOOLS {
+                    assert!(
+                        !content.contains(banned),
+                        "tool {name} names the retired verb `{banned}`"
+                    );
+                }
+                for (name, content) in AGENTS {
+                    assert!(
+                        !content.contains(banned),
+                        "agent prompt {name} names the retired verb `{banned}`"
+                    );
+                }
+                assert!(
+                    !agents_md.contains(banned),
+                    "AGENTS.md names the retired verb `{banned}`"
+                );
+            }
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// The read-guard prose holds for exactly the five prompts this change
+        /// touches: the four distributed agents rewritten by read-guard-prose
+        /// (spec-review/spec-writer/plan-writer/plan-review) plus agent-builder.md,
+        /// whose common-shape and step-6 verify text make every generated agent
+        /// inherit the rule. `codebase-navigator.md` is deliberately excluded (see
+        /// below).
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn installed_agent_prompts_state_file_access_read_guard() {
+            const RULE: &str = "graph state is reached only through the apg tools";
+            const NEVER_READ: &str = "never read directly";
+            const BLANKET: &str = "You may read any file";
+
+            for name in [
+                "spec-review.md",
+                "spec-writer.md",
+                "plan-writer.md",
+                "plan-review.md",
+                "agent-builder.md",
+            ] {
+                let content = AGENTS
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, c)| *c)
+                    .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"));
+                assert!(
+                    content.contains(RULE),
+                    "{name} must state that graph state is reached only through the apg tools"
+                );
+                assert!(
+                    content.contains(NEVER_READ),
+                    "{name} must state that node/transient files are never read directly"
+                );
+                assert!(
+                    !content.contains(BLANKET),
+                    "{name} must not carry the blanket `{BLANKET}` claim"
+                );
+            }
+
+            // `codebase-navigator.md` is excluded from the assertion above: it is a
+            // sixth entry in the embedded AGENTS set that neither phase edits (it
+            // already reaches graph state through the tools and never reads raw
+            // files, per codebase-navigator.md's database section), so a literal
+            // whole-set guard would fail on an unchanged file. Only the five
+            // in-scope prompts are asserted.
+
+            // The inheritance half inspects the agent-builder.md TEMPLATE text
+            // (there is no generated-agent artifact to read): it must require the
+            // positive rule and fail a generated agent whose body claims broader
+            // read access than its grant.
+            let builder = AGENTS
                 .iter()
-                .find(|(n, _)| *n == name)
+                .find(|(n, _)| *n == "agent-builder.md")
                 .map(|(_, c)| *c)
-                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
-        }
-
-        // The navigator is the coordinator: it gains the action grant in its
-        // permission frontmatter and the dispatch-protocol prose.
-        let navigator = agent("codebase-navigator.md");
-        assert!(
-            navigator.contains("apg_review_action: allow"),
-            "the navigator prompt must hold the apg_review_action grant"
-        );
-        for needle in [
-            "coordinator",
-            "ACTIONED/WONT-FIX claim",
-            "shallow",
-            "re-dispatch",
-        ] {
+                .unwrap();
             assert!(
-                navigator.contains(needle),
-                "the navigator prompt must carry the dispatch protocol ({needle})"
-            );
-        }
-        assert!(
-            !navigator.contains("and actions Feedback"),
-            "the navigator must no longer claim the implementer actions Feedback"
-        );
-
-        // The reviewer prompts point the action step at the coordinator: the
-        // writer returns a claim, the coordinator actions it.
-        for name in ["spec-review.md", "plan-review.md"] {
-            let prompt = agent(name);
-            assert!(
-                prompt.contains("coordinator: apg_review_action"),
-                "{name} must show the coordinator running apg_review_action"
+                builder.contains(RULE) && builder.contains(NEVER_READ),
+                "agent-builder.md must require the positive read-guard rule"
             );
             assert!(
-                prompt.contains("ACTIONED/WONT-FIX"),
-                "{name} must state that the writer returns a claim"
-            );
-            assert!(
-                !prompt.contains("writer:   apg_review_action")
-                    && !prompt.contains("writer: apg_review_action"),
-                "{name} must not show the writer running apg_review_action"
+                builder.contains("claims broader read access than its grant"),
+                "agent-builder.md's verify checklist must fail a broader-than-grant body"
             );
         }
 
-        // The action tool's own description names the coordinator as the actor.
-        let tool = SUITE_TOOLS
-            .iter()
-            .find(|(n, _)| *n == "apg_review_action.ts")
-            .map(|(_, c)| *c)
-            .expect("apg_review_action.ts is in SUITE_TOOLS");
-        assert!(
-            tool.contains("coordinator"),
-            "the apg_review_action tool must name the coordinator"
-        );
-        assert!(
-            !tool.contains("Only the writer side does this"),
-            "the apg_review_action tool must not say only the writer actions"
-        );
-    }
+        /// The coordinator-mediated feedback cycle is embedded in the shipped
+        /// prose: the navigator holds the `apg_review_action` grant and carries the
+        /// dispatch protocol (dispatch one open item to its owning writer → receive
+        /// the single ACTIONED/WONT-FIX claim → shallow claim-vs-change check →
+        /// action or re-dispatch); the two reviewer prompts and the
+        /// `apg_review_action` tool point the action step at the coordinator, never
+        /// the writer.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn coordinator_agent_carries_review_action_and_dispatch_prose() {
+            fn agent(name: &str) -> &'static str {
+                AGENTS
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, c)| *c)
+                    .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+            }
 
-    /// The coordinator-mediated cycle's writer side is read-only: the embedded
-    /// spec-writer and plan-writer prompts hold the read-only `apg_review`
-    /// channel and no longer carry the `apg_review_action` literal anywhere
-    /// (they read the transient store and return an ACTIONED/WONT-FIX claim;
-    /// the coordinator actions the item), and the agent-builder template
-    /// re-points the implementer and every test-implementer it scaffolds to
-    /// that same read-only/claim-only grant shape.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn writer_and_test_implementer_agents_hold_read_only_feedback() {
-        fn agent(name: &str) -> &'static str {
-            AGENTS
+            // The navigator is the coordinator: it gains the action grant in its
+            // permission frontmatter and the dispatch-protocol prose.
+            let navigator = agent("codebase-navigator.md");
+            assert!(
+                navigator.contains("apg_review_action: allow"),
+                "the navigator prompt must hold the apg_review_action grant"
+            );
+            for needle in [
+                "coordinator",
+                "ACTIONED/WONT-FIX claim",
+                "shallow",
+                "re-dispatch",
+            ] {
+                assert!(
+                    navigator.contains(needle),
+                    "the navigator prompt must carry the dispatch protocol ({needle})"
+                );
+            }
+            assert!(
+                !navigator.contains("and actions Feedback"),
+                "the navigator must no longer claim the implementer actions Feedback"
+            );
+
+            // The reviewer prompts point the action step at the coordinator: the
+            // writer returns a claim, the coordinator actions it.
+            for name in ["spec-review.md", "plan-review.md"] {
+                let prompt = agent(name);
+                assert!(
+                    prompt.contains("coordinator: apg_review_action"),
+                    "{name} must show the coordinator running apg_review_action"
+                );
+                assert!(
+                    prompt.contains("ACTIONED/WONT-FIX"),
+                    "{name} must state that the writer returns a claim"
+                );
+                assert!(
+                    !prompt.contains("writer:   apg_review_action")
+                        && !prompt.contains("writer: apg_review_action"),
+                    "{name} must not show the writer running apg_review_action"
+                );
+            }
+
+            // The action tool's own description names the coordinator as the actor.
+            let tool = SUITE_TOOLS
                 .iter()
-                .find(|(n, _)| *n == name)
+                .find(|(n, _)| *n == "apg_review_action.ts")
                 .map(|(_, c)| *c)
-                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
-        }
-
-        // The two writer prompts: the WHOLE embedded prompt text (not a single
-        // frontmatter key) must be free of the action grant and must carry the
-        // read-only review channel.
-        for name in ["spec-writer.md", "plan-writer.md"] {
-            let prompt = agent(name);
+                .expect("apg_review_action.ts is in SUITE_TOOLS");
             assert!(
-                !prompt.contains("apg_review_action"),
-                "{name} must not carry the apg_review_action literal anywhere"
+                tool.contains("coordinator"),
+                "the apg_review_action tool must name the coordinator"
             );
             assert!(
-                prompt.contains("apg_review"),
-                "{name} must hold the read-only apg_review channel"
+                !tool.contains("Only the writer side does this"),
+                "the apg_review_action tool must not say only the writer actions"
             );
         }
 
-        // The agent-builder template: the implementer grant description and
-        // every test-implementer grant description point at the read-only
-        // channel and a claim, never the action tool.
-        let builder = agent("agent-builder.md");
-        fn section<'a>(doc: &'a str, heading: &str) -> &'a str {
-            let start = doc
-                .find(heading)
-                .unwrap_or_else(|| panic!("agent-builder.md must carry the `{heading}` heading"));
-            let rest = &doc[start + heading.len()..];
-            match rest.find("\n### ") {
-                Some(end) => &rest[..end],
-                None => rest,
+        /// The coordinator-mediated cycle's writer side is read-only: the embedded
+        /// spec-writer and plan-writer prompts hold the read-only `apg_review`
+        /// channel and no longer carry the `apg_review_action` literal anywhere
+        /// (they read the transient store and return an ACTIONED/WONT-FIX claim;
+        /// the coordinator actions the item), and the agent-builder template
+        /// re-points the implementer and every test-implementer it scaffolds to
+        /// that same read-only/claim-only grant shape.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn writer_and_test_implementer_agents_hold_read_only_feedback() {
+            fn agent(name: &str) -> &'static str {
+                AGENTS
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, c)| *c)
+                    .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+            }
+
+            // The two writer prompts: the WHOLE embedded prompt text (not a single
+            // frontmatter key) must be free of the action grant and must carry the
+            // read-only review channel.
+            for name in ["spec-writer.md", "plan-writer.md"] {
+                let prompt = agent(name);
+                assert!(
+                    !prompt.contains("apg_review_action"),
+                    "{name} must not carry the apg_review_action literal anywhere"
+                );
+                assert!(
+                    prompt.contains("apg_review"),
+                    "{name} must hold the read-only apg_review channel"
+                );
+            }
+
+            // The agent-builder template: the implementer grant description and
+            // every test-implementer grant description point at the read-only
+            // channel and a claim, never the action tool.
+            let builder = agent("agent-builder.md");
+            fn section<'a>(doc: &'a str, heading: &str) -> &'a str {
+                let start = doc.find(heading).unwrap_or_else(|| {
+                    panic!("agent-builder.md must carry the `{heading}` heading")
+                });
+                let rest = &doc[start + heading.len()..];
+                match rest.find("\n### ") {
+                    Some(end) => &rest[..end],
+                    None => rest,
+                }
+            }
+            for heading in [
+                "### <name>-implementer (one per detected subsystem; file `<name>-implementer.md`)",
+                "### unit/int/e2e-test-implementer(s) (per detected tier, where a test tier is file-separable)",
+            ] {
+                let grant = section(builder, heading);
+                assert!(
+                    !grant.contains("apg_review_action"),
+                    "{heading} must not grant apg_review_action"
+                );
+                assert!(
+                    grant.contains("apg_review"),
+                    "{heading} must grant the read-only apg_review channel"
+                );
+                assert!(
+                    grant.contains("claim"),
+                    "{heading} must return a claim rather than action the item"
+                );
             }
         }
-        for heading in [
-            "### <name>-implementer (one per detected subsystem; file `<name>-implementer.md`)",
-            "### unit/int/e2e-test-implementer(s) (per detected tier, where a test tier is file-separable)",
-        ] {
-            let grant = section(builder, heading);
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn scaffold_gitignore_adds_layout_entries_once() {
+            let d = std::env::temp_dir().join(format!("apg-gitignore-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(".gitignore"), "/target\n").unwrap();
+            assert!(scaffold_gitignore(&d).unwrap(), "first scaffold writes");
+            let once = std::fs::read_to_string(d.join(".gitignore")).unwrap();
+            assert!(once.contains("apg/.trans/"));
+            assert!(once.contains("apg/.worktrees/"));
             assert!(
-                !grant.contains("apg_review_action"),
-                "{heading} must not grant apg_review_action"
+                once.starts_with("/target\n"),
+                "other lines untouched: {once}"
             );
             assert!(
-                grant.contains("apg_review"),
-                "{heading} must grant the read-only apg_review channel"
+                !scaffold_gitignore(&d).unwrap(),
+                "idempotent scaffold writes nothing"
             );
-            assert!(
-                grant.contains("claim"),
-                "{heading} must return a claim rather than action the item"
+            let twice = std::fs::read_to_string(d.join(".gitignore")).unwrap();
+            assert_eq!(once, twice);
+            let _ = std::fs::remove_dir_all(&d);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn scaffold_gitignore_accepts_existing_entries_in_either_spelling() {
+            let d =
+                std::env::temp_dir().join(format!("apg-gitignore-spell-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            // No trailing slashes: both entries are present for git purposes.
+            std::fs::write(d.join(".gitignore"), "apg/.trans\napg/.worktrees\n").unwrap();
+            assert!(!scaffold_gitignore(&d).unwrap());
+            let _ = std::fs::remove_dir_all(&d);
+        }
+
+        /// The upgrade guide (task-4) must cover the version field's meaning,
+        /// the mismatch detection, and the upgrade steps — the R10 block text
+        /// points users at it.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn upgrade_doc_covers_version_field_gate_and_fix_steps() {
+            for needle in [
+                "version",
+                "apg/config.json",
+                "apg scan",
+                "apg project start",
+                "apg init",
+                "major.minor",
+                "apg-upgrade.md",
+            ] {
+                assert!(
+                    APG_UPGRADE_DOC.contains(needle),
+                    "doc must mention {needle}"
+                );
+            }
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn cargo_manifest_and_lockfile_declare_release_version() {
+            let root = env!("CARGO_MANIFEST_DIR");
+            let manifest = std::fs::read_to_string(format!("{root}/Cargo.toml")).unwrap();
+            let lock = std::fs::read_to_string(format!("{root}/Cargo.lock")).unwrap();
+            // The version the crate was actually compiled at must be the release
+            // this test guards (env! comes from the same Cargo.toml, so this also
+            // catches a test that drifted ahead of the bump).
+            assert_eq!(env!("CARGO_PKG_VERSION"), RELEASE_VERSION);
+            assert_eq!(cargo_manifest_version(&manifest), Some(RELEASE_VERSION));
+            assert_eq!(
+                cargo_lock_package_version(&lock, "apg"),
+                Some(RELEASE_VERSION)
             );
         }
-    }
 
-    /// The discovered-work protocol: implementation-discovered work is re-planned
-    /// (a planned node plus a `creates` task) before it is implemented. The
-    /// embedded coordinator/authoring prompts must carry it so the rule cannot be
-    /// silently dropped from the distributed agents.
-    #[test]
-    fn discovered_work_is_replanned_before_it_is_implemented() {
-        fn agent(name: &str) -> &'static str {
-            AGENTS
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, c)| *c)
-                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
-        }
-        assert!(
-            agent("codebase-navigator.md")
-                .contains("discovered work is planned before it is implemented"),
-            "the coordinator prompt must state the discovered-work order"
-        );
-        assert!(
-            agent("agent-builder.md").contains("stops before editing"),
-            "the agent-builder template must carry the stop-and-report clause"
-        );
-        assert!(
-            agent("plan-writer.md").contains("declared before the code exists"),
-            "the plan-writer prompt must carry the planned-before-code rule"
-        );
-        assert!(
-            agent("spec-writer.md").contains("divergence discovered during implementation"),
-            "the spec-writer prompt must carry the reconciliation route for discovered divergence"
-        );
-    }
-
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn scaffold_gitignore_adds_layout_entries_once() {
-        let d = std::env::temp_dir().join(format!("apg-gitignore-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join(".gitignore"), "/target\n").unwrap();
-        assert!(scaffold_gitignore(&d).unwrap(), "first scaffold writes");
-        let once = std::fs::read_to_string(d.join(".gitignore")).unwrap();
-        assert!(once.contains("apg/.trans/"));
-        assert!(once.contains("apg/.worktrees/"));
-        assert!(
-            once.starts_with("/target\n"),
-            "other lines untouched: {once}"
-        );
-        assert!(
-            !scaffold_gitignore(&d).unwrap(),
-            "idempotent scaffold writes nothing"
-        );
-        let twice = std::fs::read_to_string(d.join(".gitignore")).unwrap();
-        assert_eq!(once, twice);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn scaffold_gitignore_accepts_existing_entries_in_either_spelling() {
-        let d = std::env::temp_dir().join(format!("apg-gitignore-spell-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        // No trailing slashes: both entries are present for git purposes.
-        std::fs::write(d.join(".gitignore"), "apg/.trans\napg/.worktrees\n").unwrap();
-        assert!(!scaffold_gitignore(&d).unwrap());
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// The upgrade guide (task-4) must cover the version field's meaning,
-    /// the mismatch detection, and the upgrade steps — the R10 block text
-    /// points users at it.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn upgrade_doc_covers_version_field_gate_and_fix_steps() {
-        for needle in [
-            "version",
-            "apg/config.json",
-            "apg scan",
-            "apg project start",
-            "apg init",
-            "major.minor",
-            "apg-upgrade.md",
-        ] {
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn readme_documents_release_version() {
+            let readme =
+                std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR")))
+                    .unwrap();
+            // The README pins the 0.13.x line, not an exact patch, so patch releases
+            // don't require a README edit.
+            assert!(readme.contains("apg 0.13.x"), "README --version examples");
+            assert!(readme.contains("0.13.x"), "README tagged-release prose");
             assert!(
-                APG_UPGRADE_DOC.contains(needle),
-                "doc must mention {needle}"
+                readme.contains("--version 0.13.x"),
+                "README Linux installer pin option"
             );
+            // No stale release records: the previous versions must be fully replaced.
+            assert!(!readme.contains("0.10"), "README must not reference 0.10");
+            assert!(!readme.contains("0.11"), "README must not reference 0.11");
         }
-    }
 
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn cargo_manifest_and_lockfile_declare_release_version() {
-        let root = env!("CARGO_MANIFEST_DIR");
-        let manifest = std::fs::read_to_string(format!("{root}/Cargo.toml")).unwrap();
-        let lock = std::fs::read_to_string(format!("{root}/Cargo.lock")).unwrap();
-        // The version the crate was actually compiled at must be the release
-        // this test guards (env! comes from the same Cargo.toml, so this also
-        // catches a test that drifted ahead of the bump).
-        assert_eq!(env!("CARGO_PKG_VERSION"), RELEASE_VERSION);
-        assert_eq!(cargo_manifest_version(&manifest), Some(RELEASE_VERSION));
-        assert_eq!(
-            cargo_lock_package_version(&lock, "apg"),
-            Some(RELEASE_VERSION)
-        );
-    }
+        /// Phase-7 task-1 (E2E, top-level dispatch): the strict-mutation surface's
+        /// refusal sweep. Every create arm — `node add`, `edge add`, `plan add`
+        /// (the plan itself), and `plan add phase|task|planned` — refuses an
+        /// existing entity (non-zero, error naming the `update`/`rm` follow-up, no
+        /// store change); `rm` on an absent entity is non-zero, never a silent
+        /// no-op.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn strict_surface_top_level_dispatch_refuses_existing_and_absent_rm() {
+            let (apg_root, repo, wt) = strict_surface_fixture("dispatch-refusal");
 
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn readme_documents_release_version() {
-        let readme =
-            std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
-        // The README pins the 0.13.x line, not an exact patch, so patch releases
-        // don't require a README edit.
-        assert!(readme.contains("apg 0.13.x"), "README --version examples");
-        assert!(readme.contains("0.13.x"), "README tagged-release prose");
-        assert!(
-            readme.contains("--version 0.13.x"),
-            "README Linux installer pin option"
-        );
-        // No stale release records: the previous versions must be fully replaced.
-        assert!(!readme.contains("0.10"), "README must not reference 0.10");
-        assert!(!readme.contains("0.11"), "README must not reference 0.11");
-    }
+            // --- node add refuses an existing FQN (naming update/rm) ---
+            with_cwd(&wt, || {
+                node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"]))
+            })
+            .unwrap();
+            let r1_path =
+                layers::node_file_path(&apg_root, layers::Layer::Requirements, "requirement", "r1");
+            let r1_before = std::fs::read_to_string(&r1_path).unwrap();
+            let err = with_cwd(&wt, || {
+                node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"]))
+                    .unwrap_err()
+            });
+            let msg = err.to_string();
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(msg.contains("apg node update"), "{msg}");
+            assert!(msg.contains("apg node rm"), "{msg}");
+            assert_eq!(
+                std::fs::read_to_string(&r1_path).unwrap(),
+                r1_before,
+                "a refused re-add must write nothing"
+            );
 
-    /// Phase-7 task-1 (E2E, top-level dispatch): the strict-mutation surface's
-    /// refusal sweep. Every create arm — `node add`, `edge add`, `plan add`
-    /// (the plan itself), and `plan add phase|task|planned` — refuses an
-    /// existing entity (non-zero, error naming the `update`/`rm` follow-up, no
-    /// store change); `rm` on an absent entity is non-zero, never a silent
-    /// no-op.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn strict_surface_top_level_dispatch_refuses_existing_and_absent_rm() {
-        let (apg_root, repo, wt) = strict_surface_fixture("dispatch-refusal");
+            // --- edge add refuses a duplicate (kind, from, to) ---
+            with_cwd(&wt, || {
+                node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r2"]))
+            })
+            .unwrap();
+            let edge = argv(&[
+                "add",
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ]);
+            with_cwd(&wt, || node_cmd::cmd_edge(&edge)).unwrap();
+            let r1_after_edge = std::fs::read_to_string(&r1_path).unwrap();
+            let err = with_cwd(&wt, || node_cmd::cmd_edge(&edge).unwrap_err());
+            let msg = err.to_string();
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(msg.contains("apg edge update"), "{msg}");
+            assert!(msg.contains("apg edge rm"), "{msg}");
+            assert_eq!(
+                std::fs::read_to_string(&r1_path).unwrap(),
+                r1_after_edge,
+                "a refused duplicate must not add a second out-half"
+            );
+            let r2 =
+                layers::read_node_file(&apg_root, layers::Layer::Requirements, "requirement", "r2")
+                    .unwrap();
+            assert_eq!(
+                r2.in_edges.len(),
+                1,
+                "the duplicate must not add an in-half"
+            );
 
-        // --- node add refuses an existing FQN (naming update/rm) ---
-        with_cwd(&wt, || {
-            node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"]))
-        })
-        .unwrap();
-        let r1_path =
-            layers::node_file_path(&apg_root, layers::Layer::Requirements, "requirement", "r1");
-        let r1_before = std::fs::read_to_string(&r1_path).unwrap();
-        let err = with_cwd(&wt, || {
-            node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"])).unwrap_err()
-        });
-        let msg = err.to_string();
-        assert!(msg.contains("already exists"), "{msg}");
-        assert!(msg.contains("apg node update"), "{msg}");
-        assert!(msg.contains("apg node rm"), "{msg}");
-        assert_eq!(
-            std::fs::read_to_string(&r1_path).unwrap(),
-            r1_before,
-            "a refused re-add must write nothing"
-        );
+            // --- rm on an absent node is non-zero (never a silent no-op) ---
+            let err = with_cwd(&wt, || {
+                node_cmd::cmd_node(&argv(&["rm", "requirements", "requirement", "ghost"]))
+                    .unwrap_err()
+            });
+            assert!(!err.to_string().is_empty(), "{err}");
 
-        // --- edge add refuses a duplicate (kind, from, to) ---
-        with_cwd(&wt, || {
-            node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r2"]))
-        })
-        .unwrap();
-        let edge = argv(&[
-            "add",
-            "depends-on",
-            "requirements.requirement.r1",
-            "requirements.requirement.r2",
-        ]);
-        with_cwd(&wt, || node_cmd::cmd_edge(&edge)).unwrap();
-        let r1_after_edge = std::fs::read_to_string(&r1_path).unwrap();
-        let err = with_cwd(&wt, || node_cmd::cmd_edge(&edge).unwrap_err());
-        let msg = err.to_string();
-        assert!(msg.contains("already exists"), "{msg}");
-        assert!(msg.contains("apg edge update"), "{msg}");
-        assert!(msg.contains("apg edge rm"), "{msg}");
-        assert_eq!(
-            std::fs::read_to_string(&r1_path).unwrap(),
-            r1_after_edge,
-            "a refused duplicate must not add a second out-half"
-        );
-        let r2 =
-            layers::read_node_file(&apg_root, layers::Layer::Requirements, "requirement", "r2")
-                .unwrap();
-        assert_eq!(
-            r2.in_edges.len(),
-            1,
-            "the duplicate must not add an in-half"
-        );
+            // --- plan add refuses an existing plan, naming update/rm ---
+            with_cwd(&wt, || plan_cmd::cmd_plan(&argv(&["add", "foo"]))).unwrap();
+            let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
+            let plan_before = std::fs::read_to_string(&plan_path).unwrap();
+            let err = with_cwd(&wt, || {
+                plan_cmd::cmd_plan(&argv(&["add", "foo"])).unwrap_err()
+            });
+            let msg = err.to_string();
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(msg.contains("apg plan update foo"), "{msg}");
+            assert!(msg.contains("apg plan rm foo"), "{msg}");
+            assert_eq!(
+                std::fs::read_to_string(&plan_path).unwrap(),
+                plan_before,
+                "a refused plan re-add must leave the store untouched"
+            );
 
-        // --- rm on an absent node is non-zero (never a silent no-op) ---
-        let err = with_cwd(&wt, || {
-            node_cmd::cmd_node(&argv(&["rm", "requirements", "requirement", "ghost"])).unwrap_err()
-        });
-        assert!(!err.to_string().is_empty(), "{err}");
+            // --- plan add phase refuses an existing phase, naming update/rm ---
+            with_cwd(&wt, || {
+                plan_cmd::cmd_plan(&argv(&[
+                    "add",
+                    "foo",
+                    "phase",
+                    "1",
+                    "--title",
+                    "P1",
+                    "--deliverable",
+                    "D",
+                ]))
+            })
+            .unwrap();
+            let phase_before = std::fs::read_to_string(&plan_path).unwrap();
+            let err = with_cwd(&wt, || {
+                plan_cmd::cmd_plan(&argv(&[
+                    "add",
+                    "foo",
+                    "phase",
+                    "1",
+                    "--title",
+                    "P1b",
+                    "--deliverable",
+                    "D",
+                ]))
+                .unwrap_err()
+            });
+            let msg = err.to_string();
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(msg.contains("apg plan update foo phase 1"), "{msg}");
+            assert!(msg.contains("apg plan rm foo phase 1"), "{msg}");
+            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), phase_before);
 
-        // --- plan add refuses an existing plan, naming update/rm ---
-        with_cwd(&wt, || plan_cmd::cmd_plan(&argv(&["add", "foo"]))).unwrap();
-        let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
-        let plan_before = std::fs::read_to_string(&plan_path).unwrap();
-        let err = with_cwd(&wt, || {
-            plan_cmd::cmd_plan(&argv(&["add", "foo"])).unwrap_err()
-        });
-        let msg = err.to_string();
-        assert!(msg.contains("already exists"), "{msg}");
-        assert!(msg.contains("apg plan update foo"), "{msg}");
-        assert!(msg.contains("apg plan rm foo"), "{msg}");
-        assert_eq!(
-            std::fs::read_to_string(&plan_path).unwrap(),
-            plan_before,
-            "a refused plan re-add must leave the store untouched"
-        );
+            // --- plan add task refuses an existing task, naming update/rm ---
+            with_cwd(&wt, || {
+                plan_cmd::cmd_plan(&argv(&[
+                    "add",
+                    "foo",
+                    "task",
+                    "1",
+                    "1",
+                    "--title",
+                    "T",
+                    "--kind",
+                    "source",
+                    "--verb",
+                    "creates",
+                    "--fqn",
+                    "/todo/new.ts",
+                ]))
+            })
+            .unwrap();
+            let task_before = std::fs::read_to_string(&plan_path).unwrap();
+            let err = with_cwd(&wt, || {
+                plan_cmd::cmd_plan(&argv(&[
+                    "add",
+                    "foo",
+                    "task",
+                    "1",
+                    "1",
+                    "--title",
+                    "T2",
+                    "--kind",
+                    "source",
+                    "--verb",
+                    "creates",
+                    "--fqn",
+                    "/todo/new.ts",
+                ]))
+                .unwrap_err()
+            });
+            let msg = err.to_string();
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(msg.contains("apg plan update foo task 1 1"), "{msg}");
+            assert!(msg.contains("apg plan rm foo task 1 1"), "{msg}");
+            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), task_before);
 
-        // --- plan add phase refuses an existing phase, naming update/rm ---
-        with_cwd(&wt, || {
-            plan_cmd::cmd_plan(&argv(&[
+            // --- plan add planned refuses an existing planned node, naming update/rm ---
+            with_cwd(&wt, || {
+                plan_cmd::cmd_plan(&argv(&[
+                    "add",
+                    "foo",
+                    "planned",
+                    "file",
+                    "/todo/new.ts",
+                    "--name",
+                    "new.ts",
+                    "--parent",
+                    "fixture.mod",
+                ]))
+            })
+            .unwrap();
+            let planned_before = std::fs::read_to_string(&plan_path).unwrap();
+            let err = with_cwd(&wt, || {
+                plan_cmd::cmd_plan(&argv(&[
+                    "add",
+                    "foo",
+                    "planned",
+                    "file",
+                    "/todo/new.ts",
+                    "--name",
+                    "new.ts",
+                    "--parent",
+                    "fixture.mod",
+                ]))
+                .unwrap_err()
+            });
+            let msg = err.to_string();
+            assert!(msg.contains("already exists"), "{msg}");
+            assert!(
+                msg.contains("apg plan update foo planned /todo/new.ts"),
+                "{msg}"
+            );
+            assert!(
+                msg.contains("apg plan rm foo planned /todo/new.ts"),
+                "{msg}"
+            );
+            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), planned_before);
+
+            // --- rm on absent plan entities is non-zero ---
+            let err = with_cwd(&wt, || {
+                plan_cmd::cmd_plan(&argv(&["rm", "foo", "phase", "9"])).unwrap_err()
+            });
+            assert!(err.to_string().contains("no phase 9"), "{err}");
+            let err = with_cwd(&wt, || {
+                plan_cmd::cmd_plan(&argv(&["rm", "ghost"])).unwrap_err()
+            });
+            assert!(
+                err.to_string().contains("no plan for project `ghost`"),
+                "{err}"
+            );
+
+            testutil::remove(&repo);
+        }
+
+        /// Phase-04 task-4 (acceptance): the `apg node` / `apg edge` command
+        /// surface is transparent — the SAME literal forms the CLI documents appear
+        /// in `help_text`, the node/edge suite tools, and the distributed agent
+        /// prompts.
+        ///
+        /// The expected strings are PINNED here as literals, not read back from the
+        /// consts: a test that compares `AGENTS`/`SUITE_TOOLS` to themselves is a
+        /// tautology and would pass even after a surface drift.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn acceptance_node_edge_surface_is_transparent_and_pinned_in_help_tools_and_agents() {
+            // 1. `apg --help` documents the exact command surface (literal lines).
+            let help = help_text();
+            for needle in [
+                "apg node <sub> …",
+                "apg edge <sub> …",
+                "Durable node-file model mutations:",
+                "add/update/rm (type-as-argument, writes apg/layers;",
+                "add/update/rm (kind/from/to;",
+            ] {
+                assert!(
+                    help.contains(needle),
+                    "help must contain {needle:?}: {help}"
+                );
+            }
+
+            // 2. The embedded suite tools carry the exact mutating command forms.
+            let tool = |name: &str| -> &'static str {
+                SUITE_TOOLS
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, c)| *c)
+                    .unwrap_or_else(|| panic!("SUITE_TOOLS must embed {name}"))
+            };
+            assert!(
+                tool("apg_node.ts").contains("apg node add|update|rm <layer> <type> <name>"),
+                "apg_node.ts must carry the pinned node command form"
+            );
+            assert!(
+                tool("apg_edge.ts").contains("apg edge add|update|rm <kind> <from> <to>"),
+                "apg_edge.ts must carry the pinned edge command form"
+            );
+
+            // 3. The distributed agent prompts: the authoring prompts carry the
+            // exact command forms; the reviewer/builder prompts name the tools.
+            let agent = |name: &str| -> &'static str {
+                AGENTS
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, c)| *c)
+                    .unwrap_or_else(|| panic!("AGENTS must embed {name}"))
+            };
+            let pinned: &[(&str, &str)] = &[
+                (
+                    "spec-writer.md",
+                    "apg node add|update|rm <layer> <type> <name> [--body …] [--property k=v]* [--unset-property k]*",
+                ),
+                (
+                    "spec-writer.md",
+                    "apg edge add|update|rm <kind> <from> <to> [--property k=v]* [--unset-property k]*",
+                ),
+                (
+                    "codebase-navigator.md",
+                    "`apg node add|update|rm` / `apg edge add|update|rm`",
+                ),
+                ("spec-review.md", "`apg_node`/`apg_edge`"),
+                ("agent-builder.md", "`apg_node`/`apg_edge`/`apg_plan_add`"),
+            ];
+            for (name, needle) in pinned {
+                assert!(
+                    agent(name).contains(needle),
+                    "agent prompt {name} must contain {needle:?}"
+                );
+            }
+
+            // Every embedded agent prompt is scanned: none may name a retired
+            // surface (the pinned forms above are the only accepted vocabulary).
+            for (name, content) in AGENTS {
+                for retired in ["plan init", "plan link", "apg_plan_init", "apg_plan_link"] {
+                    assert!(
+                        !content.contains(retired),
+                        "agent prompt {name} must not name the retired `{retired}`"
+                    );
+                }
+            }
+        }
+
+        /// Phase-03 task-23: with a session live, a separate routed `apg query`
+        /// process returns the post-mutation state with no lock error and without
+        /// waiting for the session to end. A NON-routing direct `db.lbug` open is
+        /// out of contract — lbug errors rather than waiting. After `apg session
+        /// end` a fresh query opens the DB directly and reads the same state.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn read_access_during_a_live_session_routes_and_after_end_reads_directly() {
+            let (repo, wt, wt_apg) = testutil::project_with_db("read-access");
+            let home = repo.root.join("home");
+            let session = testutil::start_session_process(&wt, &home);
+
+            // A routed mutation lands and is projected write-through.
+            let add =
+                testutil::spawn_apg(&["node", "add", "requirements", "requirement", "live"], &wt);
+            assert!(
+                add.status.success(),
+                "{}",
+                String::from_utf8_lossy(&add.stderr)
+            );
+
+            // Routed read: post-mutation state, no lock error, no wait for end.
+            let query =
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.live'}) RETURN count(n)";
+            let routed = testutil::spawn_apg(&["query", query], &wt);
+            assert!(
+                routed.status.success(),
+                "a routed read must succeed while the session is live: {}",
+                String::from_utf8_lossy(&routed.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&routed.stdout)
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1")
+            );
+
+            // Non-routing direct open: out of contract (errors, never waits).
+            let err = match crate::artifacts::ArtifactDb::open(&wt_apg) {
+                Ok(_) => {
+                    panic!("a non-routing direct DB open must fail while the session holds the DB")
+                }
+                Err(e) => format!("{e:#}"),
+            };
+            assert!(err.contains("Could not set lock on file"), "{err}");
+
+            // End the session; a fresh query opens the DB directly, same state.
+            let end = testutil::spawn_apg(&["session", "end"], &wt);
+            assert!(
+                end.status.success(),
+                "{}",
+                String::from_utf8_lossy(&end.stderr)
+            );
+            let out = session.child.wait_with_output().unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+
+            let fresh = testutil::spawn_apg(&["query", query], &wt);
+            assert!(
+                fresh.status.success(),
+                "{}",
+                String::from_utf8_lossy(&fresh.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&fresh.stdout)
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1"),
+                "after `session end` the direct reader sees the same state"
+            );
+
+            testutil::remove(&repo);
+        }
+
+        /// Phase-05 task-11 (e2e): metadata mutations require NO code re-scan.
+        /// Durable `node add`/`node rm` and `edge add`/`edge rm`; transient `plan`
+        /// add/rm (task/planned) and `review` add/action/resolve — each observed by
+        /// a NEW `apg query` process. The "no scan invoked" evidence is concrete:
+        /// `db.lbug`'s inode never changes (a scan unlinks and recreates it), the
+        /// scan's `scanned_at` scan-meta is never restamped (a scan writes a new
+        /// timestamp; the mutation re-anchor preserves it), and the scan pipeline's
+        /// `apg-frontend.log` is never recreated.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn metadata_mutations_are_immediately_queryable_without_a_scan() {
+            use std::os::unix::fs::MetadataExt;
+
+            let (repo, wt, wt_apg) = testutil::project_with_db("no-rescan");
+            let home = repo.root.join("home");
+
+            let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
+            let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
+            let inode_before = std::fs::metadata(&db_path).unwrap().ino();
+            let scanned_at = |graph: &Path| -> String {
+                let text = std::fs::read_to_string(graph).unwrap();
+                let first = text.lines().next().unwrap_or_default().to_string();
+                serde_json::from_str::<serde_json::Value>(&first)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("scanned_at")
+                            .and_then(|s| s.as_str())
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_default()
+            };
+            let scan_meta_before = scanned_at(&graph_path);
+            // A scan would recreate this; a metadata mutation never enters the scan
+            // pipeline.
+            let _ = std::fs::remove_file(wt_apg.join(specs::TRANS).join("apg-frontend.log"));
+
+            let mutate = |args: &[&str]| {
+                let out = testutil::ApgCommand::new(args)
+                    .cwd(&wt)
+                    .env("HOME", home.to_str().unwrap())
+                    .output();
+                assert!(
+                    out.status.success(),
+                    "{args:?}: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            };
+            let query = |q: &str| -> String {
+                let out = testutil::spawn_apg(&["query", q], &wt);
+                assert!(
+                    out.status.success(),
+                    "{q}: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .last()
+                    .map(|l| l.trim().to_string())
+                    .unwrap_or_default()
+            };
+
+            // --- durable node add/rm + edge add/rm ---
+            mutate(&["node", "add", "requirements", "requirement", "r1"]);
+            assert_eq!(
+                query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
+                "1"
+            );
+            mutate(&["node", "add", "requirements", "requirement", "r2"]);
+            assert_eq!(
+                query("MATCH (n:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(n)"),
+                "1"
+            );
+            mutate(&[
+                "edge",
+                "add",
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ]);
+            assert_eq!(
+                query(
+                    "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->(:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)"
+                ),
+                "1"
+            );
+            mutate(&[
+                "edge",
+                "rm",
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ]);
+            assert_eq!(
+                query(
+                    "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->() RETURN count(*)"
+                ),
+                "0"
+            );
+            mutate(&["node", "rm", "requirements", "requirement", "r1"]);
+            assert_eq!(
+                query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
+                "0"
+            );
+
+            // --- transient plan: phase/task/planned add + rm ---
+            mutate(&["plan", "add", "foo", "--title", "F", "--strategy", "S"]);
+            assert_eq!(
+                query("MATCH (p:Plan {fqn: 'foo/plan'}) RETURN count(p)"),
+                "1"
+            );
+            mutate(&[
+                "plan",
                 "add",
                 "foo",
                 "phase",
@@ -3272,1591 +3690,1191 @@ mod tests {
                 "P1",
                 "--deliverable",
                 "D",
-            ]))
-        })
-        .unwrap();
-        let phase_before = std::fs::read_to_string(&plan_path).unwrap();
-        let err = with_cwd(&wt, || {
-            plan_cmd::cmd_plan(&argv(&[
+            ]);
+            assert_eq!(
+                query("MATCH (n:PlanPhase {fqn: 'foo/plan.phase-01'}) RETURN count(n)"),
+                "1"
+            );
+            mutate(&[
+                "plan",
                 "add",
                 "foo",
-                "phase",
-                "1",
-                "--title",
-                "P1b",
-                "--deliverable",
-                "D",
-            ]))
-            .unwrap_err()
-        });
-        let msg = err.to_string();
-        assert!(msg.contains("already exists"), "{msg}");
-        assert!(msg.contains("apg plan update foo phase 1"), "{msg}");
-        assert!(msg.contains("apg plan rm foo phase 1"), "{msg}");
-        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), phase_before);
-
-        // --- plan add task refuses an existing task, naming update/rm ---
-        with_cwd(&wt, || {
-            plan_cmd::cmd_plan(&argv(&[
+                "planned",
+                "struct",
+                "fixture.mod.Widget",
+                "--name",
+                "Widget",
+                "--parent",
+                "fixture.mod",
+            ]);
+            assert_eq!(
+                query("MATCH (n:Struct {fqn: 'fixture.mod.Widget'}) RETURN count(n)"),
+                "1"
+            );
+            mutate(&["plan", "rm", "foo", "planned", "fixture.mod.Widget"]);
+            assert_eq!(
+                query("MATCH (n:Struct {fqn: 'fixture.mod.Widget'}) RETURN count(n)"),
+                "0"
+            );
+            mutate(&[
+                "plan",
                 "add",
                 "foo",
                 "task",
                 "1",
                 "1",
                 "--title",
-                "T",
-                "--kind",
-                "source",
+                "T1",
                 "--verb",
-                "creates",
+                "modifies",
                 "--fqn",
-                "/todo/new.ts",
-            ]))
-        })
-        .unwrap();
-        let task_before = std::fs::read_to_string(&plan_path).unwrap();
-        let err = with_cwd(&wt, || {
-            plan_cmd::cmd_plan(&argv(&[
-                "add",
-                "foo",
-                "task",
-                "1",
-                "1",
-                "--title",
-                "T2",
-                "--kind",
-                "source",
-                "--verb",
-                "creates",
-                "--fqn",
-                "/todo/new.ts",
-            ]))
-            .unwrap_err()
-        });
-        let msg = err.to_string();
-        assert!(msg.contains("already exists"), "{msg}");
-        assert!(msg.contains("apg plan update foo task 1 1"), "{msg}");
-        assert!(msg.contains("apg plan rm foo task 1 1"), "{msg}");
-        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), task_before);
-
-        // --- plan add planned refuses an existing planned node, naming update/rm ---
-        with_cwd(&wt, || {
-            plan_cmd::cmd_plan(&argv(&[
-                "add",
-                "foo",
-                "planned",
-                "file",
-                "/todo/new.ts",
-                "--name",
-                "new.ts",
-                "--parent",
-                "fixture.mod",
-            ]))
-        })
-        .unwrap();
-        let planned_before = std::fs::read_to_string(&plan_path).unwrap();
-        let err = with_cwd(&wt, || {
-            plan_cmd::cmd_plan(&argv(&[
-                "add",
-                "foo",
-                "planned",
-                "file",
-                "/todo/new.ts",
-                "--name",
-                "new.ts",
-                "--parent",
-                "fixture.mod",
-            ]))
-            .unwrap_err()
-        });
-        let msg = err.to_string();
-        assert!(msg.contains("already exists"), "{msg}");
-        assert!(
-            msg.contains("apg plan update foo planned /todo/new.ts"),
-            "{msg}"
-        );
-        assert!(
-            msg.contains("apg plan rm foo planned /todo/new.ts"),
-            "{msg}"
-        );
-        assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), planned_before);
-
-        // --- rm on absent plan entities is non-zero ---
-        let err = with_cwd(&wt, || {
-            plan_cmd::cmd_plan(&argv(&["rm", "foo", "phase", "9"])).unwrap_err()
-        });
-        assert!(err.to_string().contains("no phase 9"), "{err}");
-        let err = with_cwd(&wt, || {
-            plan_cmd::cmd_plan(&argv(&["rm", "ghost"])).unwrap_err()
-        });
-        assert!(
-            err.to_string().contains("no plan for project `ghost`"),
-            "{err}"
-        );
-
-        testutil::remove(&repo);
-    }
-
-    /// Phase-04 task-4 (acceptance): the `apg node` / `apg edge` command
-    /// surface is transparent — the SAME literal forms the CLI documents appear
-    /// in `help_text`, the node/edge suite tools, and the distributed agent
-    /// prompts.
-    ///
-    /// The expected strings are PINNED here as literals, not read back from the
-    /// consts: a test that compares `AGENTS`/`SUITE_TOOLS` to themselves is a
-    /// tautology and would pass even after a surface drift.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn acceptance_node_edge_surface_is_transparent_and_pinned_in_help_tools_and_agents() {
-        // 1. `apg --help` documents the exact command surface (literal lines).
-        let help = help_text();
-        for needle in [
-            "apg node <sub> …",
-            "apg edge <sub> …",
-            "Durable node-file model mutations:",
-            "add/update/rm (type-as-argument, writes apg/layers;",
-            "add/update/rm (kind/from/to;",
-        ] {
-            assert!(
-                help.contains(needle),
-                "help must contain {needle:?}: {help}"
+                "fixture.mod.Store",
+            ]);
+            assert_eq!(
+                query("MATCH (n:Task {fqn: 'foo/plan.phase-01.task-1'}) RETURN count(n)"),
+                "1"
             );
+            mutate(&["plan", "rm", "foo", "task", "1", "1"]);
+            assert_eq!(
+                query("MATCH (n:Task {fqn: 'foo/plan.phase-01.task-1'}) RETURN count(n)"),
+                "0"
+            );
+
+            // --- transient review: add/action/resolve ---
+            mutate(&["node", "add", "requirements", "requirement", "reviewed"]);
+            mutate(&[
+                "review",
+                "add",
+                "requirements.requirement.reviewed",
+                "--body",
+                "please fix",
+                "--project",
+                "foo",
+            ]);
+            assert_eq!(
+                query("MATCH (f:Feedback {fqn: 'foo/feedback-1'}) RETURN count(f)"),
+                "1"
+            );
+            mutate(&["review", "action", "foo/feedback-1", "--fix"]);
+            assert_eq!(
+                query("MATCH (f:Feedback {fqn: 'foo/feedback-1'}) RETURN f.status"),
+                "actioned"
+            );
+            mutate(&["review", "resolve", "foo/feedback-1"]);
+            assert_eq!(
+                query("MATCH (f:Feedback {fqn: 'foo/feedback-1'}) RETURN f.status"),
+                "resolved"
+            );
+
+            // --- no re-scan: projection inode, scan_meta, and the scan log are untouched ---
+            assert_eq!(
+                std::fs::metadata(&db_path).unwrap().ino(),
+                inode_before,
+                "db.lbug must never be re-created by a metadata mutation"
+            );
+            assert_eq!(
+                scanned_at(&graph_path),
+                scan_meta_before,
+                "a metadata mutation must never restamp the scan_meta (no scan ran)"
+            );
+            assert!(
+                !wt_apg.join(specs::TRANS).join("apg-frontend.log").exists(),
+                "a metadata mutation must not enter the scan pipeline"
+            );
+
+            testutil::remove(&repo);
         }
 
-        // 2. The embedded suite tools carry the exact mutating command forms.
-        let tool = |name: &str| -> &'static str {
-            SUITE_TOOLS
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, c)| *c)
-                .unwrap_or_else(|| panic!("SUITE_TOOLS must embed {name}"))
-        };
-        assert!(
-            tool("apg_node.ts").contains("apg node add|update|rm <layer> <type> <name>"),
-            "apg_node.ts must carry the pinned node command form"
-        );
-        assert!(
-            tool("apg_edge.ts").contains("apg edge add|update|rm <kind> <from> <to>"),
-            "apg_edge.ts must carry the pinned edge command form"
-        );
+        /// Phase-04 task-7 (acceptance, feedback-30): immediate queryability /
+        /// read-your-writes across the real CLI. A spawned `apg node add
+        /// requirements requirement foo` returns, then a NEW `apg query` process
+        /// resolves foo — no re-scan, no explicit flush, no session-end step — and
+        /// the test asserts NO `apg scan` was invoked: `db.lbug`'s inode never
+        /// changes (a scan unlinks and recreates it), the scan's `scanned_at`
+        /// scan-meta is never restamped, and the scan pipeline's
+        /// `apg-frontend.log` is never recreated.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn acceptance_read_your_writes_across_the_real_cli_without_a_scan() {
+            use std::os::unix::fs::MetadataExt;
 
-        // 3. The distributed agent prompts: the authoring prompts carry the
-        // exact command forms; the reviewer/builder prompts name the tools.
-        let agent = |name: &str| -> &'static str {
-            AGENTS
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, c)| *c)
-                .unwrap_or_else(|| panic!("AGENTS must embed {name}"))
-        };
-        let pinned: &[(&str, &str)] = &[
-            (
-                "spec-writer.md",
-                "apg node add|update|rm <layer> <type> <name> [--body …] [--property k=v]* [--unset-property k]*",
-            ),
-            (
-                "spec-writer.md",
-                "apg edge add|update|rm <kind> <from> <to> [--property k=v]* [--unset-property k]*",
-            ),
-            (
-                "codebase-navigator.md",
-                "`apg node add|update|rm` / `apg edge add|update|rm`",
-            ),
-            ("spec-review.md", "`apg_node`/`apg_edge`"),
-            ("agent-builder.md", "`apg_node`/`apg_edge`/`apg_plan_add`"),
-        ];
-        for (name, needle) in pinned {
+            let (repo, wt, wt_apg) = testutil::project_with_db("accept-ryw");
+            let home = repo.root.join("home");
+
+            let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
+            let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
+            let log_path = wt_apg.join(specs::TRANS).join("apg-frontend.log");
+            let scanned_at = |graph: &Path| -> String {
+                let text = std::fs::read_to_string(graph).unwrap();
+                let first = text.lines().next().unwrap_or_default().to_string();
+                serde_json::from_str::<serde_json::Value>(&first)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("scanned_at")
+                            .and_then(|s| s.as_str())
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_default()
+            };
+            let inode_before = std::fs::metadata(&db_path).unwrap().ino();
+            let scan_meta_before = scanned_at(&graph_path);
+            // A scan would recreate this; a metadata mutation never enters the scan
+            // pipeline.
+            let _ = std::fs::remove_file(&log_path);
+
+            // (1) `apg node add requirements requirement foo` returns.
+            let add =
+                testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "foo"])
+                    .cwd(&wt)
+                    .env("HOME", home.to_str().unwrap())
+                    .output();
             assert!(
-                agent(name).contains(needle),
-                "agent prompt {name} must contain {needle:?}"
+                add.status.success(),
+                "{}",
+                String::from_utf8_lossy(&add.stderr)
             );
+
+            // (2) A NEW `apg query` process resolves foo — no flush/session-end.
+            let q = testutil::spawn_apg(
+                &[
+                    "query",
+                    "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+                ],
+                &wt,
+            );
+            assert!(q.status.success(), "{}", String::from_utf8_lossy(&q.stderr));
+            assert_eq!(
+                String::from_utf8_lossy(&q.stdout)
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1"),
+                "a NEW process must read the mutation immediately"
+            );
+
+            // (3) No `apg scan` was invoked.
+            assert_eq!(
+                std::fs::metadata(&db_path).unwrap().ino(),
+                inode_before,
+                "db.lbug must never be re-created by a metadata mutation"
+            );
+            assert_eq!(
+                scanned_at(&graph_path),
+                scan_meta_before,
+                "a metadata mutation must never restamp the scan_meta (no scan ran)"
+            );
+            assert!(
+                !log_path.exists(),
+                "a metadata mutation must not enter the scan pipeline"
+            );
+
+            testutil::remove(&repo);
         }
 
-        // Every embedded agent prompt is scanned: none may name a retired
-        // surface (the pinned forms above are the only accepted vocabulary).
-        for (name, content) in AGENTS {
-            for retired in ["plan init", "plan link", "apg_plan_init", "apg_plan_link"] {
+        /// Phase-04 task-8 (acceptance): the hermetic external-project scratch-repo
+        /// acceptance — a FRESH NON-FIXTURE repo driven by a REAL `apg init` + REAL
+        /// `apg scan` (the genuine added dimension; every other test uses the
+        /// hermetic `scan_checkout` payload fixture).
+        ///
+        /// The already-built artifact is resolved through the `apg.testutil`
+        /// binary-locating helper (`ApgCommand`) — no nested `cargo build`. Each
+        /// spawned child gets its own isolated `HOME` via `Command::env` (edition
+        /// 2024 forbids process-wide `env::set_var`, and `apg init` installs the
+        /// suite into `$HOME/.opencode`). A real source file is committed BEFORE
+        /// scanning so `auto_detect_languages` selects just the Go frontend. The
+        /// project context is established with `apg project start`, and every
+        /// durable-write assertion runs with cwd inside
+        /// `<scratch>/apg/.worktrees/<name>`. Both the `/tmp` scratch repo and the
+        /// isolated HOME are torn down at the end.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn acceptance_scratch_repo_real_init_scan_burst_read_your_writes_and_session() {
+            let base =
+                std::env::temp_dir().join(format!("apg-accept-scratch-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let repo_dir = base.join("repo");
+            let home = base.join("home");
+            std::fs::create_dir_all(&home).unwrap();
+            // Pre-create the opencode dependency dir so `apg init` never shells out
+            // to npm (`cmd_init` skips npm when this path already exists) — keeps
+            // the test hermetic and fast.
+            std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin"))
+                .unwrap();
+            let home_s = home.to_str().unwrap().to_string();
+
+            // A fresh real git repo with a committed Go source file + manifest
+            // BEFORE scanning.
+            scratch_repo_init(&repo_dir);
+            std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+            std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+            scratch_commit_all(&repo_dir, "init source");
+
+            let repo_dir_s = repo_dir.clone();
+            let home_for = home_s.clone();
+            let run_in = move |dir: &Path, args: &[&str]| {
+                let out = testutil::ApgCommand::new(args)
+                    .cwd(dir)
+                    .env("HOME", &home_for)
+                    .output();
                 assert!(
-                    !content.contains(retired),
-                    "agent prompt {name} must not name the retired `{retired}`"
+                    out.status.success(),
+                    "{args:?} in {}: {}{}",
+                    dir.display(),
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                out
+            };
+
+            // Real `apg init` in the scratch main checkout, then commit the scaffold
+            // (so the main checkout is clean for `project start`).
+            run_in(&repo_dir_s, &["init", "."]);
+            scratch_commit_all(&repo_dir, "apg init");
+
+            // Real `apg scan` in the scratch main checkout.
+            run_in(&repo_dir_s, &["scan", "."]);
+
+            // `apg project start <name>` from the main checkout: worktree + branch +
+            // branch DB (auto-scanned).
+            run_in(&repo_dir_s, &["project", "start", "accept"]);
+            let wt = repo_dir.join("apg").join(".worktrees").join("accept");
+            assert!(
+                wt.is_dir(),
+                "the project worktree must exist at {}",
+                wt.display()
+            );
+            let wt_apg = wt.join(specs::LAYOUT);
+
+            // ---- (a) cross-process burst == serial application, zero lock errors ----
+            const N: usize = 6;
+            run_in(&wt, &["node", "add", "requirements", "requirement", "hub"]);
+            for i in 0..N {
+                let name = format!("leaf-{i}");
+                run_in(
+                    &wt,
+                    &["node", "add", "requirements", "requirement", name.as_str()],
                 );
             }
-        }
-    }
-
-    /// Phase-03 task-23: with a session live, a separate routed `apg query`
-    /// process returns the post-mutation state with no lock error and without
-    /// waiting for the session to end. A NON-routing direct `db.lbug` open is
-    /// out of contract — lbug errors rather than waiting. After `apg session
-    /// end` a fresh query opens the DB directly and reads the same state.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn read_access_during_a_live_session_routes_and_after_end_reads_directly() {
-        let (repo, wt, wt_apg) = testutil::project_with_db("read-access");
-        let home = repo.root.join("home");
-        let session = testutil::start_session_process(&wt, &home);
-
-        // A routed mutation lands and is projected write-through.
-        let add = testutil::spawn_apg(&["node", "add", "requirements", "requirement", "live"], &wt);
-        assert!(
-            add.status.success(),
-            "{}",
-            String::from_utf8_lossy(&add.stderr)
-        );
-
-        // Routed read: post-mutation state, no lock error, no wait for end.
-        let query = "MATCH (n:Requirement {fqn: 'requirements.requirement.live'}) RETURN count(n)";
-        let routed = testutil::spawn_apg(&["query", query], &wt);
-        assert!(
-            routed.status.success(),
-            "a routed read must succeed while the session is live: {}",
-            String::from_utf8_lossy(&routed.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&routed.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1")
-        );
-
-        // Non-routing direct open: out of contract (errors, never waits).
-        let err = match crate::artifacts::ArtifactDb::open(&wt_apg) {
-            Ok(_) => {
-                panic!("a non-routing direct DB open must fail while the session holds the DB")
-            }
-            Err(e) => format!("{e:#}"),
-        };
-        assert!(err.contains("Could not set lock on file"), "{err}");
-
-        // End the session; a fresh query opens the DB directly, same state.
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let out = session.child.wait_with_output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-
-        let fresh = testutil::spawn_apg(&["query", query], &wt);
-        assert!(
-            fresh.status.success(),
-            "{}",
-            String::from_utf8_lossy(&fresh.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&fresh.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "after `session end` the direct reader sees the same state"
-        );
-
-        testutil::remove(&repo);
-    }
-
-    /// Phase-05 task-11 (e2e): metadata mutations require NO code re-scan.
-    /// Durable `node add`/`node rm` and `edge add`/`edge rm`; transient `plan`
-    /// add/rm (task/planned) and `review` add/action/resolve — each observed by
-    /// a NEW `apg query` process. The "no scan invoked" evidence is concrete:
-    /// `db.lbug`'s inode never changes (a scan unlinks and recreates it), the
-    /// scan's `scanned_at` scan-meta is never restamped (a scan writes a new
-    /// timestamp; the mutation re-anchor preserves it), and the scan pipeline's
-    /// `apg-frontend.log` is never recreated.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn metadata_mutations_are_immediately_queryable_without_a_scan() {
-        use std::os::unix::fs::MetadataExt;
-
-        let (repo, wt, wt_apg) = testutil::project_with_db("no-rescan");
-        let home = repo.root.join("home");
-
-        let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
-        let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
-        let inode_before = std::fs::metadata(&db_path).unwrap().ino();
-        let scanned_at = |graph: &Path| -> String {
-            let text = std::fs::read_to_string(graph).unwrap();
-            let first = text.lines().next().unwrap_or_default().to_string();
-            serde_json::from_str::<serde_json::Value>(&first)
-                .ok()
-                .and_then(|v| {
-                    v.get("scanned_at")
-                        .and_then(|s| s.as_str())
-                        .map(str::to_string)
-                })
-                .unwrap_or_default()
-        };
-        let scan_meta_before = scanned_at(&graph_path);
-        // A scan would recreate this; a metadata mutation never enters the scan
-        // pipeline.
-        let _ = std::fs::remove_file(wt_apg.join(specs::TRANS).join("apg-frontend.log"));
-
-        let mutate = |args: &[&str]| {
-            let out = testutil::ApgCommand::new(args)
+            let home_burst = home_s.clone();
+            let mut kids = Vec::with_capacity(N);
+            for i in 0..N {
+                let to = format!("requirements.requirement.leaf-{i}");
+                let child = testutil::ApgCommand::new(&[
+                    "edge",
+                    "add",
+                    "depends-on",
+                    "requirements.requirement.hub",
+                    to.as_str(),
+                ])
                 .cwd(&wt)
-                .env("HOME", home.to_str().unwrap())
-                .output();
-            assert!(
-                out.status.success(),
-                "{args:?}: {}",
-                String::from_utf8_lossy(&out.stderr)
+                .env("HOME", &home_burst)
+                .spawn();
+                kids.push((i, child));
+            }
+            for (i, child) in kids {
+                let out = child.wait_with_output().unwrap();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                assert!(out.status.success(), "burst[{i}] lost a lock: {stderr}");
+                assert!(
+                    !stderr.contains("Could not set lock on file"),
+                    "burst[{i}] hit the lbug lock: {stderr}"
+                );
+                assert!(
+                    !stderr.contains("index.lock"),
+                    "burst[{i}] hit the git index lock: {stderr}"
+                );
+                assert!(
+                    !stderr.contains("specs.lock"),
+                    "burst[{i}] hit the specs.lock flock: {stderr}"
+                );
+            }
+            let hub =
+                layers::read_node_file(&wt_apg, layers::Layer::Requirements, "requirement", "hub")
+                    .unwrap();
+            assert_eq!(
+                hub.out.len(),
+                N,
+                "the burst store must equal the serial application"
             );
-        };
-        let query = |q: &str| -> String {
-            let out = testutil::spawn_apg(&["query", q], &wt);
-            assert!(
-                out.status.success(),
-                "{q}: {}",
-                String::from_utf8_lossy(&out.stderr)
+
+            // ---- (b) immediate read-your-writes across the real CLI ----
+            run_in(&wt, &["node", "add", "requirements", "requirement", "foo"]);
+            let q = testutil::spawn_apg(
+                &[
+                    "query",
+                    "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+                ],
+                &wt,
             );
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .last()
-                .map(|l| l.trim().to_string())
-                .unwrap_or_default()
-        };
-
-        // --- durable node add/rm + edge add/rm ---
-        mutate(&["node", "add", "requirements", "requirement", "r1"]);
-        assert_eq!(
-            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
-            "1"
-        );
-        mutate(&["node", "add", "requirements", "requirement", "r2"]);
-        assert_eq!(
-            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(n)"),
-            "1"
-        );
-        mutate(&[
-            "edge",
-            "add",
-            "depends-on",
-            "requirements.requirement.r1",
-            "requirements.requirement.r2",
-        ]);
-        assert_eq!(
-            query(
-                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->(:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)"
-            ),
-            "1"
-        );
-        mutate(&[
-            "edge",
-            "rm",
-            "depends-on",
-            "requirements.requirement.r1",
-            "requirements.requirement.r2",
-        ]);
-        assert_eq!(
-            query(
-                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->() RETURN count(*)"
-            ),
-            "0"
-        );
-        mutate(&["node", "rm", "requirements", "requirement", "r1"]);
-        assert_eq!(
-            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
-            "0"
-        );
-
-        // --- transient plan: phase/task/planned add + rm ---
-        mutate(&["plan", "add", "foo", "--title", "F", "--strategy", "S"]);
-        assert_eq!(
-            query("MATCH (p:Plan {fqn: 'foo/plan'}) RETURN count(p)"),
-            "1"
-        );
-        mutate(&[
-            "plan",
-            "add",
-            "foo",
-            "phase",
-            "1",
-            "--title",
-            "P1",
-            "--deliverable",
-            "D",
-        ]);
-        assert_eq!(
-            query("MATCH (n:PlanPhase {fqn: 'foo/plan.phase-01'}) RETURN count(n)"),
-            "1"
-        );
-        mutate(&[
-            "plan",
-            "add",
-            "foo",
-            "planned",
-            "struct",
-            "fixture.mod.Widget",
-            "--name",
-            "Widget",
-            "--parent",
-            "fixture.mod",
-        ]);
-        assert_eq!(
-            query("MATCH (n:Struct {fqn: 'fixture.mod.Widget'}) RETURN count(n)"),
-            "1"
-        );
-        mutate(&["plan", "rm", "foo", "planned", "fixture.mod.Widget"]);
-        assert_eq!(
-            query("MATCH (n:Struct {fqn: 'fixture.mod.Widget'}) RETURN count(n)"),
-            "0"
-        );
-        mutate(&[
-            "plan",
-            "add",
-            "foo",
-            "task",
-            "1",
-            "1",
-            "--title",
-            "T1",
-            "--verb",
-            "modifies",
-            "--fqn",
-            "fixture.mod.Store",
-        ]);
-        assert_eq!(
-            query("MATCH (n:Task {fqn: 'foo/plan.phase-01.task-1'}) RETURN count(n)"),
-            "1"
-        );
-        mutate(&["plan", "rm", "foo", "task", "1", "1"]);
-        assert_eq!(
-            query("MATCH (n:Task {fqn: 'foo/plan.phase-01.task-1'}) RETURN count(n)"),
-            "0"
-        );
-
-        // --- transient review: add/action/resolve ---
-        mutate(&["node", "add", "requirements", "requirement", "reviewed"]);
-        mutate(&[
-            "review",
-            "add",
-            "requirements.requirement.reviewed",
-            "--body",
-            "please fix",
-            "--project",
-            "foo",
-        ]);
-        assert_eq!(
-            query("MATCH (f:Feedback {fqn: 'foo/feedback-1'}) RETURN count(f)"),
-            "1"
-        );
-        mutate(&["review", "action", "foo/feedback-1", "--fix"]);
-        assert_eq!(
-            query("MATCH (f:Feedback {fqn: 'foo/feedback-1'}) RETURN f.status"),
-            "actioned"
-        );
-        mutate(&["review", "resolve", "foo/feedback-1"]);
-        assert_eq!(
-            query("MATCH (f:Feedback {fqn: 'foo/feedback-1'}) RETURN f.status"),
-            "resolved"
-        );
-
-        // --- no re-scan: projection inode, scan_meta, and the scan log are untouched ---
-        assert_eq!(
-            std::fs::metadata(&db_path).unwrap().ino(),
-            inode_before,
-            "db.lbug must never be re-created by a metadata mutation"
-        );
-        assert_eq!(
-            scanned_at(&graph_path),
-            scan_meta_before,
-            "a metadata mutation must never restamp the scan_meta (no scan ran)"
-        );
-        assert!(
-            !wt_apg.join(specs::TRANS).join("apg-frontend.log").exists(),
-            "a metadata mutation must not enter the scan pipeline"
-        );
-
-        testutil::remove(&repo);
-    }
-
-    /// Phase-04 task-7 (acceptance, feedback-30): immediate queryability /
-    /// read-your-writes across the real CLI. A spawned `apg node add
-    /// requirements requirement foo` returns, then a NEW `apg query` process
-    /// resolves foo — no re-scan, no explicit flush, no session-end step — and
-    /// the test asserts NO `apg scan` was invoked: `db.lbug`'s inode never
-    /// changes (a scan unlinks and recreates it), the scan's `scanned_at`
-    /// scan-meta is never restamped, and the scan pipeline's
-    /// `apg-frontend.log` is never recreated.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn acceptance_read_your_writes_across_the_real_cli_without_a_scan() {
-        use std::os::unix::fs::MetadataExt;
-
-        let (repo, wt, wt_apg) = testutil::project_with_db("accept-ryw");
-        let home = repo.root.join("home");
-
-        let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
-        let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
-        let log_path = wt_apg.join(specs::TRANS).join("apg-frontend.log");
-        let scanned_at = |graph: &Path| -> String {
-            let text = std::fs::read_to_string(graph).unwrap();
-            let first = text.lines().next().unwrap_or_default().to_string();
-            serde_json::from_str::<serde_json::Value>(&first)
-                .ok()
-                .and_then(|v| {
-                    v.get("scanned_at")
-                        .and_then(|s| s.as_str())
-                        .map(str::to_string)
-                })
-                .unwrap_or_default()
-        };
-        let inode_before = std::fs::metadata(&db_path).unwrap().ino();
-        let scan_meta_before = scanned_at(&graph_path);
-        // A scan would recreate this; a metadata mutation never enters the scan
-        // pipeline.
-        let _ = std::fs::remove_file(&log_path);
-
-        // (1) `apg node add requirements requirement foo` returns.
-        let add = testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "foo"])
-            .cwd(&wt)
-            .env("HOME", home.to_str().unwrap())
-            .output();
-        assert!(
-            add.status.success(),
-            "{}",
-            String::from_utf8_lossy(&add.stderr)
-        );
-
-        // (2) A NEW `apg query` process resolves foo — no flush/session-end.
-        let q = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
-            ],
-            &wt,
-        );
-        assert!(q.status.success(), "{}", String::from_utf8_lossy(&q.stderr));
-        assert_eq!(
-            String::from_utf8_lossy(&q.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "a NEW process must read the mutation immediately"
-        );
-
-        // (3) No `apg scan` was invoked.
-        assert_eq!(
-            std::fs::metadata(&db_path).unwrap().ino(),
-            inode_before,
-            "db.lbug must never be re-created by a metadata mutation"
-        );
-        assert_eq!(
-            scanned_at(&graph_path),
-            scan_meta_before,
-            "a metadata mutation must never restamp the scan_meta (no scan ran)"
-        );
-        assert!(
-            !log_path.exists(),
-            "a metadata mutation must not enter the scan pipeline"
-        );
-
-        testutil::remove(&repo);
-    }
-
-    /// Phase-04 task-8 (acceptance): the hermetic external-project scratch-repo
-    /// acceptance — a FRESH NON-FIXTURE repo driven by a REAL `apg init` + REAL
-    /// `apg scan` (the genuine added dimension; every other test uses the
-    /// hermetic `scan_checkout` payload fixture).
-    ///
-    /// The already-built artifact is resolved through the `apg.testutil`
-    /// binary-locating helper (`ApgCommand`) — no nested `cargo build`. Each
-    /// spawned child gets its own isolated `HOME` via `Command::env` (edition
-    /// 2024 forbids process-wide `env::set_var`, and `apg init` installs the
-    /// suite into `$HOME/.opencode`). A real source file is committed BEFORE
-    /// scanning so `auto_detect_languages` selects just the Go frontend. The
-    /// project context is established with `apg project start`, and every
-    /// durable-write assertion runs with cwd inside
-    /// `<scratch>/apg/.worktrees/<name>`. Both the `/tmp` scratch repo and the
-    /// isolated HOME are torn down at the end.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn acceptance_scratch_repo_real_init_scan_burst_read_your_writes_and_session() {
-        let base = std::env::temp_dir().join(format!("apg-accept-scratch-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let repo_dir = base.join("repo");
-        let home = base.join("home");
-        std::fs::create_dir_all(&home).unwrap();
-        // Pre-create the opencode dependency dir so `apg init` never shells out
-        // to npm (`cmd_init` skips npm when this path already exists) — keeps
-        // the test hermetic and fast.
-        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
-        let home_s = home.to_str().unwrap().to_string();
-
-        // A fresh real git repo with a committed Go source file + manifest
-        // BEFORE scanning.
-        scratch_repo_init(&repo_dir);
-        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
-        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
-        scratch_commit_all(&repo_dir, "init source");
-
-        let repo_dir_s = repo_dir.clone();
-        let home_for = home_s.clone();
-        let run_in = move |dir: &Path, args: &[&str]| {
-            let out = testutil::ApgCommand::new(args)
-                .cwd(dir)
-                .env("HOME", &home_for)
-                .output();
-            assert!(
-                out.status.success(),
-                "{args:?} in {}: {}{}",
-                dir.display(),
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
+            assert!(q.status.success(), "{}", String::from_utf8_lossy(&q.stderr));
+            assert_eq!(
+                String::from_utf8_lossy(&q.stdout)
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1"),
+                "a NEW apg query process must read foo with no scan/flush"
             );
-            out
-        };
 
-        // Real `apg init` in the scratch main checkout, then commit the scaffold
-        // (so the main checkout is clean for `project start`).
-        run_in(&repo_dir_s, &["init", "."]);
-        scratch_commit_all(&repo_dir, "apg init");
-
-        // Real `apg scan` in the scratch main checkout.
-        run_in(&repo_dir_s, &["scan", "."]);
-
-        // `apg project start <name>` from the main checkout: worktree + branch +
-        // branch DB (auto-scanned).
-        run_in(&repo_dir_s, &["project", "start", "accept"]);
-        let wt = repo_dir.join("apg").join(".worktrees").join("accept");
-        assert!(
-            wt.is_dir(),
-            "the project worktree must exist at {}",
-            wt.display()
-        );
-        let wt_apg = wt.join(specs::LAYOUT);
-
-        // ---- (a) cross-process burst == serial application, zero lock errors ----
-        const N: usize = 6;
-        run_in(&wt, &["node", "add", "requirements", "requirement", "hub"]);
-        for i in 0..N {
-            let name = format!("leaf-{i}");
+            // ---- (c) full session lifecycle: start → routed mutation/read → end → direct read ----
+            let session = testutil::start_session_process(&wt, &home);
             run_in(
                 &wt,
-                &["node", "add", "requirements", "requirement", name.as_str()],
+                &["node", "add", "requirements", "requirement", "routed"],
             );
-        }
-        let home_burst = home_s.clone();
-        let mut kids = Vec::with_capacity(N);
-        for i in 0..N {
-            let to = format!("requirements.requirement.leaf-{i}");
-            let child = testutil::ApgCommand::new(&[
-                "edge",
-                "add",
-                "depends-on",
-                "requirements.requirement.hub",
-                to.as_str(),
-            ])
-            .cwd(&wt)
-            .env("HOME", &home_burst)
-            .spawn();
-            kids.push((i, child));
-        }
-        for (i, child) in kids {
-            let out = child.wait_with_output().unwrap();
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            assert!(out.status.success(), "burst[{i}] lost a lock: {stderr}");
-            assert!(
-                !stderr.contains("Could not set lock on file"),
-                "burst[{i}] hit the lbug lock: {stderr}"
+            let routed = testutil::spawn_apg(
+                &[
+                    "query",
+                    "MATCH (n:Requirement {fqn: 'requirements.requirement.routed'}) RETURN count(n)",
+                ],
+                &wt,
             );
             assert!(
-                !stderr.contains("index.lock"),
-                "burst[{i}] hit the git index lock: {stderr}"
+                routed.status.success(),
+                "{}",
+                String::from_utf8_lossy(&routed.stderr)
             );
-            assert!(
-                !stderr.contains("specs.lock"),
-                "burst[{i}] hit the specs.lock flock: {stderr}"
-            );
-        }
-        let hub =
-            layers::read_node_file(&wt_apg, layers::Layer::Requirements, "requirement", "hub")
-                .unwrap();
-        assert_eq!(
-            hub.out.len(),
-            N,
-            "the burst store must equal the serial application"
-        );
-
-        // ---- (b) immediate read-your-writes across the real CLI ----
-        run_in(&wt, &["node", "add", "requirements", "requirement", "foo"]);
-        let q = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
-            ],
-            &wt,
-        );
-        assert!(q.status.success(), "{}", String::from_utf8_lossy(&q.stderr));
-        assert_eq!(
-            String::from_utf8_lossy(&q.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "a NEW apg query process must read foo with no scan/flush"
-        );
-
-        // ---- (c) full session lifecycle: start → routed mutation/read → end → direct read ----
-        let session = testutil::start_session_process(&wt, &home);
-        run_in(
-            &wt,
-            &["node", "add", "requirements", "requirement", "routed"],
-        );
-        let routed = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.routed'}) RETURN count(n)",
-            ],
-            &wt,
-        );
-        assert!(
-            routed.status.success(),
-            "{}",
-            String::from_utf8_lossy(&routed.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&routed.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "a routed read must see the routed mutation before session end"
-        );
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let sout = session.child.wait_with_output().unwrap();
-        assert!(
-            sout.status.success(),
-            "{}",
-            String::from_utf8_lossy(&sout.stderr)
-        );
-
-        // After `session end`, a direct read sees the same state, and db.lbug is
-        // consistent with the durable node files (every requirement node file
-        // has its row; the row count matches).
-        let direct = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.routed'}) RETURN count(n)",
-            ],
-            &wt,
-        );
-        assert!(
-            direct.status.success(),
-            "{}",
-            String::from_utf8_lossy(&direct.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&direct.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "after session end the direct reader sees the routed mutation"
-        );
-        {
-            let db = crate::artifacts::ArtifactDb::open(&wt_apg).unwrap();
-            let node_files = layers::read_existing_nodes(&wt_apg).unwrap();
-            let requirements: Vec<_> = node_files
-                .iter()
-                .filter(|n| n.layer == "requirements" && n.node_type == "requirement")
-                .collect();
-            for n in &requirements {
-                let f = layers::fqn(layers::Layer::Requirements, &n.node_type, &n.name);
-                assert!(db.has_node(&f), "db.lbug must be consistent with {f}");
-            }
-            let rows = db
-                .q("MATCH (n:Requirement) RETURN count(*)")
-                .unwrap()
-                .lines()
-                .last()
-                .and_then(|l| l.trim().parse::<usize>().ok())
-                .unwrap_or(0);
             assert_eq!(
-                rows,
-                requirements.len(),
-                "db.lbug Requirement rows must match the node files"
+                String::from_utf8_lossy(&routed.stdout)
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1"),
+                "a routed read must see the routed mutation before session end"
             );
+            let end = testutil::spawn_apg(&["session", "end"], &wt);
+            assert!(
+                end.status.success(),
+                "{}",
+                String::from_utf8_lossy(&end.stderr)
+            );
+            let sout = session.child.wait_with_output().unwrap();
+            assert!(
+                sout.status.success(),
+                "{}",
+                String::from_utf8_lossy(&sout.stderr)
+            );
+
+            // After `session end`, a direct read sees the same state, and db.lbug is
+            // consistent with the durable node files (every requirement node file
+            // has its row; the row count matches).
+            let direct = testutil::spawn_apg(
+                &[
+                    "query",
+                    "MATCH (n:Requirement {fqn: 'requirements.requirement.routed'}) RETURN count(n)",
+                ],
+                &wt,
+            );
+            assert!(
+                direct.status.success(),
+                "{}",
+                String::from_utf8_lossy(&direct.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&direct.stdout)
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1"),
+                "after session end the direct reader sees the routed mutation"
+            );
+            {
+                let db = crate::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+                let node_files = layers::read_existing_nodes(&wt_apg).unwrap();
+                let requirements: Vec<_> = node_files
+                    .iter()
+                    .filter(|n| n.layer == "requirements" && n.node_type == "requirement")
+                    .collect();
+                for n in &requirements {
+                    let f = layers::fqn(layers::Layer::Requirements, &n.node_type, &n.name);
+                    assert!(db.has_node(&f), "db.lbug must be consistent with {f}");
+                }
+                let rows = db
+                    .q("MATCH (n:Requirement) RETURN count(*)")
+                    .unwrap()
+                    .lines()
+                    .last()
+                    .and_then(|l| l.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                assert_eq!(
+                    rows,
+                    requirements.len(),
+                    "db.lbug Requirement rows must match the node files"
+                );
+            }
+
+            // ---- teardown: the scratch repo AND the isolated HOME ----
+            let _ = std::fs::remove_dir_all(&base);
         }
 
-        // ---- teardown: the scratch repo AND the isolated HOME ----
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    /// Regression guard for the `apg query` failure-vs-data bug: a failed query
-    /// came back from `runCypher` as an error *string*, the line-based
-    /// `csvToRows` parsed it as data, and the plan tools then crashed with
-    /// `undefined is not an object (evaluating 'fqn.replace')`.
-    ///
-    /// This is a STRUCTURAL check over the embedded suite consts (`APG_LIB` /
-    /// `SUITE_TOOLS`), not full-file equality: it pins that the guard sits on
-    /// the shared parse boundary (so a caller cannot forget it), that the
-    /// producer (`runCypher`) and the discriminant (`isQueryError`) share the
-    /// same prefix constants (so the failure signals cannot drift apart), and
-    /// that the three observed crash sites route their parse through the guarded
-    /// boundary and return the verbatim message. It fails on the pre-fix suite
-    /// (where `csvToRows` split `out` directly and the guard was dead code).
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn suite_tools_query_error_guard_is_structural() {
-        // Extract a top-level function's source (signature through its closing
-        // brace) from the embedded lib, so the assertions speak about the
-        // function body rather than unrelated text elsewhere in the file.
-        fn function_body<'a>(src: &'a str, signature: &str) -> &'a str {
-            let start = src
-                .find(signature)
-                .unwrap_or_else(|| panic!("APG_LIB must declare `{signature}`"));
-            let open = src[start..]
-                .find('{')
-                .map(|i| start + i)
-                .unwrap_or_else(|| panic!("`{signature}` must have a body"));
-            let mut depth = 0usize;
-            for (i, c) in src[open..].char_indices() {
-                match c {
-                    '{' => depth += 1,
-                    '}' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            return &src[start..open + i + 1];
+        /// Regression guard for the `apg query` failure-vs-data bug: a failed query
+        /// came back from `runCypher` as an error *string*, the line-based
+        /// `csvToRows` parsed it as data, and the plan tools then crashed with
+        /// `undefined is not an object (evaluating 'fqn.replace')`.
+        ///
+        /// This is a STRUCTURAL check over the embedded suite consts (`APG_LIB` /
+        /// `SUITE_TOOLS`), not full-file equality: it pins that the guard sits on
+        /// the shared parse boundary (so a caller cannot forget it), that the
+        /// producer (`runCypher`) and the discriminant (`isQueryError`) share the
+        /// same prefix constants (so the failure signals cannot drift apart), and
+        /// that the three observed crash sites route their parse through the guarded
+        /// boundary and return the verbatim message. It fails on the pre-fix suite
+        /// (where `csvToRows` split `out` directly and the guard was dead code).
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn suite_tools_query_error_guard_is_structural() {
+            // Extract a top-level function's source (signature through its closing
+            // brace) from the embedded lib, so the assertions speak about the
+            // function body rather than unrelated text elsewhere in the file.
+            fn function_body<'a>(src: &'a str, signature: &str) -> &'a str {
+                let start = src
+                    .find(signature)
+                    .unwrap_or_else(|| panic!("APG_LIB must declare `{signature}`"));
+                let open = src[start..]
+                    .find('{')
+                    .map(|i| start + i)
+                    .unwrap_or_else(|| panic!("`{signature}` must have a body"));
+                let mut depth = 0usize;
+                for (i, c) in src[open..].char_indices() {
+                    match c {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                return &src[start..open + i + 1];
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
+                }
+                panic!("`{signature}` has an unbalanced body");
+            }
+
+            // 1. The guard is ON the shared parse boundary, by construction: the
+            //    body of `csvToRows` — the one function every caller uses to turn a
+            //    `runCypher` result into rows — invokes `expectQueryOk` before it
+            //    splits any line. Pre-fix this body split `out` directly, leaving the
+            //    guard as dead code a tool could forget; this is the assertion that
+            //    fails on the old suite.
+            let csv_body = function_body(APG_LIB, "export function csvToRows");
+            assert!(
+                csv_body.contains("expectQueryOk("),
+                "csvToRows must call expectQueryOk at the shared parse boundary so a \
+             runCypher error result can never be parsed as data: {csv_body}"
+            );
+
+            // 2. An error result cannot be mistaken for data: `runCypher` (the
+            //    producer) and `isQueryError` (the discriminant) both build on the
+            //    exported constants, so the prefixes cannot drift out of sync; and
+            //    `runCypher` RETURNS the error string on the non-zero exit path —
+            //    it never throws and never yields data.
+            assert!(
+                APG_LIB.contains("export const QUERY_FAILED_PREFIX")
+                    && APG_LIB.contains("export const NO_DB_ERROR"),
+                "runCypher's failure signals must be exported constants shared with isQueryError"
+            );
+            let run_body = function_body(APG_LIB, "export async function runCypher");
+            let is_err_body = function_body(APG_LIB, "export function isQueryError");
+            for (who, body) in [("runCypher", run_body), ("isQueryError", is_err_body)] {
+                for const_name in ["QUERY_FAILED_PREFIX", "NO_DB_ERROR"] {
+                    assert!(
+                        body.contains(const_name),
+                        "{who} must reference the shared `{const_name}` discriminant: {body}"
+                    );
                 }
             }
-            panic!("`{signature}` has an unbalanced body");
-        }
+            let exit_check = run_body
+                .find("result.exitCode !== 0")
+                .expect("runCypher must classify success/failure by `apg query`'s exit code");
+            assert!(
+                !run_body
+                    .lines()
+                    .any(|l| l.trim_start().starts_with("throw")),
+                "runCypher must RETURN the error string, never throw: {run_body}"
+            );
+            let failure = &run_body[exit_check..];
+            let failure_return = failure
+                .find("return")
+                .expect("the non-zero exit path must return the error string");
+            assert!(
+                failure[failure_return..].contains("${QUERY_FAILED_PREFIX}"),
+                "the failure return must carry the shared prefix so isQueryError \
+             recognizes it: {}",
+                &failure[failure_return..]
+            );
 
-        // 1. The guard is ON the shared parse boundary, by construction: the
-        //    body of `csvToRows` — the one function every caller uses to turn a
-        //    `runCypher` result into rows — invokes `expectQueryOk` before it
-        //    splits any line. Pre-fix this body split `out` directly, leaving the
-        //    guard as dead code a tool could forget; this is the assertion that
-        //    fails on the old suite.
-        let csv_body = function_body(APG_LIB, "export function csvToRows");
-        assert!(
-            csv_body.contains("expectQueryOk("),
-            "csvToRows must call expectQueryOk at the shared parse boundary so a \
-             runCypher error result can never be parsed as data: {csv_body}"
-        );
-
-        // 2. An error result cannot be mistaken for data: `runCypher` (the
-        //    producer) and `isQueryError` (the discriminant) both build on the
-        //    exported constants, so the prefixes cannot drift out of sync; and
-        //    `runCypher` RETURNS the error string on the non-zero exit path —
-        //    it never throws and never yields data.
-        assert!(
-            APG_LIB.contains("export const QUERY_FAILED_PREFIX")
-                && APG_LIB.contains("export const NO_DB_ERROR"),
-            "runCypher's failure signals must be exported constants shared with isQueryError"
-        );
-        let run_body = function_body(APG_LIB, "export async function runCypher");
-        let is_err_body = function_body(APG_LIB, "export function isQueryError");
-        for (who, body) in [("runCypher", run_body), ("isQueryError", is_err_body)] {
-            for const_name in ["QUERY_FAILED_PREFIX", "NO_DB_ERROR"] {
+            // 3. The three observed crash sites are covered: each embeds the shared
+            //    guarded boundary and returns the verbatim error message, so a
+            //    failure reads as a failure rather than as data (or an opaque crash).
+            let tool = |name: &str| -> &'static str {
+                SUITE_TOOLS
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, c)| *c)
+                    .unwrap_or_else(|| panic!("SUITE_TOOLS must embed {name}"))
+            };
+            for name in ["apg_plan_tasks.ts", "apg_plan.ts", "apg_plan_phases.ts"] {
+                let src = tool(name);
                 assert!(
-                    body.contains(const_name),
-                    "{who} must reference the shared `{const_name}` discriminant: {body}"
+                    src.contains("../lib/apg.ts") && src.contains("csvToRows"),
+                    "{name} must route its parse through the shared guarded boundary \
+                 (csvToRows from ../lib/apg.ts)"
+                );
+                assert!(
+                    src.contains("csvToRows(") && src.contains("await runCypher("),
+                    "{name} must feed runCypher's result into the guarded csvToRows boundary"
+                );
+                assert!(
+                    src.contains("try {"),
+                    "{name} must wrap the guarded parse so a rejection is handled"
+                );
+                assert!(
+                    src.contains("catch (e)")
+                        && src.contains("e instanceof Error ? e.message : String(e)"),
+                    "{name} must return the verbatim guarded-parse error message"
                 );
             }
         }
-        let exit_check = run_body
-            .find("result.exitCode !== 0")
-            .expect("runCypher must classify success/failure by `apg query`'s exit code");
-        assert!(
-            !run_body
-                .lines()
-                .any(|l| l.trim_start().starts_with("throw")),
-            "runCypher must RETURN the error string, never throw: {run_body}"
-        );
-        let failure = &run_body[exit_check..];
-        let failure_return = failure
-            .find("return")
-            .expect("the non-zero exit path must return the error string");
-        assert!(
-            failure[failure_return..].contains("${QUERY_FAILED_PREFIX}"),
-            "the failure return must carry the shared prefix so isQueryError \
-             recognizes it: {}",
-            &failure[failure_return..]
-        );
 
-        // 3. The three observed crash sites are covered: each embeds the shared
-        //    guarded boundary and returns the verbatim error message, so a
-        //    failure reads as a failure rather than as data (or an opaque crash).
-        let tool = |name: &str| -> &'static str {
-            SUITE_TOOLS
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, c)| *c)
-                .unwrap_or_else(|| panic!("SUITE_TOOLS must embed {name}"))
-        };
-        for name in ["apg_plan_tasks.ts", "apg_plan.ts", "apg_plan_phases.ts"] {
-            let src = tool(name);
+        /// Phase-01 task-10 (int, scratch /tmp repo, CANDIDATE binary only —
+        /// `global.constraint.no-real-project-test`): a second real `apg scan` of
+        /// an unchanged repo takes the freshness fast-path — the verdict is
+        /// printed, ZERO frontends run, and `db.lbug` is not rebuilt; a content
+        /// edit falls back to a full re-scan. The printed `staleness_line` verdict
+        /// agrees with the fast-path decision both ways: FRESH ⇒ fast-path, and a
+        /// recorded-dirty tree whose content digest changed at the SAME sha prints
+        /// STALE and falls through the full pipeline.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn acceptance_scan_freshness_fast_path_noop_and_content_edit_fallback() {
+            let base = std::env::temp_dir().join(format!("apg-freshness-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let repo_dir = base.join("repo");
+            let home = base.join("home");
+            std::fs::create_dir_all(&home).unwrap();
+            // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
+            // it never shells out to npm.
+            std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin"))
+                .unwrap();
+            let home_s = home.to_str().unwrap().to_string();
+
+            scratch_repo_init(&repo_dir);
+            std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+            std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+            scratch_commit_all(&repo_dir, "init source");
+
+            let run_in = |dir: &Path, args: &[&str]| -> std::process::Output {
+                let out = testutil::ApgCommand::new(args)
+                    .cwd(dir)
+                    .env("HOME", &home_s)
+                    .output();
+                assert!(
+                    out.status.success(),
+                    "{args:?} in {}: {}{}",
+                    dir.display(),
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                out
+            };
+            let err_of =
+                |out: &std::process::Output| String::from_utf8_lossy(&out.stderr).into_owned();
+
+            // Real init + commit, then the first (cold) full scan.
+            run_in(&repo_dir, &["init", "."]);
+            scratch_commit_all(&repo_dir, "apg init");
+            let first = run_in(&repo_dir, &["scan", "."]);
             assert!(
-                src.contains("../lib/apg.ts") && src.contains("csvToRows"),
-                "{name} must route its parse through the shared guarded boundary \
-                 (csvToRows from ../lib/apg.ts)"
+                err_of(&first).contains("[scan] running go frontend"),
+                "the cold scan must run the go frontend: {}",
+                err_of(&first)
+            );
+            let db = repo_dir.join("apg/.trans/db.lbug");
+            let db_before = std::fs::read(&db).unwrap();
+
+            // ---- (1) no-op re-scan: FRESH ⇒ fast-path, zero frontends, no rebuild.
+            let second = run_in(&repo_dir, &["scan", "."]);
+            let second_err = err_of(&second);
+            assert!(
+                second_err.contains("→ FRESH"),
+                "the printed staleness verdict must be FRESH: {second_err}"
             );
             assert!(
-                src.contains("csvToRows(") && src.contains("await runCypher("),
-                "{name} must feed runCypher's result into the guarded csvToRows boundary"
+                second_err.contains("fast-path"),
+                "the fast-path verdict must be printed: {second_err}"
             );
             assert!(
-                src.contains("try {"),
-                "{name} must wrap the guarded parse so a rejection is handled"
+                !second_err.contains("[scan] running"),
+                "the fast-path must spawn no frontend: {second_err}"
+            );
+            assert_eq!(
+                std::fs::read(&db).unwrap(),
+                db_before,
+                "the fast-path must not rebuild db.lbug"
+            );
+
+            // ---- (2) an uncommitted content edit at the same sha ⇒ STALE + full run.
+            std::fs::write(
+                repo_dir.join("main.go"),
+                "package main\n\nfunc main() { helper() }\n\nfunc helper() {}\n",
+            )
+            .unwrap();
+            let third = run_in(&repo_dir, &["scan", "."]);
+            let third_err = err_of(&third);
+            assert!(
+                third_err.contains("→ STALE"),
+                "an uncommitted content edit must print STALE: {third_err}"
             );
             assert!(
-                src.contains("catch (e)")
-                    && src.contains("e instanceof Error ? e.message : String(e)"),
-                "{name} must return the verbatim guarded-parse error message"
+                !third_err.contains("fast-path"),
+                "a stale tree must fall through to the full pipeline: {third_err}"
             );
+            assert!(
+                third_err.contains("[scan] running go frontend"),
+                "a stale tree must run the frontend: {third_err}"
+            );
+
+            // ---- (3) recorded-dirty tree, digest changes at the SAME sha ⇒ STALE
+            // from `staleness_line` and the full pipeline (never the fast-path).
+            // The scan above recorded the dirty tree (main.go modified, uncommitted)
+            // with its content digest; change the content again at the same sha.
+            std::fs::write(
+                repo_dir.join("main.go"),
+                "package main\n\nfunc main() { helper(); helper() }\n\nfunc helper() {}\n",
+            )
+            .unwrap();
+            let fourth = run_in(&repo_dir, &["scan", "."]);
+            let fourth_err = err_of(&fourth);
+            assert!(
+                fourth_err.contains("→ STALE"),
+                "a same-sha dirty-content change must print STALE: {fourth_err}"
+            );
+            assert!(
+                !fourth_err.contains("fast-path"),
+                "a same-sha dirty-content change must fall through: {fourth_err}"
+            );
+            assert!(
+                fourth_err.contains("[scan] running go frontend"),
+                "a same-sha dirty-content change must run the frontend: {fourth_err}"
+            );
+
+            // ---- teardown: the scratch repo AND the isolated HOME ----
+            let _ = std::fs::remove_dir_all(&base);
         }
-    }
 
-    /// Phase-01 task-10 (int, scratch /tmp repo, CANDIDATE binary only —
-    /// `global.constraint.no-real-project-test`): a second real `apg scan` of
-    /// an unchanged repo takes the freshness fast-path — the verdict is
-    /// printed, ZERO frontends run, and `db.lbug` is not rebuilt; a content
-    /// edit falls back to a full re-scan. The printed `staleness_line` verdict
-    /// agrees with the fast-path decision both ways: FRESH ⇒ fast-path, and a
-    /// recorded-dirty tree whose content digest changed at the SAME sha prints
-    /// STALE and falls through the full pipeline.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn acceptance_scan_freshness_fast_path_noop_and_content_edit_fallback() {
-        let base = std::env::temp_dir().join(format!("apg-freshness-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let repo_dir = base.join("repo");
-        let home = base.join("home");
-        std::fs::create_dir_all(&home).unwrap();
-        // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
-        // it never shells out to npm.
-        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
-        let home_s = home.to_str().unwrap().to_string();
+        // -------------------------------------------------------------------
+        // Phase-02 win-B incremental integration (tasks 17 / 19). Every scenario
+        // runs the CANDIDATE binary only, against a scratch /tmp git repo
+        // (`global.constraint.no-real-project-test`).
+        // -------------------------------------------------------------------
 
-        scratch_repo_init(&repo_dir);
-        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
-        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
-        scratch_commit_all(&repo_dir, "init source");
+        /// Phase-02 task-9 (the pinned target-set hand-off contract, feedback-85):
+        /// the `--targets <file>` list is newline-delimited absolute paths (blank
+        /// lines ignored), and the same list is written per language from the
+        /// checkout-relative target set. The channel is argv — stdin stays null.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn frontend_handoff_targets_file_is_newline_delimited_absolute_paths() {
+            let tmp = std::env::temp_dir().join(format!("apg-handoff-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&tmp);
+            std::fs::create_dir_all(&tmp).unwrap();
 
-        let run_in = |dir: &Path, args: &[&str]| -> std::process::Output {
-            let out = testutil::ApgCommand::new(args)
-                .cwd(dir)
-                .env("HOME", &home_s)
-                .output();
-            assert!(
-                out.status.success(),
-                "{args:?} in {}: {}{}",
-                dir.display(),
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
+            let handoff = FrontendHandoff {
+                targets_enabled: true,
+                cache_dir: Some(PathBuf::from("/common/apg/facts")),
+                cache_key: Some("cache-key-token".to_string()),
+            };
+            let targets = vec!["/root/b.go".to_string(), "/root/a.go".to_string()];
+            let path = handoff.write_targets(&tmp, "go", &targets);
+            let read = read_targets_file(&path);
+            assert_eq!(read, targets, "the target list round-trips verbatim");
+
+            // Blanks are ignored.
+            std::fs::write(&path, "/root/x.go\n\n  \n/root/y.go\n").unwrap();
+            assert_eq!(
+                read_targets_file(&path),
+                vec!["/root/x.go".to_string(), "/root/y.go".to_string()]
             );
-            out
-        };
-        let err_of = |out: &std::process::Output| String::from_utf8_lossy(&out.stderr).into_owned();
 
-        // Real init + commit, then the first (cold) full scan.
-        run_in(&repo_dir, &["init", "."]);
-        scratch_commit_all(&repo_dir, "apg init");
-        let first = run_in(&repo_dir, &["scan", "."]);
-        assert!(
-            err_of(&first).contains("[scan] running go frontend"),
-            "the cold scan must run the go frontend: {}",
-            err_of(&first)
-        );
-        let db = repo_dir.join("apg/.trans/db.lbug");
-        let db_before = std::fs::read(&db).unwrap();
+            // An absent file parses to an empty list (no filter).
+            assert!(read_targets_file(&tmp.join("missing.targets")).is_empty());
 
-        // ---- (1) no-op re-scan: FRESH ⇒ fast-path, zero frontends, no rebuild.
-        let second = run_in(&repo_dir, &["scan", "."]);
-        let second_err = err_of(&second);
-        assert!(
-            second_err.contains("→ FRESH"),
-            "the printed staleness verdict must be FRESH: {second_err}"
-        );
-        assert!(
-            second_err.contains("fast-path"),
-            "the fast-path verdict must be printed: {second_err}"
-        );
-        assert!(
-            !second_err.contains("[scan] running"),
-            "the fast-path must spawn no frontend: {second_err}"
-        );
-        assert_eq!(
-            std::fs::read(&db).unwrap(),
-            db_before,
-            "the fast-path must not rebuild db.lbug"
-        );
+            // `targets_for_language` maps the checkout-relative set onto absolute
+            // per-language paths under the scan root.
+            let mut rel = BTreeSet::new();
+            rel.insert("a/a.go".to_string());
+            rel.insert("b/b.go".to_string());
+            rel.insert("t/thing.ts".to_string());
+            // A `.hxx` change is a C++ target (feedback-99): it must land in the
+            // cpp list, not fall through to `other` and drop its facts.
+            rel.insert("c/thing.hxx".to_string());
+            let go = targets_for_language(&rel, Path::new("/root"), "go");
+            assert_eq!(go, vec!["/root/a/a.go", "/root/b/b.go"]);
+            let ts = targets_for_language(&rel, Path::new("/root"), "ts");
+            assert_eq!(ts, vec!["/root/t/thing.ts"]);
+            let cpp = targets_for_language(&rel, Path::new("/root"), "cpp");
+            assert_eq!(cpp, vec!["/root/c/thing.hxx"]);
 
-        // ---- (2) an uncommitted content edit at the same sha ⇒ STALE + full run.
-        std::fs::write(
-            repo_dir.join("main.go"),
-            "package main\n\nfunc main() { helper() }\n\nfunc helper() {}\n",
-        )
-        .unwrap();
-        let third = run_in(&repo_dir, &["scan", "."]);
-        let third_err = err_of(&third);
-        assert!(
-            third_err.contains("→ STALE"),
-            "an uncommitted content edit must print STALE: {third_err}"
-        );
-        assert!(
-            !third_err.contains("fast-path"),
-            "a stale tree must fall through to the full pipeline: {third_err}"
-        );
-        assert!(
-            third_err.contains("[scan] running go frontend"),
-            "a stale tree must run the frontend: {third_err}"
-        );
+            // The pinned flags are the ONLY channel: a command built with the
+            // hand-off carries `--targets`, `--cache-dir`, `--cache-key`.
+            let mut cmd = Command::new("true");
+            handoff.append(&mut cmd, &tmp, "go", &targets);
+            let args: Vec<String> = cmd
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(
+                args,
+                vec![
+                    "--targets".to_string(),
+                    path.display().to_string(),
+                    "--cache-dir".to_string(),
+                    "/common/apg/facts".to_string(),
+                    "--cache-key".to_string(),
+                    "cache-key-token".to_string(),
+                ]
+            );
 
-        // ---- (3) recorded-dirty tree, digest changes at the SAME sha ⇒ STALE
-        // from `staleness_line` and the full pipeline (never the fast-path).
-        // The scan above recorded the dirty tree (main.go modified, uncommitted)
-        // with its content digest; change the content again at the same sha.
-        std::fs::write(
-            repo_dir.join("main.go"),
-            "package main\n\nfunc main() { helper(); helper() }\n\nfunc helper() {}\n",
-        )
-        .unwrap();
-        let fourth = run_in(&repo_dir, &["scan", "."]);
-        let fourth_err = err_of(&fourth);
-        assert!(
-            fourth_err.contains("→ STALE"),
-            "a same-sha dirty-content change must print STALE: {fourth_err}"
-        );
-        assert!(
-            !fourth_err.contains("fast-path"),
-            "a same-sha dirty-content change must fall through: {fourth_err}"
-        );
-        assert!(
-            fourth_err.contains("[scan] running go frontend"),
-            "a same-sha dirty-content change must run the frontend: {fourth_err}"
-        );
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
 
-        // ---- teardown: the scratch repo AND the isolated HOME ----
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    // -------------------------------------------------------------------
-    // Phase-02 win-B incremental integration (tasks 17 / 19). Every scenario
-    // runs the CANDIDATE binary only, against a scratch /tmp git repo
-    // (`global.constraint.no-real-project-test`).
-    // -------------------------------------------------------------------
-
-    /// Phase-02 task-9 (the pinned target-set hand-off contract, feedback-85):
-    /// the `--targets <file>` list is newline-delimited absolute paths (blank
-    /// lines ignored), and the same list is written per language from the
-    /// checkout-relative target set. The channel is argv — stdin stays null.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn frontend_handoff_targets_file_is_newline_delimited_absolute_paths() {
-        let tmp = std::env::temp_dir().join(format!("apg-handoff-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-
-        let handoff = FrontendHandoff {
-            targets_enabled: true,
-            cache_dir: Some(PathBuf::from("/common/apg/facts")),
-            cache_key: Some("cache-key-token".to_string()),
-        };
-        let targets = vec!["/root/b.go".to_string(), "/root/a.go".to_string()];
-        let path = handoff.write_targets(&tmp, "go", &targets);
-        let read = read_targets_file(&path);
-        assert_eq!(read, targets, "the target list round-trips verbatim");
-
-        // Blanks are ignored.
-        std::fs::write(&path, "/root/x.go\n\n  \n/root/y.go\n").unwrap();
-        assert_eq!(
-            read_targets_file(&path),
-            vec!["/root/x.go".to_string(), "/root/y.go".to_string()]
-        );
-
-        // An absent file parses to an empty list (no filter).
-        assert!(read_targets_file(&tmp.join("missing.targets")).is_empty());
-
-        // `targets_for_language` maps the checkout-relative set onto absolute
-        // per-language paths under the scan root.
-        let mut rel = BTreeSet::new();
-        rel.insert("a/a.go".to_string());
-        rel.insert("b/b.go".to_string());
-        rel.insert("t/thing.ts".to_string());
-        // A `.hxx` change is a C++ target (feedback-99): it must land in the
-        // cpp list, not fall through to `other` and drop its facts.
-        rel.insert("c/thing.hxx".to_string());
-        let go = targets_for_language(&rel, Path::new("/root"), "go");
-        assert_eq!(go, vec!["/root/a/a.go", "/root/b/b.go"]);
-        let ts = targets_for_language(&rel, Path::new("/root"), "ts");
-        assert_eq!(ts, vec!["/root/t/thing.ts"]);
-        let cpp = targets_for_language(&rel, Path::new("/root"), "cpp");
-        assert_eq!(cpp, vec!["/root/c/thing.hxx"]);
-
-        // The pinned flags are the ONLY channel: a command built with the
-        // hand-off carries `--targets`, `--cache-dir`, `--cache-key`.
-        let mut cmd = Command::new("true");
-        handoff.append(&mut cmd, &tmp, "go", &targets);
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|a| a.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            args,
-            vec![
-                "--targets".to_string(),
-                path.display().to_string(),
-                "--cache-dir".to_string(),
-                "/common/apg/facts".to_string(),
-                "--cache-key".to_string(),
-                "cache-key-token".to_string(),
-            ]
-        );
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    /// Phase-02 task-17 (int): a targeted re-scan of each change class yields a
-    /// graph exactly equal to a fresh full scan of the same tree — same node
-    /// set, same edge set, same unresolved targets. The full-scan oracle runs
-    /// with the shared fact store cleared (no reuse, no splice). Scratch /tmp
-    /// repos, CANDIDATE binary only.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    #[allow(clippy::type_complexity)]
-    fn acceptance_targeted_rescan_equivalence_leaf_body_signature_rename() {
-        // Change classes. Go has no overloads, so the overload-peer rule is
-        // covered by the impact unit test (task-16); the int-level classes are
-        // leaf edit, body-only edit, signature change, and rename.
-        let scenarios: &[(&str, fn(&Path))] = &[
-            ("leaf-edit", |repo: &Path| {
-                // Add a declaration to the leaf file (its signature changes).
-                std::fs::write(
+        /// Phase-02 task-17 (int): a targeted re-scan of each change class yields a
+        /// graph exactly equal to a fresh full scan of the same tree — same node
+        /// set, same edge set, same unresolved targets. The full-scan oracle runs
+        /// with the shared fact store cleared (no reuse, no splice). Scratch /tmp
+        /// repos, CANDIDATE binary only.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        #[allow(clippy::type_complexity)]
+        fn acceptance_targeted_rescan_equivalence_leaf_body_signature_rename() {
+            // Change classes. Go has no overloads, so the overload-peer rule is
+            // covered by the impact unit test (task-16); the int-level classes are
+            // leaf edit, body-only edit, signature change, and rename.
+            let scenarios: &[(&str, fn(&Path))] = &[
+                ("leaf-edit", |repo: &Path| {
+                    // Add a declaration to the leaf file (its signature changes).
+                    std::fs::write(
                     repo.join("a/a.go"),
                     "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 1 }\n\n// Extra is new.\nfunc Extra() int { return 2 }\n",
                 )
                 .unwrap();
-            }),
-            ("body-only-edit", |repo: &Path| {
-                // Change a function BODY without changing any declaration.
-                std::fs::write(
+                }),
+                ("body-only-edit", |repo: &Path| {
+                    // Change a function BODY without changing any declaration.
+                    std::fs::write(
                     repo.join("a/a.go"),
                     "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf is the leaf function.\nfunc Leaf() int { return 42 }\n",
                 )
                 .unwrap();
-            }),
-            ("signature-change", |repo: &Path| {
-                // Change the leaf's signature (params) — dependents cascade.
-                std::fs::write(
+                }),
+                ("signature-change", |repo: &Path| {
+                    // Change the leaf's signature (params) — dependents cascade.
+                    std::fs::write(
                     repo.join("a/a.go"),
                     "package a\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf takes a param now.\nfunc Leaf(n int) int { return n }\n",
                 )
                 .unwrap();
-            }),
-            ("rename", |repo: &Path| {
-                // Rename a file within its package (FQNs of its units persist;
-                // the File node path changes).
-                let from = repo.join("b/b.go");
-                let to = repo.join("b/bb.go");
-                let body = std::fs::read_to_string(&from).unwrap();
-                std::fs::remove_file(&from).unwrap();
-                std::fs::write(&to, body).unwrap();
-            }),
-        ];
+                }),
+                ("rename", |repo: &Path| {
+                    // Rename a file within its package (FQNs of its units persist;
+                    // the File node path changes).
+                    let from = repo.join("b/b.go");
+                    let to = repo.join("b/bb.go");
+                    let body = std::fs::read_to_string(&from).unwrap();
+                    std::fs::remove_file(&from).unwrap();
+                    std::fs::write(&to, body).unwrap();
+                }),
+            ];
 
-        for (tag, mutate) in scenarios {
-            let (base, repo_dir) = winb_scratch(tag, &winb_go_fixture());
+            for (tag, mutate) in scenarios {
+                let (base, repo_dir) = winb_scratch(tag, &winb_go_fixture());
+                let home = base.join("home");
+                let _ = winb_run(&repo_dir, &home, &["init", "."]);
+                scratch_commit_all(&repo_dir, "apg init");
+                // Cold scan: records the manifest + fact store.
+                let cold = winb_run(&repo_dir, &home, &["scan", "."]);
+                assert!(
+                    cold.status.success(),
+                    "{tag}: cold scan: {}",
+                    String::from_utf8_lossy(&cold.stderr)
+                );
+
+                // Mutate the tree (working-tree change at the same sha).
+                mutate(&repo_dir);
+
+                // Incremental re-scan.
+                let inc = winb_run(&repo_dir, &home, &["scan", "."]);
+                assert!(
+                    inc.status.success(),
+                    "{tag}: incremental scan: {}",
+                    String::from_utf8_lossy(&inc.stderr)
+                );
+                let inc_err = String::from_utf8_lossy(&inc.stderr);
+                let (inc_nodes, inc_edges, inc_unres) = winb_graph(&repo_dir);
+
+                // Oracle: a fresh FULL scan of the SAME tree with the fast-path,
+                // the DB, AND the shared fact cache cleared — no reuse/splice.
+                std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
+                std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+                let store = repo_dir.join(".git/apg/facts");
+                let _ = std::fs::remove_dir_all(&store);
+                let full = winb_run(&repo_dir, &home, &["scan", "."]);
+                assert!(
+                    full.status.success(),
+                    "{tag}: full scan oracle: {}",
+                    String::from_utf8_lossy(&full.stderr)
+                );
+                let (full_nodes, full_edges, full_unres) = winb_graph(&repo_dir);
+
+                assert_eq!(
+                    inc_nodes, full_nodes,
+                    "{tag}: node sets must be exactly equal (incremental vs full)\n{inc_err}"
+                );
+                assert_eq!(
+                    inc_edges, full_edges,
+                    "{tag}: edge sets must be exactly equal (incremental vs full)\n{inc_err}"
+                );
+                assert_eq!(
+                    inc_unres, full_unres,
+                    "{tag}: unresolved-target sets must be exactly equal\n{inc_err}"
+                );
+
+                // The incremental path must have taken the target-set hand-off (not
+                // a silent full scan).
+                assert!(
+                    inc_err.contains("incremental:"),
+                    "{tag}: the incremental verdict must be printed: {inc_err}"
+                );
+
+                // Signature early cutoff: a body-only change does NOT cascade to
+                // dependents; a signature change DOES. `b` depends on `a` and `c` on
+                // `b`, so the cascade marker's presence is a direct observable.
+                let cascaded = inc_err.contains("signature change cascades");
+                match *tag {
+                    "body-only-edit" => assert!(
+                        !cascaded,
+                        "{tag}: a body-only change must not cascade: {inc_err}"
+                    ),
+                    "signature-change" => assert!(
+                        cascaded,
+                        "{tag}: a signature change must cascade: {inc_err}"
+                    ),
+                    _ => {}
+                }
+
+                let _ = std::fs::remove_dir_all(&base);
+            }
+        }
+
+        /// Phase-02 task-19 (int): cross-worktree cache sharing — the reuse half AND
+        /// the exactness half. A cold full scan of a scratch repo records the
+        /// reference graph; a SECOND clean near-identical worktree started from the
+        /// same repo must (a) reuse the shared `<git-common-dir>/apg/facts` cache
+        /// (no cold full frontend run) AND (b) produce a graph exactly equal to the
+        /// full scan (same node set, edge set, unresolved targets). Candidate
+        /// binary only, scratch /tmp repo.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn acceptance_cross_worktree_cache_sharing_exactness() {
+            let (base, repo_dir) = winb_scratch("xwt", &winb_go_fixture());
             let home = base.join("home");
             let _ = winb_run(&repo_dir, &home, &["init", "."]);
             scratch_commit_all(&repo_dir, "apg init");
-            // Cold scan: records the manifest + fact store.
+
+            // The cold full scan records the reference graph + the shared cache.
             let cold = winb_run(&repo_dir, &home, &["scan", "."]);
             assert!(
                 cold.status.success(),
-                "{tag}: cold scan: {}",
+                "cold scan: {}",
                 String::from_utf8_lossy(&cold.stderr)
             );
-
-            // Mutate the tree (working-tree change at the same sha).
-            mutate(&repo_dir);
-
-            // Incremental re-scan.
-            let inc = winb_run(&repo_dir, &home, &["scan", "."]);
-            assert!(
-                inc.status.success(),
-                "{tag}: incremental scan: {}",
-                String::from_utf8_lossy(&inc.stderr)
-            );
-            let inc_err = String::from_utf8_lossy(&inc.stderr);
-            let (inc_nodes, inc_edges, inc_unres) = winb_graph(&repo_dir);
-
-            // Oracle: a fresh FULL scan of the SAME tree with the fast-path,
-            // the DB, AND the shared fact cache cleared — no reuse/splice.
-            std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
-            std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+            let reference = std::fs::read(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
             let store = repo_dir.join(".git/apg/facts");
-            let _ = std::fs::remove_dir_all(&store);
-            let full = winb_run(&repo_dir, &home, &["scan", "."]);
+            assert!(store.is_dir(), "the shared store must exist after a scan");
             assert!(
-                full.status.success(),
-                "{tag}: full scan oracle: {}",
-                String::from_utf8_lossy(&full.stderr)
-            );
-            let (full_nodes, full_edges, full_unres) = winb_graph(&repo_dir);
-
-            assert_eq!(
-                inc_nodes, full_nodes,
-                "{tag}: node sets must be exactly equal (incremental vs full)\n{inc_err}"
-            );
-            assert_eq!(
-                inc_edges, full_edges,
-                "{tag}: edge sets must be exactly equal (incremental vs full)\n{inc_err}"
-            );
-            assert_eq!(
-                inc_unres, full_unres,
-                "{tag}: unresolved-target sets must be exactly equal\n{inc_err}"
+                store.join("index.json").is_file(),
+                "the shared store must index the per-file fact units"
             );
 
-            // The incremental path must have taken the target-set hand-off (not
-            // a silent full scan).
-            assert!(
-                inc_err.contains("incremental:"),
-                "{tag}: the incremental verdict must be printed: {inc_err}"
-            );
-
-            // Signature early cutoff: a body-only change does NOT cascade to
-            // dependents; a signature change DOES. `b` depends on `a` and `c` on
-            // `b`, so the cascade marker's presence is a direct observable.
-            let cascaded = inc_err.contains("signature change cascades");
-            match *tag {
-                "body-only-edit" => assert!(
-                    !cascaded,
-                    "{tag}: a body-only change must not cascade: {inc_err}"
-                ),
-                "signature-change" => assert!(
-                    cascaded,
-                    "{tag}: a signature change must cascade: {inc_err}"
-                ),
-                _ => {}
+            // Start a SECOND clean worktree from the same repo (outside the main
+            // checkout, so main stays clean). The worktree's committed source bytes
+            // are identical to main's, so the relative-path-keyed units are
+            // reusable. Raw git2 only — the candidate binary runs scans, nothing
+            // else, and never against a real project.
+            let wt = base.join("wt2");
+            {
+                let repo = git2::Repository::open(&repo_dir).unwrap();
+                repo.worktree("wt2", &wt, None).unwrap();
+                let wt_repo = git2::Repository::open(&wt).unwrap();
+                wt_repo.set_head("refs/heads/wt2").unwrap();
+                wt_repo
+                    .checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+                    .unwrap();
             }
+            // The worktree's own `apg/.trans/` marker (ignored content, so the
+            // version gate + layout discovery resolve here, mirroring `project
+            // start`).
+            std::fs::create_dir_all(wt.join("apg/.trans")).unwrap();
+            assert!(
+                wt.join("apg/config.json").is_file(),
+                "the committed layout config materializes in the worktree"
+            );
+
+            // The fresh worktree's scan reuses the shared store's units.
+            let fresh = winb_run(&wt, &home, &["scan", "."]);
+            assert!(
+                fresh.status.success(),
+                "fresh worktree scan: {}",
+                String::from_utf8_lossy(&fresh.stderr)
+            );
+            let fresh_err = String::from_utf8_lossy(&fresh.stderr);
+
+            // (a) REUSE: the fresh worktree took the incremental/reuse path against
+            // the shared store (not a cold, cacheless full scan).
+            assert!(
+                fresh_err.contains("incremental:") || fresh_err.contains("reusable file"),
+                "the fresh worktree must reuse the shared cache: {fresh_err}"
+            );
+
+            // (b) EXACTNESS: the fresh worktree's graph equals the full scan. File
+            // node FQNs are absolute paths under the checkout root, so normalise
+            // both sides to checkout-relative before comparing; every other record
+            // must be exactly equal as a set.
+            let norm_s = |root: &Path, set: BTreeSet<String>| -> BTreeSet<String> {
+                let root_s = root.to_string_lossy().replace('\\', "/");
+                set.into_iter()
+                    .map(|s| s.replace(root_s.as_str(), "<root>"))
+                    .collect()
+            };
+            let norm_e =
+                |root: &Path, set: BTreeSet<(String, String)>| -> BTreeSet<(String, String)> {
+                    let root_s = root.to_string_lossy().replace('\\', "/");
+                    set.into_iter()
+                        .map(|(t, e)| (t, e.replace(root_s.as_str(), "<root>")))
+                        .collect()
+                };
+            let (f_nodes, f_edges, f_unres) = winb_graph(&wt);
+            let (r_nodes, r_edges, r_unres) = winb_graph(&repo_dir);
+            assert_eq!(
+                norm_s(&wt, f_nodes),
+                norm_s(&repo_dir, r_nodes),
+                "cross-worktree node sets must be equal"
+            );
+            assert_eq!(
+                norm_e(&wt, f_edges),
+                norm_e(&repo_dir, r_edges),
+                "cross-worktree edge sets must be equal"
+            );
+            assert_eq!(
+                f_unres, r_unres,
+                "cross-worktree unresolved sets must be equal"
+            );
+            let _ = &reference;
 
             let _ = std::fs::remove_dir_all(&base);
         }
-    }
 
-    /// Phase-02 task-19 (int): cross-worktree cache sharing — the reuse half AND
-    /// the exactness half. A cold full scan of a scratch repo records the
-    /// reference graph; a SECOND clean near-identical worktree started from the
-    /// same repo must (a) reuse the shared `<git-common-dir>/apg/facts` cache
-    /// (no cold full frontend run) AND (b) produce a graph exactly equal to the
-    /// full scan (same node set, edge set, unresolved targets). Candidate
-    /// binary only, scratch /tmp repo.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn acceptance_cross_worktree_cache_sharing_exactness() {
-        let (base, repo_dir) = winb_scratch("xwt", &winb_go_fixture());
-        let home = base.join("home");
-        let _ = winb_run(&repo_dir, &home, &["init", "."]);
-        scratch_commit_all(&repo_dir, "apg init");
+        // -----------------------------------------------------------------------
+        // Win-C DB-build dispatch (phase-03 task-4)
+        // -----------------------------------------------------------------------
 
-        // The cold full scan records the reference graph + the shared cache.
-        let cold = winb_run(&repo_dir, &home, &["scan", "."]);
-        assert!(
-            cold.status.success(),
-            "cold scan: {}",
-            String::from_utf8_lossy(&cold.stderr)
-        );
-        let reference = std::fs::read(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
-        let store = repo_dir.join(".git/apg/facts");
-        assert!(store.is_dir(), "the shared store must exist after a scan");
-        assert!(
-            store.join("index.json").is_file(),
-            "the shared store must index the per-file fact units"
-        );
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn splice_dispatch_seeds_applies_and_publishes() {
+            let base =
+                std::env::temp_dir().join(format!("apg-splice-dispatch-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let apg_root = base.join("apg");
+            let trans = apg_root.join(specs::TRANS);
+            std::fs::create_dir_all(&trans).unwrap();
+            let abs = base.join("a.go").to_string_lossy().into_owned();
 
-        // Start a SECOND clean worktree from the same repo (outside the main
-        // checkout, so main stays clean). The worktree's committed source bytes
-        // are identical to main's, so the relative-path-keyed units are
-        // reusable. Raw git2 only — the candidate binary runs scans, nothing
-        // else, and never against a real project.
-        let wt = base.join("wt2");
-        {
-            let repo = git2::Repository::open(&repo_dir).unwrap();
-            repo.worktree("wt2", &wt, None).unwrap();
-            let wt_repo = git2::Repository::open(&wt).unwrap();
-            wt_repo.set_head("refs/heads/wt2").unwrap();
-            wt_repo
-                .checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
-                .unwrap();
-        }
-        // The worktree's own `apg/.trans/` marker (ignored content, so the
-        // version gate + layout discovery resolve here, mirroring `project
-        // start`).
-        std::fs::create_dir_all(wt.join("apg/.trans")).unwrap();
-        assert!(
-            wt.join("apg/config.json").is_file(),
-            "the committed layout config materializes in the worktree"
-        );
+            // The previous scan's DB (full load) — the seed source.
+            let prev = win_c_fixture(&abs, "old");
+            win_c_build_db(&splice::db_path(&apg_root), &prev);
 
-        // The fresh worktree's scan reuses the shared store's units.
-        let fresh = winb_run(&wt, &home, &["scan", "."]);
-        assert!(
-            fresh.status.success(),
-            "fresh worktree scan: {}",
-            String::from_utf8_lossy(&fresh.stderr)
-        );
-        let fresh_err = String::from_utf8_lossy(&fresh.stderr);
+            // The delta graph: a new function in the SAME (target) file and a fresh
+            // Scan head; everything else is reused.
+            let mut next = prev.clone();
+            {
+                use crate::graph::{Location, Node, NodeKind};
+                next.nodes.insert(
+                    "mod.A.g".to_string(),
+                    Node {
+                        kind: NodeKind::Function,
+                        location: Some(Location {
+                            path: PathBuf::from(&abs),
+                            start: 0,
+                            end: 1,
+                            start_line: 1,
+                            end_line: 1,
+                        }),
+                        ..Node::default()
+                    },
+                );
+            }
+            next.nodes.get_mut(schema::SCAN_HEAD).unwrap().git_sha = Some("new".to_string());
+            next.contains
+                .insert(("mod.A".to_string(), "mod.A.g".to_string()));
 
-        // (a) REUSE: the fresh worktree took the incremental/reuse path against
-        // the shared store (not a cold, cacheless full scan).
-        assert!(
-            fresh_err.contains("incremental:") || fresh_err.contains("reusable file"),
-            "the fresh worktree must reuse the shared cache: {fresh_err}"
-        );
-
-        // (b) EXACTNESS: the fresh worktree's graph equals the full scan. File
-        // node FQNs are absolute paths under the checkout root, so normalise
-        // both sides to checkout-relative before comparing; every other record
-        // must be exactly equal as a set.
-        let norm_s = |root: &Path, set: BTreeSet<String>| -> BTreeSet<String> {
-            let root_s = root.to_string_lossy().replace('\\', "/");
-            set.into_iter()
-                .map(|s| s.replace(root_s.as_str(), "<root>"))
-                .collect()
-        };
-        let norm_e = |root: &Path, set: BTreeSet<(String, String)>| -> BTreeSet<(String, String)> {
-            let root_s = root.to_string_lossy().replace('\\', "/");
-            set.into_iter()
-                .map(|(t, e)| (t, e.replace(root_s.as_str(), "<root>")))
-                .collect()
-        };
-        let (f_nodes, f_edges, f_unres) = winb_graph(&wt);
-        let (r_nodes, r_edges, r_unres) = winb_graph(&repo_dir);
-        assert_eq!(
-            norm_s(&wt, f_nodes),
-            norm_s(&repo_dir, r_nodes),
-            "cross-worktree node sets must be equal"
-        );
-        assert_eq!(
-            norm_e(&wt, f_edges),
-            norm_e(&repo_dir, r_edges),
-            "cross-worktree edge sets must be equal"
-        );
-        assert_eq!(
-            f_unres, r_unres,
-            "cross-worktree unresolved sets must be equal"
-        );
-        let _ = &reference;
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    // -----------------------------------------------------------------------
-    // Win-C DB-build dispatch (phase-03 task-4)
-    // -----------------------------------------------------------------------
-
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn splice_dispatch_seeds_applies_and_publishes() {
-        let base = std::env::temp_dir().join(format!("apg-splice-dispatch-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let apg_root = base.join("apg");
-        let trans = apg_root.join(specs::TRANS);
-        std::fs::create_dir_all(&trans).unwrap();
-        let abs = base.join("a.go").to_string_lossy().into_owned();
-
-        // The previous scan's DB (full load) — the seed source.
-        let prev = win_c_fixture(&abs, "old");
-        win_c_build_db(&splice::db_path(&apg_root), &prev);
-
-        // The delta graph: a new function in the SAME (target) file and a fresh
-        // Scan head; everything else is reused.
-        let mut next = prev.clone();
-        {
-            use crate::graph::{Location, Node, NodeKind};
-            next.nodes.insert(
-                "mod.A.g".to_string(),
-                Node {
-                    kind: NodeKind::Function,
-                    location: Some(Location {
-                        path: PathBuf::from(&abs),
-                        start: 0,
-                        end: 1,
-                        start_line: 1,
-                        end_line: 1,
-                    }),
-                    ..Node::default()
-                },
-            );
-        }
-        next.nodes.get_mut(schema::SCAN_HEAD).unwrap().git_sha = Some("new".to_string());
-        next.contains
-            .insert(("mod.A".to_string(), "mod.A.g".to_string()));
-
-        let input = win_c_input(&base, &base, &["a.go"]);
-        let report = with_cwd(&trans, || {
-            let mut log = Log::new();
-            try_splice_build(&next, &input, &apg_root, &mut log)
-        })
-        .expect("the incremental dispatch must splice, not fall back");
-        assert!(report.scan_refreshed, "the Scan row must be refreshed");
-        assert!(
-            report.nodes_upserted >= 1,
-            "at least the new function is upserted: {report:?}"
-        );
-
-        // The published DB answers with the new unit, keeps the unaffected one,
-        // and carries the refreshed Scan head.
-        let db = Database::new(splice::db_path(&apg_root), SystemConfig::default()).unwrap();
-        let conn = Connection::new(&db).unwrap();
-        let funcs = emit_json_rows(
-            conn.query("MATCH (f:Function) RETURN f.fqn AS fqn")
-                .unwrap(),
-        );
-        let head = emit_json_rows(
-            conn.query("MATCH (s:Scan) RETURN s.git_sha AS sha")
-                .unwrap(),
-        );
-        drop(conn);
-        drop(db);
-        assert!(
-            funcs.contains("mod.A.g"),
-            "the new function must be published: {funcs}"
-        );
-        assert!(
-            funcs.contains("mod.A.f"),
-            "an unaffected unit must survive: {funcs}"
-        );
-        assert!(
-            head.contains("new"),
-            "the Scan head must be refreshed: {head}"
-        );
-
-        // The export is published in the same atomic swap.
-        let export = std::fs::read_to_string(splice::export_path(&apg_root)).unwrap();
-        assert!(
-            export.contains("mod.A.g"),
-            "graph.jsonl must carry the new unit"
-        );
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn splice_dispatch_falls_back_when_ineligible() {
-        let base = std::env::temp_dir().join(format!("apg-splice-fallback-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let apg_root = base.join("apg");
-        let trans = apg_root.join(specs::TRANS);
-        std::fs::create_dir_all(&trans).unwrap();
-        let abs = base.join("a.go").to_string_lossy().into_owned();
-        let graph = win_c_fixture(&abs, "new");
-        let input = win_c_input(&base, &base, &["a.go"]);
-        let db = splice::db_path(&apg_root);
-
-        // No previous DB: the dispatch declines and the full load runs.
-        assert!(
-            with_cwd(&trans, || {
-                let mut log = Log::new();
-                try_splice_build(&graph, &input, &apg_root, &mut log)
-            })
-            .is_none(),
-            "a missing previous db.lbug must fall back"
-        );
-
-        // A previous DB with an unclean WAL sidecar: the whole-file copy could
-        // lose unflushed rows, so the dispatch declines.
-        win_c_build_db(&db, &graph);
-        let wal = format!("{}.wal", db.display());
-        std::fs::write(&wal, b"unflushed").unwrap();
-        assert!(
-            with_cwd(&trans, || {
-                let mut log = Log::new();
-                try_splice_build(&graph, &input, &apg_root, &mut log)
-            })
-            .is_none(),
-            "a WAL sidecar on the previous db must fall back"
-        );
-        std::fs::remove_file(&wal).unwrap();
-
-        // A full-scan fallback (no phase-2 delta) never splices.
-        let mut full = win_c_input(&base, &base, &[]);
-        full.reuse = None;
-        assert!(
-            with_cwd(&trans, || {
-                let mut log = Log::new();
-                try_splice_build(&graph, &full, &apg_root, &mut log)
-            })
-            .is_none(),
-            "the full-scan path must never splice"
-        );
-
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    /// feedback-101: the delta/manifest are shared across worktrees while the
-    /// seed is the LOCAL `db.lbug`. When another worktree scans in between, the
-    /// shared scan record advances past this worktree's DB; the dispatch must
-    /// refuse the seed (falling back to the full load) rather than publish a DB
-    /// that is not a full rebuild — and must leave the previous DB untouched.
-    #[test]
-    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
-    fn splice_dispatch_falls_back_when_the_local_seed_is_stale() {
-        let base = std::env::temp_dir().join(format!("apg-splice-stale-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        let apg_root = base.join("apg");
-        let trans = apg_root.join(specs::TRANS);
-        std::fs::create_dir_all(&trans).unwrap();
-        let abs = base.join("a.go").to_string_lossy().into_owned();
-        let db = splice::db_path(&apg_root);
-
-        // This worktree's local DB was built at content "key-old".
-        win_c_build_db(&db, &win_c_fixture(&abs, "old"));
-        let before = std::fs::read(&db).unwrap();
-
-        // The shared scan record the delta was derived from names a DIFFERENT
-        // tree ("key-other") — another worktree scanned in between.
-        let mut input = win_c_input(&base, &base, &["a.go"]);
-        input.recorded_content_key = Some("key-other".to_string());
-        let next = win_c_fixture(&abs, "new");
-        assert!(
-            with_cwd(&trans, || {
+            let input = win_c_input(&base, &base, &["a.go"]);
+            let report = with_cwd(&trans, || {
                 let mut log = Log::new();
                 try_splice_build(&next, &input, &apg_root, &mut log)
             })
-            .is_none(),
-            "a seed built from a different tree than the shared record must fall back"
-        );
-        assert_eq!(
-            std::fs::read(&db).unwrap(),
-            before,
-            "the previous DB must be byte-identical when the splice is refused"
-        );
+            .expect("the incremental dispatch must splice, not fall back");
+            assert!(report.scan_refreshed, "the Scan row must be refreshed");
+            assert!(
+                report.nodes_upserted >= 1,
+                "at least the new function is upserted: {report:?}"
+            );
 
-        // The common single-worktree case — the shared record names the local
-        // DB's own tree — still splices.
-        let mut current = win_c_input(&base, &base, &["a.go"]);
-        current.recorded_content_key = Some("key-old".to_string());
-        let report = with_cwd(&trans, || {
-            let mut log = Log::new();
-            try_splice_build(&next, &current, &apg_root, &mut log)
-        })
-        .expect("a current local seed must still splice");
-        assert!(
-            report.scan_refreshed,
-            "the splice must refresh the Scan row"
-        );
+            // The published DB answers with the new unit, keeps the unaffected one,
+            // and carries the refreshed Scan head.
+            let db = Database::new(splice::db_path(&apg_root), SystemConfig::default()).unwrap();
+            let conn = Connection::new(&db).unwrap();
+            let funcs = emit_json_rows(
+                conn.query("MATCH (f:Function) RETURN f.fqn AS fqn")
+                    .unwrap(),
+            );
+            let head = emit_json_rows(
+                conn.query("MATCH (s:Scan) RETURN s.git_sha AS sha")
+                    .unwrap(),
+            );
+            drop(conn);
+            drop(db);
+            assert!(
+                funcs.contains("mod.A.g"),
+                "the new function must be published: {funcs}"
+            );
+            assert!(
+                funcs.contains("mod.A.f"),
+                "an unaffected unit must survive: {funcs}"
+            );
+            assert!(
+                head.contains("new"),
+                "the Scan head must be refreshed: {head}"
+            );
 
-        let _ = std::fs::remove_dir_all(&base);
-    }
+            // The export is published in the same atomic swap.
+            let export = std::fs::read_to_string(splice::export_path(&apg_root)).unwrap();
+            assert!(
+                export.contains("mod.A.g"),
+                "graph.jsonl must carry the new unit"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn splice_dispatch_falls_back_when_ineligible() {
+            let base =
+                std::env::temp_dir().join(format!("apg-splice-fallback-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let apg_root = base.join("apg");
+            let trans = apg_root.join(specs::TRANS);
+            std::fs::create_dir_all(&trans).unwrap();
+            let abs = base.join("a.go").to_string_lossy().into_owned();
+            let graph = win_c_fixture(&abs, "new");
+            let input = win_c_input(&base, &base, &["a.go"]);
+            let db = splice::db_path(&apg_root);
+
+            // No previous DB: the dispatch declines and the full load runs.
+            assert!(
+                with_cwd(&trans, || {
+                    let mut log = Log::new();
+                    try_splice_build(&graph, &input, &apg_root, &mut log)
+                })
+                .is_none(),
+                "a missing previous db.lbug must fall back"
+            );
+
+            // A previous DB with an unclean WAL sidecar: the whole-file copy could
+            // lose unflushed rows, so the dispatch declines.
+            win_c_build_db(&db, &graph);
+            let wal = format!("{}.wal", db.display());
+            std::fs::write(&wal, b"unflushed").unwrap();
+            assert!(
+                with_cwd(&trans, || {
+                    let mut log = Log::new();
+                    try_splice_build(&graph, &input, &apg_root, &mut log)
+                })
+                .is_none(),
+                "a WAL sidecar on the previous db must fall back"
+            );
+            std::fs::remove_file(&wal).unwrap();
+
+            // A full-scan fallback (no phase-2 delta) never splices.
+            let mut full = win_c_input(&base, &base, &[]);
+            full.reuse = None;
+            assert!(
+                with_cwd(&trans, || {
+                    let mut log = Log::new();
+                    try_splice_build(&graph, &full, &apg_root, &mut log)
+                })
+                .is_none(),
+                "the full-scan path must never splice"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// feedback-101: the delta/manifest are shared across worktrees while the
+        /// seed is the LOCAL `db.lbug`. When another worktree scans in between, the
+        /// shared scan record advances past this worktree's DB; the dispatch must
+        /// refuse the seed (falling back to the full load) rather than publish a DB
+        /// that is not a full rebuild — and must leave the previous DB untouched.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn splice_dispatch_falls_back_when_the_local_seed_is_stale() {
+            let base =
+                std::env::temp_dir().join(format!("apg-splice-stale-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let apg_root = base.join("apg");
+            let trans = apg_root.join(specs::TRANS);
+            std::fs::create_dir_all(&trans).unwrap();
+            let abs = base.join("a.go").to_string_lossy().into_owned();
+            let db = splice::db_path(&apg_root);
+
+            // This worktree's local DB was built at content "key-old".
+            win_c_build_db(&db, &win_c_fixture(&abs, "old"));
+            let before = std::fs::read(&db).unwrap();
+
+            // The shared scan record the delta was derived from names a DIFFERENT
+            // tree ("key-other") — another worktree scanned in between.
+            let mut input = win_c_input(&base, &base, &["a.go"]);
+            input.recorded_content_key = Some("key-other".to_string());
+            let next = win_c_fixture(&abs, "new");
+            assert!(
+                with_cwd(&trans, || {
+                    let mut log = Log::new();
+                    try_splice_build(&next, &input, &apg_root, &mut log)
+                })
+                .is_none(),
+                "a seed built from a different tree than the shared record must fall back"
+            );
+            assert_eq!(
+                std::fs::read(&db).unwrap(),
+                before,
+                "the previous DB must be byte-identical when the splice is refused"
+            );
+
+            // The common single-worktree case — the shared record names the local
+            // DB's own tree — still splices.
+            let mut current = win_c_input(&base, &base, &["a.go"]);
+            current.recorded_content_key = Some("key-old".to_string());
+            let report = with_cwd(&trans, || {
+                let mut log = Log::new();
+                try_splice_build(&next, &current, &apg_root, &mut log)
+            })
+            .expect("a current local seed must still splice");
+            assert!(
+                report.scan_refreshed,
+                "the splice must refresh the Scan row"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
     }
 }
