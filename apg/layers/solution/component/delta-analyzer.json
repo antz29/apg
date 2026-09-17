@@ -4,13 +4,7 @@
   "name": "delta-analyzer",
   "body": "Computes the file delta and the fallback decision (git diff --name-status -M + git status --porcelain; full-scan fallback on non-ancestor recorded commit or cache-key drift).",
   "properties": {},
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.delta",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
