@@ -24,6 +24,11 @@
       "kind": "implemented-by",
       "target": "apg.artifacts.code_universes",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.artifacts.code_universes_from_export",
+      "properties": {}
     }
   ],
   "in": [
