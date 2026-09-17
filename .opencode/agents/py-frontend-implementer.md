@@ -63,6 +63,12 @@ permission:
     "apg/.worktrees/*/src/cpplib/vendor/**": deny
     ".opencode/**": deny
     "apg/.worktrees/*/.opencode/**": deny
+    "src/pylib/Cargo.toml": allow
+    "src/pylib/Cargo.lock": allow
+    "src/pylib/build.rs": allow
+    "apg/.worktrees/*/src/pylib/Cargo.toml": allow
+    "apg/.worktrees/*/src/pylib/Cargo.lock": allow
+    "apg/.worktrees/*/src/pylib/build.rs": allow
   external_directory:
     "*": deny
     "/tmp/**": allow

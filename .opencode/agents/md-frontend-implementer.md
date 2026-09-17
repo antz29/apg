@@ -63,6 +63,12 @@ permission:
     "apg/.worktrees/*/src/cpplib/vendor/**": deny
     ".opencode/**": deny
     "apg/.worktrees/*/.opencode/**": deny
+    "src/mdlib/Cargo.toml": allow
+    "src/mdlib/Cargo.lock": allow
+    "src/mdlib/build.rs": allow
+    "apg/.worktrees/*/src/mdlib/Cargo.toml": allow
+    "apg/.worktrees/*/src/mdlib/Cargo.lock": allow
+    "apg/.worktrees/*/src/mdlib/build.rs": allow
   external_directory:
     "*": deny
     "/tmp/**": allow

@@ -63,6 +63,12 @@ permission:
     "apg/.worktrees/*/src/cpplib/vendor/**": deny
     ".opencode/**": deny
     "apg/.worktrees/*/.opencode/**": deny
+    "src/rustlib/Cargo.toml": allow
+    "src/rustlib/Cargo.lock": allow
+    "src/rustlib/build.rs": allow
+    "apg/.worktrees/*/src/rustlib/Cargo.toml": allow
+    "apg/.worktrees/*/src/rustlib/Cargo.lock": allow
+    "apg/.worktrees/*/src/rustlib/build.rs": allow
   external_directory:
     "*": deny
     "/tmp/**": allow
