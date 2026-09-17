@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "apg.frontend_cmd",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.has_extension",
+      "properties": {}
     }
   ],
   "in": [
