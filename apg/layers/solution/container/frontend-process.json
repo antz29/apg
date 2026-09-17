@@ -46,6 +46,11 @@
       "kind": "implemented-by",
       "target": "csharp.Apg.CsharpFrontend.Program.Main",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "java.CallGraphBuilder.main",
+      "properties": {}
     }
   ],
   "in": [
