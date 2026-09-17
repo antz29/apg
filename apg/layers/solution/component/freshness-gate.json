@@ -24,6 +24,11 @@
       "kind": "implemented-by",
       "target": "apg.git.is_stale",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.git.recorded_scan",
+      "properties": {}
     }
   ],
   "in": [
