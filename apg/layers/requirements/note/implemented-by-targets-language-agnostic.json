@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "implemented-by-targets-language-agnostic",
+  "body": "Correction record for requirements.requirement.implemented-by-migration (human-directed).\n\nsource: the pre-correction body mandated migrating every authored `implemented-by` target bare→rooted behind a transient planned-node bridge, and 93 edges were re-pointed to rooted targets accordingly.\n\ninconsistency: rooted FQNs are a child-era rendering. Once the transient bridge died (the plan store is branch-local and dies with the branch), the durable spec still carried rooted targets while the parent binary — which scans the tree bare — graded them Drift. The durable spec was therefore consumable only by its own future child, violating the rule that a durable spec must be readable by the binary that is running it.\n\nresolution: authored `implemented-by` targets stay language-agnostic (the bare code identity) and the ingestor resolves them language-root tolerantly — exact match first, then `<language-root>.<target>` / a leading-`<root>.` strip for every root (rust/java/go/cpp/csharp/ts/js/py/md); see apg.layers.classify_code_ref / resolves_in_scanned (src/layers.rs, commit 7a6ed03e). The 93 rooted targets were reverted to their bare forms; the requirement body now states the corrected, parent-compatible design.\n\nremaining exception: 4 targets stay rooted (rust.mdfrontend, rust.mdfrontend.main, rust.pyfrontend, rust.pyfrontend.main) because the markdown/python frontends are not yet built (P7/P8 tasks still pending) and their bare identities are not declared; they resolve as Pending against the rooted planned nodes. [with user]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
