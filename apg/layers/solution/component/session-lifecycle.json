@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.session.Coordinator.end",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.session.Coordinator.start",
       "properties": {}
     }
