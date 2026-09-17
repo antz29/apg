@@ -4,13 +4,7 @@
   "name": "phase-timer",
   "body": "Measures and reports the per-phase timing breakdown (frontend / ingest-assembly / DB-load / startup) as first-class scan output.",
   "properties": {},
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.timing",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
