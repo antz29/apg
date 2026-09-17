@@ -36,6 +36,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.session.Coordinator",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.session.Coordinator.serve",
+      "properties": {}
     }
   ],
   "in": [
