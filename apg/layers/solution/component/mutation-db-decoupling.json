@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.artifacts.reingest_layers",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.artifacts.code_universes_from_export",
       "properties": {}
     },
