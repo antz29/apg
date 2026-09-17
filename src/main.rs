@@ -3480,53 +3480,6 @@ mod tests {
                 );
             }
         }
-
-        /// Phase-06 task-11: `auto_detect_languages` — a JS-only tree detects
-        /// `js`; a tree with `.ts` plus incidental `.js` detects `ts` ONCE (js
-        /// suppressed, never js+ts as two frontends); a `node_modules`-only
-        /// JavaScript tree never triggers `js` (the walk skips dependency dirs).
-        #[test]
-        fn auto_detect_languages_js_and_ts_suppression() {
-            let base = std::env::temp_dir().join(format!("apg-js-detect-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&base);
-            let avail = vec!["ts".to_string(), "js".to_string()];
-
-            // JS-only: js detected, ts not.
-            std::fs::create_dir_all(base.join("jso")).unwrap();
-            std::fs::write(base.join("jso/app.js"), "export const x = 1;\n").unwrap();
-            assert_eq!(
-                auto_detect_languages(&base.join("jso"), &avail),
-                vec!["js".to_string()],
-                "a JS-only tree detects js"
-            );
-
-            // .ts + incidental .js (and all four JS extensions): ts once, no js.
-            std::fs::create_dir_all(base.join("mixed/src")).unwrap();
-            std::fs::write(base.join("mixed/src/a.ts"), "export const a = 1;\n").unwrap();
-            std::fs::write(base.join("mixed/src/b.js"), "export const b = 1;\n").unwrap();
-            std::fs::write(base.join("mixed/src/c.jsx"), "export const c = 1;\n").unwrap();
-            std::fs::write(base.join("mixed/src/d.mjs"), "export const d = 1;\n").unwrap();
-            std::fs::write(base.join("mixed/src/e.cjs"), "module.exports = 1;\n").unwrap();
-            assert_eq!(
-                auto_detect_languages(&base.join("mixed"), &avail),
-                vec!["ts".to_string()],
-                ".ts + incidental .js detects ts once (js suppressed)"
-            );
-
-            // node_modules-only JavaScript: no js (dependency dirs are skipped).
-            std::fs::create_dir_all(base.join("nm/node_modules/dep")).unwrap();
-            std::fs::write(
-                base.join("nm/node_modules/dep/index.js"),
-                "module.exports = 1;\n",
-            )
-            .unwrap();
-            assert!(
-                auto_detect_languages(&base.join("nm"), &avail).is_empty(),
-                "a node_modules-only JS tree never triggers js detection"
-            );
-
-            let _ = std::fs::remove_dir_all(&base);
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -3810,6 +3763,54 @@ mod tests {
     /// (= `cargo test tests::e2e:: -- --ignored`).
     mod e2e {
         use super::*;
+
+        /// Phase-06 task-11: `auto_detect_languages` — a JS-only tree detects
+        /// `js`; a tree with `.ts` plus incidental `.js` detects `ts` ONCE (js
+        /// suppressed, never js+ts as two frontends); a `node_modules`-only
+        /// JavaScript tree never triggers `js` (the walk skips dependency dirs).
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp dir fs); run via cargo test-e2e"]
+        fn auto_detect_languages_js_and_ts_suppression() {
+            let base = std::env::temp_dir().join(format!("apg-js-detect-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let avail = vec!["ts".to_string(), "js".to_string()];
+
+            // JS-only: js detected, ts not.
+            std::fs::create_dir_all(base.join("jso")).unwrap();
+            std::fs::write(base.join("jso/app.js"), "export const x = 1;\n").unwrap();
+            assert_eq!(
+                auto_detect_languages(&base.join("jso"), &avail),
+                vec!["js".to_string()],
+                "a JS-only tree detects js"
+            );
+
+            // .ts + incidental .js (and all four JS extensions): ts once, no js.
+            std::fs::create_dir_all(base.join("mixed/src")).unwrap();
+            std::fs::write(base.join("mixed/src/a.ts"), "export const a = 1;\n").unwrap();
+            std::fs::write(base.join("mixed/src/b.js"), "export const b = 1;\n").unwrap();
+            std::fs::write(base.join("mixed/src/c.jsx"), "export const c = 1;\n").unwrap();
+            std::fs::write(base.join("mixed/src/d.mjs"), "export const d = 1;\n").unwrap();
+            std::fs::write(base.join("mixed/src/e.cjs"), "module.exports = 1;\n").unwrap();
+            assert_eq!(
+                auto_detect_languages(&base.join("mixed"), &avail),
+                vec!["ts".to_string()],
+                ".ts + incidental .js detects ts once (js suppressed)"
+            );
+
+            // node_modules-only JavaScript: no js (dependency dirs are skipped).
+            std::fs::create_dir_all(base.join("nm/node_modules/dep")).unwrap();
+            std::fs::write(
+                base.join("nm/node_modules/dep/index.js"),
+                "module.exports = 1;\n",
+            )
+            .unwrap();
+            assert!(
+                auto_detect_languages(&base.join("nm"), &avail).is_empty(),
+                "a node_modules-only JS tree never triggers js detection"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
 
         #[test]
         #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
