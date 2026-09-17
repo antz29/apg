@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.artifacts.ArtifactDb.detach_delete_project",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.artifacts.reingest_project_with",
       "properties": {}
     },
