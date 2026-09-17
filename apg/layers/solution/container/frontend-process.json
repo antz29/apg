@@ -19,11 +19,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg/gofrontend.main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "build_script_build.main",
       "properties": {}
     },
