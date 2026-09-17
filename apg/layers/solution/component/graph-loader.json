@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.load.copy_from",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.load.write_graph_jsonl",
       "properties": {}
     },
