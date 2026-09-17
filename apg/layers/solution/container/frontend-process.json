@@ -29,11 +29,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "java.CallGraphBuilder.main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.build_script_build.main",
       "properties": {}
     },
