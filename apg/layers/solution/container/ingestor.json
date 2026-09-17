@@ -39,11 +39,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.ingest.claim",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.ingest.render_function_fqns",
       "properties": {}
     }
