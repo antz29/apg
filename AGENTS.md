@@ -298,42 +298,12 @@ The default gate stays fast and the guard is exercised by the opt-in e2e tier.
 The release gate is therefore `cargo build` + `cargo test` (fast unit+int) +
 `cargo test-e2e` (which runs the guard); see the release section below.
 
-**Acceptance execution profile (release, not debug).** The three jgrapht
-acceptance scenarios (`apg.tests.e2e.acceptance_fresh_worktree_near_instant_jgrapht`,
-`acceptance_localized_edit_jgrapht_incremental`,
-`acceptance_wide_signature_change_jgrapht_exact`) and their harness are measured
-with the **release-profile** candidate, because the recorded baseline's
-provenance is the optimized release binary. Run them as:
-
-```sh
-cargo build --release                     # leaves target/release/apg
-cargo test tests::e2e:: -- --ignored      # = the `cargo test-e2e` alias
-```
-
-`testutil::apg_bin_profile()` resolves `target/release/apg` — the artifact
-`cargo build --release` leaves — and the acceptance harness drives that binary
-(`ApgCommand::with_bin`), never the running profile's debug sibling. When the
-release artifact is absent the resolution **fails loudly naming `cargo build
---release`**; it never silently falls back to `target/debug/apg`. That is the
-single observable: a debug-profile run cannot resolve a candidate and is
-therefore **never acceptance-satisfied** (a debug measurement is not
-mistakable for a passing acceptance). Every acceptance artifact records its
-provenance as `profile` (`"release"`) and `binary_path` (the absolute path), so
-a recorded number can always be traced back to the candidate that produced it.
-
-**Interpretation note (why a debug run is not comparable).** The recorded
-jgrapht full-scan baseline (~16 s wall / ~12 s logged; Java frontend ~9 s) was
-measured with a release-profile candidate. The spec's "~1 s graph assembly" is
-**not reproducible on this branch**: assembly is dominated by
-`incremental::record`'s `O(files × (nodes + edges))` fact recording (≈2.9 s
-release, ≈14.5 s debug on the staged copy; released 0.13.3 ≈0.23 s) plus the
-first-incremental Java class-cache rebuild (955 unchanged files). The debug
-build inflates the per-file-unit cost ~5×, so a debug measurement is not
-comparable to the recorded baseline — see phase-04 tasks 12/13 and their notes.
-
-The machine-readable acceptance artifacts live in `apg/.trans/acceptance/*.json`
-(gitignored, like the rest of `.trans/`); their `profile`/`binary_path` fields
-carry the provenance above.
+**Self-contained e2e.** The whole test suite is self-contained
+(`global.constraint.self-contained-tests`): every e2e scenario builds its own
+scratch `/tmp` git repo (or synthetic `target/`/DB tree) and drives the candidate
+binary against it. No test reads `$HOME`, an external checkout, or any other
+developer-local path, so `cargo test-e2e` needs no `cargo build --release` —
+`cargo build` (debug) is enough.
 
 ## Testing a new binary (scratch repo in /tmp)
 

@@ -214,24 +214,27 @@ fn main() {
     // --- Rust frontend (rust-analyzer engine, compiled in isolation) ---
     if enabled(&frontends, "rust") {
         // Compile rustlib with cargo into its own isolated target dir
-        // (src/rustlib/target), matching the outer build profile (debug for
-        // fast dev compile, release for fast scans). Deps resolve from
+        // (src/rustlib/target). The frontend is ALWAYS built with `--release`,
+        // independent of the outer cargo profile: rust-analyzer's startup cost
+        // dominates every Rust scan, and the unoptimized debug frontend is ~7x
+        // slower than the optimized one. The optimized artifact is staged into
+        // the ACTIVE outer profile's frontends dir
+        // (`target/<outer-profile>/frontends`), so a debug-profile `apg` spawns
+        // the fast frontend instead of the debug sibling. Deps resolve from
         // src/rustlib/Cargo.lock; bump the pinned rust-analyzer rev in
         // src/rustlib/Cargo.toml atomically. On failure, skip rust rather
         // than aborting the whole build (like the other frontends).
-        let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
         let rustfrontend = Path::new("src/rustlib")
             .join("target")
-            .join(&profile)
+            .join("release")
             .join("rustfrontend");
         let mut cmd = Command::new("cargo");
         cmd.arg("build")
             .arg("--manifest-path")
-            .arg("src/rustlib/Cargo.toml");
-        if profile == "release" {
-            cmd.arg("--release");
-        }
-        cmd.arg("--bin").arg("rustfrontend");
+            .arg("src/rustlib/Cargo.toml")
+            .arg("--release")
+            .arg("--bin")
+            .arg("rustfrontend");
         let rust_ok = cmd.status().is_ok_and(|s| s.success()) && rustfrontend.exists();
         if rust_ok {
             println!(
@@ -246,24 +249,23 @@ fn main() {
     // --- Markdown frontend (standalone Rust crate, compiled in isolation) ---
     if enabled(&frontends, "md") {
         // Compile mdlib with cargo into its own isolated target dir
-        // (src/mdlib/target), matching the outer build profile (debug for fast
-        // dev compile, release for fast scans). mdlib is a standalone,
+        // (src/mdlib/target). ALWAYS `--release`, independent of the outer
+        // cargo profile, and staged into the ACTIVE outer profile's frontends
+        // dir (same rationale as rustlib above). mdlib is a standalone,
         // non-workspace crate exactly like src/rustlib, so its lockfile and
         // target tree stay independent. On failure, skip md rather than
         // aborting the whole build (like the other frontends).
-        let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
         let mdfrontend = Path::new("src/mdlib")
             .join("target")
-            .join(&profile)
+            .join("release")
             .join("mdfrontend");
         let mut cmd = Command::new("cargo");
         cmd.arg("build")
             .arg("--manifest-path")
-            .arg("src/mdlib/Cargo.toml");
-        if profile == "release" {
-            cmd.arg("--release");
-        }
-        cmd.arg("--bin").arg("mdfrontend");
+            .arg("src/mdlib/Cargo.toml")
+            .arg("--release")
+            .arg("--bin")
+            .arg("mdfrontend");
         let md_ok = cmd.status().is_ok_and(|s| s.success()) && mdfrontend.exists();
         if md_ok {
             println!("cargo:rustc-env=APG_FRONTEND_MD={}", mdfrontend.display());
@@ -275,26 +277,25 @@ fn main() {
     // --- Python frontend (Astral ty engine, compiled in isolation) ---
     if enabled(&frontends, "py") {
         // Compile pylib with cargo into its own isolated target dir
-        // (src/pylib/target), matching the outer build profile (debug for fast
-        // dev compile, release for fast scans). pylib is a standalone,
+        // (src/pylib/target). ALWAYS `--release`, independent of the outer
+        // cargo profile, and staged into the ACTIVE outer profile's frontends
+        // dir (same rationale as rustlib above). pylib is a standalone,
         // non-workspace crate exactly like src/mdlib, so its lockfile and
         // target tree stay independent. The staged artifact is the `pyfrontend`
         // binary (the crate's `[[bin]]` name — unaffected by the `[package]`
         // name). On failure, skip py rather than aborting the whole build
         // (like the other frontends).
-        let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
         let pyfrontend = Path::new("src/pylib")
             .join("target")
-            .join(&profile)
+            .join("release")
             .join("pyfrontend");
         let mut cmd = Command::new("cargo");
         cmd.arg("build")
             .arg("--manifest-path")
-            .arg("src/pylib/Cargo.toml");
-        if profile == "release" {
-            cmd.arg("--release");
-        }
-        cmd.arg("--bin").arg("pyfrontend");
+            .arg("src/pylib/Cargo.toml")
+            .arg("--release")
+            .arg("--bin")
+            .arg("pyfrontend");
         let py_ok = cmd.status().is_ok_and(|s| s.success()) && pyfrontend.exists();
         if py_ok {
             println!("cargo:rustc-env=APG_FRONTEND_PY={}", pyfrontend.display());
