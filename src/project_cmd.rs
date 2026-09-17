@@ -587,6 +587,11 @@ mod tests {
     /// The module/fqn namespace the payload fixtures use.
     const MOD: &str = "fixture.mod";
     const FILE: &str = "/abs/store.go";
+    /// PHASE_09: the hermetic scan (`testutil::scan_checkout`, lang_switch `go`)
+    /// roots the frontend-emitted module identity, so the canonical FQN of the
+    /// fixture's scanned code is `go.fixture.mod.*` — the form every scanned-code
+    /// expectation and every authored `implemented-by` target must use.
+    const MOD_FQN: &str = "go.fixture.mod";
 
     fn start_scan(dir: &Path) -> anyhow::Result<()> {
         testutil::scan_checkout(dir)
@@ -720,10 +725,10 @@ mod tests {
                 to: "foo/plan.phase-01.task-1".into(),
             },
             Record::PlannedNode {
-                fqn: format!("{MOD}.Widget"),
+                fqn: format!("{MOD_FQN}.Widget"),
                 kind: "struct".into(),
                 name: "Widget".into(),
-                parent: MOD.into(),
+                parent: MOD_FQN.into(),
             },
         ];
         if with_feedback {
@@ -758,11 +763,11 @@ mod tests {
     /// resolve in the fixture's scanned graph, and the plan's tasks must touch
     /// every one of them for derived solution coverage (SPEC §5).
     const IMPL_FQNS: [&str; 5] = [
-        "fixture.mod.ProjectStart",
-        "fixture.mod.MutationGuard",
-        "fixture.mod.LayersSerializer",
-        "fixture.mod.PlanBridge",
-        "fixture.mod.InitVersionGate",
+        "go.fixture.mod.ProjectStart",
+        "go.fixture.mod.MutationGuard",
+        "go.fixture.mod.LayersSerializer",
+        "go.fixture.mod.PlanBridge",
+        "go.fixture.mod.InitVersionGate",
     ];
 
     /// A bare node file (identity + prose + metadata; edges added by the
@@ -1901,8 +1906,8 @@ mod tests {
             let main_apg = repo.apg_root();
             let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
             assert!(db.has_node("requirements.requirement.timer"));
-            assert!(db.has_node(format!("{MOD}.Store").as_str()));
-            assert!(db.has_node(format!("{MOD}.Widget").as_str()));
+            assert!(db.has_node(format!("{MOD_FQN}.Store").as_str()));
+            assert!(db.has_node(format!("{MOD_FQN}.Widget").as_str()));
             assert!(!db.has_node("foo/plan"), "transient plans never reach main");
             drop(db);
             // The main DB is fresh (scan_meta re-anchored by the rebuild scan).
@@ -2062,8 +2067,8 @@ mod tests {
                 "requirements.requirement.r20",
                 "domain.group.change-sets",
                 "solution.system.apg-cli",
-                "fixture.mod.Store",
-                "fixture.mod.ProjectStart",
+                "go.fixture.mod.Store",
+                "go.fixture.mod.ProjectStart",
             ] {
                 assert!(db.has_node(f), "main DB must hold `{f}` after the rebuild");
             }
@@ -2115,8 +2120,8 @@ mod tests {
             start_scan(&repo.root).unwrap();
             let main_apg = repo.apg_root();
             let main_db = artifacts::ArtifactDb::open(&main_apg).unwrap();
-            assert!(main_db.has_node(format!("{MOD}.Store").as_str()));
-            assert!(main_db.has_node(format!("{MOD}.Lookup").as_str()));
+            assert!(main_db.has_node(format!("{MOD_FQN}.Store").as_str()));
+            assert!(main_db.has_node(format!("{MOD_FQN}.Lookup").as_str()));
             drop(main_db);
             let main_db_bytes = std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap();
             let main_graph_bytes =
@@ -2163,13 +2168,13 @@ mod tests {
             // scanned payload is there, and no authored tiers yet (the branch DB
             // is the fresh start-scan).
             let db = artifacts::ArtifactDb::open(&resolved).unwrap();
-            assert!(db.has_node(MOD), "module from the scanned payload");
+            assert!(db.has_node(MOD_FQN), "module from the scanned payload");
             assert!(
-                db.has_node(format!("{MOD}.Store").as_str()),
+                db.has_node(format!("{MOD_FQN}.Store").as_str()),
                 "struct from the scanned payload"
             );
             assert!(
-                db.has_node(format!("{MOD}.Lookup").as_str()),
+                db.has_node(format!("{MOD_FQN}.Lookup").as_str()),
                 "function from the scanned payload"
             );
             assert!(!db.has_node("requirements.requirement.r1"));
@@ -2347,9 +2352,9 @@ mod tests {
                 "domain.group.change-sets",
                 "solution.system.apg-cli",
                 "solution.container.project-commands",
-                format!("{MOD}.Store").as_str(),
-                format!("{MOD}.Lookup").as_str(),
-                format!("{MOD}.ProjectStart").as_str(),
+                format!("{MOD_FQN}.Store").as_str(),
+                format!("{MOD_FQN}.Lookup").as_str(),
+                format!("{MOD_FQN}.ProjectStart").as_str(),
             ] {
                 assert!(db.has_node(f), "main DB must hold `{f}` after the rebuild");
             }
@@ -2411,7 +2416,7 @@ mod tests {
                         to: "fail/plan.phase-01".to_string(),
                     },
                     Record::PlannedNode {
-                        fqn: format!("{MOD}.Widget"),
+                        fqn: format!("{MOD_FQN}.Widget"),
                         kind: "struct".into(),
                         name: "Widget".into(),
                         parent: MOD.into(),

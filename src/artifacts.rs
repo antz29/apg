@@ -2159,7 +2159,10 @@ mod tests {
             {
                 let db = ArtifactDb::open(&wt_apg).unwrap();
                 assert!(db.has_node("requirements.requirement.rebuilt"));
-                assert!(db.has_node("fixture.mod.Store"));
+                // PHASE_09: the hermetic scan roots the frontend-emitted module
+                // identity under its lang_switch id (`go` — testutil::scan_checkout),
+                // so the scanned FQN is `go.fixture.mod.Store`.
+                assert!(db.has_node("go.fixture.mod.Store"));
             }
 
             // The next scan REBUILDS `db.lbug` from source: remove the index (a
@@ -2182,7 +2185,7 @@ mod tests {
                 "the metadata mutation must survive the scan rebuild"
             );
             assert!(
-                db.has_node("fixture.mod.Store"),
+                db.has_node("go.fixture.mod.Store"),
                 "the scanned code must be rebuilt from source"
             );
             drop(db);

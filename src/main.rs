@@ -5640,7 +5640,7 @@ mod tests {
                 "--verb",
                 "modifies",
                 "--fqn",
-                "fixture.mod.Store",
+                "go.fixture.mod.Store",
             ]);
             assert_eq!(
                 query("MATCH (n:Task {fqn: 'foo/plan.phase-01.task-1'}) RETURN count(n)"),
@@ -7476,9 +7476,9 @@ mod tests {
                 ("full", &full_calls, &full_uses),
             ] {
                 for (from, to) in [
-                    ("pkg.b.B.bar", "pkg.b.Target.t"),
-                    ("pkg.b.B.make", "pkg.b.Target.<init>"),
-                    ("pkg.b.B.bar", "pkg.a.A.foo"),
+                    ("java.pkg.b.B.bar", "java.pkg.b.Target.t"),
+                    ("java.pkg.b.B.make", "java.pkg.b.Target.<init>"),
+                    ("java.pkg.b.B.bar", "java.pkg.a.A.foo"),
                 ] {
                     assert!(
                         calls.contains(&(from.to_string(), to.to_string())),
@@ -7488,7 +7488,10 @@ mod tests {
                     );
                 }
                 assert!(
-                    uses.contains(&("pkg.b.B.make".to_string(), "pkg.b.Target".to_string())),
+                    uses.contains(&(
+                        "java.pkg.b.B.make".to_string(),
+                        "java.pkg.b.Target".to_string()
+                    )),
                     "{tag}: the resolved use pkg.b.B.make -> pkg.b.Target must be present"
                 );
             }
@@ -7768,23 +7771,23 @@ mod tests {
             let recs = export_records(&nested.root);
             let modules = export_module_counts(&recs);
             assert_eq!(
-                modules.get("nested-app"),
+                modules.get("rust.nested-app"),
                 Some(&1),
                 "(a) the nested crate's Module node must appear exactly once: {modules:?}"
             );
             assert_eq!(
-                modules.get("root-app"),
+                modules.get("rust.root-app"),
                 Some(&1),
                 "(a) root module: {modules:?}"
             );
             let symbols = export_symbol_fqns(&recs);
             assert!(
-                symbols.contains("nested-app.NestedThing")
-                    && symbols.contains("nested-app.nested_fn"),
+                symbols.contains("rust.nested-app.NestedThing")
+                    && symbols.contains("rust.nested-app.nested_fn"),
                 "(a) the nested crate's declared symbols must appear: {symbols:?}"
             );
             assert!(
-                symbols.contains("root-app.RootThing"),
+                symbols.contains("rust.root-app.RootThing"),
                 "(a) the root crate's symbols must appear: {symbols:?}"
             );
             let _ = std::fs::remove_dir_all(&nested.root);
@@ -7816,12 +7819,12 @@ mod tests {
             let recs = export_records(&ws.root);
             let modules = export_module_counts(&recs);
             assert_eq!(
-                modules.get("crate-a"),
+                modules.get("rust.crate-a"),
                 Some(&1),
                 "(b) crate-a must be discovered exactly once: {modules:?}"
             );
             assert_eq!(
-                modules.get("crate-b"),
+                modules.get("rust.crate-b"),
                 Some(&1),
                 "(b) crate-b must be discovered exactly once: {modules:?}"
             );
@@ -7832,7 +7835,7 @@ mod tests {
             );
             let symbols = export_symbol_fqns(&recs);
             assert!(
-                symbols.contains("crate-a.AThing") && symbols.contains("crate-b.BThing"),
+                symbols.contains("rust.crate-a.AThing") && symbols.contains("rust.crate-b.BThing"),
                 "(b) each member's symbols must appear: {symbols:?}"
             );
             let _ = std::fs::remove_dir_all(&ws.root);
@@ -7869,7 +7872,7 @@ mod tests {
                 "(c) a .worktrees/ crate's symbols must be absent: {symbols:?}"
             );
             assert!(
-                symbols.contains("wt-root.WtRoot"),
+                symbols.contains("rust.wt-root.WtRoot"),
                 "(c) the real root crate must still be discovered: {symbols:?}"
             );
             let _ = std::fs::remove_dir_all(&wt.root);
@@ -7918,7 +7921,9 @@ mod tests {
             // Non-vacuous: the crate BESIDE the generated tree was loaded, so
             // the exclusion is exercised against a live scan, not an empty one.
             assert!(
-                symbols.iter().any(|f| f == "rustlib-fixture.RustlibThing"),
+                symbols
+                    .iter()
+                    .any(|f| f == "rust.rustlib-fixture.RustlibThing"),
                 "(d) the crate beside the generated tree must be discovered: {symbols:?}"
             );
             let leaked: Vec<String> = export_code_locations(&recs)

@@ -4741,7 +4741,9 @@ mod tests {
             // Scanned code + the layers tree landed...
             let db = artifacts::ArtifactDb::open(&repo.apg_root()).unwrap();
             assert!(
-                db.has_node("fixture.mod.Store"),
+                // PHASE_09: the scan roots the module identity under its
+                // lang_switch id (`go` — testutil::scan_checkout).
+                db.has_node("go.fixture.mod.Store"),
                 "scanned code must be in the DB"
             );
             assert!(
@@ -5120,7 +5122,7 @@ mod tests {
             let mut known = node("solution", "system", "known-sys");
             known
                 .out
-                .push(out_edge("implemented-by", "fixture.mod.Store"));
+                .push(out_edge("implemented-by", "go.fixture.mod.Store"));
             write_project(&wt_apg, &[known], &[]).unwrap();
             let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
             assert!(
@@ -5268,7 +5270,7 @@ mod tests {
             // implemented-by: System → code (no in-half — code has no node file)
             portal
                 .out
-                .push(out_edge("implemented-by", "fixture.mod.Store"));
+                .push(out_edge("implemented-by", "go.fixture.mod.Store"));
             // represents: User → Entity
             user.out.push(out_edge("represents", "domain.entity.order"));
             order

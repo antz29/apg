@@ -2281,11 +2281,11 @@ mod tests {
             );
             let spliced = code_snapshot(&seeded.db);
             for row in [
-                "Module:Apg:",
-                "Module:Apg.CsharpFrontend:",
-                "Module:Apg.CsharpFrontend.Tests:",
-                "Contains:Apg->Apg.CsharpFrontend",
-                "Contains:Apg.CsharpFrontend->Apg.CsharpFrontend.Tests",
+                "Module:csharp.Apg:",
+                "Module:csharp.Apg.CsharpFrontend:",
+                "Module:csharp.Apg.CsharpFrontend.Tests:",
+                "Contains:csharp.Apg->csharp.Apg.CsharpFrontend",
+                "Contains:csharp.Apg.CsharpFrontend->csharp.Apg.CsharpFrontend.Tests",
             ] {
                 assert!(
                     spliced.contains(row),
@@ -2465,9 +2465,9 @@ mod tests {
             assert!(reference_jsonl.starts_with("{\"type\":\"scan_meta\""));
             // The skipped language's scaffolding is present in the export itself.
             for needle in [
-                "\"type\":\"module\",\"fqn\":\"Apg\"",
-                "\"type\":\"module\",\"fqn\":\"Apg.CsharpFrontend\"",
-                "\"type\":\"contains\",\"from\":\"Apg\",\"to\":\"Apg.CsharpFrontend\"",
+                "\"type\":\"module\",\"fqn\":\"csharp.Apg\"",
+                "\"type\":\"module\",\"fqn\":\"csharp.Apg.CsharpFrontend\"",
+                "\"type\":\"contains\",\"from\":\"csharp.Apg\",\"to\":\"csharp.Apg.CsharpFrontend\"",
             ] {
                 assert!(
                     assembled_jsonl.contains(needle),
@@ -2639,12 +2639,13 @@ mod tests {
 
             // The scaffolding is in the export itself...
             assert!(
-                assembled_jsonl.contains("\"type\":\"module\",\"fqn\":\"pkg.a\""),
+                assembled_jsonl.contains("\"type\":\"module\",\"fqn\":\"java.pkg.a\""),
                 "the export must carry the unchanged package's module record"
             );
             assert!(
-                assembled_jsonl.contains("\"type\":\"contains\",\"from\":\"pkg\",\"to\":\"pkg.a\""),
-                "the export must carry the spawned stream's pkg -> pkg.a scaffolding:\n{assembled_jsonl}"
+                assembled_jsonl
+                    .contains("\"type\":\"contains\",\"from\":\"java.pkg\",\"to\":\"java.pkg.a\""),
+                "the export must carry the spawned stream's java.pkg -> java.pkg.a scaffolding:\n{assembled_jsonl}"
             );
             // ...and the whole export equals a full rebuild's.
             assert_eq!(
@@ -2676,12 +2677,13 @@ mod tests {
             load::write_graph_jsonl(&before_fix, &before_path).unwrap();
             let before_jsonl = std::fs::read_to_string(&before_path).unwrap();
             assert!(
-                before_jsonl.contains("\"type\":\"module\",\"fqn\":\"pkg.a\""),
+                before_jsonl.contains("\"type\":\"module\",\"fqn\":\"java.pkg.a\""),
                 "the reused file's cached direct-parent module survives even pre-fix"
             );
             assert!(
-                !before_jsonl.contains("\"type\":\"contains\",\"from\":\"pkg\",\"to\":\"pkg.a\""),
-                "the pre-fix stream cannot carry pkg -> pkg.a:\n{before_jsonl}"
+                !before_jsonl
+                    .contains("\"type\":\"contains\",\"from\":\"java.pkg\",\"to\":\"java.pkg.a\""),
+                "the pre-fix stream cannot carry java.pkg -> java.pkg.a:\n{before_jsonl}"
             );
             assert_ne!(
                 canonical(&before_jsonl),
@@ -3927,66 +3929,88 @@ mod tests {
             kind: NodeKind::Module,
             ..Node::default()
         };
+        let language = |_: &str| Node {
+            kind: NodeKind::Language,
+            ..Node::default()
+        };
         let mut g = Graph::default();
+        // PHASE_09: the ingestor roots every module/symbol FQN under its
+        // lang_switch id, so this "last full scan" graph is rooted — `go.` for
+        // the changed language, `csharp.` for the skipped one — and carries each
+        // stream's `Language` root plus its `Language -> Module` edge.
+        g.nodes.insert("go".into(), language("go"));
+        g.nodes.insert("csharp".into(), language("csharp"));
         // The changed language (it spawns and re-emits its full hierarchy).
-        g.nodes.insert("godemo".into(), module("godemo"));
+        g.nodes.insert("go.godemo".into(), module("go.godemo"));
         g.nodes
-            .insert("godemo/changed".into(), module("godemo/changed"));
+            .insert("go.godemo/changed".into(), module("go.godemo/changed"));
         g.nodes
             .insert(changed.into(), located(NodeKind::File, changed, 1, 30));
         g.nodes.insert(
-            "godemo.changed.S".into(),
+            "go.godemo.changed.S".into(),
             located(NodeKind::Struct, changed, 1, 30),
         );
         g.nodes.insert(
-            "godemo.changed.S.f".into(),
+            "go.godemo.changed.S.f".into(),
             located(NodeKind::Function, changed, 2, 10),
         );
+        g.contains.insert(("go".into(), "go.godemo".into()));
+        g.contains.insert(("go".into(), "go.godemo/changed".into()));
         g.contains
-            .insert(("godemo".into(), "godemo/changed".into()));
-        g.contains.insert(("godemo/changed".into(), changed.into()));
+            .insert(("go.godemo".into(), "go.godemo/changed".into()));
         g.contains
-            .insert((changed.into(), "godemo.changed.S".into()));
+            .insert(("go.godemo/changed".into(), changed.into()));
         g.contains
-            .insert((changed.into(), "godemo.changed.S.f".into()));
+            .insert((changed.into(), "go.godemo.changed.S".into()));
         g.contains
-            .insert(("godemo.changed.S".into(), "godemo.changed.S.f".into()));
+            .insert((changed.into(), "go.godemo.changed.S.f".into()));
+        g.contains
+            .insert(("go.godemo.changed.S".into(), "go.godemo.changed.S.f".into()));
         // The skipped language: global Module->Module scaffolding with two
         // pure-intermediate modules and a leaf module that owns the file.
-        g.nodes.insert("Apg".into(), module("Apg"));
-        g.nodes
-            .insert("Apg.CsharpFrontend".into(), module("Apg.CsharpFrontend"));
+        g.nodes.insert("csharp.Apg".into(), module("csharp.Apg"));
         g.nodes.insert(
-            "Apg.CsharpFrontend.Tests".into(),
-            module("Apg.CsharpFrontend.Tests"),
+            "csharp.Apg.CsharpFrontend".into(),
+            module("csharp.Apg.CsharpFrontend"),
+        );
+        g.nodes.insert(
+            "csharp.Apg.CsharpFrontend.Tests".into(),
+            module("csharp.Apg.CsharpFrontend.Tests"),
         );
         g.nodes
             .insert(skipped.into(), located(NodeKind::File, skipped, 1, 20));
         g.nodes.insert(
-            "Apg.CsharpFrontend.Tests.Program".into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program".into(),
             located(NodeKind::Struct, skipped, 1, 20),
         );
         g.nodes.insert(
-            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program.Main".into(),
             located(NodeKind::Function, skipped, 2, 10),
         );
+        g.contains.insert(("csharp".into(), "csharp.Apg".into()));
         g.contains
-            .insert(("Apg".into(), "Apg.CsharpFrontend".into()));
+            .insert(("csharp".into(), "csharp.Apg.CsharpFrontend".into()));
+        g.contains
+            .insert(("csharp".into(), "csharp.Apg.CsharpFrontend.Tests".into()));
+        g.contains
+            .insert(("csharp.Apg".into(), "csharp.Apg.CsharpFrontend".into()));
         g.contains.insert((
-            "Apg.CsharpFrontend".into(),
-            "Apg.CsharpFrontend.Tests".into(),
+            "csharp.Apg.CsharpFrontend".into(),
+            "csharp.Apg.CsharpFrontend.Tests".into(),
         ));
         g.contains
-            .insert(("Apg.CsharpFrontend.Tests".into(), skipped.into()));
-        g.contains
-            .insert((skipped.into(), "Apg.CsharpFrontend.Tests.Program".into()));
+            .insert(("csharp.Apg.CsharpFrontend.Tests".into(), skipped.into()));
         g.contains.insert((
             skipped.into(),
-            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program".into(),
         ));
         g.contains.insert((
-            "Apg.CsharpFrontend.Tests.Program".into(),
-            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+            skipped.into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program.Main".into(),
+        ));
+        g.contains.insert((
+            "csharp.Apg.CsharpFrontend.Tests.Program".into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program.Main".into(),
         ));
         g.nodes.insert(
             crate::schema::SCAN_HEAD.into(),
@@ -4007,65 +4031,78 @@ mod tests {
             kind: NodeKind::Module,
             ..Node::default()
         };
+        let language = |_: &str| Node {
+            kind: NodeKind::Language,
+            ..Node::default()
+        };
         let mut g = Graph::default();
-        g.nodes.insert("godemo".into(), module("godemo"));
+        // PHASE_09: the changed language's re-emitted hierarchy is rooted and
+        // carries its `Language` root.
+        g.nodes.insert("go".into(), language("go"));
+        g.nodes.insert("go.godemo".into(), module("go.godemo"));
         g.nodes
-            .insert("godemo/changed".into(), module("godemo/changed"));
+            .insert("go.godemo/changed".into(), module("go.godemo/changed"));
         g.nodes
             .insert(changed.into(), located(NodeKind::File, changed, 1, 40));
         g.nodes.insert(
-            "godemo.changed.S".into(),
+            "go.godemo.changed.S".into(),
             located(NodeKind::Struct, changed, 1, 40),
         );
         g.nodes.insert(
-            "godemo.changed.S.f".into(),
+            "go.godemo.changed.S.f".into(),
             located(NodeKind::Function, changed, 2, 10),
         );
         g.nodes.insert(
-            "godemo.changed.S.h".into(),
+            "go.godemo.changed.S.h".into(),
             located(NodeKind::Function, changed, 12, 20),
         );
+        g.contains.insert(("go".into(), "go.godemo".into()));
+        g.contains.insert(("go".into(), "go.godemo/changed".into()));
         g.contains
-            .insert(("godemo".into(), "godemo/changed".into()));
-        g.contains.insert(("godemo/changed".into(), changed.into()));
+            .insert(("go.godemo".into(), "go.godemo/changed".into()));
         g.contains
-            .insert((changed.into(), "godemo.changed.S".into()));
+            .insert(("go.godemo/changed".into(), changed.into()));
         g.contains
-            .insert((changed.into(), "godemo.changed.S.f".into()));
+            .insert((changed.into(), "go.godemo.changed.S".into()));
         g.contains
-            .insert((changed.into(), "godemo.changed.S.h".into()));
+            .insert((changed.into(), "go.godemo.changed.S.f".into()));
         g.contains
-            .insert(("godemo.changed.S".into(), "godemo.changed.S.f".into()));
+            .insert((changed.into(), "go.godemo.changed.S.h".into()));
         g.contains
-            .insert(("godemo.changed.S".into(), "godemo.changed.S.h".into()));
+            .insert(("go.godemo.changed.S".into(), "go.godemo.changed.S.f".into()));
+        g.contains
+            .insert(("go.godemo.changed.S".into(), "go.godemo.changed.S.h".into()));
         // Cached facts for the skipped language: the reused File's direct-parent
-        // module only — NO `Apg`, NO `Apg.CsharpFrontend`, NO Module->Module
-        // edges.
+        // module only — NO `csharp.Apg`, NO `csharp.Apg.CsharpFrontend`, NO
+        // Module->Module edges and NO `csharp` Language root (that scaffolding is
+        // replayed from the store only when the language is actually skipped).
         g.nodes.insert(
-            "Apg.CsharpFrontend.Tests".into(),
-            module("Apg.CsharpFrontend.Tests"),
+            "csharp.Apg.CsharpFrontend.Tests".into(),
+            module("csharp.Apg.CsharpFrontend.Tests"),
         );
         g.nodes
             .insert(skipped.into(), located(NodeKind::File, skipped, 1, 20));
         g.nodes.insert(
-            "Apg.CsharpFrontend.Tests.Program".into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program".into(),
             located(NodeKind::Struct, skipped, 1, 20),
         );
         g.nodes.insert(
-            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program.Main".into(),
             located(NodeKind::Function, skipped, 2, 10),
         );
         g.contains
-            .insert(("Apg.CsharpFrontend.Tests".into(), skipped.into()));
-        g.contains
-            .insert((skipped.into(), "Apg.CsharpFrontend.Tests.Program".into()));
+            .insert(("csharp.Apg.CsharpFrontend.Tests".into(), skipped.into()));
         g.contains.insert((
             skipped.into(),
-            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program".into(),
         ));
         g.contains.insert((
-            "Apg.CsharpFrontend.Tests.Program".into(),
-            "Apg.CsharpFrontend.Tests.Program.Main".into(),
+            skipped.into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program.Main".into(),
+        ));
+        g.contains.insert((
+            "csharp.Apg.CsharpFrontend.Tests.Program".into(),
+            "csharp.Apg.CsharpFrontend.Tests.Program.Main".into(),
         ));
         g.nodes.insert(
             crate::schema::SCAN_HEAD.into(),
@@ -4080,13 +4117,13 @@ mod tests {
     fn multi_lang_new(changed: &str, skipped: &str) -> Graph {
         let mut g = multi_lang_previous(changed, skipped);
         g.nodes.insert(
-            "godemo.changed.S.h".into(),
+            "go.godemo.changed.S.h".into(),
             located(NodeKind::Function, changed, 12, 20),
         );
         g.contains
-            .insert((changed.into(), "godemo.changed.S.h".into()));
+            .insert((changed.into(), "go.godemo.changed.S.h".into()));
         g.contains
-            .insert(("godemo.changed.S".into(), "godemo.changed.S.h".into()));
+            .insert(("go.godemo.changed.S".into(), "go.godemo.changed.S.h".into()));
         g.nodes.insert(
             crate::schema::SCAN_HEAD.into(),
             scan_node("newsha", "newkey", "2026-01-02T00:00:00Z"),
@@ -4105,11 +4142,26 @@ mod tests {
             kind: NodeKind::Module,
             ..Node::default()
         };
+        let language = |_: &str| Node {
+            kind: NodeKind::Language,
+            ..Node::default()
+        };
         let mut g = Graph::default();
-        for p in ["pkg", "pkg.a", "pkg.b", "pkg.c"] {
+        // PHASE_09: the ingestor roots every module/symbol FQN under the `java`
+        // lang_switch id, and the stream carries its `Language` root.
+        g.nodes.insert("java".into(), language("java"));
+        for p in ["java.pkg", "java.pkg.a", "java.pkg.b", "java.pkg.c"] {
             g.nodes.insert(p.to_string(), module(p));
         }
-        for (pkg, file, ty) in [("pkg.a", a, "A"), ("pkg.b", b, "B"), ("pkg.c", c, "C")] {
+        g.contains.insert(("java".into(), "java.pkg".into()));
+        for p in ["java.pkg.a", "java.pkg.b", "java.pkg.c"] {
+            g.contains.insert(("java".into(), p.to_string()));
+        }
+        for (pkg, file, ty) in [
+            ("java.pkg.a", a, "A"),
+            ("java.pkg.b", b, "B"),
+            ("java.pkg.c", c, "C"),
+        ] {
             let st = format!("{pkg}.{ty}");
             let fun = format!("{pkg}.{ty}.f");
             g.nodes
@@ -4127,8 +4179,8 @@ mod tests {
             g.contains.insert((file.to_string(), fun.clone()));
             g.contains.insert((st.clone(), fun.clone()));
         }
-        for p in ["pkg.a", "pkg.b", "pkg.c"] {
-            g.contains.insert(("pkg".to_string(), p.to_string()));
+        for p in ["java.pkg.a", "java.pkg.b", "java.pkg.c"] {
+            g.contains.insert(("java.pkg".to_string(), p.to_string()));
         }
         g.nodes.insert(
             crate::schema::SCAN_HEAD.into(),
