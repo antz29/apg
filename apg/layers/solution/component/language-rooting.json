@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.graph.NodeKind.Language",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.ingest.root_module_fqn",
+      "properties": {}
     }
   ],
   "in": [
