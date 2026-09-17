@@ -29,11 +29,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.build_script_build.main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "cpplib.main",
       "properties": {}
     },
