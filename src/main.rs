@@ -399,6 +399,9 @@ fn available_languages() -> Vec<String> {
         if dir.join("mdfrontend").exists() {
             langs.push("md".into());
         }
+        if dir.join("pyfrontend").exists() {
+            langs.push("py".into());
+        }
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
         }
@@ -438,6 +441,9 @@ fn frontend_cmd(language: &str) -> Option<String> {
             "md" if dir.join("mdfrontend").exists() => {
                 return Some(dir.join("mdfrontend").display().to_string());
             }
+            "py" if dir.join("pyfrontend").exists() => {
+                return Some(dir.join("pyfrontend").display().to_string());
+            }
             "csharp"
                 if dir.join("csharpfrontend").exists()
                     || dir.join("csharpfrontend.exe").exists() =>
@@ -470,6 +476,7 @@ fn frontend_cmd(language: &str) -> Option<String> {
         "go" => option_env!("APG_FRONTEND_GO"),
         "rust" => option_env!("APG_FRONTEND_RUST"),
         "md" => option_env!("APG_FRONTEND_MD"),
+        "py" => option_env!("APG_FRONTEND_PY"),
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         // One built artifact, two ids: `js`-only repos run the same unified
@@ -492,6 +499,23 @@ const DEFAULT_DETECTOR_SKIP: &[&str] = &["target", "node_modules"];
 /// with the spec set. Markdown under an excluded tree must not trigger md
 /// detection.
 const MD_DETECTOR_SKIP: &[&str] = &["target", "vendor", "node_modules", ".worktrees"];
+
+/// The Python detector's skip set — `domain.constraint.python-exclusions`'
+/// non-hidden entries plus the default `target`/`node_modules`. Neither
+/// `__pycache__`, `venv`, `site-packages` nor `*.egg-info` is dot-prefixed, so
+/// the walker's hidden-name rule does not cover them and they MUST be listed;
+/// the constraint's hidden entries (`.venv`, `.tox`, `.git`, `.hg`,
+/// `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.eggs`) are already skipped
+/// by that rule and are deliberately not listed. `*.egg-info` is a glob the
+/// walker matches against the directory name (literals match exactly).
+const PY_DETECTOR_SKIP: &[&str] = &[
+    "target",
+    "node_modules",
+    "__pycache__",
+    "venv",
+    "site-packages",
+    "*.egg-info",
+];
 
 /// True when `dir` holds, within `depth` directory levels, a file whose
 /// extension is one of `exts` (each with its leading dot).
@@ -573,6 +597,14 @@ fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec<Str
         // (task-8): a markdown-only file under `vendor/` (or another excluded
         // tree) must not trigger md detection.
         ("md", &[".md", ".markdown"], 5, MD_DETECTOR_SKIP),
+        // Python's skip set is `domain.constraint.python-exclusions`: a tree
+        // whose only Python lives under a venv / site-packages / `*.egg-info` /
+        // `__pycache__` dir must not trigger py detection. Depth 8 (above the
+        // default 5): Python packages legitimately nest deeper under a `src/`
+        // root, and the exclusion set — not the depth — is the safety bound, so
+        // a deep excluded tree is never entered. `.pyi` is accepted alongside
+        // `.py`; `.pyx` is not a candidate.
+        ("py", &[".py", ".pyi"], 8, PY_DETECTOR_SKIP),
     ];
     let mut out = Vec::new();
     for (lang, exts, depth, skip) in &candidates {
@@ -604,6 +636,7 @@ fn id_prefix_for(language: &str) -> &'static str {
         "js" => "js",
         "csharp" => "cs",
         "md" => "md",
+        "py" => "py",
         _ => "x",
     }
 }
@@ -881,8 +914,9 @@ USAGE:
 
 SCAN OPTIONS:
   --language <lang>            Scanner language(s): java, go, cpp, rust, ts,
-                               csharp (comma-separated or repeated; auto-detected
-                               for every language present if omitted)
+                               csharp, py (comma-separated or repeated;
+                               auto-detected for every language present if
+                               omitted)
   --exclude-path <glob>       Exclude path patterns (repeatable)
   --module <dir>              Restrict scanning to a module (Go/C++/Rust/TS/C#,
                                repeatable)

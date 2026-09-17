@@ -125,6 +125,13 @@ fn claim(seen: &mut HashMap<String, (String, NodeKind)>, id: &str, fqn: &str, ki
 /// `parent.init#<file-basename>` instead. The per-declaration language drives
 /// the Go `init` special case (multi-language scans mix languages in one
 /// buffer).
+///
+/// The `py` stream additionally needs same-scope duplicate-name disambiguation
+/// (Python `@overload` stubs whose annotations erase identically, and a
+/// conditional redefinition): within a colliding subgroup — members erasing to
+/// the SAME param list, including the both-empty `()` case — every member
+/// renders the full form `parent.name(T1,T2,...)#<file-basename>:<start_line>`,
+/// retaining the erased param-list suffix. Every non-py stream is unchanged.
 fn render_function_fqns(decls: &[FuncDecl]) -> Vec<(String, String)> {
     let mut groups: HashMap<(&str, &str), Vec<usize>> = HashMap::new();
     for (i, d) in decls.iter().enumerate() {
@@ -146,6 +153,44 @@ fn render_function_fqns(decls: &[FuncDecl]) -> Vec<(String, String)> {
         } else if idxs.len() == 1 {
             let d = &decls[idxs[0]];
             out.push((d.id.clone(), format!("{parent}.{name}")));
+        } else if idxs.iter().all(|&i| decls[i].language == "py") {
+            // Python same-scope duplicate-name rule, scoped to the `py` stream
+            // (every non-py stream keeps the existing overload shape). Bucket
+            // the group by erased param list: a subgroup of more than one
+            // member cannot share `parent.name(T1,T2,...)`, so each colliding
+            // member renders the full form with its retained param-list suffix
+            // plus the `#<file-basename>:<start_line>` disambiguator. A member
+            // whose erased param list is unique in the group keeps the bare
+            // overload form.
+            let mut buckets: Vec<(String, Vec<usize>)> = Vec::new();
+            for &i in &idxs {
+                let key = decls[i].params.join(",");
+                match buckets.iter_mut().find(|(k, _)| *k == key) {
+                    Some((_, members)) => members.push(i),
+                    None => buckets.push((key, vec![i])),
+                }
+            }
+            for (params, members) in buckets {
+                if members.len() > 1 {
+                    for i in members {
+                        let d = &decls[i];
+                        out.push((
+                            d.id.clone(),
+                            format!(
+                                "{parent}.{name}({params})#{}:{}",
+                                file_basename(&d.file),
+                                d.start_line
+                            ),
+                        ));
+                    }
+                } else {
+                    let d = &decls[members[0]];
+                    out.push((
+                        d.id.clone(),
+                        format!("{parent}.{name}({})", d.params.join(",")),
+                    ));
+                }
+            }
         } else {
             for i in idxs {
                 let d = &decls[i];

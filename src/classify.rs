@@ -225,6 +225,27 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "src"
         }
+        // Python: a `.pyi` stub is hand-written (`src`, the `.d.ts` analog) and
+        // is never itself a generated marker, while a stub under a
+        // `gen`/`generated` tree still classifies generated. `__pycache__` is a
+        // generated segment; there is no `site-packages` segment because the
+        // discovery exclusion never scans one.
+        "py" => {
+            if filename_lower.ends_with("_test.py")
+                || filename_lower.starts_with("test_")
+                || filename_lower.ends_with(".test.py")
+                || has_seg(&["test", "tests", "__tests__"])
+            {
+                return "test";
+            }
+            if has_seg(&["__pycache__", "gen", "generated"]) {
+                return "generated";
+            }
+            if has_seg(&["vendor", "third_party", "thirdparty"]) {
+                return "external";
+            }
+            "src"
+        }
         // Markdown: ordinary docs stay in the graph classified `docs` (all-code-
         // included, filter not omission); generated trees (`gen`/`generated`/
         // `dist`/`build`/`out`) are `generated` and `vendor`/`third_party` are
