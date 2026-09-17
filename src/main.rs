@@ -2670,6 +2670,124 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Phase-07 Markdown frontend acceptance helpers (task-13). Non-#[test]
+    // helpers, so they live at the `mod tests` root.
+    // -----------------------------------------------------------------------
+
+    /// The staged Markdown frontend the candidate runs
+    /// (`<profile>/frontends/mdfrontend`), resolved from `testutil::apg_bin()`
+    /// — the same artifact `apg scan` spawns. Fails loudly naming the build,
+    /// like [`rust_frontend_bin`].
+    fn md_frontend_bin() -> PathBuf {
+        let apg = crate::testutil::apg_bin();
+        let bin = apg
+            .parent()
+            .expect("apg binary has a parent")
+            .join("frontends")
+            .join("mdfrontend");
+        assert!(
+            bin.is_file(),
+            "markdown frontend not found at {} — build it first: \
+             cargo build --config 'env.APG_BUILD_FRONTENDS=\"md\"'",
+            bin.display()
+        );
+        bin
+    }
+
+    /// Runs the Markdown frontend directly over `repo_dir` and parses its
+    /// emitted unified-schema records — the fixture's scanner spool, fed to the
+    /// in-process ingestor so the shadow counters can be observed POSITIVELY
+    /// (a real scan only prints a warning when they are non-zero, so the
+    /// warning's absence alone would be vacuous).
+    fn md_frontend_records(repo_dir: &Path) -> Vec<crate::schema::Record> {
+        let bin = md_frontend_bin();
+        let out = std::process::Command::new(&bin)
+            .arg(repo_dir)
+            .output()
+            .unwrap_or_else(|e| panic!("spawn {}: {e}", bin.display()));
+        assert!(
+            out.status.success(),
+            "mdfrontend failed over {}: {}",
+            repo_dir.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                serde_json::from_str::<crate::schema::Record>(l)
+                    .unwrap_or_else(|e| panic!("bad scanner record `{l}`: {e}"))
+            })
+            .collect()
+    }
+
+    /// A scratch git repo for the Markdown acceptance fixture: the caller's
+    /// files, an isolated HOME (the suite dependency dir pre-created so `apg
+    /// init` never shells out to npm), `apg init`, and both commits. Returns
+    /// `(base, repo_dir, home)`.
+    fn md_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("apg-md-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        scratch_repo_init(&repo_dir);
+        for (rel, body) in files {
+            let p = repo_dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        scratch_commit_all(&repo_dir, "init source");
+        let init = testutil::ApgCommand::new(&["init", "."])
+            .cwd(&repo_dir)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            init.status.success(),
+            "apg init failed in {}: {}{}",
+            repo_dir.display(),
+            String::from_utf8_lossy(&init.stdout),
+            String::from_utf8_lossy(&init.stderr)
+        );
+        scratch_commit_all(&repo_dir, "apg init");
+        (base, repo_dir, home)
+    }
+
+    /// The phase-07 Markdown acceptance fixture: a mixed Go + Markdown repo
+    /// carrying every pinned AC shape — nested duplicate headings, a sibling
+    /// after a deeper heading (nearest preceding lower-level parent), a
+    /// heading-less document, same-stem `README.md`/`README.markdown` in one
+    /// directory, same-stem files in different directories, a subdirectory
+    /// module, an ignored `.mdx`, and a `gen/` document classified generated.
+    fn md_mixed_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("go.mod", "module scratch\n\ngo 1.21\n"),
+            ("main.go", "package main\n\nfunc main() {}\n"),
+            (
+                "docs/overview.md",
+                "# Overview\n\n## Overview\n\n### Overview 1\n",
+            ),
+            (
+                "docs/nesting.md",
+                "# Title\n\n## Child\n\n### Grandchild\n\n## Sibling\n",
+            ),
+            ("docs/empty.md", "Just prose, with no headings at all.\n"),
+            ("docs/intro.md", "# Intro\n"),
+            ("guides/intro.md", "# Intro\n"),
+            ("docs/deep/page.md", "# Deep\n"),
+            // The requirement's path-alias fixture: dot-joining a directory
+            // path would collapse `docs/guide` and `docs.guide` to one prefix.
+            ("docs/guide/x.md", "# X\n"),
+            ("docs.guide/x.md", "# X\n"),
+            ("notes/README.md", "# Notes\n"),
+            ("notes/README.markdown", "# Notes\n"),
+            ("notes/draft.mdx", "# Draft\n"),
+            ("onlymdx/draft.mdx", "# Draft\n"),
+            ("gen/generated.md", "# Generated\n"),
+        ]
+    }
+
+    // -----------------------------------------------------------------------
     // Phase-04 acceptance helpers (tasks 7–9): timing-report readers, verdict
     // parsers, and the jgrapht source pickers. Non-#[test] helpers, so they
     // live at the `mod tests` root.
@@ -7787,6 +7905,329 @@ mod tests {
             assert!(
                 has_resolved_project_edge(&records),
                 "the self-scan must emit at least one resolve-only edge"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-07 task-13 (e2e, scratch /tmp repo, CANDIDATE binary only —
+        /// `global.constraint.no-real-project-test`): the Markdown frontend's
+        /// pinned AC through ONE REAL mixed Go+Markdown scan. Asserts one Module
+        /// per directory (FQN = the directory absolute path, pre-P9), absolute
+        /// path File nodes with the extension retained, nested section Structs
+        /// with contains edges, injective duplicate-heading dedup, same-stem /
+        /// path-alias distinctness, `.mdx` excluded, md auto-detected ALONGSIDE
+        /// go, and the md `code_type` (`docs`/`generated`). `shadowed_modules ==
+        /// 0` is asserted POSITIVELY on the frontend's own emitted records (the
+        /// in-process ingest of its spool observes the counter; the scan's
+        /// warning absence alone is vacuous), and the scan exits 0 with no
+        /// `claim` same-kind panic.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+        fn acceptance_markdown_scratch_modules_sections_and_code_types() {
+            let (base, repo_dir, home) = md_scratch("acceptance", &md_mixed_fixture());
+
+            // `apg init` writes a layout config whose `default` (`src`) REPLACES
+            // the builtin per-language rules, so opt this fixture into the md
+            // provenance classes (generated wins its `gen/` tree, ordinary
+            // markdown is docs) — a real project config that keeps the version
+            // field. The builtin md arm itself is asserted separately below on
+            // the frontend's OWN records with no config.
+            std::fs::write(
+                repo_dir.join("apg/config.json"),
+                format!(
+                    "{{\n  \"default\": \"src\",\n  \"types\": [\n    \
+                     {{ \"name\": \"generated\", \"globs\": [\"**/gen/**\"] }},\n    \
+                     {{ \"name\": \"external\", \"globs\": [\"**/vendor/**\"] }},\n    \
+                     {{ \"name\": \"docs\", \"globs\": [\"**/*.md\", \"**/*.markdown\"] }}\n  \
+                     ],\n  \"version\": \"{}\"\n}}\n",
+                    env!("CARGO_PKG_VERSION")
+                ),
+            )
+            .unwrap();
+            scratch_commit_all(&repo_dir, "md code-type rules");
+
+            // ---- the REAL mixed scan: md is auto-detected ALONGSIDE go ----
+            let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "scan failed: {stderr}");
+            assert!(
+                stderr.contains("Languages: go, md"),
+                "a mixed repo must auto-detect md alongside go: {stderr}"
+            );
+            assert!(
+                stderr.contains("[scan] running go frontend"),
+                "the go frontend must run (mixed repo): {stderr}"
+            );
+            assert!(
+                stderr.contains("[scan] running md frontend"),
+                "the md frontend must run: {stderr}"
+            );
+            // A same-kind `claim` collision aborts the scan non-zero (already
+            // covered by `success`); no module/function may be shadowed either.
+            assert!(
+                !stderr.contains("shadowed"),
+                "no module/function may be shadowed: {stderr}"
+            );
+
+            let recs = export_records(&repo_dir);
+            let root = std::fs::canonicalize(&repo_dir).unwrap();
+            let at = |rel: &str| root.join(rel).to_string_lossy().into_owned();
+
+            // ---- (1) one Module per directory, FQN = the directory absolute
+            // path verbatim (pre-P9), each emitted exactly once ----
+            let module_counts = export_module_counts(&recs);
+            for dir in ["docs", "docs/deep", "guides", "notes", "gen"] {
+                assert_eq!(
+                    module_counts.get(&at(dir)).copied(),
+                    Some(1),
+                    "directory `{dir}` must yield exactly one Module `{}`: {module_counts:?}",
+                    at(dir)
+                );
+            }
+            // An `.mdx`-only directory is not a Module (and yields no node).
+            assert!(
+                !module_counts.contains_key(&at("onlymdx")),
+                "an .mdx-only directory must not be a Module: {module_counts:?}"
+            );
+            // Positive no-double-emission check on the emitted records.
+            for (fqn, n) in &module_counts {
+                assert_eq!(*n, 1, "module `{fqn}` emitted {n} times");
+            }
+
+            // ---- (2) File nodes: absolute path, extension retained, with the
+            // md code_type (`docs`; `generated` under gen/) ----
+            let file_type: std::collections::BTreeMap<String, String> = recs
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("file"))
+                .map(|r| {
+                    (
+                        r.get("fqn")
+                            .and_then(|f| f.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        r.get("code_type")
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    )
+                })
+                .collect();
+            for rel in [
+                "docs/overview.md",
+                "docs/nesting.md",
+                "docs/empty.md",
+                "docs/intro.md",
+                "guides/intro.md",
+                "docs/deep/page.md",
+                "notes/README.md",
+                "notes/README.markdown",
+                "gen/generated.md",
+            ] {
+                let expected = if rel.starts_with("gen/") {
+                    "generated"
+                } else {
+                    "docs"
+                };
+                assert_eq!(
+                    file_type.get(&at(rel)).map(String::as_str),
+                    Some(expected),
+                    "md file `{rel}` must be a `{expected}` File node: {file_type:?}"
+                );
+            }
+            // `.mdx` yields NO node at all — not a File, not a Struct.
+            assert!(
+                !export_file_paths(&recs).iter().any(|f| f.ends_with(".mdx"))
+                    && !recs.iter().any(|r| r
+                        .get("path")
+                        .and_then(|p| p.as_str())
+                        .is_some_and(|p| p.ends_with(".mdx"))),
+                "no node may be drawn from an .mdx file"
+            );
+
+            let struct_fqns: BTreeSet<String> = recs
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("struct"))
+                .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
+                .collect();
+            let contains: BTreeSet<(String, String)> = recs
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("contains"))
+                .map(|r| {
+                    (
+                        r.get("from")
+                            .and_then(|f| f.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        r.get("to")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    )
+                })
+                .collect();
+
+            // ---- (3) nested sections + the pinned duplicate-heading dedup:
+            // Overview/Overview/Overview 1 -> overview/overview-1/overview-2,
+            // each FQN extending its parent (`<File>.<slug>`, then the parent
+            // section's FQN). ----
+            let ov = at("docs/overview.md");
+            let o1 = format!("{ov}.overview");
+            let o2 = format!("{ov}.overview.overview-1");
+            let o3 = format!("{ov}.overview.overview-1.overview-2");
+            for f in [&o1, &o2, &o3] {
+                assert!(
+                    struct_fqns.contains(f),
+                    "duplicate-heading dedup must render `{f}`: {struct_fqns:?}"
+                );
+            }
+
+            // The second `##` is a sibling of the first (`title`); the file's
+            // top-level section hangs off the File; a sibling after a deeper
+            // heading attaches to the nearest preceding LOWER-level heading.
+            let ns = at("docs/nesting.md");
+            let n1 = format!("{ns}.title");
+            let n2 = format!("{ns}.title.child");
+            let n3 = format!("{ns}.title.child.grandchild");
+            let n4 = format!("{ns}.title.sibling");
+            for f in [&n1, &n2, &n3, &n4] {
+                assert!(
+                    struct_fqns.contains(f),
+                    "nesting must render `{f}`: {struct_fqns:?}"
+                );
+            }
+
+            for (from, to) in [
+                (ov.clone(), o1.clone()),
+                (o1.clone(), o2.clone()),
+                (o2.clone(), o3.clone()),
+                (ns.clone(), n1.clone()),
+                (n1.clone(), n2.clone()),
+                (n2.clone(), n3.clone()),
+                (n1.clone(), n4.clone()),
+            ] {
+                assert!(
+                    contains.contains(&(from.clone(), to.clone())),
+                    "contains `{from} -> {to}` must hold: {contains:?}"
+                );
+            }
+
+            // ---- (4) a heading-less document yields NO section Struct — only
+            // its File node; no synthesized document-root anchors it. ----
+            let empty = at("docs/empty.md");
+            assert!(
+                export_symbols_at(&recs, &empty).is_empty(),
+                "a heading-less document must declare NO section Struct: {:?}",
+                export_symbols_at(&recs, &empty)
+            );
+            assert!(
+                !struct_fqns.contains(&empty),
+                "no synthesized document-root Struct for a heading-less file"
+            );
+
+            // ---- (5) same-stem files in ONE directory share exactly one
+            // Module but stay TWO distinct File nodes (extension retained). ----
+            let readme_md = at("notes/README.md");
+            let readme_markdown = at("notes/README.markdown");
+            assert_eq!(
+                module_counts.get(&at("notes")).copied(),
+                Some(1),
+                "the same-dir markdown files must share ONE Module"
+            );
+            assert!(
+                file_type.contains_key(&readme_md) && file_type.contains_key(&readme_markdown),
+                "README.md + README.markdown must be two distinct File nodes: {file_type:?}"
+            );
+            assert!(
+                struct_fqns.contains(&format!("{readme_md}.notes"))
+                    && struct_fqns.contains(&format!("{readme_markdown}.notes")),
+                "same-stem sections must stay distinct by file path: {struct_fqns:?}"
+            );
+
+            // ---- (6) path-alias / same-stem-across-directories stay distinct,
+            // and a subdirectory is its own Module (not an alias of `docs`). ----
+            let docs_intro = at("docs/intro.md");
+            let guides_intro = at("guides/intro.md");
+            assert_ne!(docs_intro, guides_intro);
+            assert_ne!(at("docs"), at("docs/deep"));
+            assert!(
+                file_type.contains_key(&docs_intro)
+                    && file_type.contains_key(&guides_intro)
+                    && module_counts.contains_key(&at("docs/deep")),
+                "same-stem files in different directories must stay distinct: {file_type:?}"
+            );
+            assert!(
+                struct_fqns.contains(&format!("{docs_intro}.intro"))
+                    && struct_fqns.contains(&format!("{guides_intro}.intro")),
+                "same-stem sections across directories must be distinct: {struct_fqns:?}"
+            );
+
+            // The requirement's path-alias fixture: `docs/guide/x.md` and
+            // `docs.guide/x.md` must NOT alias (dot-joining the directory path
+            // would collapse both to one `docs.guide` prefix).
+            let guide_x = at("docs/guide/x.md");
+            let dotguide_x = at("docs.guide/x.md");
+            assert_eq!(module_counts.get(&at("docs/guide")).copied(), Some(1));
+            assert_eq!(module_counts.get(&at("docs.guide")).copied(), Some(1));
+            assert_ne!(at("docs/guide"), at("docs.guide"));
+            assert!(
+                file_type.contains_key(&guide_x) && file_type.contains_key(&dotguide_x),
+                "the path-alias files must stay distinct File nodes: {file_type:?}"
+            );
+            assert!(
+                struct_fqns.contains(&format!("{guide_x}.x"))
+                    && struct_fqns.contains(&format!("{dotguide_x}.x")),
+                "the path-alias sections must stay distinct: {struct_fqns:?}"
+            );
+
+            // ---- (7) the BUILTIN md code-type arm (no config) and
+            // shadowed_modules == 0 POSITIVELY: ingest the frontend's own
+            // emitted records in-process and observe both the classifier and
+            // the counter (the real scan's warning absence alone is vacuous,
+            // and an init layout's config default replaces the builtin rules,
+            // so this is where the builtin arm is exercised). ----
+            let md_records = md_frontend_records(&repo_dir);
+            let (md_graph, report) = crate::ingest::ingest(
+                md_records,
+                &crate::ingest::IngestOptions {
+                    blacklist: &[],
+                    language: "md",
+                    config: None,
+                },
+            );
+            for rel in [
+                "docs/overview.md",
+                "docs/nesting.md",
+                "docs/empty.md",
+                "docs/intro.md",
+                "guides/intro.md",
+                "docs/deep/page.md",
+                "notes/README.md",
+                "notes/README.markdown",
+            ] {
+                assert_eq!(
+                    md_graph.nodes.get(&at(rel)).map(|n| n.code_type.as_str()),
+                    Some("docs"),
+                    "builtin md rule: ordinary markdown `{rel}` must classify docs"
+                );
+            }
+            // `gen/` wins (generated) and the file stays in the graph
+            // (all-code-included: filtered by code_type, never omitted).
+            assert_eq!(
+                md_graph
+                    .nodes
+                    .get(&at("gen/generated.md"))
+                    .map(|n| n.code_type.as_str()),
+                Some("generated"),
+                "builtin md rule: a gen/ document must classify generated"
+            );
+            assert_eq!(
+                report.shadowed_modules, 0,
+                "the md records (duplicate-heading fixtures included) must shadow no module"
+            );
+            assert_eq!(
+                report.shadowed_functions, 0,
+                "the md records must shadow no function"
             );
 
             let _ = std::fs::remove_dir_all(&base);
