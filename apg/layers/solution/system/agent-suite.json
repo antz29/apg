@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "solution.container.agent-install",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.main",
+      "properties": {}
     }
   ],
   "in": [
