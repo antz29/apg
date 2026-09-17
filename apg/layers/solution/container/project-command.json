@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "solution.component.project-delete",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.project_cmd.cmd_project",
+      "properties": {}
     }
   ],
   "in": [
