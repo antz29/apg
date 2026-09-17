@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "apg.install_suite",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.review_cmd.review_action",
       "properties": {}
     },
