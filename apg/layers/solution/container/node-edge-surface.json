@@ -41,6 +41,11 @@
       "kind": "contains",
       "target": "solution.component.review-feedback-projection",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.node_cmd.cmd_node",
+      "properties": {}
     }
   ],
   "in": [
