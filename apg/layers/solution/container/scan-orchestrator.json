@@ -36,6 +36,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.cmd_scan",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.scanner_records",
+      "properties": {}
     }
   ],
   "in": [
