@@ -4,13 +4,7 @@
   "name": "project-dispatch",
   "body": "Subcommand routing inside `cmd_project`: start|merge|delete (unknown subcommands are refused with usage). Hosted by the existing `cmd_project` dispatch function — the `delete` arm is the change.",
   "properties": {},
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.project_cmd.cmd_project",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
