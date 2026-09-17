@@ -36,6 +36,11 @@
       "kind": "implemented-by",
       "target": "apg.cmd_scan",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.scanner_records",
+      "properties": {}
     }
   ],
   "in": [
