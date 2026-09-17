@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "stakeholder",
   "name": "large-repo-team",
-  "body": "A team that runs apg over very large repositories (the netbeans-scale motivating case: an hour-plus full scan — motivation only, not an acceptance workload; acceptance is measured on the jgrapht reference workload). Pays the wall-clock cost of every scan and needs re-scans after small edits to be cheap.",
+  "body": "A team that runs apg over very large repositories (an hour-plus full scan — motivation only, not an acceptance workload). Pays the wall-clock cost of every scan and needs re-scans after small edits to be cheap. Acceptance of the scan-optimisation wins is measured on self-contained synthetic scratch fixtures, never on an external checkout.",
   "properties": {},
   "out": [
     {
