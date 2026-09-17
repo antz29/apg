@@ -17,11 +17,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.artifacts.reingest_layers",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.layers.write_project",
       "properties": {}
     },
