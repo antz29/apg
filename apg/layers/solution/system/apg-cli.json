@@ -29,6 +29,11 @@
       "kind": "contains",
       "target": "solution.container.mutation-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.print_help",
+      "properties": {}
     }
   ],
   "in": [
