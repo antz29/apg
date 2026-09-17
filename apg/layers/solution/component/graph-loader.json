@@ -17,11 +17,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.load.create_schema",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.load.write_graph_jsonl",
       "properties": {}
     }
