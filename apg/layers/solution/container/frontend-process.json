@@ -19,11 +19,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "Apg.CsharpFrontend.Program.Main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "CallGraphBuilder.main",
       "properties": {}
     },
