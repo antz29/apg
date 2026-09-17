@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.load.create_schema",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.load.spec_rel_pairs",
+      "properties": {}
     }
   ],
   "in": [
