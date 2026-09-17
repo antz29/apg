@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.install_suite",
       "properties": {}
     },
