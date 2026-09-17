@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.pyfrontend",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.pyfrontend.main",
       "properties": {}
     }
