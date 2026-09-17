@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "solution.component.write-through-projection",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.session",
+      "properties": {}
     }
   ],
   "in": [
