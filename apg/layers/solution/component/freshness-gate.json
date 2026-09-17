@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "apg.git.is_stale",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.git.reanchor_scan_meta",
       "properties": {}
     },
