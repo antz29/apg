@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "ts.apg-tsfrontend.scanner.emitNode",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg-tsfrontend.scanner.collectFile",
       "properties": {}
     }
