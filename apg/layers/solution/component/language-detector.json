@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.auto_detect_languages",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.has_extension",
       "properties": {}
     },
