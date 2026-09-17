@@ -711,6 +711,24 @@ impl FrontendHandoff {
     }
 }
 
+/// The `incremental::language_of` bucket a **scan language id** belongs to.
+///
+/// The unified JS/TS frontend runs under TWO scan ids (`ts` and `js`) for ONE
+/// artifact (`frontend_cmd` maps both to the same `tsfrontend`; the detector
+/// returns `js` for a JS-only repo and `ts` for a TS-containing one, never
+/// both), while `incremental::language_of` renders a single `"ts"` token for
+/// every `.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs` file. A JS-only repo's `"js"`
+/// id must therefore compare against the `"ts"` bucket to receive its
+/// `.js`-family targets; every other id is its own bucket. `language_of`
+/// itself stays stable — it cannot know which of the two ids the repo is
+/// scanning under.
+fn language_bucket(scan_language: &str) -> &str {
+    match scan_language {
+        "js" => "ts",
+        other => other,
+    }
+}
+
 /// The absolute target paths belonging to `language`'s emission granularity,
 /// from the checkout-relative target set.
 fn targets_for_language(
@@ -718,9 +736,10 @@ fn targets_for_language(
     scan_root: &Path,
     language: &str,
 ) -> Vec<String> {
+    let bucket = language_bucket(language);
     let mut out: Vec<String> = targets_rel
         .iter()
-        .filter(|rel| incremental::language_of(rel) == language)
+        .filter(|rel| incremental::language_of(rel) == bucket)
         .map(|rel| scan_root.join(rel).to_string_lossy().into_owned())
         .collect();
     out.sort();
@@ -3592,6 +3611,49 @@ mod tests {
             // an empty target set (no emission filter is passed on this path).
             assert!(should_spawn_language(true, true, false));
             assert!(should_spawn_language(true, go_targets.is_empty(), any));
+
+            // Phase-08 task-23: the `py` scan id receives its `.py`/`.pyi`
+            // targets — `language_of` renders the scan-side token `py`, not the
+            // stale `python`, so the filter matches.
+            let mut py_rel = BTreeSet::new();
+            py_rel.insert("pkg/a.py".to_string());
+            py_rel.insert("pkg/stub.pyi".to_string());
+            assert_eq!(
+                targets_for_language(&py_rel, Path::new("/root"), "py"),
+                vec![
+                    "/root/pkg/a.py".to_string(),
+                    "/root/pkg/stub.pyi".to_string(),
+                ],
+                "the py scan id must receive its .py/.pyi targets"
+            );
+            assert!(
+                targets_for_language(&py_rel, Path::new("/root"), "go").is_empty(),
+                "a py target must not be delivered to another language"
+            );
+
+            // Phase-08 task-24: the unified js/ts artifact is ONE `language_of`
+            // bucket under TWO scan ids. A JS-only repo scans under `js`, and a
+            // TS-containing repo under `ts`; both must receive the js-family
+            // targets even though `language_of` renders the single token `ts`.
+            let mut js_rel = BTreeSet::new();
+            js_rel.insert("web/app.js".to_string());
+            js_rel.insert("web/widget.jsx".to_string());
+            js_rel.insert("web/esm.mjs".to_string());
+            js_rel.insert("web/cjs.cjs".to_string());
+            js_rel.insert("web/typed.ts".to_string());
+            for id in ["js", "ts"] {
+                let got = targets_for_language(&js_rel, Path::new("/root"), id);
+                for suffix in ["web/app.js", "web/widget.jsx", "web/esm.mjs", "web/cjs.cjs"] {
+                    assert!(
+                        got.iter().any(|p| p.ends_with(suffix)),
+                        "the `{id}` scan id must receive its {suffix} target: {got:?}"
+                    );
+                }
+            }
+            assert!(
+                targets_for_language(&js_rel, Path::new("/root"), "go").is_empty(),
+                "a js/ts target must not be delivered to another language"
+            );
         }
 
         /// The discovered-work protocol: implementation-discovered work is
@@ -4090,6 +4152,26 @@ mod tests {
         (base, repo_dir, home)
     }
 
+    /// A Python scratch repo that has NOT yet been `apg init`'d (the caller
+    /// controls the init/commit sequence for the incremental scenarios).
+    /// Returns `(base, repo_dir)`.
+    fn py_incremental_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("apg-pywinb-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        scratch_repo_init(&repo_dir);
+        for (rel, body) in files {
+            let p = repo_dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        scratch_commit_all(&repo_dir, "init source");
+        (base, repo_dir)
+    }
+
     /// P9 roots a module/symbol FQN under a `<lang>.` segment; strip a leading
     /// Python root (`py.`/`python.`) so a module IDENTITY assertion holds both
     /// pre-rooting (bare `pkg`) and post-rooting (`py.pkg`). Only the Python
@@ -4194,6 +4276,19 @@ mod tests {
                 "external_ref.py",
                 "import dep\n\n\ndef use() -> int:\n    return dep.thing()\n",
             ),
+        ]
+    }
+
+    /// Phase-08 task-19 fixture: `pkg.a` calls `pkg.b.helper` — the unchanged,
+    /// un-emitted target of the targeted re-scan scenario.
+    fn py_incremental_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("pkg/__init__.py", ""),
+            (
+                "pkg/a.py",
+                "from pkg.b import helper\n\n\ndef call() -> int:\n    return helper()\n",
+            ),
+            ("pkg/b.py", "def helper() -> int:\n    return 1\n"),
         ]
     }
 
@@ -8739,6 +8834,125 @@ mod tests {
             );
 
             let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-08 task-19 (e2e): the incremental contract (the environment
+        /// model is the sibling
+        /// `acceptance_python_environment_model_and_external_resolution`). Each
+        /// scenario runs on its OWN fresh scratch repo so the delta contains
+        /// exactly the one file it mutates, mirroring the Go acceptance
+        /// scenarios. A targeted re-scan of an edited CALLER whose call target
+        /// lives in an unchanged, un-emitted module must NOT drop the caller:
+        /// the changed file and its resolved `Calls` edge survive. Editing the
+        /// TARGET (a signature change) re-emits its dependents. In every case
+        /// the incremental Python graph equals a fresh full scan exactly (node
+        /// set, edge set, unresolved-target set).
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+        #[allow(clippy::type_complexity)]
+        fn acceptance_python_incremental_graph_equivalence() {
+            // (tag, mutate, verdict assertion)
+            let scenarios: Vec<(&str, fn(&Path), fn(&str))> = vec![
+                (
+                    "caller-edit",
+                    |repo| {
+                        std::fs::write(
+                            repo.join("pkg/a.py"),
+                            "from pkg.b import helper\n\n\ndef call() -> int:\n    return helper() + 1\n",
+                        )
+                        .unwrap();
+                    },
+                    |err| {
+                        assert!(
+                            !err.contains("signature change cascades"),
+                            "a body-only caller edit must not cascade: {err}"
+                        )
+                    },
+                ),
+                (
+                    "target-signature",
+                    |repo| {
+                        std::fs::write(
+                            repo.join("pkg/b.py"),
+                            "def helper() -> int:\n    return 1\n\n\ndef helper2() -> int:\n    return 2\n",
+                        )
+                        .unwrap();
+                    },
+                    |err| {
+                        assert!(
+                            err.contains("signature change cascades"),
+                            "a target signature change must re-emit its dependents: {err}"
+                        )
+                    },
+                ),
+            ];
+
+            for (tag, mutate, check) in scenarios {
+                let (base, repo_dir) = py_incremental_scratch(tag, &py_incremental_fixture());
+                let home = base.join("home");
+                let init = winb_run(&repo_dir, &home, &["init", "."]);
+                assert!(
+                    init.status.success(),
+                    "{tag}: apg init: {}",
+                    String::from_utf8_lossy(&init.stderr)
+                );
+                scratch_commit_all(&repo_dir, "apg init");
+
+                let cold = winb_run(&repo_dir, &home, &["scan", "."]);
+                assert!(
+                    cold.status.success(),
+                    "{tag}: cold scan: {}",
+                    String::from_utf8_lossy(&cold.stderr)
+                );
+
+                mutate(&repo_dir);
+
+                let inc = winb_run(&repo_dir, &home, &["scan", "."]);
+                let inc_err = String::from_utf8_lossy(&inc.stderr).to_string();
+                assert!(inc.status.success(), "{tag}: incremental scan: {inc_err}");
+                assert!(
+                    inc_err.contains("incremental:"),
+                    "{tag}: the incremental verdict must be printed: {inc_err}"
+                );
+                check(&inc_err);
+
+                // The changed caller must not vanish: its resolved `Calls` edge
+                // into the unchanged, un-emitted module survives.
+                let recs = export_records(&repo_dir);
+                assert!(
+                    has_edge_between(&recs, "calls", "pkg.a.call", "pkg.b.helper"),
+                    "{tag}: a re-scanned caller's call into the unchanged module must \
+                     survive: {recs:?}\n--- stderr ---\n{inc_err}"
+                );
+                let (inc_nodes, inc_edges, inc_unres) = winb_graph(&repo_dir);
+
+                // Oracle: a fresh FULL scan with the DB, the export, AND the
+                // shared fact cache cleared — no reuse/splice.
+                std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug")).unwrap();
+                std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl")).unwrap();
+                let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
+                let full = winb_run(&repo_dir, &home, &["scan", "."]);
+                assert!(
+                    full.status.success(),
+                    "{tag}: full scan oracle: {}",
+                    String::from_utf8_lossy(&full.stderr)
+                );
+                let (full_nodes, full_edges, full_unres) = winb_graph(&repo_dir);
+                assert_eq!(
+                    inc_nodes, full_nodes,
+                    "{tag}: node sets must be exactly equal (incremental vs full)\n{inc_err}"
+                );
+                assert_eq!(
+                    inc_edges, full_edges,
+                    "{tag}: edge sets must be exactly equal (incremental vs full)\n{inc_err}"
+                );
+                assert_eq!(
+                    inc_unres, full_unres,
+                    "{tag}: unresolved-target sets must be exactly equal\n{inc_err}"
+                );
+
+                let _ = std::fs::remove_dir_all(&base);
+            }
         }
 
         /// Phase-08 task-19 (e2e, FIXTURE MODEL feedback-83): the Python

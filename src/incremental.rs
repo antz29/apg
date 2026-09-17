@@ -567,6 +567,17 @@ pub const CPP_EXTENSIONS: &[&str] = &[
 
 /// The language a checkout-relative path belongs to, by extension — the
 /// per-language granularity key for the fact store.
+///
+/// The returned token is the **scan language id** (`go`, `java`, `rust`, `ts`,
+/// `csharp`, `py`, `cpp`, `md`) so it can be compared directly against the
+/// scan's detected/requested language ids — `apg.targets_for_language` filters
+/// the win-B target set with exactly this comparison. `.py`/`.pyi` therefore
+/// return `"py"`, NOT `"python"` (the scan-side vocabulary is `py`: the
+/// detector candidate, `frontend_cmd`, `id_prefix_for` and the `lang_switch`
+/// record all use it). The same token is the per-file/per-module label in the
+/// fact store and module scaffolding (`ReuseFile.lang`, `FileFragment`), where
+/// it is only ever compared against other `language_of`-derived labels, so the
+/// token rename is internally consistent.
 pub fn language_of(rel: &str) -> &'static str {
     let ext = Path::new(rel)
         .extension()
@@ -578,7 +589,7 @@ pub fn language_of(rel: &str) -> &'static str {
         "rs" => "rust",
         "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" => "ts",
         "cs" | "csx" => "csharp",
-        "py" | "pyi" => "python",
+        "py" | "pyi" => "py",
         _ if CPP_EXTENSIONS.contains(&ext) => "cpp",
         "md" | "markdown" => "md",
         _ => "other",
@@ -615,7 +626,10 @@ mod tests {
             assert_eq!(language_of("x.rs"), "rust");
             assert_eq!(language_of("x.tsx"), "ts");
             assert_eq!(language_of("x.cs"), "csharp");
-            assert_eq!(language_of("x.py"), "python");
+            // `.py`/`.pyi` classify under the scan-side id `py` (phase-08
+            // task-23), so the win-B target filter matches them.
+            assert_eq!(language_of("x.py"), "py");
+            assert_eq!(language_of("x.pyi"), "py");
             assert_eq!(language_of("x.cpp"), "cpp");
             // Every extension `cpplib.is_cpp_ext` accepts classifies as cpp, so a
             // changed header/impl lands in the C++ target list (feedback-99).
