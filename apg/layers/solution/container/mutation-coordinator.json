@@ -29,11 +29,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.session.Coordinator.handle_mutation",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.session",
       "properties": {}
     },
