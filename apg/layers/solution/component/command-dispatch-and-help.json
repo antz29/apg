@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "apg.main",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.node_cmd.cmd_node",
+      "properties": {}
     }
   ],
   "in": [
