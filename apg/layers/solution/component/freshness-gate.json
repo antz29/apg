@@ -17,11 +17,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.git.recorded_scan",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.schema.Record.ScanMeta",
       "properties": {}
     },
