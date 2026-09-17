@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.review_cmd.review_action",
       "properties": {}
     }
