@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.node_cmd.cmd_node",
       "properties": {}
     },
