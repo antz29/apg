@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.cmd_plan",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.main",
+      "properties": {}
     }
   ],
   "in": [
