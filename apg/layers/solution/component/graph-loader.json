@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.load.copy_from",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.load.write_graph_jsonl",
+      "properties": {}
     }
   ],
   "in": [
