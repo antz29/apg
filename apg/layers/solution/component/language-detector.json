@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.frontend_cmd",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.auto_detect_languages",
+      "properties": {}
     }
   ],
   "in": [
