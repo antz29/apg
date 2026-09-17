@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.id_prefix_for",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.auto_detect_languages",
       "properties": {}
     },
