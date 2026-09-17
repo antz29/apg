@@ -4,13 +4,7 @@
   "name": "agent-prompt-text",
   "body": "The distributed agent prompts in opencode-suite/agents/*.md (plan-writer, spec-writer, codebase-navigator; also agent-builder/spec-review/plan-review) and the root AGENTS.md CLI reference block — delivered at the current `apg plan` / `apg node` / `apg edge` verbs and carrying the discovered-work protocol (discovered work is planned before it is implemented). These templates are embedded constants in src/main.rs (`include_str!`) delivered to the user-level suite by `apg.install_suite`; the repo-tree `.md` sources are prose, and once the markdown frontend lands they are also scanned File nodes. The DELIVERED artifact is still the embedded constant, so this component is covered by anchoring to the embedding/install Rust (`apg.main`), never to a `.md` path. That anchor is deliberate for the delivery artifact, not a claim that a `.md` target is universally invalid: a scanned `.md` File FQN is a legitimate `implemented-by` target once the markdown frontend is active (see `solution.note.markdown-anchoring`; drift is checked against the code universe by the write-time validation in `apg.layers` and `apg.artifacts.code_universes`).",
   "properties": {},
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.main",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
