@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.layers.write_through_with_deletes",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.git.commit_files",
+      "properties": {}
     }
   ],
   "in": [
