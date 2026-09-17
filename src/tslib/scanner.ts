@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// apg TypeScript scanner frontend.
+// @ts-nocheck
+// apg unified JS/TS scanner frontend.
 //
 // Exact-fidelity tier (like the Go/Java/Rust frontends): parses and type-checks
 // the project with the official TypeScript compiler API (`ts.createProgram` +
@@ -7,6 +8,11 @@
 // that is not a project symbol becomes an `unresolved_call` / `unresolved_use`
 // edge with a category (stdlib for the bundled `lib.d.ts`, external for
 // `node_modules`, unknown otherwise), never a fabricated FQN.
+//
+// Unified JS/TS: `.ts/.tsx/.mts/.cts` plus the JavaScript extensions
+// `.js/.jsx/.mjs/.cjs` are accepted via `allowJs`, with the compiler's native
+// CJS/ESM/package resolution. Dynamic/untyped JavaScript constructs still yield
+// UnresolvedTarget only — never a fabricated FQN.
 //
 // Module model: an npm package is a module. A package.json with `workspaces`
 // makes each workspace package its own module (the root is skipped unless it
@@ -25,10 +31,25 @@
 // same convention the Java frontend uses (javac's UTF-16 char positions);
 // start_line/end_line are 1-based inclusive line numbers.
 //
-// Usage: node scanner.mjs <dir> [--module <dir>]... [exclude...]
+// Usage: node scanner.mjs <dir> [--module <dir>]... [--targets <file>]
+//        [--cache-dir <dir>] [--cache-key <key>] [exclude...]
 //   node_modules is always skipped (dependency code, like Go's module cache);
 //   --module restricts scanning to the given package dirs; remaining args are
 //   substring path excludes.
+//
+// Win-B full-context-targeted emission (the pinned phase-02 task-9 interface):
+//   --targets <file>   UTF-8, newline-delimited absolute source-file paths;
+//                      absent/empty = no emission filter (the byte-identical
+//                      full scan). Every target is still resolved against the
+//                      FULL program context; only the target files' facts are
+//                      emitted, and a reference into a non-emitted (cached)
+//                      file carries that declaration's canonical FQN.
+//   --cache-dir <dir>  the shared cache root (<git-common-dir>/apg/facts).
+//   --cache-key <key>  the global cache key. The TypeScript compiler's native
+//                      incremental build-info is persisted at
+//                      <cache-dir>/ts/<cache-key>/tsconfig.tsbuildinfo so a
+//                      re-scan (or a fresh worktree with the same binary +
+//                      format + config) reuses it; a key mismatch discards it.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -36,18 +57,27 @@ import ts from "typescript";
 
 const args = process.argv.slice(2);
 if (args.length < 1) {
-  console.error("Usage: tsfrontend <dir> [--module <dir>]... [exclude...]");
+  console.error("Usage: tsfrontend <dir> [--module <dir>]... [--targets <file>] [--cache-dir <dir>] [--cache-key <key>] [exclude...]");
   process.exit(1);
 }
 const rootArg = args[0];
 let moduleDirs = [];
 let excludes = [];
 let idPrefix = "n";
+let targetsPath = "";
+let cacheDir = "";
+let cacheKey = "";
 for (let i = 1; i < args.length; i++) {
   if (args[i] === "--module" && i + 1 < args.length) {
     moduleDirs.push(args[++i]);
   } else if (args[i] === "--id-prefix" && i + 1 < args.length) {
     idPrefix = args[++i];
+  } else if (args[i] === "--targets" && i + 1 < args.length) {
+    targetsPath = args[++i];
+  } else if (args[i] === "--cache-dir" && i + 1 < args.length) {
+    cacheDir = args[++i];
+  } else if (args[i] === "--cache-key" && i + 1 < args.length) {
+    cacheKey = args[++i];
   } else {
     excludes.push(args[i]);
   }
@@ -55,9 +85,36 @@ for (let i = 1; i < args.length; i++) {
 const root = path.resolve(rootArg);
 const moduleDirAbs = moduleDirs.map((d) => path.resolve(path.resolve(root, d === "." ? root : d)));
 
+// The target set is an EMISSION filter only (global.constraint.frontend-full-
+// context). `null` means no filter is in force, so every declaration is
+// emitted — the byte-identical full-scan stream. A missing/unreadable file
+// degrades to no filter (with a warning), never to an empty scan.
+let targetFiles = null;
+if (targetsPath) {
+  try {
+    const set = new Set();
+    for (const line of fs.readFileSync(targetsPath, "utf8").split(/\r?\n/)) {
+      const t = line.trim();
+      if (t) set.add(path.resolve(t));
+    }
+    if (set.size > 0) targetFiles = set;
+  } catch {
+    process.stderr.write(`warning: could not read targets ${targetsPath}; scanning unfiltered\n`);
+  }
+}
+
 // ── unified schema emission ──────────────────────────────────────────
 const out = process.stdout;
 const seenEdges = new Set();
+// emittedID holds the opaque ids whose declaration node records are actually
+// part of the emitted stream (the target set, or every declaration when no
+// filter is in force). An edge to a declaration whose id is NOT in this set
+// carries the target's canonical FQN instead of the opaque id (see emitEdge),
+// so a reference from an emitted (target) file to a declaration in a
+// non-emitted (cached) file survives the ingestor's fact splice. With no
+// filter every declaration is emitted, so this is always the opaque id.
+const emittedID = new Set();
+const idToFqn = new Map();
 function emitNode(type, fields) {
   out.write(JSON.stringify({ type, ...fields }) + "\n");
 }
@@ -65,10 +122,11 @@ function emitEdge(type, from, to) {
   // The ingestor dedups edges, but avoid re-emitting identical edges from the
   // broad syntax walk (a class referenced as a value, a type, and a new-target
   // all resolve to the same symbol).
-  const k = type + "\0" + from + "\0" + to;
+  const end = emittedID.has(to) ? to : idToFqn.get(to) || to;
+  const k = type + "\0" + from + "\0" + end;
   if (seenEdges.has(k)) return;
   seenEdges.add(k);
-  out.write(JSON.stringify({ type, from, to }) + "\n");
+  out.write(JSON.stringify({ type, from, to: end }) + "\n");
 }
 
 let nextId = 0;
@@ -93,7 +151,7 @@ function loadPkg(dir) {
   }
 }
 
-const isSourceExt = (f) => /\.(ts|tsx|mts|cts)$/.test(f);
+const isSourceExt = (f) => /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(f);
 
 // true when `dir` contains source files that are NOT under `skipDirs`.
 function hasSourcesOutside(dir, skipDirs) {
@@ -247,17 +305,18 @@ function collectSources(pkgDir) {
 }
 
 // relpath with separators → dots, extension (and trailing `.d`) stripped:
-// `src/components/Button.tsx` → `src.components.Button`.
+// `src/components/Button.tsx` → `src.components.Button`,
+// `src/app.js` → `src.app`.
 function relPrefix(pkgDir, file) {
   const rel = path.relative(pkgDir, file);
-  const noExt = rel.replace(/\.(ts|tsx|mts|cts)$/, "").replace(/\.d$/, "");
+  const noExt = rel.replace(/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/, "").replace(/\.d$/, "");
   return noExt.split(path.sep).join(".");
 }
 
 // ── main: packages → sources → program ───────────────────────────────
 const packages = discoverPackages();
 if (packages.length === 0) {
-  console.error(`Error: no TypeScript packages found under ${root}`);
+  console.error(`Error: no TypeScript/JavaScript packages found under ${root}`);
   process.exit(1);
 }
 
@@ -268,7 +327,7 @@ for (const pkg of packages) {
   }
 }
 if (allFiles.length === 0) {
-  console.error(`Error: no TypeScript source files found under ${root}`);
+  console.error(`Error: no TypeScript/JavaScript source files found under ${root}`);
   process.exit(1);
 }
 
@@ -276,7 +335,7 @@ const programCompilerOptions = {
   target: ts.ScriptTarget.ESNext,
   module: ts.ModuleKind.ESNext,
   moduleResolution: ts.ModuleResolutionKind.Bundler,
-  allowJs: false,
+  allowJs: true,
   jsx: ts.JsxEmit.Preserve,
   strict: false,
   skipLibCheck: true,
@@ -286,9 +345,14 @@ const programCompilerOptions = {
 // Custom compiler host that resolves imports between workspace packages
 // directly (package.json `name` → package dir), so a fresh checkout scans
 // cleanly without `npm install` first. Non-workspace imports fall through to
-// the default resolution (node_modules).
-function workspaceHost() {
-  const host = ts.createCompilerHost(programCompilerOptions);
+// the default resolution (node_modules / package.json exports+main). The
+// JavaScript extensions are accepted as workspace candidates too, so a JS-only
+// workspace package resolves without a build step.
+function workspaceHost(options) {
+  const opts = options || programCompilerOptions;
+  const host = opts.incremental
+    ? ts.createIncrementalCompilerHost(opts, ts.sys)
+    : ts.createCompilerHost(opts);
   const resolveWorkspaceImport = (spec) => {
     for (const pkg of packages) {
       if (spec === pkg.name || spec.startsWith(pkg.name + "/")) {
@@ -299,12 +363,26 @@ function workspaceHost() {
           base + ".tsx",
           base + ".mts",
           base + ".cts",
+          base + ".js",
+          base + ".jsx",
+          base + ".mjs",
+          base + ".cjs",
+          base + ".d.ts",
           path.join(base, "index.ts"),
           path.join(base, "index.tsx"),
+          path.join(base, "index.js"),
+          path.join(base, "index.jsx"),
+          path.join(base, "index.mjs"),
+          path.join(base, "index.cjs"),
         ];
         for (const c of candidates) {
           if (fs.existsSync(c)) {
-            return { resolvedFileName: c, extension: ts.Extension.Ts, isExternalLibraryImport: false };
+            const ext = c.endsWith(".js") ? ts.Extension.Js
+              : c.endsWith(".jsx") ? ts.Extension.Jsx
+                : c.endsWith(".mjs") ? ts.Extension.Mjs
+                  : c.endsWith(".cjs") ? ts.Extension.Cjs
+                    : ts.Extension.Ts;
+            return { resolvedFileName: c, extension: ext, isExternalLibraryImport: false };
           }
         }
       }
@@ -321,7 +399,46 @@ function workspaceHost() {
   return host;
 }
 
-const program = ts.createProgram(allFiles.map((f) => f.file), programCompilerOptions, workspaceHost());
+// Build the program over the FULL source set (the full resolution context).
+// With a shared cache root the compiler's native incremental engine is used and
+// its build-info is persisted under `<cache-dir>/ts/<cache-key>/` so a re-scan
+// reuses it; only the build-info file is written (the JS output is suppressed,
+// nothing is emitted into the scanned tree).
+let program;
+if (cacheDir) {
+  const tsCacheDir = path.join(cacheDir, "ts", cacheKey || "");
+  fs.mkdirSync(tsCacheDir, { recursive: true });
+  const tsBuildInfoPath = path.join(tsCacheDir, "tsconfig.tsbuildinfo");
+  const incrementalOptions = {
+    ...programCompilerOptions,
+    noEmit: false,
+    incremental: true,
+    tsBuildInfoFile: tsBuildInfoPath,
+  };
+  const oldProgram = ts.readBuilderProgram(incrementalOptions, {
+    useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
+    getCurrentDirectory: () => ts.sys.getCurrentDirectory(),
+    readFile: (f) => ts.sys.readFile(f),
+  });
+  const builder = ts.createEmitAndSemanticDiagnosticsBuilderProgram(
+    allFiles.map((f) => f.file),
+    incrementalOptions,
+    workspaceHost(incrementalOptions),
+    oldProgram,
+  );
+  builder.emit(undefined, (fileName, data) => {
+    if (fileName === tsBuildInfoPath) {
+      try {
+        fs.writeFileSync(fileName, data);
+      } catch {
+        // A cache write failure is never fatal: the scan continues full-context.
+      }
+    }
+  });
+  program = builder.getProgram();
+} else {
+  program = ts.createProgram(allFiles.map((f) => f.file), programCompilerOptions, workspaceHost());
+}
 const checker = program.getTypeChecker();
 const sourceFiles = new Map(); // abs path → SourceFile (project files only)
 for (const f of allFiles) {
@@ -524,7 +641,7 @@ function collectFile(sf, pkgDir, modFqn) {
   for (const stmt of sf.statements) walk(stmt, fileParent);
 }
 
-// Collect declarations.
+// Collect declarations over the FULL file set (the full resolution context).
 for (const { file, pkg } of allFiles) {
   const sf = sourceFiles.get(file);
   if (!sf) continue;
@@ -536,6 +653,18 @@ const allDecls = [
   ...structOrder.map((fqn) => structs.get(fqn)),
   ...funcOrder.map((key) => funcs.get(key)),
 ].sort((a, b) => (a.path !== b.path ? (a.path < b.path ? -1 : 1) : a.start - b.start));
+
+// Overload grouping for the canonical function FQN (SPEC §4): a (parent, name)
+// declared more than once renders `parent.name(params)` for every member, a
+// singleton renders `parent.name`. This is what the ingestor renders, so a
+// cross-target edge carries the exact FQN the splice expects.
+const funcGroupCount = new Map();
+for (const key of funcOrder) {
+  const d = funcs.get(key);
+  const g = d.parent + "\0" + d.name;
+  funcGroupCount.set(g, (funcGroupCount.get(g) || 0) + 1);
+}
+
 for (const d of allDecls) {
   d.id = newNodeID();
   declIdByKey.set(d.path + "@" + d.start, d.id);
@@ -543,9 +672,31 @@ for (const d of allDecls) {
   if (d.name === "constructor" && idByFqn.has(d.parent)) ctorIdByParent.set(d.parent, d.id);
 }
 
-// Emit module + file records.
+// Map every id to its canonical FQN and record which ids are part of the
+// emitted stream (the target set, or all of them when no filter is in force).
+for (const fqn of structOrder) {
+  const d = structs.get(fqn);
+  idToFqn.set(d.id, fqn);
+  if (targetFiles === null || targetFiles.has(path.resolve(d.path))) emittedID.add(d.id);
+}
+for (const key of funcOrder) {
+  const d = funcs.get(key);
+  const fqn = funcGroupCount.get(d.parent + "\0" + d.name) > 1
+    ? d.parent + "." + d.name + "(" + d.params.join(",") + ")"
+    : d.parent + "." + d.name;
+  idToFqn.set(d.id, fqn);
+  if (targetFiles === null || targetFiles.has(path.resolve(d.file))) emittedID.add(d.id);
+}
+
+// The files whose per-file facts are emitted (every file with no filter).
+const emitFileList = targetFiles === null
+  ? allFiles
+  : allFiles.filter(({ file }) => targetFiles.has(path.resolve(file)));
+
+// Emit module records (scaffolding — no location, never filtered) and the
+// emitted files' file records.
 for (const pkg of packages) emitNode("module", { fqn: pkg.name });
-for (const { file, pkg } of allFiles) {
+for (const { file, pkg } of emitFileList) {
   const sf = sourceFiles.get(file);
   if (!sf) continue;
   emitNode("file", {
@@ -556,9 +707,10 @@ for (const { file, pkg } of allFiles) {
   });
 }
 
-// Emit node records.
+// Emit node records (only the emitted declarations).
 for (const fqn of structOrder) {
   const d = structs.get(fqn);
+  if (!emittedID.has(d.id)) continue;
   emitNode("struct", {
     id: d.id,
     parent: d.parent,
@@ -572,6 +724,7 @@ for (const fqn of structOrder) {
 }
 for (const key of funcOrder) {
   const d = funcs.get(key);
+  if (!emittedID.has(d.id)) continue;
   emitNode("function", {
     id: d.id,
     parent: d.parent,
@@ -589,6 +742,7 @@ for (const key of funcOrder) {
 // Structural containment: methods hang under their class/interface (SPEC §7).
 for (const key of funcOrder) {
   const d = funcs.get(key);
+  if (!emittedID.has(d.id)) continue;
   const parentId = idByFqn.get(d.parent);
   if (parentId) emitEdge("contains", parentId, d.id);
 }
@@ -844,10 +998,11 @@ function walkNode(node, sf, cur) {
   ts.forEachChild(node, (c) => walkNode(c, sf, cur));
 }
 
-// Edge walk per file. Progress on stderr (captured to apg-frontend.log).
-const total = allFiles.length;
+// Edge walk over the emitted (target) files. Progress on stderr (captured to
+// apg-frontend.log).
+const total = emitFileList.length;
 let done = 0;
-for (const { file } of allFiles) {
+for (const { file } of emitFileList) {
   const sf = sourceFiles.get(file);
   if (!sf) continue;
   walkNode(sf, sf, null);

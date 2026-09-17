@@ -400,7 +400,10 @@ fn available_languages() -> Vec<String> {
             langs.push("java".into());
         }
         if dir.join("tsfrontend").is_dir() {
+            // One unified JS/TS frontend artifact, two language ids: a JS-only
+            // repo auto-detects and scans without a separate JS frontend install.
             langs.push("ts".into());
+            langs.push("js".into());
         }
         if !langs.is_empty() {
             return langs;
@@ -447,7 +450,7 @@ fn frontend_cmd(language: &str) -> Option<String> {
                     classes.display()
                 ));
             }
-            "ts" if dir.join("tsfrontend").is_dir() => {
+            "ts" | "js" if dir.join("tsfrontend").is_dir() => {
                 return Some(format!(
                     "node {}",
                     dir.join("tsfrontend").join("scanner.mjs").display()
@@ -462,7 +465,9 @@ fn frontend_cmd(language: &str) -> Option<String> {
         "rust" => option_env!("APG_FRONTEND_RUST"),
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
-        "ts" => option_env!("APG_FRONTEND_TS"),
+        // One built artifact, two ids: `js`-only repos run the same unified
+        // JS/TS frontend under the `js` id.
+        "ts" | "js" => option_env!("APG_FRONTEND_TS"),
         _ => None,
     };
     baked.map(|s| s.to_string())
@@ -514,6 +519,7 @@ fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec<Str
         ("cpp", cpp_exts.as_slice()),
         ("rust", &[".rs"]),
         ("ts", &[".ts", ".tsx", ".mts", ".cts"]),
+        ("js", &[".js", ".jsx", ".mjs", ".cjs"]),
         ("csharp", &[".cs", ".csx"]),
     ];
     let mut out = Vec::new();
@@ -521,6 +527,13 @@ fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec<Str
         if available.iter().any(|l| l == lang) && has_extension(dir, exts, 5) {
             out.push(lang.to_string());
         }
+    }
+    // A repo that also contains incidental JavaScript still scans ONCE: the
+    // unified JS/TS frontend runs under the `ts` id, never js+ts as two
+    // frontends. `has_extension` never descends into `node_modules`, so a
+    // dependency tree's JS can never trigger `js` detection.
+    if out.iter().any(|l| l == "ts") {
+        out.retain(|l| l != "js");
     }
     out
 }
@@ -536,6 +549,7 @@ fn id_prefix_for(language: &str) -> &'static str {
         "cpp" => "c",
         "rust" => "r",
         "ts" => "t",
+        "js" => "js",
         "csharp" => "cs",
         _ => "x",
     }
@@ -3406,6 +3420,387 @@ mod tests {
                 "the spec-writer prompt must carry the reconciliation route for discovered divergence"
             );
         }
+
+        /// Phase-06 task-10: `builtin_code_type`'s JS rules are **extension-
+        /// keyed, not stream-id-keyed** — the bundle-filename rule fires under
+        /// BOTH the `ts` id (a mixed/TS-detected repo scans its incidental
+        /// JavaScript under `ts`) and the `js` id. A bare `.cjs` suffix is never
+        /// a bundle marker; only a real `min`/`bundle` filename infix (or a
+        /// `gen|generated|dist|build|out` path segment) classifies generated.
+        ///
+        /// `classify_code_type` is metadata-only — it never drops a node — so
+        /// every case additionally asserts the file stays a recognised in-graph
+        /// code type (present, never filtered out).
+        #[test]
+        fn builtin_code_type_js_rules_are_extension_keyed() {
+            let cases: &[(&str, &str)] = &[
+                // Bundle filename markers: generated under both ids.
+                ("/proj/src/app.min.js", "generated"),
+                ("/proj/dist/app.min.js", "generated"),
+                ("/proj/build/app.bundle.js", "generated"),
+                ("/proj/src/app.min.jsx", "generated"),
+                ("/proj/src/widget.min.mjs", "generated"),
+                ("/proj/src/widget.bundle.mjs", "generated"),
+                ("/proj/dist/app.min.cjs", "generated"),
+                ("/proj/dist/app.bundle.cjs", "generated"),
+                // A bare `.cjs`/`.js`/`.mjs` suffix is NEVER generated.
+                ("/proj/src/index.js", "src"),
+                ("/proj/src/util.mjs", "src"),
+                ("/proj/src/index.cjs", "src"),
+                ("/proj/src/x.cjs", "src"),
+                ("/proj/src/widget.jsx", "src"),
+                // test/vendor mirror the ts arm.
+                ("/proj/tests/app.js", "test"),
+                ("/proj/vendor/app.mjs", "external"),
+            ];
+            for (path, expected) in cases {
+                for id in ["ts", "js"] {
+                    let got = classify::classify_code_type(path, path, id, None);
+                    assert_eq!(
+                        got, *expected,
+                        "{id} id: {path} must classify {expected}, got {got}"
+                    );
+                    assert!(
+                        ["src", "test", "generated", "external"].contains(&got.as_str()),
+                        "{id} id: {path} must stay an in-graph code type (never dropped), got {got}"
+                    );
+                }
+            }
+            // The `js` arm also recognises the JS filename test suffixes
+            // (`*.test.js`/`*.spec.js` and the other JS extensions).
+            for (path, expected) in [
+                ("/proj/src/app.test.js", "test"),
+                ("/proj/src/app.spec.mjs", "test"),
+                ("/proj/src/app_test.cjs", "test"),
+            ] {
+                assert_eq!(
+                    classify::classify_code_type(path, path, "js", None),
+                    expected,
+                    "js id: {path} must classify {expected}"
+                );
+            }
+        }
+
+        /// Phase-06 task-11: `auto_detect_languages` — a JS-only tree detects
+        /// `js`; a tree with `.ts` plus incidental `.js` detects `ts` ONCE (js
+        /// suppressed, never js+ts as two frontends); a `node_modules`-only
+        /// JavaScript tree never triggers `js` (the walk skips dependency dirs).
+        #[test]
+        fn auto_detect_languages_js_and_ts_suppression() {
+            let base = std::env::temp_dir().join(format!("apg-js-detect-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let avail = vec!["ts".to_string(), "js".to_string()];
+
+            // JS-only: js detected, ts not.
+            std::fs::create_dir_all(base.join("jso")).unwrap();
+            std::fs::write(base.join("jso/app.js"), "export const x = 1;\n").unwrap();
+            assert_eq!(
+                auto_detect_languages(&base.join("jso"), &avail),
+                vec!["js".to_string()],
+                "a JS-only tree detects js"
+            );
+
+            // .ts + incidental .js (and all four JS extensions): ts once, no js.
+            std::fs::create_dir_all(base.join("mixed/src")).unwrap();
+            std::fs::write(base.join("mixed/src/a.ts"), "export const a = 1;\n").unwrap();
+            std::fs::write(base.join("mixed/src/b.js"), "export const b = 1;\n").unwrap();
+            std::fs::write(base.join("mixed/src/c.jsx"), "export const c = 1;\n").unwrap();
+            std::fs::write(base.join("mixed/src/d.mjs"), "export const d = 1;\n").unwrap();
+            std::fs::write(base.join("mixed/src/e.cjs"), "module.exports = 1;\n").unwrap();
+            assert_eq!(
+                auto_detect_languages(&base.join("mixed"), &avail),
+                vec!["ts".to_string()],
+                ".ts + incidental .js detects ts once (js suppressed)"
+            );
+
+            // node_modules-only JavaScript: no js (dependency dirs are skipped).
+            std::fs::create_dir_all(base.join("nm/node_modules/dep")).unwrap();
+            std::fs::write(
+                base.join("nm/node_modules/dep/index.js"),
+                "module.exports = 1;\n",
+            )
+            .unwrap();
+            assert!(
+                auto_detect_languages(&base.join("nm"), &avail).is_empty(),
+                "a node_modules-only JS tree never triggers js detection"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase-06 unified JS/TS frontend acceptance helpers (tasks 12–15).
+    // Non-#[test] helpers, so they live at the `mod tests` root.
+    // -----------------------------------------------------------------------
+
+    /// The staged unified JS/TS frontend artifact the candidate runs
+    /// (`<profile>/frontends/tsfrontend/scanner.mjs` — the BUILT output staged
+    /// by task-3). Fails loudly naming the build when absent.
+    fn ts_frontend_artifact() -> PathBuf {
+        let apg = crate::testutil::apg_bin();
+        let p = apg
+            .parent()
+            .expect("apg binary has a parent")
+            .join("frontends")
+            .join("tsfrontend")
+            .join("scanner.mjs");
+        assert!(
+            p.is_file(),
+            "unified JS/TS frontend not found at {} — build it first: \
+             cargo build --config 'env.APG_BUILD_FRONTENDS=\"ts\"'",
+            p.display()
+        );
+        p
+    }
+
+    /// A scratch git repo for a JS/TS fixture: the caller's files, an isolated
+    /// HOME with the suite dependency dir pre-created, and a committed
+    /// `apg init` so the scan starts from a clean tree. Returns
+    /// `(base, repo_dir, home)`.
+    fn js_scratch_owned(tag: &str, files: &[(&str, String)]) -> (PathBuf, PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("apg-js-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        scratch_repo_init(&repo_dir);
+        for (rel, body) in files {
+            let p = repo_dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        scratch_commit_all(&repo_dir, "init source");
+        let init = testutil::ApgCommand::new(&["init", "."])
+            .cwd(&repo_dir)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            init.status.success(),
+            "apg init failed in {}: {}{}",
+            repo_dir.display(),
+            String::from_utf8_lossy(&init.stdout),
+            String::from_utf8_lossy(&init.stderr)
+        );
+        scratch_commit_all(&repo_dir, "apg init");
+        (base, repo_dir, home)
+    }
+
+    /// [`js_scratch_owned`] over borrowed string literals.
+    fn js_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf) {
+        let owned: Vec<(&str, String)> =
+            files.iter().map(|(r, b)| (*r, (*b).to_string())).collect();
+        js_scratch_owned(tag, &owned)
+    }
+
+    /// The absolute source paths carried by `file` records in a scan export.
+    fn export_file_paths(records: &[serde_json::Value]) -> BTreeSet<String> {
+        records
+            .iter()
+            .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("file"))
+            .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    /// The module FQNs in a scan export.
+    fn export_modules(records: &[serde_json::Value]) -> BTreeSet<String> {
+        records
+            .iter()
+            .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("module"))
+            .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    /// The Struct/Function FQNs whose declared `path` is exactly `path`.
+    fn export_symbols_at(records: &[serde_json::Value], path: &str) -> BTreeSet<String> {
+        records
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.get("type").and_then(|t| t.as_str()),
+                    Some("struct") | Some("function")
+                )
+            })
+            .filter(|r| r.get("path").and_then(|p| p.as_str()) == Some(path))
+            .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    /// The resolve-only edge types (`calls`/`uses`/`unresolved_call`/
+    /// `unresolved_use`) whose `from` FQN is one of `sources`.
+    fn export_edge_types_from(
+        records: &[serde_json::Value],
+        sources: &BTreeSet<String>,
+    ) -> BTreeSet<String> {
+        records
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.get("type").and_then(|t| t.as_str()),
+                    Some("calls") | Some("uses") | Some("unresolved_call") | Some("unresolved_use")
+                )
+            })
+            .filter(|r| {
+                r.get("from")
+                    .and_then(|f| f.as_str())
+                    .is_some_and(|f| sources.contains(f))
+            })
+            .filter_map(|r| r.get("type").and_then(|t| t.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    /// True when the export carries at least one `calls`/`uses` edge whose two
+    /// endpoints are both declared project symbols (a resolve-only edge, never
+    /// an unresolved target).
+    fn has_resolved_project_edge(records: &[serde_json::Value]) -> bool {
+        let project = export_symbol_fqns(records);
+        records.iter().any(|r| {
+            let ty = r.get("type").and_then(|t| t.as_str());
+            if !matches!(ty, Some("calls") | Some("uses")) {
+                return false;
+            }
+            let from = r.get("from").and_then(|f| f.as_str()).unwrap_or("");
+            let to = r.get("to").and_then(|t| t.as_str()).unwrap_or("");
+            project.contains(from) && project.contains(to)
+        })
+    }
+
+    /// The `(fqn, category)` pairs of `unresolved` records.
+    fn export_unresolved(records: &[serde_json::Value]) -> BTreeSet<(String, String)> {
+        records
+            .iter()
+            .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("unresolved"))
+            .map(|r| {
+                (
+                    r.get("fqn")
+                        .and_then(|f| f.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    r.get("category")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                )
+            })
+            .collect()
+    }
+
+    /// The `calls`/`uses` edge targets in the export.
+    fn export_resolved_edge_targets(records: &[serde_json::Value]) -> BTreeSet<String> {
+        records
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.get("type").and_then(|t| t.as_str()),
+                    Some("calls") | Some("uses")
+                )
+            })
+            .filter_map(|r| r.get("to").and_then(|t| t.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    /// The first `file` record path ending with `suffix` — symlink-agnostic
+    /// (`/var/...` vs `/private/var/...` on macOS), so a fixture comparison never
+    /// depends on the frontend's cwd canonicalisation.
+    fn export_file_ending(records: &[serde_json::Value], suffix: &str) -> Option<String> {
+        export_file_paths(records)
+            .into_iter()
+            .find(|f| f.ends_with(suffix))
+    }
+
+    /// Phase-06 task-12 fixture: a JS-only package with all four accepted JS
+    /// extensions plus a `node_modules` dependency tree that must be skipped.
+    fn js_only_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (
+                "calc.js",
+                "function jsInner() { return 1; }\nfunction jsOuter() { return jsInner(); }\nmodule.exports = { jsOuter, jsInner };\n",
+            ),
+            (
+                "widget.jsx",
+                "function Widget() { return null; }\nfunction useWidget() { return Widget(); }\nfunction App() { return <Widget/>; }\nmodule.exports = { App, Widget, useWidget };\n",
+            ),
+            (
+                "esm.mjs",
+                "export function mjsInner() { return 2; }\nexport function mjsOuter() { return mjsInner(); }\n",
+            ),
+            (
+                "cjs.cjs",
+                "function loadDep() { return require('./dep.cjs'); }\nmodule.exports = { loadDep };\n",
+            ),
+            (
+                "node_modules/leftpad/index.js",
+                "function leftpadLeak() { return 3; }\nmodule.exports = { leftpadLeak };\n",
+            ),
+        ]
+    }
+
+    /// Phase-06 task-13 fixture: a mixed JS/TS package scanned ONCE under `ts`.
+    /// Direction A: a `.js` file imports a `.ts` definition. Direction B: a
+    /// `.ts` file imports a `.js` definition. Plus `package.json`
+    /// `main`/`exports` self-name resolution, a JS workspace package resolved by
+    /// name (the `workspaceHost` JS-candidate path), and `.d.ts` handling.
+    fn mixed_js_ts_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (
+                "package.json",
+                "{\n  \"name\": \"mixed\",\n  \"type\": \"module\",\n  \"workspaces\": [\"lib\"],\n  \"main\": \"./src/index.js\",\n  \"exports\": { \".\": \"./src/index.js\" }\n}\n",
+            ),
+            (
+                "lib/package.json",
+                "{\n  \"name\": \"mixed-lib\",\n  \"type\": \"module\",\n  \"main\": \"./index.js\"\n}\n",
+            ),
+            (
+                "lib/index.js",
+                "export function libHelper() { return 7; }\n",
+            ),
+            (
+                "src/tsdef.ts",
+                "export function tsHelper(): number { return 1; }\n",
+            ),
+            (
+                "src/jsdef.js",
+                "export function jsHelper(x) { return x + 1; }\n",
+            ),
+            ("src/types.d.ts", "export interface Config { x: number; }\n"),
+            (
+                "src/jsconsumer.js",
+                "import { tsHelper } from \"./tsdef\";\nexport function useTs() { return tsHelper(); }\n",
+            ),
+            (
+                "src/tsconsumer.ts",
+                "import { jsHelper } from \"./jsdef\";\nimport type { Config } from \"./types\";\nexport function useJs(): number { return jsHelper(1); }\nexport function readConfig(c: Config): number { return c.x; }\n",
+            ),
+            (
+                "src/index.js",
+                "export function indexHelper() { return 42; }\n",
+            ),
+            (
+                "src/selfconsumer.js",
+                "import { indexHelper } from \"mixed\";\nimport { libHelper } from \"mixed-lib\";\nexport function useIndex() { return indexHelper(); }\nexport function useLib() { return libHelper(); }\n",
+            ),
+        ]
+    }
+
+    /// Phase-06 task-14 fixture: dynamic `require(expr)` and computed access
+    /// only — the never-fabricate rule for untyped JavaScript.
+    fn dynamic_js_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![(
+            "dynamic.js",
+            "function loadDynamic(name) {\n  const m = require(name);\n  return m();\n}\nfunction computed(obj, key) {\n  return obj[key]();\n}\nmodule.exports = { loadDynamic, computed };\n",
+        )]
+    }
+
+    /// Phase-06 task-15 fixture: a COPY of the ported `src/tslib` —
+    /// `scanner.ts` + its `package.json` (`name: apg-tsfrontend`) — as the scan
+    /// target. Reading the real repo source is why this is e2e.
+    fn tslib_self_scan_fixture() -> Vec<(&'static str, String)> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let scanner = std::fs::read_to_string(root.join("src/tslib/scanner.ts"))
+            .expect("read src/tslib/scanner.ts");
+        let pkg = std::fs::read_to_string(root.join("src/tslib/package.json"))
+            .expect("read src/tslib/package.json");
+        vec![("tslib/scanner.ts", scanner), ("tslib/package.json", pkg)]
     }
 
     /// e2e tier -- real I/O: these tests read repo files (README/Cargo.toml/
@@ -7074,6 +7469,273 @@ mod tests {
                 "(C) the rustfrontend must NOT be compiled into the root target dir: {}",
                 root_artifact.display()
             );
+        }
+
+        /// Phase-06 task-12 (e2e): a JS-only scratch repo exercising ALL FOUR
+        /// accepted JS extensions (`.js`/`.jsx`/`.mjs`/`.cjs`) through the real
+        /// candidate binary + the built unified frontend. Each extension is
+        /// ACCEPTED and yields a File node, the module, its declared symbols, and
+        /// a resolve-only edge; `node_modules` is skipped entirely.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+        fn js_only_repo_accepts_all_four_js_extensions() {
+            assert!(ts_frontend_artifact().is_file());
+            let (base, repo_dir, home) = js_scratch("js-only", &js_only_fixture());
+            let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "scan failed: {stderr}");
+
+            let records = export_records(&repo_dir);
+            let files = export_file_paths(&records);
+            assert!(
+                export_modules(&records).contains("repo"),
+                "the JS package module must be present: {:?}",
+                export_modules(&records)
+            );
+
+            for rel in ["calc.js", "widget.jsx", "esm.mjs", "cjs.cjs"] {
+                let abs = export_file_ending(&records, &format!("/{rel}"))
+                    .unwrap_or_else(|| panic!("{rel} must be accepted as a File node: {files:?}"));
+                let syms = export_symbols_at(&records, &abs);
+                assert!(!syms.is_empty(), "{rel} must declare symbols: {syms:?}");
+                let edges = export_edge_types_from(&records, &syms);
+                assert!(
+                    !edges.is_empty(),
+                    "{rel} must emit a resolve-only edge (Calls/Uses/Unresolved*): {edges:?}"
+                );
+            }
+
+            // node_modules is skipped: no File/symbol node is drawn from it.
+            assert!(
+                files.iter().all(|f| !f.contains("/node_modules/")),
+                "node_modules must not be scanned: {files:?}"
+            );
+            assert!(
+                records.iter().all(|r| {
+                    !r.get("path")
+                        .and_then(|p| p.as_str())
+                        .is_some_and(|p| p.contains("/node_modules/"))
+                }),
+                "no symbol may be drawn from node_modules"
+            );
+
+            assert!(
+                stderr.contains("Languages: js"),
+                "a JS-only repo must auto-detect the js id: {stderr}"
+            );
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-06 task-13 (e2e): a mixed JS/TS scratch repo scanned ONCE under
+        /// the unified frontend (`ts` id). BOTH resolution directions resolve to
+        /// the real declared project symbol (never Unresolved): a `.js` import of
+        /// a `.ts` definition and a `.ts` import of a `.js` definition. Also
+        /// `package.json` `main`/`exports` self-name resolution and `.d.ts`
+        /// declaration handling.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+        fn mixed_js_ts_repo_resolves_both_directions() {
+            assert!(ts_frontend_artifact().is_file());
+            let (base, repo_dir, home) = js_scratch("mixed-js-ts", &mixed_js_ts_fixture());
+            let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "scan failed: {stderr}");
+            // One frontend, one id: a TS-detected mixed repo never runs js+ts.
+            assert!(
+                stderr.contains("Languages: ts"),
+                "a mixed repo scans once under ts: {stderr}"
+            );
+            assert!(
+                !stderr.contains("Languages: js"),
+                "js must be suppressed when ts is present: {stderr}"
+            );
+
+            let records = export_records(&repo_dir);
+            let symbols = export_symbol_fqns(&records);
+            assert!(
+                records.iter().any(|r| {
+                    r.get("type").and_then(|t| t.as_str()) == Some("calls")
+                        && r.get("from").and_then(|f| f.as_str())
+                            == Some("mixed.src.jsconsumer.useTs")
+                        && r.get("to").and_then(|t| t.as_str()) == Some("mixed.src.tsdef.tsHelper")
+                }),
+                "direction A: a .js import must resolve to its .ts definition (a real FQN, not \
+                 Unresolved): {records:?}"
+            );
+            assert!(
+                records.iter().any(|r| {
+                    r.get("type").and_then(|t| t.as_str()) == Some("calls")
+                        && r.get("from").and_then(|f| f.as_str())
+                            == Some("mixed.src.tsconsumer.useJs")
+                        && r.get("to").and_then(|t| t.as_str()) == Some("mixed.src.jsdef.jsHelper")
+                }),
+                "direction B: a .ts import must resolve to its .js definition (a real FQN, not \
+                 Unresolved): {records:?}"
+            );
+            assert!(symbols.contains("mixed.src.tsdef.tsHelper"));
+            assert!(symbols.contains("mixed.src.jsdef.jsHelper"));
+
+            // package.json `main`/`exports`: the self-name import reaches the
+            // declared `src/index.js` symbol (a real resolved target).
+            assert!(
+                records.iter().any(|r| {
+                    r.get("type").and_then(|t| t.as_str()) == Some("calls")
+                        && r.get("from").and_then(|f| f.as_str())
+                            == Some("mixed.src.selfconsumer.useIndex")
+                        && r.get("to").and_then(|t| t.as_str())
+                            == Some("mixed.src.index.indexHelper")
+                }),
+                "package.json main/exports resolution must reach the declared symbol: {records:?}"
+            );
+
+            // A JS workspace package resolved by NAME exercises the
+            // `workspaceHost` JS-candidate path (task-22's extension: a `.js`
+            // `index` candidate resolves without a build step). The lib file is
+            // collected under both the root and the workspace package, so its
+            // symbol appears under `mixed.` and `mixed-lib.`; the named import
+            // must resolve to a REAL project FQN in either case (never
+            // Unresolved).
+            let lib_symbols: BTreeSet<String> = symbols
+                .iter()
+                .filter(|f| f.ends_with(".index.libHelper"))
+                .cloned()
+                .collect();
+            assert!(
+                !lib_symbols.is_empty(),
+                "the JS workspace package's symbol must be a project symbol: {symbols:?}"
+            );
+            assert!(
+                records.iter().any(|r| {
+                    r.get("type").and_then(|t| t.as_str()) == Some("calls")
+                        && r.get("from").and_then(|f| f.as_str())
+                            == Some("mixed.src.selfconsumer.useLib")
+                        && r.get("to")
+                            .and_then(|t| t.as_str())
+                            .is_some_and(|t| lib_symbols.contains(t))
+                }),
+                "a named JS workspace import must resolve through the JS candidate path: {records:?}"
+            );
+
+            // `.d.ts` handling: the declaration is a File node and its interface
+            // is a project symbol used by the `.ts` consumer.
+            assert!(
+                export_file_ending(&records, "/src/types.d.ts").is_some(),
+                "the .d.ts declaration file must be scanned"
+            );
+            assert!(
+                symbols.contains("mixed.src.types.Config"),
+                "the .d.ts interface must be a project symbol: {symbols:?}"
+            );
+            assert!(
+                export_resolved_edge_targets(&records).contains("mixed.src.types.Config"),
+                "the .d.ts interface must be a resolved uses target: {records:?}"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-06 task-14 (e2e): a scratch repo whose JavaScript uses dynamic
+        /// `require(expr)` and computed member access. The never-fabricate rule
+        /// holds: only `unresolved_call`/`unresolved_use` edges leave the
+        /// fixture's functions, each unresolved target carries a category, and
+        /// there are ZERO guessed `calls`/`uses` edges.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+        fn dynamic_js_yields_only_categorised_unresolved() {
+            assert!(ts_frontend_artifact().is_file());
+            let (base, repo_dir, home) = js_scratch("dynamic-js", &dynamic_js_fixture());
+            let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "scan failed: {stderr}");
+
+            let records = export_records(&repo_dir);
+            let dyn_file = export_file_ending(&records, "/dynamic.js")
+                .expect("dynamic.js must be a File node");
+            let syms = export_symbols_at(&records, &dyn_file);
+            assert!(!syms.is_empty(), "dynamic.js must declare symbols");
+            let edges = export_edge_types_from(&records, &syms);
+            assert!(
+                !edges.is_empty(),
+                "the dynamic constructs must emit an edge"
+            );
+            assert!(
+                edges.iter().all(|t| t.starts_with("unresolved_")),
+                "only unresolved edges may leave untyped dynamic JS, got {edges:?}"
+            );
+
+            let unresolved = export_unresolved(&records);
+            assert!(
+                !unresolved.is_empty(),
+                "the dynamic constructs must be unresolved targets"
+            );
+            for (fqn, category) in &unresolved {
+                assert!(
+                    !category.is_empty(),
+                    "unresolved target {fqn} must carry a category"
+                );
+            }
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-06 task-15 (e2e): the self-scan acceptance — the candidate's
+        /// BUILT/STAGED unified frontend scans a scratch COPY of the ported
+        /// `src/tslib` (`scanner.ts` + its `package.json`). The graph is not just
+        /// an empty module node: the package module, a File node for scanner.ts,
+        /// the ported declaration units, and at least one resolve-only edge.
+        /// Never points the candidate at the real apg checkout.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+        fn self_scan_of_ported_tslib_produces_symbols() {
+            assert!(ts_frontend_artifact().is_file());
+            let (base, repo_dir, home) = js_scratch_owned("self-scan", &tslib_self_scan_fixture());
+            let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "scan failed: {stderr}");
+
+            let records = export_records(&repo_dir);
+            assert!(
+                export_modules(&records).contains("apg-tsfrontend"),
+                "the copied package module must be present: {:?}",
+                export_modules(&records)
+            );
+            let scanner = export_file_ending(&records, "/tslib/scanner.ts")
+                .expect("scanner.ts must be a File node");
+            let syms = export_symbols_at(&records, &scanner);
+            assert!(
+                !syms.is_empty(),
+                "scanner.ts must declare symbols, got none"
+            );
+            for unit in [
+                "collectFile",
+                "emitNode",
+                "discoverPackages",
+                "collectSources",
+                "isSourceExt",
+                "relPrefix",
+                "workspaceHost",
+                "emitEdge",
+                "emitUnresolved",
+                "registerStruct",
+                "registerFunction",
+                "handleCall",
+                "handleNew",
+                "handleType",
+                "handleJsx",
+                "walkNode",
+            ] {
+                let fqn = format!("apg-tsfrontend.scanner.{unit}");
+                assert!(
+                    syms.contains(&fqn),
+                    "ported unit {fqn} must be a symbol: {syms:?}"
+                );
+            }
+            assert!(
+                has_resolved_project_edge(&records),
+                "the self-scan must emit at least one resolve-only edge"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
         }
     }
 }

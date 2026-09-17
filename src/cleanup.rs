@@ -3,11 +3,12 @@ use crate::graph::{Graph, NodeKind};
 
 pub struct CleanupOptions {
     pub user_excludes: Vec<String>,
-    /// Language of the scan. Span validation is Java-, TS-, and C#-only: their
-    /// methods are declared inside the class/interface body. Go methods are
-    /// declared outside the struct body (receiver-based), so the check would
-    /// wrongly drop them. A multi-language scan passes a non-matching value
-    /// (e.g. "go,ts") to disable the per-language safety net.
+    /// Language of the scan. Span validation is Java-, TS-, JS-, and C#-only:
+    /// their methods are declared inside the class/interface body (the unified
+    /// JS/TS frontend shares TS's struct-body span semantics for JS too). Go
+    /// methods are declared outside the struct body (receiver-based), so the
+    /// check would wrongly drop them. A multi-language scan passes a
+    /// non-matching value (e.g. "go,ts") to disable the per-language safety net.
     pub language: String,
 }
 
@@ -84,11 +85,15 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
     }
 
     // Containment span validation: a Struct may only contain Functions whose
-    // start offset falls inside the struct's span. Java-, TS-, and C#-only —
-    // Go methods are declared outside the struct body, so the check would
-    // wrongly drop them.
+    // start offset falls inside the struct's span. Java-, TS-, JS-, and
+    // C#-only — Go methods are declared outside the struct body, so the check
+    // would wrongly drop them.
     let mut span_violations = 0usize;
-    if opts.language == "java" || opts.language == "ts" || opts.language == "csharp" {
+    if opts.language == "java"
+        || opts.language == "ts"
+        || opts.language == "js"
+        || opts.language == "csharp"
+    {
         graph.contains.retain(|(a, b)| {
             let Some(na) = graph.nodes.get(a) else {
                 return false;

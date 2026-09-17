@@ -34,7 +34,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/rustlib/src/main.rs");
     println!("cargo:rerun-if-changed=src/tslib/package.json");
     println!("cargo:rerun-if-changed=src/tslib/package-lock.json");
-    println!("cargo:rerun-if-changed=src/tslib/scanner.mjs");
+    println!("cargo:rerun-if-changed=src/tslib/scanner.ts");
     println!("cargo:rerun-if-changed=src/csharplib/CsharpFrontend.csproj");
     println!("cargo:rerun-if-changed=src/csharplib/Program.cs");
 
@@ -236,12 +236,18 @@ fn main() {
         }
     }
 
-    // --- TypeScript frontend (Node + official TypeScript compiler) ---
+    // --- Unified JS/TS frontend (Node + official TypeScript compiler) ---
     if enabled(&frontends, "ts") {
         // npm ci (with the committed package-lock) installs typescript into
         // src/tslib/node_modules. Skipped when already installed so repeated
-        // builds don't re-fetch. The staged frontend is the scanner script +
-        // its node_modules, run via `node <dir>/scanner.mjs`.
+        // builds don't re-fetch. The staged frontend is the BUILT artifact:
+        // `scanner.ts` (transpile-only, `@ts-nocheck`) is compiled to
+        // `scanner.js` by the repo-local compiler and staged as
+        // `tsfrontend/scanner.mjs`. `.mjs` is unconditionally ESM to node, so no
+        // staged package.json is needed and the runtime name/path stays exactly
+        // what `frontend_cmd` runs (`node <dir>/tsfrontend/scanner.mjs`) and what
+        // `APG_FRONTEND_TS` names. The staged `node_modules` is required — the
+        // built scanner imports `typescript` at runtime.
         let tslib = Path::new("src/tslib");
         let ts_dep = tslib
             .join("node_modules")
@@ -260,7 +266,49 @@ fn main() {
             let stage_ts = stage_dir.join("tsfrontend");
             std::fs::create_dir_all(&stage_ts).ok();
             copy_dir(&tslib.join("node_modules"), &stage_ts.join("node_modules"));
-            let _ = std::fs::copy(tslib.join("scanner.mjs"), stage_ts.join("scanner.mjs"));
+
+            // Compile the ported source to the staged artifact. `scanner.ts`
+            // carries `// @ts-nocheck` (transpile-only, no semantic typecheck);
+            // `--noEmitOnError` still fails this step on any syntax/emit error
+            // rather than staging a broken artifact. The emitted `scanner.js`
+            // is renamed to `scanner.mjs` on stage.
+            let ts_build = Path::new(&out_dir).join("tsfrontend-build");
+            let _ = std::fs::remove_dir_all(&ts_build);
+            std::fs::create_dir_all(&ts_build).ok();
+            let tsc = tslib
+                .join("node_modules")
+                .join("typescript")
+                .join("bin")
+                .join("tsc");
+            let compile_ok = Command::new("node")
+                .arg(tsc.to_str().unwrap())
+                .arg(tslib.join("scanner.ts").to_str().unwrap())
+                .args([
+                    "--module",
+                    "esnext",
+                    "--target",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--allowJs",
+                    "false",
+                    "--skipLibCheck",
+                    "--noEmitOnError",
+                    "--outDir",
+                    ts_build.to_str().unwrap(),
+                ])
+                .status()
+                .is_ok_and(|s| s.success());
+            let emitted = ts_build.join("scanner.js");
+            if !compile_ok || !emitted.is_file() {
+                panic!(
+                    "tsfrontend compile failed: `node {} {}` did not emit {} — fix src/tslib/scanner.ts",
+                    tsc.display(),
+                    tslib.join("scanner.ts").display(),
+                    emitted.display()
+                );
+            }
+            let _ = std::fs::copy(&emitted, stage_ts.join("scanner.mjs"));
             println!(
                 "cargo:rustc-env=APG_FRONTEND_TS={}",
                 stage_ts.join("scanner.mjs").display()

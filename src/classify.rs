@@ -75,6 +75,20 @@ pub fn classify_code_type(
     builtin_code_type(path, language).to_string()
 }
 
+/// True when a JavaScript file's FILENAME carries a genuine bundle marker:
+/// `*.min.js`, `*.bundle.js`, `*.min.mjs`, `*.bundle.mjs`, `*.min.cjs`,
+/// `*.bundle.cjs` (and the `.jsx` analogues). This is extension-keyed, not
+/// stream-id-keyed, so it fires under both the `ts` arm (a mixed/TS-detected
+/// repo scans its JS under `ts`) and the `js` arm. A bare `.cjs` suffix is NEVER
+/// a marker — only the explicit `min`/`bundle` infix.
+fn js_bundle_filename(filename_lower: &str) -> bool {
+    [".js", ".jsx", ".mjs", ".cjs"].iter().any(|ext| {
+        filename_lower
+            .strip_suffix(ext)
+            .is_some_and(|stem| stem.ends_with(".min") || stem.ends_with(".bundle"))
+    })
+}
+
 fn builtin_code_type(path: &str, language: &str) -> &'static str {
     let segments: Vec<&str> = path.split('/').collect();
     let has_seg = |names: &[&str]| segments.iter().any(|s| names.contains(s));
@@ -152,7 +166,38 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             {
                 return "test";
             }
-            if has_seg(&["gen", "generated", "dist", "build", "out"]) {
+            // Extension-keyed JS bundle rule (fires here for a TS-detected repo's
+            // incidental JavaScript too: `src/app.min.js` under the `ts` id).
+            if js_bundle_filename(&filename_lower)
+                || has_seg(&["gen", "generated", "dist", "build", "out"])
+            {
+                return "generated";
+            }
+            if has_seg(&["vendor"]) {
+                return "external";
+            }
+            "src"
+        }
+        "js" => {
+            if filename_lower.ends_with("_test.js")
+                || filename_lower.ends_with("_test.jsx")
+                || filename_lower.ends_with("_test.mjs")
+                || filename_lower.ends_with("_test.cjs")
+                || filename_lower.ends_with(".test.js")
+                || filename_lower.ends_with(".test.jsx")
+                || filename_lower.ends_with(".test.mjs")
+                || filename_lower.ends_with(".test.cjs")
+                || filename_lower.ends_with(".spec.js")
+                || filename_lower.ends_with(".spec.jsx")
+                || filename_lower.ends_with(".spec.mjs")
+                || filename_lower.ends_with(".spec.cjs")
+                || has_seg(&["test", "tests", "__tests__"])
+            {
+                return "test";
+            }
+            if js_bundle_filename(&filename_lower)
+                || has_seg(&["gen", "generated", "dist", "build", "out"])
+            {
                 return "generated";
             }
             if has_seg(&["vendor"]) {
