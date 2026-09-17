@@ -21,11 +21,6 @@
       "kind": "contains",
       "target": "solution.component.agent-prompt-text",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "apg.main",
-      "properties": {}
     }
   ],
   "in": [
