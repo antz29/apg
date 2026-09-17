@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.mdfrontend",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.mdfrontend.main",
       "properties": {}
     }
