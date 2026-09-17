@@ -41,6 +41,11 @@
       "kind": "implemented-by",
       "target": "apg.ingest.ingest",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.ingest.render_function_fqns",
+      "properties": {}
     }
   ],
   "in": [
