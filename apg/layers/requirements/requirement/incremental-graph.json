@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "incremental-graph",
-  "body": "Feature incremental-graph (win C). At netbeans scale (a motivating case, not an acceptance workload) the DB build (parquet + copy_from + schema) is no longer negligible — it is a multi-minute floor; even the recorded jgrapht full scan spends ~2s of its ~16s wall in DB load. The ingestor must seed/splice the DB from the previous one instead of rebuilding it from scratch, while allowing a global projection pass over cached + re-emitted facts that never requires re-running the frontends. Acceptance is measured on jgrapht (requirements.requirement.incremental-acceptance-targets); this is the part that must not be skipped on huge graphs.",
+  "body": "Feature incremental-graph (win C). On very large graphs the DB build (parquet + copy_from + schema) is no longer negligible — it can dominate the scan. The ingestor must seed/splice the DB from the previous one instead of rebuilding it from scratch, while allowing a global projection pass over cached + re-emitted facts that never requires re-running the frontends. A localized re-scan must not perform a full DB rebuild. Acceptance is self-contained (requirements.requirement.incremental-acceptance-targets), measured on synthetic scratch fixtures; this is the part that must not be skipped on huge graphs.",
   "properties": {
     "feature": "incremental-graph"
   },
