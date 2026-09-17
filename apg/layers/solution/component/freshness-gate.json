@@ -17,11 +17,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.git.reanchor_scan_meta",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.git.recorded_scan",
       "properties": {}
     },
