@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.plan_cmd.write_through",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.layers.write_project",
+      "properties": {}
     }
   ],
   "in": [
