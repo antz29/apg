@@ -396,6 +396,9 @@ fn available_languages() -> Vec<String> {
         if dir.join("csharpfrontend").exists() || dir.join("csharpfrontend.exe").exists() {
             langs.push("csharp".into());
         }
+        if dir.join("mdfrontend").exists() {
+            langs.push("md".into());
+        }
         if dir.join("java-classes").is_dir() {
             langs.push("java".into());
         }
@@ -432,6 +435,9 @@ fn frontend_cmd(language: &str) -> Option<String> {
             "rust" if dir.join("rustfrontend").exists() => {
                 return Some(dir.join("rustfrontend").display().to_string());
             }
+            "md" if dir.join("mdfrontend").exists() => {
+                return Some(dir.join("mdfrontend").display().to_string());
+            }
             "csharp"
                 if dir.join("csharpfrontend").exists()
                     || dir.join("csharpfrontend.exe").exists() =>
@@ -463,6 +469,7 @@ fn frontend_cmd(language: &str) -> Option<String> {
         "cpp" => option_env!("APG_FRONTEND_CPP"),
         "go" => option_env!("APG_FRONTEND_GO"),
         "rust" => option_env!("APG_FRONTEND_RUST"),
+        "md" => option_env!("APG_FRONTEND_MD"),
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
         // One built artifact, two ids: `js`-only repos run the same unified
@@ -473,7 +480,31 @@ fn frontend_cmd(language: &str) -> Option<String> {
     baked.map(|s| s.to_string())
 }
 
-fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32) -> bool {
+/// The default detector skip set: directory names the language walk never
+/// descends into, on top of the walker's unconditional hidden dot-name rule.
+/// Preserves the detector's long-standing behaviour (`target` +
+/// `node_modules`).
+const DEFAULT_DETECTOR_SKIP: &[&str] = &["target", "node_modules"];
+
+/// The markdown detector's skip set — `domain.entity.scan-exclusion`'s
+/// `target`/`vendor`/`node_modules`/`.worktrees`. `.worktrees` is already
+/// covered by the walker's hidden dot-name rule; it is listed for fidelity
+/// with the spec set. Markdown under an excluded tree must not trigger md
+/// detection.
+const MD_DETECTOR_SKIP: &[&str] = &["target", "vendor", "node_modules", ".worktrees"];
+
+/// True when `dir` holds, within `depth` directory levels, a file whose
+/// extension is one of `exts` (each with its leading dot).
+///
+/// `skip_set` names directories never descended into. Each entry is matched
+/// against a directory's file name: a literal entry (`target`, `vendor`, …)
+/// matches that exact name, and an entry containing glob metacharacters
+/// (`*.egg-info`) is matched as a glob against the name. The walker's
+/// unconditional hidden dot-name rule (`name.starts_with('.')`) stays in force
+/// in addition to the set, so callers pass only the non-hidden exclusions they
+/// need. The exclusion set — not `depth` — is the safety bound: an excluded
+/// dependency/generated tree is never entered.
+fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32, skip_set: &[&str]) -> bool {
     if depth == 0 {
         return false;
     }
@@ -484,11 +515,14 @@ fn has_extension(dir: &std::path::Path, exts: &[&str], depth: u32) -> bool {
     for entry in entries.flatten() {
         let p = entry.path();
         let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name.starts_with('.') || name == "target" || name == "node_modules" {
+        if name.starts_with('.') {
             continue;
         }
         if p.is_dir() {
-            if has_extension(&p, exts, depth - 1) {
+            if skip_set.iter().any(|s| classify::matches_glob(s, name)) {
+                continue;
+            }
+            if has_extension(&p, exts, depth - 1, skip_set) {
                 return true;
             }
         } else if p
@@ -513,18 +547,36 @@ fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec<Str
         .map(|e| format!(".{e}"))
         .collect();
     let cpp_exts: Vec<&str> = cpp_dotted.iter().map(String::as_str).collect();
-    let candidates: Vec<(&str, &[&str])> = vec![
-        ("java", &[".java"] as &[&str]),
-        ("go", &[".go"]),
-        ("cpp", cpp_exts.as_slice()),
-        ("rust", &[".rs"]),
-        ("ts", &[".ts", ".tsx", ".mts", ".cts"]),
-        ("js", &[".js", ".jsx", ".mjs", ".cjs"]),
-        ("csharp", &[".cs", ".csx"]),
+    // (language, accepted extensions, walk depth, skip set). Every candidate
+    // shares the ONE generalised `has_extension` walker; each names only the
+    // non-hidden directories it must not descend into (`skip_set`), and the
+    // depth bound is explicit per candidate rather than a shared magic literal.
+    let candidates: Vec<(&str, &[&str], u32, &[&str])> = vec![
+        ("java", &[".java"] as &[&str], 5, DEFAULT_DETECTOR_SKIP),
+        ("go", &[".go"], 5, DEFAULT_DETECTOR_SKIP),
+        ("cpp", cpp_exts.as_slice(), 5, DEFAULT_DETECTOR_SKIP),
+        ("rust", &[".rs"], 5, DEFAULT_DETECTOR_SKIP),
+        (
+            "ts",
+            &[".ts", ".tsx", ".mts", ".cts"],
+            5,
+            DEFAULT_DETECTOR_SKIP,
+        ),
+        (
+            "js",
+            &[".js", ".jsx", ".mjs", ".cjs"],
+            5,
+            DEFAULT_DETECTOR_SKIP,
+        ),
+        ("csharp", &[".cs", ".csx"], 5, DEFAULT_DETECTOR_SKIP),
+        // Markdown's skip set is `domain.entity.scan-exclusion`
+        // (task-8): a markdown-only file under `vendor/` (or another excluded
+        // tree) must not trigger md detection.
+        ("md", &[".md", ".markdown"], 5, MD_DETECTOR_SKIP),
     ];
     let mut out = Vec::new();
-    for (lang, exts) in &candidates {
-        if available.iter().any(|l| l == lang) && has_extension(dir, exts, 5) {
+    for (lang, exts, depth, skip) in &candidates {
+        if available.iter().any(|l| l == lang) && has_extension(dir, exts, *depth, skip) {
             out.push(lang.to_string());
         }
     }
@@ -551,6 +603,7 @@ fn id_prefix_for(language: &str) -> &'static str {
         "ts" => "t",
         "js" => "js",
         "csharp" => "cs",
+        "md" => "md",
         _ => "x",
     }
 }

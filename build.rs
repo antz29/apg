@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
-/// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `csharp`); `0`/`none`/empty skips all.
+/// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `md`);
+/// `0`/`none`/empty skips all.
 /// Unset = build everything (the dev default). The brew `scanner` formula sets
-/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-csharp` formulae build each
+/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp` formulae build each
 /// frontend directly and don't use build.rs for that.
 fn build_frontends() -> Vec<String> {
     match std::env::var("APG_BUILD_FRONTENDS") {
@@ -18,6 +19,7 @@ fn build_frontends() -> Vec<String> {
             "rust".into(),
             "ts".into(),
             "csharp".into(),
+            "md".into(),
         ],
     }
 }
@@ -37,6 +39,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/tslib/scanner.ts");
     println!("cargo:rerun-if-changed=src/csharplib/CsharpFrontend.csproj");
     println!("cargo:rerun-if-changed=src/csharplib/Program.cs");
+    println!("cargo:rerun-if-changed=src/mdlib/Cargo.toml");
+    println!("cargo:rerun-if-changed=src/mdlib/src/main.rs");
 
     // Re-run when the frontend allowlist changes, so toggling
     // `APG_BUILD_FRONTENDS` re-stages (and re-tests) the selected frontends
@@ -233,6 +237,35 @@ fn main() {
             );
             let _ = std::fs::copy(&rustfrontend, stage_dir.join("rustfrontend"));
             languages.push("rust".into());
+        }
+    }
+
+    // --- Markdown frontend (standalone Rust crate, compiled in isolation) ---
+    if enabled(&frontends, "md") {
+        // Compile mdlib with cargo into its own isolated target dir
+        // (src/mdlib/target), matching the outer build profile (debug for fast
+        // dev compile, release for fast scans). mdlib is a standalone,
+        // non-workspace crate exactly like src/rustlib, so its lockfile and
+        // target tree stay independent. On failure, skip md rather than
+        // aborting the whole build (like the other frontends).
+        let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+        let mdfrontend = Path::new("src/mdlib")
+            .join("target")
+            .join(&profile)
+            .join("mdfrontend");
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build")
+            .arg("--manifest-path")
+            .arg("src/mdlib/Cargo.toml");
+        if profile == "release" {
+            cmd.arg("--release");
+        }
+        cmd.arg("--bin").arg("mdfrontend");
+        let md_ok = cmd.status().is_ok_and(|s| s.success()) && mdfrontend.exists();
+        if md_ok {
+            println!("cargo:rustc-env=APG_FRONTEND_MD={}", mdfrontend.display());
+            let _ = std::fs::copy(&mdfrontend, stage_dir.join("mdfrontend"));
+            languages.push("md".into());
         }
     }
 

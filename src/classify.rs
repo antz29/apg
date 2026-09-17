@@ -225,6 +225,19 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "src"
         }
+        // Markdown: ordinary docs stay in the graph classified `docs` (all-code-
+        // included, filter not omission); generated trees (`gen`/`generated`/
+        // `dist`/`build`/`out`) are `generated` and `vendor`/`third_party` are
+        // `external`.
+        "md" => {
+            if has_seg(&["gen", "generated", "dist", "build", "out"]) {
+                return "generated";
+            }
+            if has_seg(&["vendor", "third_party"]) {
+                return "external";
+            }
+            "docs"
+        }
         _ => "src",
     }
 }
