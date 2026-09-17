@@ -46,6 +46,11 @@
       "kind": "implemented-by",
       "target": "cpplib.main",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "Apg.CsharpFrontend.Program.Main",
+      "properties": {}
     }
   ],
   "in": [
