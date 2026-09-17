@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.node_cmd.cmd_node",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.node_cmd.node_add",
+      "properties": {}
     }
   ],
   "in": [
