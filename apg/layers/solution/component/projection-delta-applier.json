@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.artifacts.ArtifactDb.detach_delete_project",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.layers.write_project",
       "properties": {}
     },
