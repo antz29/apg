@@ -24,6 +24,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.artifacts.reingest_project_with",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.layers.write_project",
+      "properties": {}
     }
   ],
   "in": [
