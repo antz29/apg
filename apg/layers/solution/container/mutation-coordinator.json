@@ -36,6 +36,11 @@
       "kind": "implemented-by",
       "target": "apg.session.Coordinator",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.session.Coordinator.handle_mutation",
+      "properties": {}
     }
   ],
   "in": [
