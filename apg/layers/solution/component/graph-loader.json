@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "apg.load.build_load_files",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.load.copy_from",
+      "properties": {}
     }
   ],
   "in": [
