@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.git.recorded_scan",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.schema.Record.ScanMeta",
       "properties": {}
     },
