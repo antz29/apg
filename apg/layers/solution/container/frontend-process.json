@@ -46,6 +46,11 @@
       "kind": "implemented-by",
       "target": "CallGraphBuilder.main",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "build_script_build.main",
+      "properties": {}
     }
   ],
   "in": [
