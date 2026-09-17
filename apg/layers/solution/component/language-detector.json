@@ -19,11 +19,6 @@
       "kind": "implemented-by",
       "target": "apg.has_extension",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "apg.id_prefix_for",
-      "properties": {}
     }
   ],
   "in": [
