@@ -56,6 +56,13 @@ pub enum NodeKind {
     Function,
     File,
     UnresolvedTarget,
+    /// The language root of one scanned frontend stream (the `lang_switch`
+    /// id — `rust`, `py`, `go`, …). Derived ingestor-side, one per stream:
+    /// every module FQN is rooted `<language-id>.<module-identity>` and the
+    /// Language node is attached to each of its modules via
+    /// `Language -Contains-> Module`. Carries no location, `code_type`, or
+    /// category (PHASE_09 language rooting).
+    Language,
     Requirement,
     Note,
     Feedback,

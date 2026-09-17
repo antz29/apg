@@ -76,6 +76,13 @@ Direction: "make a new frontend, validate against the latest `carto` binary."
   - Decide the *bump policy* (what's additive=minor vs breaking=major) as the wall the
     range bounces off: additive record/edge types + optional fields = patch/minor;
     field rename / FQN-rule change / removed type / semantic change = major.
+  - **Applied FQN-rule change (scanner-optimisation PHASE_09 — language rooting):** code
+    FQNs are now language-rooted — the ingestor materialises one `Language` node per
+    `lang_switch` stream (its FQN is the bare language id, e.g. `rust`) and renders a module
+    `<language-id>.<module-identity>`, with symbols inheriting the root through
+    `parent.name`. This changes the observable FQN of every module and symbol, so it is a
+    **major** schema change under the policy above (not additive); consumers keyed on bare
+    module/symbol FQNs must migrate to the rooted form.
   - Likely still *restrict what frontends may declare* (reject bare `*`/`>1` as sole
     bound) even though the parser can match anything.
   - Keep the **schema revision** and the **`carto` CLI semver** conceptually distinct.

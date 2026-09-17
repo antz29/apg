@@ -158,21 +158,29 @@ A change-set is a **project** = a git branch + worktree:
 
 | Label             | Properties                          | Description                              |
 |-------------------|--------------------------------------|------------------------------------------|
-| Module            | fqn (STRING PK)                     | A package (Java), module (Go/C++/Rust), C# namespace, or npm package (TS) — no path/location |
-| File              | fqn (STRING PK), start_line, end_line, code_type | A source file; `fqn` is the absolute path, lines are `1..total` |
+| Language          | fqn (STRING PK)                     | The root of one scanned frontend stream — the bare `lang_switch` id (`rust`, `py`, `go`, …); `Language —Contains→ Module` |
+| Module            | fqn (STRING PK)                     | A package (Java), module (Go/C++/Rust), C# namespace, or npm package (TS), rendered `<language-id>.<module-identity>` — no path/location |
+| File              | fqn (STRING PK), start_line, end_line, code_type | A source file; `fqn` is the absolute path, lines are `1..total` (not language-rooted) |
 | Struct            | fqn (STRING PK), path, start, `end`, start_line, end_line, code_type | A class, struct, interface, or enum      |
 | Function          | fqn (STRING PK), path, start, `end`, start_line, end_line, code_type | A function, method, or constructor       |
-| UnresolvedTarget  | fqn (STRING PK)                     | A call/type ref the scanner couldn't resolve to a project symbol |
+| UnresolvedTarget  | fqn (STRING PK)                     | A call/type ref the scanner couldn't resolve to a project symbol (not language-rooted) |
 
-All FQNs are fully qualified and language-shaped: `org.jgrapht.Graph.addVertex` (Java),
-`github.com/org/repo.Pkg.Method` (Go), `ns.Class.method` (C++), `crate.mod.Type.method`
-(Rust). TypeScript FQNs are npm-package- and file-prefixed (each ES module file is its
-own namespace): `@co/ui.src.components.Button.Button.onClick` for a package `@co/ui`,
-file `src/components/Button.tsx`, class `Button`, method `onClick`; the doubled `Button.Button`
-is package.`relpath`.class, and top-level functions are `@co/ui.src.app.go`.
-Overloaded functions and constructors carry their erased parameter types: `pkg.Calc.add(int,int)`
-vs `pkg.Calc.add(java.lang.String,java.lang.String)`, `pkg.Cls.<init>(java.lang.String)`;
-Go `init` functions are `pkg.init#<file.go>`. `start` and `end` are 0-based byte offsets; every located node also has `start_line` and `end_line` (**1-based inclusive line numbers**) — use those to join against diffs and hunks or to slice the file's source lines.
+All FQNs are fully qualified and **language-rooted**: a module renders
+`<language-id>.<module-identity>` (the `Language` node's own FQN is the bare id,
+e.g. `rust`) and symbols inherit the root. So `java.org.jgrapht.Graph.addVertex`
+(Java), `go.github.com/org/repo.Pkg.Method` (Go), `cpp.ns.Class.method` (C++),
+`rust.crate.mod.Type.method` (Rust). TypeScript FQNs are npm-package- and
+file-prefixed (each ES module file is its own namespace):
+`ts.@co/ui.src.components.Button.Button.onClick` for package `@co/ui`, file
+`src/components/Button.tsx`, class `Button`, method `onClick`; the doubled
+`Button.Button` is `<lang>.`package.`relpath`.class, and top-level functions are
+`ts.@co/ui.src.app.go`. Overloaded functions and constructors carry their erased
+parameter types: `java.pkg.Calc.add(int,int)` vs
+`java.pkg.Calc.add(java.lang.String,java.lang.String)`,
+`java.pkg.Cls.<init>(java.lang.String)`; Go `init` functions are
+`go.pkg.init#<file.go>`. Because the language roots are disjoint, a
+cross-language FQN collision (`rust.apg` vs `py.apg`) is impossible by
+construction. `start` and `end` are 0-based byte offsets; every located node also has `start_line` and `end_line` (**1-based inclusive line numbers**) — use those to join against diffs and hunks or to slice the file's source lines.
 
 ### Code edge types
 
@@ -234,7 +242,7 @@ at a planned FQN replaces it.
 - **Java, Go, Rust, TypeScript, and C# edges are exact** (compiler / rust-analyzer / TypeScript / Roslyn type-checker resolution). A `Calls` edge always points at the real declared method.
 - **C++ edges are heuristic** (tree-sitter). Unresolvable refs become `UnresolvedCall`/`UnresolvedUse`, never guessed FQNs.
 - **All code is included** (tests, generated, vendored). Filter by `code_type` instead: `MATCH (n) WHERE n.code_type = 'test'` (or `'generated'`, `'external'`, etc.; default `'src'`). An `apg/config.json` config file can override the classification rules.
-- **Multi-module repos** (Go workspaces, C++ monorepos, Cargo workspaces, npm workspaces): each module is a top-level `Module` node; FQNs are module-prefixed (`modA.util.Foo` vs `modB.util.Foo`, `@co/ui.src.Button` vs `@co/web.src.Button`). Pass `--module dir1 --module dir2` to `apg scan` to restrict scanning.
+- **Multi-module repos** (Go workspaces, C++ monorepos, Cargo workspaces, npm workspaces): each module is a top-level `Module` node; FQNs are language-rooted and module-prefixed (`rust.modA.util.Foo` vs `rust.modB.util.Foo`, `ts.@co/ui.src.Button` vs `ts.@co/web.src.Button`). Pass `--module dir1 --module dir2` to `apg scan` to restrict scanning.
 - **Multi-language repos** (e.g. a Go backend + TS frontend): `apg scan` auto-detects every language present and merges their graphs into one database — Go and TS modules, functions, and edges all live in the same merged graph.
 - To see what the scanner couldn't resolve: `MATCH (f)-[:UnresolvedCall]->(u) RETURN u.fqn, count(f) ORDER BY 2 DESC LIMIT 20`
 
@@ -249,13 +257,13 @@ up empty.
 | Question | Tool |
 |---|---|
 | Find a symbol from part of its name | `apg_find_symbol {name: "addVertex"}` (add `kind: "Function"`/`"Struct"`/`"File"` to narrow) |
-| List the methods/functions of a type | `apg_methods {fqn: "org.jgrapht.Graph"}` |
+| List the methods/functions of a type | `apg_methods {fqn: "java.org.jgrapht.Graph"}` |
 | Show a type + its nested types | `apg_struct {fqn: "..."}` |
 | Who calls a function? | `apg_callers {fqn: "..."}` |
 | What does a function call? | `apg_callees {fqn: "..."}` |
 | What types does a unit use / what uses a type? | `apg_uses {fqn: "...", direction: "out"/"in"}` |
-| List the files in a module/package | `apg_module_files {fqn: "org.jgrapht.alg"}` |
-| List all types under a module | `apg_module_structs {fqn: "org.jgrapht.alg"}` |
+| List the files in a module/package | `apg_module_files {fqn: "java.org.jgrapht.alg"}` |
+| List all types under a module | `apg_module_structs {fqn: "java.org.jgrapht.alg"}` |
 | List every module | `apg_modules` (add `prefix` to filter) |
 | What's in a file? | `apg_file_units {path: "/abs/src/Graph.java"}` |
 | Map a path to file + owning module | `apg_file_path {path: "/abs/src/Graph.java"}` |

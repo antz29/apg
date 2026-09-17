@@ -851,6 +851,14 @@ pub struct ModuleScaffolding {
     /// The scaffolding's `Module -> Module` `contains` edges `(from, to)`
     /// (sorted, deduped).
     pub edges: Vec<(String, String)>,
+    /// The `Language` node FQNs this scaffolding roots (PHASE_09 language
+    /// rooting) — the bare scan language ids. `#[serde(default)]` so a unit
+    /// written before the field existed decodes as empty.
+    #[serde(default)]
+    pub languages: Vec<String>,
+    /// The `Language -> Module` `contains` edges `(from, to)` (sorted, deduped).
+    #[serde(default)]
+    pub language_edges: Vec<(String, String)>,
 }
 
 impl ModuleScaffolding {
@@ -942,12 +950,30 @@ impl ModuleScaffolding {
                     entry.edges.push((a.clone(), b.clone()));
                 }
             }
+            // PHASE_09: the component's `Language` root(s) and the
+            // `Language -> Module` edges, so a skipped language's root survives
+            // the incremental assembly.
+            for (a, b) in &graph.contains {
+                if component.contains(b)
+                    && graph
+                        .nodes
+                        .get(a)
+                        .is_some_and(|n| n.kind == NodeKind::Language)
+                {
+                    entry.languages.push(a.clone());
+                    entry.language_edges.push((a.clone(), b.clone()));
+                }
+            }
         }
         for scaffolding in out.values_mut() {
             scaffolding.modules.sort();
             scaffolding.modules.dedup();
             scaffolding.edges.sort();
             scaffolding.edges.dedup();
+            scaffolding.languages.sort();
+            scaffolding.languages.dedup();
+            scaffolding.language_edges.sort();
+            scaffolding.language_edges.dedup();
         }
         out
     }

@@ -9,7 +9,7 @@ export default tool({
       .string()
       .optional()
       .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
-    fqn: tool.schema.string().describe("Target function FQN, e.g. org.jgrapht.Graph.addVertex (required)"),
+    fqn: tool.schema.string().describe("Target function FQN (language-rooted), e.g. java.org.jgrapht.Graph.addVertex (required)"),
     codeType: tool.schema
       .string()
       .optional()

@@ -473,18 +473,30 @@ Edge records:
 
 ### FQN convention (rendered ingestor-side, SPEC §4)
 
+Every code FQN is **language-rooted** (PHASE_09): the ingestor materialises one
+`Language` node per `lang_switch` stream (its FQN is the bare language id, e.g.
+`rust`) and roots every module FQN under it. `<language-id>` is the stream's
+declared id verbatim (`go`/`java`/`cpp`/`rust`/`ts`/`js`/`csharp`/`py`/`md`).
+
 | kind | FQN |
 |---|---|
-| module | `fqn` verbatim |
-| struct | `parent.name` |
+| language root | `<language-id>` — the bare `lang_switch` id (e.g. `rust`); `Language —Contains→ Module` |
+| module | `<language-id>.<module-identity>` — the frontend emits the identity verbatim, the ingestor roots it (`rust.apg`, `py.pkg.sub`, `ts.@co/ui`, `md.<absolute-path>`) |
+| struct | `parent.name` — `parent` is the rooted module/scope FQN |
 | function (unique in scope) | `parent.name` |
 | function (overloaded) | `parent.name(T1,T2,...)` — erased, comma-separated params |
 | Go `init` | `parent.init#<file-basename>` |
-| TypeScript | `pkg.relpath.name` — npm package + dot-path prefix per ES-module file (`@co/ui.src.components.Button.Button`); TS getters/setters land as overloads (`diameter()` / `diameter(number)`) |
+| TypeScript | `<language-id>.<pkg.relpath.name>` — the rooted npm package + dot-path prefix per ES-module file (`ts.@co/ui.src.components.Button.Button`); TS getters/setters land as overloads (`diameter()` / `diameter(number)`) |
+
+A `File` FQN is its absolute path and an `UnresolvedTarget` FQN is a foreign
+symbol name — neither is language-rooted.
+
+Because the language roots are disjoint, a cross-language module/symbol FQN
+collision is impossible by construction (`rust.apg` and `py.apg` both survive).
 
 Overloads are grouped by `(parent, name)`; any group of size > 1 renders every
 member with the `(params)` suffix. The ingestor fails loudly (panics) on any
-residual FQN collision rather than silently overwriting.
+residual same-kind FQN collision rather than silently overwriting.
 
 ## LadybugDB Tooling
 

@@ -1,8 +1,10 @@
 //! Two-pass ingestion of unified-schema records into a [`Graph`], including the
 //! canonical FQN renderer (SPEC §4).
 //!
-//! Pass 1 buffers node records and renders canonical FQNs (module verbatim,
-//! struct `parent.name`, function `parent.name` / `parent.name(T1,T2)`, Go
+//! Pass 1 buffers node records and renders canonical FQNs (module
+//! `<language-id>.<module-identity>` — the frontend emits the identity verbatim
+//! and the ingestor roots it under the `lang_switch` id, PHASE_09 — struct
+//! `parent.name`, function `parent.name` / `parent.name(T1,T2)`, Go
 //! `init` → `parent.init#<file-basename>`), building both `id → FQN` and
 //! `FQN → Node` maps. Pass 2 resolves edge endpoints against those maps.
 //!
@@ -89,6 +91,87 @@ fn file_basename(file: &str) -> String {
         .unwrap_or_else(|| file.to_string())
 }
 
+/// Renders a module's canonical FQN by rooting its frontend-emitted dotted
+/// identity under the `lang_switch` language id (PHASE_09 language rooting):
+///
+/// ```text
+/// root_module_fqn("rust", "apg.ingest") -> "rust.apg.ingest"
+/// root_module_fqn("py",   "pkg.sub")    -> "py.pkg.sub"
+/// root_module_fqn("ts",   "@co/ui.src") -> "ts.@co/ui.src"
+/// root_module_fqn("md",   "/abs/docs")  -> "md./abs/docs"
+/// ```
+///
+/// The frontends emit the module identity VERBATIM and UNROOTED (a
+/// frontend-baked root would double-root once the ingestor applies it); the
+/// ingestor applies the `lang_switch` id here. Rooting is what makes two
+/// languages that both define a module identity `apg` distinct (`rust.apg` vs
+/// `py.apg`), so a cross-language module-module FQN collision is impossible by
+/// construction. Every declaration's scope parent begins with a module identity,
+/// so `parent.name` inherits the root without a second transform.
+pub fn root_module_fqn(language: &str, identity: &str) -> String {
+    format!("{language}.{identity}")
+}
+
+/// Applies [`root_module_fqn`] to a declaration's scope parent (or a module
+/// identity), leaving an EMPTY parent empty — a declaration with no scope is a
+/// scanner anomaly and must not become the bare `<language>.` root.
+fn rooted_scope(language: &str, parent: &str) -> String {
+    if parent.is_empty() {
+        String::new()
+    } else {
+        root_module_fqn(language, parent)
+    }
+}
+
+/// Roots a `contains` endpoint iff it is a known module identity (the frontends
+/// emit `Module -> Module` containment with the raw identity endpoints, while
+/// declaration containment uses opaque ids this must never rewrite). Module
+/// records for both endpoints are emitted before their containment edge (the
+/// frontends emit global module scaffolding first), so membership is exact.
+fn root_module_endpoint(
+    language: &str,
+    endpoint: &str,
+    module_identities: &HashMap<String, HashSet<String>>,
+) -> String {
+    match module_identities.get(language) {
+        Some(ids) if ids.contains(endpoint) => root_module_fqn(language, endpoint),
+        _ => endpoint.to_string(),
+    }
+}
+
+/// Roots a scanner-fact edge endpoint that names a **project symbol**, not a
+/// module: a cross-stream (`--targets`) edge carries the target's canonical FQN
+/// instead of an opaque id (phase-02 task-9), and the frontend emits that FQN
+/// UNROOTED. The endpoint is rooted by its longest module-identity prefix
+/// (walked right-to-left over `.`/`/` boundaries, so a nested module wins over
+/// its parent); an opaque id or a foreign name has no such prefix and is left
+/// unchanged. Only the CURRENT stream's language identities are consulted, so
+/// two languages that both define `apg` can never cross.
+fn root_edge_endpoint(
+    language: &str,
+    endpoint: &str,
+    module_identities: &HashMap<String, HashSet<String>>,
+) -> String {
+    let Some(identities) = module_identities.get(language) else {
+        return endpoint.to_string();
+    };
+    if identities.contains(endpoint) {
+        return root_module_fqn(language, endpoint);
+    }
+    let bytes = endpoint.as_bytes();
+    let mut sep = bytes.len();
+    while sep > 0 {
+        sep -= 1;
+        if (bytes[sep] == b'.' || bytes[sep] == b'/')
+            && sep > 0
+            && identities.contains(&endpoint[..sep])
+        {
+            return root_module_fqn(language, endpoint);
+        }
+    }
+    endpoint.to_string()
+}
+
 /// `None` for empty strings, so spec/plan node fields that are absent stay
 /// absent in the DB (queryable with `IS NULL`) instead of storing `""`.
 fn opt(s: String) -> Option<String> {
@@ -118,6 +201,12 @@ fn claim(seen: &mut HashMap<String, (String, NodeKind)>, id: &str, fqn: &str, ki
 }
 
 /// Renders the FQN of every function declaration (SPEC §4).
+///
+/// PHASE_09 language rooting: each `FuncDecl.parent` is already the ROOTED
+/// scope FQN (the caller applies [`root_module_fqn`] to the frontend's raw
+/// parent before buffering — see `ingest_records`), so `parent.name` inherits
+/// the language root for every declaration whose parent is a module (e.g.
+/// `rust.apg.ingest.foo`). The suffix/shape rules below are unchanged.
 ///
 /// Declarations are grouped by `(parent, name)`: a singleton group renders
 /// `parent.name`, an overloaded group renders `parent.name(T1,T2,...)` for every
@@ -358,6 +447,18 @@ fn splice_cached(graph: &mut Graph, reuse: &Reuse) {
         for (from, to) in &scaffolding.edges {
             graph.contains.insert((from.clone(), to.clone()));
         }
+        // PHASE_09: the skipped language's own `Language` root and its
+        // `Language -> Module` edges are global scaffolding too — without them
+        // the assembled graph would lack the language root a full rebuild has.
+        for l in &scaffolding.languages {
+            graph.nodes.entry(l.clone()).or_insert_with(|| Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            });
+        }
+        for (from, to) in &scaffolding.language_edges {
+            graph.contains.insert((from.clone(), to.clone()));
+        }
     }
 
     // Pass 3: every unit's edges, now that ALL endpoints exist.
@@ -488,11 +589,21 @@ fn ingest_records(
     // File nodes keyed by absolute path -> their parent module FQN.
     let mut files: HashMap<String, String> = HashMap::new();
     // Modules are buffered (not claimed/inserted immediately): a package and a
-    // type may legally share a name in the JVM (`pkg.A` the package and `pkg.A`
-    // the class, e.g. NetBeans' QA test-data project layout), and flat FQN space
-    // can't represent both. Modules are inserted only after every struct and
-    // function FQN is claimed, so a colliding module yields to the type.
+    // type may legally share a name in the JVM (`pkg.A` the package and
+    // `pkg.A` the class, e.g. NetBeans' QA test-data project layout), and flat
+    // FQN space can't represent both. Modules are inserted only after every
+    // struct and function FQN is claimed, so a colliding module yields to the
+    // type.
     let mut modules: Vec<String> = Vec::new();
+    // The raw (unrooted) module identities seen in the stream, PER LANGUAGE, so
+    // a `contains` endpoint can be told from an opaque declaration id and a
+    // cross-stream canonical FQN can be rooted by its module prefix.
+    let mut module_identities: HashMap<String, HashSet<String>> = HashMap::new();
+    // Rooted module FQN -> its language, for the `Language -Contains-> Module`
+    // attachment after the module nodes land.
+    let mut module_language: HashMap<String, String> = HashMap::new();
+    // Every language stream seen, in first-seen order (one Language node each).
+    let mut languages: Vec<String> = Vec::new();
     // Current language: starts at the scan's language and switches when a
     // `lang_switch` record (injected by `apg scan` between frontend streams of
     // a multi-language scan) appears. Drives code_type classification and FQN
@@ -520,12 +631,24 @@ fn ingest_records(
         for r in records {
             match r {
                 Record::Module { fqn } => {
-                    if is_blacklisted(&fqn, opts.blacklist) {
+                    // PHASE_09 language rooting: the frontend emits the module
+                    // identity verbatim; the ingestor roots it under the stream's
+                    // `lang_switch` id.
+                    let rooted = root_module_fqn(&lang, &fqn);
+                    if is_blacklisted(&rooted, opts.blacklist) {
                         skipped += 1;
                         continue;
                     }
-                    if !modules.contains(&fqn) {
-                        modules.push(fqn);
+                    module_identities
+                        .entry(lang.clone())
+                        .or_default()
+                        .insert(fqn.clone());
+                    module_language.insert(rooted.clone(), lang.clone());
+                    if !languages.contains(&lang) {
+                        languages.push(lang.clone());
+                    }
+                    if !modules.contains(&rooted) {
+                        modules.push(rooted);
                     }
                 }
                 Record::Struct {
@@ -538,7 +661,7 @@ fn ingest_records(
                     start_line,
                     end_line,
                 } => {
-                    let fqn = format!("{parent}.{name}");
+                    let fqn = format!("{}.{name}", rooted_scope(&lang, &parent));
                     claim(&mut seen, &id, &fqn, NodeKind::Struct);
                     id_to_fqn.insert(id.clone(), fqn.clone());
                     if is_blacklisted(&fqn, opts.blacklist) {
@@ -577,7 +700,7 @@ fn ingest_records(
                     end_line,
                 } => funcs.push(FuncDecl {
                     id,
-                    parent,
+                    parent: rooted_scope(&lang, &parent),
                     name,
                     params,
                     file,
@@ -595,7 +718,9 @@ fn ingest_records(
                     end_line,
                 } => {
                     // A file belongs to a module; if that module is blacklisted
-                    // the file and everything in it is out of scope too.
+                    // the file and everything in it is out of scope too. The
+                    // parent module FQN is rooted (PHASE_09).
+                    let parent = rooted_scope(&lang, &parent);
                     if is_blacklisted(&parent, opts.blacklist) {
                         skipped += 1;
                         continue;
@@ -904,6 +1029,53 @@ fn ingest_records(
                         ..spec_node(NodeKind::Task)
                     },
                 ),
+                // Rooted code-fact edge endpoints (PHASE_09). `Contains`
+                // endpoints are module identities (root exactly) or opaque ids
+                // (leave). `Calls`/`Uses` endpoints are opaque ids for emitted
+                // units or an UNROOTED canonical FQN for a cross-stream target
+                // (phase-02 task-9) — root the latter by its module prefix.
+                // `Unresolved*` roots only the `from` (the emitted unit); the
+                // `to` is a FOREIGN name, never rooted.
+                Record::Contains { from, to } => write_edge(
+                    &mut sw,
+                    Record::Contains {
+                        from: root_module_endpoint(&lang, &from, &module_identities),
+                        to: root_module_endpoint(&lang, &to, &module_identities),
+                    },
+                ),
+                Record::Calls { from, to } => write_edge(
+                    &mut sw,
+                    Record::Calls {
+                        from: root_edge_endpoint(&lang, &from, &module_identities),
+                        to: root_edge_endpoint(&lang, &to, &module_identities),
+                    },
+                ),
+                Record::Uses { from, to } => write_edge(
+                    &mut sw,
+                    Record::Uses {
+                        from: root_edge_endpoint(&lang, &from, &module_identities),
+                        to: root_edge_endpoint(&lang, &to, &module_identities),
+                    },
+                ),
+                Record::UnresolvedCall {
+                    from,
+                    to,
+                    target_type,
+                } => write_edge(
+                    &mut sw,
+                    Record::UnresolvedCall {
+                        from: root_edge_endpoint(&lang, &from, &module_identities),
+                        to,
+                        target_type,
+                    },
+                ),
+                Record::UnresolvedUse { from, to } => write_edge(
+                    &mut sw,
+                    Record::UnresolvedUse {
+                        from: root_edge_endpoint(&lang, &from, &module_identities),
+                        to,
+                    },
+                ),
                 edge => write_edge(&mut sw, edge),
             }
         }
@@ -982,6 +1154,31 @@ fn ingest_records(
                 ..Node::default()
             },
         );
+    }
+
+    // Pass B4 (PHASE_09 language rooting): materialise exactly ONE `Language`
+    // node per scanned stream (the bare `lang_switch` id) and attach each
+    // surviving rooted module to its language via `Language -Contains-> Module`
+    // exactly once. A shadowed module (already claimed by a type of the same
+    // name) carries no language edge, matching the module node it lost.
+    for language in &languages {
+        insert_node(
+            &mut graph,
+            language.clone(),
+            Node {
+                kind: NodeKind::Language,
+                ..Node::default()
+            },
+        );
+    }
+    for (module, language) in &module_language {
+        if graph
+            .nodes
+            .get(module)
+            .is_some_and(|n| n.kind == NodeKind::Module)
+        {
+            graph.contains.insert((language.clone(), module.clone()));
+        }
     }
 
     // Pass B3: wire the File layer into containment. Neither endpoint needs the
@@ -1318,7 +1515,8 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
 fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
     matches!(
         (a, b),
-        (NodeKind::Module, NodeKind::Module)
+        (NodeKind::Language, NodeKind::Module)
+            | (NodeKind::Module, NodeKind::Module)
             | (NodeKind::Module, NodeKind::File)
             | (NodeKind::File, NodeKind::Struct)
             | (NodeKind::File, NodeKind::Function)
@@ -1708,6 +1906,63 @@ mod tests {
             assert_eq!(seen.len(), decls.len());
         }
 
+        /// Phase-09 task-2 / task-40: `root_module_fqn` roots a frontend's
+        /// verbatim dotted identity under the `lang_switch` language id, for
+        /// every language — Rust's dotted module path, Python's package chain,
+        /// TypeScript's npm-package + dot-path identity, Markdown's absolute
+        /// directory path, Go's module path, and Java's package. Rooting is what
+        /// makes two languages that both define a module identity `apg` distinct
+        /// (`rust.apg` vs `py.apg`).
+        #[test]
+        fn root_module_fqn_roots_every_language_identity() {
+            assert_eq!(root_module_fqn("rust", "apg.ingest"), "rust.apg.ingest");
+            assert_eq!(root_module_fqn("py", "pkg.sub"), "py.pkg.sub");
+            assert_eq!(root_module_fqn("ts", "@co/ui.src"), "ts.@co/ui.src");
+            assert_eq!(root_module_fqn("md", "/abs/docs"), "md./abs/docs");
+            assert_eq!(root_module_fqn("go", "github.com/x/y"), "go.github.com/x/y");
+            assert_eq!(root_module_fqn("java", "com.foo"), "java.com.foo");
+            // An empty parent is left empty — never the bare `<language>.` root.
+            assert_eq!(rooted_scope("rust", ""), "");
+            assert_eq!(rooted_scope("rust", "apg"), "rust.apg");
+        }
+
+        /// Phase-09 task-9 / task-40: a declaration whose parent is a module
+        /// inherits the rooted module FQN through `parent.name` (the renderer
+        /// only concatenates, so rooting the parent at record time roots the
+        /// symbol). The shape rules — singleton, overload suffix, Go
+        /// `init#<file>` — are unchanged.
+        #[test]
+        fn rooted_module_parent_yields_rooted_symbol_fqns() {
+            let decls = [
+                fd("n1", "rust.apg.ingest", "run", &[], "/x/a.rs"),
+                fd("n2", "py.pkg.sub", "helper", &[], "/x/a.py"),
+            ];
+            let m = fqns(&decls);
+            assert_eq!(m["n1"], "rust.apg.ingest.run");
+            assert_eq!(m["n2"], "py.pkg.sub.helper");
+            // Go `init` keeps its file disambiguator under the rooted parent.
+            let inits = [
+                fd("n3", "go.pkg", "init", &[], "/x/a.go"),
+                fd("n4", "go.pkg", "init", &[], "/x/b.go"),
+            ];
+            let mi = fqns(&inits);
+            assert_eq!(mi["n3"], "go.pkg.init#a.go");
+            assert_eq!(mi["n4"], "go.pkg.init#b.go");
+        }
+
+        /// Phase-09 task-40: language rooting removes only the CROSS-language
+        /// collision. A same-kind collision WITHIN one language still fails
+        /// loudly in `claim` — the rooted FQNs are no different: two
+        /// declarations rendering the same rooted FQN panic rather than silently
+        /// overwriting.
+        #[test]
+        #[should_panic(expected = "FQN collision")]
+        fn same_kind_claim_still_panics_under_rooting() {
+            let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
+            claim(&mut seen, "n1", "rust.pkg.F", NodeKind::Function);
+            claim(&mut seen, "n2", "rust.pkg.F", NodeKind::Function);
+        }
+
         /// The edge spool round-trips through an IN-MEMORY `Vec<u8>`/`Cursor`, not a
         /// file: the evidence listed it as "writes and re-reads a spool file", but
         /// its body performs no filesystem I/O, so by the law it is unit (the body
@@ -2040,6 +2295,20 @@ mod tests {
                 file_rec("/proj/src/app.ts", "@co/ui", 30),
                 file_rec("/proj/src/app.test.ts", "@co/ui", 20),
                 srec("t3", "@co/ui.src.app", "Helper", "/proj/src/app.test.ts"),
+                // Two further languages reuse the SAME module identity `apg`:
+                // rooting keeps them distinct (`rust.apg` vs `py.apg`).
+                Record::LangSwitch {
+                    language: "rust".to_string(),
+                },
+                Record::Module {
+                    fqn: "apg".to_string(),
+                },
+                Record::LangSwitch {
+                    language: "py".to_string(),
+                },
+                Record::Module {
+                    fqn: "apg".to_string(),
+                },
             ];
             let (graph, report) = ingest(
                 records,
@@ -2050,15 +2319,60 @@ mod tests {
                 },
             );
             assert_eq!(report.skipped, 0);
-            // Go init is file-disambiguated; the TS function named `init` is not.
-            assert!(graph.nodes.contains_key("github.com/x/y.init#store.go"));
-            assert!(graph.nodes.contains_key("@co/ui.src.app.init"));
+            // PHASE_09: rooting makes a cross-language module-module FQN
+            // collision impossible by construction, so nothing is shadowed.
+            assert_eq!(
+                report.shadowed_modules, 0,
+                "rooting must keep rust.apg and py.apg distinct"
+            );
+            assert_eq!(report.shadowed_functions, 0);
+            // Rooted module FQNs, one per language.
+            for m in ["go.github.com/x/y", "ts.@co/ui", "rust.apg", "py.apg"] {
+                assert_eq!(
+                    graph.nodes.get(m).map(|n| n.kind),
+                    Some(NodeKind::Module),
+                    "module `{m}` must be rooted under its language"
+                );
+            }
+            // One Language node per `lang_switch` stream, bare id.
+            for l in ["go", "ts", "rust", "py"] {
+                assert_eq!(
+                    graph.nodes.get(l).map(|n| n.kind),
+                    Some(NodeKind::Language),
+                    "language root `{l}` must be materialised"
+                );
+            }
+            // `Language -Contains-> Module` exactly once per module.
+            for (lang, m) in [
+                ("go", "go.github.com/x/y"),
+                ("ts", "ts.@co/ui"),
+                ("rust", "rust.apg"),
+                ("py", "py.apg"),
+            ] {
+                assert!(
+                    graph.contains.contains(&(lang.to_string(), m.to_string())),
+                    "Language `{lang}` must contain `{m}`"
+                );
+            }
+            // Rooted symbols inherit through `parent.name`; Go init is
+            // file-disambiguated, the TS function named `init` is not.
+            assert!(graph.nodes.contains_key("go.github.com/x/y.Store"));
+            assert!(graph.nodes.contains_key("go.github.com/x/y.init#store.go"));
+            assert!(graph.nodes.contains_key("ts.@co/ui.src.app.App"));
+            assert!(graph.nodes.contains_key("ts.@co/ui.src.app.init"));
             // code_type is per-language: the Go store is src, the .test.ts file
-            // (ts test rule) and its struct are test.
+            // (ts test rule) and its struct are test. File FQNs are paths.
             assert_eq!(graph.nodes["/abs/store.go"].code_type, "src");
             assert_eq!(graph.nodes["/proj/src/app.ts"].code_type, "src");
             assert_eq!(graph.nodes["/proj/src/app.test.ts"].code_type, "test");
-            assert_eq!(graph.nodes["@co/ui.src.app.Helper"].code_type, "test");
+            assert_eq!(graph.nodes["ts.@co/ui.src.app.Helper"].code_type, "test");
+            // Module→File containment is rooted too.
+            assert!(
+                graph
+                    .contains
+                    .contains(&("go.github.com/x/y".to_string(), "/abs/store.go".to_string())),
+                "the rooted module must contain its file"
+            );
         }
 
         #[test]

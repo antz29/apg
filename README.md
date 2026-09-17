@@ -273,15 +273,22 @@ file scope directly: `MATCH (f:File {fqn:'...'})-[:Contains]->(n) RETURN n.fqn`
 lists a file's units, and every node's `start_line`/`end_line` joins against
 diff hunks (which are line-based).
 
-FQN convention: `parent.name` for structs and unique functions;
+FQN convention: every code FQN is **language-rooted** — the ingestor materialises
+one `Language` node per `lang_switch` stream (its FQN is the bare language id,
+e.g. `rust`) and renders a module as `<language-id>.<module-identity>`, so
+symbols inherit the root: `parent.name` for structs and unique functions;
 `parent.name(T1,T2)` for overloads; Go `init` → `parent.init#<file.go>`. Rust
-impl methods hang under their self type (`crate.Type.method`), trait
+impl methods hang under their self type (`rust.crate.Type.method`), trait
 declarations and default methods under the trait; `Uses` edges record
-`impl Trait for Type` relationships (`Type → Trait`). TypeScript FQNs are
-npm-package + file-path-prefixed: a class `Button` in `src/components/Button.tsx`
-of package `@co/ui` is `@co/ui.src.components.Button.Button`, and its method
-`onClick` is `@co/ui.src.components.Button.Button.onClick` (each ES module file
-is its own namespace, so same-named symbols in different files never collide).
+`impl Trait for Type` relationships (`Type → Trait`). TypeScript FQNs are the
+rooted npm-package + file-path-prefixed form: a class `Button` in
+`src/components/Button.tsx` of package `@co/ui` is
+`ts.@co/ui.src.components.Button.Button`, and its method `onClick` is
+`ts.@co/ui.src.components.Button.Button.onClick` (each ES module file is its own
+namespace, so same-named symbols in different files never collide). The language
+roots are disjoint, so a cross-language collision (`rust.apg` vs `py.apg`) is
+impossible by construction. Files and foreign references are NOT rooted: a
+`File.fqn` is its absolute path and an `UnresolvedTarget` FQN stays verbatim.
 
 `start`/`end` are **0-based byte offsets**; `start_line`/`end_line` are
 **1-based inclusive line numbers**; `path` is absolute under the project

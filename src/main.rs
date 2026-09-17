@@ -4315,6 +4315,150 @@ mod tests {
     mod e2e {
         use super::*;
 
+        /// Phase-09 task-41 (COORDINATOR RE-SCOPE: the scratch-repo / in-place
+        /// drift oracle is dropped). An in-process test asserts the
+        /// implemented-by migration invariant through the ACTUAL rooting code:
+        /// every bare migration source FQN the phase re-points renders as its
+        /// rooted destination, so no authored `implemented-by` target can remain
+        /// un-rooted. `ingest` spools to a temp file, so this is e2e by the tier
+        /// law and is `#[ignore]`d. It reads NO `apg/layers` node files and no
+        /// `db.lbug`.
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
+        fn rooting_renders_every_implemented_by_migration_target() {
+            // (language, bare migration source FQN, rooted destination FQN).
+            // The first six are the coordinator's named cross-language cases;
+            // the rest are the `apg.*` -> `rust.apg.*` family (a representative
+            // spread across the migrated owners).
+            let cases: &[(&str, &str, &str)] = &[
+                ("rust", "apg.cmd_scan", "rust.apg.cmd_scan"),
+                (
+                    "rust",
+                    "build_script_build.main",
+                    "rust.build_script_build.main",
+                ),
+                (
+                    "java",
+                    "CallGraphBuilder.main",
+                    "java.CallGraphBuilder.main",
+                ),
+                ("go", "apg/gofrontend.main", "go.apg/gofrontend.main"),
+                (
+                    "csharp",
+                    "Apg.CsharpFrontend.Program.Main",
+                    "csharp.Apg.CsharpFrontend.Program.Main",
+                ),
+                ("cpp", "cpplib.main", "cpp.cpplib.main"),
+                ("rust", "apg.main", "rust.apg.main"),
+                ("rust", "apg.scanner_records", "rust.apg.scanner_records"),
+                ("rust", "apg.ingest.claim", "rust.apg.ingest.claim"),
+                ("rust", "apg.ingest.ingest", "rust.apg.ingest.ingest"),
+                (
+                    "rust",
+                    "apg.ingest.render_function_fqns",
+                    "rust.apg.ingest.render_function_fqns",
+                ),
+                (
+                    "rust",
+                    "apg.load.build_load_files",
+                    "rust.apg.load.build_load_files",
+                ),
+                ("rust", "apg.load.copy_from", "rust.apg.load.copy_from"),
+                (
+                    "rust",
+                    "apg.load.create_schema",
+                    "rust.apg.load.create_schema",
+                ),
+                (
+                    "rust",
+                    "apg.load.write_graph_jsonl",
+                    "rust.apg.load.write_graph_jsonl",
+                ),
+                (
+                    "rust",
+                    "apg.auto_detect_languages",
+                    "rust.apg.auto_detect_languages",
+                ),
+                ("rust", "apg.frontend_cmd", "rust.apg.frontend_cmd"),
+                ("rust", "apg.has_extension", "rust.apg.has_extension"),
+                ("rust", "apg.id_prefix_for", "rust.apg.id_prefix_for"),
+                (
+                    "rust",
+                    "apg.classify.builtin_code_type",
+                    "rust.apg.classify.builtin_code_type",
+                ),
+                (
+                    "rust",
+                    "apg.classify.classify_code_type",
+                    "rust.apg.classify.classify_code_type",
+                ),
+                ("rust", "apg.git.git_state", "rust.apg.git.git_state"),
+                ("rust", "apg.git.is_stale", "rust.apg.git.is_stale"),
+                (
+                    "rust",
+                    "apg.git.reanchor_scan_meta",
+                    "rust.apg.git.reanchor_scan_meta",
+                ),
+                (
+                    "rust",
+                    "apg.git.recorded_scan",
+                    "rust.apg.git.recorded_scan",
+                ),
+                (
+                    "rust",
+                    "apg.schema.Record.ScanMeta",
+                    "rust.apg.schema.Record.ScanMeta",
+                ),
+                (
+                    "rust",
+                    "apg.session.Coordinator.start",
+                    "rust.apg.session.Coordinator.start",
+                ),
+            ];
+            let function = |id: &str, parent: &str, name: &str| crate::schema::Record::Function {
+                id: id.to_string(),
+                parent: parent.to_string(),
+                name: name.to_string(),
+                params: vec![],
+                file: "/abs/x".to_string(),
+                path: "/abs/x".to_string(),
+                start: 0,
+                end: 1,
+                start_line: 1,
+                end_line: 1,
+            };
+            for &(language, bare, rooted) in cases {
+                let (parent, name) = bare
+                    .rsplit_once('.')
+                    .unwrap_or_else(|| panic!("`{bare}` must carry a parent scope"));
+                let records: Vec<crate::schema::Record> = vec![
+                    crate::schema::Record::LangSwitch {
+                        language: language.to_string(),
+                    },
+                    function("n1", parent, name),
+                ];
+                let (graph, report) = crate::ingest::ingest(
+                    records,
+                    &crate::ingest::IngestOptions {
+                        blacklist: &[],
+                        language,
+                        config: None,
+                    },
+                );
+                assert_eq!(report.shadowed_modules, 0, "`{bare}` must not shadow");
+                assert_eq!(report.shadowed_functions, 0, "`{bare}` must not shadow");
+                assert!(
+                    graph.nodes.contains_key(rooted),
+                    "`{bare}` must render as the rooted `{rooted}` — the \
+                     implemented-by migration target"
+                );
+                assert!(
+                    !graph.nodes.contains_key(bare),
+                    "the bare migration target `{bare}` must no longer resolve"
+                );
+            }
+        }
+
         /// Phase-06 task-11: `auto_detect_languages` — a JS-only tree detects
         /// `js`; a tree with `.ts` plus incidental `.js` detects `ts` ONCE (js
         /// suppressed, never js+ts as two frontends); a `node_modules`-only

@@ -132,6 +132,7 @@ fn lines(graph: &Graph, fqn: &str) -> (i64, i64) {
 /// pair into `dir`. Columns match the LadybugDB table schema exactly.
 pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     // --- Node tables ---
+    let mut language_fqn = Vec::new();
     let mut module_fqn = Vec::new();
     let mut module_status = Vec::new();
     let mut scan_fqn = Vec::new();
@@ -234,6 +235,9 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
 
     for (fqn, node) in &graph.nodes {
         match node.kind {
+            NodeKind::Language => {
+                language_fqn.push(fqn.clone());
+            }
             NodeKind::Module => {
                 module_fqn.push(fqn.clone());
                 module_status.push(node.status.clone().unwrap_or_default());
@@ -386,6 +390,10 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         }
     }
 
+    write_parquet(
+        &dir.join("language.parquet"),
+        &[("fqn", Col::Str(language_fqn))],
+    )?;
     write_parquet(
         &dir.join("module.parquet"),
         &[
@@ -835,6 +843,8 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
 fn contains_pairs() -> Vec<(NodeKind, NodeKind)> {
     use NodeKind::*;
     vec![
+        // The Language root ⊃ its modules (PHASE_09 language rooting).
+        (Language, Module),
         (Module, Module),
         (Module, File),
         (File, Struct),
@@ -964,6 +974,7 @@ fn kind_slug(k: NodeKind) -> &'static str {
         NodeKind::Function => "function",
         NodeKind::File => "file",
         NodeKind::UnresolvedTarget => "unresolved_target",
+        NodeKind::Language => "language",
         NodeKind::Requirement => "requirement",
         NodeKind::Note => "note",
         NodeKind::Feedback => "feedback",
@@ -1032,6 +1043,7 @@ pub fn node_labels() -> &'static [&'static str] {
         "Function",
         "File",
         "UnresolvedTarget",
+        "Language",
         "Requirement",
         "Note",
         "Feedback",
@@ -1072,6 +1084,7 @@ pub fn label_of(k: NodeKind) -> &'static str {
         NodeKind::Function => "Function",
         NodeKind::File => "File",
         NodeKind::UnresolvedTarget => "UnresolvedTarget",
+        NodeKind::Language => "Language",
         NodeKind::Requirement => "Requirement",
         NodeKind::Note => "Note",
         NodeKind::Feedback => "Feedback",
@@ -1101,6 +1114,7 @@ pub fn label_of(k: NodeKind) -> &'static str {
 /// extended with spec/plan pairs, plus the nine spec/plan rel tables).
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY, status STRING)")?;
+    conn.query("CREATE NODE TABLE Language(fqn STRING PRIMARY KEY)")?;
     conn.query(
         "CREATE NODE TABLE Scan(fqn STRING PRIMARY KEY, git_sha STRING, git_clean STRING, content_key STRING, scanned_at STRING)",
     )?;
@@ -1146,7 +1160,7 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE NODE TABLE Constraint(fqn STRING PRIMARY KEY, name STRING, body STRING, attaches_to STRING)",
     )?;
     conn.query(
-        "CREATE REL TABLE Contains(FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM Stakeholder TO Requirement, FROM User TO Requirement, FROM Requirement TO Requirement, FROM DomainGroup TO DomainGroup, FROM DomainGroup TO Entity, FROM DomainGroup TO Value, FROM DomainGroup TO Service, FROM System TO Container, FROM Container TO Component)",
+        "CREATE REL TABLE Contains(FROM Language TO Module, FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM Stakeholder TO Requirement, FROM User TO Requirement, FROM Requirement TO Requirement, FROM DomainGroup TO DomainGroup, FROM DomainGroup TO Entity, FROM DomainGroup TO Value, FROM DomainGroup TO Service, FROM System TO Container, FROM Container TO Component)",
     )?;
     conn.query("CREATE REL TABLE Calls(FROM Function TO Function, FROM Service TO Service)")?;
     conn.query(
@@ -1188,6 +1202,7 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
     let p = |name: &str| dir.join(name).to_string_lossy().into_owned();
     let stmts = [
         format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
+        format!(r#"COPY Language FROM "{}""#, p("language.parquet")),
         // The Scan row (SCAN_HEAD) carries the phase-01 content-identity key
         // (`content_key`) beside git_sha/git_clean/scanned_at; the parquet
         // columns are emitted in this exact DDL order, so the key lands in the
@@ -1337,6 +1352,11 @@ enum Export {
         fqn: String,
         #[serde(skip_serializing_if = "String::is_empty")]
         status: String,
+    },
+    /// A language-root node (`lang_switch` id, e.g. `rust`) — the root of the
+    /// `Language -Contains-> Module` hierarchy (PHASE_09 language rooting).
+    Language {
+        fqn: String,
     },
     Struct {
         fqn: String,
@@ -1616,6 +1636,7 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                 fqn: fqn.clone(),
                 status: node.status.clone().unwrap_or_default(),
             },
+            NodeKind::Language => Export::Language { fqn: fqn.clone() },
             NodeKind::Struct => {
                 let (path, start, end) = loc(graph, fqn);
                 let (start_line, end_line) = lines(graph, fqn);

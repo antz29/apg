@@ -9,7 +9,7 @@ export default tool({
       .string()
       .optional()
       .describe("Project root directory (a worktree path to operate on). Defaults to the workspace root."),
-    fqn: tool.schema.string().describe("Struct FQN, e.g. org.jgrapht.graph.DefaultGraphType (required)"),
+    fqn: tool.schema.string().describe("Struct FQN (language-rooted), e.g. java.org.jgrapht.graph.DefaultGraphType (required)"),
   },
   async execute(args, context) {
     const fqn = args.fqn

@@ -28,13 +28,14 @@ const PLANNED_CODE_LABELS: [&str; 4] = ["Module", "File", "Struct", "Function"];
 /// the scan control node, and unresolved references. A metadata delta must
 /// never detach `UnresolvedTarget`/`Scan` by FQN — they are scanned code, not
 /// spec/plan state.
-const CODE_GRAPH_LABELS: [&str; 6] = [
+const CODE_GRAPH_LABELS: [&str; 7] = [
     "Module",
     "File",
     "Struct",
     "Function",
     "UnresolvedTarget",
     "Scan",
+    "Language",
 ];
 
 /// The process-wide reentrant extended write lock (see `acquire_spec_lock`):

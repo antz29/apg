@@ -622,10 +622,21 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
     let mut delta_structs: Vec<String> = Vec::new();
     let mut delta_files: Vec<String> = Vec::new();
     let mut delta_modules: Vec<String> = Vec::new();
+    // PHASE_09: the language roots the delta's assembled graph carries (one per
+    // spawned stream plus the replayed scaffolding of a skipped language).
+    let mut delta_languages: Vec<String> = Vec::new();
     // FQN -> label for every node the delta owns (code units + modules).
     let mut delta_labels: HashMap<String, &'static str> = HashMap::new();
     for (fqn, node) in &delta.graph.nodes {
         match node.kind {
+            NodeKind::Language => {
+                // The language root is global scaffolding: upsert it
+                // unconditionally (a few rows) so the spliced DB carries the
+                // same Language set as a full rebuild. It never disappears on a
+                // partial scan, so it is not in the delete scope.
+                delta_languages.push(fqn.clone());
+                delta_labels.insert(fqn.clone(), "Language");
+            }
             NodeKind::Module => {
                 // A module is re-decided when the delta's target set reaches a
                 // File in its SEED subtree, OR when the seed has no Module row
@@ -746,6 +757,7 @@ pub fn apply(conn: &Connection, delta: &SpliceDelta<'_>) -> anyhow::Result<Splic
         ("Struct", &delta_structs),
         ("File", &delta_files),
         ("Module", &delta_modules),
+        ("Language", &delta_languages),
     ] {
         let (rows, stmts) = upsert_node(conn, label, fqns, delta.graph)?;
         report.nodes_upserted += rows;
@@ -1104,6 +1116,7 @@ fn node_label_of(kind: NodeKind) -> Option<&'static str> {
         NodeKind::Function => Some("Function"),
         NodeKind::File => Some("File"),
         NodeKind::UnresolvedTarget => Some("UnresolvedTarget"),
+        NodeKind::Language => Some("Language"),
         _ => None,
     }
 }
@@ -1220,6 +1233,7 @@ fn upsert_node(
                 lit(fqn),
                 lit(node.category.as_deref().unwrap_or(""))
             ),
+            NodeKind::Language => format!("{{fqn: {}}}", lit(fqn)),
             _ => continue,
         });
     }
@@ -1253,6 +1267,7 @@ fn upsert_node(
             "UNWIND [{list}] AS row MERGE (n:UnresolvedTarget {{fqn: row.fqn}}) \
              SET n.category = row.category"
         ),
+        "Language" => format!("UNWIND [{list}] AS row MERGE (n:Language {{fqn: row.fqn}})"),
         _ => return Ok((0, 0)),
     };
     conn.query(&stmt)?;

@@ -188,7 +188,9 @@ calls/publishes/subscribes — never a stored Group→Group edge.
 Node rules: name allowlist `[a-z0-9][a-z0-9-]*` (refuse, never sanitize); type must exist in
 its layer; `Entity` requires kind entity/event; `Group` takes core/supporting/generic +
 optional root; `Container` takes app/service/db/queue; **FQN = `<layer>.<type>.<name>`** for
-authored nodes (code nodes keep their language-native FQNs) — names unique per (layer, type);
+authored nodes (code nodes carry their **language-rooted** FQNs — a module is
+`<language-id>.<module-identity>` under its scanner `lang_switch` id and symbols inherit the
+root through `parent.name`, PHASE_09) — names unique per (layer, type);
 contains/depends-on trees acyclic. Spine is sequential (lint). Dangling FQN references are
 write-time errors.
 
@@ -235,7 +237,8 @@ apg/.trans/          (transient — mirrors the structure)
   committed node files never contain transient references. Ingestion combines the durable
   nodes with their transient relationships and validates the pairs.
 - **Code endpoints are exempt from the pairwise rule** — code nodes have no files. The
-  `implemented-by` edge is recorded on the spec side only, as a code FQN, validated against
+  `implemented-by` edge is recorded on the spec side only, as a **language-rooted** code FQN
+  (`<language-id>.<module-identity>…`, PHASE_09), validated against
   the scanned graph: resolves → real; planned (in `.trans`) → pending, not an error; **gone
   from the scanned graph → error** (spec drift). The scanned graph is the stronger check.
 - **Renames / deletions are atomic write-throughs:** rename = file move + FQN change +
