@@ -9,11 +9,6 @@
       "kind": "contains",
       "target": "solution.container.agent-install",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.main",
-      "properties": {}
     }
   ],
   "in": [
