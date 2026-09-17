@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "apg.session.Coordinator.reclaim_stale_socket",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.session.Coordinator.start",
+      "properties": {}
     }
   ],
   "in": [
