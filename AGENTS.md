@@ -70,12 +70,44 @@ internals:
    unguarded main rebuild, then **self-cleans** on that success path:
    the merged project's worktree is removed and its branch deleted (the
    default branch and the main checkout are never touched); push/tag remain
-   human acts.
+   human acts. Both the gate and the merge run in the **installed** binary, so
+   the plan/spec must use that binary's FQNs — see *The installed binary is the
+   contract* below.
 6. **Version gate + `apg init`.** `apg/config.json` carries the
    binary-managed `version` field; `apg scan`/`apg project start` **block**
    unless the layout and the binary share major.minor. **`apg init` is the
    upgrade act**: re-run it idempotently to write the current version, scaffold
    `apg/.worktrees/` + its `.gitignore` entry, and update the installed suite.
+
+### The installed binary is the contract — never self-host a change-set
+
+`apg plan verify` and `apg project merge` are executed by the **installed** `apg`
+binary. That binary is fixed, and its checks are **exact-match** against the graph
+*it* builds. The change-set must therefore be expressible in the running binary's
+vocabulary — **the parent can never depend on its future child**:
+
+- **Never point a branch-built `apg` at the apg repo** — not to `scan`, not to
+  `verify`, not to `merge`. The apg repo's own graph is (re)built by the installed
+  release only, and only the installed release runs `project merge` on it.
+  "Build the new binary and use it to finalise" is the oroboros — do not do it.
+- **The plan and the durable spec use the running binary's FQNs.** Task targets,
+  planned-node FQNs and `implemented-by` targets are the *language-agnostic code
+  identities the installed binary renders* (`apg.cmd_scan`,
+  `apg-tsfrontend.scanner.collectFile`), never a rendering only the next binary
+  produces (`rust.apg.cmd_scan`). A change-set that alters how the *next* binary
+  renders FQNs (e.g. language rooting) must not make the *current* plan or spec
+  depend on that rendering; the next binary's tolerance
+  (`layers::classify_code_ref`) resolves the same identities once it is released.
+- **A durable artifact only the next binary can read is broken, not advanced** —
+  fix it to the running vocabulary.
+- **Realize planned nodes in the running binary's graph.** The verify gate
+  realizes a planned node by the FQN the installed binary renders; once the code
+  exists, the planned node is obsolete and must be removed — a child-rendered FQN
+  (`rust.X`) will never realize against the bare graph (`X`) the installed binary
+  builds.
+- **Verify a change-set by tests, not by scanning the repo** — the unit/int
+  default suite plus the opt-in e2e tier against scratch `/tmp` repos; the apg
+  repo's own graph is a navigation aid.
 
 ### Discovered work: stop, re-plan, then implement
 
@@ -312,6 +344,11 @@ state; the apg repo's own graph is only ever rebuilt by the installed (released)
 binary. This covers generated agents too: the apg repo's own
 `.opencode/agents/**` are (re)generated with the installed release, not by an
 in-tree project.
+
+This is the **parent-cannot-depend-on-the-child** rule: the change-set is
+finalised with the installed binary, so nothing it must read — plan targets,
+planned nodes, `implemented-by` targets — may be written in a future binary's
+FQN rendering. See *The installed binary is the contract* in the project flow.
 
 1. **Build the candidate.** `cargo build` produces `target/debug/apg` and
    stages the frontends to `target/debug/frontends`, so the binary finds them
