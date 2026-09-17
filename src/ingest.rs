@@ -1478,6 +1478,32 @@ mod tests {
         }
     }
 
+    /// A Python function declaration with an explicit start line, so
+    /// [`render_function_fqns`]'s `py` duplicate-name rule can be exercised
+    /// in-memory (the `fd` helper pins `go` and line 1).
+    fn fd_py(
+        id: &str,
+        parent: &str,
+        name: &str,
+        params: &[&str],
+        file: &str,
+        line: u32,
+    ) -> FuncDecl {
+        FuncDecl {
+            id: id.to_string(),
+            parent: parent.to_string(),
+            name: name.to_string(),
+            params: params.iter().map(|s| s.to_string()).collect(),
+            file: file.to_string(),
+            path: file.to_string(),
+            start: 0,
+            end: 1,
+            start_line: line,
+            end_line: line,
+            language: "py".to_string(),
+        }
+    }
+
     fn srec(id: &str, parent: &str, name: &str, path: &str) -> Record {
         Record::Struct {
             id: id.to_string(),
@@ -1637,6 +1663,49 @@ mod tests {
             let m = fqns(&decls);
             assert_eq!(m["n1"], "pkg.C.foo()");
             assert_eq!(m["n2"], "pkg.C.foo(int)");
+        }
+
+        /// Phase-08 task-15: Python duplicate-name disambiguation. Two
+        /// identically-annotated `@overload` stubs of one name (their erased
+        /// param lists collide) and a same-scope conditional redefinition (the
+        /// empty param list) each render a DISTINCT FQN in the FULL form
+        /// `parent.name(T1,T2,...)#<file-basename>:<start_line>`: the erased
+        /// param-list suffix is RETAINED on the colliding member — including the
+        /// empty `()` form, never dropped to `parent.name#...` — with the
+        /// `#<file-basename>:<start_line>` disambiguator appended. Because every
+        /// colliding member claims a unique FQN, a call to each resolves to its
+        /// own Function node and `claim` never panics.
+        #[test]
+        fn py_duplicate_name_declarations_render_distinct_full_fqns() {
+            let decls = [
+                // Two `@overload` stubs of `f`, both annotated `int` — the
+                // erased param list `int` collides.
+                fd_py("n1", "pkg.mod", "f", &["int"], "/root/pkg/mod.py", 10),
+                fd_py("n2", "pkg.mod", "f", &["int"], "/root/pkg/mod.py", 24),
+                // A same-scope conditional redefinition of `g` — both branches
+                // erase to the EMPTY param list.
+                fd_py("n3", "pkg.mod", "g", &[], "/root/pkg/mod.py", 40),
+                fd_py("n4", "pkg.mod", "g", &[], "/root/pkg/mod.py", 52),
+            ];
+            let m = fqns(&decls);
+            assert_eq!(m["n1"], "pkg.mod.f(int)#mod.py:10");
+            assert_eq!(m["n2"], "pkg.mod.f(int)#mod.py:24");
+            // The `()` form is retained — NOT dropped to `pkg.mod.g#…`.
+            assert_eq!(m["n3"], "pkg.mod.g()#mod.py:40");
+            assert_eq!(m["n4"], "pkg.mod.g()#mod.py:52");
+
+            // A call edge referencing either id resolves to that declaration's
+            // own Function node: the id -> FQN map is injective.
+            let unique: HashSet<&String> = m.values().collect();
+            assert_eq!(unique.len(), decls.len(), "every FQN is distinct: {m:?}");
+
+            // The distinct FQNs are exactly what keeps `claim` from panicking on
+            // a same-kind collision.
+            let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
+            for (id, fqn) in &m {
+                claim(&mut seen, id, fqn, NodeKind::Function);
+            }
+            assert_eq!(seen.len(), decls.len());
         }
 
         /// The edge spool round-trips through an IN-MEMORY `Vec<u8>`/`Cursor`, not a

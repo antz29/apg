@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
-/// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `md`);
-/// `0`/`none`/empty skips all.
+/// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `md`,
+/// `py`); `0`/`none`/empty skips all.
 /// Unset = build everything (the dev default). The brew `scanner` formula sets
-/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp` formulae build each
+/// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py` formulae build each
 /// frontend directly and don't use build.rs for that.
 fn build_frontends() -> Vec<String> {
     match std::env::var("APG_BUILD_FRONTENDS") {
@@ -20,6 +20,7 @@ fn build_frontends() -> Vec<String> {
             "ts".into(),
             "csharp".into(),
             "md".into(),
+            "py".into(),
         ],
     }
 }
@@ -41,6 +42,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/csharplib/Program.cs");
     println!("cargo:rerun-if-changed=src/mdlib/Cargo.toml");
     println!("cargo:rerun-if-changed=src/mdlib/src/main.rs");
+    println!("cargo:rerun-if-changed=src/pylib/Cargo.toml");
+    println!("cargo:rerun-if-changed=src/pylib/src/main.rs");
 
     // Re-run when the frontend allowlist changes, so toggling
     // `APG_BUILD_FRONTENDS` re-stages (and re-tests) the selected frontends
@@ -266,6 +269,37 @@ fn main() {
             println!("cargo:rustc-env=APG_FRONTEND_MD={}", mdfrontend.display());
             let _ = std::fs::copy(&mdfrontend, stage_dir.join("mdfrontend"));
             languages.push("md".into());
+        }
+    }
+
+    // --- Python frontend (Astral ty engine, compiled in isolation) ---
+    if enabled(&frontends, "py") {
+        // Compile pylib with cargo into its own isolated target dir
+        // (src/pylib/target), matching the outer build profile (debug for fast
+        // dev compile, release for fast scans). pylib is a standalone,
+        // non-workspace crate exactly like src/mdlib, so its lockfile and
+        // target tree stay independent. The staged artifact is the `pyfrontend`
+        // binary (the crate's `[[bin]]` name — unaffected by the `[package]`
+        // name). On failure, skip py rather than aborting the whole build
+        // (like the other frontends).
+        let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+        let pyfrontend = Path::new("src/pylib")
+            .join("target")
+            .join(&profile)
+            .join("pyfrontend");
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build")
+            .arg("--manifest-path")
+            .arg("src/pylib/Cargo.toml");
+        if profile == "release" {
+            cmd.arg("--release");
+        }
+        cmd.arg("--bin").arg("pyfrontend");
+        let py_ok = cmd.status().is_ok_and(|s| s.success()) && pyfrontend.exists();
+        if py_ok {
+            println!("cargo:rustc-env=APG_FRONTEND_PY={}", pyfrontend.display());
+            let _ = std::fs::copy(&pyfrontend, stage_dir.join("pyfrontend"));
+            languages.push("py".into());
         }
     }
 

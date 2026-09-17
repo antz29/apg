@@ -3685,6 +3685,44 @@ mod tests {
                 );
             }
         }
+
+        /// Phase-08 task-16: the `py` code-type arm. An ordinary module is
+        /// `src`; a `*_test.py` (or `test_*.py`, or a `test/` segment) is
+        /// `test`; a hand-written `.pyi` stub is `src` — NEVER `generated`
+        /// (the `.d.ts` analog, a declaration is authored source) — UNLESS it
+        /// sits under a `gen`/`generated` tree, which is `generated`; a
+        /// `third_party/` file is `external`. `classify_code_type` is
+        /// metadata-only — it never drops a node — so every case additionally
+        /// asserts the file stays a recognised in-graph code type.
+        #[test]
+        fn builtin_code_type_py_rules_are_path_and_stem_keyed() {
+            let cases: &[(&str, &str)] = &[
+                ("/proj/pkg/mod.py", "src"),
+                ("/proj/pkg/__init__.py", "src"),
+                ("/proj/src/app.py", "src"),
+                // Hand-written stubs are authored source, never generated.
+                ("/proj/pkg/mod.pyi", "src"),
+                ("/proj/stubs/pkg/mod.pyi", "src"),
+                // A stub under a generated tree IS generated.
+                ("/proj/gen/pkg/mod.pyi", "generated"),
+                ("/proj/generated/pkg/mod.py", "generated"),
+                // Test naming conventions and test trees.
+                ("/proj/pkg/mod_test.py", "test"),
+                ("/proj/test_helpers.py", "test"),
+                ("/proj/tests/mod.py", "test"),
+                // Dependency trees are external.
+                ("/proj/third_party/lib/mod.py", "external"),
+                ("/proj/vendor/lib/mod.py", "external"),
+            ];
+            for (path, expected) in cases {
+                let got = classify::classify_code_type(path, path, "py", None);
+                assert_eq!(got, *expected, "py id: {path} must classify {expected}");
+                assert!(
+                    ["src", "test", "generated", "external"].contains(&got.as_str()),
+                    "py id: {path} must stay an in-graph code type (never dropped), got {got}"
+                );
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -3959,6 +3997,219 @@ mod tests {
         let pkg = std::fs::read_to_string(root.join("src/tslib/package.json"))
             .expect("read src/tslib/package.json");
         vec![("tslib/scanner.ts", scanner), ("tslib/package.json", pkg)]
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase-08 Python frontend acceptance helpers (tasks 17–20). Non-#[test]
+    // helpers, so they live at the `mod tests` root.
+    // -----------------------------------------------------------------------
+
+    /// The staged Python frontend the candidate runs
+    /// (`<profile>/frontends/pyfrontend`), resolved from `testutil::apg_bin()`
+    /// — the same artifact `apg scan` spawns. Fails loudly naming the build.
+    fn py_frontend_bin() -> PathBuf {
+        let apg = crate::testutil::apg_bin();
+        let bin = apg
+            .parent()
+            .expect("apg binary has a parent")
+            .join("frontends")
+            .join("pyfrontend");
+        assert!(
+            bin.is_file(),
+            "python frontend not found at {} — build it first: \
+             cargo build --config 'env.APG_BUILD_FRONTENDS=\"py\"'",
+            bin.display()
+        );
+        bin
+    }
+
+    /// Runs a scanner frontend binary over `dir` with `extra` argv and parses
+    /// its emitted unified-schema records.
+    fn frontend_stream(bin: &Path, dir: &Path, extra: &[&str]) -> Vec<crate::schema::Record> {
+        let out = std::process::Command::new(bin)
+            .arg(dir)
+            .args(extra)
+            .output()
+            .unwrap_or_else(|e| panic!("spawn {}: {e}", bin.display()));
+        assert!(
+            out.status.success(),
+            "{} failed over {}: {}",
+            bin.display(),
+            dir.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                serde_json::from_str::<crate::schema::Record>(l)
+                    .unwrap_or_else(|e| panic!("bad scanner record `{l}`: {e}"))
+            })
+            .collect()
+    }
+
+    /// Runs the Python frontend directly over `repo_dir` with `extra` argv.
+    fn py_frontend_records_with(repo_dir: &Path, extra: &[&str]) -> Vec<crate::schema::Record> {
+        frontend_stream(&py_frontend_bin(), repo_dir, extra)
+    }
+
+    /// [`py_frontend_records_with`] with no extra argv.
+    fn py_frontend_records(repo_dir: &Path) -> Vec<crate::schema::Record> {
+        py_frontend_records_with(repo_dir, &[])
+    }
+
+    /// A scratch git repo for a Python fixture: the caller's files, an isolated
+    /// HOME (the suite dependency dir pre-created so `apg init` never shells
+    /// out to npm), a committed `apg init`, and both commits. Returns
+    /// `(base, repo_dir, home)`.
+    fn py_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!("apg-py-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        scratch_repo_init(&repo_dir);
+        for (rel, body) in files {
+            let p = repo_dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        scratch_commit_all(&repo_dir, "init source");
+        let init = testutil::ApgCommand::new(&["init", "."])
+            .cwd(&repo_dir)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            init.status.success(),
+            "apg init failed in {}: {}{}",
+            repo_dir.display(),
+            String::from_utf8_lossy(&init.stdout),
+            String::from_utf8_lossy(&init.stderr)
+        );
+        scratch_commit_all(&repo_dir, "apg init");
+        (base, repo_dir, home)
+    }
+
+    /// P9 roots a module/symbol FQN under a `<lang>.` segment; strip a leading
+    /// Python root (`py.`/`python.`) so a module IDENTITY assertion holds both
+    /// pre-rooting (bare `pkg`) and post-rooting (`py.pkg`). Only the Python
+    /// fixtures (modules `pkg`/`pkg.sub`/`foo`/`bar`) are passed through it, so
+    /// a real module named after a language token is never rewritten.
+    fn strip_lang_prefix(fqn: &str) -> String {
+        match fqn.split_once('.') {
+            Some(("py" | "python", rest)) => rest.to_string(),
+            _ => fqn.to_string(),
+        }
+    }
+
+    /// Writes a real `apg/config.json` opting this fixture into the py
+    /// provenance classes. `apg init` writes a `default: src` layout whose empty
+    /// `types` REPLACES the builtin rules; this keeps the version field. The
+    /// builtin py arm is asserted separately on the frontend's own records.
+    fn write_py_config(repo_dir: &Path) {
+        std::fs::write(
+            repo_dir.join("apg/config.json"),
+            format!(
+                "{{\n  \"default\": \"src\",\n  \"types\": [\n    \
+                 {{ \"name\": \"test\", \"globs\": [\"**/*_test.py\", \"**/test_*.py\", \"**/tests/**\"] }},\n    \
+                 {{ \"name\": \"generated\", \"globs\": [\"**/gen/**\", \"**/generated/**\"] }},\n    \
+                 {{ \"name\": \"external\", \"globs\": [\"**/third_party/**\", \"**/vendor/**\"] }}\n  \
+                 ],\n  \"version\": \"{}\"\n}}\n",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+        .unwrap();
+    }
+
+    /// Phase-08 task-17 fixture: a Python repo carrying the pinned acceptance
+    /// shapes — a package + sub-package, distinct-stem flat modules, a `.pyi`
+    /// stub, a `*_test.py`, a `third_party/` file, a `site-packages/` tree
+    /// (must yield NO code node) and a `.pyx` (never scanned).
+    fn py_acceptance_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("pkg/__init__.py", ""),
+            ("pkg/sub/__init__.py", ""),
+            ("pkg/sub/mod.py", "def sub_fn() -> int:\n    return 1\n"),
+            ("pkg/sub/api.pyi", "def typed(x: int) -> int: ...\n"),
+            ("pkg/lifecycle_test.py", "def check() -> None:\n    pass\n"),
+            ("foo.py", "def foo() -> int:\n    return 1\n"),
+            ("bar.py", "def bar() -> int:\n    return 2\n"),
+            (
+                "third_party/lib/dep.py",
+                "def dep() -> int:\n    return 3\n",
+            ),
+            (
+                "site-packages/vendored/dep.py",
+                "def hidden() -> int:\n    return 4\n",
+            ),
+            ("cy/mod.pyx", "def cyfn():\n    pass\n"),
+        ]
+    }
+
+    /// Phase-08 task-18 fixture: cross-file calls/uses, a project-class
+    /// constructor call, a stdlib reference (`os.getcwd`), a hand-built `.venv`
+    /// dependency (markers + stub site-packages, no interpreter) and in-root
+    /// dynamic/unbound references (a call through a module-level callable alias
+    /// and a base class that is an in-root alias binding — ty resolves both to a
+    /// project-file position that is not a declaration).
+    fn py_resolution_fixture() -> Vec<(&'static str, &'static str)> {
+        vec![
+            (
+                "pyproject.toml",
+                "[project]\nname = \"probe\"\nversion = \"0.0.0\"\n",
+            ),
+            ("pkg/__init__.py", ""),
+            ("pkg/base.py", "class Base:\n    pass\n"),
+            (
+                "pkg/aliases.py",
+                "from pkg.base import Base\n\n\nBaseAlias = Base\n",
+            ),
+            (
+                "pkg/b.py",
+                "def helper() -> int:\n    return 1\n\n\nhelper_alias = helper\n",
+            ),
+            (
+                "pkg/a.py",
+                "from pkg.aliases import BaseAlias\nfrom pkg.b import helper, helper_alias\n\
+                 from pkg.base import Base\n\n\n\
+                 class User(Base):\n    pass\n\n\n\
+                 class Aliased(BaseAlias):\n    pass\n\n\n\
+                 def call() -> int:\n    return helper()\n\n\n\
+                 def call_aliased() -> int:\n    return helper_alias()\n\n\n\
+                 def make() -> Base:\n    return Base()\n",
+            ),
+            (
+                "stdlib_ref.py",
+                "import os\n\n\ndef where() -> str:\n    return os.getcwd()\n",
+            ),
+            (
+                ".venv/pyvenv.cfg",
+                "home = /nonexistent\nversion = 3.12.0\n",
+            ),
+            (
+                ".venv/lib/python3.12/site-packages/dep/__init__.py",
+                "def thing() -> int:\n    return 1\n",
+            ),
+            (
+                "external_ref.py",
+                "import dep\n\n\ndef use() -> int:\n    return dep.thing()\n",
+            ),
+        ]
+    }
+
+    /// True when the export carries a resolve-only edge `from --kind--> to`,
+    /// ROOTING-AGNOSTICALLY (a leading `py.`/`python.` root is normalised away
+    /// on both endpoints, so the assertion holds pre- and post-P9).
+    fn has_edge_between(records: &[serde_json::Value], kind: &str, from: &str, to: &str) -> bool {
+        records.iter().any(|r| {
+            r.get("type").and_then(|t| t.as_str()) == Some(kind)
+                && r.get("from")
+                    .and_then(|f| f.as_str())
+                    .is_some_and(|f| strip_lang_prefix(f) == from)
+                && r.get("to")
+                    .and_then(|t| t.as_str())
+                    .is_some_and(|t| strip_lang_prefix(t) == to)
+        })
     }
 
     /// e2e tier -- real I/O: these tests read repo files (README/Cargo.toml/
@@ -8262,6 +8513,529 @@ mod tests {
             assert_eq!(
                 report.shadowed_functions, 0,
                 "the md records must shadow no function"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-08 task-17 (e2e, scratch /tmp repo, CANDIDATE binary only —
+        /// `global.constraint.no-real-project-test`): the Python acceptance
+        /// fixture suite through ONE real scan. Module IDENTITY is asserted
+        /// ROOTING-AGNOSTICALLY (a leading `py.`/`python.` root is normalised
+        /// away, so the same assertions hold pre- and post-P9). `.py` and `.pyi`
+        /// each yield a File node parented to their module; a `.pyx` and every
+        /// `site-packages` file yield NO code node; `*_test.py` is `test` and a
+        /// `third_party/` file is `external` (asserted on both the real scan's
+        /// config-opted export AND the frontend's own records under the builtin
+        /// arm); `shadowed_modules == 0` and no same-kind `claim` panic.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+        fn acceptance_python_scratch_modules_files_and_code_types() {
+            let (base, repo_dir, home) = py_scratch("acceptance", &py_acceptance_fixture());
+            write_py_config(&repo_dir);
+            scratch_commit_all(&repo_dir, "py code-type rules");
+
+            let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "scan failed: {stderr}");
+            assert!(
+                stderr.contains("Languages: py"),
+                "a Python repo must auto-detect py: {stderr}"
+            );
+            assert!(
+                stderr.contains("[scan] running py frontend"),
+                "the py frontend must run: {stderr}"
+            );
+            assert!(
+                !stderr.contains("shadowed"),
+                "no module/function may be shadowed: {stderr}"
+            );
+
+            let recs = export_records(&repo_dir);
+            let root = std::fs::canonicalize(&repo_dir).unwrap();
+            let at = |rel: &str| root.join(rel).to_string_lossy().into_owned();
+
+            // (1) Module identities, rooting-agnostic.
+            let modules: BTreeSet<String> = export_modules(&recs)
+                .iter()
+                .map(|m| strip_lang_prefix(m))
+                .collect();
+            for m in ["pkg", "pkg.sub", "pkg.sub.mod", "pkg.sub.api", "foo", "bar"] {
+                assert!(
+                    modules.contains(m),
+                    "module `{m}` must be present: {modules:?}"
+                );
+            }
+
+            // (2) `.py` and `.pyi` File nodes, each parented to its module.
+            // Containment is a `contains` edge (the export's File record has no
+            // `parent` field), so the File's parent is the `from` of the
+            // `module -> file path` edge.
+            let parent_of = |path: &str| -> Option<String> {
+                recs.iter()
+                    .find(|r| {
+                        r.get("type").and_then(|t| t.as_str()) == Some("contains")
+                            && r.get("to").and_then(|t| t.as_str()) == Some(path)
+                    })
+                    .and_then(|r| {
+                        r.get("from")
+                            .and_then(|f| f.as_str())
+                            .map(strip_lang_prefix)
+                    })
+            };
+            assert_eq!(
+                parent_of(&at("pkg/sub/mod.py")).as_deref(),
+                Some("pkg.sub.mod"),
+                "a .py File node must be parented to its module"
+            );
+            assert_eq!(
+                parent_of(&at("pkg/sub/api.pyi")).as_deref(),
+                Some("pkg.sub.api"),
+                "a .pyi File node must be parented to its module"
+            );
+
+            // (3) Code types (the fixture's opt-in config).
+            let types: std::collections::BTreeMap<String, String> = recs
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("file"))
+                .filter_map(|r| {
+                    Some((
+                        r.get("fqn")?.as_str()?.to_string(),
+                        r.get("code_type")?.as_str()?.to_string(),
+                    ))
+                })
+                .collect();
+            assert_eq!(
+                types.get(&at("pkg/lifecycle_test.py")).map(String::as_str),
+                Some("test"),
+                "`*_test.py` must classify test: {types:?}"
+            );
+            assert_eq!(
+                types.get(&at("third_party/lib/dep.py")).map(String::as_str),
+                Some("external"),
+                "a `third_party/` file must classify external: {types:?}"
+            );
+
+            // (4) `.pyx` and `site-packages` yield NO code node.
+            let locations = export_code_locations(&recs);
+            assert!(
+                !locations.iter().any(|p| p.ends_with(".pyx")),
+                "a `.pyx` must never become a code node: {locations:?}"
+            );
+            assert!(
+                !locations.iter().any(|p| p.contains("site-packages")),
+                "a `site-packages` tree must never become a code node: {locations:?}"
+            );
+
+            // (5) The BUILTIN py arm + shadow counters, observed POSITIVELY on
+            // the frontend's own records (config-free).
+            let front = py_frontend_records(&repo_dir);
+            let (graph, report) = crate::ingest::ingest(
+                front,
+                &crate::ingest::IngestOptions {
+                    blacklist: &[],
+                    language: "py",
+                    config: None,
+                },
+            );
+            assert_eq!(report.shadowed_modules, 0, "no py module may shadow");
+            assert_eq!(report.shadowed_functions, 0, "no py function may shadow");
+            assert_eq!(
+                graph
+                    .nodes
+                    .get(&at("pkg/lifecycle_test.py"))
+                    .map(|n| n.code_type.as_str()),
+                Some("test"),
+                "builtin py rule: `*_test.py` must classify test"
+            );
+            assert_eq!(
+                graph
+                    .nodes
+                    .get(&at("third_party/lib/dep.py"))
+                    .map(|n| n.code_type.as_str()),
+                Some("external"),
+                "builtin py rule: a `third_party/` file must classify external"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-08 task-18 (e2e): py resolution + unresolved classification
+        /// through one real scan. A cross-file call is a `Calls` edge; a
+        /// cross-file base class and a project-class constructor call are `Uses`
+        /// to the base/class Struct; a stdlib reference is `stdlib` (never
+        /// external); a hand-built `.venv` dependency is `external` (never
+        /// stdlib); an in-root dynamic/unbound call is `unknown` (precedence
+        /// holds); no guessed calls/uses edge is emitted.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+        fn acceptance_python_resolution_and_unresolved_classification() {
+            let (base, repo_dir, home) = py_scratch("resolve", &py_resolution_fixture());
+
+            let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "scan failed: {stderr}");
+
+            let recs = export_records(&repo_dir);
+            assert!(
+                has_edge_between(&recs, "calls", "pkg.a.call", "pkg.b.helper"),
+                "a.py calling b.py's function must be a Calls edge: {recs:?}"
+            );
+            assert!(
+                has_edge_between(&recs, "uses", "pkg.a.User", "pkg.base.Base"),
+                "a cross-file base class must be a Uses edge to the base Struct: {recs:?}"
+            );
+            assert!(
+                has_edge_between(&recs, "uses", "pkg.a.make", "pkg.base.Base"),
+                "a constructor call on a project class must be a Uses edge: {recs:?}"
+            );
+
+            let unresolved = export_unresolved(&recs);
+            assert!(
+                unresolved.contains(&("os.getcwd".to_string(), "stdlib".to_string())),
+                "a stdlib/typeshed reference must be stdlib: {unresolved:?}"
+            );
+            assert!(
+                unresolved.iter().any(|(_, c)| c == "external"),
+                "a venv dependency reference must be external: {unresolved:?}"
+            );
+            assert!(
+                unresolved.iter().any(|(_, c)| c == "unknown"),
+                "an in-root dynamic/unbound reference must be unknown: {unresolved:?}"
+            );
+            // Precedence: a category never bleeds across the classes.
+            assert!(
+                !unresolved
+                    .iter()
+                    .any(|(f, c)| f.contains("os.") && c == "external"),
+                "a stdlib reference must never be external: {unresolved:?}"
+            );
+            assert!(
+                !unresolved
+                    .iter()
+                    .any(|(f, c)| f.starts_with("dep") && c == "stdlib"),
+                "a venv dependency must never be stdlib: {unresolved:?}"
+            );
+
+            // No guessed calls/uses edge leaves the in-root dynamic reference:
+            // the alias base is an `unresolved_use` (never a fabricated `Uses`).
+            assert!(
+                !recs.iter().any(|r| {
+                    r.get("type").and_then(|t| t.as_str()) == Some("uses")
+                        && r.get("from")
+                            .and_then(|f| f.as_str())
+                            .is_some_and(|f| strip_lang_prefix(f) == "pkg.a.Aliased")
+                }),
+                "the dynamic base must not be guessed into a Uses edge: {recs:?}"
+            );
+            assert!(
+                recs.iter().any(|r| {
+                    r.get("type").and_then(|t| t.as_str()) == Some("unresolved_use")
+                        && r.get("from")
+                            .and_then(|f| f.as_str())
+                            .is_some_and(|f| strip_lang_prefix(f) == "pkg.a.Aliased")
+                }),
+                "the dynamic base must be an unresolved_use: {recs:?}"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-08 task-19 (e2e, FIXTURE MODEL feedback-83): the Python
+        /// environment model is HAND-BUILT inside a scratch dir — a `.venv`
+        /// site-packages stub tree plus `pyproject.toml`/`uv.lock`/`pyvenv.cfg`
+        /// markers — and every frontend run has an EMPTY `PATH`, so ty resolves
+        /// it WITHOUT shelling out to `python`/`uv` and no interpreter is
+        /// required. A uv project / virtualenv / bare src root auto-detects, and
+        /// a third-party import resolves against the real environment as
+        /// `external` (never stdlib).
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp dir fs + spawned pyfrontend); run via cargo test-e2e"]
+        fn acceptance_python_environment_model_and_external_resolution() {
+            let base = std::env::temp_dir().join(format!("apg-pyenv-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let write = |rel: &str, body: &str| {
+                let p = base.join(rel);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(&p, body).unwrap();
+            };
+
+            // uv project: pyproject.toml + uv.lock markers.
+            write(
+                "uv/pyproject.toml",
+                "[project]\nname = \"uvproj\"\nversion = \"0.1.0\"\n",
+            );
+            write("uv/uv.lock", "version = 1\n");
+            write("uv/app.py", "def f() -> int:\n    return 1\n");
+
+            // virtualenv: a `.venv/pyvenv.cfg` marker and a stub site-packages
+            // tree, with NO pyproject.toml (a pure virtualenv project).
+            write(
+                "venv/.venv/pyvenv.cfg",
+                "home = /nonexistent\nversion = 3.12.0\n",
+            );
+            write(
+                "venv/.venv/lib/python3.12/site-packages/dep/__init__.py",
+                "def thing() -> int:\n    return 1\n",
+            );
+            write("venv/app.py", "def f() -> int:\n    return 1\n");
+
+            // bare src root: no markers at all.
+            write("bare/app.py", "def g() -> int:\n    return 1\n");
+
+            // A dependency environment: pyproject.toml + `.venv` site-packages
+            // with a third-party import (ty's project discovery adopts the
+            // `.venv` through the pyproject marker).
+            write(
+                "dep/pyproject.toml",
+                "[project]\nname = \"depproj\"\nversion = \"0.1.0\"\nrequires-python = \">=3.12\"\n",
+            );
+            write(
+                "dep/.venv/pyvenv.cfg",
+                "home = /nonexistent\nversion = 3.12.0\n",
+            );
+            write(
+                "dep/.venv/lib/python3.12/site-packages/dep/__init__.py",
+                "def thing() -> int:\n    return 1\n",
+            );
+            write(
+                "dep/app.py",
+                "import dep\n\n\ndef use() -> int:\n    return dep.thing()\n",
+            );
+
+            let run = |dir: &Path| {
+                std::process::Command::new(py_frontend_bin())
+                    .arg(dir)
+                    .env("PATH", "")
+                    .output()
+                    .unwrap_or_else(|e| panic!("spawn pyfrontend: {e}"))
+            };
+
+            for (dir, kind) in [("uv", "Uv"), ("venv", "VirtualEnv"), ("bare", "BareSrc")] {
+                let out = run(&base.join(dir));
+                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                assert!(out.status.success(), "{dir}: pyfrontend failed: {stderr}");
+                assert!(
+                    stderr.contains(&format!("{kind} project")),
+                    "{dir}: expected a {kind} project from filesystem markers alone, \
+                     with no interpreter: {stderr}"
+                );
+            }
+
+            // A third-party import resolves against the hand-built environment
+            // as external — never stdlib — with no Python runtime present.
+            let records = py_frontend_records(&base.join("dep"));
+            let unresolved: BTreeSet<(String, String)> = records
+                .iter()
+                .filter_map(|r| match r {
+                    crate::schema::Record::Unresolved { fqn, category } => {
+                        Some((fqn.clone(), category.clone().unwrap_or_default()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                unresolved.iter().any(|(_, c)| c == "external"),
+                "a venv dependency must resolve external: {unresolved:?}"
+            );
+            assert!(
+                unresolved.iter().all(|(_, c)| c != "stdlib"),
+                "a venv dependency must never be stdlib: {unresolved:?}"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-08 task-20 (e2e): py language plumbing detection.
+        /// `auto_detect_languages` selects `py` only for real `.py`/`.pyi`
+        /// sources: a `.pyx`-only tree and a tree whose only Python lives under
+        /// `site-packages`/`.venv`/`venv` never trigger it; and
+        /// `available_languages` reports `py` only when a `pyfrontend` artifact
+        /// is installed (driven through the real CLI with an isolated
+        /// `APG_FRONTEND_DIR`).
+        #[test]
+        #[ignore = "e2e tier: real I/O (temp dir fs + spawned apg); run via cargo test-e2e"]
+        fn python_language_plumbing_detection_and_availability() {
+            let base = std::env::temp_dir().join(format!("apg-py-detect-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let avail = vec!["py".to_string()];
+
+            // Ordinary .py / .pyi detect py.
+            std::fs::create_dir_all(base.join("plain")).unwrap();
+            std::fs::write(base.join("plain/app.py"), "def f():\n    return 1\n").unwrap();
+            assert_eq!(
+                auto_detect_languages(&base.join("plain"), &avail),
+                vec!["py".to_string()],
+                "a .py tree must detect py"
+            );
+            std::fs::create_dir_all(base.join("stub")).unwrap();
+            std::fs::write(base.join("stub/api.pyi"), "def f() -> int: ...\n").unwrap();
+            assert_eq!(
+                auto_detect_languages(&base.join("stub"), &avail),
+                vec!["py".to_string()],
+                "a .pyi-only tree must detect py"
+            );
+
+            // .pyx is NOT a candidate.
+            std::fs::create_dir_all(base.join("pyx")).unwrap();
+            std::fs::write(base.join("pyx/mod.pyx"), "def f():\n    pass\n").unwrap();
+            assert!(
+                auto_detect_languages(&base.join("pyx"), &avail).is_empty(),
+                "a .pyx-only tree must not trigger py"
+            );
+
+            // Python under site-packages / .venv / venv never triggers py.
+            for (dir, rel) in [
+                ("sp", "site-packages/dep.py"),
+                ("dotvenv", ".venv/lib/python3.12/site-packages/dep.py"),
+                ("venvname", "venv/lib/python3.12/site-packages/dep.py"),
+            ] {
+                let p = base.join(dir).join(rel);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(&p, "def dep():\n    return 1\n").unwrap();
+                assert!(
+                    auto_detect_languages(&base.join(dir), &avail).is_empty(),
+                    "Python only under {rel} must not trigger py"
+                );
+            }
+
+            // available_languages gates py on the installed pyfrontend. An
+            // isolated frontends dir carrying only a stub `gofrontend` reports
+            // no py (and never spawns pyfrontend); adding the REAL pyfrontend
+            // makes py reportable and run.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                let (b, repo_dir, home) = py_scratch(
+                    "avail",
+                    &[
+                        ("pkg/__init__.py", ""),
+                        ("pkg/mod.py", "def f() -> int:\n    return 1\n"),
+                    ],
+                );
+                let fe = b.join("frontends");
+                std::fs::create_dir_all(&fe).unwrap();
+                let go_stub = fe.join("gofrontend");
+                std::fs::write(&go_stub, "#!/bin/sh\nexit 0\n").unwrap();
+                std::fs::set_permissions(&go_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+                let run = |dir: &Path, env: &Path| {
+                    testutil::ApgCommand::new(&["scan", "."])
+                        .cwd(dir)
+                        .env("HOME", home.to_str().unwrap())
+                        .env("APG_FRONTEND_DIR", env.to_str().unwrap())
+                        .output()
+                };
+
+                let scan = run(&repo_dir, &fe);
+                let out = String::from_utf8_lossy(&scan.stderr).to_string();
+                assert!(scan.status.success(), "scan (go-only frontends): {out}");
+                assert!(
+                    !out.contains("Languages: py") && !out.contains("running py frontend"),
+                    "py must NOT be reported/run when pyfrontend is absent: {out}"
+                );
+
+                // Force a re-scan (the fast-path would otherwise reuse the DB),
+                // then install the real pyfrontend and re-run.
+                let _ = std::fs::remove_file(repo_dir.join("apg/.trans/db.lbug"));
+                let _ = std::fs::remove_file(repo_dir.join("apg/.trans/graph.jsonl"));
+                let _ = std::fs::remove_dir_all(repo_dir.join(".git/apg/facts"));
+                let real = testutil::apg_bin()
+                    .parent()
+                    .expect("apg binary has a parent")
+                    .join("frontends");
+                std::os::unix::fs::symlink(real.join("pyfrontend"), fe.join("pyfrontend")).unwrap();
+
+                let scan2 = run(&repo_dir, &fe);
+                let out2 = String::from_utf8_lossy(&scan2.stderr).to_string();
+                assert!(scan2.status.success(), "scan (py installed): {out2}");
+                assert!(
+                    out2.contains("Languages: py") && out2.contains("running py frontend"),
+                    "py must be reported/run once pyfrontend is installed: {out2}"
+                );
+
+                let _ = std::fs::remove_dir_all(&b);
+            }
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-08 task-17/20 (e2e): a mixed Go + Python repo scans BOTH
+        /// frontends into ONE graph — py auto-detects alongside go, both
+        /// frontends run, the merged graph carries a py symbol and its resolved
+        /// call edge with zero `shadowed_modules`, and the py frontend honours
+        /// its `--id-prefix` opaque-id namespace (the per-language namespacing
+        /// the scan relies on to merge two `n1`-starting streams).
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
+        fn acceptance_python_mixed_language_single_graph() {
+            let (base, repo_dir, home) = py_scratch(
+                "mixed",
+                &[
+                    ("go.mod", "module scratch\n\ngo 1.21\n"),
+                    ("main.go", "package main\n\nfunc main() {}\n"),
+                    ("pkg/__init__.py", ""),
+                    ("pkg/other.py", "def helper() -> int:\n    return 1\n"),
+                    (
+                        "pkg/mod.py",
+                        "from pkg.other import helper\n\n\ndef call() -> int:\n    return helper()\n",
+                    ),
+                ],
+            );
+
+            let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "scan failed: {stderr}");
+            assert!(
+                stderr.contains("Languages: go, py"),
+                "a mixed repo must auto-detect both languages: {stderr}"
+            );
+            assert!(
+                stderr.contains("[scan] running go frontend"),
+                "the go frontend must run: {stderr}"
+            );
+            assert!(
+                stderr.contains("[scan] running py frontend"),
+                "the py frontend must run: {stderr}"
+            );
+            assert!(
+                !stderr.contains("shadowed"),
+                "no module/function may be shadowed in the merged graph: {stderr}"
+            );
+
+            let recs = export_records(&repo_dir);
+            assert!(
+                export_file_ending(&recs, "/main.go").is_some(),
+                "the go file must be in the merged graph: {recs:?}"
+            );
+            let symbols = export_symbol_fqns(&recs);
+            assert!(
+                symbols
+                    .iter()
+                    .any(|s| strip_lang_prefix(s) == "pkg.mod.call"),
+                "the py symbol must be in the merged graph: {symbols:?}"
+            );
+            assert!(
+                has_edge_between(&recs, "calls", "pkg.mod.call", "pkg.other.helper"),
+                "the py cross-module call must resolve in the merged graph: {recs:?}"
+            );
+
+            // The per-language opaque-id prefix: the scan merges two streams
+            // whose ids both start at 1, so py must namespace under `py`.
+            let py_records = py_frontend_records_with(&repo_dir, &["--id-prefix", "py"]);
+            let py_ids: Vec<String> = py_records
+                .iter()
+                .filter_map(|r| match r {
+                    crate::schema::Record::Struct { id, .. }
+                    | crate::schema::Record::Function { id, .. } => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert!(!py_ids.is_empty(), "the py frontend must emit declarations");
+            assert!(
+                py_ids.iter().all(|id| id.starts_with("py")),
+                "py opaque ids must carry the py prefix: {py_ids:?}"
             );
 
             let _ = std::fs::remove_dir_all(&base);
