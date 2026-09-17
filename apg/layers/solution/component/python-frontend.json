@@ -4,13 +4,7 @@
   "name": "python-frontend",
   "body": "The Python frontend: a standalone Rust binary `pyfrontend` under src/pylib, built on Astral's `ty` type-checker engine with Ruff parser crates pinned as git deps (ruff tag 0.16.6) — no Python runtime at scan time. It discovers __init__.py/__init__.pyi packages plus flat top-level modules, emits module/file/struct/function records and contains/calls/uses edges through `ty`'s project semantics, and emits unresolved_call/unresolved_use -> UnresolvedTarget with a category for anything `ty` cannot resolve. It fits the frontend contract: full `ty` project context, targeted emission, and its native ty/salsa incremental cache. Its source (src/pylib) does not exist yet and is not in the scanned graph, so its `implemented-by` anchors are the planned Implementation nodes `rust.pyfrontend` (Module) and `rust.pyfrontend.main` (Function) — graded Pending until the branch re-scan realizes them, the same planned-anchor state as solution.component.js-ts-frontend and solution.component.markdown-frontend.",
   "properties": {},
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.pyfrontend.main",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
