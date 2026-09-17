@@ -24,6 +24,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.git.recorded_scan",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.git_state",
+      "properties": {}
     }
   ],
   "in": [
