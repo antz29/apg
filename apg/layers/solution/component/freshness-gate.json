@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "apg.schema.Record.ScanMeta",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.git.reanchor_scan_meta",
       "properties": {}
     },
