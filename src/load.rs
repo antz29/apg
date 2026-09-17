@@ -1972,6 +1972,19 @@ pub(crate) mod tests {
                     n.scanned_at = o("scanned_at");
                     g.nodes.insert(crate::schema::SCAN_HEAD.to_string(), n);
                 }
+                "language" => {
+                    // A language-root node (`lang_switch` id, e.g. `rust`) carries
+                    // only its fqn — no location, no code_type; this mirrors
+                    // `Export::Language` (PHASE_09 language rooting) so the record
+                    // round-trips instead of hitting the unknown-type bail.
+                    g.nodes.insert(
+                        s("fqn"),
+                        Node {
+                            kind: NodeKind::Language,
+                            ..Node::default()
+                        },
+                    );
+                }
                 "module" => {
                     g.nodes.insert(
                         s("fqn"),

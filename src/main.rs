@@ -8184,7 +8184,7 @@ mod tests {
             let records = export_records(&repo_dir);
             let files = export_file_paths(&records);
             assert!(
-                export_modules(&records).contains("repo"),
+                export_modules(&records).contains("js.repo"),
                 "the JS package module must be present: {:?}",
                 export_modules(&records)
             );
@@ -8252,8 +8252,9 @@ mod tests {
                 records.iter().any(|r| {
                     r.get("type").and_then(|t| t.as_str()) == Some("calls")
                         && r.get("from").and_then(|f| f.as_str())
-                            == Some("mixed.src.jsconsumer.useTs")
-                        && r.get("to").and_then(|t| t.as_str()) == Some("mixed.src.tsdef.tsHelper")
+                            == Some("ts.mixed.src.jsconsumer.useTs")
+                        && r.get("to").and_then(|t| t.as_str())
+                            == Some("ts.mixed.src.tsdef.tsHelper")
                 }),
                 "direction A: a .js import must resolve to its .ts definition (a real FQN, not \
                  Unresolved): {records:?}"
@@ -8262,14 +8263,15 @@ mod tests {
                 records.iter().any(|r| {
                     r.get("type").and_then(|t| t.as_str()) == Some("calls")
                         && r.get("from").and_then(|f| f.as_str())
-                            == Some("mixed.src.tsconsumer.useJs")
-                        && r.get("to").and_then(|t| t.as_str()) == Some("mixed.src.jsdef.jsHelper")
+                            == Some("ts.mixed.src.tsconsumer.useJs")
+                        && r.get("to").and_then(|t| t.as_str())
+                            == Some("ts.mixed.src.jsdef.jsHelper")
                 }),
                 "direction B: a .ts import must resolve to its .js definition (a real FQN, not \
                  Unresolved): {records:?}"
             );
-            assert!(symbols.contains("mixed.src.tsdef.tsHelper"));
-            assert!(symbols.contains("mixed.src.jsdef.jsHelper"));
+            assert!(symbols.contains("ts.mixed.src.tsdef.tsHelper"));
+            assert!(symbols.contains("ts.mixed.src.jsdef.jsHelper"));
 
             // package.json `main`/`exports`: the self-name import reaches the
             // declared `src/index.js` symbol (a real resolved target).
@@ -8277,9 +8279,9 @@ mod tests {
                 records.iter().any(|r| {
                     r.get("type").and_then(|t| t.as_str()) == Some("calls")
                         && r.get("from").and_then(|f| f.as_str())
-                            == Some("mixed.src.selfconsumer.useIndex")
+                            == Some("ts.mixed.src.selfconsumer.useIndex")
                         && r.get("to").and_then(|t| t.as_str())
-                            == Some("mixed.src.index.indexHelper")
+                            == Some("ts.mixed.src.index.indexHelper")
                 }),
                 "package.json main/exports resolution must reach the declared symbol: {records:?}"
             );
@@ -8304,7 +8306,7 @@ mod tests {
                 records.iter().any(|r| {
                     r.get("type").and_then(|t| t.as_str()) == Some("calls")
                         && r.get("from").and_then(|f| f.as_str())
-                            == Some("mixed.src.selfconsumer.useLib")
+                            == Some("ts.mixed.src.selfconsumer.useLib")
                         && r.get("to")
                             .and_then(|t| t.as_str())
                             .is_some_and(|t| lib_symbols.contains(t))
@@ -8319,11 +8321,11 @@ mod tests {
                 "the .d.ts declaration file must be scanned"
             );
             assert!(
-                symbols.contains("mixed.src.types.Config"),
+                symbols.contains("ts.mixed.src.types.Config"),
                 "the .d.ts interface must be a project symbol: {symbols:?}"
             );
             assert!(
-                export_resolved_edge_targets(&records).contains("mixed.src.types.Config"),
+                export_resolved_edge_targets(&records).contains("ts.mixed.src.types.Config"),
                 "the .d.ts interface must be a resolved uses target: {records:?}"
             );
 
@@ -8391,7 +8393,7 @@ mod tests {
 
             let records = export_records(&repo_dir);
             assert!(
-                export_modules(&records).contains("apg-tsfrontend"),
+                export_modules(&records).contains("ts.apg-tsfrontend"),
                 "the copied package module must be present: {:?}",
                 export_modules(&records)
             );
@@ -8420,7 +8422,7 @@ mod tests {
                 "handleJsx",
                 "walkNode",
             ] {
-                let fqn = format!("apg-tsfrontend.scanner.{unit}");
+                let fqn = format!("ts.apg-tsfrontend.scanner.{unit}");
                 assert!(
                     syms.contains(&fqn),
                     "ported unit {fqn} must be a symbol: {syms:?}"
@@ -8437,7 +8439,7 @@ mod tests {
         /// Phase-07 task-13 (e2e, scratch /tmp repo, CANDIDATE binary only —
         /// `global.constraint.no-real-project-test`): the Markdown frontend's
         /// pinned AC through ONE REAL mixed Go+Markdown scan. Asserts one Module
-        /// per directory (FQN = the directory absolute path, pre-P9), absolute
+        /// per directory (FQN = `md.<directory absolute path>`, post-P9), absolute
         /// path File nodes with the extension retained, nested section Structs
         /// with contains edges, injective duplicate-heading dedup, same-stem /
         /// path-alias distinctness, `.mdx` excluded, md auto-detected ALONGSIDE
@@ -8497,21 +8499,26 @@ mod tests {
             let recs = export_records(&repo_dir);
             let root = std::fs::canonicalize(&repo_dir).unwrap();
             let at = |rel: &str| root.join(rel).to_string_lossy().into_owned();
+            // P9 roots every module FQN under its language id: the md module
+            // identity (the directory absolute path) renders `md.<abs-path>`.
+            // File FQNs are absolute paths and section FQNs hang off a File, so
+            // neither is rooted — only the module lookups below use `md_at`.
+            let md_at = |rel: &str| format!("md.{}", at(rel));
 
-            // ---- (1) one Module per directory, FQN = the directory absolute
-            // path verbatim (pre-P9), each emitted exactly once ----
+            // ---- (1) one Module per directory, FQN = `md.<directory absolute
+            // path>` (post-P9), each emitted exactly once ----
             let module_counts = export_module_counts(&recs);
             for dir in ["docs", "docs/deep", "guides", "notes", "gen"] {
                 assert_eq!(
-                    module_counts.get(&at(dir)).copied(),
+                    module_counts.get(&md_at(dir)).copied(),
                     Some(1),
                     "directory `{dir}` must yield exactly one Module `{}`: {module_counts:?}",
-                    at(dir)
+                    md_at(dir)
                 );
             }
             // An `.mdx`-only directory is not a Module (and yields no node).
             assert!(
-                !module_counts.contains_key(&at("onlymdx")),
+                !module_counts.contains_key(&md_at("onlymdx")),
                 "an .mdx-only directory must not be a Module: {module_counts:?}"
             );
             // Positive no-double-emission check on the emitted records.
@@ -8595,10 +8602,15 @@ mod tests {
             // Overview/Overview/Overview 1 -> overview/overview-1/overview-2,
             // each FQN extending its parent (`<File>.<slug>`, then the parent
             // section's FQN). ----
+            // PHASE_09: a top-level section's parent is the File path, which the
+            // ingestor roots via `rooted_scope`, so every section FQN is
+            // `md.<file-path>.<slug>` (the slug chain then extends it). The
+            // File→section `contains` edge keeps the File's OWN (unrooted) path
+            // as its `from` (ingest Pass B3 derives it from the node's location).
             let ov = at("docs/overview.md");
-            let o1 = format!("{ov}.overview");
-            let o2 = format!("{ov}.overview.overview-1");
-            let o3 = format!("{ov}.overview.overview-1.overview-2");
+            let o1 = format!("md.{ov}.overview");
+            let o2 = format!("md.{ov}.overview.overview-1");
+            let o3 = format!("md.{ov}.overview.overview-1.overview-2");
             for f in [&o1, &o2, &o3] {
                 assert!(
                     struct_fqns.contains(f),
@@ -8610,10 +8622,10 @@ mod tests {
             // top-level section hangs off the File; a sibling after a deeper
             // heading attaches to the nearest preceding LOWER-level heading.
             let ns = at("docs/nesting.md");
-            let n1 = format!("{ns}.title");
-            let n2 = format!("{ns}.title.child");
-            let n3 = format!("{ns}.title.child.grandchild");
-            let n4 = format!("{ns}.title.sibling");
+            let n1 = format!("md.{ns}.title");
+            let n2 = format!("md.{ns}.title.child");
+            let n3 = format!("md.{ns}.title.child.grandchild");
+            let n4 = format!("md.{ns}.title.sibling");
             for f in [&n1, &n2, &n3, &n4] {
                 assert!(
                     struct_fqns.contains(f),
@@ -8654,7 +8666,7 @@ mod tests {
             let readme_md = at("notes/README.md");
             let readme_markdown = at("notes/README.markdown");
             assert_eq!(
-                module_counts.get(&at("notes")).copied(),
+                module_counts.get(&md_at("notes")).copied(),
                 Some(1),
                 "the same-dir markdown files must share ONE Module"
             );
@@ -8663,8 +8675,8 @@ mod tests {
                 "README.md + README.markdown must be two distinct File nodes: {file_type:?}"
             );
             assert!(
-                struct_fqns.contains(&format!("{readme_md}.notes"))
-                    && struct_fqns.contains(&format!("{readme_markdown}.notes")),
+                struct_fqns.contains(&format!("md.{readme_md}.notes"))
+                    && struct_fqns.contains(&format!("md.{readme_markdown}.notes")),
                 "same-stem sections must stay distinct by file path: {struct_fqns:?}"
             );
 
@@ -8677,12 +8689,12 @@ mod tests {
             assert!(
                 file_type.contains_key(&docs_intro)
                     && file_type.contains_key(&guides_intro)
-                    && module_counts.contains_key(&at("docs/deep")),
+                    && module_counts.contains_key(&md_at("docs/deep")),
                 "same-stem files in different directories must stay distinct: {file_type:?}"
             );
             assert!(
-                struct_fqns.contains(&format!("{docs_intro}.intro"))
-                    && struct_fqns.contains(&format!("{guides_intro}.intro")),
+                struct_fqns.contains(&format!("md.{docs_intro}.intro"))
+                    && struct_fqns.contains(&format!("md.{guides_intro}.intro")),
                 "same-stem sections across directories must be distinct: {struct_fqns:?}"
             );
 
@@ -8691,16 +8703,16 @@ mod tests {
             // would collapse both to one `docs.guide` prefix).
             let guide_x = at("docs/guide/x.md");
             let dotguide_x = at("docs.guide/x.md");
-            assert_eq!(module_counts.get(&at("docs/guide")).copied(), Some(1));
-            assert_eq!(module_counts.get(&at("docs.guide")).copied(), Some(1));
+            assert_eq!(module_counts.get(&md_at("docs/guide")).copied(), Some(1));
+            assert_eq!(module_counts.get(&md_at("docs.guide")).copied(), Some(1));
             assert_ne!(at("docs/guide"), at("docs.guide"));
             assert!(
                 file_type.contains_key(&guide_x) && file_type.contains_key(&dotguide_x),
                 "the path-alias files must stay distinct File nodes: {file_type:?}"
             );
             assert!(
-                struct_fqns.contains(&format!("{guide_x}.x"))
-                    && struct_fqns.contains(&format!("{dotguide_x}.x")),
+                struct_fqns.contains(&format!("md.{guide_x}.x"))
+                    && struct_fqns.contains(&format!("md.{dotguide_x}.x")),
                 "the path-alias sections must stay distinct: {struct_fqns:?}"
             );
 

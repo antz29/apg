@@ -2075,50 +2075,52 @@ mod tests {
                 },
             );
             assert_eq!(report.shadowed_modules, 1);
-            // The class survives with its canonical FQN.
-            assert!(graph.nodes.contains_key("org.pkg.A"));
-            assert_eq!(graph.nodes["org.pkg.A"].kind, NodeKind::Struct);
+            // PHASE_09: the module/type collision is at the ROOTED FQN — every
+            // module is rooted under its `lang_switch` id (`java.`); the class
+            // survives with its rooted canonical FQN.
+            assert!(graph.nodes.contains_key("java.org.pkg.A"));
+            assert_eq!(graph.nodes["java.org.pkg.A"].kind, NodeKind::Struct);
             // The parent package and the package nested under the shadowed name
             // survive; the shadowed package itself is not present.
-            assert!(graph.nodes.contains_key("org.pkg"));
-            assert!(graph.nodes.contains_key("org.pkg.A.deep"));
-            assert!(graph.nodes.contains_key("org.pkg.A.deep.B"));
-            // Files survive with their own module·file·unit containment chains.
+            assert!(graph.nodes.contains_key("java.org.pkg"));
+            assert!(graph.nodes.contains_key("java.org.pkg.A.deep"));
+            assert!(graph.nodes.contains_key("java.org.pkg.A.deep.B"));
+            // Files survive (their FQNs are absolute paths, never rooted) with
+            // their own module·file·unit containment chains.
             assert!(graph.nodes.contains_key("/x/A.java"));
             assert!(graph.nodes.contains_key("/y/B.java"));
             assert_eq!(graph.nodes["/x/A.java"].kind, NodeKind::File);
             assert!(
                 graph
                     .contains
-                    .contains(&("org.pkg".to_string(), "/x/A.java".to_string()))
+                    .contains(&("java.org.pkg".to_string(), "/x/A.java".to_string()))
             );
             assert!(
                 graph
                     .contains
-                    .contains(&("/x/A.java".to_string(), "org.pkg.A".to_string()))
+                    .contains(&("/x/A.java".to_string(), "java.org.pkg.A".to_string()))
             );
             assert!(
                 graph
                     .contains
-                    .contains(&("org.pkg.A.deep".to_string(), "/y/B.java".to_string()))
+                    .contains(&("java.org.pkg.A.deep".to_string(), "/y/B.java".to_string()))
             );
             assert!(
                 graph
                     .contains
-                    .contains(&("/y/B.java".to_string(), "org.pkg.A.deep.B".to_string()))
+                    .contains(&("/y/B.java".to_string(), "java.org.pkg.A.deep.B".to_string()))
             );
             // But the shadowed package is not a parent: its Module→File edge and the
             // package chain through it are pruned.
             assert!(
                 !graph
                     .contains
-                    .contains(&("org.pkg.A".to_string(), "/x/A.java".to_string()))
+                    .contains(&("java.org.pkg.A".to_string(), "/x/A.java".to_string()))
             );
-            assert!(
-                !graph
-                    .contains
-                    .contains(&("org.pkg.A".to_string(), "org.pkg.A.deep".to_string()))
-            );
+            assert!(!graph.contains.contains(&(
+                "java.org.pkg.A".to_string(),
+                "java.org.pkg.A.deep".to_string()
+            )));
         }
 
         #[test]
@@ -2163,67 +2165,74 @@ mod tests {
             );
             // The struct `p.A.test` (from the shadowed package) wins over the
             // method `p.A.test`; the distinct method `p.A.other` survives.
+            // PHASE_09: rooting changes only the CROSS-language case — the
+            // within-language shadow counts are unchanged and the collision is at
+            // the rooted FQN (`java.`).
             assert_eq!(report.shadowed_functions, 1);
             assert_eq!(report.shadowed_modules, 1);
-            assert!(graph.nodes.contains_key("p.A.test"));
-            assert_eq!(graph.nodes["p.A.test"].kind, NodeKind::Struct);
-            assert!(graph.nodes.contains_key("p.A.other"));
-            // The shadowed module is gone as a module — `p.A` exists only as the
-            // winning struct — and the file in it survives but loses its module
-            // parent chain (`p→p.A` module edge pruned).
-            assert_eq!(graph.nodes["p.A"].kind, NodeKind::Struct);
+            assert!(graph.nodes.contains_key("java.p.A.test"));
+            assert_eq!(graph.nodes["java.p.A.test"].kind, NodeKind::Struct);
+            assert!(graph.nodes.contains_key("java.p.A.other"));
+            // The shadowed module is gone as a module — `java.p.A` exists only as
+            // the winning struct — and the file in it survives but loses its
+            // module parent chain (`java.p→java.p.A` module edge pruned).
+            assert_eq!(graph.nodes["java.p.A"].kind, NodeKind::Struct);
             assert!(graph.nodes.contains_key("/x/A.java"));
             assert!(graph.nodes.contains_key("/y/test.java"));
             assert!(
                 graph
                     .contains
-                    .contains(&("p".to_string(), "/x/A.java".to_string()))
+                    .contains(&("java.p".to_string(), "/x/A.java".to_string()))
             );
             assert!(
                 !graph
                     .contains
-                    .contains(&("p".to_string(), "p.A".to_string()))
+                    .contains(&("java.p".to_string(), "java.p.A".to_string()))
             );
             assert!(
                 graph
                     .contains
-                    .contains(&("/x/A.java".to_string(), "p.A".to_string()))
+                    .contains(&("/x/A.java".to_string(), "java.p.A".to_string()))
             );
             assert!(
                 graph
                     .contains
-                    .contains(&("/y/test.java".to_string(), "p.A.test".to_string()))
+                    .contains(&("/y/test.java".to_string(), "java.p.A.test".to_string()))
             );
             // The dropped function's containment (by struct and by file) is pruned;
             // the surviving function's edges stay.
             assert!(
                 !graph
                     .contains
-                    .contains(&("p.A".to_string(), "p.A.test".to_string()))
+                    .contains(&("java.p.A".to_string(), "java.p.A.test".to_string()))
             );
             assert!(
                 !graph
                     .contains
-                    .contains(&("/x/A.java".to_string(), "p.A.test".to_string()))
+                    .contains(&("/x/A.java".to_string(), "java.p.A.test".to_string()))
             );
             assert!(
                 graph
                     .contains
-                    .contains(&("p.A".to_string(), "p.A.other".to_string()))
+                    .contains(&("java.p.A".to_string(), "java.p.A.other".to_string()))
             );
             assert!(
                 graph
                     .contains
-                    .contains(&("/x/A.java".to_string(), "p.A.other".to_string()))
+                    .contains(&("/x/A.java".to_string(), "java.p.A.other".to_string()))
             );
         }
 
         #[test]
         #[ignore = "e2e tier: real I/O (temp spool dir); run via cargo test-e2e"]
         fn module_replaces_unresolved_target() {
-            // An unresolved placeholder node lives only in `graph.nodes`; a real
-            // declaration (here: the `tests` package vs a bare type reference that
-            // was emitted unresolved) replaces it instead of panicking.
+            // PHASE_09: rooting retires the original 'replaces' premise. A module's
+            // identity is rooted (`java.tests`) while a foreign/unresolved name
+            // stays verbatim (`tests`), so the module and the unresolved placeholder
+            // no longer share an FQN — both survive, each with its own kind. (The
+            // original behaviour, a real declaration superseding an
+            // UnresolvedTarget placeholder at the SAME FQN, is still exercised by
+            // `reuse_splice_reresolves_unresolved_edges_to_cached_real_nodes`.)
             let records = vec![
                 Record::Unresolved {
                     fqn: "tests".to_string(),
@@ -2241,8 +2250,11 @@ mod tests {
                     config: None,
                 },
             );
+            // The module is rooted; the unresolved name is not.
+            assert!(graph.nodes.contains_key("java.tests"));
+            assert_eq!(graph.nodes["java.tests"].kind, NodeKind::Module);
             assert!(graph.nodes.contains_key("tests"));
-            assert_eq!(graph.nodes["tests"].kind, NodeKind::Module);
+            assert_eq!(graph.nodes["tests"].kind, NodeKind::UnresolvedTarget);
         }
 
         #[test]
@@ -2477,35 +2489,37 @@ mod tests {
                 },
             );
             assert_eq!(report.skipped, 0);
-            assert!(graph.nodes.contains_key("github.com/x/y.Store"));
-            assert!(graph.nodes.contains_key("github.com/x/y.Compute"));
-            assert!(graph.nodes.contains_key("github.com/x/y.Store.Get"));
+            // PHASE_09: every module/symbol FQN is rooted under the scan's
+            // `lang_switch` id (`go.`); the unresolved target stays verbatim.
+            assert!(graph.nodes.contains_key("go.github.com/x/y.Store"));
+            assert!(graph.nodes.contains_key("go.github.com/x/y.Compute"));
+            assert!(graph.nodes.contains_key("go.github.com/x/y.Store.Get"));
             assert!(graph.nodes.contains_key("fmt.Errorf"));
             // File layer: module contains the file, the file contains its units,
             // and methods stay under their struct.
             assert!(
                 graph
                     .contains
-                    .contains(&("github.com/x/y".to_string(), "/abs/store.go".to_string()))
+                    .contains(&("go.github.com/x/y".to_string(), "/abs/store.go".to_string()))
             );
             assert!(graph.contains.contains(&(
                 "/abs/store.go".to_string(),
-                "github.com/x/y.Store".to_string()
+                "go.github.com/x/y.Store".to_string()
             )));
             assert!(graph.contains.contains(&(
                 "/abs/store.go".to_string(),
-                "github.com/x/y.Compute".to_string()
+                "go.github.com/x/y.Compute".to_string()
             )));
             assert!(!graph.contains.contains(&(
-                "github.com/x/y".to_string(),
-                "github.com/x/y.Store".to_string()
+                "go.github.com/x/y".to_string(),
+                "go.github.com/x/y.Store".to_string()
             )));
             assert!(graph.contains.contains(&(
-                "github.com/x/y.Store".to_string(),
-                "github.com/x/y.Store.Get".to_string()
+                "go.github.com/x/y.Store".to_string(),
+                "go.github.com/x/y.Store.Get".to_string()
             )));
             assert!(graph.unresolved_calls.contains(&(
-                "github.com/x/y.Compute".to_string(),
+                "go.github.com/x/y.Compute".to_string(),
                 "fmt.Errorf".to_string(),
                 String::new()
             )));
@@ -2579,10 +2593,10 @@ mod tests {
                 },
                 Record::SpecImplementedBy {
                     from: "solution.component.checkout".to_string(),
-                    to: "github.com/x/y.Gateway".to_string(),
+                    to: "go.github.com/x/y.Gateway".to_string(),
                 },
                 Record::PlannedNode {
-                    fqn: "github.com/x/y.Gateway".to_string(),
+                    fqn: "go.github.com/x/y.Gateway".to_string(),
                     kind: "struct".to_string(),
                     name: "Gateway".to_string(),
                     parent: String::new(),
@@ -2596,7 +2610,7 @@ mod tests {
                     config: None,
                 },
             );
-            let fqn = "github.com/x/y.Gateway".to_string();
+            let fqn = "go.github.com/x/y.Gateway".to_string();
             let node = &graph.nodes[&fqn];
             // The real (scanned) node won: present, located, not planned.
             assert_eq!(node.kind, NodeKind::Struct);
@@ -2638,15 +2652,17 @@ mod tests {
             let (graph, report) = ingest(
                 records,
                 &IngestOptions {
-                    blacklist: &["drop.mod".to_string()],
+                    blacklist: &["go.drop.mod".to_string()],
                     language: "go",
                     config: None,
                 },
             );
             assert!(report.skipped >= 3);
-            assert!(graph.nodes.contains_key("keep.mod"));
-            assert!(!graph.nodes.contains_key("drop.mod"));
-            assert!(!graph.nodes.contains_key("drop.mod.B"));
+            // PHASE_09: every module FQN is rooted (`go.`), and
+            // `is_blacklisted` matches the ROOTED FQN — hence the rooted pattern.
+            assert!(graph.nodes.contains_key("go.keep.mod"));
+            assert!(!graph.nodes.contains_key("go.drop.mod"));
+            assert!(!graph.nodes.contains_key("go.drop.mod.B"));
             // A file whose parent module is blacklisted is dropped along with its
             // units; the surviving file keeps its module and unit edges.
             assert!(!graph.nodes.contains_key("/x/b.go"));
@@ -2654,12 +2670,12 @@ mod tests {
             assert!(
                 graph
                     .contains
-                    .contains(&("keep.mod".to_string(), "/x/a.go".to_string()))
+                    .contains(&("go.keep.mod".to_string(), "/x/a.go".to_string()))
             );
             assert!(
                 graph
                     .contains
-                    .contains(&("/x/a.go".to_string(), "keep.mod.A".to_string()))
+                    .contains(&("/x/a.go".to_string(), "go.keep.mod.A".to_string()))
             );
             assert!(!graph.contains.is_empty());
         }
@@ -2813,7 +2829,7 @@ mod tests {
             // The cached unit b/b.go declares the two real targets.
             let mut cached = Graph::default();
             cached.nodes.insert(
-                "scratch".to_string(),
+                "go.scratch".to_string(),
                 Node {
                     kind: NodeKind::Module,
                     ..Node::default()
@@ -2834,8 +2850,8 @@ mod tests {
                 },
             );
             for (fqn, kind, start_line) in [
-                ("scratch.Callee", NodeKind::Function, 2u32),
-                ("scratch.Model", NodeKind::Struct, 6u32),
+                ("go.scratch.Callee", NodeKind::Function, 2u32),
+                ("go.scratch.Model", NodeKind::Struct, 6u32),
             ] {
                 cached.nodes.insert(
                     fqn.to_string(),
@@ -2855,13 +2871,13 @@ mod tests {
             }
             cached
                 .contains
-                .insert(("scratch".to_string(), "/fresh/b.go".to_string()));
+                .insert(("go.scratch".to_string(), "/fresh/b.go".to_string()));
             cached
                 .contains
-                .insert(("/fresh/b.go".to_string(), "scratch.Callee".to_string()));
+                .insert(("/fresh/b.go".to_string(), "go.scratch.Callee".to_string()));
             cached
                 .contains
-                .insert(("/fresh/b.go".to_string(), "scratch.Model".to_string()));
+                .insert(("/fresh/b.go".to_string(), "go.scratch.Model".to_string()));
             let frag = FileFragment::from_graph(&cached, "/fresh/b.go", "b.go", "oid-b", "go");
             store.put(&frag, "/fresh", &cache_key).unwrap();
 
@@ -2885,11 +2901,11 @@ mod tests {
                 },
                 file_rec("/fresh/a.go", "scratch", 10),
                 Record::Unresolved {
-                    fqn: "scratch.Callee".to_string(),
+                    fqn: "go.scratch.Callee".to_string(),
                     category: Some("unknown".to_string()),
                 },
                 Record::Unresolved {
-                    fqn: "scratch.Model".to_string(),
+                    fqn: "go.scratch.Model".to_string(),
                     category: Some("external".to_string()),
                 },
                 Record::Unresolved {
@@ -2898,12 +2914,12 @@ mod tests {
                 },
                 Record::UnresolvedCall {
                     from: "s1".to_string(),
-                    to: "scratch.Callee".to_string(),
+                    to: "go.scratch.Callee".to_string(),
                     target_type: "func()".to_string(),
                 },
                 Record::UnresolvedUse {
                     from: "s1".to_string(),
-                    to: "scratch.Model".to_string(),
+                    to: "go.scratch.Model".to_string(),
                 },
                 Record::UnresolvedCall {
                     from: "s1".to_string(),
@@ -2990,16 +3006,18 @@ mod tests {
 
             // (a) the converted edges appear in `calls`/`uses`.
             assert!(
-                assembled
-                    .calls
-                    .contains(&("scratch.Caller".to_string(), "scratch.Callee".to_string())),
+                assembled.calls.contains(&(
+                    "go.scratch.Caller".to_string(),
+                    "go.scratch.Callee".to_string()
+                )),
                 "the unresolved call to a cached real Function must move to calls: {:?}",
                 assembled.calls
             );
             assert!(
-                assembled
-                    .uses
-                    .contains(&("scratch.Caller".to_string(), "scratch.Model".to_string())),
+                assembled.uses.contains(&(
+                    "go.scratch.Caller".to_string(),
+                    "go.scratch.Model".to_string()
+                )),
                 "the unresolved use of a cached real Struct must move to uses: {:?}",
                 assembled.uses
             );
@@ -3024,7 +3042,7 @@ mod tests {
             }
             // (c) the genuine unresolved edge + exactly ONE UnresolvedTarget row.
             assert!(assembled.unresolved_calls.contains(&(
-                "scratch.Caller".to_string(),
+                "go.scratch.Caller".to_string(),
                 "ghost.External".to_string(),
                 String::new()
             )));
