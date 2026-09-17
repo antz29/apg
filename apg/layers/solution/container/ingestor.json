@@ -28,11 +28,6 @@
       "properties": {}
     },
     {
-      "kind": "implemented-by",
-      "target": "apg.ingest.ingest",
-      "properties": {}
-    },
-    {
       "kind": "contains",
       "target": "solution.component.language-rooting",
       "properties": {}
