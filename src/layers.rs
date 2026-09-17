@@ -1281,11 +1281,45 @@ pub enum CodeRefStatus {
     Drift,
 }
 
+/// The `lang_switch` scan identities a code FQN can be rooted under — the
+/// complete set `available_languages`/`id_prefix_for` recognise (`ts` and `js`
+/// are the unified JS/TS frontend's two ids; a JS-only repo scans under `js`).
+/// Used only to resolve an authored code reference against the scanned universe
+/// tolerantly (see [`resolves_in_scanned`]).
+pub const LANGUAGE_ROOTS: [&str; 9] = [
+    "rust", "java", "go", "cpp", "csharp", "ts", "js", "py", "md",
+];
+
+/// True when `fqn` resolves in `scanned`, tolerating the language root: an
+/// authored reference may be stored **un-rooted** (`apg.cmd_scan`) while the
+/// scanned universe is rooted (`rust.apg.cmd_scan`), or the reverse. This keeps
+/// the durable spec language-agnostic so a binary that predates rooting (the
+/// parent) and a rooted binary (the child) resolve the *same* authored target —
+/// neither depends on the other. Exact membership always wins first, then a
+/// `<root>.` prefix add/strip for every known language root.
+fn resolves_in_scanned(fqn: &str, scanned: &BTreeSet<String>) -> bool {
+    if scanned.contains(fqn) {
+        return true;
+    }
+    for root in LANGUAGE_ROOTS {
+        if scanned.contains(&format!("{root}.{fqn}")) {
+            return true;
+        }
+        if let Some(rest) = fqn.strip_prefix(root).and_then(|s| s.strip_prefix('.'))
+            && scanned.contains(rest)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Classify one `implemented-by` code FQN (SPEC §4.1): [`CodeRefStatus::Real`]
-/// if `fqn` is in `scanned`; [`CodeRefStatus::Pending`] if it is in `planned`
-/// (and not `scanned`); [`CodeRefStatus::Drift`] otherwise. `scanned` is the
-/// set of code FQNs the scan produced; `planned` is the set of FQNs the plan
-/// declared as planned nodes (`.trans`).
+/// if `fqn` resolves in `scanned` (see [`resolves_in_scanned`] — rooting
+/// tolerant); [`CodeRefStatus::Pending`] if it is in `planned` (and not
+/// `scanned`); [`CodeRefStatus::Drift`] otherwise. `scanned` is the set of code
+/// FQNs the scan produced; `planned` is the set of FQNs the plan declared as
+/// planned nodes (`.trans`).
 ///
 /// **The scanned graph is the stronger check**: membership in `scanned` wins
 /// over membership in `planned` — a FQN in both universes is `Real` (it has
@@ -1297,7 +1331,7 @@ pub fn classify_code_ref(
     scanned: &BTreeSet<String>,
     planned: &BTreeSet<String>,
 ) -> CodeRefStatus {
-    if scanned.contains(fqn) {
+    if resolves_in_scanned(fqn, scanned) {
         CodeRefStatus::Real
     } else if planned.contains(fqn) {
         CodeRefStatus::Pending
@@ -3809,6 +3843,83 @@ mod tests {
             let planned = code_universe(&["apg.main"]);
             assert_eq!(
                 classify_code_ref("apg.main", &scanned, &planned),
+                CodeRefStatus::Real
+            );
+        }
+
+        /// The durable spec stays language-agnostic: an authored target resolves
+        /// against a rooted scanned universe (child) and an un-rooted one
+        /// (parent), so neither binary depends on the other. A target that is
+        /// genuinely absent stays Drift.
+        #[test]
+        fn code_ref_resolution_tolerates_language_root() {
+            let planned: BTreeSet<String> = BTreeSet::new();
+
+            // Bare authored targets, rooted scanned universe.
+            let rooted = code_universe(&[
+                "rust.apg.main",
+                "go.github.com/x/y.Store",
+                "java.org.pkg.A",
+                "ts.apg-tsfrontend.scanner.collectFile",
+                "py.pkg.sub",
+                "md./abs/docs",
+            ]);
+            assert_eq!(
+                classify_code_ref("apg.main", &rooted, &planned),
+                CodeRefStatus::Real
+            );
+            assert_eq!(
+                classify_code_ref("github.com/x/y.Store", &rooted, &planned),
+                CodeRefStatus::Real
+            );
+            assert_eq!(
+                classify_code_ref("org.pkg.A", &rooted, &planned),
+                CodeRefStatus::Real
+            );
+            assert_eq!(
+                classify_code_ref("apg-tsfrontend.scanner.collectFile", &rooted, &planned),
+                CodeRefStatus::Real
+            );
+            assert_eq!(
+                classify_code_ref("pkg.sub", &rooted, &planned),
+                CodeRefStatus::Real
+            );
+            assert_eq!(
+                classify_code_ref("/abs/docs", &rooted, &planned),
+                CodeRefStatus::Real
+            );
+            // A genuinely-absent target is still Drift.
+            assert_eq!(
+                classify_code_ref("apg.gone.Nope", &rooted, &planned),
+                CodeRefStatus::Drift
+            );
+            assert!(
+                validate_code_refs(&["apg.main", "github.com/x/y.Store"], &rooted, &planned)
+                    .is_ok()
+            );
+
+            // Rooted authored target, un-rooted scanned universe (the parent).
+            let bare = code_universe(&["apg.main"]);
+            assert_eq!(
+                classify_code_ref("rust.apg.main", &bare, &planned),
+                CodeRefStatus::Real
+            );
+            assert_eq!(
+                classify_code_ref("apg.main", &bare, &planned),
+                CodeRefStatus::Real
+            );
+
+            // `js` is the unified JS/TS frontend's SECOND id — a JS-only repo
+            // scans under `js` (not `ts`), and `available_languages` lists both —
+            // so the tolerance must cover it.
+            let js_rooted = code_universe(&["js.repo.calc.jsOuter"]);
+            assert_eq!(
+                classify_code_ref("repo.calc.jsOuter", &js_rooted, &planned),
+                CodeRefStatus::Real
+            );
+            let js_bare = code_universe(&["repo.calc.jsOuter"]);
+            assert_eq!(
+                classify_code_ref("js.repo.calc.jsOuter", &js_bare, &planned),
                 CodeRefStatus::Real
             );
         }
