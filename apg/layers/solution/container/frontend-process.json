@@ -34,11 +34,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "go.apg/gofrontend.main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.build_script_build.main",
       "properties": {}
     },
