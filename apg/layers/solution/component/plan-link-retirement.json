@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "apg.plan_cmd.cmd_plan",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.plan_cmd.plan_update_phase_at",
+      "properties": {}
     }
   ],
   "in": [
