@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "apg.session.Coordinator.start",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.session.Coordinator.reclaim_stale_socket",
       "properties": {}
     },
