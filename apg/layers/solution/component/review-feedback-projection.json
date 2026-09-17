@@ -9,11 +9,6 @@
       "kind": "implemented-by",
       "target": "apg.load.spec_rel_pairs",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "apg.load.create_schema",
-      "properties": {}
     }
   ],
   "in": [
