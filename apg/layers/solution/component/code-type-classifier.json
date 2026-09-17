@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.classify.classify_code_type",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "apg.classify.builtin_code_type",
+      "properties": {}
     }
   ],
   "in": [
