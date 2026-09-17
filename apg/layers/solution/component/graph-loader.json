@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.load.write_graph_jsonl",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "apg.load.create_schema",
       "properties": {}
     },
