@@ -28,6 +28,11 @@
       "kind": "details",
       "source": "solution.note.implemented-by-migration-reconciliation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.implemented-by-targets-language-agnostic",
+      "properties": {}
     }
   ]
 }
