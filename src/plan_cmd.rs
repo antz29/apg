@@ -1598,6 +1598,24 @@ fn plan_verify(args: &[String]) -> anyhow::Result<()> {
     plan_verify_at(&apg_root, project)
 }
 
+/// The FQN candidates whose realization satisfies the planned-node gate: the
+/// authored `fqn` itself, its language-agnostic identity, and every
+/// `<root>.<identity>` variant. Pure — the caller checks each against the
+/// branch DB, so a planned node named bare (`apg.cache`) is realized by rooted
+/// scanned code (`rust.apg.cache`) and vice versa. An `UnresolvedTarget` at a
+/// candidate is never real: the caller's `impl_label` check admits only the four
+/// Implementation labels.
+fn realization_candidates(fqn: &str) -> Vec<String> {
+    let identity = crate::layers::code_identity(fqn);
+    let mut out = vec![fqn.to_string(), identity.to_string()];
+    for root in crate::layers::LANGUAGE_ROOTS {
+        out.push(format!("{root}.{identity}"));
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Core of `plan verify` — the coherence gate. Returns the merge handoff
 /// message on green, or errors listing every blocker (unrealized planned
 /// nodes, unresolved feedback, coverage gaps). Guarded: refuses outside the
@@ -1630,7 +1648,11 @@ pub(crate) fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<(
         })
         .collect();
     for (fqn, kind) in planned {
-        let realized = db.impl_label(fqn).is_some() && !db.is_planned(fqn);
+        // Language-root tolerant (mirrors `classify_code_ref`): realize on ANY
+        // `<root>.` variant of the planned node's identity, so the parent
+        // (scanned bare) and the child (scanned rooted) agree on the same target.
+        let real = |name: &str| db.impl_label(name).is_some() && !db.is_planned(name);
+        let realized = realization_candidates(fqn).iter().any(|c| real(c));
         if !realized {
             blocked.push(format!(
                 "planned {kind} node `{fqn}` is not realized — a scan must find real code at its FQN before verify (missing or dangling code blocks verify)"
@@ -1856,6 +1878,10 @@ pub(crate) fn coverage_check(
     satisfied: &BTreeSet<String>,
     branch_added: &BTreeSet<String>,
 ) -> CoverageReport {
+    // Language-agnostic identity (commit 7a6ed03e + `code_identity`): the durable
+    // plan may name a rooted FQN (`rust.apg.cache`) while the solution node's
+    // `implemented-by` target is bare (`apg.cache`), or vice versa — compare
+    // IDENTITIES, not raw strings, so coverage is root-agnostic.
     let mut touched: BTreeSet<&str> = BTreeSet::new();
     for r in records {
         if let Record::Task {
@@ -1866,10 +1892,10 @@ pub(crate) fn coverage_check(
         } = r
         {
             if !target.is_empty() {
-                touched.insert(target.as_str());
+                touched.insert(crate::layers::code_identity(target));
             }
             if matches!(verb.as_str(), "renames" | "moves") && !new_fqn.is_empty() {
-                touched.insert(new_fqn.as_str());
+                touched.insert(crate::layers::code_identity(new_fqn));
             }
         }
     }
@@ -1933,7 +1959,7 @@ pub(crate) fn coverage_check(
             continue;
         }
         for fqn in refs {
-            if !touched.contains(fqn) {
+            if !touched.contains(crate::layers::code_identity(fqn)) {
                 gaps.push(CoverageGap {
                     solution: solution.clone(),
                     fqn: fqn.to_string(),
@@ -2875,6 +2901,103 @@ mod tests {
                 }]
             );
             assert_eq!(report.no_claims, vec!["solution.component.checkout"]);
+        }
+
+        /// The coverage gate is language-root agnostic: task targets / rename
+        /// destinations may be language-rooted while the solution nodes'
+        /// `implemented-by` targets are bare (and the reverse) — the identities
+        /// match, so there are NO gaps either way.
+        #[test]
+        fn coverage_identity_tolerates_language_root_on_both_sides() {
+            let task = |fqn: &str, verb: &str, target: &str, new_fqn: &str| Record::Task {
+                fqn: fqn.to_string(),
+                title: "T".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: verb.to_string(),
+                target: target.to_string(),
+                new_fqn: new_fqn.to_string(),
+            };
+            let node = |name: &str, refs: &[&str]| crate::layers::NodeFile {
+                layer: "solution".to_string(),
+                node_type: "system".to_string(),
+                name: name.to_string(),
+                body: String::new(),
+                properties: std::collections::BTreeMap::new(),
+                out: refs
+                    .iter()
+                    .map(|r| crate::layers::OutEdge {
+                        kind: "implemented-by".to_string(),
+                        target: r.to_string(),
+                        properties: std::collections::BTreeMap::new(),
+                    })
+                    .collect(),
+                in_edges: Vec::new(),
+            };
+            let branch_added: BTreeSet<String> = ["solution.system.alpha", "solution.system.beta"]
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+
+            // Rooted task targets, BARE implemented-by targets.
+            let rooted_tasks = vec![
+                task("foo/plan.phase-01.task-1", "modifies", "rust.apg.cache", ""),
+                task(
+                    "foo/plan.phase-01.task-2",
+                    "renames",
+                    "rust.apg.old_mod",
+                    "rust.apg.new_mod",
+                ),
+            ];
+            let bare_refs = vec![
+                node("alpha", &["apg.cache"]),
+                node("beta", &["apg.new_mod"]),
+            ];
+            let report = coverage_check(&rooted_tasks, &bare_refs, &BTreeSet::new(), &branch_added);
+            assert!(
+                report.gaps.is_empty(),
+                "rooted task targets must cover bare implemented-by targets: {:?}",
+                report.gaps
+            );
+
+            // BARE task targets, ROOTED implemented-by targets (the reverse).
+            let bare_tasks = vec![
+                task("foo/plan.phase-01.task-1", "modifies", "apg.cache", ""),
+                task(
+                    "foo/plan.phase-01.task-2",
+                    "renames",
+                    "apg.old_mod",
+                    "apg.new_mod",
+                ),
+            ];
+            let rooted_refs = vec![
+                node("alpha", &["rust.apg.cache"]),
+                node("beta", &["rust.apg.new_mod"]),
+            ];
+            let report = coverage_check(&bare_tasks, &rooted_refs, &BTreeSet::new(), &branch_added);
+            assert!(
+                report.gaps.is_empty(),
+                "bare task targets must cover rooted implemented-by targets: {:?}",
+                report.gaps
+            );
+        }
+
+        /// `realization_candidates` (pure) offers the authored FQN, its identity,
+        /// and every `<root>.<identity>` variant — the set whose real realization
+        /// satisfies the planned-node gate under either rooting.
+        #[test]
+        fn realization_candidates_cover_both_rootings() {
+            let rooted = realization_candidates("rust.apg.cache");
+            assert!(rooted.contains(&"rust.apg.cache".to_string()));
+            assert!(rooted.contains(&"apg.cache".to_string()));
+            assert!(rooted.contains(&"java.apg.cache".to_string()));
+            assert!(!rooted.contains(&"rust.rust.apg.cache".to_string()));
+
+            let bare = realization_candidates("apg.cache");
+            assert!(bare.contains(&"apg.cache".to_string()));
+            assert!(bare.contains(&"rust.apg.cache".to_string()));
+            assert!(bare.contains(&"go.apg.cache".to_string()));
         }
 
         // ------------------------------------------------------------------

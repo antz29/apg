@@ -1314,6 +1314,24 @@ fn resolves_in_scanned(fqn: &str, scanned: &BTreeSet<String>) -> bool {
     false
 }
 
+/// The **language-agnostic identity** of a code FQN: strip ONE leading known
+/// language root (`rust.`/`java.`/`go.`/`cpp.`/`csharp.`/`ts.`/`js.`/`py.`/`md.`)
+/// and return the remainder; anything else is returned unchanged. This is the
+/// stable identity the durable spec is authored against, so a rooted FQN
+/// (`rust.apg.cache`) and its bare counterpart (`apg.cache`) compare EQUAL.
+/// [`resolves_in_scanned`] applies the same tolerance to universe membership;
+/// this exposes it to the verify paths that compare two authored code FQNs to
+/// each other (planned-node realization, derived coverage) rather than to a
+/// scanned universe.
+pub fn code_identity(fqn: &str) -> &str {
+    for root in LANGUAGE_ROOTS {
+        if let Some(rest) = fqn.strip_prefix(root).and_then(|s| s.strip_prefix('.')) {
+            return rest;
+        }
+    }
+    fqn
+}
+
 /// Classify one `implemented-by` code FQN (SPEC §4.1): [`CodeRefStatus::Real`]
 /// if `fqn` resolves in `scanned` (see [`resolves_in_scanned`] — rooting
 /// tolerant); [`CodeRefStatus::Pending`] if it is in `planned` (and not
@@ -3922,6 +3940,26 @@ mod tests {
                 classify_code_ref("js.repo.calc.jsOuter", &js_bare, &planned),
                 CodeRefStatus::Real
             );
+        }
+
+        /// `code_identity` strips exactly ONE leading language root — every root in
+        /// `LANGUAGE_ROOTS`, a bare FQN unchanged, and only a real `<root>.`
+        /// boundary (so `rusty.main` is never mangled).
+        #[test]
+        fn code_identity_strips_one_language_root() {
+            for root in LANGUAGE_ROOTS {
+                assert_eq!(
+                    code_identity(&format!("{root}.apg.cmd_scan")),
+                    "apg.cmd_scan",
+                    "`{root}.` must strip to the bare identity"
+                );
+            }
+            assert_eq!(code_identity("apg.cmd_scan"), "apg.cmd_scan");
+            assert_eq!(code_identity("/abs/store.go"), "/abs/store.go");
+            // ONE root only, and only a real `<root>.` boundary.
+            assert_eq!(code_identity("rust.rust.apg.main"), "rust.apg.main");
+            assert_eq!(code_identity("rusty.main"), "rusty.main");
+            assert_eq!(code_identity("rust"), "rust");
         }
 
         /// Pending is NOT an error — a planned-only FQN validates Ok (it realizes
