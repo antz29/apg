@@ -41,6 +41,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.ingest.ingest",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.claim",
+      "properties": {}
     }
   ],
   "in": [
