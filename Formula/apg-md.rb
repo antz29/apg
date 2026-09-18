@@ -12,6 +12,12 @@ class ApgMd < Formula
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
+  bottle do
+    root_url "https://github.com/antz29/apg/releases/download/v0.14.0"
+    rebuild 1
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "05273c67632d22875470e07474b84e88dc40c915a427982927c96005070538ff"
+  end
+
   # A bottle block is merged here by the bottle workflow once this formula is
   # registered there and a tagged release publishes a bottle.
 
