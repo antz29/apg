@@ -7,8 +7,8 @@ class ApgMd < Formula
   desc "Markdown scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.13.3",
-      revision: "19298817359f645414146ae3847ba5217087db0a"
+      tag:      "v0.14.0",
+      revision: "a02a58d0db9c6f81879bccb3729d5376f7b88d59"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
