@@ -1,9 +1,0 @@
-{
-  "layer": "global",
-  "type": "constraint",
-  "name": "no-real-project-test",
-  "body": "A freshly built candidate binary must never be pointed at a real project; it must be exercised against a scratch /tmp git repo per AGENTS.md, so init/scan/project/merge mutations never touch real state.",
-  "properties": {},
-  "out": [],
-  "in": []
-}

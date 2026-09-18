@@ -1,9 +1,0 @@
-{
-  "layer": "global",
-  "type": "constraint",
-  "name": "checkout-independent-code-anchors",
-  "body": "A durable `implemented-by` anchor must be a checkout-independent FQN (a Module, Struct or Function — e.g. a suite symbol's `apg-opencode-suite.<relpath>.<symbol>` or a Rust `apg.<module>.<fn>`). An absolute File-path FQN embeds the checkout/worktree directory, so the same file resolves to a different FQN in a worktree than on `main` and the main rebuild reports spec drift — File paths must never be durable anchors (they are fine as transient plan task targets).",
-  "properties": {},
-  "out": [],
-  "in": []
-}

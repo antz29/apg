@@ -1,9 +1,0 @@
-{
-  "layer": "global",
-  "type": "constraint",
-  "name": "self-contained-tests",
-  "body": "Every test in the repository must be self-contained: it may only use the repository under test, the isolated environment it creates under the system temp directory, or the candidate binary and its built frontends. No test may read the user's home directory or any external checkout, and no test may depend on a recorded external workload baseline.",
-  "properties": {},
-  "out": [],
-  "in": []
-}

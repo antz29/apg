@@ -1,9 +1,0 @@
-{
-  "layer": "global",
-  "type": "constraint",
-  "name": "language-rooted-identity",
-  "body": "Every code identity is rooted in the language it was scanned under. The ingestor materialises one `Language` node per language actually scanned (derived from the `lang_switch` control record, never scanner-emitted) and renders every module FQN as `<language-id>.<module-identity>`; symbols inherit the root through `parent.name`. The language-root namespaces are disjoint, so cross-language module/symbol FQN collisions cannot occur and no module may be silently shadowed across languages.\n\nForeign symbol names are not project identities and are NOT language-rooted: `UnresolvedTarget` FQNs stay verbatim and `code_type` stays path-based. Within one language the existing deterministic handling stands — module-vs-type shadowing (`shadowed_modules`) and function-vs-struct shadowing (`shadowed_functions`) are counted and logged, and a same-kind Struct/Function collision still fails loudly (`claim` panics) rather than silently overwriting. Language rooting narrows this law to cross-language identity; it never licenses silent data loss within a language.\n\nConsistent with global.constraint.never-fabricate-edges and global.constraint.exactness-no-heuristic: the root is derived deterministically from the stream's declared language, never guessed, and every module/symbol gets exactly one root.",
-  "properties": {},
-  "out": [],
-  "in": []
-}

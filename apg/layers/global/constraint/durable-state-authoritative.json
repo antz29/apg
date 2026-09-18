@@ -1,9 +1,0 @@
-{
-  "layer": "global",
-  "type": "constraint",
-  "name": "durable-state-authoritative",
-  "body": "Durable authored state — the `apg/layers/**` node files and their per-logical-mutation git commits — is authoritative. The `apg/.trans/db.lbug` query index is derived and rebuildable; correctness must never depend on a fresh DB, and an absent or stale DB must never block or corrupt a durable mutation.",
-  "properties": {},
-  "out": [],
-  "in": []
-}

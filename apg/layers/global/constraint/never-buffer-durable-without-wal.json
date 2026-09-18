@@ -1,9 +1,0 @@
-{
-  "layer": "global",
-  "type": "constraint",
-  "name": "never-buffer-durable-without-wal",
-  "body": "Durable writes are never buffered in memory without a write-ahead log. Any design that defers a durable node-file write or its commit must first make it recoverable (a WAL or equivalent); otherwise durable writes land directly, exactly as they do today.",
-  "properties": {},
-  "out": [],
-  "in": []
-}

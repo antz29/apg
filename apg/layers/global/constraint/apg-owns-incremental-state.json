@@ -1,9 +1,0 @@
-{
-  "layer": "global",
-  "type": "constraint",
-  "name": "apg-owns-incremental-state",
-  "body": "APG must own the manifest, the impact closure, the schedule, the fact cache, and the DB splice; the per-frontend change must stay deliberately minimal (accept target set / full context / targeted emit / native cache).",
-  "properties": {},
-  "out": [],
-  "in": []
-}
