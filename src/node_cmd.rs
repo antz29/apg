@@ -460,14 +460,25 @@ mod tests {
         std::fs::write(p, content).unwrap();
     }
 
+    /// A project context for node-file-only tests: a real git repo whose
+    /// worktree `foo` on branch `foo` hosts the durable `apg/layers` store, but
+    /// with NO seed code and NO scan — so no `db.lbug`/code graph and no
+    /// process-wide `CWD_LOCK` hold. `write_project` skips its projection leg
+    /// when `db.lbug` is absent, so the write/validate/commit path (and every
+    /// node-file read) behaves identically. Returns `(wt_apg_root, repo, wt_root)`.
+    fn node_store_fixture(tag: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = Repo::new(&format!("nodecmd-{tag}"));
+        let wt = repo.start_project("foo");
+        let wt_apg = wt.join(specs::LAYOUT);
+        (wt_apg, repo, wt)
+    }
+
     /// A real project context (R3/R4): a git repo whose worktree `foo` on
     /// branch `foo` carries a real `apg/.trans/db.lbug` code graph built by
     /// the hermetic scan fixture — the context every `apg node`/`apg edge`
     /// mutation runs in. Returns `(wt_apg_root, repo, wt_root)`.
     fn mutation_fixture(tag: &str) -> (PathBuf, Repo, PathBuf) {
-        let repo = Repo::new(&format!("nodecmd-{tag}"));
-        let wt = repo.start_project("foo");
-        let wt_apg = wt.join(specs::LAYOUT);
+        let (wt_apg, repo, wt) = node_store_fixture(tag);
         wt_write(
             &wt,
             "code/seed.scan.jsonl",
@@ -930,7 +941,7 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
         fn reads_see_the_node_files() {
-            let (wt_apg, repo, _wt) = mutation_fixture("reads");
+            let (wt_apg, repo, _wt) = node_store_fixture("reads");
             let mut ent = node("domain", "entity", "customer");
             ent.properties
                 .insert("kind".to_string(), "entity".to_string());
@@ -1053,7 +1064,7 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
         fn node_add_refuses_existing_and_node_update_preserves_edges() {
-            let (wt_apg, repo, _wt) = mutation_fixture("node-strict");
+            let (wt_apg, repo, _wt) = node_store_fixture("node-strict");
             // Author r1 --depends-on--> r2 through the real CLI arms.
             node_add(&wt_apg, &av(&["requirements", "requirement", "r1"])).unwrap();
             node_add(&wt_apg, &av(&["requirements", "requirement", "r2"])).unwrap();
@@ -1125,7 +1136,7 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
         fn edge_add_refuses_duplicate_and_edge_update_merges_both_halves() {
-            let (wt_apg, repo, _wt) = mutation_fixture("edge-strict");
+            let (wt_apg, repo, _wt) = node_store_fixture("edge-strict");
             node_add(&wt_apg, &av(&["requirements", "requirement", "r1"])).unwrap();
             node_add(&wt_apg, &av(&["requirements", "requirement", "r2"])).unwrap();
             edge_add(
@@ -1363,7 +1374,7 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
         fn strict_node_and_edge_update_preserve_edges_through_dispatch() {
-            let (wt_apg, repo, wt) = mutation_fixture("dispatch-strict");
+            let (wt_apg, repo, wt) = node_store_fixture("dispatch-strict");
 
             // r1 carries its own properties + one in-edge (r0 -> r1) and one
             // out-edge (r1 -> r2) so a node update can be checked edge-for-edge.
