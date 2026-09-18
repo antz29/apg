@@ -288,8 +288,9 @@ reviewer:    apg_review_reject <f>                               → status = op
 - **Never hand-edit the generated/dependency trees** inside the frontends
   (`src/*/target/**`, `src/tslib/node_modules/**`, `src/cpplib/vendor/**`) —
   they are build outputs and vendored dependencies, not authored source.
-- **`install.sh` and `Formula/**`** (the seven brew formulae) are part of the
-  packaging surface and are yours when a task calls for keeping them accurate.
+- **`install.sh` and `Formula/**`** (the scanner plus eight frontend formulae)
+  are part of the packaging surface and are yours when a task calls for keeping
+  them accurate.
 - **`opencode-suite/`** is in-tree product source: the suite tools/lib and the
   distributed-agent templates, embedded in `src/main.rs` via `include_str!`.
   When a task calls for it you edit it like any other product source (your
