@@ -2172,6 +2172,18 @@ mod tests {
         (wt.join(specs::LAYOUT), repo, wt)
     }
 
+    /// A project context for plan tests that never open the branch DB: a real
+    /// git repo whose worktree `foo` on branch `foo` hosts the transient
+    /// `.trans/plans` store, but with NO code DB — so every plan write takes
+    /// the JSONL-only path (`write_jsonl_and_reingest` skips both the
+    /// projection and the stale gate when `db.lbug` is absent). Returns
+    /// `(wt_apg_root, repo, wt_root)`.
+    fn plan_store_fixture(name: &str) -> (PathBuf, Repo, PathBuf) {
+        let repo = Repo::new(&format!("plan-{name}"));
+        let wt = repo.start_project("foo");
+        (wt.join(specs::LAYOUT), repo, wt)
+    }
+
     /// Builds a real DB + load files under `dir/apg` (used by `fixture`).
     fn db_at(dir: &Path) {
         let mut g = Graph::default();
@@ -6844,47 +6856,44 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
         fn plan_rm_cli_refusal_force_and_rm_add_roundtrip() {
-            let (apg_root, repo, wt) = fixture("rm-cli");
+            let (apg_root, repo, wt) = plan_store_fixture("rm-cli");
             let path = write_plan(&apg_root);
 
-            // A plan with a phase refuses, naming the phase + --force.
-            let err = with_cwd(&wt, || {
-                cmd_plan(&["rm".to_string(), "foo".to_string()]).unwrap_err()
-            });
-            assert!(err.to_string().contains("foo/plan.phase-01"), "{err}");
-            assert!(err.to_string().contains("--force"), "{err}");
-            assert!(path.exists());
+            // One cwd hold for the whole surface: `cmd_plan` resolves `apg/` by
+            // walking up from cwd, so the DB-free path fits every command under
+            // a single `CWD_LOCK` acquisition instead of one per command.
+            with_cwd(&wt, || {
+                // A plan with a phase refuses, naming the phase + --force.
+                let err = cmd_plan(&["rm".to_string(), "foo".to_string()]).unwrap_err();
+                assert!(err.to_string().contains("foo/plan.phase-01"), "{err}");
+                assert!(err.to_string().contains("--force"), "{err}");
+                assert!(path.exists());
 
-            // A phase with a task refuses, naming the task + --force.
-            let err = with_cwd(&wt, || {
-                cmd_plan(&[
+                // A phase with a task refuses, naming the task + --force.
+                let err = cmd_plan(&[
                     "rm".to_string(),
                     "foo".to_string(),
                     "phase".to_string(),
                     "1".to_string(),
                 ])
-                .unwrap_err()
-            });
-            assert!(
-                err.to_string().contains("foo/plan.phase-01.task-1"),
-                "{err}"
-            );
-            assert!(err.to_string().contains("--force"), "{err}");
+                .unwrap_err();
+                assert!(
+                    err.to_string().contains("foo/plan.phase-01.task-1"),
+                    "{err}"
+                );
+                assert!(err.to_string().contains("--force"), "{err}");
 
-            // A done task refuses without --force, cascades with it.
-            plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
-            let err = with_cwd(&wt, || {
-                cmd_plan(&[
+                // A done task refuses without --force, cascades with it.
+                plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+                let err = cmd_plan(&[
                     "rm".to_string(),
                     "foo".to_string(),
                     "task".to_string(),
                     "1".to_string(),
                     "1".to_string(),
                 ])
-                .unwrap_err()
-            });
-            assert!(err.to_string().contains("done"), "{err}");
-            with_cwd(&wt, || {
+                .unwrap_err();
+                assert!(err.to_string().contains("done"), "{err}");
                 cmd_plan(&[
                     "rm".to_string(),
                     "foo".to_string(),
@@ -6893,60 +6902,51 @@ mod tests {
                     "1".to_string(),
                     "--force".to_string(),
                 ])
-            })
-            .unwrap();
-            let recs = specs::read_jsonl(&path).unwrap();
-            assert!(!recs.iter().any(|r| matches!(r, Record::Task { .. })));
+                .unwrap();
+                let recs = specs::read_jsonl(&path).unwrap();
+                assert!(!recs.iter().any(|r| matches!(r, Record::Task { .. })));
 
-            // A phase with no tasks removes without --force.
-            with_cwd(&wt, || {
+                // A phase with no tasks removes without --force.
                 cmd_plan(&[
                     "rm".to_string(),
                     "foo".to_string(),
                     "phase".to_string(),
                     "1".to_string(),
                 ])
-            })
-            .unwrap();
-            assert!(
-                !specs::read_jsonl(&path)
-                    .unwrap()
-                    .iter()
-                    .any(|r| matches!(r, Record::PlanPhase { .. }))
-            );
+                .unwrap();
+                assert!(
+                    !specs::read_jsonl(&path)
+                        .unwrap()
+                        .iter()
+                        .any(|r| matches!(r, Record::PlanPhase { .. }))
+                );
 
-            // `rm foo --force` deletes the whole plan JSONL...
-            with_cwd(&wt, || {
-                cmd_plan(&["rm".to_string(), "foo".to_string(), "--force".to_string()])
-            })
-            .unwrap();
-            assert!(
-                !path.exists(),
-                "a plan --force rm must delete the plan JSONL"
-            );
+                // `rm foo --force` deletes the whole plan JSONL...
+                cmd_plan(&["rm".to_string(), "foo".to_string(), "--force".to_string()]).unwrap();
+                assert!(
+                    !path.exists(),
+                    "a plan --force rm must delete the plan JSONL"
+                );
 
-            // ...so the following `apg plan add foo` recreates it (rm→add).
-            with_cwd(&wt, || cmd_plan(&["add".to_string(), "foo".to_string()])).unwrap();
-            assert!(path.exists(), "apg plan add must recreate the removed plan");
+                // ...so the following `apg plan add foo` recreates it (rm→add).
+                cmd_plan(&["add".to_string(), "foo".to_string()]).unwrap();
+                assert!(path.exists(), "apg plan add must recreate the removed plan");
 
-            // A non-existent entity is a hard error.
-            let err = with_cwd(&wt, || {
-                cmd_plan(&[
+                // A non-existent entity is a hard error.
+                let err = cmd_plan(&[
                     "rm".to_string(),
                     "foo".to_string(),
                     "phase".to_string(),
                     "9".to_string(),
                 ])
-                .unwrap_err()
+                .unwrap_err();
+                assert!(err.to_string().contains("no phase 9"), "{err}");
+                let err = cmd_plan(&["rm".to_string(), "ghost".to_string()]).unwrap_err();
+                assert!(
+                    err.to_string().contains("no plan for project `ghost`"),
+                    "{err}"
+                );
             });
-            assert!(err.to_string().contains("no phase 9"), "{err}");
-            let err = with_cwd(&wt, || {
-                cmd_plan(&["rm".to_string(), "ghost".to_string()]).unwrap_err()
-            });
-            assert!(
-                err.to_string().contains("no plan for project `ghost`"),
-                "{err}"
-            );
 
             testutil::remove(&repo);
         }
