@@ -1345,9 +1345,14 @@ mod tests {
             let head_before = repo.head_sha();
             let branch_head_before = wt_head(&wt);
 
-            // `add` dispatches and routes the Feedback + Reviews halves to the
-            // attached node's tier mirror.
+            // One cwd hold for the whole surface: `cmd_review` resolves `apg/`
+            // by walking up from cwd, so every command fits under a single
+            // `CWD_LOCK` acquisition instead of one per call. The test's own
+            // work is sub-second; it was the five separate re-queues on the
+            // process-wide lock that pushed it past libtest's 60s warning.
             with_cwd(&wt, || {
+                // `add` dispatches and routes the Feedback + Reviews halves to
+                // the attached node's tier mirror.
                 cmd_review(&av(&[
                     "add",
                     "domain.entity.order",
@@ -1356,66 +1361,66 @@ mod tests {
                     "--project",
                     "foo",
                 ]))
-            })
-            .unwrap();
-            let mirror = apg_root.join(specs::TRANS).join("domain").join("foo.jsonl");
-            let (feedback_fqn, body) = {
-                let recs = specs::read_jsonl(&mirror).unwrap();
-                let feedback = recs
-                    .iter()
-                    .find_map(|r| match r {
-                        Record::Feedback {
-                            fqn, body, status, ..
-                        } => Some((fqn.clone(), body.clone(), status.clone())),
-                        _ => None,
-                    })
-                    .expect("add lands a Feedback record");
-                assert_eq!(feedback.2, "open", "a new Feedback starts open");
-                assert!(
-                    recs.iter().any(|r| matches!(
-                        r,
-                        Record::Reviews { from, to }
-                            if from == &feedback.0 && to == "domain.entity.order"
-                    )),
-                    "the Reviews edge lands beside its Feedback"
+                .unwrap();
+                let mirror = apg_root.join(specs::TRANS).join("domain").join("foo.jsonl");
+                let (feedback_fqn, body) = {
+                    let recs = specs::read_jsonl(&mirror).unwrap();
+                    let feedback = recs
+                        .iter()
+                        .find_map(|r| match r {
+                            Record::Feedback {
+                                fqn, body, status, ..
+                            } => Some((fqn.clone(), body.clone(), status.clone())),
+                            _ => None,
+                        })
+                        .expect("add lands a Feedback record");
+                    assert_eq!(feedback.2, "open", "a new Feedback starts open");
+                    assert!(
+                        recs.iter().any(|r| matches!(
+                            r,
+                            Record::Reviews { from, to }
+                                if from == &feedback.0 && to == "domain.entity.order"
+                        )),
+                        "the Reviews edge lands beside its Feedback"
+                    );
+                    (feedback.0, feedback.1)
+                };
+                assert_eq!(body, "surface body");
+
+                // `list` dispatches (read-only) — no store change.
+                let mirror_before = std::fs::read_to_string(&mirror).unwrap();
+                cmd_review(&av(&["list", "domain.entity.order"])).unwrap();
+                assert_eq!(std::fs::read_to_string(&mirror).unwrap(), mirror_before);
+
+                // `action` → `actioned`/`fixed`; the body never changes.
+                cmd_review(&av(&["action", &feedback_fqn, "--fix"])).unwrap();
+                assert_eq!(
+                    feedback_status(&mirror, &feedback_fqn),
+                    ("actioned".to_string(), "fixed".to_string())
                 );
-                (feedback.0, feedback.1)
-            };
-            assert_eq!(body, "surface body");
+                assert_eq!(
+                    feedback_body(&mirror, &feedback_fqn),
+                    "surface body",
+                    "the feedback body is immutable across action"
+                );
 
-            // `list` dispatches (read-only) — no store change.
-            let mirror_before = std::fs::read_to_string(&mirror).unwrap();
-            with_cwd(&wt, || cmd_review(&av(&["list", "domain.entity.order"]))).unwrap();
-            assert_eq!(std::fs::read_to_string(&mirror).unwrap(), mirror_before);
+                // `reject` → back to `open`/`rejected`; body still immutable.
+                cmd_review(&av(&["reject", &feedback_fqn])).unwrap();
+                assert_eq!(
+                    feedback_status(&mirror, &feedback_fqn),
+                    ("open".to_string(), "rejected".to_string())
+                );
+                assert_eq!(feedback_body(&mirror, &feedback_fqn), "surface body");
 
-            // `action` → `actioned`/`fixed`; the body never changes.
-            with_cwd(&wt, || cmd_review(&av(&["action", &feedback_fqn, "--fix"]))).unwrap();
-            assert_eq!(
-                feedback_status(&mirror, &feedback_fqn),
-                ("actioned".to_string(), "fixed".to_string())
-            );
-            assert_eq!(
-                feedback_body(&mirror, &feedback_fqn),
-                "surface body",
-                "the feedback body is immutable across action"
-            );
-
-            // `reject` → back to `open`/`rejected`; body still immutable.
-            with_cwd(&wt, || cmd_review(&av(&["reject", &feedback_fqn]))).unwrap();
-            assert_eq!(
-                feedback_status(&mirror, &feedback_fqn),
-                ("open".to_string(), "rejected".to_string())
-            );
-            assert_eq!(feedback_body(&mirror, &feedback_fqn), "surface body");
-
-            // `resolve` → terminal `resolved`; the prior disposition is preserved
-            // (resolve passes no disposition — unchanged semantics); body immutable.
-            with_cwd(&wt, || cmd_review(&av(&["resolve", &feedback_fqn]))).unwrap();
-            assert_eq!(
-                feedback_status(&mirror, &feedback_fqn),
-                ("resolved".to_string(), "rejected".to_string())
-            );
-            assert_eq!(feedback_body(&mirror, &feedback_fqn), "surface body");
+                // `resolve` → terminal `resolved`; the prior disposition is preserved
+                // (resolve passes no disposition — unchanged semantics); body immutable.
+                cmd_review(&av(&["resolve", &feedback_fqn])).unwrap();
+                assert_eq!(
+                    feedback_status(&mirror, &feedback_fqn),
+                    ("resolved".to_string(), "rejected".to_string())
+                );
+                assert_eq!(feedback_body(&mirror, &feedback_fqn), "surface body");
+            });
 
             // Review writes stay transient: neither the main nor the project branch
             // HEAD moves and the tree stays clean.
