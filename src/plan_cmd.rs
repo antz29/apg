@@ -7279,7 +7279,7 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
         fn strict_plan_rm_refusal_and_force_cascade_through_dispatch() {
-            let (apg_root, repo, wt) = fixture("dispatch-rm");
+            let (apg_root, repo, wt) = plan_store_fixture("dispatch-rm");
             let plan_path = specs::plan_jsonl_path(&apg_root, "foo");
             let records = vec![
                 Record::Plan {
@@ -7326,68 +7326,64 @@ mod tests {
             specs::write_jsonl(&plan_path, &records).unwrap();
             let before = std::fs::read_to_string(&plan_path).unwrap();
 
-            // A plan with a phase refuses, naming the phase + --force.
-            let err = with_cwd(&wt, || cmd_plan(&av(&["rm", "foo"])).unwrap_err());
-            assert!(err.to_string().contains("foo/plan.phase-01"), "{err}");
-            assert!(err.to_string().contains("--force"), "{err}");
-            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
-
-            // A phase with a task refuses, naming the task + --force.
-            let err = with_cwd(&wt, || {
-                cmd_plan(&av(&["rm", "foo", "phase", "1"])).unwrap_err()
-            });
-            assert!(
-                err.to_string().contains("foo/plan.phase-01.task-1"),
-                "{err}"
-            );
-            assert!(err.to_string().contains("--force"), "{err}");
-            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
-
-            // A `done` task refuses, naming the status + --force.
-            plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
-            let done_before = std::fs::read_to_string(&plan_path).unwrap();
-            let err = with_cwd(&wt, || {
-                cmd_plan(&av(&["rm", "foo", "task", "1", "1"])).unwrap_err()
-            });
-            assert!(err.to_string().contains("done"), "{err}");
-            assert!(err.to_string().contains("--force"), "{err}");
-            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), done_before);
-
-            // A pending task with incident Feedback refuses, naming the feedback.
-            plan_undone_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
-            let mut recs = specs::read_jsonl(&plan_path).unwrap();
-            recs.push(Record::Feedback {
-                fqn: "foo/feedback-1".into(),
-                body: "b".into(),
-                status: "open".into(),
-                disposition: String::new(),
-            });
-            recs.push(Record::Reviews {
-                from: "foo/feedback-1".into(),
-                to: "foo/plan.phase-01.task-1".into(),
-            });
-            specs::write_jsonl(&plan_path, &recs).unwrap();
-            let fb_before = std::fs::read_to_string(&plan_path).unwrap();
-            let err = with_cwd(&wt, || {
-                cmd_plan(&av(&["rm", "foo", "task", "1", "1"])).unwrap_err()
-            });
-            assert!(err.to_string().contains("foo/feedback-1"), "{err}");
-            assert!(err.to_string().contains("--force"), "{err}");
-            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), fb_before);
-
-            // A creates-targeted planned node refuses, naming the task + --force.
-            let err = with_cwd(&wt, || {
-                cmd_plan(&av(&["rm", "foo", "planned", "github.com/x/y.Gateway"])).unwrap_err()
-            });
-            assert!(
-                err.to_string().contains("foo/plan.phase-01.task-1"),
-                "{err}"
-            );
-            assert!(err.to_string().contains("--force"), "{err}");
-            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), fb_before);
-
-            // The forced planned cascade removes the node + its parent Contains.
+            // One cwd hold for the whole surface: `cmd_plan` resolves `apg/` by
+            // walking up from cwd, so the DB-free path fits every command under
+            // a single `CWD_LOCK` acquisition instead of one per command.
             with_cwd(&wt, || {
+                // A plan with a phase refuses, naming the phase + --force.
+                let err = cmd_plan(&av(&["rm", "foo"])).unwrap_err();
+                assert!(err.to_string().contains("foo/plan.phase-01"), "{err}");
+                assert!(err.to_string().contains("--force"), "{err}");
+                assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
+
+                // A phase with a task refuses, naming the task + --force.
+                let err = cmd_plan(&av(&["rm", "foo", "phase", "1"])).unwrap_err();
+                assert!(
+                    err.to_string().contains("foo/plan.phase-01.task-1"),
+                    "{err}"
+                );
+                assert!(err.to_string().contains("--force"), "{err}");
+                assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
+
+                // A `done` task refuses, naming the status + --force.
+                plan_done_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+                let done_before = std::fs::read_to_string(&plan_path).unwrap();
+                let err = cmd_plan(&av(&["rm", "foo", "task", "1", "1"])).unwrap_err();
+                assert!(err.to_string().contains("done"), "{err}");
+                assert!(err.to_string().contains("--force"), "{err}");
+                assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), done_before);
+
+                // A pending task with incident Feedback refuses, naming the feedback.
+                plan_undone_at(&apg_root, "foo", "foo/plan.phase-01.task-1").unwrap();
+                let mut recs = specs::read_jsonl(&plan_path).unwrap();
+                recs.push(Record::Feedback {
+                    fqn: "foo/feedback-1".into(),
+                    body: "b".into(),
+                    status: "open".into(),
+                    disposition: String::new(),
+                });
+                recs.push(Record::Reviews {
+                    from: "foo/feedback-1".into(),
+                    to: "foo/plan.phase-01.task-1".into(),
+                });
+                specs::write_jsonl(&plan_path, &recs).unwrap();
+                let fb_before = std::fs::read_to_string(&plan_path).unwrap();
+                let err = cmd_plan(&av(&["rm", "foo", "task", "1", "1"])).unwrap_err();
+                assert!(err.to_string().contains("foo/feedback-1"), "{err}");
+                assert!(err.to_string().contains("--force"), "{err}");
+                assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), fb_before);
+
+                // A creates-targeted planned node refuses, naming the task + --force.
+                let err =
+                    cmd_plan(&av(&["rm", "foo", "planned", "github.com/x/y.Gateway"])).unwrap_err();
+                assert!(
+                    err.to_string().contains("foo/plan.phase-01.task-1"),
+                    "{err}"
+                );
+                assert!(err.to_string().contains("--force"), "{err}");
+                assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), fb_before);
+
+                // The forced planned cascade removes the node + its parent Contains.
                 cmd_plan(&av(&[
                     "rm",
                     "foo",
@@ -7395,52 +7391,47 @@ mod tests {
                     "github.com/x/y.Gateway",
                     "--force",
                 ]))
-            })
-            .unwrap();
-            let recs = specs::read_jsonl(&plan_path).unwrap();
-            assert!(
-                !recs.iter().any(|r| matches!(r, Record::PlannedNode { .. })),
-                "the planned node is gone"
-            );
-            assert_no_orphans(&recs);
+                .unwrap();
+                let recs = specs::read_jsonl(&plan_path).unwrap();
+                assert!(
+                    !recs.iter().any(|r| matches!(r, Record::PlannedNode { .. })),
+                    "the planned node is gone"
+                );
+                assert_no_orphans(&recs);
 
-            // The forced task cascade removes the task + its orphan feedback.
-            with_cwd(&wt, || {
-                cmd_plan(&av(&["rm", "foo", "task", "1", "1", "--force"]))
-            })
-            .unwrap();
-            let recs = specs::read_jsonl(&plan_path).unwrap();
-            assert!(!recs.iter().any(|r| matches!(r, Record::Task { .. })));
-            assert!(
-                !recs
-                    .iter()
-                    .any(|r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-1")),
-                "the task's feedback must not survive as an orphan"
-            );
-            assert_no_orphans(&recs);
+                // The forced task cascade removes the task + its orphan feedback.
+                cmd_plan(&av(&["rm", "foo", "task", "1", "1", "--force"])).unwrap();
+                let recs = specs::read_jsonl(&plan_path).unwrap();
+                assert!(!recs.iter().any(|r| matches!(r, Record::Task { .. })));
+                assert!(
+                    !recs.iter().any(
+                        |r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-1")
+                    ),
+                    "the task's feedback must not survive as an orphan"
+                );
+                assert_no_orphans(&recs);
 
-            // The phase now has no tasks: a plain (no --force) rm removes it.
-            with_cwd(&wt, || cmd_plan(&av(&["rm", "foo", "phase", "1"]))).unwrap();
-            assert!(
-                !specs::read_jsonl(&plan_path)
-                    .unwrap()
-                    .iter()
-                    .any(|r| matches!(r, Record::PlanPhase { .. }))
-            );
+                // The phase now has no tasks: a plain (no --force) rm removes it.
+                cmd_plan(&av(&["rm", "foo", "phase", "1"])).unwrap();
+                assert!(
+                    !specs::read_jsonl(&plan_path)
+                        .unwrap()
+                        .iter()
+                        .any(|r| matches!(r, Record::PlanPhase { .. }))
+                );
 
-            // `rm foo --force` deletes the emptied store; a following rm is a hard
-            // error and a following `plan add` recreates the plan.
-            with_cwd(&wt, || cmd_plan(&av(&["rm", "foo", "--force"]))).unwrap();
-            assert!(!plan_path.exists(), "the emptied store must be deleted");
-            let err = with_cwd(&wt, || {
-                cmd_plan(&av(&["rm", "foo", "--force"])).unwrap_err()
+                // `rm foo --force` deletes the emptied store; a following rm is a hard
+                // error and a following `plan add` recreates the plan.
+                cmd_plan(&av(&["rm", "foo", "--force"])).unwrap();
+                assert!(!plan_path.exists(), "the emptied store must be deleted");
+                let err = cmd_plan(&av(&["rm", "foo", "--force"])).unwrap_err();
+                assert!(
+                    err.to_string().contains("no plan for project `foo`"),
+                    "{err}"
+                );
+                cmd_plan(&av(&["add", "foo"])).unwrap();
+                assert!(plan_path.exists(), "rm→add round-trips");
             });
-            assert!(
-                err.to_string().contains("no plan for project `foo`"),
-                "{err}"
-            );
-            with_cwd(&wt, || cmd_plan(&av(&["add", "foo"]))).unwrap();
-            assert!(plan_path.exists(), "rm→add round-trips");
 
             testutil::remove(&repo);
         }
