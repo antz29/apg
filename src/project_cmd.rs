@@ -1915,172 +1915,6 @@ mod tests {
             testutil::remove(&repo);
         }
 
-        #[test]
-        #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
-        fn dogfood_round_trip_re_materializes_tiers_start_author_scan_verify_merge() {
-            // A main checkout whose scanned code carries the structs the solution
-            // tier's implemented-by edges claim (SPEC §4.1: resolves → real).
-            let repo = Repo::new("dogfood-e2e");
-            repo.write(
-                "code/seed.scan.jsonl",
-                &testutil::code_payload(
-                    MOD,
-                    FILE,
-                    &[
-                        "Store",
-                        "ProjectStart",
-                        "MutationGuard",
-                        "LayersSerializer",
-                        "PlanBridge",
-                        "InitVersionGate",
-                    ],
-                ),
-            );
-            repo.commit_all("seed code");
-
-            // start: one command yields worktree + branch + branch DB, off the
-            // default branch (the dogfood flow the next feature will run).
-            let wt = project_start_at(&repo.apg_root(), "apg-projects", Some(&start_scan)).unwrap();
-            let wt_apg = wt.join(specs::LAYOUT);
-
-            // author: the re-materialized tiers land as node files through the
-            // write_project funnel (the exact surface `apg node`/`apg edge`
-            // use): membership guard → validate → atomic write → auto-commit →
-            // DB re-merge.
-            layers::write_project(&wt_apg, &apg_projects_tier_nodes(), &[]).unwrap();
-
-            // author: the transient plan (SPEC §5) — never committed, but it must
-            // ingest alongside the durable tiers.
-            let plan_path = wt_apg
-                .join(specs::TRANS)
-                .join("plans")
-                .join("apg-projects.jsonl");
-            artifacts::write_jsonl_and_reingest(
-                &wt_apg,
-                &plan_path,
-                "apg-projects",
-                &apg_projects_plan_records("apg-projects"),
-            )
-            .unwrap();
-
-            // The branch carries the node files (one auto-commit) and never the
-            // plan (R8 — .trans is transient).
-            let wt_repo = git2::Repository::open(&wt).unwrap();
-            let tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
-            assert!(
-                tip.tree()
-                    .unwrap()
-                    .get_path(Path::new("apg/layers/requirements/requirement/r1.json"))
-                    .is_ok(),
-                "the tier node files must be committed on the project branch"
-            );
-            assert!(
-                tip.tree()
-                    .unwrap()
-                    .get_path(Path::new("apg/.trans/plans/apg-projects.jsonl"))
-                    .is_err(),
-                "the plan JSONL must never be committed (.trans is transient)"
-            );
-
-            // scan: the branch DB is rebuilt from code + layers + .trans plans —
-            // the tiers appear and the transient plan ingests alongside them.
-            start_scan(&wt).unwrap();
-            let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
-            for f in expected_tier_fqns() {
-                assert!(db.has_node(&f), "branch DB must hold tier node `{f}`");
-            }
-            for f in [
-                "apg-projects/plan",
-                "apg-projects/plan.phase-01",
-                "apg-projects/plan.phase-01.task-1",
-                "apg-projects/plan.phase-01.task-5",
-            ] {
-                assert!(
-                    db.has_node(f),
-                    "branch DB must hold transient plan node `{f}`"
-                );
-            }
-            // The spine is real in the DB: 20 drives edges, the domain→solution
-            // realised-by hop, the 5 implemented-by claims onto scanned structs,
-            // and the User→Requirement contains tree.
-            let count = |q: &str| -> i64 {
-                db.q(q)
-                    .unwrap()
-                    .lines()
-                    .last()
-                    .unwrap_or_default()
-                    .trim()
-                    .parse()
-                    .unwrap_or(0)
-            };
-            assert_eq!(
-                count("MATCH (:Requirement)-[:Drives]->(:DomainGroup) RETURN count(*)"),
-                20
-            );
-            assert_eq!(
-                count("MATCH (:DomainGroup)-[:RealisedBy]->(:System) RETURN count(*)"),
-                1
-            );
-            assert_eq!(
-                count("MATCH (:Container)-[:SpecImplementedBy]->(:Struct) RETURN count(*)"),
-                5
-            );
-            assert_eq!(
-                count("MATCH (:User)-[:Contains]->(:Requirement) RETURN count(*)"),
-                20
-            );
-            assert_eq!(
-                count("MATCH (:Note)-[:Details]->(:Requirement) RETURN count(*)"),
-                1
-            );
-            drop(db);
-
-            // verify: the coherence gate passes — no planned nodes, no feedback,
-            // and every implemented-by FQN is touched by a plan task.
-            plan_cmd::plan_verify_at(&wt_apg, "apg-projects").unwrap();
-
-            // merge: verify gate → fast-forward into the default branch → main
-            // rebuild (a plain unguarded scan on main).
-            project_merge_at(&repo.apg_root(), "apg-projects", Some(&start_scan)).unwrap();
-
-            // The default branch now holds the project's tip with the node files.
-            let main_repo = git2::Repository::open(&repo.root).unwrap();
-            assert_eq!(
-                main_repo.head().unwrap().peel_to_commit().unwrap().id(),
-                tip.id(),
-                "main must fast-forward to the project tip"
-            );
-            assert!(
-                repo.root
-                    .join("apg/layers/solution/container/project-commands.json")
-                    .exists(),
-                "the merged main checkout carries the tier node files"
-            );
-            assert!(repo.is_clean(), "merged main must be clean");
-
-            // Main rebuild: the main DB has the code + the re-materialized tiers;
-            // the transient plan did not cross the merge.
-            let main_apg = repo.apg_root();
-            let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
-            for f in [
-                "requirements.requirement.r1",
-                "requirements.requirement.r20",
-                "domain.group.change-sets",
-                "solution.system.apg-cli",
-                "go.fixture.mod.Store",
-                "go.fixture.mod.ProjectStart",
-            ] {
-                assert!(db.has_node(f), "main DB must hold `{f}` after the rebuild");
-            }
-            assert!(
-                !db.has_node("apg-projects/plan"),
-                "transient plans never reach main"
-            );
-            drop(db);
-            assert!(!git::is_stale(&main_apg));
-            testutil::remove(&repo);
-        }
-
         // ------------------------------------------------------------------
         // phase-5 task-4 (e2e): the FULL dogfood round trip — suite-tool
         // lookups and mutations with cwd inside the worktree (SPEC §6: walk-up
@@ -2305,6 +2139,39 @@ mod tests {
                     "branch DB must hold transient plan node `{f}`"
                 );
             }
+            // The spine is real in the branch DB: 20 drives edges, the
+            // domain→solution realised-by hop, the 5 implemented-by claims onto
+            // scanned structs, and the User→Requirement contains tree.
+            let count = |q: &str| -> i64 {
+                db.q(q)
+                    .unwrap()
+                    .lines()
+                    .last()
+                    .unwrap_or_default()
+                    .trim()
+                    .parse()
+                    .unwrap_or(0)
+            };
+            assert_eq!(
+                count("MATCH (:Requirement)-[:Drives]->(:DomainGroup) RETURN count(*)"),
+                20
+            );
+            assert_eq!(
+                count("MATCH (:DomainGroup)-[:RealisedBy]->(:System) RETURN count(*)"),
+                1
+            );
+            assert_eq!(
+                count("MATCH (:Container)-[:SpecImplementedBy]->(:Struct) RETURN count(*)"),
+                5
+            );
+            assert_eq!(
+                count("MATCH (:User)-[:Contains]->(:Requirement) RETURN count(*)"),
+                20
+            );
+            assert_eq!(
+                count("MATCH (:Note)-[:Details]->(:Requirement) RETURN count(*)"),
+                1
+            );
             drop(db);
             assert_eq!(
                 std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap(),
