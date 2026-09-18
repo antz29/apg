@@ -2258,6 +2258,16 @@ mod tests {
             // `refs/heads/<name>`; AC (b): a refused/failed merge leaves both
             // untouched; AC (c): the default branch and the main checkout are
             // preserved (never-touch-default-branch).
+            //
+            // Fold every scan (both start auto-scans + the merge rebuild) into
+            // ONE CWD_LOCK hold. Each scan would otherwise re-queue on the
+            // process-wide lock behind every other scanning e2e test, and that
+            // re-queueing — not the scan itself — is what pushed this test past
+            // libtest's 60s warning.
+            let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            fn start_scan_locked(dir: &Path) -> anyhow::Result<()> {
+                testutil::scan_checkout_locked(dir)
+            }
             let repo = Repo::new("self-cleanup");
             repo.write(
                 "code/seed.scan.jsonl",
@@ -2269,7 +2279,7 @@ mod tests {
             // fails — a planned node that the branch scan never realized — must
             // refuse before anything is merged, leaving the worktree, the branch,
             // and the main checkout untouched.
-            let wt = project_start_at(&repo.apg_root(), "fail", Some(&start_scan)).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "fail", Some(&start_scan_locked)).unwrap();
             let wt_apg = wt.join(specs::LAYOUT);
             // A transient plan carrying an unrealized planned node makes the
             // verify gate refuse (`fixture.mod.Widget` never becomes real code —
@@ -2305,14 +2315,17 @@ mod tests {
                 ],
             )
             .unwrap();
-            start_scan(&wt).unwrap();
+            // No rebuild: `write_jsonl_and_reingest` already projected the plan
+            // (including the planned node) into the live branch DB, so it is
+            // fresh and complete.
             let err = plan_cmd::plan_verify_at(&wt_apg, "fail").unwrap_err();
             assert!(
                 format!("{err:#}").contains("not realized"),
                 "verify must report the unrealized planned node: {err:#}"
             );
             let main_tip_before_refusal = repo.head_sha();
-            let err = project_merge_at(&repo.apg_root(), "fail", Some(&start_scan)).unwrap_err();
+            let err =
+                project_merge_at(&repo.apg_root(), "fail", Some(&start_scan_locked)).unwrap_err();
             assert!(format!("{err:#}").contains("not realized"), "{err:#}");
             assert_eq!(
                 repo.head_sha(),
@@ -2338,7 +2351,7 @@ mod tests {
             // Success path (AC-a): a project with durable content + a minimal
             // plan (no planned nodes, no feedback) passes the verify gate, merges,
             // rebuilds main, and then cleans up after itself.
-            let wt = project_start_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "test", Some(&start_scan_locked)).unwrap();
             let wt_apg = wt.join(specs::LAYOUT);
             write_spec_node(&wt_apg);
             let plan_path = wt_apg.join(specs::TRANS).join("plans").join("test.jsonl");
@@ -2366,11 +2379,14 @@ mod tests {
                 ],
             )
             .unwrap();
-            start_scan(&wt).unwrap();
+            // No rebuild: `write_spec_node` (durable tier) and
+            // `write_jsonl_and_reingest` (plan) already projected their records
+            // into the live branch DB and re-anchored scan_meta, so it is fresh
+            // and complete.
             plan_cmd::plan_verify_at(&wt_apg, "test").unwrap();
 
             let tip_before_merge = main_repo.head().unwrap().peel_to_commit().unwrap().id();
-            project_merge_at(&repo.apg_root(), "test", Some(&start_scan)).unwrap();
+            project_merge_at(&repo.apg_root(), "test", Some(&start_scan_locked)).unwrap();
 
             // The merge landed main at the project tip (fast-forward), the main
             // rebuild is fresh, and the merged project cleaned up after itself.
