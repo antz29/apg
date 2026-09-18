@@ -539,6 +539,20 @@ pub fn payload_files(dir: &Path) -> Vec<PathBuf> {
 /// parallel) must never interleave their `set_current_dir`.
 pub fn scan_checkout(project_dir: &Path) -> anyhow::Result<()> {
     let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    scan_checkout_locked(project_dir)
+}
+
+/// [`scan_checkout`] for a caller that already holds [`CWD_LOCK`]. The scan
+/// mutates the process-global cwd (`run_pipeline` chdirs into `.trans`), so the
+/// caller must guarantee exclusivity itself. A test that must run several scans
+/// folds them into ONE lock hold through this entry point, so it never
+/// re-queues on the shared lock between them (the re-queueing, not the scan
+/// itself, is what pushes a multi-scan test past libtest's 60s warning).
+///
+/// # Safety contract
+/// Call only while [`CWD_LOCK`] is held; concurrent use would interleave
+/// `set_current_dir` and corrupt the other scan's view of the cwd.
+pub fn scan_checkout_locked(project_dir: &Path) -> anyhow::Result<()> {
     let apg_root = specs::find_or_create_apg_root(project_dir);
     let trans_dir = apg_root.join(specs::TRANS);
     std::fs::create_dir_all(&trans_dir)?;

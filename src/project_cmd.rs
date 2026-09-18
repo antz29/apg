@@ -1927,6 +1927,15 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
         fn full_dogfood_round_trip_suite_tool_ops_inside_the_worktree() {
+            // Fold the remaining scans (main pre-scan, start auto-scan, merge
+            // rebuild) into ONE CWD_LOCK hold. Each scan would otherwise
+            // re-queue on the process-wide lock behind every other scanning e2e
+            // test, and that re-queueing — not the scan itself — is what pushed
+            // this test past libtest's 60s warning.
+            let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            fn start_scan_locked(dir: &Path) -> anyhow::Result<()> {
+                testutil::scan_checkout_locked(dir)
+            }
             // A main checkout whose scanned code carries the structs the solution
             // tier's implemented-by edges claim (resolves -> real), plus one
             // function so the branch-DB lookups assert the
@@ -1951,7 +1960,7 @@ mod tests {
             // A main-checkout scan first: the "untouched" assertions compare
             // against a real main DB (its db.lbug + graph.jsonl must not move
             // during in-worktree operation).
-            start_scan(&repo.root).unwrap();
+            start_scan_locked(&repo.root).unwrap();
             let main_apg = repo.apg_root();
             let main_db = artifacts::ArtifactDb::open(&main_apg).unwrap();
             assert!(main_db.has_node(format!("{MOD_FQN}.Store").as_str()));
@@ -1966,7 +1975,8 @@ mod tests {
             // DB. The worktree lives INSIDE main's apg/ (at
             // <main>/apg/.worktrees/round-trip), so walk-up discovery has a real
             // choice to make — the worktree's own apg/ vs main's apg/ above it.
-            let wt = project_start_at(&repo.apg_root(), "round-trip", Some(&start_scan)).unwrap();
+            let wt =
+                project_start_at(&repo.apg_root(), "round-trip", Some(&start_scan_locked)).unwrap();
             let wt_apg = wt.join(specs::LAYOUT);
             assert!(wt.is_dir());
             assert!(wt_apg.join(specs::TRANS).join("db.lbug").exists());
@@ -2120,9 +2130,13 @@ mod tests {
             );
             assert_eq!(repo.head_sha(), main_tip, "main's branch must not move");
 
-            // 3. scan the worktree (the `apg scan`-equivalent rebuild, cwd inside
-            // the worktree): the branch DB now holds code + tiers + plan together.
-            start_scan(&wt).unwrap();
+            // 3. the branch DB already holds code + tiers + plan together: the
+            // start auto-scan supplied the code, and the step 2b/2c mutations
+            // merged the durable tiers and the transient plan into the live DB
+            // (`write_project`'s `ingest_tree` and `write_jsonl_and_reingest`'s
+            // `merge_records`). Asserting here — without a redundant full
+            // worktree rebuild — is the speedup; the merge rebuild below still
+            // exercises a full scan of code + tiers.
             let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
             for f in expected_tier_fqns() {
                 assert!(db.has_node(&f), "branch DB must hold tier node `{f}`");
@@ -2176,7 +2190,7 @@ mod tests {
             assert_eq!(
                 std::fs::read(main_apg.join(specs::TRANS).join("db.lbug")).unwrap(),
                 main_db_bytes,
-                "a worktree scan must not touch main's DB"
+                "in-worktree operations must not touch main's DB"
             );
 
             // 4. verify: the coherence gate passes green — no planned nodes, no
@@ -2185,7 +2199,7 @@ mod tests {
 
             // 5. merge from the main checkout: verify gate -> fast-forward -> main
             // rebuilds unguarded (a plain scan of the main checkout).
-            project_merge_at(&repo.apg_root(), "round-trip", Some(&start_scan)).unwrap();
+            project_merge_at(&repo.apg_root(), "round-trip", Some(&start_scan_locked)).unwrap();
 
             // The default branch holds the project tip; the merged main checkout
             // carries the node files (the tiers + the dogfood node).
