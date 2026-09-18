@@ -1802,6 +1802,15 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
         fn merge_round_trip_start_mutate_verify_merge_rebuild() {
+            // Fold every scan (start auto-scan + the realize scan + the merge
+            // rebuild) into ONE CWD_LOCK hold. Each scan would otherwise
+            // re-queue on the process-wide lock behind every other scanning e2e
+            // test, and that re-queueing — not the scan itself — is what pushed
+            // this test past libtest's 60s warning.
+            let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            fn start_scan_locked(dir: &Path) -> anyhow::Result<()> {
+                testutil::scan_checkout_locked(dir)
+            }
             let repo = Repo::new("merge-e2e");
             repo.write(
                 "code/seed.scan.jsonl",
@@ -1810,7 +1819,7 @@ mod tests {
             repo.commit_all("seed code");
 
             // start -> worktree + branch + branch DB (payload has only Store).
-            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan_locked)).unwrap();
             let wt_apg = wt.join(specs::LAYOUT);
 
             // mutate: author the spec (a durable node file -> auto-commits on the
@@ -1869,7 +1878,7 @@ mod tests {
             let payload = testutil::code_payload(MOD, FILE, &["Store", "Widget"]);
             std::fs::write(wt.join("code/seed.scan.jsonl"), payload).unwrap();
             wt_commit(&wt, "code/seed.scan.jsonl", "implement Widget");
-            start_scan(&wt).unwrap();
+            start_scan_locked(&wt).unwrap();
             let foo_tip = git2::Repository::open(&wt)
                 .unwrap()
                 .head()
@@ -1883,7 +1892,7 @@ mod tests {
 
             // merge from the main checkout: verify gate -> ff merge -> main
             // rebuild (the rebuild is a plain unguarded scan on main).
-            project_merge_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            project_merge_at(&repo.apg_root(), "foo", Some(&start_scan_locked)).unwrap();
 
             // The default branch now holds the project's tip.
             let main_repo = git2::Repository::open(&repo.root).unwrap();
