@@ -535,19 +535,16 @@ mod tests {
         }
     }
 
-    /// Creates `hub` + `leaf-0..n` requirement nodes through the real dispatch.
+    /// Creates `hub` + `leaf-0..n` requirement nodes in a single durable
+    /// mutation. Setup only establishes the target nodes; the burst under test
+    /// is the edge/node work, so N+1 dispatched `cmd_node` calls (each its own
+    /// commit + DB projection) collapse into one `write_project`.
     fn setup_hub_and_leaves(wt: &Path, n: usize) {
-        with_cwd(wt, || {
-            cmd_node(&av(&["add", "requirements", "requirement", "hub"]))
-        })
-        .unwrap();
+        let mut nodes = vec![node("requirements", "requirement", "hub")];
         for i in 0..n {
-            let name = format!("leaf-{i}");
-            with_cwd(wt, || {
-                cmd_node(&av(&["add", "requirements", "requirement", &name]))
-            })
-            .unwrap();
+            nodes.push(node("requirements", "requirement", &format!("leaf-{i}")));
         }
+        layers::write_project(&wt.join(specs::LAYOUT), &nodes, &[]).unwrap();
     }
 
     /// Starts N separate `apg edge add hub -> leaf-i` processes back-to-back,
@@ -2092,11 +2089,17 @@ mod tests {
         /// Stage A (DB present) exercises all three locks; stage B (DB removed)
         /// isolates the `.git/index.lock` + specs.lock + the shared hub-file
         /// read-modify-write that a DB-only fix cannot reach; stage C drives the
-        /// node path's own existence-check + write + commit burst.
+        /// node path's own existence-check + write + commit burst on stage A's
+        /// DB-present fixture (its `accept-` names do not collide with
+        /// `hub`/`leaf-*`), so only two repos/scans are built.
+        ///
+        /// N=4 keeps genuine cross-process contention while halving the child
+        /// fan-out (each child is a full 33 MB debug `apg`, and the whole e2e
+        /// tier runs hundreds of them concurrently).
         #[test]
         #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
         fn acceptance_cross_process_burst_has_zero_lock_errors_and_serial_store() {
-            const N: usize = 8;
+            const N: usize = 4;
             const NAMED_LOCKS: [&str; 4] = [
                 "lbug apg/.trans/db.lbug",
                 "git .git/index.lock",
@@ -2158,8 +2161,9 @@ mod tests {
 
             // Stage C — N separate `apg node add` processes: the node path's own
             // burst (existence check + write + commit) behind the same entry flock.
-            let (wt_apg_c, repo_c, wt_c) = mutation_fixture("accept-burst-node");
-            let home_c = repo_c.root.join("home");
+            // Reuses stage A's DB-present fixture; only the `accept-` names are
+            // counted, so `hub`/`leaf-*` do not interfere.
+            let home_c = repo.root.join("home");
             std::fs::create_dir_all(&home_c).unwrap();
             let mut hist_c: BTreeMap<&'static str, usize> = BTreeMap::new();
             let mut kids = Vec::with_capacity(N);
@@ -2173,7 +2177,7 @@ mod tests {
                         "requirement",
                         name.as_str(),
                     ])
-                    .cwd(&wt_c)
+                    .cwd(&wt)
                     .env("HOME", home_c.to_str().unwrap())
                     .spawn(),
                 );
@@ -2199,7 +2203,7 @@ mod tests {
             for lock in NAMED_LOCKS {
                 assert_eq!(hist_c.get(lock), None, "stage C hit {lock}: {hist_c:?}");
             }
-            let stored = layers::read_existing_nodes(&wt_apg_c)
+            let stored = layers::read_existing_nodes(&wt_apg)
                 .unwrap()
                 .iter()
                 .filter(|n| {
@@ -2212,7 +2216,6 @@ mod tests {
 
             testutil::remove(&repo);
             testutil::remove(&repo_b);
-            testutil::remove(&repo_c);
         }
     }
 
