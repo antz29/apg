@@ -7070,9 +7070,14 @@ mod tests {
                 })
             };
 
-            // A title/deliverable-only phase update: the task Contains edge and both
-            // outgoing bridge edges survive.
+            // One cwd hold for the whole surface: `cmd_plan` resolves `apg/` by
+            // walking up from cwd, so every command fits under a single
+            // `CWD_LOCK` acquisition instead of one per call. The test's own work
+            // is sub-second; it was the seven separate re-queues on the
+            // process-wide lock that pushed it past libtest's 60s warning.
             with_cwd(&wt, || {
+                // A title/deliverable-only phase update: the task Contains edge and both
+                // outgoing bridge edges survive.
                 cmd_plan(&av(&[
                     "update",
                     "foo",
@@ -7083,35 +7088,33 @@ mod tests {
                     "--deliverable",
                     "D1b",
                 ]))
-            })
-            .unwrap();
-            let recs = specs::read_jsonl(&plan_path).unwrap();
-            assert!(
-                recs.iter().any(|r| matches!(
+                .unwrap();
+                let recs = specs::read_jsonl(&plan_path).unwrap();
+                assert!(
+                    recs.iter().any(|r| matches!(
+                        r,
+                        Record::PlanPhase { fqn, title, deliverable, .. }
+                            if fqn == "foo/plan.phase-01" && title == "P1b" && deliverable == "D1b"
+                    )),
+                    "phase title/deliverable updated in place"
+                );
+                assert!(
+                    task_contains(&recs),
+                    "task Contains survives a phase update"
+                );
+                assert!(recs.iter().any(|r| matches!(
                     r,
-                    Record::PlanPhase { fqn, title, deliverable, .. }
-                        if fqn == "foo/plan.phase-01" && title == "P1b" && deliverable == "D1b"
-                )),
-                "phase title/deliverable updated in place"
-            );
-            assert!(
-                task_contains(&recs),
-                "task Contains survives a phase update"
-            );
-            assert!(recs.iter().any(|r| matches!(
-                r,
-                Record::Satisfies { from, to }
-                    if from == "foo/plan.phase-01" && to == "requirements.requirement.R1"
-            )));
-            assert!(recs.iter().any(|r| matches!(
-                r,
-                Record::Gates { from, to }
-                    if from == "foo/plan.phase-01" && to == "foo/plan.phase-02"
-            )));
+                    Record::Satisfies { from, to }
+                        if from == "foo/plan.phase-01" && to == "requirements.requirement.R1"
+                )));
+                assert!(recs.iter().any(|r| matches!(
+                    r,
+                    Record::Gates { from, to }
+                        if from == "foo/plan.phase-01" && to == "foo/plan.phase-02"
+                )));
 
-            // `--satisfies`/`--prereq` replace only phase-01's OWN outgoing sets; the
-            // task Contains, the incoming gate, and phase-02's Satisfies survive.
-            with_cwd(&wt, || {
+                // `--satisfies`/`--prereq` replace only phase-01's OWN outgoing sets; the
+                // task Contains, the incoming gate, and phase-02's Satisfies survive.
                 cmd_plan(&av(&[
                     "update",
                     "foo",
@@ -7122,67 +7125,64 @@ mod tests {
                     "--prereq",
                     "2",
                 ]))
-            })
-            .unwrap();
-            let recs = specs::read_jsonl(&plan_path).unwrap();
-            let sat: Vec<&str> = recs
-                .iter()
-                .filter_map(|r| match r {
-                    Record::Satisfies { from, to } if from == "foo/plan.phase-01" => {
-                        Some(to.as_str())
-                    }
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(
-                sat,
-                vec!["requirements.requirement.R2"],
-                "the passed --satisfies replaces phase-01's outgoing set"
-            );
-            let gates: Vec<&str> = recs
-                .iter()
-                .filter_map(|r| match r {
-                    Record::Gates { from, to } if from == "foo/plan.phase-01" => Some(to.as_str()),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(
-                gates,
-                vec!["foo/plan.phase-02"],
-                "the passed --prereq replaces phase-01's outgoing gate set"
-            );
-            assert!(recs.iter().any(|r| matches!(
-                r,
-                Record::Gates { from, to }
-                    if from == "foo/plan.phase-03" && to == "foo/plan.phase-01"
-            )));
-            assert!(recs.iter().any(|r| matches!(
-                r,
-                Record::Satisfies { from, to }
-                    if from == "foo/plan.phase-02" && to == "requirements.requirement.R2"
-            )));
-            assert!(task_contains(&recs));
+                .unwrap();
+                let recs = specs::read_jsonl(&plan_path).unwrap();
+                let sat: Vec<&str> = recs
+                    .iter()
+                    .filter_map(|r| match r {
+                        Record::Satisfies { from, to } if from == "foo/plan.phase-01" => {
+                            Some(to.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    sat,
+                    vec!["requirements.requirement.R2"],
+                    "the passed --satisfies replaces phase-01's outgoing set"
+                );
+                let gates: Vec<&str> = recs
+                    .iter()
+                    .filter_map(|r| match r {
+                        Record::Gates { from, to } if from == "foo/plan.phase-01" => {
+                            Some(to.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    gates,
+                    vec!["foo/plan.phase-02"],
+                    "the passed --prereq replaces phase-01's outgoing gate set"
+                );
+                assert!(recs.iter().any(|r| matches!(
+                    r,
+                    Record::Gates { from, to }
+                        if from == "foo/plan.phase-03" && to == "foo/plan.phase-01"
+                )));
+                assert!(recs.iter().any(|r| matches!(
+                    r,
+                    Record::Satisfies { from, to }
+                        if from == "foo/plan.phase-02" && to == "requirements.requirement.R2"
+                )));
+                assert!(task_contains(&recs));
 
-            // A cycle-forming gate is refused before any write (phase-02 gating
-            // phase-01 closes the phase-01 → phase-02 → phase-01 loop).
-            let before = std::fs::read_to_string(&plan_path).unwrap();
-            let err = with_cwd(&wt, || {
-                cmd_plan(&av(&["update", "foo", "phase", "2", "--prereq", "1"])).unwrap_err()
-            });
-            assert!(
-                err.to_string().to_lowercase().contains("cycle")
-                    || err.to_string().to_lowercase().contains("gate"),
-                "{err}"
-            );
-            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
+                // A cycle-forming gate is refused before any write (phase-02 gating
+                // phase-01 closes the phase-01 → phase-02 → phase-01 loop).
+                let before = std::fs::read_to_string(&plan_path).unwrap();
+                let err =
+                    cmd_plan(&av(&["update", "foo", "phase", "2", "--prereq", "1"])).unwrap_err();
+                assert!(
+                    err.to_string().to_lowercase().contains("cycle")
+                        || err.to_string().to_lowercase().contains("gate"),
+                    "{err}"
+                );
+                assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
 
-            // A task update (title only) keeps status: done and the Reviews edge.
-            with_cwd(&wt, || {
-                cmd_plan(&av(&["update", "foo", "task", "1", "1", "--title", "T2"]))
-            })
-            .unwrap();
-            let recs = specs::read_jsonl(&plan_path).unwrap();
-            assert!(
+                // A task update (title only) keeps status: done and the Reviews edge.
+                cmd_plan(&av(&["update", "foo", "task", "1", "1", "--title", "T2"])).unwrap();
+                let recs = specs::read_jsonl(&plan_path).unwrap();
+                assert!(
                 recs.iter().any(|r| matches!(
                     r,
                     Record::Task { fqn, title, status, .. }
@@ -7190,24 +7190,21 @@ mod tests {
                 )),
                 "the done status survives a task update"
             );
-            assert!(recs.iter().any(|r| matches!(
-                r,
-                Record::Reviews { from, to }
-                    if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1"
-            )));
+                assert!(recs.iter().any(|r| matches!(
+                    r,
+                    Record::Reviews { from, to }
+                        if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1"
+                )));
 
-            // Re-validation: an invalid verb and a creates-over-real-code are both
-            // refused before any write.
-            let before = std::fs::read_to_string(&plan_path).unwrap();
-            let err = with_cwd(&wt, || {
-                cmd_plan(&av(&[
+                // Re-validation: an invalid verb and a creates-over-real-code are both
+                // refused before any write.
+                let before = std::fs::read_to_string(&plan_path).unwrap();
+                let err = cmd_plan(&av(&[
                     "update", "foo", "task", "1", "1", "--verb", "explodes",
                 ]))
-                .unwrap_err()
-            });
-            assert!(!err.to_string().is_empty(), "{err}");
-            let err = with_cwd(&wt, || {
-                cmd_plan(&av(&[
+                .unwrap_err();
+                assert!(!err.to_string().is_empty(), "{err}");
+                let err = cmd_plan(&av(&[
                     "update",
                     "foo",
                     "task",
@@ -7218,14 +7215,12 @@ mod tests {
                     "--fqn",
                     "github.com/x/y.Store",
                 ]))
-                .unwrap_err()
-            });
-            assert!(!err.to_string().is_empty(), "{err}");
-            assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
+                .unwrap_err();
+                assert!(!err.to_string().is_empty(), "{err}");
+                assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
 
-            // A planned update repoints the parent Contains edge and preserves the
-            // unrelated Reviews edge.
-            with_cwd(&wt, || {
+                // A planned update repoints the parent Contains edge and preserves the
+                // unrelated Reviews edge.
                 cmd_plan(&av(&[
                     "update",
                     "foo",
@@ -7238,10 +7233,9 @@ mod tests {
                     "--parent",
                     "github.com/x/y.Store",
                 ]))
-            })
-            .unwrap();
-            let recs = specs::read_jsonl(&plan_path).unwrap();
-            assert!(
+                .unwrap();
+                let recs = specs::read_jsonl(&plan_path).unwrap();
+                assert!(
             recs.iter().any(|r| matches!(
                 r,
                 Record::PlannedNode { fqn, kind, name, parent }
@@ -7249,23 +7243,26 @@ mod tests {
             )),
             "planned node updated in place"
         );
-            let contains: Vec<&str> = recs
-                .iter()
-                .filter_map(|r| match r {
-                    Record::Contains { from, to } if to == "/todo/app.ts" => Some(from.as_str()),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(
-                contains,
-                vec!["github.com/x/y.Store"],
-                "exactly the repointed parent Contains edge"
-            );
-            assert!(recs.iter().any(|r| matches!(
-                r,
-                Record::Reviews { from, to }
-                    if from == "foo/feedback-2" && to == "/todo/app.ts"
-            )));
+                let contains: Vec<&str> = recs
+                    .iter()
+                    .filter_map(|r| match r {
+                        Record::Contains { from, to } if to == "/todo/app.ts" => {
+                            Some(from.as_str())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    contains,
+                    vec!["github.com/x/y.Store"],
+                    "exactly the repointed parent Contains edge"
+                );
+                assert!(recs.iter().any(|r| matches!(
+                    r,
+                    Record::Reviews { from, to }
+                        if from == "foo/feedback-2" && to == "/todo/app.ts"
+                )));
+            });
 
             testutil::remove(&repo);
         }
