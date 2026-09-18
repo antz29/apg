@@ -16,6 +16,7 @@ use lbug::Connection;
 use parquet::basic::{Compression, ConvertedType, Repetition, Type as PhysicalType};
 use parquet::data_type::{ByteArray, ByteArrayType, Int64Type};
 use parquet::file::properties::WriterProperties;
+use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::file::writer::SerializedFileWriter;
 use parquet::schema::types::Type;
 use serde::Serialize;
@@ -1196,105 +1197,240 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// True when `path` exists and its parquet footer declares zero rows. A
+/// missing or unreadable file returns `false` so the caller's `COPY` still
+/// runs and fails loudly — a build/load drift must never be masked as "empty".
+fn parquet_is_empty(path: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    match SerializedFileReader::new(file) {
+        Ok(reader) => reader.metadata().file_metadata().num_rows() == 0,
+        Err(_) => false,
+    }
+}
+
 /// Loads all PARQUET files in `dir` via `COPY FROM`, per `(from, to)` pair for
-/// multi-pair rel tables.
+/// multi-pair rel tables. A table whose load file is genuinely empty (zero
+/// rows) is skipped: an empty `COPY` is pure per-statement overhead, and a
+/// code-only scan leaves dozens of authored/spine tables empty.
 pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
     let p = |name: &str| dir.join(name).to_string_lossy().into_owned();
-    let stmts = [
-        format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
-        format!(r#"COPY Language FROM "{}""#, p("language.parquet")),
+    let copy = |name: &str, stmt: String| -> anyhow::Result<()> {
+        if parquet_is_empty(&dir.join(name)) {
+            return Ok(());
+        }
+        conn.query(&stmt)?;
+        Ok(())
+    };
+    let stmts: [(&str, String); 38] = [
+        (
+            "module.parquet",
+            format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
+        ),
+        (
+            "language.parquet",
+            format!(r#"COPY Language FROM "{}""#, p("language.parquet")),
+        ),
         // The Scan row (SCAN_HEAD) carries the phase-01 content-identity key
         // (`content_key`) beside git_sha/git_clean/scanned_at; the parquet
         // columns are emitted in this exact DDL order, so the key lands in the
         // live DB's Scan node with no extra statement.
-        format!(r#"COPY Scan FROM "{}""#, p("scan.parquet")),
-        format!(r#"COPY Struct FROM "{}""#, p("struct.parquet")),
-        format!(r#"COPY Function FROM "{}""#, p("function.parquet")),
-        format!(r#"COPY File FROM "{}""#, p("file.parquet")),
-        format!(
-            r#"COPY UnresolvedTarget FROM "{}""#,
-            p("unresolved.parquet")
+        (
+            "scan.parquet",
+            format!(r#"COPY Scan FROM "{}""#, p("scan.parquet")),
         ),
-        format!(r#"COPY Requirement FROM "{}""#, p("requirement.parquet")),
-        format!(r#"COPY Note FROM "{}""#, p("note.parquet")),
-        format!(r#"COPY Feedback FROM "{}""#, p("feedback.parquet")),
-        format!(r#"COPY Plan FROM "{}""#, p("plan.parquet")),
-        format!(r#"COPY PlanPhase FROM "{}""#, p("plan_phase.parquet")),
-        format!(r#"COPY Task FROM "{}""#, p("task.parquet")),
-        format!(r#"COPY Stakeholder FROM "{}""#, p("stakeholder.parquet")),
-        format!(r#"COPY Entity FROM "{}""#, p("entity.parquet")),
-        format!(r#"COPY System FROM "{}""#, p("system.parquet")),
-        format!(r#"COPY Container FROM "{}""#, p("container.parquet")),
-        format!(r#"COPY Component FROM "{}""#, p("component.parquet")),
-        format!(r#"COPY User FROM "{}""#, p("user.parquet")),
-        format!(r#"COPY DomainGroup FROM "{}""#, p("group.parquet")),
-        format!(r#"COPY Value FROM "{}""#, p("value.parquet")),
-        format!(r#"COPY Service FROM "{}""#, p("service.parquet")),
-        format!(r#"COPY Person FROM "{}""#, p("person.parquet")),
-        format!(r#"COPY Constraint FROM "{}""#, p("constraint.parquet")),
-        format!(
-            r#"COPY Contains FROM "{}" (from="Module", to="Module")"#,
-            p("contains_mod_mod.parquet")
+        (
+            "struct.parquet",
+            format!(r#"COPY Struct FROM "{}""#, p("struct.parquet")),
         ),
-        format!(
-            r#"COPY Contains FROM "{}" (from="Module", to="File")"#,
-            p("contains_mod_file.parquet")
+        (
+            "function.parquet",
+            format!(r#"COPY Function FROM "{}""#, p("function.parquet")),
         ),
-        format!(
-            r#"COPY Contains FROM "{}" (from="File", to="Struct")"#,
-            p("contains_file_struct.parquet")
+        (
+            "file.parquet",
+            format!(r#"COPY File FROM "{}""#, p("file.parquet")),
         ),
-        format!(
-            r#"COPY Contains FROM "{}" (from="File", to="Function")"#,
-            p("contains_file_fn.parquet")
+        (
+            "unresolved.parquet",
+            format!(
+                r#"COPY UnresolvedTarget FROM "{}""#,
+                p("unresolved.parquet")
+            ),
         ),
-        format!(
-            r#"COPY Contains FROM "{}" (from="Struct", to="Struct")"#,
-            p("contains_struct_struct.parquet")
+        (
+            "requirement.parquet",
+            format!(r#"COPY Requirement FROM "{}""#, p("requirement.parquet")),
         ),
-        format!(
-            r#"COPY Contains FROM "{}" (from="Struct", to="Function")"#,
-            p("contains_struct_fn.parquet")
+        (
+            "note.parquet",
+            format!(r#"COPY Note FROM "{}""#, p("note.parquet")),
         ),
-        format!(
-            r#"COPY Calls FROM "{}" (from="Function", to="Function")"#,
-            p("calls_fn.parquet")
+        (
+            "feedback.parquet",
+            format!(r#"COPY Feedback FROM "{}""#, p("feedback.parquet")),
         ),
-        format!(
-            r#"COPY Calls FROM "{}" (from="Service", to="Service")"#,
-            p("calls_svc.parquet")
+        (
+            "plan.parquet",
+            format!(r#"COPY Plan FROM "{}""#, p("plan.parquet")),
         ),
-        format!(
-            r#"COPY Uses FROM "{}" (from="Function", to="Struct")"#,
-            p("uses_fn.parquet")
+        (
+            "plan_phase.parquet",
+            format!(r#"COPY PlanPhase FROM "{}""#, p("plan_phase.parquet")),
         ),
-        format!(
-            r#"COPY Uses FROM "{}" (from="Struct", to="Struct")"#,
-            p("uses_struct.parquet")
+        (
+            "task.parquet",
+            format!(r#"COPY Task FROM "{}""#, p("task.parquet")),
         ),
-        format!(
-            r#"COPY Uses FROM "{}" (from="Person", to="System")"#,
-            p("uses_person.parquet")
+        (
+            "stakeholder.parquet",
+            format!(r#"COPY Stakeholder FROM "{}""#, p("stakeholder.parquet")),
         ),
-        format!(
-            r#"COPY UnresolvedCall FROM "{}""#,
-            p("unresolved_call.parquet")
+        (
+            "entity.parquet",
+            format!(r#"COPY Entity FROM "{}""#, p("entity.parquet")),
         ),
-        format!(
-            r#"COPY UnresolvedUse FROM "{}" (from="Function", to="UnresolvedTarget")"#,
-            p("unresolved_use_fn.parquet")
+        (
+            "system.parquet",
+            format!(r#"COPY System FROM "{}""#, p("system.parquet")),
         ),
-        format!(
-            r#"COPY UnresolvedUse FROM "{}" (from="Struct", to="UnresolvedTarget")"#,
-            p("unresolved_use_struct.parquet")
+        (
+            "container.parquet",
+            format!(r#"COPY Container FROM "{}""#, p("container.parquet")),
+        ),
+        (
+            "component.parquet",
+            format!(r#"COPY Component FROM "{}""#, p("component.parquet")),
+        ),
+        (
+            "user.parquet",
+            format!(r#"COPY User FROM "{}""#, p("user.parquet")),
+        ),
+        (
+            "group.parquet",
+            format!(r#"COPY DomainGroup FROM "{}""#, p("group.parquet")),
+        ),
+        (
+            "value.parquet",
+            format!(r#"COPY Value FROM "{}""#, p("value.parquet")),
+        ),
+        (
+            "service.parquet",
+            format!(r#"COPY Service FROM "{}""#, p("service.parquet")),
+        ),
+        (
+            "person.parquet",
+            format!(r#"COPY Person FROM "{}""#, p("person.parquet")),
+        ),
+        (
+            "constraint.parquet",
+            format!(r#"COPY Constraint FROM "{}""#, p("constraint.parquet")),
+        ),
+        (
+            "contains_mod_mod.parquet",
+            format!(
+                r#"COPY Contains FROM "{}" (from="Module", to="Module")"#,
+                p("contains_mod_mod.parquet")
+            ),
+        ),
+        (
+            "contains_mod_file.parquet",
+            format!(
+                r#"COPY Contains FROM "{}" (from="Module", to="File")"#,
+                p("contains_mod_file.parquet")
+            ),
+        ),
+        (
+            "contains_file_struct.parquet",
+            format!(
+                r#"COPY Contains FROM "{}" (from="File", to="Struct")"#,
+                p("contains_file_struct.parquet")
+            ),
+        ),
+        (
+            "contains_file_fn.parquet",
+            format!(
+                r#"COPY Contains FROM "{}" (from="File", to="Function")"#,
+                p("contains_file_fn.parquet")
+            ),
+        ),
+        (
+            "contains_struct_struct.parquet",
+            format!(
+                r#"COPY Contains FROM "{}" (from="Struct", to="Struct")"#,
+                p("contains_struct_struct.parquet")
+            ),
+        ),
+        (
+            "contains_struct_fn.parquet",
+            format!(
+                r#"COPY Contains FROM "{}" (from="Struct", to="Function")"#,
+                p("contains_struct_fn.parquet")
+            ),
+        ),
+        (
+            "calls_fn.parquet",
+            format!(
+                r#"COPY Calls FROM "{}" (from="Function", to="Function")"#,
+                p("calls_fn.parquet")
+            ),
+        ),
+        (
+            "calls_svc.parquet",
+            format!(
+                r#"COPY Calls FROM "{}" (from="Service", to="Service")"#,
+                p("calls_svc.parquet")
+            ),
+        ),
+        (
+            "uses_fn.parquet",
+            format!(
+                r#"COPY Uses FROM "{}" (from="Function", to="Struct")"#,
+                p("uses_fn.parquet")
+            ),
+        ),
+        (
+            "uses_struct.parquet",
+            format!(
+                r#"COPY Uses FROM "{}" (from="Struct", to="Struct")"#,
+                p("uses_struct.parquet")
+            ),
+        ),
+        (
+            "uses_person.parquet",
+            format!(
+                r#"COPY Uses FROM "{}" (from="Person", to="System")"#,
+                p("uses_person.parquet")
+            ),
+        ),
+        (
+            "unresolved_call.parquet",
+            format!(
+                r#"COPY UnresolvedCall FROM "{}""#,
+                p("unresolved_call.parquet")
+            ),
+        ),
+        (
+            "unresolved_use_fn.parquet",
+            format!(
+                r#"COPY UnresolvedUse FROM "{}" (from="Function", to="UnresolvedTarget")"#,
+                p("unresolved_use_fn.parquet")
+            ),
+        ),
+        (
+            "unresolved_use_struct.parquet",
+            format!(
+                r#"COPY UnresolvedUse FROM "{}" (from="Struct", to="UnresolvedTarget")"#,
+                p("unresolved_use_struct.parquet")
+            ),
         ),
     ];
-    for s in stmts {
-        conn.query(&s)?;
+    for (name, s) in stmts {
+        copy(name, s)?;
     }
     // Spec/plan rel tables: one COPY per `(from, to)` pair, generated from the
     // same pair enumeration that wrote the files.
-    let mut contains_stmt = Vec::new();
     for (from, to) in contains_pairs() {
         let name = pair_file("contains", from, to);
         if [
@@ -1309,24 +1445,27 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         {
             continue;
         }
-        contains_stmt.push(format!(
-            r#"COPY Contains FROM "{}" (from="{}", to="{}")"#,
-            p(&name),
-            label_of(from),
-            label_of(to)
-        ));
-    }
-    for s in contains_stmt {
-        conn.query(&s)?;
+        copy(
+            &name,
+            format!(
+                r#"COPY Contains FROM "{}" (from="{}", to="{}")"#,
+                p(&name),
+                label_of(from),
+                label_of(to)
+            ),
+        )?;
     }
     for (table, from, to) in spec_rel_pairs() {
         let name = pair_file(table, from, to);
-        conn.query(&format!(
-            r#"COPY {table} FROM "{}" (from="{}", to="{}")"#,
-            p(&name),
-            label_of(from),
-            label_of(to)
-        ))?;
+        copy(
+            &name,
+            format!(
+                r#"COPY {table} FROM "{}" (from="{}", to="{}")"#,
+                p(&name),
+                label_of(from),
+                label_of(to)
+            ),
+        )?;
     }
     Ok(())
 }
