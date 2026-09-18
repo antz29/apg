@@ -61,9 +61,9 @@ jobs:
           echo "LBUG_LIBRARY_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
           echo "LBUG_INCLUDE_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
 
-      # build.rs compiles all frontends (Go, C++, Java, Rust, TS) and stages them
-      # into target/release/frontends; the default APG_BUILD_FRONTENDS (unset)
-      # does exactly what we want here.
+      # build.rs compiles all frontends (Go, C++, Java, Rust, TS, C#, Python,
+      # Markdown) and stages them into target/release/frontends; the default
+      # APG_BUILD_FRONTENDS (unset) does exactly what we want here.
       - name: Build apg + frontends
         run: cargo build --release
 
@@ -81,6 +81,8 @@ jobs:
           tar -C target/release/frontends -czf "dist/packages/apg-csharp-linux-${{ matrix.arch }}.tar.gz" csharpfrontend
           tar -C target/release/frontends -czf "dist/packages/apg-java-linux-${{ matrix.arch }}.tar.gz" java-classes
           tar -C target/release/frontends -czf "dist/packages/apg-ts-linux-${{ matrix.arch }}.tar.gz" tsfrontend
+          tar -C target/release/frontends -czf "dist/packages/apg-py-linux-${{ matrix.arch }}.tar.gz" pyfrontend
+          tar -C target/release/frontends -czf "dist/packages/apg-md-linux-${{ matrix.arch }}.tar.gz" mdfrontend
 
           # 3. All-in-one bundle
           mkdir -p dist/all/frontends

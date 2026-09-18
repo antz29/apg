@@ -1,7 +1,7 @@
 # Scanner formula — the `apg` binary (ingestor + query CLI). No scanner
 # frontends are bundled; install the per-language frontend formulae
-# (apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py) which drop
-# their artifacts into $(brew --prefix)/share/apg/frontends. The bin/apg
+# (apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py, apg-md)
+# which drop their artifacts into $(brew --prefix)/share/apg/frontends. The bin/apg
 # wrapper points the binary at that directory via APG_FRONTEND_DIR.
 
 class Scanner < Formula
@@ -48,7 +48,8 @@ class Scanner < Formula
     ENV["LBUG_INCLUDE_DIR"] = lbug_dir.to_s
 
     # Do not compile any scanner frontends in this build; the separate
-    # apg-go / apg-java / apg-cpp formulae provide them.
+    # apg-go / apg-java / apg-cpp / apg-rust / apg-ts / apg-csharp / apg-py /
+    # apg-md formulae provide them.
     ENV["APG_BUILD_FRONTENDS"] = "0"
 
     # Install the real binary into libexec (not bin/), then bin/apg becomes a
@@ -71,6 +72,7 @@ class Scanner < Formula
         brew install antz29/apg/apg-ts       # TypeScript (needs `node` at scan time)
         brew install antz29/apg/apg-csharp   # C# (needs `dotnet` at build time only)
         brew install antz29/apg/apg-py       # Python (no Python runtime needed at scan time)
+        brew install antz29/apg/apg-md       # Markdown (no runtime needed at scan time)
     EOS
   end
 

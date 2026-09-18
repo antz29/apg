@@ -15,7 +15,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user go rust
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,rust
 #
-#   # Install everything (scanner + all 7 frontends):
+#   # Install everything (scanner + all 8 frontends):
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
 #
 # Layout (mirrors the brew formula): the real binary lives in
@@ -42,7 +42,7 @@ raw_frontends=""
 install_all=0
 components=""
 
-ALL_FRONTENDS="cpp go rust csharp java ts py"
+ALL_FRONTENDS="cpp go rust csharp java ts py md"
 
 usage() {
     cat <<'EOF'
@@ -60,6 +60,7 @@ Components:
   java            Java scanner frontend (java-classes)
   ts              TypeScript scanner frontend (tsfrontend)
   py              Python scanner frontend (pyfrontend)
+  md              Markdown scanner frontend (mdfrontend)
   all             Core scanner + all frontends
 
 Options:
@@ -105,8 +106,9 @@ normalize_component() {
         java | apg-java) echo "java" ;;
         ts | typescript | apg-ts) echo "ts" ;;
         py | python | apg-py) echo "py" ;;
+        md | markdown | apg-md) echo "md" ;;
         all) echo "all" ;;
-        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, py, all)" ;;
+        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, py, md, all)" ;;
     esac
 }
 
@@ -212,6 +214,10 @@ if [ "$uninstall" -eq 1 ]; then
             py)
                 rm -f "$frontends_dir/pyfrontend"
                 echo "Removed Python frontend."
+                ;;
+            md)
+                rm -f "$frontends_dir/mdfrontend"
+                echo "Removed Markdown frontend."
                 ;;
         esac
     done
@@ -415,6 +421,10 @@ for f in $target_frontends; do
             [ -x "$work/extract_${f}/pyfrontend" ] || die "${tarball} does not contain 'pyfrontend'"
             install -m 0755 "$work/extract_${f}/pyfrontend" "$frontends_dir/pyfrontend"
             ;;
+        md)
+            [ -x "$work/extract_${f}/mdfrontend" ] || die "${tarball} does not contain 'mdfrontend'"
+            install -m 0755 "$work/extract_${f}/mdfrontend" "$frontends_dir/mdfrontend"
+            ;;
     esac
 
     installed_components="${installed_components}${installed_components:+, }${f}"
@@ -451,6 +461,7 @@ for lang in $ALL_FRONTENDS; do
         java) [ -d "$frontends_dir/java-classes" ] && present=1 ;;
         ts) [ -d "$frontends_dir/tsfrontend" ] && present=1 ;;
         py) [ -x "$frontends_dir/pyfrontend" ] && present=1 ;;
+        md) [ -x "$frontends_dir/mdfrontend" ] && present=1 ;;
     esac
     if [ "$present" -eq 1 ]; then
         installed_langs="${installed_langs}${installed_langs:+ }$lang"

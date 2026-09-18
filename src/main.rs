@@ -2368,7 +2368,7 @@ mod tests {
     /// the `[package] version` line on every release: the assertions below fail
     /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
     /// advertised release), so a bump commit cannot silently skip it.
-    const RELEASE_VERSION: &str = "0.13.3";
+    const RELEASE_VERSION: &str = "0.14.0";
 
     /// The `version = "..."` declared directly under a Cargo.toml `[package]`
     /// header.
@@ -4835,12 +4835,12 @@ mod tests {
             let readme =
                 std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR")))
                     .unwrap();
-            // The README pins the 0.13.x line, not an exact patch, so patch releases
+            // The README pins the 0.14.x line, not an exact patch, so patch releases
             // don't require a README edit.
-            assert!(readme.contains("apg 0.13.x"), "README --version examples");
-            assert!(readme.contains("0.13.x"), "README tagged-release prose");
+            assert!(readme.contains("apg 0.14.x"), "README --version examples");
+            assert!(readme.contains("0.14.x"), "README tagged-release prose");
             assert!(
-                readme.contains("--version 0.13.x"),
+                readme.contains("--version 0.14.x"),
                 "README Linux installer pin option"
             );
             // No stale release records: the previous versions must be fully replaced.
@@ -7449,8 +7449,10 @@ mod tests {
             );
 
             // (C) BUILD.RS STILL COMPILES RUSTLIB IN ISOLATION: `cargo build
-            // --manifest-path src/rustlib/Cargo.toml ... --bin rustfrontend`,
-            // targeting the isolated `src/rustlib/target/<profile>/`.
+            // --manifest-path src/rustlib/Cargo.toml ... --release --bin
+            // rustfrontend`, targeting the isolated
+            // `src/rustlib/target/release/` (ALWAYS `--release`, independent of
+            // the outer cargo profile).
             let build_rs = std::fs::read_to_string(root.join("build.rs")).unwrap();
             assert!(
                 build_rs.contains("--manifest-path") && build_rs.contains("src/rustlib/Cargo.toml"),
@@ -7460,26 +7462,20 @@ mod tests {
                 build_rs.contains("--bin") && build_rs.contains("rustfrontend"),
                 "(C) build.rs must build the rustfrontend bin"
             );
-            // The running profile (the candidate's `target/<profile>`) selects
-            // the isolated target dir build.rs compiled into.
+            // build.rs compiles rustlib with `--release` into the isolated
+            // `src/rustlib/target/release/` regardless of the outer cargo
+            // profile, then stages it into the active profile's frontends dir.
+            let isolated = root.join("src/rustlib/target/release/rustfrontend");
+            assert!(
+                isolated.is_file(),
+                "(C) the rustfrontend must be built into the ISOLATED target dir {} — \
+                 run `cargo build` (build.rs compiles it there)",
+                isolated.display()
+            );
             let profile_dir = crate::testutil::apg_bin()
                 .parent()
                 .expect("apg binary has a parent")
                 .to_path_buf();
-            let profile = profile_dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .expect("profile dir name");
-            let isolated = root
-                .join("src/rustlib/target")
-                .join(profile)
-                .join("rustfrontend");
-            assert!(
-                isolated.is_file(),
-                "(C) the rustfrontend must be built into the ISOLATED target dir {} — \
-                 build it first: cargo build --config 'env.APG_BUILD_FRONTENDS=\"rust\"'",
-                isolated.display()
-            );
             let root_artifact = profile_dir.join("rustfrontend");
             assert!(
                 !root_artifact.exists(),

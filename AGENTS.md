@@ -11,7 +11,9 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   `src/tslib/scanner.mjs` — a Node script using the official `typescript`
   compiler API, npm-installed with a committed `package-lock.json`, C#:
   `src/csharplib/Program.cs` — a standalone single-file `csharpfrontend` binary
-  built on Roslyn `Microsoft.CodeAnalysis.CSharp`) parses a codebase and streams
+  built on Roslyn `Microsoft.CodeAnalysis.CSharp`, Python: `src/pylib` — a
+  standalone `pyfrontend` built on Astral's `ty`/Ruff engine crates, Markdown:
+  `src/mdlib` — a standalone `mdfrontend`) parses a codebase and streams
   one JSON object per
   line to stdout — the **unified JSONL schema** (see `SPEC.md` §2). It emits
   *facts only*: declarations, references, edges. It never computes FQNs and
@@ -24,12 +26,14 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
 - Build: `build.rs` compiles the frontends (`gcc`/`g++` tree-sitter for C++,
   `go build` for Go, `javac` for Java, `cargo build` for the Rust frontend —
   `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
-  tag, `npm ci` for the TypeScript frontend — `src/tslib`) and stages them to
+  tag, `npm ci` for the TypeScript frontend — `src/tslib`, `cargo build` for
+  the Python (`src/pylib`) and Markdown (`src/mdlib`) crates) and stages them to
   `target/<profile>/frontends`. Run a scan with `apg scan <dir>` (or the
   `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
   (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
   `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
-  `cpp`, `rust`, `ts`, `csharp`; `0` to skip) limits what build.rs compiles.
+  `cpp`, `rust`, `ts`, `csharp`, `py`, `md`; `0` to skip) limits what build.rs
+  compiles.
 
 ## Project flow (the verified pattern)
 
@@ -219,8 +223,9 @@ tools take an optional `codeType` (default: all code); exact-FQN tools hint
 when a lookup comes up empty (overloads carry `(params)` suffixes).
 
 The `apg` binary is brew-installable via split formulae (tap
-`https://github.com/antz29/apg.git`): `scanner` (the binary), plus six frontend
-formulae — `apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp` —
+`https://github.com/antz29/apg.git`): `scanner` (the binary), plus eight frontend
+formulae — `apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`,
+`apg-py`, `apg-md` —
 each dropping its artifacts into `$(brew --prefix)/share/apg/frontends` (the
 `scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
 On Linux there's a `curl | sh` installer (`install.sh` — installs the base
@@ -414,8 +419,9 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    `RELEASE_VERSION` literal (`version = "X.Y.Z"`).
 3. **Commit the release content** (the version bump + whatever ships in it).
    This commit is the **release HEAD**.
-4. **Repoint all 7 formulae** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
-   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`): `tag:` → `vX.Y.Z`,
+4. **Repoint all 8 formulae** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
+   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-md`):
+   `tag:` → `vX.Y.Z`,
    `revision:` → the release-HEAD SHA, `root_url` →
    `releases/download/vX.Y.Z`, and bump each `rebuild N` by 1. Commit as
    *"Point formula revisions at the vX.Y.Z release HEAD"*.

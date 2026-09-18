@@ -3,7 +3,7 @@ set -euo pipefail
 
 # apg release helper (steps 4-5 of "Deploying a release" in AGENTS.md).
 #
-# Repoints the 7 Homebrew formulae (Formula/*.rb) at a new tag and creates the
+# Repoints the 8 Homebrew formulae (Formula/*.rb) at a new tag and creates the
 # annotated release tag — in the CORRECT order, so that when you push the tag
 # the bottle workflow builds bottles of the NEW version, not the previous one
 # (the bottle job builds from the tap formulae on `main`, so they must already
@@ -39,12 +39,14 @@ if [ -n "$(git status --porcelain)" ]; then
   git status --short >&2
   exit 1
 fi
-# The release gate: the version-guard tests (RELEASE_VERSION literal, README
-# pins, Cargo.lock consistency) only run under `cargo test` — `cargo check`
-# never compiles the test module, so a release that skips this ships a red
-# suite (the 0.11.0 miss: RELEASE_VERSION stayed 0.10.4 at the tagged HEAD).
-echo "==> Gate: cargo test (release-version guards)"
-cargo test 2>&1 | tail -3
+# The release gate is the repo's single gate command WITH the e2e tier. The
+# version-guard tests (RELEASE_VERSION literal, README pins, Cargo.lock
+# consistency) read files from disk, so they are e2e-tier and are NOT reached
+# by a plain `cargo test` (which runs unit+int only): a release that ran only
+# the default suite would ship a red release HEAD (the 0.11.0 miss:
+# RELEASE_VERSION stayed 0.10.4 at the tagged HEAD).
+echo "==> Gate: scripts/gate.sh --e2e (fmt/check/clippy/build/test + e2e guards)"
+scripts/gate.sh --e2e
 
 RELEASE_SHA="$(git rev-parse HEAD)"
 echo "==> Release HEAD: $RELEASE_SHA"
@@ -65,10 +67,10 @@ echo "==> Committing formula revisions"
 git add Formula
 git commit -m "Point formula revisions at the $TAG release HEAD
 
-Formula/scanner, apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp:
-tag -> $TAG, revision -> $RELEASE_SHA (the release HEAD), bottle root_url ->
-releases/download/$TAG, rebuild bumped. Bottle sha256s + rebuild stay for the
-CI bottle rebuild at tag time."
+Formula/scanner, apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp,
+apg-py, apg-md: tag -> $TAG, revision -> $RELEASE_SHA (the release HEAD),
+bottle root_url -> releases/download/$TAG, rebuild bumped. Bottle sha256s +
+rebuild stay for the CI bottle rebuild at tag time."
 
 echo "==> Creating annotated tag $TAG -> $RELEASE_SHA"
 git tag -a "$TAG" -m "apg $NEW_VERSION" "$RELEASE_SHA"

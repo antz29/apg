@@ -39,8 +39,9 @@ Scanner (per language) → Rust ingestor → apg/.trans/db.lbug + apg/.trans/gra
 - [opencode](https://opencode.ai) (for the chat plugin)
 
 The `scanner` formula builds the `apg` binary; the language frontends are
-separate formulae (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`). Install the
-base plus the frontends for the languages you scan. Prebuilt bottles (macOS
+separate formulae (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`,
+`apg-csharp`, `apg-py`, `apg-md`). Install the base plus the frontends for the
+languages you scan. Prebuilt bottles (macOS
 arm64) are
 published to each GitHub release by CI; if no bottle matches your system,
 Homebrew falls back to building from source. Java projects additionally need
@@ -51,7 +52,8 @@ TypeScript projects need `node` on your PATH at scan time (the `apg-ts`
 frontend runs the official TypeScript compiler); a repo's `node_modules` is
 always skipped, and workspace-package imports resolve even before `npm install`.
 The C# frontend (`apg-csharp`) needs a .NET SDK only at build time — the
-published binary is self-contained.
+published binary is self-contained. The Python frontend (`apg-py`) and the
+Markdown frontend (`apg-md`) need no language runtime at scan time.
 
 ## Install (Homebrew)
 
@@ -63,7 +65,9 @@ brew install antz29/apg/scanner \
              antz29/apg/apg-cpp \
              antz29/apg/apg-rust \
              antz29/apg/apg-ts \
-             antz29/apg/apg-csharp
+             antz29/apg/apg-csharp \
+             antz29/apg/apg-py \
+             antz29/apg/apg-md
 ```
 
 Install only the frontends you need:
@@ -75,11 +79,11 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.13.x
+apg --version   # apg 0.14.x
 apg --help
 ```
 
-The stable install tracks the current `0.13.x` release tag. If you want the
+The stable install tracks the current `0.14.x` release tag. If you want the
 latest unreleased code instead, pass `--HEAD`:
 
 ```sh
@@ -109,14 +113,14 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 # Or use the --frontends flag:
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,ts
 
-# Install everything (scanner + all 6 frontends):
+# Install everything (scanner + all 8 frontends):
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
 ```
 
 The installer verifies sha256 checksums for each component against `sha256sums.txt`.
 
 Options:
-- `--version 0.13.x`: pin a specific release tag
+- `--version 0.14.x`: pin a specific release tag
 - `--user`: install under `~/.local` (no root required)
 - `--prefix DIR`: choose a custom install location (default `/usr/local`)
 - `--frontends L,L...`: comma-separated list of frontends to install
@@ -129,7 +133,7 @@ The binary links OpenSSL dynamically, so `libssl.so.3` must be present (it is on
 Verify:
 
 ```sh
-apg --version   # apg 0.13.x
+apg --version   # apg 0.14.x
 apg --help
 ```
 
@@ -413,7 +417,8 @@ cargo build --release
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 `APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
-allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`; `0` to skip all) to
+allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `py`, `md`; `0` to skip
+all) to
 limit what build.rs compiles — the split brew formulae rely on this.
 
 The test suite is split into three tiers (`global.constraint.test-tier-boundaries`):
