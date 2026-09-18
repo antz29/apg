@@ -5,14 +5,14 @@ class ApgGo < Formula
   desc "Go scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.14.0",
-      revision: "a02a58d0db9c6f81879bccb3729d5376f7b88d59"
+      tag:      "v0.14.1",
+      revision: "aad05ea4a9efb519ad25545bd89c6a0a47ea8101"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.14.0"
-    rebuild 34
+    root_url "https://github.com/antz29/apg/releases/download/v0.14.1"
+    rebuild 35
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "2888fc6ccff7725ae4e2e2561610399c76d0f7a120f058994be579c040b8c1f2"
   end
 
