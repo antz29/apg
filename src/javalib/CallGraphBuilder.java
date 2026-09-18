@@ -7,6 +7,7 @@ import javax.tools.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 public class CallGraphBuilder {
     static final long START = System.currentTimeMillis();
@@ -72,33 +73,57 @@ public class CallGraphBuilder {
 
         System.err.println("[" + elapsed() + "] collecting source files...");
         List<Path> files = new ArrayList<>();
-        try (var walk = Files.walk(dir)) {
-            walk.filter(p -> p.toString().endsWith(".java"))
-                // Phase-04 task-15 residual (feedback-138): a `module-info.java`
-                // is a module DESCRIPTOR — it declares no package and no
-                // struct/function/edge facts — but it is still a SCANNED source
-                // file, so it stays in the walked set and the graph still
-                // carries its `file` record (domain.entity.source-file: every
-                // eligible source file is included; filtering is by code_type,
-                // never by dropping the file). It is partitioned OUT of every
-                // javac task and every `-sourcepath` root instead
-                // (partitionDescriptors): ONE descriptor in a batch flips the
-                // whole compilation into NAMED-module mode, whose `requires`
-                // graph hides every JDK module the descriptor does not read
-                // (java.desktop/java.sql/java.xml/org.xml.sax/...), and each
-                // such type then degrades to an error symbol whose calls/uses
-                // leak out as bare simple names (`JFrame`, `pack`, `add`,
-                // `StreamResult`). A Maven multi-module tree carries one per
-                // module (jgrapht), so a one-task full scan reported `too many
-                // module declarations found` and lost JDK visibility wholesale.
-                // The scanner attributes an UNNAMED-module source tree
-                // (global.constraint.frontend-full-context: resolve against the
-                // FULL context), so descriptors are attributed nowhere on BOTH
-                // legs while remaining part of the scanned file set.
-                .filter(Files::isRegularFile)
-                .filter(p -> excludePaths.stream().noneMatch(pat -> p.toString().contains(pat)))
-                .forEach(files::add);
-        }
+        // Discovery walk. Prune hidden directories — any directory whose
+        // basename begins with '.' — notably a nested project worktree under
+        // `apg/.worktrees/`. Walking into it compiles the parent checkout's
+        // sources and the worktree's copy together, which fails with
+        // `duplicate class: CallGraphBuilder`. The other frontends all prune
+        // hidden names (domain.entity.scan-exclusion: `.worktrees/` is never a
+        // scan root); this brings Java to the same rule. The scan root itself
+        // is exempt, so a scan root that lives under `.worktrees/` is still
+        // scanned.
+        Files.walkFileTree(dir, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path d, BasicFileAttributes attrs) {
+                Path name = d.getFileName();
+                if (!d.equals(dir) && name != null && name.toString().startsWith(".")) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            // Phase-04 task-15 residual (feedback-138): a `module-info.java`
+            // is a module DESCRIPTOR — it declares no package and no
+            // struct/function/edge facts — but it is still a SCANNED source
+            // file, so it stays in the walked set and the graph still carries
+            // its `file` record (domain.entity.source-file: every eligible
+            // source file is included; filtering is by code_type, never by
+            // dropping the file). It is partitioned OUT of every javac task and
+            // every `-sourcepath` root instead (partitionDescriptors): ONE
+            // descriptor in a batch flips the whole compilation into
+            // NAMED-module mode, whose `requires` graph hides every JDK module
+            // the descriptor does not read
+            // (java.desktop/java.sql/java.xml/org.xml.sax/...), and each such
+            // type then degrades to an error symbol whose calls/uses leak out as
+            // bare simple names (`JFrame`, `pack`, `add`, `StreamResult`). A
+            // Maven multi-module tree carries one per module (jgrapht), so a
+            // one-task full scan reported `too many module declarations found`
+            // and lost JDK visibility wholesale. The scanner attributes an
+            // UNNAMED-module source tree (global.constraint.frontend-full-
+            // context: resolve against the FULL context), so descriptors are
+            // attributed nowhere on BOTH legs while remaining part of the
+            // scanned file set.
+            @Override
+            public FileVisitResult visitFile(Path p, BasicFileAttributes attrs) {
+                if (!attrs.isRegularFile()) return FileVisitResult.CONTINUE;
+                if (!p.toString().endsWith(".java")) return FileVisitResult.CONTINUE;
+                if (excludePaths.stream().anyMatch(pat -> p.toString().contains(pat))) {
+                    return FileVisitResult.CONTINUE;
+                }
+                files.add(p);
+                return FileVisitResult.CONTINUE;
+            }
+        });
         System.err.println("[" + elapsed() + "] " + files.size() + " .java files");
 
         // The target set is an EMISSION filter only (phase-02 task-11). An

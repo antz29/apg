@@ -1176,10 +1176,21 @@ static void get_cpp_files(fs::path dir, std::vector<fs::path> &files,
 {
     if (!fs::exists(dir)) return;
     if (recursive) {
-        for (const auto &entry : fs::recursive_directory_iterator(dir)) {
-            if (!fs::is_regular_file(entry)) continue;
+        // Skip hidden directories (basename begins with '.') entirely — notably
+        // a nested project worktree under `apg/.worktrees/`. A plain
+        // recursive_directory_iterator descends into them and picks up the
+        // worktree's duplicate sources; the other frontends prune hidden names
+        // (domain.entity.scan-exclusion: `.worktrees/` is never a scan root).
+        for (auto it = fs::recursive_directory_iterator(dir);
+             it != fs::recursive_directory_iterator(); ++it) {
+            const fs::directory_entry &entry = *it;
             std::string name = entry.path().filename().string();
-            if (name[0] == '.') continue;
+            if (entry.is_directory()) {
+                if (!name.empty() && name[0] == '.') it.disable_recursion_pending();
+                continue;
+            }
+            if (!entry.is_regular_file()) continue;
+            if (!name.empty() && name[0] == '.') continue;
             std::string path_str = entry.path().string();
             bool excluded = false;
             for (const auto &pat : excludes) {
