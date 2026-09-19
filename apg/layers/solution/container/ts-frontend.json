@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "ts-frontend",
+  "body": "The TypeScript/JavaScript frontend artifact (`src/tslib/scanner.mjs`), spawned by the scan driver. It discovers npm packages and collects each package's sources. Must root modules from the repository-relative base and emit each source file exactly once.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
