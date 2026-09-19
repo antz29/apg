@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "walk-up-trans-marker",
+  "body": "FOOTNOTE — layout discovery vs identity [with user]: the suite tools find a project's `apg/` by walking up from cwd; the walked-up `apg/.trans/` directory is the LAYOUT MARKER that resolves which graph a tool is talking to (`rust.apg.git`: \"the walk-up `apg/` discovery stays the layout resolver\"). This change does not alter walk-up discovery: it changes how the code identities INSIDE the graph are spelled. The two are independent — a tool may find the main checkout's `apg/.trans` or a worktree's own branch `.trans`, and either way the stored identities are repo-relative and resolve against the project directory the tool is handed. The marker is a discovery aid, never part of identity.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
