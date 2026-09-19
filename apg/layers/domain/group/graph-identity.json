@@ -79,6 +79,11 @@
       "kind": "drives",
       "source": "requirements.requirement.python-namespace-package-identity",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.fast-project-start",
+      "properties": {}
     }
   ]
 }
