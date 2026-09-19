@@ -41,6 +41,11 @@
       "kind": "contains",
       "target": "requirements.requirement.fast-project-start",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.canonical-file-identity",
+      "properties": {}
     }
   ],
   "in": [
