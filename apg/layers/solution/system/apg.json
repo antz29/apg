@@ -29,6 +29,11 @@
       "kind": "contains",
       "target": "solution.container.py-frontend",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.opencode-suite",
+      "properties": {}
     }
   ],
   "in": []
