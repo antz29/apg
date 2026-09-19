@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "identity-layer",
+  "body": "The ingestor-side component that resolves a source file's canonical identity from the repository-relative base and renders every fqn from it: the File fqn, the language root, and the module/scope rooting. It reads the git toplevel (`rust.apg.git`) and writes the relative identity into the graph (`rust.apg.load`) and the exported jsonl (`rust.apg.ingest.root_module_fqn`). Owns the repo-relative identity of files and modules; absolute paths are reconstructed only in the suite-tool layer.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
