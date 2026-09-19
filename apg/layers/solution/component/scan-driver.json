@@ -29,6 +29,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.delta.full_scan_reason",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.rebase",
+      "properties": {}
     }
   ],
   "in": [
