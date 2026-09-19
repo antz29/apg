@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "go.apg/gofrontend",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "go.apg/gofrontend.applyGoBuildCache",
+      "properties": {}
     }
   ],
   "in": [
