@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "go-frontend",
+  "body": "The Go frontend artifact (`src/golib/main.go`, `go.apg/gofrontend`). It points GOCACHE at a shared per-scan cache under the git-common-dir and loads packages with Tests enabled; it must not emit generated cache files or their synthetic symbols as package sources.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
