@@ -4,7 +4,13 @@
   "name": "tool-path-resolution",
   "body": "The suite-tool boundary in the shared plumbing `opencode-suite/lib/apg.ts`: it resolves the caller-supplied project `directory` to the project root (`ts.apg-opencode-suite.lib.apg.findApgRoot`) and runs each curated tool's Cypher from that root (`ts.apg-opencode-suite.lib.apg.runCypher`), turning the graph's stored repo-relative identities into absolute filesystem paths the agent can read. It is the concrete owner of absolute-at-the-tool-boundary, distinct from solution.component.identity-layer, which stores the relative identity and explicitly disclaims resolution.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-opencode-suite.lib.apg.findApgRoot",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
