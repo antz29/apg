@@ -4,6 +4,12 @@
   "name": "identity-defect-inventory",
   "body": "DEFECT INVENTORY (instances of this requirement, observed in the branch graph / source):\n\n1. TS synthetic root package — `ts.apg-tsfrontend.scanner.discoverPackages` adds the scan root as a module named `path.basename(root)` when `hasSourcesOutside(..)` sees sources outside the named packages, and `collectSources(pkg.dir)` walks recursively with no nested-package exclusion. Observed: the same file emitted as `ts.cosanima-1.0.0.testdata.src.shapes.Point` AND `ts.@apg/ts-fixture.src.shapes.Point`; the shared cache splices worktree A's `ts.<checkout-name>.*` into worktree B. The `target/` outputs (defect 3) are what satisfy `hasSourcesOutside`.\n\n2. Go GOCACHE self-inclusion — `go.apg/gofrontend.applyGoBuildCache` sets GOCACHE to `<git-common-dir>/apg/facts/go/<cache-key>`, and packages are loaded with Tests enabled; Go's generated `_testmain` appears in the package file list. Observed: File `.git/apg/facts/go/<key>/53/<sha>-d` (code_type src, no module parent) plus `go.apg/gofrontend.test.init#<basename>` / `.main`.\n\n3. `target/` build artifacts scanned — the scanners do not read `.gitignore`, so each checkout's `target/**` (staged `tsfrontend/scanner.mjs`, `build/apg-*/out/tsfrontend-build/scanner.js`) lands in the graph and triggers defect 1. Main had 9 such Files vs 2 in worktrees.\n\n4. Java default package — `src/javalib/CallGraphBuilder.java` declares no package and `java.CallGraphBuilder.Collector.emitPkgHierarchy` returns early on an empty package: no module record, File parent empty (orphaned), top-level class renders `.CallGraphBuilder`, and there is no `java` Language root — the Java subtree is invisible to module-based tools.\n\n5. Python namespace packages — `rust.pyfrontend.Scanner.module_fqn_for` walks only `__init__.py`-bearing ancestors, so `pkg/mod.py` and `other/mod.py` both collapse to `mod`.\n\n6. Slow `project start` — a fresh worktree at an already-scanned commit is not a full scan but the delta target set is empty, so `rust.apg.should_spawn_language(false, true, false)` is true and every frontend is spawned unfiltered (global module scaffolding is not per-file). Once identity is portable, start should seed by copy/rebased reuse with no frontend spawns.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.portable-graph-identity",
+      "properties": {}
+    }
+  ],
   "in": []
 }

@@ -63,6 +63,11 @@
       "kind": "details",
       "source": "requirements.note.walk-up-trans-marker",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.identity-defect-inventory",
+      "properties": {}
     }
   ]
 }
