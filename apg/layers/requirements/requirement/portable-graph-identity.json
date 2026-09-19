@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.frontend-rooting-from-repo-base",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.no-self-ingestion",
+      "properties": {}
     }
   ],
   "in": [
