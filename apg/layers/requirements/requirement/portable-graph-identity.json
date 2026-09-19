@@ -68,6 +68,11 @@
       "kind": "details",
       "source": "requirements.note.identity-defect-inventory",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.refinement-per-defect-domain",
+      "properties": {}
     }
   ]
 }
