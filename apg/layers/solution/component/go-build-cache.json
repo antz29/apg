@@ -4,7 +4,13 @@
   "name": "go-build-cache",
   "body": "The Go frontend's shared build-cache handling (`go.apg/gofrontend.applyGoBuildCache`, `goBuildCacheDir`). It points GOCACHE at `<git-common-dir>/apg/facts/go/<cache-key>`; it must keep generated `_testmain` scratch files out of the emitted package file list so cache content never becomes graph identity.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "go.apg/gofrontend",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
