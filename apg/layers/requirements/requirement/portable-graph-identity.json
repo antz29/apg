@@ -14,11 +14,6 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.absolute-paths-at-tool-boundary",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "requirements.requirement.frontend-rooting-from-repo-base",
       "properties": {}
     },

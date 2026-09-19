@@ -67,11 +67,6 @@
     },
     {
       "kind": "drives",
-      "source": "requirements.requirement.absolute-paths-at-tool-boundary",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
       "source": "requirements.requirement.frontend-rooting-from-repo-base",
       "properties": {}
     },
