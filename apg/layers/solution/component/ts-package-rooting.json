@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "ts-package-rooting",
+  "body": "The TS frontend's package/module discovery (`ts.apg-tsfrontend.scanner.discoverPackages`). It must name packages from their declared names / repo-relative base, never synthesise a root module named after the checkout directory, and must not re-emit a file under both its real package and a synthetic recursive root.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
