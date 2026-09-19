@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "scan-hygiene",
+  "body": "The boundary between what the scanner ingests as source and what it must leave out: the scanner's own caches, generated test mains, and build outputs. Scan hygiene is supporting to graph identity — excluding non-source artifacts keeps identities meaningful and keeps the graph a function of authored content only.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [],
+  "in": []
+}
