@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.ingest",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.root_module_fqn",
+      "properties": {}
     }
   ],
   "in": [
