@@ -16,6 +16,11 @@
       "kind": "drives",
       "target": "domain.group.graph-identity",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.java-package",
+      "properties": {}
     }
   ],
   "in": [
