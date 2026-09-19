@@ -37,6 +37,11 @@
       "kind": "realised-by",
       "target": "solution.container.ts-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.java-frontend",
+      "properties": {}
     }
   ],
   "in": []
