@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "checkout-independent-graph-identity",
+  "body": "A code graph must be a function of the repository's content and commit, not of the checkout location, the scan root, or the user who ran the scan: two clean checkouts of the same commit must produce the same identities and edges, and a graph built in one checkout must be valid in another at that commit. The scanner must never ingest its own caches or build outputs as source. Structure and references are checked at write time; satisfaction is assessed by review.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
