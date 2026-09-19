@@ -4,7 +4,13 @@
   "name": "scan-hygiene",
   "body": "The component that keeps non-source artifacts out of the graph: gitignore-aware path filtering (`rust.apg.git.path_is_ignored`), the shared Go build cache under the git-common-dir, generated `_testmain` files, and `target/**` build outputs. It defines the ingest boundary — what counts as source content for identity purposes.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.path_is_ignored",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
