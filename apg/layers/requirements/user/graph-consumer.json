@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "graph-consumer",
+  "body": "An agent, editor, or script that consumes the program graph through the apg suite tools. It runs with a cwd inside a project worktree, hands the tools a project `directory`, and needs real absolute filesystem paths back for files it opens — even though the graph's stored identity of those files must be checkout-independent.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
