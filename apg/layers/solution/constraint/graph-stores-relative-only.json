@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "graph-stores-relative-only",
+  "body": "The persisted graph and its jsonl export must carry only repo-relative identities; an absolute filesystem path must never appear as a File/Module/Struct/Function fqn. Resolution to an absolute path happens only in the suite-tool boundary, against the project directory supplied by the caller. The recorded scan root is metadata, not an identity.",
+  "properties": {
+    "attaches-to": "solution.component.identity-layer"
+  },
+  "out": [],
+  "in": []
+}
