@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "java-frontend",
+  "body": "The Java frontend artifact (`src/javalib/CallGraphBuilder.java`). It walks compilation units and emits module/package scaffolding. Must give default-package sources a root module so their classes are reachable, rather than returning early on the empty package.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
