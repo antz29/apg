@@ -6,7 +6,13 @@
   "properties": {
     "feature": "graph-identity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.value.repo-relative-path",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
