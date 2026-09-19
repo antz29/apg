@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "canonical-file-identity",
+  "body": "The checkout-independent identity of a source file: its repo-relative path. This is the identity carried by the File node. It is what lets a graph built in one checkout be read in another — the absolute path is reconstructed only at the tool boundary. Its value must not contain any component of the checkout's absolute path.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
