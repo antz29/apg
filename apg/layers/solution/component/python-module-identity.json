@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.pyfrontend",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.pyfrontend.Scanner.module_fqn_for",
+      "properties": {}
     }
   ],
   "in": [
