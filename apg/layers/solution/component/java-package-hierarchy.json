@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "java-package-hierarchy",
+  "body": "The Java frontend's package-hierarchy emission (`java.CallGraphBuilder.Collector.emitPkgHierarchy`). It must not return early on the empty (default) package: default-package sources need a root module so the File has a module parent and top-level classes get a non-leading-dot identity reachable by module-based tools.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
