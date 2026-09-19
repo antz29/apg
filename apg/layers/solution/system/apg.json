@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "solution.container.scanner-cli",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.ts-frontend",
+      "properties": {}
     }
   ],
   "in": []
