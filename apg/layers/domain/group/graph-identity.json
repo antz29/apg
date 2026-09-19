@@ -12,6 +12,11 @@
       "kind": "contains",
       "target": "domain.value.repo-relative-path",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.canonical-file-identity",
+      "properties": {}
     }
   ],
   "in": []
