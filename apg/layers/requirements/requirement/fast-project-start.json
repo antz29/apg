@@ -6,7 +6,13 @@
   "properties": {
     "feature": "start-performance"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.value.canonical-file-identity",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
