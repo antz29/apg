@@ -52,6 +52,11 @@
       "kind": "realised-by",
       "target": "solution.component.scan-driver",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.java-package",
+      "properties": {}
     }
   ],
   "in": [
