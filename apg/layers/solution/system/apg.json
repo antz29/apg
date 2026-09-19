@@ -24,6 +24,11 @@
       "kind": "contains",
       "target": "solution.container.java-frontend",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.py-frontend",
+      "properties": {}
     }
   ],
   "in": []
