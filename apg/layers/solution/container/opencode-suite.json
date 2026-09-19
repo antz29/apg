@@ -6,13 +6,7 @@
   "properties": {
     "kind": "app"
   },
-  "out": [
-    {
-      "kind": "contains",
-      "target": "solution.component.tool-path-resolution",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
