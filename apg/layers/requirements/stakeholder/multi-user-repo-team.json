@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "stakeholder",
+  "name": "multi-user-repo-team",
+  "body": "The team of developers and AI agents that share one git repository across many checkouts: the canonical clone, `apg/.worktrees/<project>` branches, and every teammate's own clone at a different absolute path. They expect a graph built once to be usable by everyone at the same commit, and a graph built in one checkout to be reusable in another without a full rescan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
