@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "repo-relative-path",
+  "body": "A `/`-separated path relative to the repository (git toplevel) root; the portable base every identity is built from. It is independent of the absolute checkout location, of the user, and of the directory passed to `apg scan`. When the scanned tree is not a git repository the scan root is the base.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
