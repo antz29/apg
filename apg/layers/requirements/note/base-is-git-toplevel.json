@@ -4,6 +4,12 @@
   "name": "base-is-git-toplevel",
   "body": "DESIGN DECISION [with user]: the base for file identity is the git toplevel, not the scan root. Rationale: `apg scan <repo>` and `apg scan <repo>/<subdir>` must mint the same identity for the same file, and a worktree's identity must match the main checkout's. Root-relative also keeps `..` segments impossible. Non-git fallback: relative to the scan root (the only stable base available). Rejected: scan-root-relative (breaks scanning a subdirectory) and repo-relative-to-a-fixed-prefix (needs configuration and is still checkout-derived).",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.repo-relative-file-identity",
+      "properties": {}
+    }
+  ],
   "in": []
 }
