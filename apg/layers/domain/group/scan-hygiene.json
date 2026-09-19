@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.scan-hygiene",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.go-build-cache",
+      "properties": {}
     }
   ],
   "in": []
