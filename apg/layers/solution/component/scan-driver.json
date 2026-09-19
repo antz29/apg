@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.project_cmd",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd.project_start_at",
+      "properties": {}
     }
   ],
   "in": [
