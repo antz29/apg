@@ -21,11 +21,6 @@
       "kind": "contains",
       "source": "solution.container.opencode-suite",
       "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.tool-path-resolution",
-      "properties": {}
     }
   ]
 }

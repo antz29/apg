@@ -52,11 +52,6 @@
       "kind": "contains",
       "target": "domain.entity.typescript-package",
       "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.entity.tool-path-resolution",
-      "properties": {}
     }
   ],
   "in": [
