@@ -10,6 +10,11 @@
       "kind": "contains",
       "source": "domain.group.graph-identity",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.frontend-rooting-from-repo-base",
+      "properties": {}
     }
   ]
 }
