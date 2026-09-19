@@ -18,11 +18,6 @@
       "kind": "contains",
       "source": "solution.system.apg",
       "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.group.graph-identity",
-      "properties": {}
     }
   ]
 }
