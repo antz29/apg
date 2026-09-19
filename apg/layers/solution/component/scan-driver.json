@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "scan-driver",
+  "body": "The scan orchestrator: `apg scan` and the `project start` path. It decides full vs incremental (`rust.apg.delta.full_scan_reason`), decides which frontends to spawn (`rust.apg.should_spawn_language`), splices cached/reused fragments (`rust.apg.ingest`, `rust.apg.cache.rebase`), and seeds a branch DB by copy (`rust.apg.splice`). Owns the \"start at an already-scanned commit is near-instant\" behaviour and the no-unfiltered-spawn fast path.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
