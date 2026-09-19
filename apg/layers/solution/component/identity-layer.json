@@ -15,6 +15,11 @@
       "kind": "realised-by",
       "source": "domain.group.graph-identity",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.source-file",
+      "properties": {}
     }
   ]
 }
