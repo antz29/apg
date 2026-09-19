@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "python-module",
+  "body": "The dotted module identity a Python source file is attributed to. It is built from the file's full package directory path, not merely its `__init__.py`-bearing ancestors, so a file under a PEP-420 namespace package carries its directory components and files of the same name in different namespace packages stay distinct. This is the Python instance of module-identity.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
