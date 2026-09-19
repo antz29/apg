@@ -29,6 +29,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.git",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.repo_rel",
+      "properties": {}
     }
   ],
   "in": [
