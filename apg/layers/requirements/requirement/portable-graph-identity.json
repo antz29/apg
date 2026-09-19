@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.no-self-ingestion",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.java-default-package-identity",
+      "properties": {}
     }
   ],
   "in": [
