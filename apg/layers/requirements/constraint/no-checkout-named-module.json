@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "no-checkout-named-module",
+  "body": "No frontend may name a module after the basename of the checkout or scan-root directory, and a single source file must not be emitted under two module identities. A module name derived from the checkout path (e.g. `ts.<checkout-name>`) is a violation, as is a file reachable through both a real package and a synthetic recursive root.",
+  "properties": {
+    "attaches-to": "requirements.requirement.frontend-rooting-from-repo-base"
+  },
+  "out": [],
+  "in": []
+}
