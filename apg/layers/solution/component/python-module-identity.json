@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "python-module-identity",
+  "body": "The Python frontend's module-identity computation (`rust.pyfrontend.Scanner.module_fqn_for`, `dotted_identity`). It must include PEP-420 namespace-package directory components so files under different namespace packages get distinct identities.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
