@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "ts.apg-tsfrontend",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-tsfrontend.scanner.discoverPackages",
+      "properties": {}
     }
   ],
   "in": [
