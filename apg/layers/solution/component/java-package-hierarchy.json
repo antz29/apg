@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "java.CallGraphBuilder.Collector.emitPkgHierarchy",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "java.CallGraphBuilder.main",
+      "properties": {}
     }
   ],
   "in": [
