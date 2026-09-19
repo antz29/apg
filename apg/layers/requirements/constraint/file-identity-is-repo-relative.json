@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "file-identity-is-repo-relative",
+  "body": "A source file's identity must be the `/`-separated path relative to the git toplevel (the scan root when not in a git repository). It must not be an absolute path, must not be relative to the directory passed to `apg scan`, and must not contain any component of the checkout's absolute path. A leading `/` or a `..` segment is a violation.",
+  "properties": {
+    "attaches-to": "requirements.requirement.repo-relative-file-identity"
+  },
+  "out": [],
+  "in": []
+}
