@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "repo-relative-file-identity",
+  "body": "A source file's canonical identity must be its path relative to the git toplevel, with `/` separators — never its absolute path and never its path relative to whatever directory was passed to `apg scan`. The base is the repository root so that `apg scan <repo>` and `apg scan <repo>/src/tslib` mint the same identity for the same file. When the scanned directory is not inside a git repository, the scan root is the fallback base.\n\nAcceptance criteria:\n- Scanning the repo root and scanning a subdirectory of the same repo yield the same File fqn for a shared file.\n- The identity contains no leading `/` and no checkout directory component.\n- The relative base is stable across worktrees that are at the same commit.",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": []
+}
