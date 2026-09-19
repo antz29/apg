@@ -1,0 +1,12 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "graph-identity",
+  "body": "The identity model of the program graph: how a repository's source content is named so that the same content at the same commit has the same name for every user and in every checkout. Core domain concept of this change-set; its aggregate root is the canonical identity of a source file.",
+  "properties": {
+    "attribute": "core",
+    "root": "canonical-file-identity"
+  },
+  "out": [],
+  "in": []
+}
