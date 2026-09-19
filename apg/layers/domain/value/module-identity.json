@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "module-identity",
+  "body": "The checkout-independent identity of a package or module. It is derived from the repo-relative base plus the frontend's language rooting — never from the basename of the checkout directory or the scan root, and never synthesised from sources that live outside the declared packages. Files inside a package belong to exactly one module identity.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
