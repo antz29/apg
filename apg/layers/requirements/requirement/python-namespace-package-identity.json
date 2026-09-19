@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "python-namespace-package-identity",
+  "body": "PEP-420 namespace packages (directories with no `__init__.py`) must contribute their directory path to module identity. Today `rust.pyfrontend.Scanner.module_fqn_for` walks up only `__init__.py`-bearing ancestors, so a namespace package contributes nothing: `pkg/mod.py` and `other/mod.py` both collapse to the identity `mod`.\n\nAcceptance criteria:\n- A module inside a namespace package gets a dotted identity that includes its package directory path.\n- `pkg/mod.py` and `other/mod.py` receive distinct identities.\n- A regular (init-bearing) package's identity is unchanged.",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": []
+}
