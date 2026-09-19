@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "py-frontend",
+  "body": "The Python frontend artifact (`src/pylib`, `rust.pyfrontend`). It computes dotted module identities per source file and must account for PEP-420 namespace packages, not only `__init__.py`-bearing ancestors.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
