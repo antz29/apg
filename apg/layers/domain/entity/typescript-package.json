@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "typescript-package",
+  "body": "The npm/workspace package identity a TypeScript/JavaScript source file is attributed to. It is derived from the declared package name plus the repository-relative base — never from the basename of the checkout or scan-root directory — and each source file belongs to exactly one package identity (a synthetic recursive root must not re-emit it). This is the TS instance of module-identity.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
