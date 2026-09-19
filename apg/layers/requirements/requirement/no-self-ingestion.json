@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "no-self-ingestion",
+  "body": "The scanner must never ingest its own caches or build outputs as code. The shared Go build cache lives under the git-common-dir (`.git/apg/facts/go/<cache-key>`); Go writes a generated `_testmain` into it, which must not surface as a package File, and neither must its generated `init`/`main` functions. `target/**` (staged frontends, cargo build outputs) must not be scanned as source, and `.gitignore`d build trees must be excluded by default.\n\nObserved today: `go.apg/gofrontend` emits a File `.git/apg/facts/go/<key>/53/<sha>-d` with no module parent plus `go.apg/gofrontend.test.init#<basename>` / `.main`; the TS frontend scans `target/debug/frontends/tsfrontend/scanner.mjs` and `target/debug/build/apg-*/out/tsfrontend-build/scanner.js`.\n\nAcceptance criteria:\n- No File fqn under `.git/` or `target/` appears in the graph.\n- The Go frontend emits no function from a generated `_testmain` scratch file.\n- The count of `target/**` Files in the graph is zero, in both main and worktrees.",
+  "properties": {
+    "feature": "scan-hygiene"
+  },
+  "out": [],
+  "in": []
+}
