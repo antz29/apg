@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "tool-path-resolution",
+  "body": "The agent-facing boundary at which a stored repo-relative identity is resolved to a real absolute filesystem path against the project directory the caller supplies. The durable graph keeps checkout-independent identities (relative-in-graph); the curated suite tools take a project `directory`, find the project root, and are the only place the absolute path is reconstructed (absolute-at-tools) before an agent or editor opens the file. This is the tool-boundary half of module-identity: without it the portable graph would be unopenable.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
