@@ -59,6 +59,11 @@
       "kind": "drives",
       "source": "requirements.requirement.repo-relative-file-identity",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.absolute-paths-at-tool-boundary",
+      "properties": {}
     }
   ]
 }
