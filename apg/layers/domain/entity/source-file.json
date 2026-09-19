@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "source-file",
+  "body": "A tracked file of the repository whose content is source code. Its identity is its canonical-file-identity, and every graph fact about it (its module parent, its declarations) hangs off that identity. A source file is the same entity in every checkout of a commit.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
