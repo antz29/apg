@@ -23,6 +23,11 @@
       "kind": "drives",
       "source": "requirements.requirement.portable-graph-identity",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.repo-relative-file-identity",
+      "properties": {}
     }
   ]
 }

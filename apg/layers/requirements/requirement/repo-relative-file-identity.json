@@ -21,6 +21,11 @@
       "kind": "drives",
       "target": "domain.group.graph-identity",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.source-file",
+      "properties": {}
     }
   ],
   "in": [
