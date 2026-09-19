@@ -54,5 +54,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.repo-relative-file-identity",
+      "properties": {}
+    }
+  ]
 }
