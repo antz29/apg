@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "requirements.requirement.python-namespace-package-identity",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.fast-project-start",
+      "properties": {}
     }
   ],
   "in": [
