@@ -27,6 +27,11 @@
       "kind": "contains",
       "target": "domain.entity.source-file",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.identity-layer",
+      "properties": {}
     }
   ],
   "in": []
