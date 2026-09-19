@@ -32,6 +32,11 @@
       "kind": "realised-by",
       "target": "solution.component.identity-layer",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.ts-frontend",
+      "properties": {}
     }
   ],
   "in": []
