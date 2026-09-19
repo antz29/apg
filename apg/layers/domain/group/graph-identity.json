@@ -57,6 +57,11 @@
       "kind": "contains",
       "target": "domain.entity.java-package",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.python-module",
+      "properties": {}
     }
   ],
   "in": [
