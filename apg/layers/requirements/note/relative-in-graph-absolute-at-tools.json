@@ -4,6 +4,12 @@
   "name": "relative-in-graph-absolute-at-tools",
   "body": "DESIGN DECISION [with user]: the durable graph stores the repo-relative identity; the suite tools resolve it to an absolute path at their boundary against the project `directory` they are given. Rationale: the artifact stays portable, while agents and editors keep receiving real absolute paths they can open. Consequence/scope: raw `apg query` is the graph view and returns the stored relative fqn; only the curated suite tools (`apg_file_path`, `apg_file_units`, `apg_hunk`, …) re-base. The cached fragment format already stores checkout-relative paths and rebases absolute fqns (`rust.apg.cache.rebase`), so this promotes the cache's existing model to the whole graph.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.absolute-paths-at-tool-boundary",
+      "properties": {}
+    }
+  ],
   "in": []
 }
