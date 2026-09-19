@@ -7,6 +7,12 @@
     "attribute": "core",
     "root": "canonical-file-identity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.value.repo-relative-path",
+      "properties": {}
+    }
+  ],
   "in": []
 }
