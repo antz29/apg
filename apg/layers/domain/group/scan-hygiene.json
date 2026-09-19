@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "domain.entity.runtime-artifact",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.scan-hygiene",
+      "properties": {}
     }
   ],
   "in": []
