@@ -6,7 +6,13 @@
   "properties": {
     "feature": "graph-identity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.value.canonical-file-identity",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
