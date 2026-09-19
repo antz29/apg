@@ -21,6 +21,11 @@
       "kind": "contains",
       "source": "solution.container.py-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.python-module",
+      "properties": {}
     }
   ]
 }
