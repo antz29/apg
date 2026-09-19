@@ -6,7 +6,13 @@
   "properties": {
     "feature": "scan-hygiene"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.runtime-artifact",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
