@@ -6,7 +6,13 @@
   "properties": {
     "feature": "graph-identity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.repo-relative-file-identity",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
