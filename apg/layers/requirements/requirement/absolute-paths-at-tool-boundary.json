@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "absolute-paths-at-tool-boundary",
+  "body": "The curated suite tools must hand consumers absolute filesystem paths even though the durable graph stores checkout-independent repo-relative identities. Each curated tool resolves a stored identity against the project `directory` it is given before returning it, so `apg_file_path`, `apg_file_units`, `apg_hunk`, … yield paths a consumer can open. Raw `apg query` is the graph view and deliberately returns the stored repo-relative form — re-basing happens only at the curated-tool boundary, never in the artifact.\n\nToday the suite's shared plumbing only discovers the project root (`ts.apg-opencode-suite.lib.apg.findApgRoot`) and runs the fixed Cypher templates (`ts.apg-opencode-suite.lib.apg.runCypher`) from that root; once the graph's File fqn is repo-relative, the tools must join it back to the caller's project directory.\n\nAcceptance criteria:\n- A curated tool given a stored repo-relative File fqn returns an absolute path under the caller's project directory.\n- The same stored identity resolves to different absolute paths in two checkouts at the same commit.\n- Raw `apg query` returns the stored repo-relative form unchanged.\n- The re-basing follows the tool's `directory` argument rather than cwd alone.",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": []
+}
