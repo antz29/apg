@@ -4,6 +4,12 @@
   "name": "blacklist-not-in-cache-key",
   "body": "KNOWN LIMITATION — the scan blacklist is NOT folded into the cache key, so a RECORDED blacklist is undetectable from the store and a later warm start can reuse a graph assembled under a different blacklist.\n\nMechanism: `rust.apg.cmd_scan` guards only the CURRENT scan — the warm probe is attempted only when the current blacklist is empty — while `rust.apg.warm_prepared` requires a stored unit for every source-manifest entry (`store.candidate(...)`). A WHOLE-FILE blacklist drops the file's unit, so the probe misses and falls back to the ordinary path (safe). A PARTIAL-DECLARATION blacklist (a struct/function FQN prefix) leaves the file's unit present, and that unit was recorded FROM the already-filtered graph: `rust.apg.incremental.record` derives every fragment via `FileIndex::build` over the assembled (already blacklist-filtered) graph. On reuse, `rust.apg.ingest.splice_cached` inserts cached nodes/edges directly; only the spool goes through `rust.apg.ingest.is_blacklisted`. The warm start therefore reuses the blacklist-filtered fragment verbatim. The cache key is `rust.apg.cache.ScanConfigKey`, which does not carry the blacklist.\n\nGuarantee: `requirements.requirement.fast-project-start` AC2 is guaranteed for the SAME effective scan configuration — the intended deliverable, a warm start at an already-scanned commit under the same config — and the same-config warm path is correct. Because a recorded config mismatch cannot be detected from the store, cross-config warm reuse is the residual gap.\n\nResidual gap / follow-up: a future change-set should fold the blacklist into the scan/cache key (`rust.apg.cache.ScanConfigKey`); this would also close the PRE-EXISTING ordinary-incremental variant of the same gap (the recording path shares the key). Recorded here because the transient plan note `fix-module-identity/plan.note-26` dies with the branch; this note is its durable home.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.fast-project-start",
+      "properties": {}
+    }
+  ],
   "in": []
 }
