@@ -711,8 +711,7 @@ impl FrontendHandoff {
     }
 }
 
-/// The `incremental::language_of` bucket a **scan language id** belongs to.
-///
+/// The `incremental::language_of` bucket a **scan language id** belongs to.///
 /// The unified JS/TS frontend runs under TWO scan ids (`ts` and `js`) for ONE
 /// artifact (`frontend_cmd` maps both to the same `tsfrontend`; the detector
 /// returns `js` for a JS-only repo and `ts` for a TS-containing one, never
@@ -746,6 +745,159 @@ fn targets_for_language(
     out
 }
 
+/// The warm-cache seed preparation (phase-06 tasks 3/4/6): when the shared store
+/// holds a COMPLETE recorded scan for exactly this checkout's HEAD under the
+/// current cache key, build the [`incremental::Prepared`] state from the
+/// **recorded manifest alone** — never `Manifest::build`, so no full-tree walk —
+/// and return it. `None` means the caller runs the ordinary
+/// `incremental::prepare`.
+///
+/// The verdict comes from the pure `delta::scan_verdict` wrapper
+/// ([`delta::scan_state`]): the recorded scan is at exactly HEAD under the
+/// current key. Completeness is then judged without a source walk: every
+/// source-language entry of the recorded manifest must have a stored fact unit
+/// under the current key (non-source entries never get units and are ignored),
+/// and every such language must have stored module scaffolding. A single missing
+/// unit/scaffold is a miss (the caller falls back), so the warm path can never
+/// assemble an incomplete graph. The recorded content-identity key must equal
+/// this checkout's own, so a record from a different tree at the same sha is
+/// refused.
+fn warm_prepared(
+    project_dir: &Path,
+    apg_root: &Path,
+    git_state: &git::GitState,
+    scan_config: &cache::ScanConfigKey,
+) -> Option<incremental::Prepared> {
+    let cache_key = cache::CacheKey::compute(scan_config);
+    let store_root = cache::FactStore::resolve(apg_root).ok()?.root;
+    let (record, verdict) = delta::scan_state(apg_root, Some(&store_root), &cache_key);
+    if !verdict.is_warm_cache() {
+        return None;
+    }
+    let record = record?;
+    // The recorded tree content must equal THIS checkout's: a record from a
+    // dirty tree (or another commit's tree at the same sha) is not this tree.
+    let (Some(current_key), Some(recorded_key)) = (
+        git_state.content_key.as_deref(),
+        record.content_key.as_deref(),
+    ) else {
+        return None;
+    };
+    if current_key != recorded_key {
+        return None;
+    }
+    let store = cache::FactStore::at(store_root.clone()).load();
+    let mut languages: BTreeSet<String> = BTreeSet::new();
+    let mut reuse_candidates: Vec<incremental::ReuseFile> = Vec::new();
+    for (rel, oid) in &record.manifest.entries {
+        let lang = incremental::language_of(rel);
+        if lang == "other" {
+            // Not a scanned source file: it never carries a fact unit.
+            continue;
+        }
+        // A source file with no stored unit means the cache is not complete
+        // for this tree — fall back (conservative, never a partial assembly).
+        store.candidate(lang, rel, oid, &cache_key)?;
+        languages.insert(lang.to_string());
+        reuse_candidates.push(incremental::ReuseFile {
+            abs: incremental::absolute(project_dir, rel),
+            rel: rel.clone(),
+            oid: oid.clone(),
+            lang: lang.to_string(),
+        });
+    }
+    if reuse_candidates.is_empty() {
+        return None;
+    }
+    for lang in &languages {
+        // A language with no stored scaffolding cannot be reconstructed from
+        // the cache — fall back.
+        store.scaffolding(lang, &cache_key)?;
+    }
+    // The recorded manifest describes this tree; re-base its recorded root onto
+    // the reading checkout so the re-recorded baseline stays coherent.
+    let mut manifest = record.manifest.clone();
+    manifest.root = project_dir.to_string_lossy().into_owned();
+    Some(incremental::Prepared {
+        store_root,
+        cache_key,
+        full_scan: None,
+        targets_rel: BTreeSet::new(),
+        changed_rel: BTreeSet::new(),
+        removed_fqns: BTreeSet::new(),
+        reuse_candidates,
+        manifest,
+        recorded_content_key: record.content_key.clone(),
+    })
+}
+
+/// Whether the shared store is a complete warm cache for this checkout's HEAD —
+/// the same predicate [`warm_prepared`] applies, without building the state.
+/// `project start` uses it to report the seed path it is about to take, and
+/// `cmd_scan` uses [`warm_prepared`] for the assembly itself.
+pub(crate) fn warm_cache_ready(project_dir: &Path, apg_root: &Path) -> bool {
+    let git_state = git::git_state(project_dir);
+    let available = available_languages();
+    let detected = auto_detect_languages(project_dir, &available);
+    let languages = if detected.is_empty() {
+        available
+    } else {
+        detected
+    };
+    let config = cache::ScanConfigKey {
+        languages,
+        excludes: Vec::new(),
+        modules: Vec::new(),
+    };
+    warm_prepared(project_dir, apg_root, &git_state, &config).is_some()
+}
+
+/// The code-FQN universe of the shared store's complete warm cache — the
+/// full-universe seam's source when no local export exists yet (a fresh
+/// worktree): every fragment's re-based code FQNs (module FQNs included) plus
+/// every language's module scaffolding. The warm assembly produces exactly these
+/// nodes, so authored `implemented-by` validation sees a full rebuild's universe
+/// without the local `graph.jsonl` a full scan would have written.
+fn warm_universe(
+    store_root: &Path,
+    cache_key: &cache::CacheKey,
+    manifest: &cache::Manifest,
+    languages: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let store = cache::FactStore::at(store_root.to_path_buf()).load();
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    for (rel, oid) in &manifest.entries {
+        let lang = incremental::language_of(rel);
+        if lang == "other" {
+            continue;
+        }
+        let Some((frag, stored_root)) = store.candidate(lang, rel, oid, cache_key) else {
+            continue;
+        };
+        let (modules, nodes, _) = frag.project(&stored_root, "");
+        out.extend(modules);
+        for (fqn, node) in nodes {
+            if node.status.is_none()
+                && matches!(
+                    node.kind,
+                    graph::NodeKind::Module
+                        | graph::NodeKind::Struct
+                        | graph::NodeKind::Function
+                        | graph::NodeKind::File
+                )
+            {
+                out.insert(fqn);
+            }
+        }
+    }
+    for lang in languages {
+        if let Some(scaffolding) = store.scaffolding(lang, cache_key) {
+            out.extend(scaffolding.modules);
+        }
+    }
+    out
+}
+
 /// The win-C per-language frontend spawn verdict (phase-03 task-5).
 ///
 /// On the win-B incremental path (`full_scan == false`):
@@ -774,17 +926,39 @@ fn targets_for_language(
 /// (phase-01 task-7) is the separate, earlier path for "the entire tree is
 /// unchanged".
 ///
+/// **Warm-cache completeness (phase-06 task-1).** When the shared store holds a
+/// COMPLETE recorded scan for exactly this HEAD (`warm_complete`), every
+/// language — including its global module scaffolding (feedback-102) — is
+/// reconstructible from the store, so NO language spawns on the empty-target
+/// case the paragraph above reserves for the unfiltered path. The flag is
+/// derived from the same recorded manifest + store completeness that drives the
+/// warm-cache assembly (`cmd_scan`), never re-derived here.
+///
 /// On a whole-tree full scan (`full_scan == true`) every detected/requested
-/// language must still spawn; the skip applies only to the incremental
-/// partition of work.
+/// language must still spawn; the skip applies only to the incremental partition
+/// of work.
 ///
 /// This is the **single source of truth** for the per-language verdict: it is
 /// derived from the very phase-2 target set that drives the win-C DB splice
 /// (`PipelineInput { targets_rel, .. }`, phase-03 task-4), never from a fresh
 /// `auto_detect_languages` walk, so a language skipped here is exactly a
 /// language the splicer treats as unchanged and the two can never disagree.
-fn should_spawn_language(full_scan: bool, targets_empty: bool, any_targets: bool) -> bool {
-    full_scan || !any_targets || !targets_empty
+fn should_spawn_language(
+    full_scan: bool,
+    targets_empty: bool,
+    any_targets: bool,
+    warm_complete: bool,
+) -> bool {
+    if full_scan {
+        return true;
+    }
+    if warm_complete {
+        // The recorded-HEAD scan is complete in the shared store: assemble from
+        // its rebased facts (per-file units + replayed scaffolding) with zero
+        // frontends, even though the delta target set is empty.
+        return false;
+    }
+    !any_targets || !targets_empty
 }
 
 /// Spawns one language's frontend for a scan phase, draining stdout to a spool
@@ -1635,20 +1809,35 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
 
     let config = classify::ApgConfig::load(&project_dir);
 
+    // The scan config identity shared by the warm-cache probe and the win-B
+    // preparation: the exact languages/excludes/modules this scan runs with.
+    let scan_config = cache::ScanConfigKey {
+        languages: languages.clone(),
+        excludes: path_excludes.clone(),
+        modules: module_dirs.clone(),
+    };
+
     // Win-B incremental preparation (phase-02 task-8): the content manifest,
     // git delta + correctness fallbacks, impact target set, and the fact-reuse
     // candidates. `full_scan: Some(reason)` falls through to the full pipeline
     // (the correctness reference). The target set drives the frontend
     // `--targets` hand-off (task-9) and the fact splice in `run_pipeline`.
-    let incremental = incremental::prepare(
-        &project_dir,
-        &apg_root,
-        &cache::ScanConfigKey {
-            languages: languages.clone(),
-            excludes: path_excludes.clone(),
-            modules: module_dirs.clone(),
-        },
-    );
+    //
+    // Warm-cache seed (phase-06 task-4): when the shared store already holds a
+    // COMPLETE recorded scan for exactly this HEAD, prepare from the recorded
+    // manifest and assemble from its re-based facts — no `Manifest::build`, so
+    // no full-tree walk, and zero frontends. The ordinary `prepare` runs only
+    // when the warm probe misses. A blacklist is never folded into the cache
+    // key, so a blacklisted scan falls back to the ordinary path (never a warm
+    // reuse of facts recorded under a different FQN filter).
+    let warm = if blacklist.is_empty() {
+        warm_prepared(&project_dir, &apg_root, &git_state, &scan_config)
+    } else {
+        None
+    };
+    let warm_complete = warm.is_some();
+    let incremental =
+        warm.unwrap_or_else(|| incremental::prepare(&project_dir, &apg_root, &scan_config));
     let mut handoff = FrontendHandoff::default();
     let mut reuse_plan: Option<incremental::ReusePlan> = None;
     if let Some(reason) = &incremental.full_scan {
@@ -1664,6 +1853,29 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             handoff.cache_dir = Some(incremental.store_root.clone());
             handoff.cache_key = Some(incremental.cache_key.token());
         }
+    } else if warm_complete {
+        log.ln(&format!(
+            "[scan] warm cache: recorded scan at HEAD — assembling {} file(s) from re-based facts (frontends skipped)",
+            incremental.reuse_candidates.len(),
+        ));
+        // No `--targets`: nothing is re-emitted; the per-file units are spliced
+        // from the store and their languages' scaffolding is replayed from the
+        // store's `skipped_langs` set.
+        handoff.cache_dir = Some(incremental.store_root.clone());
+        handoff.cache_key = Some(incremental.cache_key.token());
+        reuse_plan = Some(incremental::ReusePlan {
+            store_root: incremental.store_root.clone(),
+            cache_key: incremental.cache_key.clone(),
+            files: incremental
+                .reuse_candidates
+                .iter()
+                .map(|f| (f.rel.clone(), f.lang.clone(), f.oid.clone()))
+                .collect(),
+            reader_root: project_dir.to_string_lossy().into_owned(),
+            // Every language is reconstructible from the store; the final set is
+            // refilled after the (zero-spawn) loop from the same full cache.
+            skipped_langs: languages.iter().cloned().collect(),
+        });
     } else {
         log.ln(&format!(
             "[scan] incremental: {} target file(s), {} reusable file(s)",
@@ -1738,11 +1950,22 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             // has them in the final (stage-1 ∪ cascade) set, so it re-runs and
             // replaces its spool; only a language with no targets at all is
             // skipped here.
-            if !should_spawn_language(full_scan_path, targets.is_empty(), any_targets) {
+            if !should_spawn_language(
+                full_scan_path,
+                targets.is_empty(),
+                any_targets,
+                warm_complete,
+            ) {
                 if phase == 1 {
-                    log.ln(&format!(
-                        "[scan] {lang}: no changed targets — frontend skipped (facts reused)"
-                    ));
+                    if warm_complete {
+                        log.ln(&format!(
+                            "[scan] {lang}: recorded scan at HEAD — frontend skipped (warm cache)"
+                        ));
+                    } else {
+                        log.ln(&format!(
+                            "[scan] {lang}: no changed targets — frontend skipped (facts reused)"
+                        ));
+                    }
                 }
                 continue;
             }
@@ -1829,7 +2052,13 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         // splice, so the scaffolding replay and the spawn skip can never
         // disagree; a language with any target is spawned and emits its own
         // (fresh) scaffolding.
-        let skipped_langs: BTreeSet<String> = if targets_rel.is_empty() {
+        //
+        // Warm-cache completeness (phase-06 task-1/4): every configured language
+        // was skipped, so EVERY language's scaffolding must be replayed from the
+        // store — the empty-target-set case below.
+        let skipped_langs: BTreeSet<String> = if warm_complete {
+            languages.iter().cloned().collect()
+        } else if targets_rel.is_empty() {
             BTreeSet::new()
         } else {
             let with_targets: BTreeSet<&str> = targets_rel
@@ -1888,7 +2117,20 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // PREVIOUS export (the sole full code-identity source) MINUS the delta's
     // removed FQNs UNION the delta's emitted real code FQNs — never the
     // target-only spool. On a full scan the full spool IS the universe.
-    let scanned_code: BTreeSet<String> = if incremental.full_scan.is_some() {
+    //
+    // Warm-cache path (phase-06 task-4): the spool is EMPTY (zero frontends) and
+    // a fresh worktree has no local export, so derive the universe from the
+    // shared store's re-based facts + module scaffolding — exactly the nodes the
+    // warm assembly produces.
+    let scanned_code: BTreeSet<String> = if warm_complete {
+        let warm_langs: BTreeSet<String> = languages.iter().cloned().collect();
+        warm_universe(
+            &incremental.store_root,
+            &incremental.cache_key,
+            &incremental.manifest,
+            &warm_langs,
+        )
+    } else if incremental.full_scan.is_some() {
         let (pre, _) = ingest::ingest(
             scanner_records(&spools, &git_state),
             &ingest::IngestOptions {
@@ -3373,19 +3615,43 @@ mod tests {
 
             // Incremental PARTIAL case: the changed language spawns; the unchanged
             // one is skipped entirely (not merely emission-filtered).
-            assert!(should_spawn_language(false, go_targets.is_empty(), any));
-            assert!(!should_spawn_language(false, ts_targets.is_empty(), any));
+            assert!(should_spawn_language(
+                false,
+                go_targets.is_empty(),
+                any,
+                false
+            ));
+            assert!(!should_spawn_language(
+                false,
+                ts_targets.is_empty(),
+                any,
+                false
+            ));
 
             // Incremental with NO targets anywhere: phase-02's unfiltered path runs
             // every language (an empty target file means "no filter"), so the
             // frontends still emit their global module scaffolding + full universe.
-            assert!(should_spawn_language(false, true, false));
-            assert!(should_spawn_language(false, false, false));
+            assert!(should_spawn_language(false, true, false, false));
+            assert!(should_spawn_language(false, false, false, false));
 
             // Full scan: every detected/requested language still spawns, even with
             // an empty target set (no emission filter is passed on this path).
-            assert!(should_spawn_language(true, true, false));
-            assert!(should_spawn_language(true, go_targets.is_empty(), any));
+            assert!(should_spawn_language(true, true, false, false));
+            assert!(should_spawn_language(
+                true,
+                go_targets.is_empty(),
+                any,
+                false
+            ));
+
+            // phase-06 task-2: a COMPLETE warm cache skips EVERY language even on
+            // the empty-target case phase-02's unfiltered path would otherwise
+            // spawn — the recorded facts + scaffolding reconstruct the graph.
+            assert!(!should_spawn_language(false, true, false, true));
+            assert!(!should_spawn_language(false, false, false, true));
+            // A full scan still spawns every language (the warm flag never
+            // overrides the correctness full-scan gate).
+            assert!(should_spawn_language(true, true, false, true));
 
             // Phase-08 task-23: the `py` scan id receives its `.py`/`.pyi`
             // targets — `language_of` renders the scan-side token `py`, not the
@@ -6345,9 +6611,13 @@ mod tests {
             let fresh_err = String::from_utf8_lossy(&fresh.stderr);
 
             // (a) REUSE: the fresh worktree took the incremental/reuse path against
-            // the shared store (not a cold, cacheless full scan).
+            // the shared store (not a cold, cacheless full scan). At an unchanged
+            // recorded HEAD the path is the strongest form — the warm-cache
+            // assembly with zero frontend spawns.
             assert!(
-                fresh_err.contains("incremental:") || fresh_err.contains("reusable file"),
+                fresh_err.contains("incremental:")
+                    || fresh_err.contains("reusable file")
+                    || fresh_err.contains("warm cache"),
                 "the fresh worktree must reuse the shared cache: {fresh_err}"
             );
 

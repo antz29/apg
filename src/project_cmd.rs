@@ -182,6 +182,17 @@ fn project_start_at(apg_root: &Path, name: &str, scan: Option<&ScanFn>) -> anyho
     let wt_apg = wt_dir.join(specs::LAYOUT);
     std::fs::create_dir_all(wt_apg.join(specs::TRANS))?;
 
+    // Warm-cache start (phase-06 task-7/11): when the shared store already holds
+    // a COMPLETE recorded scan for this worktree's HEAD, the auto-scan takes the
+    // zero-frontend warm path — assemble from the store's re-based facts with no
+    // full-tree walk (`warm_cache_ready` applies the same probe `cmd_scan` uses,
+    // without building the manifest). Report the seed path start is taking.
+    if crate::warm_cache_ready(&wt_dir, &wt_apg) {
+        println!(
+            "Warm cache: seeding branch DB for `{name}` from the shared fact store (frontends skipped)"
+        );
+    }
+
     // Auto-scan: worktree + branch + branch DB (R1 — one command yields all
     // three).
     let scan = scan.unwrap_or(&real_scan);
@@ -1465,6 +1476,107 @@ mod tests {
         git2::Repository::open(&repo.root).unwrap()
     }
 
+    /// A scratch git repo with real Go sources + a versioned `apg/` layout,
+    /// driven by the REAL candidate binary. The isolated `home` is a sibling
+    /// OUTSIDE the repo, so the checkout stays clean for `project start`.
+    fn warm_scratch(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let base =
+            std::env::temp_dir().join(format!("apg-warm-start-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        let mut opts = git2::RepositoryInitOptions::new();
+        opts.initial_head("refs/heads/main");
+        let repo = git2::Repository::init_opts(&repo_dir, &opts).unwrap();
+        {
+            let mut cfg = repo.config().unwrap();
+            cfg.set_str("user.name", "apg warm test").unwrap();
+            cfg.set_str("user.email", "apg-warm@example.com").unwrap();
+        }
+        std::fs::write(
+            repo_dir.join(".gitignore"),
+            "apg/.trans/\napg/.worktrees/\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(repo_dir.join(specs::LAYOUT).join(specs::TRANS)).unwrap();
+        std::fs::write(
+            repo_dir.join(specs::LAYOUT).join("config.json"),
+            format!(
+                "{{\n  \"default\": \"src\",\n  \"types\": [],\n  \"version\": \"{}\"\n}}\n",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+        .unwrap();
+        std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
+        let fixture = [
+            (
+                "a/a.go",
+                "package a\n\ntype A struct {\n\tX int\n}\n\nfunc Leaf() int { return 1 }\n",
+            ),
+            (
+                "b/b.go",
+                "package b\n\nimport \"scratch/a\"\n\ntype B struct {\n\tA a.A\n}\n\nfunc Foo() int { return a.Leaf() }\n",
+            ),
+            (
+                "c/c.go",
+                "package c\n\nimport \"scratch/b\"\n\nfunc Bar() int { return b.Foo() }\n",
+            ),
+        ];
+        for (rel, body) in fixture {
+            let p = repo_dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        warm_commit_all(&repo_dir, "init source");
+        (base, repo_dir, home)
+    }
+
+    fn warm_commit_all(dir: &Path, msg: &str) {
+        let repo = git2::Repository::open(dir).unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo.head().ok().map(|h| h.peel_to_commit().unwrap());
+        let parents: Vec<&git2::Commit> = head.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, parents.as_slice())
+            .unwrap();
+    }
+
+    /// Runs the candidate binary with the isolated `HOME`.
+    fn warm_run(repo_dir: &Path, home: &Path, args: &[&str]) -> std::process::Output {
+        testutil::ApgCommand::new(args)
+            .cwd(repo_dir)
+            .env("HOME", &home.to_string_lossy())
+            .output()
+    }
+
+    /// Every `graph.jsonl` record except the leading `scan_meta` (the code +
+    /// layer/transient records a full scan and the warm assembly must agree on).
+    fn graph_records(dir: &Path) -> std::collections::BTreeSet<String> {
+        let path = dir
+            .join(specs::LAYOUT)
+            .join(specs::TRANS)
+            .join("graph.jsonl");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        text.lines()
+            .filter(|l| {
+                let v: serde_json::Value =
+                    serde_json::from_str(l).unwrap_or(serde_json::Value::Null);
+                v.get("type").and_then(|t| t.as_str()) != Some("scan_meta")
+            })
+            .map(str::to_string)
+            .collect()
+    }
+
     /// e2e tier -- real I/O: every test here creates/merges/deletes real git
     /// worktrees and branches, or drives the candidate `apg` binary. Each is
     /// `#[ignore]`d, so a plain `cargo test` never runs one; the only entry
@@ -1472,6 +1584,91 @@ mod tests {
     /// (= `cargo test tests::e2e:: -- --ignored`).
     mod e2e {
         use super::*;
+
+        /// phase-06 task-8 (e2e): a warm-cache `apg project start` at an
+        /// already-scanned commit spawns NO frontend, seeds the branch DB from
+        /// the shared store's re-based facts, and carries the same code nodes
+        /// and edges as the full scan of that commit.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn warm_cache_project_start_spawns_no_frontend_and_equals_a_full_scan() {
+            let (base, repo_dir, home) = warm_scratch("warm");
+
+            // Full scan on the main checkout: populates the shared fact store
+            // and the main db.lbug at the recorded HEAD the warm start reuses.
+            let scan = warm_run(&repo_dir, &home, &["scan", "."]);
+            assert!(
+                scan.status.success(),
+                "main scan: {}",
+                String::from_utf8_lossy(&scan.stderr)
+            );
+            // The baseline genuinely spawned the go frontend.
+            let main_log = std::fs::read_to_string(
+                repo_dir
+                    .join(specs::LAYOUT)
+                    .join(specs::TRANS)
+                    .join("apg-frontend.log"),
+            )
+            .unwrap();
+            assert!(
+                main_log.contains("running go frontend"),
+                "the baseline full scan must spawn the go frontend: {main_log}"
+            );
+            let full_scan_records = graph_records(&repo_dir);
+            assert!(
+                !full_scan_records.is_empty(),
+                "the full scan must emit a graph"
+            );
+
+            // Warm-cache project start: worktree + branch + branch DB, zero
+            // frontends (the recorded HEAD is already complete in the store).
+            let start = warm_run(&repo_dir, &home, &["project", "start", "foo"]);
+            assert!(
+                start.status.success(),
+                "project start: {}",
+                String::from_utf8_lossy(&start.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&start.stdout).contains("Warm cache"),
+                "start must report the warm seed: {}",
+                String::from_utf8_lossy(&start.stdout)
+            );
+
+            let wt = repo_dir.join(specs::LAYOUT).join(".worktrees").join("foo");
+            assert!(
+                wt.join(specs::LAYOUT)
+                    .join(specs::TRANS)
+                    .join("db.lbug")
+                    .exists(),
+                "the branch db.lbug must be seeded"
+            );
+
+            // ZERO frontend spawns: the auto-scan log carries the warm-cache
+            // line and NO "running <lang> frontend".
+            let wt_log = std::fs::read_to_string(
+                wt.join(specs::LAYOUT)
+                    .join(specs::TRANS)
+                    .join("apg-frontend.log"),
+            )
+            .unwrap();
+            assert!(
+                wt_log.contains("warm cache"),
+                "the warm path must be taken: {wt_log}"
+            );
+            assert!(
+                !wt_log.contains("running go frontend"),
+                "the warm start must spawn no frontend: {wt_log}"
+            );
+
+            // Same code nodes and edges as the full scan of the commit.
+            let warm_records = graph_records(&wt);
+            assert_eq!(
+                warm_records, full_scan_records,
+                "the warm start's graph must equal a full scan of the commit"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
 
         // ------------------------------------------------------------------
         // task-4 AC (int): one command yields worktree + branch + branch DB off

@@ -168,64 +168,148 @@ impl ScanRecord {
     }
 }
 
-/// The full-scan predicate (task-4): `Some(reason)` when an incremental scan is
-/// unsafe and the full pipeline must run. Applied before any delta is computed.
+/// The in-memory scan verdict ([`scan_verdict`]): which scan path the current
+/// checkout should take, decided WITHOUT git discovery or a filesystem walk.
+/// [`full_scan_reason`] and [`plan`] are the git wrappers that gather the facts
+/// this predicate consumes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScanVerdict {
+    /// The recorded scan is at exactly HEAD under the current cache key: the
+    /// shared store's recorded facts describe this tree, so a scan can assemble
+    /// from them with zero frontends (the warm-cache path) when the store is
+    /// complete. The delta is not needed — the recorded manifest IS the state.
+    WarmCache,
+    /// The recorded scan is a usable ancestor of HEAD under the current key:
+    /// the ordinary incremental path (delta + fact reuse) applies.
+    Incremental,
+    /// A full scan is required, with the reason.
+    FullScan(FullScanReason),
+}
+
+impl ScanVerdict {
+    /// `Some(reason)` when the verdict requires the full pipeline.
+    pub fn full_scan_reason(&self) -> Option<&FullScanReason> {
+        match self {
+            ScanVerdict::FullScan(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// True when the verdict requires the full pipeline.
+    pub fn requires_full_scan(&self) -> bool {
+        self.full_scan_reason().is_some()
+    }
+
+    /// True when the recorded scan is at exactly HEAD under the current key.
+    pub fn is_warm_cache(&self) -> bool {
+        matches!(self, ScanVerdict::WarmCache)
+    }
+}
+
+/// The **pure** scan verdict (task-9): decided only from an in-memory scan
+/// record, the current cache key, the current HEAD and the recorded commit's
+/// ancestry — **no git discovery and no filesystem access**. This is the single
+/// source of truth the git wrappers [`full_scan_reason`]/[`plan`] consume, so
+/// every `FullScanReason` branch (and the recorded-HEAD warm-cache condition) is
+/// unit-testable in memory.
 ///
-/// `current_key` is the key this binary+config would compute now; a mismatch
-/// with the recorded key is a full-scan gate.
-pub fn full_scan_reason(
-    apg_root: &Path,
-    store_root: Option<&Path>,
+/// `recorded_is_ancestor` is the git fact the wrapper gathers separately:
+/// `Some(true)` means the recorded commit is HEAD or an ancestor of it;
+/// `Some(false)`/`None` both mean it cannot be verified as an ancestor (a
+/// garbage-collected commit or a history rewrite), which is a full-scan gate.
+pub fn scan_verdict(
+    in_repo: bool,
+    record: Option<&ScanRecord>,
     current_key: &CacheKey,
-) -> Option<FullScanReason> {
-    let Ok(repo) = git2::Repository::discover(apg_root) else {
-        return Some(FullScanReason::NotAGitRepo);
+    head: Option<&str>,
+    recorded_is_ancestor: Option<bool>,
+) -> ScanVerdict {
+    if !in_repo {
+        return ScanVerdict::FullScan(FullScanReason::NotAGitRepo);
+    }
+    let Some(head) = head else {
+        return ScanVerdict::FullScan(FullScanReason::NoHead);
     };
-    let Some(head) = head_oid(&repo) else {
-        return Some(FullScanReason::NoHead);
-    };
-    let Some(store_root) = store_root else {
-        return Some(FullScanReason::NoRecordedScan);
-    };
-    let Some(record) = ScanRecord::load(store_root) else {
-        return Some(FullScanReason::NoRecordedScan);
+    let Some(record) = record else {
+        return ScanVerdict::FullScan(FullScanReason::NoRecordedScan);
     };
 
     // Cache-key drift: binary version / JSONL schema / projection / config.
     if !record.cache_key.matches(current_key) {
-        return Some(FullScanReason::CacheKeyDrift {
+        return ScanVerdict::FullScan(FullScanReason::CacheKeyDrift {
             recorded: record.cache_key.token(),
             current: current_key.token(),
         });
     }
 
-    // The recorded commit must still be an ancestor of HEAD; a history rewrite
-    // makes the commit-range diff meaningless. A recorded sha that is not even
-    // a valid object id cannot be verified as an ancestor, so it is a
-    // full-scan too — never an "incremental OK" (`Option::?` would silently
-    // return `None` here).
-    let Ok(recorded_oid) = git2::Oid::from_str(&record.sha) else {
-        return Some(FullScanReason::DeltaUnavailable);
-    };
-    let Ok(recorded_commit) = repo.find_commit(recorded_oid) else {
-        // The recorded commit is gone (GC after a rewrite) — treat as a
-        // non-ancestor full-scan.
-        return Some(FullScanReason::NotAncestor {
-            recorded: record.sha.clone(),
-            head: head.to_string(),
-        });
-    };
-    if !(head == recorded_commit.id()
-        || repo
-            .graph_descendant_of(head, recorded_commit.id())
-            .unwrap_or(false))
-    {
-        return Some(FullScanReason::NotAncestor {
-            recorded: record.sha.clone(),
-            head: head.to_string(),
-        });
+    // The recorded-HEAD warm-cache condition: the shared store's recorded facts
+    // are exactly this tree's, so no delta and no frontends are needed.
+    if record.sha == head {
+        return ScanVerdict::WarmCache;
     }
-    None
+
+    // A recorded sha that is not even a valid object id cannot be verified as an
+    // ancestor, so it is a full-scan too — never an "incremental OK".
+    if git2::Oid::from_str(&record.sha).is_err() {
+        return ScanVerdict::FullScan(FullScanReason::DeltaUnavailable);
+    }
+    if recorded_is_ancestor == Some(true) {
+        ScanVerdict::Incremental
+    } else {
+        // The recorded commit is gone (GC after a rewrite) or a non-ancestor:
+        // the commit-range diff is meaningless.
+        ScanVerdict::FullScan(FullScanReason::NotAncestor {
+            recorded: record.sha.clone(),
+            head: head.to_string(),
+        })
+    }
+}
+
+/// The in-memory recorded scan plus its verdict at a checkout — ONE git
+/// discovery, no filesystem walk. The warm-cache seed path consumes the
+/// returned record's manifest; [`full_scan_reason`]/[`plan`] are thin wrappers.
+pub fn scan_state(
+    apg_root: &Path,
+    store_root: Option<&Path>,
+    current_key: &CacheKey,
+) -> (Option<ScanRecord>, ScanVerdict) {
+    let repo = git2::Repository::discover(apg_root).ok();
+    let head = repo.as_ref().and_then(head_oid);
+    let head_str = head.map(|o| o.to_string());
+    let record = store_root.and_then(ScanRecord::load);
+    let ancestor = match (&repo, head, &record) {
+        (Some(repo), Some(head), Some(record)) => git2::Oid::from_str(&record.sha)
+            .ok()
+            .and_then(|oid| repo.find_commit(oid).ok())
+            .map(|c| head == c.id() || repo.graph_descendant_of(head, c.id()).unwrap_or(false)),
+        _ => None,
+    };
+    let verdict = scan_verdict(
+        repo.is_some(),
+        record.as_ref(),
+        current_key,
+        head_str.as_deref(),
+        ancestor,
+    );
+    (record, verdict)
+}
+
+/// The full-scan predicate (task-4): `Some(reason)` when an incremental scan is
+/// unsafe and the full pipeline must run. Applied before any delta is computed.
+///
+/// `current_key` is the key this binary+config would compute now; a mismatch
+/// with the recorded key is a full-scan gate. The decision itself is the pure
+/// [`scan_verdict`]; this wrapper only gathers the git facts (discovery, HEAD,
+/// recorded-commit ancestry).
+pub fn full_scan_reason(
+    apg_root: &Path,
+    store_root: Option<&Path>,
+    current_key: &CacheKey,
+) -> Option<FullScanReason> {
+    scan_state(apg_root, store_root, current_key)
+        .1
+        .full_scan_reason()
+        .cloned()
 }
 
 /// Computes the git delta from the recorded commit to the current tree: the
@@ -319,6 +403,11 @@ pub fn compute(apg_root: &Path, recorded_sha: &str) -> anyhow::Result<Delta> {
 pub struct Plan {
     pub delta: Option<Delta>,
     pub full_scan: Option<FullScanReason>,
+    /// The recorded scan is at exactly HEAD under the current key (task-3): the
+    /// shared store's recorded facts describe this tree, so the caller may
+    /// assemble from them with zero frontends when the store is complete. The
+    /// delta is `None` on this path — the recorded manifest IS the state.
+    pub warm_cache: bool,
 }
 
 impl Plan {
@@ -329,37 +418,39 @@ impl Plan {
 }
 
 /// The one entry point the scan orchestration uses: evaluate the fallbacks,
-/// then compute the delta (or report the full-scan reason).
+/// then compute the delta (or report the full-scan reason), or report the
+/// recorded-HEAD warm-cache condition.
 pub fn plan(apg_root: &Path, store_root: Option<&Path>, config: &ScanConfigKey) -> Plan {
     let current_key = CacheKey::compute(config);
-    let reason = full_scan_reason(apg_root, store_root, &current_key);
-    if let Some(reason) = reason {
-        return Plan {
+    let (record, verdict) = scan_state(apg_root, store_root, &current_key);
+    match verdict {
+        ScanVerdict::FullScan(reason) => Plan {
             delta: None,
             full_scan: Some(reason),
-        };
-    }
-    let Some(store_root) = store_root else {
-        return Plan {
+            warm_cache: false,
+        },
+        ScanVerdict::WarmCache => Plan {
             delta: None,
-            full_scan: Some(FullScanReason::NoRecordedScan),
-        };
-    };
-    let Some(record) = ScanRecord::load(store_root) else {
-        return Plan {
-            delta: None,
-            full_scan: Some(FullScanReason::NoRecordedScan),
-        };
-    };
-    match compute(apg_root, &record.sha) {
-        Ok(delta) => Plan {
-            delta: Some(delta),
             full_scan: None,
+            warm_cache: true,
         },
-        Err(_) => Plan {
-            delta: None,
-            full_scan: Some(FullScanReason::DeltaUnavailable),
-        },
+        ScanVerdict::Incremental => {
+            // The verdict guarantees a record; an unreadable sha/commit is a
+            // full-scan (`compute` errors -> DeltaUnavailable).
+            let sha = record.map(|r| r.sha).unwrap_or_default();
+            match compute(apg_root, &sha) {
+                Ok(delta) => Plan {
+                    delta: Some(delta),
+                    full_scan: None,
+                    warm_cache: false,
+                },
+                Err(_) => Plan {
+                    delta: None,
+                    full_scan: Some(FullScanReason::DeltaUnavailable),
+                    warm_cache: false,
+                },
+            }
+        }
     }
 }
 
@@ -450,6 +541,133 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
+    /// unit tier -- pure in-memory: no filesystem, git repository or process.
+    /// The git-wrapper path (`full_scan_reason` discovery/ancestry over a real
+    /// repo) stays e2e below; these drive the extracted pure [`scan_verdict`].
+    mod unit {
+        use super::*;
+
+        fn key() -> CacheKey {
+            CacheKey::compute(&ScanConfigKey::default())
+        }
+
+        fn record(sha: &str, cache_key: CacheKey) -> ScanRecord {
+            ScanRecord {
+                sha: sha.to_string(),
+                cache_key,
+                manifest: Manifest::default(),
+                content_key: None,
+            }
+        }
+
+        /// A same-length valid-oid spelling (not a real commit: the pure
+        /// predicate never touches a repository).
+        const VALID_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+        /// fix-module-identity phase-06 task-9: the recorded-HEAD warm-cache
+        /// condition and every `FullScanReason` branch are decided from the
+        /// in-memory scan record + cache key + HEAD — no git discovery, no
+        /// filesystem. The warm verdict is `WarmCache` (the store's facts
+        /// describe this tree); every other outcome is a full scan with its
+        /// reason or the ordinary incremental verdict.
+        #[test]
+        fn scan_verdict_decides_warm_cache_and_every_full_scan_reason_in_memory() {
+            let k = key();
+
+            // (1) NotAGitRepo — no repository at all.
+            assert_eq!(
+                scan_verdict(false, None, &k, Some("head"), None),
+                ScanVerdict::FullScan(FullScanReason::NotAGitRepo)
+            );
+
+            // (2) NoHead — a repo with an unborn/missing HEAD.
+            assert_eq!(
+                scan_verdict(true, None, &k, None, None),
+                ScanVerdict::FullScan(FullScanReason::NoHead)
+            );
+
+            // (3) NoRecordedScan — HEAD is present but no prior record exists.
+            assert_eq!(
+                scan_verdict(true, None, &k, Some("head"), None),
+                ScanVerdict::FullScan(FullScanReason::NoRecordedScan)
+            );
+
+            // (4) CacheKeyDrift — the recorded key is incompatible.
+            let drifted = CacheKey::compute(&ScanConfigKey {
+                languages: vec!["go".into()],
+                ..Default::default()
+            });
+            let rec = record("head", k.clone());
+            assert!(matches!(
+                scan_verdict(true, Some(&rec), &drifted, Some("head"), Some(true)),
+                ScanVerdict::FullScan(FullScanReason::CacheKeyDrift { .. })
+            ));
+
+            // (5) WarmCache — the recorded scan is at exactly HEAD under the
+            // current key (the condition `cmd_scan`'s zero-frontend path gates on).
+            let warm = scan_verdict(true, Some(&rec), &k, Some("head"), Some(true));
+            assert!(warm.is_warm_cache(), "{warm:?}");
+            assert!(!warm.requires_full_scan());
+            assert!(warm.full_scan_reason().is_none());
+
+            // (6) DeltaUnavailable — a malformed recorded sha cannot be verified.
+            let bad = record("not-a-sha", k.clone());
+            assert_eq!(
+                scan_verdict(true, Some(&bad), &k, Some("head"), Some(true)),
+                ScanVerdict::FullScan(FullScanReason::DeltaUnavailable)
+            );
+
+            // (7) NotAncestor — a valid recorded sha that is not an ancestor of
+            // HEAD (a rewrite / a GC'd commit: the wrapper passes false/None).
+            let other = record(VALID_SHA, k.clone());
+            assert!(matches!(
+                scan_verdict(true, Some(&other), &k, Some("head"), Some(false)),
+                ScanVerdict::FullScan(FullScanReason::NotAncestor { .. })
+            ));
+            assert!(matches!(
+                scan_verdict(true, Some(&other), &k, Some("head"), None),
+                ScanVerdict::FullScan(FullScanReason::NotAncestor { .. })
+            ));
+
+            // (8) Incremental — a usable ancestor under the current key.
+            assert_eq!(
+                scan_verdict(true, Some(&other), &k, Some("head"), Some(true)),
+                ScanVerdict::Incremental
+            );
+        }
+
+        /// Every `FullScanReason` renders its stable tag and human line (the
+        /// scan log's `describe()`), including the warm-cache path's complement.
+        #[test]
+        fn full_scan_reason_tags_and_describes_every_variant() {
+            let variants = [
+                (FullScanReason::NotAGitRepo, "not-a-git-repo"),
+                (FullScanReason::NoRecordedScan, "no-recorded-scan"),
+                (FullScanReason::NoHead, "no-head"),
+                (
+                    FullScanReason::NotAncestor {
+                        recorded: "a".repeat(40),
+                        head: "b".repeat(40),
+                    },
+                    "recorded-not-ancestor",
+                ),
+                (
+                    FullScanReason::CacheKeyDrift {
+                        recorded: "old".into(),
+                        current: "new".into(),
+                    },
+                    "cache-key-drift",
+                ),
+                (FullScanReason::NoPreviousExport, "no-previous-export"),
+                (FullScanReason::DeltaUnavailable, "delta-unavailable"),
+            ];
+            for (reason, tag) in &variants {
+                assert_eq!(reason.tag(), *tag);
+                assert!(!reason.describe().is_empty(), "{tag}");
+            }
+        }
+    }
+
     /// e2e tier -- real I/O: every test here builds a scratch git repo under
     /// the temp dir and runs real libgit2 operations. Each is `#[ignore]`d, so
     /// a plain `cargo test` never runs one; the only entry point is the named
@@ -535,11 +753,38 @@ mod tests {
             }
             .save(&store)
             .unwrap();
-            // Ancestor ⇒ no full-scan reason, the delta is computed.
+            // The recorded scan is at exactly HEAD ⇒ the warm-cache verdict: no
+            // full scan and no delta — the recorded manifest IS the state.
             assert_eq!(full_scan_reason(&dir, Some(&store), &key), None);
             let p = plan(&dir, Some(&store), &ScanConfigKey::default());
             assert!(!p.requires_full_scan(), "{p:?}");
+            assert!(p.warm_cache, "{p:?}");
+            assert!(p.delta.is_none());
+
+            // A recorded ANCESTOR that is not HEAD takes the incremental delta
+            // path (the warm verdict is exactly the recorded-HEAD condition).
+            ScanRecord {
+                sha: base.clone(),
+                cache_key: key.clone(),
+                manifest: Manifest::default(),
+                content_key: None,
+            }
+            .save(&store)
+            .unwrap();
+            let p = plan(&dir, Some(&store), &ScanConfigKey::default());
+            assert!(!p.requires_full_scan(), "{p:?}");
+            assert!(!p.warm_cache, "{p:?}");
             assert!(p.delta.is_some());
+
+            // Restore the recorded `tip` scan before rewriting history.
+            ScanRecord {
+                sha: tip.clone(),
+                cache_key: key.clone(),
+                manifest: Manifest::default(),
+                content_key: None,
+            }
+            .save(&store)
+            .unwrap();
 
             // Rewrite history: reset main back to `base` (the recorded `tip`
             // commit is no longer an ancestor) ⇒ full scan.

@@ -410,21 +410,29 @@ pub struct FragEdge {
 /// Re-bases a stored identity onto the **repo-relative** identity base
 /// (`requirements.requirement.portable-graph-identity`): a stored ABSOLUTE path
 /// (a legacy fact unit written from a checkout root) is stripped of its writer
-/// root to its `/`-separated tail; an identifier or an already repo-relative
-/// identity passes through unchanged.
+/// root — or of the reading checkout's own root — to its `/`-separated tail; an
+/// identifier or an already repo-relative identity passes through unchanged.
 ///
-/// `reader_root` is retained in the signature (the reading checkout's base) but
-/// is deliberately NOT concatenated: the persisted graph is checkout-
-/// independent, so a unit written in one worktree composes verbatim in another
-/// at the same commit. This promotes the cache's original checkout-relative
-/// model to the repo-relative base the whole graph now uses.
-fn rebase(stored_root: &str, _reader_root: &str, s: &str) -> String {
-    match s.strip_prefix(stored_root) {
-        Some(tail) if !tail.is_empty() && (tail.starts_with('/') || tail.starts_with('\\')) => {
-            tail.trim_start_matches(['/', '\\']).to_string()
+/// `reader_root` is the reading checkout's base. The stored graph is
+/// checkout-independent, so a unit written in one worktree composes verbatim in
+/// another at the same commit (task-6: cross-checkout reuse) — but a unit whose
+/// identity is an absolute spelling of the READER's own tree (e.g. a fragment
+/// re-projected under the reader) must normalize to the same repo-relative tail
+/// rather than leak the checkout path. Two clean checkouts of one commit
+/// therefore mint the SAME identity for the same file.
+fn rebase(stored_root: &str, reader_root: &str, s: &str) -> String {
+    for root in [stored_root, reader_root] {
+        if root.is_empty() {
+            continue;
         }
-        _ => s.to_string(),
+        if let Some(tail) = s.strip_prefix(root)
+            && !tail.is_empty()
+            && (tail.starts_with('/') || tail.starts_with('\\'))
+        {
+            return tail.trim_start_matches(['/', '\\']).to_string();
+        }
     }
+    s.to_string()
 }
 
 /// A **per-file fact unit**: the resolved graph fragment for one source file,
@@ -1415,6 +1423,13 @@ mod tests {
                 rebase("/writer/wt", "/reader/wt", "/writer/wt/src/a.rs"),
                 "src/a.rs"
             );
+            // An absolute spelling of the READER's own tree normalizes to the
+            // same repo-relative tail too (task-6: cross-checkout reuse never
+            // leaks a checkout path).
+            assert_eq!(
+                rebase("/writer/wt", "/reader/wt", "/reader/wt/src/a.rs"),
+                "src/a.rs"
+            );
             // An absolute path outside the writer root is left alone (no root to
             // strip).
             assert_eq!(
@@ -1976,7 +1991,9 @@ mod tests {
             );
             let fresh_err = String::from_utf8_lossy(&fresh.stderr).into_owned();
             assert!(
-                fresh_err.contains("incremental") || fresh_err.contains("reusable file"),
+                fresh_err.contains("incremental")
+                    || fresh_err.contains("reusable file")
+                    || fresh_err.contains("warm cache"),
                 "the worktree must reuse the shared cache: {fresh_err}"
             );
             let wt_files = file_fqns(&wt);
