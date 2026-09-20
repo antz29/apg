@@ -126,15 +126,6 @@ jobs:
       # gh resolves the repo from git remotes, so this job needs a checkout.
       - uses: actions/checkout@v7
 
-      - name: Resolve release tag
-        id: rel
-        run: |
-          # Derive the tag from the checked-out source version so a manual
-          # re-dispatch (release repair) targets the right release rather than
-          # the branch name. On a tag push this equals GITHUB_REF_NAME.
-          VERSION="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
-          echo "tag=v${VERSION}" >>"$GITHUB_OUTPUT"
-
       - uses: actions/download-artifact@v8
         with:
           pattern: apg-linux-*
@@ -148,19 +139,15 @@ jobs:
           rm *.sha256
 
       - name: Ensure GitHub release exists
-        env:
-          TAG: ${{ steps.rel.outputs.tag }}
         run: |
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             # The bottle workflow may create the release concurrently on the
             # same tag push; absorb that 422 race, then confirm below.
-            gh release create "$TAG" --generate-notes || true
+            gh release create "${GITHUB_REF_NAME}" --generate-notes || true
           fi
-          gh release view "$TAG" >/dev/null 2>&1
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1
 
       - name: Upload tarballs + checksums
         working-directory: dist
-        env:
-          TAG: ${{ steps.rel.outputs.tag }}
         run: |
-          gh release upload "$TAG" *.tar.gz sha256sums.txt --clobber
+          gh release upload "${GITHUB_REF_NAME}" *.tar.gz sha256sums.txt --clobber

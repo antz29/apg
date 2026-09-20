@@ -142,7 +142,7 @@ The suite agents (`codebase-navigator`, `spec-writer`, `plan-writer`,
 
 ### CLI
 
-The project builds a single `apg` binary (package `apg`, was `java_apg`):
+The project builds a single `apg` binary (package `apg`):
 
 - `apg init [dir]` — create `apg/` (committed `config.json` carrying the
   binary-managed `version` field + gitignored `.trans/`), scaffold the repo
@@ -191,8 +191,8 @@ The project builds a single `apg` binary (package `apg`, was `java_apg`):
   `--satisfies`/`--prereq`), `rm`
   (`<project>|phase|task|planned [--force]`; refuses while dependents exist),
   `done`/`undone` (assertion-only), `note` (task notes), `complete`
-  (milestone-only), `render`, `verify` (the pre-merge coherence gate; the old
-  `apply` was renamed — the binary applies nothing).
+  (milestone-only), `render`, `verify` (the pre-merge coherence gate; the
+  binary applies nothing).
 - `apg project <sub> …` — project contexts (worktrees, git2-operated):
   `start <name>` (from the main checkout: worktree + branch + branch DB off
   the default branch, prints `apg/.worktrees/<name>`), `merge <name>` (from
@@ -393,12 +393,19 @@ Releases are cut by pushing an annotated `vX.Y.Z` tag; `bottle.yml` (ARM bottle)
 and `linux-release.yml` (x86_64/aarch64 tarballs) build and publish on that tag
 push and create the GitHub release.
 
-**Order matters — get this wrong and the bottles are the previous version.**
+**Published releases are immutable.** A release's tag and its assets are final
+once published: never move the tag, and never overwrite, re-upload, or otherwise
+mutate a published release's assets. If a release is wrong or incomplete — a
+failed build, a missing platform, a bad artifact — cut a new patch version
+through the normal flow; `latest` moves to it and the superseded release is left
+exactly as published.
+
+**Order matters — the formulae must point at the new version before the tag.**
 The Linux job checks out the tag and builds its source, so the tarballs are
 always correct. The **bottle** job does *not* build from the tag: it builds via
 the Homebrew tap formulae on `main`, so the formulae must already point at the
-new version *before* the tag is pushed. Tagging first (with the formulae still
-on the old version) ships stale `OLD-version` bottles — the v0.10.3 mistake.
+new version *before* the tag is pushed. Tagging first, with the formulae still
+on the old version, ships stale `OLD-version` bottles.
 
 Forward release (the `scripts/release.sh <version>` helper automates steps 4–5):
 
@@ -434,13 +441,6 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    `*-X.Y.Z.arm64_sonoma.bottle.*.tar.gz` (NOT the previous version) plus the
    `apg-linux-*` tarballs. If the bottles show the old version, you tagged
    before step 4.
-
-Repairing stale bottles (tag was pushed before the formula repoint — the 0.10.3
-case): after the formula-revision commit pointing at the released version lands
-on `main`, re-dispatch the bottle job — `gh workflow run bottle.yml --ref main`
-(or GitHub UI → Actions → "Build and publish bottles" → Run workflow) — then
-`brew bottle --merge` / the bot commits the new sha256s. The tag and release
-stay put; only the bottle assets get rebuilt/uploaded.
 
 `scripts/release.sh` automates steps 4–5: it verifies the version is already
 bumped and the tree is clean, rewrites every `Formula/*.rb`, commits the formula
@@ -521,7 +521,7 @@ residual same-kind FQN collision rather than silently overwriting.
 > `pip install ladybug`, `npm install @ladybugdb/core`, `cargo add lbug`, or the
 > Go/Java/C++/CLI binaries.
 
-The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing the parsed codebase. Interact via the `apg_query` tool — a Cypher-like query interface. (The legacy `ladybug_query`/`ladybug_scan` tools were renamed to `apg_query`/`apg_scan`.)
+The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing the parsed codebase. Interact via the `apg_query` tool — a Cypher-like query interface.
 
 ### Query syntax
 
