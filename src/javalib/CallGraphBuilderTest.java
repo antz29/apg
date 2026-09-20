@@ -46,6 +46,7 @@ public class CallGraphBuilderTest {
             writeModuleDescriptorFixture(proj3);
             testModuleDescriptorsDoNotDegradeAttribution(proj3, base);
             testDefaultPackageModuleIdentity(base);
+            testDefaultPackageTargetedScaffolding(base);
         } finally {
             deleteRec(base);
         }
@@ -661,6 +662,75 @@ public class CallGraphBuilderTest {
             structFqn(recs, gadget, "Gadget.Inner") != null, "records were:\n" + raw);
     }
 
+    /**
+     * Phase-04 task-12 e2e (CallGraphBuilderTest harness): the
+     * targeted/incremental branch must carry the default package's module
+     * record exactly as a full scan does — feedback-103's invariant that a
+     * spawned frontend emits every walked package's scaffolding.
+     *
+     * `proj-default-mixed` pairs an UNCHANGED default-package source with a
+     * target packaged source: the default package is then in neither the
+     * re-emitted set (it is not a target) nor any Module->Module hierarchy edge
+     * (a single-segment identity has none), so its `(default)` module record
+     * can only come from the global scaffolding. Pre-fix the scaffolding set
+     * dropped the empty package and the targeted module set was a strict subset
+     * of the full scan's; the no-match-targets branch dropped it too.
+     */
+    static void testDefaultPackageTargetedScaffolding(Path base) throws Exception {
+        Path proj = base.resolve("proj-default-mixed");
+        Files.createDirectories(proj.resolve("pkg/b"));
+        Files.writeString(proj.resolve("Root.java"), """
+            class Root {
+                int r() { return 0; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(proj.resolve("pkg/b/B.java"), """
+            package pkg.b;
+            public class B {
+                public int foo() { return 1; }
+            }
+            """, StandardCharsets.UTF_8);
+        Path rootFile = proj.resolve("Root.java").toAbsolutePath().normalize();
+        Path bFile = proj.resolve("pkg/b/B.java").toAbsolutePath().normalize();
+        String def = CallGraphBuilder.moduleIdentityFor("");
+
+        Set<String> full = normalize(run(proj).out);
+        check("full scan emits the default-package module alongside the packaged ones",
+            modulesOf(full).equals(new TreeSet<>(Set.of(def, "pkg", "pkg.b"))),
+            "full modules: " + modulesOf(full));
+
+        // Normal targeted branch: only pkg.b is a target; Root.java's default
+        // package is unchanged and arrives solely via global scaffolding.
+        Path targets = base.resolve("default-targeted.targets");
+        Files.writeString(targets, bFile + "\n", StandardCharsets.UTF_8);
+        Result incR = run(proj, "--targets", targets.toString(),
+            "--cache-dir", base.resolve("cache-default-targeted").toString(), "--cache-key", "k1");
+        Set<String> inc = normalize(incR.out);
+        check("targeted scan with an unchanged default package emits its module record",
+            inc.contains("module|" + def), "targeted output was:\n" + incR.out);
+        check("targeted scan's module set equals the full scan's",
+            modulesOf(inc).equals(modulesOf(full)),
+            "full modules: " + modulesOf(full) + "\ntargeted modules: " + modulesOf(inc)
+                + "\n" + incR.out);
+        check("targeted scan does not re-emit the non-target default-package file",
+            !inc.contains("file|" + rootFile + "|"), "targeted output was:\n" + incR.out);
+        check("targeted scan still re-emits the target package's File record",
+            inc.contains("file|" + bFile + "|pkg.b|1|4"), "targeted output was:\n" + incR.out);
+
+        // No-match-targets branch: a non-empty target list naming no walked
+        // source still scaffolds every walked package, default included.
+        Path gone = base.resolve("default-gone.targets");
+        Files.writeString(gone, base.resolve("gone/G.java").toAbsolutePath().normalize() + "\n",
+            StandardCharsets.UTF_8);
+        String out = run(proj, "--targets", gone.toString()).out;
+        Set<String> recs = normalize(out);
+        check("no-match targeted scan emits the default-package module record",
+            recs.contains("module|" + def), "targeted output was:\n" + out);
+        check("no-match targeted scan also emits the packaged scaffolding",
+            recs.contains("module|pkg") && recs.contains("module|pkg.b"),
+            "targeted output was:\n" + out);
+    }
+
     // ------------------------------------------------------------------
     // Scanner invocation
     // ------------------------------------------------------------------
@@ -890,6 +960,16 @@ public class CallGraphBuilderTest {
             if (p[0].equals("struct") && p[2].equals(path.toString()) && p[1].equals(fqn)) return p[1];
         }
         return null;
+    }
+
+    /** The set of module fqns carried by a normalized record set. */
+    static Set<String> modulesOf(Set<String> recs) {
+        Set<String> out = new TreeSet<>();
+        for (String s : recs) {
+            String[] p = s.split("\\|", -1);
+            if (p[0].equals("module")) out.add(p[1]);
+        }
+        return out;
     }
 
     /** True when no `struct` record for `path` renders a leading-dot fqn. */

@@ -7181,6 +7181,156 @@ mod tests {
             let _ = std::fs::remove_dir_all(&base);
         }
 
+        /// Phase-04 task-3 (e2e): the candidate `apg` scan of a scratch /tmp
+        /// DEFAULT-PACKAGE Java repo — no `package` declaration anywhere — must
+        /// materialise a `java` Language root that Contains the non-empty
+        /// `(default)` module, hang the package-less File under that module,
+        /// render the top-level class with no leading dot
+        /// (`java.(default).Widget`), and expose the whole
+        /// Module→File→Struct subtree to the module-based tools (the
+        /// `apg_module_structs` two-hop query). Candidate binary only, scratch
+        /// /tmp repo, isolated java-only frontend dir
+        /// (`global.constraint.no-real-project-test`).
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn java_default_package_identity_end_to_end() {
+            let (base, repo_dir, home, frontend_dir) = java_scratch(
+                "default-package",
+                &[
+                    (
+                        "Widget.java",
+                        "public class Widget {\n    public int size() { return 1; }\n}\n",
+                    ),
+                    (
+                        "Gadget.java",
+                        "class Gadget {\n    static class Inner { int v() { return 2; } }\n}\n",
+                    ),
+                ],
+            );
+            let init = java_run(&repo_dir, &home, &frontend_dir, &["init", "."]);
+            assert!(
+                init.status.success(),
+                "apg init: {}",
+                String::from_utf8_lossy(&init.stderr)
+            );
+            scratch_commit_all(&repo_dir, "apg init");
+
+            let scan = java_run(&repo_dir, &home, &frontend_dir, &["scan", "."]);
+            assert!(
+                scan.status.success(),
+                "scan: {}",
+                String::from_utf8_lossy(&scan.stderr)
+            );
+
+            // The graph view: the `java` Language root, the default-package
+            // module, the package-less File and the top-level structs.
+            let records = export_records(&repo_dir);
+            let nodes: BTreeSet<(String, String)> = records
+                .iter()
+                .filter_map(|r| {
+                    let ty = r.get("type").and_then(|t| t.as_str())?;
+                    let fqn = r.get("fqn").and_then(|f| f.as_str())?;
+                    matches!(ty, "language" | "module" | "file" | "struct")
+                        .then(|| (ty.to_string(), fqn.to_string()))
+                })
+                .collect();
+            let contains: BTreeSet<(String, String)> = records
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("contains"))
+                .map(|r| {
+                    (
+                        r.get("from")
+                            .and_then(|f| f.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        r.get("to")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    )
+                })
+                .collect();
+
+            assert!(
+                nodes.contains(&("language".to_string(), "java".to_string())),
+                "the scan must materialise a `java` Language root; nodes: {nodes:?}"
+            );
+            assert!(
+                nodes.contains(&("module".to_string(), "java.(default)".to_string())),
+                "the default package must emit a non-empty module record; nodes: {nodes:?}"
+            );
+            assert!(
+                contains.contains(&("java".to_string(), "java.(default)".to_string())),
+                "the `java` Language root must Contain the default-package module; \
+                 contains: {contains:?}"
+            );
+
+            // The package-less File hangs under the non-empty module: the
+            // File's parent is the Module→File Contains edge (the export carries
+            // the repo-relative File fqn, never the absolute checkout path).
+            let widget_file = nodes
+                .iter()
+                .find(|(ty, fqn)| ty == "file" && fqn.ends_with("Widget.java"))
+                .map(|(_, fqn)| fqn.clone())
+                .unwrap_or_else(|| panic!("no File record for Widget.java; nodes: {nodes:?}"));
+            assert!(
+                !widget_file.starts_with('/'),
+                "the File fqn is the repo-relative identity: {widget_file}"
+            );
+            assert!(
+                contains.contains(&("java.(default)".to_string(), widget_file.clone())),
+                "the package-less File's parent must be the default-package module; \
+                 contains: {contains:?}"
+            );
+
+            // The top-level class renders with the module parent and NO leading
+            // dot: `java.(default).Widget` (a bare `.Widget` would be the
+            // package-less bug this phase fixes).
+            assert!(
+                nodes.contains(&("struct".to_string(), "java.(default).Widget".to_string())),
+                "the top-level class fqn must be `java.(default).Widget`; nodes: {nodes:?}"
+            );
+            assert!(
+                !nodes
+                    .iter()
+                    .any(|(ty, fqn)| ty.as_str() == "struct" && fqn.starts_with('.')),
+                "no struct fqn may carry a leading dot; nodes: {nodes:?}"
+            );
+            assert!(
+                contains.contains(&(widget_file.clone(), "java.(default).Widget".to_string())),
+                "the File must Contain its top-level class; contains: {contains:?}"
+            );
+
+            // Module-based tools: the `apg_module_structs` two-hop query — run
+            // through the candidate `apg query` against the scratch DB —
+            // enumerates the Module→File→Struct subtree.
+            let q = java_run(
+                &repo_dir,
+                &home,
+                &frontend_dir,
+                &[
+                    "query",
+                    "MATCH (m:Module {fqn: 'java.(default)'})-[:Contains]->(:File)-[:Contains]->(s:Struct) RETURN s.fqn ORDER BY s.fqn",
+                ],
+            );
+            assert!(
+                q.status.success(),
+                "module_structs query: {}",
+                String::from_utf8_lossy(&q.stderr)
+            );
+            let qout = String::from_utf8_lossy(&q.stdout).into_owned();
+            assert!(
+                qout.contains("java.(default).Widget"),
+                "apg_module_structs must enumerate the default-package class: {qout}"
+            );
+            assert!(
+                qout.contains("java.(default).Gadget"),
+                "apg_module_structs must enumerate every default-package class: {qout}"
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
         // -------------------------------------------------------------------
         // Phase-05 Rust all-manifest discovery / isolation acceptance
         // (tasks 5, 6, 9). Scratch /tmp `Repo::new` fixtures + CANDIDATE binary

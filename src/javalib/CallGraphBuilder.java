@@ -467,8 +467,11 @@ public class CallGraphBuilder {
             // descriptor is a walked file with a `file` record but no package,
             // so it is emitted here (never attributed) alongside that
             // scaffolding.
+            // Every walked package — the default (empty) package included.
+            // emitPkgHierarchy maps "" to the non-empty default-package
+            // identity, so dropping it here would omit the `(default)` module
+            // record a full scan emits (feedback-103).
             LinkedHashSet<String> allPkgs = new LinkedHashSet<>(pkgByFile.values());
-            allPkgs.remove("");
             System.err.println("[" + elapsed() + "] targets matched no attributable scanned file; "
                 + "emitting global module scaffolding for " + allPkgs.size() + " package(s)"
                 + (requestedDescriptors.isEmpty() ? " only"
@@ -683,9 +686,14 @@ public class CallGraphBuilder {
         // get theirs from their own re-emitted files, so the union covers every
         // walked package — matching a full scan's hierarchy. The all-targets
         // path has no unchanged package and stays byte-identical to a full scan.
+        // The default (empty) package is kept: emitPkgHierarchy maps it to the
+        // non-empty default-package identity, so an unchanged default package
+        // still contributes its `(default)` module record to the global
+        // scaffolding (feedback-103). A default-package TARGET never reaches
+        // here (package granularity puts every default-package file in the
+        // re-emitted set), so this cannot double-emit.
         LinkedHashSet<String> nonTargetPkgs = new LinkedHashSet<>();
         for (Path f : nonTargetFiles) nonTargetPkgs.add(pkgByFile.getOrDefault(f, ""));
-        nonTargetPkgs.remove("");
         System.err.println("[" + elapsed() + "] emitting global module scaffolding for "
             + nonTargetPkgs.size() + " reused package(s)...");
         c.emitGlobalPkgScaffolding(nonTargetPkgs);
