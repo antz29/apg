@@ -85,8 +85,31 @@ struct FuncDecl {
     language: String,
 }
 
-fn is_blacklisted(fqn: &str, blacklist: &[String]) -> bool {
-    blacklist.iter().any(|p| fqn.starts_with(p.as_str()))
+/// The scan-hygiene predicate: a record is out of scope when
+///
+/// - its canonical FQN carries a user blacklist prefix, or
+/// - its repo-relative source path (or identity) sits under a default
+///   build-output tree — `.git/**` or `target/**`, via the shared
+///   [`crate::classify::is_build_output_path`] predicate, or
+/// - that path is gitignored by the containing checkout: the scan's content
+///   identity already excludes ignored content, so keeping it would make the
+///   graph a function of checkout state rather than of authored content.
+///
+/// `path` is `None` for records that carry no source location (modules) and
+/// for edge endpoints, whose FQN prefix is still honoured. An edge into a
+/// dropped record dangles and is pruned by the final cleanup.
+fn is_blacklisted(fqn: &str, path: Option<&str>, opts: &IngestOptions) -> bool {
+    if opts.blacklist.iter().any(|p| fqn.starts_with(p.as_str())) {
+        return true;
+    }
+    let Some(path) = path else {
+        return false;
+    };
+    if crate::classify::is_build_output_path(path) {
+        return true;
+    }
+    opts.base
+        .is_some_and(|base| crate::git::path_is_ignored(base, Path::new(path)))
 }
 
 fn file_basename(file: &str) -> String {
@@ -707,7 +730,7 @@ fn ingest_records(
                     // (a Markdown identity is an absolute directory path) and
                     // roots it under the stream's `lang_switch` id.
                     let rooted = root_module_fqn(&lang, &fqn, base);
-                    if is_blacklisted(&rooted, opts.blacklist) {
+                    if is_blacklisted(&rooted, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -736,7 +759,8 @@ fn ingest_records(
                     let fqn = format!("{}.{name}", rooted_scope(&lang, &parent, base));
                     claim(&mut seen, &id, &fqn, NodeKind::Struct);
                     id_to_fqn.insert(id.clone(), fqn.clone());
-                    if is_blacklisted(&fqn, opts.blacklist) {
+                    let identity = repo_relative_identity(base, &path);
+                    if is_blacklisted(&fqn, Some(&identity), opts) {
                         skipped += 1;
                         continue;
                     }
@@ -747,7 +771,7 @@ fn ingest_records(
                         Node {
                             kind: NodeKind::Struct,
                             location: Some(Location {
-                                path: PathBuf::from(repo_relative_identity(base, &path)),
+                                path: PathBuf::from(&identity),
                                 start,
                                 end,
                                 start_line,
@@ -794,11 +818,11 @@ fn ingest_records(
                     // parent module FQN is rooted (PHASE_09), and the file's
                     // canonical identity is its repo-relative path.
                     let parent = rooted_scope(&lang, &parent, base);
-                    if is_blacklisted(&parent, opts.blacklist) {
+                    let identity = repo_relative_identity(base, &path);
+                    if is_blacklisted(&parent, Some(&identity), opts) {
                         skipped += 1;
                         continue;
                     }
-                    let identity = repo_relative_identity(base, &path);
                     if !files.contains_key(&identity) {
                         files.insert(identity.clone(), parent.clone());
                         let code_type = classify_code_type(&path, &identity, &lang, opts.config);
@@ -1180,7 +1204,7 @@ fn ingest_records(
         let Some(fqn) = id_to_fqn.get(&f.id).cloned() else {
             continue;
         };
-        if is_blacklisted(&fqn, opts.blacklist) {
+        if is_blacklisted(&fqn, Some(&f.path), opts) {
             skipped += 1;
             continue;
         }
@@ -1315,7 +1339,7 @@ fn ingest_records(
                     }
                     let a = resolve(&from);
                     let b = resolve(&to);
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1324,7 +1348,7 @@ fn ingest_records(
                 Record::Calls { from, to } => {
                     let a = resolve(&from);
                     let b = resolve(&to);
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1333,7 +1357,7 @@ fn ingest_records(
                 Record::Uses { from, to } => {
                     let a = resolve(&from);
                     let b = resolve(&to);
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1345,7 +1369,7 @@ fn ingest_records(
                     target_type,
                 } => {
                     let a = resolve(&from);
-                    if is_blacklisted(&a, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1353,7 +1377,7 @@ fn ingest_records(
                 }
                 Record::UnresolvedUse { from, to } => {
                     let a = resolve(&from);
-                    if is_blacklisted(&a, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1364,7 +1388,7 @@ fn ingest_records(
                 // code, like any other edge.
                 Record::Details { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1372,7 +1396,7 @@ fn ingest_records(
                 }
                 Record::Reviews { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1380,7 +1404,7 @@ fn ingest_records(
                 }
                 Record::DependsOn { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1388,7 +1412,7 @@ fn ingest_records(
                 }
                 Record::Gates { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1396,7 +1420,7 @@ fn ingest_records(
                 }
                 Record::Satisfies { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1405,7 +1429,7 @@ fn ingest_records(
                 // Spine edges (GraphModel-SPEC.md; PHASE_01).
                 Record::Drives { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1413,7 +1437,7 @@ fn ingest_records(
                 }
                 Record::Represents { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1422,7 +1446,7 @@ fn ingest_records(
                 // New-model §3.3 spec edges (apg-projects).
                 Record::RealisedBy { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1430,7 +1454,7 @@ fn ingest_records(
                 }
                 Record::SpecImplementedBy { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1438,7 +1462,7 @@ fn ingest_records(
                 }
                 Record::Publishes { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1446,7 +1470,7 @@ fn ingest_records(
                 }
                 Record::Subscribes { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, opts.blacklist) || is_blacklisted(&b, opts.blacklist) {
+                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
                         skipped += 1;
                         continue;
                     }

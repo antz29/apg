@@ -144,12 +144,34 @@ pub fn checkout_clean(dir: &Path) -> bool {
 
 /// True when the ignore rules of the checkout containing `main_root` cover
 /// `path` (the project worktree location must be gitignored — a nested
-/// checkout that is not ignored would dirty the main checkout forever).
+/// checkout that is not ignored would dirty the main checkout forever; the
+/// ingestor also uses it to keep gitignored build trees out of the graph).
+///
+/// `path` may be handed in any spelling a scan produces: an absolute scanner
+/// path (possibly through a `/var` → `/private/var` symlink), or a
+/// repo-relative identity. libgit2's ignore lookup wants a workdir-relative
+/// path, so an absolute input is made relative to the canonicalized workdir
+/// first (a path outside the checkout is not ignored); a relative input is
+/// taken as already workdir-relative.
 pub fn path_is_ignored(main_root: &Path, path: &Path) -> bool {
-    match discover_repo(main_root) {
-        Ok(repo) => repo.status_should_ignore(path).unwrap_or(false),
-        Err(_) => false,
+    let Ok(repo) = discover_repo(main_root) else {
+        return false;
+    };
+    let Some(workdir) = repo.workdir() else {
+        return false;
+    };
+    let rel = if path.is_absolute() {
+        match canonical_allow_missing(path).strip_prefix(canonical_allow_missing(workdir)) {
+            Ok(rel) => rel.to_path_buf(),
+            Err(_) => return false,
+        }
+    } else {
+        path.to_path_buf()
+    };
+    if rel.as_os_str().is_empty() {
+        return false;
     }
+    repo.status_should_ignore(&rel).unwrap_or(false)
 }
 
 /// Captures the current git state of the repo containing `dir`: HEAD sha plus

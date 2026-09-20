@@ -263,6 +263,25 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
     }
 }
 
+/// The default build-output directory segments the scanner never treats as
+/// source: the git store (`.git/**`) and cargo/build output trees
+/// (`target/**`). These are the shared path predicate's two default exclusion
+/// globs — nothing under them is authored content.
+const BUILD_OUTPUT_DIRS: &[&str] = &[".git", "target"];
+
+/// The shared build-output path predicate (the default exclusion globs
+/// `.git/**` and `target/**`): true when `path` lies under a default
+/// build-output tree — i.e. one of its `/`- or `\`-separated components is
+/// `.git` or `target`. `path` may be a scanner path or a repo-relative
+/// identity; matching is segment-keyed, so `.gitignore`, `targets/` and
+/// `target_file.go` stay ordinary source. Both the scan-hygiene defaults and
+/// the ingestor's record drop consult this one predicate, so a tree excluded
+/// at the frontend and a tree dropped at ingest can never disagree.
+pub fn is_build_output_path(path: &str) -> bool {
+    path.split(['/', '\\'])
+        .any(|seg| BUILD_OUTPUT_DIRS.contains(&seg))
+}
+
 /// Simple glob matcher: `*` matches any run (including `/`), `?` matches a
 /// single character.
 pub fn matches_glob(pattern: &str, path: &str) -> bool {
@@ -294,4 +313,45 @@ pub fn matches_glob(pattern: &str, path: &str) -> bool {
         pi += 1;
     }
     pi == pat.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// unit tier -- pure in-memory: no filesystem, database, git or process.
+    mod unit {
+        use super::*;
+
+        /// fix-module-identity phase-03 task-6: the shared build-output
+        /// exclusion predicate rejects every `.git/**` and `target/**` path
+        /// (the observed self-ingestion offenders: the Go build cache under
+        /// `.git/apg/facts` and the TS/staged frontends under `target/`) and
+        /// accepts ordinary source — `.gitignore`, `targets/` and a
+        /// `target_file` name are NOT build-output trees.
+        #[test]
+        fn build_output_predicate_rejects_git_and_target_trees() {
+            for p in [
+                ".git/apg/facts/go/key/53/abc-d",
+                "/abs/repo/.git/index",
+                "target/debug/frontends/tsfrontend/scanner.mjs",
+                "/abs/repo/target/debug/x.rs",
+                "nested/target/out.rs",
+                "src\\.git\\x.go",
+            ] {
+                assert!(is_build_output_path(p), "{p} must be a build-output path");
+            }
+            for p in [
+                "src/main.rs",
+                "a/a.go",
+                "targets/release.rs",
+                "src/target_file.go",
+                ".gitignore",
+                "docs/.gitkeep",
+                "",
+            ] {
+                assert!(!is_build_output_path(p), "{p} must stay authored source");
+            }
+        }
+    }
 }

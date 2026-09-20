@@ -103,6 +103,8 @@ func TestGoBuildCacheDir(t *testing.T) {
 
 func TestApplyGoBuildCache(t *testing.T) {
 	t.Setenv("GOCACHE", "original")
+	prevRoots := goBuildCacheRoots
+	t.Cleanup(func() { goBuildCacheRoots = prevRoots })
 	dir := t.TempDir()
 	got, err := applyGoBuildCache(dir, "cache-key-token")
 	if err != nil {
@@ -117,6 +119,101 @@ func TestApplyGoBuildCache(t *testing.T) {
 	}
 	if env := os.Getenv("GOCACHE"); env != want {
 		t.Fatalf("GOCACHE = %q want %q", env, want)
+	}
+	// The per-scan GOCACHE is recorded for the emission filter, so the
+	// generated `_testmain` Go writes into it — and the `init`/`main` it
+	// synthesizes — never surface as scanned project source.
+	if len(goBuildCacheRoots) == 0 {
+		t.Fatal("applyGoBuildCache must record the cache root for the emission filter")
+	}
+	scratch := filepath.Join(want, "53", "0123456789abcdef-d")
+	if !isToolchainScratch(scratch) {
+		t.Errorf("a file under the recorded GOCACHE (%s) must be toolchain scratch", scratch)
+	}
+	if isToolchainScratch(filepath.Join(dir, "a.go")) {
+		t.Error("project source outside the GOCACHE must not be toolchain scratch")
+	}
+}
+
+// TestIsGeneratedScratchPath is the phase-03 task-9 unit: the pure emission
+// filter rejects the per-scan GOCACHE (dir/key), the generated `_testmain`
+// scratch file, and the synthesized `init`/`main` declared in it — while
+// keeping ordinary project source.
+func TestIsGeneratedScratchPath(t *testing.T) {
+	cacheDir := goBuildCacheDir("/facts", "cache-key-token")
+
+	// Go writes the generated test main into the GOCACHE under a content-hash
+	// name (no `.go` suffix), so cache membership — not the basename — is the
+	// discriminator there.
+	generated := filepath.Join(cacheDir, "53", "0123456789abcdef-d")
+	for _, p := range []string{
+		generated,
+		filepath.Join(cacheDir, "_testmain.go"),
+		filepath.Join("/tmp", "go-build123", "b001", "_testmain.go"),
+	} {
+		if !isGeneratedScratchPath(p, cacheDir) {
+			t.Errorf("isGeneratedScratchPath(%q) = false, want true (toolchain scratch)", p)
+		}
+	}
+
+	// The generated test main declares the `init` that registers the tests and
+	// the `main` that runs them; both hang off the scratch file, so the same
+	// predicate rejects every declaration in it.
+	for _, name := range []string{"init", "main"} {
+		d := fileDecl{kind: "function", name: name, file: generated}
+		if !isGeneratedScratchPath(d.file, cacheDir) {
+			t.Errorf("the generated test main's synthesized %s (%q) must be filtered out", name, d.file)
+		}
+	}
+
+	// Ordinary project source — including real test files — is kept.
+	for _, p := range []string{"/repo/a/a.go", "/repo/a/a_test.go"} {
+		if isGeneratedScratchPath(p, cacheDir) {
+			t.Errorf("isGeneratedScratchPath(%q) = true, want false (project source)", p)
+		}
+	}
+
+	// A sibling directory that merely shares a string prefix with the cache key
+	// is not inside the cache.
+	sibling := filepath.Join("/facts", "go", "cache-key-token-2", "53", "x-d")
+	if isGeneratedScratchPath(sibling, cacheDir) {
+		t.Errorf("isGeneratedScratchPath(%q) = true, want false (cache sibling)", sibling)
+	}
+
+	// With no cache dir configured, only the `_testmain.go` basename is
+	// rejected (the `$WORK` spelling); ordinary source is untouched.
+	if isGeneratedScratchPath("/repo/a/a.go", "") {
+		t.Error("an ordinary path with no cache dir must not be filtered")
+	}
+	if !isGeneratedScratchPath("/repo/a/_testmain.go", "") {
+		t.Error("a generated _testmain.go must be filtered even with no cache dir")
+	}
+}
+
+// TestToolchainScratchFromRecordedCache is the phase-03 task-9 unit for the
+// wiring: once applyGoBuildCache has recorded the per-scan GOCACHE
+// (`goBuildCacheDir` dir + key), a generated `_testmain` under it never reaches
+// the emission stream, while project source does.
+func TestToolchainScratchFromRecordedCache(t *testing.T) {
+	prev := goBuildCacheRoots
+	goBuildCacheRoots = nil
+	t.Cleanup(func() { goBuildCacheRoots = prev })
+
+	cacheDir := goBuildCacheDir("/facts", "cache-key-token")
+	recordGoBuildCacheRoot(cacheDir)
+
+	scratch := filepath.Join(cacheDir, "53", "0123456789abcdef-d")
+	if !isToolchainScratch(scratch) {
+		t.Errorf("a path under the recorded GOCACHE (%s) must be scratch", scratch)
+	}
+	if !isEmissionExcluded(scratch, nil) {
+		t.Errorf("the GOCACHE scratch path (%s) must be excluded from emission", scratch)
+	}
+	if isToolchainScratch("/repo/a/a.go") {
+		t.Error("ordinary project source must not be scratch")
+	}
+	if isEmissionExcluded("/repo/a/a.go", nil) {
+		t.Error("ordinary project source must not be excluded from emission")
 	}
 }
 

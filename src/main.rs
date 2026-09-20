@@ -6763,6 +6763,184 @@ mod tests {
             let _ = std::fs::remove_dir_all(&base);
         }
 
+        /// fix-module-identity phase-03 task-7 (e2e): scan hygiene. A scratch
+        /// /tmp git repo carries a Go test package (whose compile writes a
+        /// generated `_testmain` into the shared Go build cache under
+        /// `.git/apg/facts`), a `target/**` build tree (a `.ts` the unified
+        /// frontend would otherwise scan, exactly like the observed
+        /// `target/debug/frontends/tsfrontend/scanner.mjs`), and a gitignored
+        /// build tree. After `apg scan`, ZERO File/Struct/Function record may
+        /// carry a path under `.git/**` or `target/**` (or the gitignored
+        /// tree), and no record may come from a generated `_testmain`. The
+        /// same must hold for a linked worktree. Candidate binary only,
+        /// scratch repo (`global.constraint.no-real-project-test`).
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo/git/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn scan_hygiene_excludes_git_target_and_gitignored_trees() {
+            assert!(
+                ts_frontend_artifact().is_file(),
+                "the unified JS/TS frontend must be built for the target leak case"
+            );
+            let (base, repo_dir) = winb_scratch(
+                "hygiene",
+                &[
+                    ("go.mod", "module scratch\n\ngo 1.21\n"),
+                    (
+                        "pkg/pkg.go",
+                        "package pkg\n\n// Pkg is the package entry.\nfunc Pkg() int { return 1 }\n",
+                    ),
+                    (
+                        "pkg/pkg_test.go",
+                        "package pkg\n\nimport \"testing\"\n\nfunc TestPkg(t *testing.T) {\n\tif Pkg() != 1 {\n\t\tt.Fatal(\"pkg\")\n\t}\n}\n",
+                    ),
+                    // A TS source outside every build tree, so the unified
+                    // frontend detects `ts` (the repo is go + ts).
+                    (
+                        "src/app.ts",
+                        "export function app(): number { return 1; }\n",
+                    ),
+                    // A committed build-output tree the frontend would
+                    // otherwise scan (the observed offender's shape).
+                    (
+                        "target/build/leak.ts",
+                        "export function leakedFromTarget(): number { return 2; }\n",
+                    ),
+                    // A segment-exact control: `targets/` is NOT `target/**`,
+                    // so it must survive the hygiene filter.
+                    (
+                        "targets/keep.ts",
+                        "export function keptFromTargets(): number { return 4; }\n",
+                    ),
+                    // The gitignored build tree never enters the content
+                    // identity, so it must not enter the graph either.
+                    (".gitignore", "build-out/\n"),
+                ],
+            );
+            let home = base.join("home");
+
+            // A file under `.git/**` cannot be committed; mirror the per-scan
+            // Go build-cache layout so a stray emission is caught.
+            let cache_file = repo_dir.join(".git/apg/facts/go/key/53/deadbeef-d");
+            std::fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+            std::fs::write(&cache_file, "not source\n").unwrap();
+            // The gitignored build tree: untracked, so git's ignore rules
+            // (not the default `.git`/`target` predicate) must exclude it.
+            let ignored = repo_dir.join("build-out/leak.ts");
+            std::fs::create_dir_all(ignored.parent().unwrap()).unwrap();
+            std::fs::write(
+                &ignored,
+                "export function leakedFromIgnored(): number { return 3; }\n",
+            )
+            .unwrap();
+
+            let init = winb_run(&repo_dir, &home, &["init", "."]);
+            assert!(
+                init.status.success(),
+                "init: {}",
+                String::from_utf8_lossy(&init.stderr)
+            );
+            scratch_commit_all(&repo_dir, "apg init");
+
+            // Independent (not the production predicate) segment check: a
+            // record from a build-output / gitignored tree is a leak.
+            let is_leak = |p: &str| {
+                p.split(['/', '\\'])
+                    .any(|s| s == ".git" || s == "target" || s == "build-out")
+            };
+            let assert_hygienic = |checkout: &Path, tag: &str| {
+                let records = export_records(checkout);
+                let files: BTreeSet<String> = records
+                    .iter()
+                    .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("file"))
+                    .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
+                    .collect();
+                // Never a vacuous pass: the real source of BOTH languages was
+                // scanned.
+                assert!(
+                    files.contains("pkg/pkg.go"),
+                    "{tag}: the Go package file must be scanned: {files:?}"
+                );
+                assert!(
+                    files.contains("src/app.ts"),
+                    "{tag}: the TS source file must be scanned: {files:?}"
+                );
+                assert!(
+                    files.contains("targets/keep.ts"),
+                    "{tag}: `targets/` is not `target/**` and must be scanned: {files:?}"
+                );
+
+                let mut offenders: Vec<String> = Vec::new();
+                let mut testmain: Vec<String> = Vec::new();
+                for r in &records {
+                    let ty = r.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    for key in ["fqn", "path"] {
+                        let Some(v) = r.get(key).and_then(|x| x.as_str()) else {
+                            continue;
+                        };
+                        if matches!(ty, "file" | "struct" | "function") && is_leak(v) {
+                            offenders.push(format!("{ty}:{key}:{v}"));
+                        }
+                        if v.contains("_testmain") {
+                            testmain.push(format!("{ty}:{key}:{v}"));
+                        }
+                    }
+                }
+                assert!(
+                    offenders.is_empty(),
+                    "{tag}: no File/Struct/Function may come from .git/**, target/** or a gitignored tree: {offenders:?}"
+                );
+                assert!(
+                    testmain.is_empty(),
+                    "{tag}: no record may come from a generated _testmain: {testmain:?}"
+                );
+            };
+
+            // (1) The main checkout: the Go build cache lands under
+            // `<repo>/.git/apg/facts`, inside the scanned tree.
+            let scan = winb_run(&repo_dir, &home, &["scan", "."]);
+            assert!(
+                scan.status.success(),
+                "main scan: {}",
+                String::from_utf8_lossy(&scan.stderr)
+            );
+            let stderr = String::from_utf8_lossy(&scan.stderr);
+            assert!(
+                stderr.contains("Languages: go, ts") || stderr.contains("Languages: ts, go"),
+                "the fixture must scan go + ts: {stderr}"
+            );
+            assert_hygienic(&repo_dir, "main");
+
+            // (2) A linked worktree of the same repo: the committed target
+            // tree materializes; the gitignored one is recreated untracked.
+            let wt = base.join("wt");
+            {
+                let repo = git2::Repository::open(&repo_dir).unwrap();
+                repo.worktree("wt", &wt, None).unwrap();
+                let wt_repo = git2::Repository::open(&wt).unwrap();
+                wt_repo.set_head("refs/heads/wt").unwrap();
+                wt_repo
+                    .checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
+                    .unwrap();
+            }
+            std::fs::create_dir_all(wt.join("apg/.trans")).unwrap();
+            let ignored_wt = wt.join("build-out/leak.ts");
+            std::fs::create_dir_all(ignored_wt.parent().unwrap()).unwrap();
+            std::fs::write(
+                &ignored_wt,
+                "export function leakedFromIgnored(): number { return 3; }\n",
+            )
+            .unwrap();
+            let wt_scan = winb_run(&wt, &home, &["scan", "."]);
+            assert!(
+                wt_scan.status.success(),
+                "worktree scan: {}",
+                String::from_utf8_lossy(&wt_scan.stderr)
+            );
+            assert_hygienic(&wt, "worktree");
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
         // -----------------------------------------------------------------------
         // Win-C DB-build dispatch (phase-03 task-4)
         // -----------------------------------------------------------------------
