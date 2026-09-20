@@ -389,9 +389,9 @@ worktree); and a refused/failed merge leaves the worktree and branch untouched.
 
 ## Deploying a release (cutting a tag)
 
-Releases are cut by pushing an annotated `vX.Y.Z` tag; `bottle.yml` (ARM bottle)
-and `linux-release.yml` (x86_64/aarch64 tarballs) build and publish on that tag
-push and create the GitHub release.
+Releases are cut by pushing an annotated `vX.Y.Z` tag; `release.yml` builds the
+ARM bottles and the x86_64/aarch64 tarballs, then a single publish job creates
+the release as a draft, attaches every asset, and publishes it.
 
 **Published releases are immutable.** A release's tag and its assets are final
 once published: never move the tag, and never overwrite, re-upload, or otherwise
@@ -435,8 +435,9 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
 5. **Annotated tag** pointing at the **release HEAD** (not the
    formula-revision commit): `git tag -a vX.Y.Z -m "apg X.Y.Z" <release-sha>`.
 6. **Push (human-approved)**: `git push origin main` then
-   `git push origin vX.Y.Z`. CI builds + creates the release; the bottle bot
-   then auto-commits *"Update bottle sha256s for vX.Y.Z"* to `main`.
+   `git push origin vX.Y.Z`. CI builds the bottles and the tarballs, then a
+   single publish job commits the bottle sha256s to `main`, creates the release
+   as a draft, attaches every asset, and publishes it.
 7. **Verify the assets are the new version**: `gh release view vX.Y.Z` must list
    `*-X.Y.Z.arm64_sonoma.bottle.*.tar.gz` (NOT the previous version) plus the
    `apg-linux-*` tarballs. If the bottles show the old version, you tagged
