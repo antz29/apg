@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "repo-agent-guide",
-  "body": "The apg repository's own agent guide `AGENTS.md` (scanned as File `AGENTS.md` under module `md.apg`): the repo-level guidance agents read when working in this checkout. It is not part of the `opencode-suite/` distribution (not embedded via `include_str!`, not installed by `apg init`), so it is modelled separately from `solution.component.navigator-prompt-guidance`. It carries the file-tool guidance (\"Other tools\"; the \"Read those files with read, grep, or bash\" line) that must state the same graph-first qualifier as the installed navigator prompt.",
+  "body": "The apg repository's own agent guide `AGENTS.md` (present in the graph as a scanned File): the repo-level guidance agents read when working in this checkout. It is not part of the `opencode-suite/` distribution (not embedded via `include_str!`, not installed by `apg init`), so it is modelled separately from `solution.component.navigator-prompt-guidance`. It carries the file-tool guidance (\"Other tools\"; the \"Read those files with read, grep, or bash\" line) that must state the same graph-first qualifier as the installed navigator prompt.",
   "properties": {},
   "out": [
     {
