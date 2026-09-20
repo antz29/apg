@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "tool-path-resolution",
+  "body": "The act of resolving a stored, checkout-independent graph identity back to an absolute filesystem path at the consumer boundary. It is the bridge between the portable artifact and the world of editors and file handles: the graph holds the repo-relative identity, and a consumer that asks to open a file receives the absolute path of that file in its own checkout. This is the tool-boundary instance of graph-identity, alongside the frontends' module-identity instances.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
