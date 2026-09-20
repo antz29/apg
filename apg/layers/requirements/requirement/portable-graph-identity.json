@@ -78,11 +78,6 @@
       "kind": "details",
       "source": "requirements.note.relative-in-graph-absolute-at-tools",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.tool-boundary-out-of-scope",
-      "properties": {}
     }
   ]
 }
