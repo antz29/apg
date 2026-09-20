@@ -1,20 +1,68 @@
-name: Build and publish Linux binaries
+name: Release
 
 on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
+  # GitHub Actions runners can't satisfy Homebrew's tap-trust check (it needs a
+  # user-scoped token); the taps here are our own first-party tap.
+  HOMEBREW_NO_REQUIRE_TAP_TRUST: 1
+  # gh doesn't auto-read GITHUB_TOKEN in Actions.
   GH_TOKEN: ${{ github.token }}
 
 jobs:
-  build:
-    name: Build (${{ matrix.arch }})
+  bottle:
+    name: Bottle (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Intel (macos-13) runners have been retired upstream, so only ARM
+          # bottles are published; Intel Macs build from source.
+          - os: macos-14
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - name: Tap apg
+        run: brew tap antz29/apg "https://github.com/${GITHUB_REPOSITORY}.git"
+
+      - name: Build and install formulae with --build-bottle
+        run: |
+          brew install --build-bottle antz29/apg/scanner
+          brew install --build-bottle antz29/apg/apg-go antz29/apg/apg-java antz29/apg/apg-cpp antz29/apg/apg-rust antz29/apg/apg-ts antz29/apg/apg-csharp antz29/apg/apg-py antz29/apg/apg-md
+
+      - name: Create bottles
+        working-directory: ${{ runner.temp }}
+        run: |
+          brew bottle \
+            --json \
+            --root-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
+            scanner apg-go apg-java apg-cpp apg-rust apg-ts apg-csharp apg-py apg-md
+
+      - name: Upload bottle artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: bottles-${{ matrix.arch }}
+          path: ${{ runner.temp }}/*.bottle*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload bottle JSON
+        uses: actions/upload-artifact@v7
+        with:
+          name: bottles-json-${{ matrix.arch }}
+          path: ${{ runner.temp }}/*.bottle*.json
+          if-no-files-found: error
+
+  linux:
+    name: Build Linux (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -119,13 +167,45 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish Linux binaries
-    needs: build
-    runs-on: ubuntu-latest
+    name: Publish release
+    needs: [bottle, linux]
+    runs-on: macos-14
     steps:
-      # gh resolves the repo from git remotes, so this job needs a checkout.
       - uses: actions/checkout@v7
+        with:
+          ref: main
 
+      # --- bottles: merge the sha256s back into the tap formulae on main ---
+      - name: Download bottle artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: bottles-*
+          merge-multiple: true
+          path: bottles
+
+      - name: Tap apg
+        run: brew tap antz29/apg "https://github.com/${GITHUB_REPOSITORY}.git"
+
+      - name: Merge bottle blocks into formulae
+        run: |
+          brew bottle --merge --write --no-commit --json bottles/*.bottle.json
+          # brew writes into the tap checkout (dir name gets a "homebrew-" prefix);
+          # copy the updated formulae back into the workspace.
+          find "$(brew --prefix)/Library/Taps/antz29" -path '*/Formula/*.rb' -exec cp '{}' "${GITHUB_WORKSPACE}/Formula/" \;
+
+      - name: Commit bottle updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula
+          if git diff --cached --quiet; then
+            echo "No formula changes to commit"
+          else
+            git commit -m "Update bottle sha256s for ${GITHUB_REF_NAME}"
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          fi
+
+      # --- linux tarballs + merged checksums ---
       - uses: actions/download-artifact@v8
         with:
           pattern: apg-linux-*
@@ -138,16 +218,26 @@ jobs:
           cat *.sha256 > sha256sums.txt
           rm *.sha256
 
-      - name: Ensure GitHub release exists
+      # brew writes bottle files as <name>--<version>... but builds the fetch URL
+      # as <name>-<version>...; rename to match what brew fetches.
+      - name: Normalize bottle filenames
         run: |
-          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            # The bottle workflow may create the release concurrently on the
-            # same tag push; absorb that 422 race, then confirm below.
-            gh release create "${GITHUB_REF_NAME}" --generate-notes || true
-          fi
-          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1
+          for f in bottles/*--*.bottle*.tar.gz; do
+            mv "$f" "$(echo "$f" | sed 's/--/-/')"
+          done
 
-      - name: Upload tarballs + checksums
-        working-directory: dist
+      # Immutable releases forbid adding assets after publish, so the release is
+      # created as a draft, every asset is attached, and only then is it
+      # published. Creating the release here (once, after both builds) also
+      # removes the create-vs-upload race the two old workflows had.
+      - name: Create the release as a draft
+        run: gh release create "${GITHUB_REF_NAME}" --draft --generate-notes
+
+      - name: Attach every asset
         run: |
-          gh release upload "${GITHUB_REF_NAME}" *.tar.gz sha256sums.txt --clobber
+          gh release upload "${GITHUB_REF_NAME}" \
+            bottles/*.bottle*.tar.gz \
+            dist/*.tar.gz dist/sha256sums.txt
+
+      - name: Publish the release
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false
