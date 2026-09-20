@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "tool-path-resolution",
+  "body": "The suite tools' path-resolution component: the shared `opencode-suite/lib/apg.ts` plumbing (`findApgRoot` root discovery, `runCypher` project-directory-scoped query execution) and the curated tools that return stored identities. Given the project `directory`, it joins a stored repo-relative identity back to an absolute path before returning it to the consumer; raw `apg query` is left untouched. Owns the tool side of the repo-relative/absolute boundary.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
