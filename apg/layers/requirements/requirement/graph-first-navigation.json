@@ -28,6 +28,11 @@
       "kind": "details",
       "source": "requirements.note.graph-first-test-pending",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.fix-md-module-naming",
+      "properties": {}
     }
   ]
 }

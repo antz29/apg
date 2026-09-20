@@ -4,6 +4,12 @@
   "name": "fix-md-module-naming",
   "body": "source: review feedback graph-first-prompt/feedback-1. Inconsistency: requirements.requirement.graph-first-navigation and solution.component.repo-agent-guide named module `md.apg` for `AGENTS.md`/`README.md`, but the Markdown module identity is derived from the checkout/git-toplevel directory basename (in this worktree it renders as `md.graph-first-prompt`), so naming it in rule text contradicts requirements.requirement.portable-graph-identity and requirements.requirement.frontend-rooting-from-repo-base. Resolution: reworded both bodies to assert only the checkout-independent fact — that `AGENTS.md`, `README.md`, and `opencode-suite/agents/*.md` are scanned by the Markdown frontend and present as File nodes in the graph — with no basename-derived module name; the in-graph/not-in-graph distinction is unchanged [with user].",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.graph-first-navigation",
+      "properties": {}
+    }
+  ],
   "in": []
 }
