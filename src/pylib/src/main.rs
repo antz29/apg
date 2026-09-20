@@ -392,20 +392,36 @@ impl Scanner {
         }
     }
 
-    /// Computes the dotted module identity for a source file by walking up
-    /// through `__init__.py`/`__init__.pyi`-bearing ancestor directories.
+    /// Computes the dotted module identity for a source file from its full
+    /// package directory path: every directory between the scan root and the
+    /// file is a package-or-PEP-420-namespace component (a directory with no
+    /// `__init__.py` is a namespace package and contributes its name just like
+    /// an `__init__.py`/`__init__.pyi`-bearing regular package). The scan root
+    /// is the import root and never contributes its own name, so no module is
+    /// named after the checkout/scan-root directory. A file outside the scan
+    /// root keeps the pre-namespace rule (only `__init__`-bearing ancestors).
     fn module_fqn_for(&self, file: &Path) -> String {
         let is_init = file.file_stem().is_some_and(|s| s == "__init__");
         let stem = file
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "module".to_string());
+        let under_root = file.starts_with(&self.root);
         let mut ancestors: Vec<String> = Vec::new();
         let mut dir = file.parent().map(Path::to_path_buf);
         while let Some(d) = dir {
-            let has_init = d.join("__init__.py").is_file() || d.join("__init__.pyi").is_file();
-            if !has_init {
-                break;
+            if under_root {
+                // Directories strictly below the import root all contribute;
+                // the root itself is the boundary (exclusive).
+                if d == self.root {
+                    break;
+                }
+            } else {
+                // Outside the scan tree: preserve the pre-namespace boundary.
+                let has_init = d.join("__init__.py").is_file() || d.join("__init__.pyi").is_file();
+                if !has_init {
+                    break;
+                }
             }
             if let Some(name) = d.file_name() {
                 ancestors.push(name.to_string_lossy().into_owned());
@@ -1243,6 +1259,29 @@ mod tests {
                 "fixture",
                 "a root-level __init__ takes its directory name"
             );
+            // PEP-420 namespace components: a directory with no `__init__.py`
+            // contributes its name, so namespace siblings keep distinct
+            // identities instead of collapsing to the bare stem.
+            assert_eq!(
+                dotted_identity(false, "mod", &["pkg".to_string()]),
+                "pkg.mod",
+                "a namespace directory folds into the identity like a package"
+            );
+            assert_eq!(
+                dotted_identity(false, "mod", &["other".to_string()]),
+                "other.mod",
+                "a sibling namespace directory yields a distinct identity"
+            );
+            assert_ne!(
+                dotted_identity(false, "mod", &["pkg".to_string()]),
+                dotted_identity(false, "mod", &["other".to_string()]),
+                "same-stem modules under different namespace packages must not collapse"
+            );
+            assert_eq!(
+                dotted_identity(false, "mod", &["ns".to_string(), "reg".to_string()]),
+                "reg.ns.mod",
+                "a namespace package nested under a regular package keeps both components"
+            );
         }
 
         #[test]
@@ -1531,6 +1570,79 @@ mod tests {
             assert!(
                 node_id(&recs, "function", "flat", "standalone").is_some(),
                 "flat module function missing"
+            );
+        }
+
+        #[test]
+        #[ignore = "e2e tier: spawns the built frontend over a scratch temp dir; run via cargo test-e2e"]
+        fn namespace_packages_fold_directory_components_into_module_identity() {
+            let root = scratch_dir("namespace");
+            // PEP-420 namespace packages: no `__init__.py`, same-stem modules.
+            write_file(&root, "namespace_a/mod.py", "def a():\n    return 1\n");
+            write_file(&root, "namespace_b/mod.py", "def b():\n    return 2\n");
+            // A regular (init-bearing) package, including a namespace dir
+            // nested inside it.
+            write_file(&root, "regular/__init__.py", "");
+            write_file(&root, "regular/mod.py", "def regular():\n    return 3\n");
+            write_file(&root, "regular/ns/mod.py", "def nested():\n    return 4\n");
+
+            let recs = records(&run_frontend(&root, &[]));
+
+            let modules = module_fqns(&recs);
+            for expected in [
+                "namespace_a",
+                "namespace_a.mod",
+                "namespace_b",
+                "namespace_b.mod",
+                "regular",
+                "regular.mod",
+                "regular.ns",
+                "regular.ns.mod",
+            ] {
+                assert!(
+                    modules.contains(expected),
+                    "module {expected} missing: {modules:?}"
+                );
+            }
+            assert!(
+                !modules.contains("mod"),
+                "same-stem namespace modules must not collapse to the bare stem: {modules:?}"
+            );
+
+            let files: Vec<&serde_json::Value> =
+                recs.iter().filter(|r| r["type"] == "file").collect();
+            let parent_of = |suffix: &str| -> Option<String> {
+                files
+                    .iter()
+                    .find(|r| r["path"].as_str().is_some_and(|p| p.ends_with(suffix)))
+                    .and_then(|r| r["parent"].as_str().map(str::to_string))
+            };
+            assert_eq!(
+                parent_of("namespace_a/mod.py").as_deref(),
+                Some("namespace_a.mod")
+            );
+            assert_eq!(
+                parent_of("namespace_b/mod.py").as_deref(),
+                Some("namespace_b.mod")
+            );
+            assert_eq!(
+                parent_of("regular/__init__.py").as_deref(),
+                Some("regular"),
+                "an init-bearing package identity is unchanged"
+            );
+            assert_eq!(parent_of("regular/mod.py").as_deref(), Some("regular.mod"));
+            assert_eq!(
+                parent_of("regular/ns/mod.py").as_deref(),
+                Some("regular.ns.mod")
+            );
+
+            assert!(
+                node_id(&recs, "function", "namespace_a.mod", "a").is_some(),
+                "namespace_a declaration missing"
+            );
+            assert!(
+                node_id(&recs, "function", "namespace_b.mod", "b").is_some(),
+                "namespace_b declaration missing"
             );
         }
 
