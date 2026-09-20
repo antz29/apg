@@ -7,14 +7,14 @@ class ApgMd < Formula
   desc "Markdown scanner frontend for apg"
   homepage "https://github.com/antz29/apg"
   url "https://github.com/antz29/apg.git",
-      tag:      "v0.15.1",
-      revision: "e19f5e5531f5cf599314ee2d2b3f77830889d8f2"
+      tag:      "v0.15.2",
+      revision: "14aadba4fe15e86853a0f5197f1ad9c5b8addb3a"
   license "MIT"
   head "https://github.com/antz29/apg.git", branch: "main"
 
   bottle do
-    root_url "https://github.com/antz29/apg/releases/download/v0.15.1"
-    rebuild 7
+    root_url "https://github.com/antz29/apg/releases/download/v0.15.2"
+    rebuild 8
     sha256 cellar: :any_skip_relocation, arm64_sonoma: "981be5a473b672ad090095a74277ba2f5b8382e01ad42ecd97db3f4700895e23"
   end
 
