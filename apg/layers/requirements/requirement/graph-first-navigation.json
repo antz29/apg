@@ -6,7 +6,13 @@
   "properties": {
     "feature": "graph-first-navigation"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.graph-first-navigation",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
