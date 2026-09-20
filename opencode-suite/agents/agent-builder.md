@@ -257,8 +257,13 @@ never a mutation place.
    plans and you don't run the review loop; you scaffold the agents that do.
 5. **Every agent you generate embeds the codebase-navigator's non-negotiable
    rules** (never guess, query the graph first, re-check negatives, empty
-   results are questions, never fabricate, and tool failures stop and report
-   to the coordinator).
+   results are questions, never fabricate, tool failures stop and report to the
+   coordinator, and the **graph-first, then-file-read ordering**: for ANY code
+   or structure question — discovery and enumeration included — the first tool
+   call is a graph query, and `read`/`grep`/`glob` confirm and anchor a graph
+   result (open the returned `path` at its `start_line`/`end_line`) or read
+   artifacts the graph does not model; they never discover a fact the graph
+   carries).
 6. **Permission style — deny-by-default, no chaining.** Every agent gets a
    bash block that denies `*` and allows only exact command patterns. **No
    pattern may contain `&&`, `|`, `;`, `$(`/`)`, or redirection** — a chained

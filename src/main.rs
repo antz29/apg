@@ -4939,6 +4939,71 @@ mod tests {
             );
         }
 
+        /// The graph-first ordering is stated on the installed navigator prompt
+        /// and carried into `AGENTS.md`: for ANY code or structure question —
+        /// discovery and enumeration included — the first tool call is a graph
+        /// query, and `read`/`grep`/`glob` confirm and anchor a graph result or
+        /// read artifacts the graph does not model; they never discover a graph
+        /// fact. The navigator's rule names both artifact classes (in-graph:
+        /// scanned source, the scanned Markdown, `build.rs`; not-in-graph: the
+        /// build/packaging manifests and scripts), and `agent-builder.md` rule 5
+        /// makes every generated agent inherit the ordering.
+        #[test]
+        #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn graph_first_rule_stated_in_navigator_prompt_and_guide() {
+            let navigator = AGENTS
+                .iter()
+                .find(|(n, _)| *n == "codebase-navigator.md")
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("codebase-navigator.md is in the embedded AGENTS set"));
+            let agents_md = include_str!("../AGENTS.md");
+
+            // The navigator states the ordering as a non-negotiable rule: query
+            // first for ANY code/structure question (discovery included), and
+            // file tools confirm/anchor or read non-modelled artifacts.
+            assert!(
+                navigator.contains("Graph first, then file read"),
+                "the navigator prompt must state the graph-first, then-file-read rule"
+            );
+            for needle in ["do not discover graph facts", "confirm and anchor"] {
+                assert!(
+                    navigator.contains(needle),
+                    "the navigator prompt must state `{needle}` in the ordering rule"
+                );
+            }
+
+            // The rule names both artifact classes.
+            for needle in ["In the graph:", "Not in the graph:"] {
+                assert!(
+                    navigator.contains(needle),
+                    "the navigator prompt's rule must name the `{needle}` artifact class"
+                );
+            }
+
+            // AGENTS.md carries the same qualifier in the file-tool guidance
+            // ("Other tools" and the "Read those files with read, grep, or bash"
+            // line): file tools confirm/anchor graph results or read non-modelled
+            // artifacts; they never discover a graph fact.
+            for needle in ["confirm and anchor", "do not discover graph facts"] {
+                assert!(
+                    agents_md.contains(needle),
+                    "AGENTS.md must carry the graph-first qualifier `{needle}`"
+                );
+            }
+
+            // agent-builder.md rule 5 makes every generated agent inherit the
+            // ordering, not only the pre-existing navigator rules.
+            let builder = AGENTS
+                .iter()
+                .find(|(n, _)| *n == "agent-builder.md")
+                .map(|(_, c)| *c)
+                .unwrap();
+            assert!(
+                builder.contains("graph-first, then-file-read ordering"),
+                "agent-builder.md rule 5 must require generated agents to inherit the graph-first ordering"
+            );
+        }
+
         /// The coordinator-mediated feedback cycle is embedded in the shipped
         /// prose: the navigator holds the `apg_review_action` grant and carries the
         /// dispatch protocol (dispatch one open item to its owning writer → receive

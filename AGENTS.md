@@ -710,7 +710,7 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   located node also carries `start_line`/`end_line`, **1-based inclusive line
   numbers**; use them (not byte offsets) when joining against diffs, hunks, or
   anything line-oriented.
-- `path` is an **absolute filesystem path** under the project directory. Read those files with `read`, `grep`, or `bash`.
+- `path` is an **absolute filesystem path** under the project directory. Read those files with `read`, `grep`, or `bash` to **confirm and anchor** a graph result (open the returned `path` at its `start_line`/`end_line`) or to read artifacts the graph does not model — never to discover a fact the graph carries.
 
 ### Fidelity & noise
 
@@ -735,7 +735,14 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
 
 ### Other tools
 
-- `read`, `grep`, `glob`, `bash` — standard file operations.
+- `read`, `grep`, `glob`, `bash` — standard file operations. They **confirm and
+  anchor** a graph result (open the returned `path` at its
+  `start_line`/`end_line`) or read artifacts the graph does not model — they
+  do not discover graph facts. For ANY code or structure question — discovery
+  and enumeration included ("what is in this file/module?", "what does this
+  unit depend on?") — the first tool call is a graph query (the `apg_*` suite,
+  or `apg_query`); reach for a file tool second.
 - Extract byte ranges with: `dd if=<file> bs=1 skip=<start> count=<end-start> 2>/dev/null`
-- Use `rg` (ripgrep) in bash for fast content search.
+- Use `rg` (ripgrep) in bash for fast content search **of artifacts the graph
+  does not model** — for in-graph facts, a graph query comes first.
 - `task` — spawn sub-agents for complex multi-file exploration.
