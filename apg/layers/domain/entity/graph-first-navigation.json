@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "graph-first-navigation",
+  "body": "The ordering discipline this change-set installs: for any fact about code or structure — declarations, dependencies, containment, enumeration, discovery — the program graph is consulted first, and file tools are confirmatory (open the graph's `path` at its `start_line`/`end_line`) or cover artifacts the graph does not model (build/packaging manifests and scripts). It dissolves the observed failure where an agent reached for glob/read/grep on source the graph already carried, because the prompt scoped graph-first to relationships and left discovery unstated.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
