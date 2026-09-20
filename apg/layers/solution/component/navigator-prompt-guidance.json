@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/agents/codebase-navigator.md",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/agent-builder.md",
+      "properties": {}
     }
   ],
   "in": [
