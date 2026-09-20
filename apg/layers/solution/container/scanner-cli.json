@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "solution.component.project-start-seeder",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.repo-agent-guide",
+      "properties": {}
     }
   ],
   "in": [
