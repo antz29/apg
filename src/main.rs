@@ -7651,15 +7651,33 @@ mod tests {
 
             let records = export_records(&repo_dir);
             let files = export_file_paths(&records);
+            // fix-module-identity phase-02: a package-less repo identifies its
+            // one module from the repo-relative base (`root`), never the
+            // checkout/scan-root directory basename (`repo`). The old synthetic
+            // `js.repo` module is gone
+            // (`requirements.constraint.no-checkout-named-module`).
             assert!(
-                export_modules(&records).contains("js.repo"),
-                "the JS package module must be present: {:?}",
+                !export_modules(&records).contains("js.repo"),
+                "no module may be named after the checkout/scan-root basename: {:?}",
                 export_modules(&records)
             );
 
             for rel in ["calc.js", "widget.jsx", "esm.mjs", "cjs.cjs"] {
                 let abs = export_file_ending(&records, &format!("/{rel}"))
                     .unwrap_or_else(|| panic!("{rel} must be accepted as a File node: {files:?}"));
+                // Exactly ONE module identity parents each source file: no file
+                // is emitted twice (once per recursive package walk).
+                let parents: BTreeSet<String> = records
+                    .iter()
+                    .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("contains"))
+                    .filter(|r| r.get("to").and_then(|t| t.as_str()) == Some(abs.as_str()))
+                    .filter_map(|r| r.get("from").and_then(|f| f.as_str()).map(str::to_string))
+                    .collect();
+                assert_eq!(
+                    parents.len(),
+                    1,
+                    "{rel} must be emitted under exactly one module identity: {parents:?}"
+                );
                 let syms = export_symbols_at(&records, &abs);
                 assert!(!syms.is_empty(), "{rel} must declare symbols: {syms:?}");
                 let edges = export_edge_types_from(&records, &syms);
@@ -7756,19 +7774,39 @@ mod tests {
 
             // A JS workspace package resolved by NAME exercises the
             // `workspaceHost` JS-candidate path (task-22's extension: a `.js`
-            // `index` candidate resolves without a build step). The lib file is
-            // collected under both the root and the workspace package, so its
-            // symbol appears under `mixed.` and `mixed-lib.`; the named import
-            // must resolve to a REAL project FQN in either case (never
-            // Unresolved).
+            // `index` candidate resolves without a build step). fix-module-
+            // identity phase-02: `collectSources` skips the nested discovered-
+            // package directory, so the workspace package's file is collected
+            // under the workspace package ONLY — it is never re-emitted under
+            // the recursive root package
+            // (`requirements.constraint.no-checkout-named-module`).
             let lib_symbols: BTreeSet<String> = symbols
                 .iter()
                 .filter(|f| f.ends_with(".index.libHelper"))
                 .cloned()
                 .collect();
+            assert_eq!(
+                lib_symbols,
+                BTreeSet::from(["ts.mixed-lib.index.libHelper".to_string()]),
+                "a nested workspace file must be emitted under exactly one module identity: {symbols:?}"
+            );
             assert!(
-                !lib_symbols.is_empty(),
-                "the JS workspace package's symbol must be a project symbol: {symbols:?}"
+                !symbols.iter().any(|f| f.starts_with("ts.mixed.lib.")),
+                "the nested package's files must not be re-emitted under the recursive root: {symbols:?}"
+            );
+            // The nested package's File node is contained by exactly one module.
+            let lib_file = export_file_ending(&records, "/lib/index.js")
+                .expect("lib/index.js must be a File node");
+            let lib_parents: BTreeSet<String> = records
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("contains"))
+                .filter(|r| r.get("to").and_then(|t| t.as_str()) == Some(lib_file.as_str()))
+                .filter_map(|r| r.get("from").and_then(|f| f.as_str()).map(str::to_string))
+                .collect();
+            assert_eq!(
+                lib_parents,
+                BTreeSet::from(["ts.mixed-lib".to_string()]),
+                "lib/index.js must be contained by exactly one module identity: {lib_parents:?}"
             );
             assert!(
                 records.iter().any(|r| {

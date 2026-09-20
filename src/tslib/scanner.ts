@@ -17,8 +17,11 @@
 // Module model: an npm package is a module. A package.json with `workspaces`
 // makes each workspace package its own module (the root is skipped unless it
 // carries its own sources); a single package is one module named by its
-// package.json `name` (or the directory basename). Every source file under a
-// package belongs to that package's module. FQNs are module-prefixed and
+// package.json `name`. A source file outside every discovered package takes a
+// fallback identity derived from the repository-relative base (the git top
+// level, else the scan root) — never the checkout/scan-root directory basename
+// (`requirements.constraint.no-checkout-named-module`). Every source file under
+// a package belongs to that package's module. FQNs are module-prefixed and
 // file-path-prefixed (each ES module file is its own namespace), so two files
 // in the same package can both declare `class Button` without colliding:
 //
@@ -54,6 +57,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+// The package-identity computation lives in a side-effect-free module (also
+// importable by `node --test`); `./identity.mjs` is staged alongside the built
+// scanner by build.rs.
+import { packageIdentity } from "./identity.mjs";
 
 const args = process.argv.slice(2);
 if (args.length < 1) {
@@ -185,10 +192,33 @@ function discoverPackages() {
   const add = (dir, name) => {
     const abs = path.resolve(dir);
     if (packages.some((p) => p.dir === abs)) return;
-    packages.push({ name: name || path.basename(abs), dir: abs });
+    packages.push({ name: name || packageIdentity(repoBase, packages, abs), dir: abs });
   };
 
   const rootPkg = loadPkg(root);
+
+  // The repository-relative base every fallback identity derives from: the git
+  // toplevel (walking up for `.git` — a file in a linked worktree), or the scan
+  // root when the tree is not a git checkout. Never the checkout/scan-root
+  // basename (`requirements.constraint.no-checkout-named-module`).
+  const repoBase = (() => {
+    let d = root;
+    for (;;) {
+      if (fs.existsSync(path.join(d, ".git"))) return d;
+      const parent = path.dirname(d);
+      if (parent === d) return root;
+      d = parent;
+    }
+  })();
+
+  // The repo-root package's identity: its declared name when it has one,
+  // otherwise the repo-relative base rendered by the pure `packageIdentity`
+  // helper. A synthetic module named `path.basename(root)` (the checkout /
+  // worktree directory) is never minted.
+  const rootFallback = (discovered) =>
+    rootPkg && typeof rootPkg.name === "string" && rootPkg.name
+      ? rootPkg.name
+      : packageIdentity(repoBase, discovered, root);
 
   // A root package.json with `workspaces` names the module boundary (each
   // workspace package is a module; the root is skipped unless it carries its
@@ -216,20 +246,20 @@ function discoverPackages() {
             const sub = path.join(base, e.name);
             const pkg = loadPkg(sub);
             if (pkg) {
-              add(sub, typeof pkg.name === "string" && pkg.name ? pkg.name : e.name);
+              add(sub, typeof pkg.name === "string" && pkg.name ? pkg.name : packageIdentity(repoBase, packages, sub));
               wsDirs.push(sub);
             }
           }
         } else if (fs.existsSync(base) && fs.statSync(base).isDirectory()) {
           const pkg = loadPkg(base);
           if (pkg) {
-            add(base, typeof pkg.name === "string" && pkg.name ? pkg.name : path.basename(base));
+            add(base, typeof pkg.name === "string" && pkg.name ? pkg.name : packageIdentity(repoBase, packages, base));
             wsDirs.push(base);
           }
         }
       }
       if (hasSourcesOutside(root, wsDirs)) {
-        add(root, typeof rootPkg.name === "string" && rootPkg.name ? rootPkg.name : path.basename(root));
+        add(root, rootFallback(packages));
       }
       return finish();
     }
@@ -263,13 +293,14 @@ function discoverPackages() {
   walk(root);
 
   if (named.length === 0) {
-    // No package.json anywhere: one module named by the directory.
-    add(root, rootPkg && typeof rootPkg.name === "string" && rootPkg.name ? rootPkg.name : path.basename(root));
+    // No package.json anywhere: one module for the whole scan, identified from
+    // the repo-relative base (never the checkout/scan-root basename).
+    add(root, rootFallback(packages));
     return finish();
   }
   for (const n of named) add(n.dir, n.name);
   if (hasSourcesOutside(root, named.map((n) => n.dir))) {
-    add(root, rootPkg && typeof rootPkg.name === "string" && rootPkg.name ? rootPkg.name : path.basename(root));
+    add(root, rootFallback(packages));
   }
   return finish();
 
@@ -282,8 +313,13 @@ function discoverPackages() {
 }
 
 // ── source collection ────────────────────────────────────────────────
-function collectSources(pkgDir) {
+// `nestedPkgDirs` are the OTHER discovered packages: a nested one owns its own
+// files, so the walk never descends into it (otherwise a workspace package's
+// file would also be re-emitted under the recursive root package —
+// `requirements.constraint.no-checkout-named-module`).
+function collectSources(pkgDir, nestedPkgDirs) {
   const files = [];
+  const skip = (nestedPkgDirs || []).filter((d) => d !== pkgDir);
   const walk = (d) => {
     let entries;
     try {
@@ -295,8 +331,10 @@ function collectSources(pkgDir) {
       if (e.name[0] === "." || e.name === "node_modules") continue;
       const p = path.join(d, e.name);
       if (excludes.some((pat) => p.includes(pat))) continue;
-      if (e.isDirectory()) walk(p);
-      else if (isSourceExt(e.name)) files.push(p);
+      if (e.isDirectory()) {
+        if (skip.some((s) => p === s)) continue;
+        walk(p);
+      } else if (isSourceExt(e.name)) files.push(p);
     }
   };
   walk(pkgDir);
@@ -322,7 +360,7 @@ if (packages.length === 0) {
 
 let allFiles = [];
 for (const pkg of packages) {
-  for (const f of collectSources(pkg.dir)) {
+  for (const f of collectSources(pkg.dir, packages.map((p) => p.dir))) {
     allFiles.push({ file: f, pkg });
   }
 }

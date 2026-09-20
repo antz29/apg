@@ -38,6 +38,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/tslib/package.json");
     println!("cargo:rerun-if-changed=src/tslib/package-lock.json");
     println!("cargo:rerun-if-changed=src/tslib/scanner.ts");
+    println!("cargo:rerun-if-changed=src/tslib/identity.mjs");
     println!("cargo:rerun-if-changed=src/csharplib/CsharpFrontend.csproj");
     println!("cargo:rerun-if-changed=src/csharplib/Program.cs");
     println!("cargo:rerun-if-changed=src/mdlib/Cargo.toml");
@@ -377,6 +378,12 @@ fn main() {
                 );
             }
             let _ = std::fs::copy(&emitted, stage_ts.join("scanner.mjs"));
+            // The built scanner keeps `import { packageIdentity } from
+            // "./identity.mjs"` verbatim (the source module is not compiled by
+            // the tsc invocation above), so the staged `identity.mjs` must sit
+            // next to the staged `scanner.mjs` for that import to resolve. It is
+            // plain side-effect-free ESM, copied as-is.
+            let _ = std::fs::copy(tslib.join("identity.mjs"), stage_ts.join("identity.mjs"));
             println!(
                 "cargo:rustc-env=APG_FRONTEND_TS={}",
                 stage_ts.join("scanner.mjs").display()
