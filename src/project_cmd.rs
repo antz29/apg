@@ -3,10 +3,13 @@
 //! - `apg project start <name>` — one command creates the project context:
 //!   a git worktree + branch off the repo's DEFAULT branch (the main
 //!   checkout's symbolic HEAD, not literal main), at the fixed location
-//!   `<main>/apg/.worktrees/<name>`, plus an auto-scan of the new worktree
-//!   (worktree + branch + branch DB). Always a branch — no escape hatch.
-//!   Idempotent only when `<name>` already IS the current project context
-//!   (re-run inside the project's worktree → no-op, prints the path);
+//!   `<main>/apg/.worktrees/<name>`, seeded by copying the main checkout's
+//!   `apg/.trans` scan into the branch (worktree + branch + branch DB; no
+//!   frontend scan). Because the seed is main's scan, start refuses when the
+//!   main checkout's scan is stale or missing for main's HEAD — run
+//!   `apg scan` in the main checkout first. Always a branch — no escape
+//!   hatch. Idempotent only when `<name>` already IS the current project
+//!   context (re-run inside the project's worktree → no-op, prints the path);
 //!   otherwise every refusal is a hard fail naming the actual state and one
 //!   fix command (R2). Project names are never sanitized. Start is a
 //!   layout-touching op: the R10 version gate blocks layouts whose
@@ -72,25 +75,25 @@ fn project_start(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg project start <name>");
     };
     let apg_root = require_apg_root()?;
-    let path = project_start_at(&apg_root, name, None)?;
+    let path = project_start_at(&apg_root, name)?;
     println!("Project `{name}` started at {}", path.display());
     Ok(())
 }
 
-/// The default auto-scan: a real `apg scan` of the worktree (production). The
-/// optional `scan` override lets tests drive a hermetic scan.
+/// The default rebuild: a real `apg scan` of the main checkout (production).
+/// The optional `ScanFn` override lets tests drive a hermetic rebuild.
 fn real_scan(dir: &Path) -> anyhow::Result<()> {
     crate::cmd_scan(&[dir.display().to_string()])
 }
 
-/// The scan/rebuild injection seam (`project start`'s auto-scan and
-/// `project merge`'s main rebuild).
+/// The rebuild injection seam (`project merge`'s main rebuild).
 type ScanFn = dyn Fn(&Path) -> anyhow::Result<()>;
 
 /// Core of `project start` (split from the CLI wrapper so tests drive it
-/// against a fixture root). `scan: None` runs the real frontend scan;
-/// a test scan closure replaces it.
-fn project_start_at(apg_root: &Path, name: &str, scan: Option<&ScanFn>) -> anyhow::Result<PathBuf> {
+/// against a fixture root). Refuses when the main checkout's scan is stale or
+/// missing, else creates the branch + worktree and copies main's `apg/.trans`
+/// into the branch — no frontend scan.
+fn project_start_at(apg_root: &Path, name: &str) -> anyhow::Result<PathBuf> {
     // Identity first: non-git dirs refuse here (R2: suggest apg init).
     let identity = git::repo_identity(apg_root)?;
     let wt_dir = git::project_worktree_dir(&identity.main_root, name);
@@ -133,6 +136,18 @@ fn project_start_at(apg_root: &Path, name: &str, scan: Option<&ScanFn>) -> anyho
 
     refuse_start(&identity, name)?;
 
+    // Freshness gate: start seeds the branch DB by copying main's scan, so
+    // main must have a CURRENT scan for main's HEAD. `!git::is_fresh` (never
+    // `is_stale`) — a missing `db.lbug`/`graph.jsonl` is "not fresh" too, which
+    // `is_stale` alone cannot see. This sits AFTER `refuse_start` (dirty/
+    // collision/in-worktree refusals keep precedence) and BEFORE the gitignore
+    // self-heal, so a refusal never mutates the main checkout.
+    if !git::is_fresh(apg_root) {
+        anyhow::bail!(
+            "refused: the main checkout's scan is stale or missing — `apg project start` copies main's scan into the branch, so main must have a current scan. Fix: run `apg scan` in the main checkout, then re-run `apg project start {name}`."
+        );
+    }
+
     // Self-heal (R9): when the worktree location is not gitignored — the
     // repo .gitignore dropped the `apg/.worktrees/` entry, or the repo was
     // cloned before it existed — scaffold the apg layout entries and commit
@@ -174,30 +189,37 @@ fn project_start_at(apg_root: &Path, name: &str, scan: Option<&ScanFn>) -> anyho
     wt_repo.set_head(&format!("refs/heads/{name}"))?;
     wt_repo.checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))?;
 
-    // Seed the worktree's own `apg/.trans/` before the auto-scan: the walk-up
-    // layout discovery must resolve to THIS worktree's layout root (a
-    // gitignored `.trans` marker is what disambiguates a layout root from an
-    // unrelated `apg/` dir — without it, a scan of the worktree would walk
-    // past it up into the main checkout's layout).
+    // Seed the worktree's own `apg/.trans/` by copying the main checkout's
+    // scan verbatim: the graph stores repo-relative paths (`path`/File FQNs)
+    // and the worktree's tree equals main's HEAD, so main's DB is valid as-is
+    // in the branch — no scan, no frontend spawns. Copying (not scanning) also
+    // guarantees the fresh `apg/.trans` marker exists, which is what
+    // disambiguates this worktree's layout root from the main checkout's
+    // during walk-up discovery.
     let wt_apg = wt_dir.join(specs::LAYOUT);
-    std::fs::create_dir_all(wt_apg.join(specs::TRANS))?;
-
-    // Warm-cache start (phase-06 task-7/11): when the shared store already holds
-    // a COMPLETE recorded scan for this worktree's HEAD, the auto-scan takes the
-    // zero-frontend warm path — assemble from the store's re-based facts with no
-    // full-tree walk (`warm_cache_ready` applies the same probe `cmd_scan` uses,
-    // without building the manifest). Report the seed path start is taking.
-    if crate::warm_cache_ready(&wt_dir, &wt_apg) {
-        println!(
-            "Warm cache: seeding branch DB for `{name}` from the shared fact store (frontends skipped)"
-        );
-    }
-
-    // Auto-scan: worktree + branch + branch DB (R1 — one command yields all
-    // three).
-    let scan = scan.unwrap_or(&real_scan);
-    scan(&wt_dir)?;
+    copy_trans_artifacts(&apg_root.join(specs::TRANS), &wt_apg.join(specs::TRANS))?;
     Ok(wt_dir)
+}
+
+/// Recursively copies the main checkout's `apg/.trans` scan into the new
+/// worktree's `apg/.trans` (files and nested directories). Reads only the
+/// `.trans` tree — never the source tree — creates `dst`, and is a no-op when
+/// `src` and `dst` are the same directory.
+fn copy_trans_artifacts(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    if src == dst {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_trans_artifacts(&entry.path(), &to)?;
+        } else {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
 }
 
 /// Every hard-refusal case of `project start` (R2) — each error names the
@@ -1585,17 +1607,18 @@ mod tests {
     mod e2e {
         use super::*;
 
-        /// phase-06 task-8 (e2e): a warm-cache `apg project start` at an
-        /// already-scanned commit spawns NO frontend, seeds the branch DB from
-        /// the shared store's re-based facts, and carries the same code nodes
-        /// and edges as the full scan of that commit.
+        /// fast-project-start task-5 (e2e): `apg project start` at a
+        /// freshly-scanned main copies main's `apg/.trans` into the branch
+        /// verbatim — the branch `db.lbug` + `graph.jsonl` are byte-identical
+        /// to main's, and NO new frontend runs (the copied `apg-frontend.log`
+        /// still carries main's single frontend run and nothing is appended).
         #[test]
         #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
         fn warm_cache_project_start_spawns_no_frontend_and_equals_a_full_scan() {
             let (base, repo_dir, home) = warm_scratch("warm");
 
-            // Full scan on the main checkout: populates the shared fact store
-            // and the main db.lbug at the recorded HEAD the warm start reuses.
+            // Full scan on the main checkout: populates main's `.trans`
+            // (db.lbug + graph.jsonl + the frontend log) at the recorded HEAD.
             let scan = warm_run(&repo_dir, &home, &["scan", "."]);
             assert!(
                 scan.status.success(),
@@ -1603,71 +1626,151 @@ mod tests {
                 String::from_utf8_lossy(&scan.stderr)
             );
             // The baseline genuinely spawned the go frontend.
-            let main_log = std::fs::read_to_string(
-                repo_dir
-                    .join(specs::LAYOUT)
-                    .join(specs::TRANS)
-                    .join("apg-frontend.log"),
-            )
-            .unwrap();
+            let main_trans = repo_dir.join(specs::LAYOUT).join(specs::TRANS);
+            let main_log = std::fs::read_to_string(main_trans.join("apg-frontend.log")).unwrap();
             assert!(
                 main_log.contains("running go frontend"),
                 "the baseline full scan must spawn the go frontend: {main_log}"
             );
+            let main_db = std::fs::read(main_trans.join("db.lbug")).unwrap();
+            let main_graph = std::fs::read(main_trans.join("graph.jsonl")).unwrap();
             let full_scan_records = graph_records(&repo_dir);
             assert!(
                 !full_scan_records.is_empty(),
                 "the full scan must emit a graph"
             );
 
-            // Warm-cache project start: worktree + branch + branch DB, zero
-            // frontends (the recorded HEAD is already complete in the store).
+            // Project start: worktree + branch + branch DB copied from main —
+            // no frontend scan, no new frontend process.
             let start = warm_run(&repo_dir, &home, &["project", "start", "foo"]);
             assert!(
                 start.status.success(),
                 "project start: {}",
                 String::from_utf8_lossy(&start.stderr)
             );
-            assert!(
-                String::from_utf8_lossy(&start.stdout).contains("Warm cache"),
-                "start must report the warm seed: {}",
-                String::from_utf8_lossy(&start.stdout)
-            );
 
             let wt = repo_dir.join(specs::LAYOUT).join(".worktrees").join("foo");
+            let wt_trans = wt.join(specs::LAYOUT).join(specs::TRANS);
             assert!(
-                wt.join(specs::LAYOUT)
-                    .join(specs::TRANS)
-                    .join("db.lbug")
-                    .exists(),
+                wt_trans.join("db.lbug").exists(),
                 "the branch db.lbug must be seeded"
             );
 
-            // ZERO frontend spawns: the auto-scan log carries the warm-cache
-            // line and NO "running <lang> frontend".
-            let wt_log = std::fs::read_to_string(
-                wt.join(specs::LAYOUT)
-                    .join(specs::TRANS)
-                    .join("apg-frontend.log"),
-            )
-            .unwrap();
-            assert!(
-                wt_log.contains("warm cache"),
-                "the warm path must be taken: {wt_log}"
+            // Byte-identical copy: the branch DB and graph ARE main's scan, and
+            // the copied log is unchanged — start appended nothing, so no new
+            // frontend ran.
+            assert_eq!(
+                std::fs::read(wt_trans.join("db.lbug")).unwrap(),
+                main_db,
+                "the branch db.lbug must be byte-identical to main's"
             );
-            assert!(
-                !wt_log.contains("running go frontend"),
-                "the warm start must spawn no frontend: {wt_log}"
+            assert_eq!(
+                std::fs::read(wt_trans.join("graph.jsonl")).unwrap(),
+                main_graph,
+                "the branch graph.jsonl must be byte-identical to main's"
+            );
+            assert_eq!(
+                std::fs::read_to_string(wt_trans.join("apg-frontend.log")).unwrap(),
+                main_log,
+                "the copied frontend log must be byte-identical — no new frontend ran"
             );
 
             // Same code nodes and edges as the full scan of the commit.
-            let warm_records = graph_records(&wt);
             assert_eq!(
-                warm_records, full_scan_records,
-                "the warm start's graph must equal a full scan of the commit"
+                graph_records(&wt),
+                full_scan_records,
+                "the branch graph must equal a full scan of the commit"
             );
 
             let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// fast-project-start task-6 (e2e): `apg project start` refuses when
+        /// the main checkout has no scan OR a stale one, naming `apg scan` in
+        /// the main checkout. The refusal sits before the gitignore self-heal,
+        /// so it leaves main (and its `.gitignore`) untouched and creates no
+        /// branch/worktree.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn start_refuses_when_main_scan_is_stale_or_missing() {
+            // (a) No main scan at all (no `.trans/db.lbug`). The worktrees
+            // ignore entry is dropped too, so a refusal that reached the
+            // self-heal would visibly mutate main's `.gitignore`.
+            let repo = Repo::new("start-scan-missing");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.write(".gitignore", "apg/.trans/\n");
+            repo.commit_all("seed code, drop worktrees ignore");
+
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("stale or missing"), "{msg}");
+            assert!(msg.contains("apg scan"), "{msg}");
+            assert!(msg.contains("main checkout"), "{msg}");
+            // The refusal precedes the self-heal: `.gitignore` is untouched and
+            // main is still clean.
+            let ignore = std::fs::read_to_string(repo.root.join(".gitignore")).unwrap();
+            assert!(
+                !ignore.contains("apg/.worktrees/"),
+                "a freshness refusal must not run the gitignore self-heal: {ignore}"
+            );
+            assert!(repo.is_clean(), "the refusal must leave main untouched");
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            assert!(
+                main_repo
+                    .find_branch("foo", git2::BranchType::Local)
+                    .is_err(),
+                "no project branch may be created"
+            );
+            assert!(
+                main_repo.find_worktree("foo").is_err(),
+                "no project worktree may be created"
+            );
+            assert!(!repo.project_worktree_dir("foo").exists());
+            testutil::remove(&repo);
+
+            // (b) A stale recorded scan: a fresh scan, then a later commit on
+            // main makes the recorded sha/key no longer match HEAD.
+            let repo = Repo::new("start-scan-stale");
+            repo.write(
+                "code/seed.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Store"]),
+            );
+            repo.commit_all("seed code");
+            start_scan(&repo.root).unwrap();
+            assert!(
+                git::is_fresh(&repo.apg_root()),
+                "the fixture scan must be fresh"
+            );
+            repo.write(
+                "code/more.scan.jsonl",
+                &testutil::code_payload(MOD, FILE, &["Later"]),
+            );
+            repo.commit_all("later change");
+            assert!(
+                !git::is_fresh(&repo.apg_root()),
+                "the recorded scan is now stale for HEAD"
+            );
+
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("stale or missing"), "{msg}");
+            assert!(msg.contains("apg scan"), "{msg}");
+            let main_repo = git2::Repository::open(&repo.root).unwrap();
+            assert!(
+                main_repo
+                    .find_branch("foo", git2::BranchType::Local)
+                    .is_err(),
+                "no project branch may be created"
+            );
+            assert!(
+                main_repo.find_worktree("foo").is_err(),
+                "no project worktree may be created"
+            );
+            assert!(!repo.project_worktree_dir("foo").exists());
+            testutil::remove(&repo);
         }
 
         // ------------------------------------------------------------------
@@ -1685,8 +1788,10 @@ mod tests {
                 &testutil::code_payload(MOD, FILE, &["Store"]),
             );
             let main_sha = repo.commit_all("seed code");
+            // start seeds the branch from main's scan, so main must be scanned.
+            start_scan(&repo.root).unwrap();
 
-            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "foo").unwrap();
             assert_eq!(wt, repo.project_worktree_dir("foo").canonicalize().unwrap());
             assert!(wt.is_dir());
 
@@ -1716,12 +1821,11 @@ mod tests {
             assert_eq!(id_main.branch.as_deref(), Some("main"));
 
             // In-context re-run: no-op, prints the path, still Ok.
-            let again =
-                project_start_at(&wt.join(specs::LAYOUT), "foo", Some(&start_scan)).unwrap();
+            let again = project_start_at(&wt.join(specs::LAYOUT), "foo").unwrap();
             assert_eq!(again, wt);
 
             // From the main checkout the same name is a hard collision.
-            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
             assert!(format!("{err:#}").contains("already exists"), "{err:#}");
             testutil::remove(&repo);
         }
@@ -1744,8 +1848,11 @@ mod tests {
                 .unwrap();
             branch.rename("trunk", true).unwrap();
             main_repo.set_head("refs/heads/trunk").unwrap();
+            // start copies main's scan, so scan after the rename (the sha is
+            // unchanged, but scan on the checkout's current HEAD).
+            start_scan(&repo.root).unwrap();
 
-            let _wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            let _wt = project_start_at(&repo.apg_root(), "foo").unwrap();
             let head = main_repo.head().unwrap().peel_to_commit().unwrap();
             let branch = main_repo
                 .find_branch("foo", git2::BranchType::Local)
@@ -1769,7 +1876,7 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("apg-start-nongit-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(dir.join("apg").join(specs::TRANS)).unwrap();
-            let err = project_start_at(&dir.join("apg"), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&dir.join("apg"), "foo").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("git repository"), "{msg}");
             assert!(msg.contains("apg init"), "{msg}");
@@ -1786,7 +1893,7 @@ mod tests {
             opts.initial_head("refs/heads/main");
             git2::Repository::init_opts(&root, &opts).unwrap();
             std::fs::create_dir_all(root.join("apg").join(specs::TRANS)).unwrap();
-            let err = project_start_at(&root.join("apg"), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&root.join("apg"), "foo").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("unborn HEAD"), "{msg}");
             assert!(msg.contains("commit an initial state"), "{msg}");
@@ -1799,7 +1906,7 @@ mod tests {
             let repo = Repo::new("start-wt-escape");
             repo.start_project("foo");
             let wt_apg = repo.project_apg_root("foo");
-            let err = project_start_at(&wt_apg, "bar", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&wt_apg, "bar").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("one project at a time"), "{msg}");
             assert!(msg.contains("main checkout"), "{msg}");
@@ -1811,7 +1918,7 @@ mod tests {
         fn start_refuses_dirty_main() {
             let repo = Repo::new("start-dirty");
             repo.write("junk.txt", "untracked junk");
-            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("dirty"), "{msg}");
             assert!(msg.contains("git status"), "{msg}");
@@ -1823,7 +1930,7 @@ mod tests {
         fn start_refuses_invalid_names_never_sanitized() {
             let repo = Repo::new("start-names");
             for bad in ["", "a/b", "bad name", "bad~name", "..", "HEAD", ".lock"] {
-                let err = project_start_at(&repo.apg_root(), bad, Some(&start_scan)).unwrap_err();
+                let err = project_start_at(&repo.apg_root(), bad).unwrap_err();
                 let msg = format!("{err:#}");
                 assert!(
                     msg.contains("refused")
@@ -1841,7 +1948,7 @@ mod tests {
             let main_repo = git2::Repository::open(&repo.root).unwrap();
             let head = main_repo.head().unwrap().peel_to_commit().unwrap();
             main_repo.branch("foo", &head, false).unwrap();
-            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("already exists"), "{msg}");
             assert!(msg.contains("no worktree hosts it"), "{msg}");
@@ -1858,7 +1965,7 @@ mod tests {
             let head = main_repo.head().unwrap().peel_to_commit().unwrap();
             main_repo.branch("foo", &head, false).unwrap();
             main_repo.set_head("refs/heads/foo").unwrap();
-            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("already exists"), "{msg}");
             assert!(msg.contains("checked out in the main checkout"), "{msg}");
@@ -1872,7 +1979,7 @@ mod tests {
             repo.start_project("foo");
             // From the main checkout, starting `foo` again: checked out in the
             // project's worktree.
-            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("already exists"), "{msg}");
             assert!(msg.contains("checked out in worktree"), "{msg}");
@@ -1894,7 +2001,7 @@ mod tests {
             let repo = Repo::new("start-collision-dir");
             // A plain directory at the worktree location (no branch, no worktree).
             std::fs::create_dir_all(repo.project_worktree_dir("foo")).unwrap();
-            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("not a project worktree"), "{msg}");
             testutil::remove(&repo);
@@ -1913,7 +2020,9 @@ mod tests {
             );
             repo.write(".gitignore", "apg/.trans/\n");
             repo.commit_all("drop worktrees ignore");
-            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            // start seeds from main's scan, so main needs a fresh scan.
+            start_scan(&repo.root).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "foo").unwrap();
             assert!(wt.is_dir());
             // The entry is back in the main checkout's .gitignore — committed,
             // so the main checkout is clean again (a later start would refuse a
@@ -1938,7 +2047,7 @@ mod tests {
         fn start_blocks_unversioned_layout_with_init_guidance() {
             let repo = Repo::new("start-gate-unversioned");
             set_layout_version(&repo, None);
-            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
             let msg = format!("{err:#}");
             for needle in [
                 "no layout version",
@@ -1958,7 +2067,7 @@ mod tests {
         fn start_blocks_older_layout_with_upgrade_guidance() {
             let repo = Repo::new("start-gate-older");
             set_layout_version(&repo, Some(&older_minor_version()));
-            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("predates"), "{msg}");
             assert!(msg.contains("apg init"), "{msg}");
@@ -1972,7 +2081,7 @@ mod tests {
         fn start_blocks_newer_layout_with_upgrade_guidance() {
             let repo = Repo::new("start-gate-newer");
             set_layout_version(&repo, Some(&newer_minor_version()));
-            let err = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap_err();
+            let err = project_start_at(&repo.apg_root(), "foo").unwrap_err();
             let msg = format!("{err:#}");
             assert!(msg.contains("NEWER apg"), "{msg}");
             assert!(msg.contains("upgrade apg"), "{msg}");
@@ -1991,7 +2100,8 @@ mod tests {
                 &testutil::code_payload(MOD, FILE, &["Store"]),
             );
             set_layout_version(&repo, Some(&patch_shifted_version()));
-            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan)).unwrap();
+            start_scan(&repo.root).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "foo").unwrap();
             assert!(wt.is_dir(), "same major.minor must proceed");
             testutil::remove(&repo);
         }
@@ -2015,8 +2125,11 @@ mod tests {
             );
             repo.commit_all("seed code");
 
+            // Main must carry a fresh scan: start seeds the branch from it.
+            start_scan_locked(&repo.root).unwrap();
+
             // start -> worktree + branch + branch DB (payload has only Store).
-            let wt = project_start_at(&repo.apg_root(), "foo", Some(&start_scan_locked)).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "foo").unwrap();
             let wt_apg = wt.join(specs::LAYOUT);
 
             // mutate: author the spec (a durable node file -> auto-commits on the
@@ -2181,8 +2294,7 @@ mod tests {
             // DB. The worktree lives INSIDE main's apg/ (at
             // <main>/apg/.worktrees/round-trip), so walk-up discovery has a real
             // choice to make — the worktree's own apg/ vs main's apg/ above it.
-            let wt =
-                project_start_at(&repo.apg_root(), "round-trip", Some(&start_scan_locked)).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "round-trip").unwrap();
             let wt_apg = wt.join(specs::LAYOUT);
             assert!(wt.is_dir());
             assert!(wt_apg.join(specs::TRANS).join("db.lbug").exists());
@@ -2481,11 +2593,14 @@ mod tests {
             );
             repo.commit_all("seed code");
 
+            // Main must carry a fresh scan: both starts seed from it.
+            start_scan_locked(&repo.root).unwrap();
+
             // Refusal path first (AC-b): a merge of a project whose verify gate
             // fails — a planned node that the branch scan never realized — must
             // refuse before anything is merged, leaving the worktree, the branch,
             // and the main checkout untouched.
-            let wt = project_start_at(&repo.apg_root(), "fail", Some(&start_scan_locked)).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "fail").unwrap();
             let wt_apg = wt.join(specs::LAYOUT);
             // A transient plan carrying an unrealized planned node makes the
             // verify gate refuse (`fixture.mod.Widget` never becomes real code —
@@ -2557,7 +2672,7 @@ mod tests {
             // Success path (AC-a): a project with durable content + a minimal
             // plan (no planned nodes, no feedback) passes the verify gate, merges,
             // rebuilds main, and then cleans up after itself.
-            let wt = project_start_at(&repo.apg_root(), "test", Some(&start_scan_locked)).unwrap();
+            let wt = project_start_at(&repo.apg_root(), "test").unwrap();
             let wt_apg = wt.join(specs::LAYOUT);
             write_spec_node(&wt_apg);
             let plan_path = wt_apg.join(specs::TRANS).join("plans").join("test.jsonl");

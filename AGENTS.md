@@ -44,7 +44,10 @@ internals:
 1. **Start from main.** The navigator runs `apg project start <name>` from the
    **main checkout** (never inside a worktree). The binary branches off the
    repo's default branch, creates the worktree at `<main>/apg/.worktrees/<name>`,
-   auto-scans it (worktree + branch + branch DB in one command), and **prints
+   and seeds the branch DB by copying the main checkout's `apg/.trans` scan
+   verbatim (worktree + branch + branch DB in one command, no frontend scan).
+   Start refuses when the main checkout's scan is stale or missing for main's
+   HEAD, so run `apg scan` in the main checkout first. Then it **prints
    the worktree path**. Idempotent only inside that same project; every
    collision is a hard refuse.
 2. **Operate in-worktree.** Sessions and subagents run with **cwd inside the
@@ -366,7 +369,8 @@ FQN rendering. See *The installed binary is the contract* in the project flow.
    scratch repo is a real project:
 
    ```sh
-   "$BIN" project start demo                 # worktree + branch + branch DB, auto-scan
+   "$BIN" scan .                             # main must have a current scan: start copies it
+   "$BIN" project start demo                 # worktree + branch + branch DB copied from main's scan
    cd apg/.worktrees/demo
    "$BIN" node add requirements requirement demo-req --body "…"
    "$BIN" node add domain value demo-val --body "…"

@@ -831,27 +831,6 @@ fn warm_prepared(
     })
 }
 
-/// Whether the shared store is a complete warm cache for this checkout's HEAD —
-/// the same predicate [`warm_prepared`] applies, without building the state.
-/// `project start` uses it to report the seed path it is about to take, and
-/// `cmd_scan` uses [`warm_prepared`] for the assembly itself.
-pub(crate) fn warm_cache_ready(project_dir: &Path, apg_root: &Path) -> bool {
-    let git_state = git::git_state(project_dir);
-    let available = available_languages();
-    let detected = auto_detect_languages(project_dir, &available);
-    let languages = if detected.is_empty() {
-        available
-    } else {
-        detected
-    };
-    let config = cache::ScanConfigKey {
-        languages,
-        excludes: Vec::new(),
-        modules: Vec::new(),
-    };
-    warm_prepared(project_dir, apg_root, &git_state, &config).is_some()
-}
-
 /// The code-FQN universe of the shared store's complete warm cache — the
 /// full-universe seam's source when no local export exists yet (a fresh
 /// worktree): every fragment's re-based code FQNs (module FQNs included) plus
