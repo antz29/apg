@@ -16,11 +16,6 @@
       "kind": "drives",
       "target": "domain.group.graph-identity",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.value.project-start-seed",
-      "properties": {}
     }
   ],
   "in": [
