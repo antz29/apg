@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.navigator-prompt-guidance",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",
