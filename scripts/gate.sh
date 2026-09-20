@@ -45,6 +45,12 @@ cargo build
 step "cargo test   (default suite: unit+int)"
 cargo test
 
+step "bun test   (opencode-suite: bun)"
+(cd opencode-suite && bun test)
+
+step "node --test   (src/tslib: node)"
+(cd src/tslib && node --test)
+
 if [ "${1:-}" = "--e2e" ]; then
   step "cargo test tests::e2e:: -- --ignored --test-threads=${E2E_THREADS:-1}"
   cargo test tests::e2e:: -- --ignored --test-threads="${E2E_THREADS:-1}"

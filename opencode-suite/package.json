@@ -1,6 +1,9 @@
 {
   "name": "apg-opencode-suite",
   "private": true,
+  "scripts": {
+    "test": "bun test"
+  },
   "dependencies": {
     "@opencode-ai/plugin": "1.18.20"
   }
