@@ -23,6 +23,11 @@
       "kind": "details",
       "source": "solution.note.repo-guide-container-choice",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.graph-first-test-pending",
+      "properties": {}
     }
   ]
 }
