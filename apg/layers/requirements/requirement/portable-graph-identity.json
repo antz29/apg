@@ -46,6 +46,11 @@
       "kind": "drives",
       "target": "domain.entity.source-file",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.absolute-paths-at-tool-boundary",
+      "properties": {}
     }
   ],
   "in": [
