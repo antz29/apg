@@ -303,9 +303,11 @@ offsets, matching their compilers' native positions.)
 
 A change-set is a **project**: a git branch + its worktree. `apg project start
 <name>` — run from the main checkout — branches off the default branch, creates
-the worktree at `apg/.worktrees/<name>`, auto-scans it, and **prints the
-worktree path**; sessions then operate with cwd inside the worktree (walk-up
-discovery finds the worktree's own `apg/` and its branch DB). Main is never a
+the worktree at `apg/.worktrees/<name>`, copies the main checkout's current
+scan into it (`apg scan` must be current on main first — start refuses a stale
+or missing scan), and **prints the worktree path**; sessions then operate with
+cwd inside the worktree (walk-up discovery finds the worktree's own `apg/` and
+its branch DB). Main is never a
 mutation place — `apg node`/`apg edge`/`apg plan`/`apg review` refuse outside a
 project context.
 

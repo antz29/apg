@@ -161,10 +161,9 @@ impl Repo {
         wt_repo
             .checkout_head(Some(&mut git2::build::CheckoutBuilder::new().force()))
             .unwrap();
-        // Seed the worktree's own `apg/.trans/` marker — exactly what the
-        // production start does before its auto-scan — so walk-up layout
-        // discovery inside the worktree resolves to the worktree's layout,
-        // not the main checkout's.
+        // Seed the worktree's own `apg/.trans/` marker — the marker production
+        // start's scan copy provides — so walk-up layout discovery inside the
+        // worktree resolves to the worktree's layout, not the main checkout's.
         std::fs::create_dir_all(wt_path.join(specs::LAYOUT).join(specs::TRANS)).unwrap();
         wt_path
     }

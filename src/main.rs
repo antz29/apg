@@ -5933,7 +5933,7 @@ mod tests {
             run_in(&repo_dir_s, &["scan", "."]);
 
             // `apg project start <name>` from the main checkout: worktree + branch +
-            // branch DB (auto-scanned).
+            // branch DB (seeded by copying main's scan).
             run_in(&repo_dir_s, &["project", "start", "accept"]);
             let wt = repo_dir.join("apg").join(".worktrees").join("accept");
             assert!(

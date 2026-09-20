@@ -137,7 +137,8 @@ A change-set is a **project** = a git branch + worktree:
 - The navigator runs **`apg project start <name>`** from the **main checkout**
   (never from inside a worktree). The binary creates the worktree at
   `<main>/apg/.worktrees/<name>`, branches off the repo's **default** branch,
-  auto-scans it, and **prints the worktree path**.
+  seeds the branch DB by copying main's current scan (`apg scan` on main first —
+  start refuses a stale or missing scan), and **prints the worktree path**.
 - Sessions/agents then operate with **cwd inside the worktree**. The suite
   tools' walk-up discovery finds the worktree's **own** `apg/` (its layout +
   its branch DB) — the tools work unchanged. Point the session workdir at the
@@ -339,7 +340,8 @@ mutates the graph), the project context comes first:
 
 1. Run **`apg project start <name>`** from the **main checkout** (via
    `apg_project {action: "start", name}`). The binary creates the worktree +
-   branch off the default branch, auto-scans, and **prints the worktree path**.
+   branch off the default branch, seeds the branch DB from main's current scan
+   (main must be freshly scanned), and **prints the worktree path**.
 2. Sessions and subagents then operate with **cwd inside the printed worktree**
    — point the session workdir there. The suite tools' walk-up discovery finds
    the worktree's own `apg/` (its branch DB) automatically; nothing else
