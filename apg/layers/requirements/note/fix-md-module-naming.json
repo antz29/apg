@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.graph-first-navigation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.repo-agent-guide",
+      "properties": {}
     }
   ],
   "in": []

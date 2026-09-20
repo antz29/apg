@@ -26,6 +26,11 @@
       "kind": "details",
       "source": "solution.note.repo-guide-container-choice",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.fix-md-module-naming",
+      "properties": {}
     }
   ]
 }
