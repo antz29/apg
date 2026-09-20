@@ -1,5 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
-import { runCypher, lit } from "../lib/apg.ts"
+import path from "node:path"
+import { runCypher, lit, findApgRoot, resolveProjectPath } from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -19,8 +20,8 @@ export default tool({
     limit: tool.schema.string().optional().describe("Max results (default 100, max 500)"),
   },
   async execute(args, context) {
-    const path = args.path
-    if (!path) return "Error: path is required"
+    const filePath = args.path
+    if (!filePath) return "Error: path is required"
     const startLine = Number(args.startLine)
     const endLine = Number(args.endLine)
     if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) {
@@ -29,8 +30,13 @@ export default tool({
     if (startLine > endLine) return "Error: startLine must be <= endLine"
     const limit = args.limit ? Math.max(1, Math.min(500, Number(args.limit))) : 100
 
+    // The graph's `path` column is the stored repo-relative identity; convert
+    // the caller's absolute path before matching.
+    const root = findApgRoot(context, args.directory)
+    const stored = path.isAbsolute(filePath) && root ? resolveProjectPath(root, filePath) : filePath
+
     let cypher =
-      `MATCH (n) WHERE n.path = ${lit(path)} AND n.start_line <= ${endLine} AND n.end_line >= ${startLine}`
+      `MATCH (n) WHERE n.path = ${lit(stored)} AND n.start_line <= ${endLine} AND n.end_line >= ${startLine}`
     if (args.kind) {
       cypher += ` AND labels(n) = ${lit(args.kind)}`
     } else {

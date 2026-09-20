@@ -23,7 +23,8 @@ export default tool({
       `RETURN n.fqn, n.start_line, n.end_line ORDER BY n.start_line`
 
     const [selfOut, nestedOut] = await Promise.all([
-      runCypher(context, self, args.directory),
+      // Column 1 is `s.path`, the stored repo-relative source-file identity.
+      runCypher(context, self, args.directory, { rebaseColumns: [1] }),
       runCypher(context, nested, args.directory),
     ])
     const nestedBody = nestedOut.split("\n").slice(1).join("\n")

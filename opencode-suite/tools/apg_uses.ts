@@ -27,17 +27,22 @@ export default tool({
     const limit = args.limit ? Math.max(1, Math.min(1000, Number(args.limit))) : 500
 
     let cypher: string
+    // The `n.path` / `s.path` column is the stored repo-relative source-file
+    // identity; its CSV index differs per branch.
+    let rebaseColumns: number[]
     if (direction === "in") {
       cypher = `MATCH (n)-[:Uses]->(s:Struct) WHERE s.fqn = ${lit(fqn)}`
       const ctCond = codeTypeCondition("n", args.codeType)
       if (ctCond) cypher += ` AND ${ctCond}`
       cypher += ` RETURN labels(n) as kind, n.fqn as user, n.path, n.start_line, n.end_line ORDER BY n.fqn LIMIT ${limit}`
+      rebaseColumns = [2]
     } else {
       cypher = `MATCH (n)-[:Uses]->(s:Struct) WHERE n.fqn = ${lit(fqn)}`
       const ctCond = codeTypeCondition("s", args.codeType)
       if (ctCond) cypher += ` AND ${ctCond}`
       cypher += ` RETURN s.fqn as used_type, s.path, s.start_line, s.end_line, s.code_type ORDER BY s.fqn LIMIT ${limit}`
+      rebaseColumns = [1]
     }
-    return runCypher(context, cypher, args.directory)
+    return runCypher(context, cypher, args.directory, { rebaseColumns })
   },
 })

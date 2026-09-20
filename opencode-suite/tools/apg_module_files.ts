@@ -25,6 +25,8 @@ export default tool({
     const ctCond = codeTypeCondition("f", args.codeType)
     if (ctCond) cypher += ` WHERE ${ctCond}`
     cypher += ` RETURN f.fqn, f.start_line, f.end_line, f.code_type ORDER BY f.fqn LIMIT ${limit}`
-    return runCypher(context, cypher, args.directory)
+    // Column 0 is the File fqn — the stored repo-relative identity. Resolve it
+    // to an absolute path under the caller's project directory.
+    return runCypher(context, cypher, args.directory, { rebaseColumns: [0] })
   },
 })

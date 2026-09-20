@@ -2333,8 +2333,8 @@ mod tests {
             use crate::schema::Record;
 
             let dir = scratch("export-equiv");
-            let changed = "/x/go/changed.go".to_string();
-            let skipped = "/x/csharp/Tests.cs".to_string();
+            let changed = "go/changed.go".to_string();
+            let skipped = "csharp/Tests.cs".to_string();
             let cache_key = CacheKey::compute(&ScanConfigKey::default());
 
             // The last FULL scan's graph: both languages' complete scaffolding.
@@ -2439,6 +2439,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
                 Some(&reuse),
             );
@@ -2498,9 +2499,9 @@ mod tests {
             use crate::schema::Record;
 
             let dir = scratch("java-targeted-export");
-            let a = "/x/java/pkg/a/A.java".to_string();
-            let b = "/x/java/pkg/b/B.java".to_string();
-            let c = "/x/java/pkg/c/C.java".to_string();
+            let a = "java/pkg/a/A.java".to_string();
+            let b = "java/pkg/b/B.java".to_string();
+            let c = "java/pkg/c/C.java".to_string();
             let cache_key = CacheKey::compute(&ScanConfigKey::default());
 
             // The TRUE new tree: the full-rebuild reference AND the source of the
@@ -2622,6 +2623,7 @@ mod tests {
                 blacklist: &[],
                 language: "java",
                 config: None,
+                base: None,
             };
             let mut fixed: Vec<Record> = vec![scan_meta()];
             fixed.extend(scaffolding());

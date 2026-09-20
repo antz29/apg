@@ -25,14 +25,16 @@ export function apgBinary(): string {
  *  branch DB) — never the main checkout's — so the tools work unchanged with
  *  cwd inside the worktree.
  *
- *  `directory` (the tools' optional arg) overrides the starting point: a
- *  session rooted at the main checkout passes a project worktree path
- *  (`apg/.worktrees/<name>`) and the walk-up starts there, falling back to the
- *  session dirs only when it yields nothing. This is how a main-rooted session
- *  targets a project worktree's own `apg/` instead of main's. */
+ *  `directory` (the tools' optional arg) is the caller's project directory and
+ *  is AUTHORITATIVE: when given, the walk-up starts there and only there, so
+ *  the returned project root is the caller's checkout — the base the curated
+ *  tools rebase stored repo-relative identities onto
+ *  (`requirements.requirement.absolute-paths-at-tool-boundary`) — never a
+ *  project the session merely happens to have cwd in. The context/cwd dirs are
+ *  fallbacks only when no `directory` is given. */
 export function findApgRoot(context: ToolContext, directory?: string): string | null {
   const starts = directory
-    ? [directory, context.directory, process.cwd(), context.worktree]
+    ? [directory]
     : [context.directory, process.cwd(), context.worktree]
   for (const s of starts) {
     if (!s) continue
@@ -46,6 +48,32 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
   }
   return null
 }
+
+/**
+ * The stored↔absolute identity boundary, side-effect-free (no fs, no
+ * subprocess, no `Bun.$`): given the caller's project directory and a path,
+ * it returns the OTHER spelling of the same file.
+ *
+ * - A stored repo-relative identity (the graph's File `fqn` / Struct/Function
+ *   `path` — `/`-separated, no leading `/`) resolves to the absolute path
+ *   under `projectDir`, so a consumer can open it.
+ * - An input that is already absolute and under `projectDir` maps back to the
+ *   stored repo-relative value, ready for a Cypher path column.
+ *
+ * The two directions round-trip. An absolute path outside `projectDir` (there
+ * is no stored spelling to recover) and the empty string pass through
+ * unchanged.
+ */
+export function resolveProjectPath(projectDir: string, value: string): string {
+  if (!value) return value
+  if (path.isAbsolute(value)) {
+    const rel = path.relative(projectDir, value)
+    if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) return value
+    return rel.split(path.sep).join("/")
+  }
+  return path.join(projectDir, value)
+}
+
 
 /** Prefix of the error string runCypher returns when `apg query` exits non-zero;
  *  the exit code and the CLI's stderr follow it. Shared with `isQueryError` so
@@ -66,11 +94,19 @@ export const NO_DB_ERROR =
  * query`'s exit code and stderr verbatim. Both failure signals are built from
  * the constants above, which `isQueryError` also tests against, so the failure
  * contract stays structural rather than duplicated string literals.
+ *
+ * DEFAULT-RAW seam (`requirements.requirement.absolute-paths-at-tool-boundary`):
+ * with no `opts`, the stored form is returned verbatim, so raw `apg query` is
+ * untouched. A curated tool opts in by naming the CSV columns that carry a
+ * stored repo-relative identity; those cells are resolved to absolute paths
+ * under the caller's project directory before the CSV is re-serialized. The
+ * header row is never rebased.
  */
 export async function runCypher(
   context: ToolContext,
   cypher: string,
   directory?: string,
+  opts?: { rebaseColumns?: number[] },
 ): Promise<string> {
   const root = findApgRoot(context, directory)
   if (!root) {
@@ -80,7 +116,21 @@ export async function runCypher(
   if (result.exitCode !== 0) {
     return `${QUERY_FAILED_PREFIX} (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
   }
-  return result.stdout.toString().trim()
+  const out = result.stdout.toString().trim()
+  const cols = opts?.rebaseColumns
+  if (!cols || cols.length === 0) return out
+  const rebased = csvToRows(out).map((row, i) =>
+    i === 0
+      ? row
+      : row.map((cell, j) => (cols.includes(j) ? resolveProjectPath(root, cell) : cell)),
+  )
+  return rebased
+    .map((row) =>
+      row
+        .map((cell) => (/[",\n\r]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell))
+        .join(","),
+    )
+    .join("\n")
 }
 
 /** Single-quotes a value for a Cypher string literal, escaping \ ' " and newlines. */

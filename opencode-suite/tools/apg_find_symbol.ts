@@ -40,6 +40,9 @@ export default tool({
       cypher += ` AND ${conds.join(" AND ")}`
     }
     cypher += ` RETURN labels(n) as kind, n.fqn, n.path, n.start_line, n.end_line ORDER BY n.fqn LIMIT ${limit}`
-    return runCypher(context, cypher, args.directory)
+    // Column 2 is `n.path` — the stored repo-relative source-file identity for
+    // a Struct/Function (empty for a File, whose identity is its fqn in column
+    // 1 and stays the tool-input form other tools accept).
+    return runCypher(context, cypher, args.directory, { rebaseColumns: [2] })
   },
 })

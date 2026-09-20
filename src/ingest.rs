@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::classify::{ApgConfig, classify_code_type};
 use crate::graph::{Graph, Location, Node, NodeKind};
@@ -26,6 +26,11 @@ pub struct IngestOptions<'a> {
     pub blacklist: &'a [String],
     pub language: &'a str,
     pub config: Option<&'a ApgConfig>,
+    /// The checkout-independent identity base: the git toplevel (or the scan
+    /// root when the scanned tree is not a git repository). Every scanner path
+    /// is rendered repo-relative against it. `None` (the pure in-memory callers)
+    /// is the pass-through sentinel — paths are rendered verbatim.
+    pub base: Option<&'a Path>,
 }
 
 /// Reuse/splice inputs for a win-B incremental assembly (phase-02 task-7): the
@@ -91,14 +96,74 @@ fn file_basename(file: &str) -> String {
         .unwrap_or_else(|| file.to_string())
 }
 
+/// Renders a scanner path as its checkout-independent identity relative to
+/// `base` (the git toplevel, or the scan root when the scanned tree is not a
+/// git repository): a `/`-separated path with no leading separator, no `.`
+/// component and no `..` segment. An already-relative identity (a frontend's
+/// dotted package identity, e.g. `pkg.sub` or `@co/ui.src`) passes through
+/// unchanged; an absolute path under `base` is stripped to its tail.
+///
+/// A path outside `base`, or one whose tail would escape `base` with `..`,
+/// falls back to its file name so an identity can never embed a checkout
+/// component (a leading `/` or a `..` segment is a violation —
+/// `requirements.constraint.file-identity-is-repo-relative`).
+///
+/// An empty `base` is the pure pass-through sentinel the in-memory renderer
+/// tests use: the input is returned verbatim.
+pub fn repo_relative_identity(base: &Path, path: &str) -> String {
+    if base.as_os_str().is_empty() {
+        return path.to_string();
+    }
+    let fallback = || -> String {
+        let name = Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if name.is_empty() {
+            path.replace('\\', "/").trim_start_matches('/').to_string()
+        } else {
+            name
+        }
+    };
+    let p = Path::new(path);
+    let candidate = if p.is_absolute() {
+        match p.strip_prefix(base) {
+            Ok(rel) => rel.to_path_buf(),
+            Err(_) => return fallback(),
+        }
+    } else {
+        p.to_path_buf()
+    };
+    let mut out: Vec<String> = Vec::new();
+    for comp in candidate.components() {
+        match comp {
+            std::path::Component::Normal(s) => out.push(s.to_string_lossy().replace('\\', "/")),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if out.pop().is_none() {
+                    return fallback();
+                }
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {}
+        }
+    }
+    if out.is_empty() {
+        return fallback();
+    }
+    out.join("/")
+}
+
 /// Renders a module's canonical FQN by rooting its frontend-emitted dotted
-/// identity under the `lang_switch` language id (PHASE_09 language rooting):
+/// identity under the `lang_switch` language id (PHASE_09 language rooting)
+/// after rendering the identity repo-relative against `base` (a Markdown
+/// module identity is an absolute directory path; every other frontend emits a
+/// relative identity, which passes through unchanged):
 ///
 /// ```text
-/// root_module_fqn("rust", "apg.ingest") -> "rust.apg.ingest"
-/// root_module_fqn("py",   "pkg.sub")    -> "py.pkg.sub"
-/// root_module_fqn("ts",   "@co/ui.src") -> "ts.@co/ui.src"
-/// root_module_fqn("md",   "/abs/docs")  -> "md./abs/docs"
+/// root_module_fqn("rust", "apg.ingest", base) -> "rust.apg.ingest"
+/// root_module_fqn("py",   "pkg.sub",    base) -> "py.pkg.sub"
+/// root_module_fqn("ts",   "@co/ui.src", base) -> "ts.@co/ui.src"
+/// root_module_fqn("md",   "/abs/docs",  base) -> "md.docs"
 /// ```
 ///
 /// The frontends emit the module identity VERBATIM and UNROOTED (a
@@ -108,18 +173,18 @@ fn file_basename(file: &str) -> String {
 /// `py.apg`), so a cross-language module-module FQN collision is impossible by
 /// construction. Every declaration's scope parent begins with a module identity,
 /// so `parent.name` inherits the root without a second transform.
-pub fn root_module_fqn(language: &str, identity: &str) -> String {
-    format!("{language}.{identity}")
+pub fn root_module_fqn(language: &str, identity: &str, base: &Path) -> String {
+    format!("{language}.{}", repo_relative_identity(base, identity))
 }
 
 /// Applies [`root_module_fqn`] to a declaration's scope parent (or a module
 /// identity), leaving an EMPTY parent empty — a declaration with no scope is a
 /// scanner anomaly and must not become the bare `<language>.` root.
-fn rooted_scope(language: &str, parent: &str) -> String {
+fn rooted_scope(language: &str, parent: &str, base: &Path) -> String {
     if parent.is_empty() {
         String::new()
     } else {
-        root_module_fqn(language, parent)
+        root_module_fqn(language, parent, base)
     }
 }
 
@@ -132,9 +197,10 @@ fn root_module_endpoint(
     language: &str,
     endpoint: &str,
     module_identities: &HashMap<String, HashSet<String>>,
+    base: &Path,
 ) -> String {
     match module_identities.get(language) {
-        Some(ids) if ids.contains(endpoint) => root_module_fqn(language, endpoint),
+        Some(ids) if ids.contains(endpoint) => root_module_fqn(language, endpoint, base),
         _ => endpoint.to_string(),
     }
 }
@@ -151,12 +217,13 @@ fn root_edge_endpoint(
     language: &str,
     endpoint: &str,
     module_identities: &HashMap<String, HashSet<String>>,
+    base: &Path,
 ) -> String {
     let Some(identities) = module_identities.get(language) else {
         return endpoint.to_string();
     };
     if identities.contains(endpoint) {
-        return root_module_fqn(language, endpoint);
+        return root_module_fqn(language, endpoint, base);
     }
     let bytes = endpoint.as_bytes();
     let mut sep = bytes.len();
@@ -166,7 +233,7 @@ fn root_edge_endpoint(
             && sep > 0
             && identities.contains(&endpoint[..sep])
         {
-            return root_module_fqn(language, endpoint);
+            return root_module_fqn(language, endpoint, base);
         }
     }
     endpoint.to_string()
@@ -586,7 +653,7 @@ fn ingest_records(
     let mut id_to_fqn: HashMap<String, String> = HashMap::new();
     let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
     let mut funcs: Vec<FuncDecl> = Vec::new();
-    // File nodes keyed by absolute path -> their parent module FQN.
+    // File nodes keyed by repo-relative path -> their parent module FQN.
     let mut files: HashMap<String, String> = HashMap::new();
     // Modules are buffered (not claimed/inserted immediately): a package and a
     // type may legally share a name in the JVM (`pkg.A` the package and
@@ -609,6 +676,10 @@ fn ingest_records(
     // a multi-language scan) appears. Drives code_type classification and FQN
     // rendering per record.
     let mut lang: String = opts.language.to_string();
+    // The checkout-independent identity base (git toplevel / scan-root
+    // fallback). `None` is the pass-through sentinel the pure in-memory callers
+    // use, so a `""` base renders every path verbatim.
+    let base: &Path = opts.base.unwrap_or_else(|| Path::new(""));
 
     // Stream the records in one pass: modules, structs, and unresolved targets
     // have deterministic FQNs and enter the graph immediately; functions are
@@ -632,9 +703,10 @@ fn ingest_records(
             match r {
                 Record::Module { fqn } => {
                     // PHASE_09 language rooting: the frontend emits the module
-                    // identity verbatim; the ingestor roots it under the stream's
-                    // `lang_switch` id.
-                    let rooted = root_module_fqn(&lang, &fqn);
+                    // identity verbatim; the ingestor renders it repo-relative
+                    // (a Markdown identity is an absolute directory path) and
+                    // roots it under the stream's `lang_switch` id.
+                    let rooted = root_module_fqn(&lang, &fqn, base);
                     if is_blacklisted(&rooted, opts.blacklist) {
                         skipped += 1;
                         continue;
@@ -661,7 +733,7 @@ fn ingest_records(
                     start_line,
                     end_line,
                 } => {
-                    let fqn = format!("{}.{name}", rooted_scope(&lang, &parent));
+                    let fqn = format!("{}.{name}", rooted_scope(&lang, &parent, base));
                     claim(&mut seen, &id, &fqn, NodeKind::Struct);
                     id_to_fqn.insert(id.clone(), fqn.clone());
                     if is_blacklisted(&fqn, opts.blacklist) {
@@ -675,7 +747,7 @@ fn ingest_records(
                         Node {
                             kind: NodeKind::Struct,
                             location: Some(Location {
-                                path: PathBuf::from(&path),
+                                path: PathBuf::from(repo_relative_identity(base, &path)),
                                 start,
                                 end,
                                 start_line,
@@ -700,11 +772,11 @@ fn ingest_records(
                     end_line,
                 } => funcs.push(FuncDecl {
                     id,
-                    parent: rooted_scope(&lang, &parent),
+                    parent: rooted_scope(&lang, &parent, base),
                     name,
                     params,
                     file,
-                    path,
+                    path: repo_relative_identity(base, &path),
                     start,
                     end,
                     start_line,
@@ -719,21 +791,23 @@ fn ingest_records(
                 } => {
                     // A file belongs to a module; if that module is blacklisted
                     // the file and everything in it is out of scope too. The
-                    // parent module FQN is rooted (PHASE_09).
-                    let parent = rooted_scope(&lang, &parent);
+                    // parent module FQN is rooted (PHASE_09), and the file's
+                    // canonical identity is its repo-relative path.
+                    let parent = rooted_scope(&lang, &parent, base);
                     if is_blacklisted(&parent, opts.blacklist) {
                         skipped += 1;
                         continue;
                     }
-                    if !files.contains_key(&path) {
-                        files.insert(path.clone(), parent.clone());
-                        let code_type = classify_code_type(&path, &path, &lang, opts.config);
+                    let identity = repo_relative_identity(base, &path);
+                    if !files.contains_key(&identity) {
+                        files.insert(identity.clone(), parent.clone());
+                        let code_type = classify_code_type(&path, &identity, &lang, opts.config);
                         graph.nodes.insert(
-                            path.clone(),
+                            identity.clone(),
                             Node {
                                 kind: NodeKind::File,
                                 location: Some(Location {
-                                    path: PathBuf::from(&path),
+                                    path: PathBuf::from(&identity),
                                     start: 0,
                                     end: 0,
                                     start_line,
@@ -1039,22 +1113,22 @@ fn ingest_records(
                 Record::Contains { from, to } => write_edge(
                     &mut sw,
                     Record::Contains {
-                        from: root_module_endpoint(&lang, &from, &module_identities),
-                        to: root_module_endpoint(&lang, &to, &module_identities),
+                        from: root_module_endpoint(&lang, &from, &module_identities, base),
+                        to: root_module_endpoint(&lang, &to, &module_identities, base),
                     },
                 ),
                 Record::Calls { from, to } => write_edge(
                     &mut sw,
                     Record::Calls {
-                        from: root_edge_endpoint(&lang, &from, &module_identities),
-                        to: root_edge_endpoint(&lang, &to, &module_identities),
+                        from: root_edge_endpoint(&lang, &from, &module_identities, base),
+                        to: root_edge_endpoint(&lang, &to, &module_identities, base),
                     },
                 ),
                 Record::Uses { from, to } => write_edge(
                     &mut sw,
                     Record::Uses {
-                        from: root_edge_endpoint(&lang, &from, &module_identities),
-                        to: root_edge_endpoint(&lang, &to, &module_identities),
+                        from: root_edge_endpoint(&lang, &from, &module_identities, base),
+                        to: root_edge_endpoint(&lang, &to, &module_identities, base),
                     },
                 ),
                 Record::UnresolvedCall {
@@ -1064,7 +1138,7 @@ fn ingest_records(
                 } => write_edge(
                     &mut sw,
                     Record::UnresolvedCall {
-                        from: root_edge_endpoint(&lang, &from, &module_identities),
+                        from: root_edge_endpoint(&lang, &from, &module_identities, base),
                         to,
                         target_type,
                     },
@@ -1072,7 +1146,7 @@ fn ingest_records(
                 Record::UnresolvedUse { from, to } => write_edge(
                     &mut sw,
                     Record::UnresolvedUse {
-                        from: root_edge_endpoint(&lang, &from, &module_identities),
+                        from: root_edge_endpoint(&lang, &from, &module_identities, base),
                         to,
                     },
                 ),
@@ -1913,17 +1987,70 @@ mod tests {
         /// directory path, Go's module path, and Java's package. Rooting is what
         /// makes two languages that both define a module identity `apg` distinct
         /// (`rust.apg` vs `py.apg`).
+        ///
+        /// fix-module-identity task-12: the identity is rendered repo-relative
+        /// against the base first. A Markdown identity is an absolute directory
+        /// path, so `/repo/docs` under base `/repo` renders `md.docs`; every
+        /// other frontend identity is already relative and passes through.
         #[test]
         fn root_module_fqn_roots_every_language_identity() {
-            assert_eq!(root_module_fqn("rust", "apg.ingest"), "rust.apg.ingest");
-            assert_eq!(root_module_fqn("py", "pkg.sub"), "py.pkg.sub");
-            assert_eq!(root_module_fqn("ts", "@co/ui.src"), "ts.@co/ui.src");
-            assert_eq!(root_module_fqn("md", "/abs/docs"), "md./abs/docs");
-            assert_eq!(root_module_fqn("go", "github.com/x/y"), "go.github.com/x/y");
-            assert_eq!(root_module_fqn("java", "com.foo"), "java.com.foo");
+            let base = Path::new("/repo");
+            assert_eq!(
+                root_module_fqn("rust", "apg.ingest", base),
+                "rust.apg.ingest"
+            );
+            assert_eq!(root_module_fqn("py", "pkg.sub", base), "py.pkg.sub");
+            assert_eq!(root_module_fqn("ts", "@co/ui.src", base), "ts.@co/ui.src");
+            assert_eq!(root_module_fqn("md", "/repo/docs", base), "md.docs");
+            assert_eq!(
+                root_module_fqn("go", "github.com/x/y", base),
+                "go.github.com/x/y"
+            );
+            assert_eq!(root_module_fqn("java", "com.foo", base), "java.com.foo");
+            // The empty base is the pass-through sentinel.
+            assert_eq!(
+                root_module_fqn("md", "/abs/docs", Path::new("")),
+                "md./abs/docs"
+            );
             // An empty parent is left empty — never the bare `<language>.` root.
-            assert_eq!(rooted_scope("rust", ""), "");
-            assert_eq!(rooted_scope("rust", "apg"), "rust.apg");
+            assert_eq!(rooted_scope("rust", "", base), "");
+            assert_eq!(rooted_scope("rust", "apg", base), "rust.apg");
+        }
+
+        /// fix-module-identity task-2: `repo_relative_identity` renders a
+        /// scanner path relative to the git-toplevel base (the scan root is the
+        /// non-git fallback), `/`-separated, with no leading `/` and no `..`
+        /// segment. An already-relative frontend identity passes through; an
+        /// absolute path under the base is stripped; a path that would escape
+        /// the base falls back to its file name.
+        #[test]
+        fn repo_relative_identity_is_checkout_independent() {
+            let base = Path::new("/repo");
+            // Under the base: the tail, no leading slash.
+            assert_eq!(
+                repo_relative_identity(base, "/repo/src/load.rs"),
+                "src/load.rs"
+            );
+            // The base itself resolves to the bare file name (never empty).
+            assert_eq!(repo_relative_identity(base, "/repo"), "repo");
+            // A relative identity passes through unchanged.
+            assert_eq!(repo_relative_identity(base, "apg.ingest"), "apg.ingest");
+            assert_eq!(repo_relative_identity(base, "@co/ui.src"), "@co/ui.src");
+            // Lexical normalisation: `.` dropped, `..` resolved.
+            assert_eq!(
+                repo_relative_identity(base, "/repo/a/./b/../c.rs"),
+                "a/c.rs"
+            );
+            // No `..` can survive: an escaping relative path falls back.
+            assert_eq!(repo_relative_identity(base, "../etc/passwd"), "passwd");
+            let out = repo_relative_identity(base, "/repo/../etc/passwd");
+            assert!(!out.starts_with('/'), "no leading slash: {out}");
+            assert!(!out.split('/').any(|c| c == ".."), "no .. segment: {out}");
+            // The empty base is the pass-through sentinel.
+            assert_eq!(
+                repo_relative_identity(Path::new(""), "/abs/a.rs"),
+                "/abs/a.rs"
+            );
         }
 
         /// Phase-09 task-9 / task-40: a declaration whose parent is a module
@@ -2007,6 +2134,57 @@ mod tests {
         }
     }
 
+    /// int tier -- two or more units wired together, pure in-memory (no
+    /// filesystem, database, git or process): the identity renderer chain.
+    mod int {
+        use super::*;
+
+        /// fix-module-identity task-16: the single identity base flows through
+        /// the whole ingest-side render chain in memory —
+        /// [`repo_relative_identity`] → [`root_module_fqn`] → [`rooted_scope`] →
+        /// `parent.name` ([`render_function_fqns`]) — so a scanner record set
+        /// renders checkout-independent module/File/symbol identities end to end.
+        ///
+        /// The spooling `ingest`/`ingest_records` entry point is e2e (it opens a
+        /// `std::env::temp_dir()` spool file), so the assembly contract this
+        /// task owns is exercised here on the pure renderer units it is built
+        /// from.
+        #[test]
+        fn repo_relative_identity_flows_through_the_render_chain() {
+            let base = Path::new("/repo");
+            // A File's canonical identity is its repo-relative path, never the
+            // absolute scanner path.
+            assert_eq!(
+                repo_relative_identity(base, "/repo/internal/store/store.go"),
+                "internal/store/store.go"
+            );
+            // Its parent module identity is rooted off the same base; a relative
+            // frontend identity passes through and is rooted verbatim.
+            let module = root_module_fqn("go", "github.com/x/y", base);
+            assert_eq!(module, "go.github.com/x/y");
+            // A declaration under that module renders `parent.name` off the
+            // rooted parent.
+            let decls = [fd(
+                "n1",
+                &module,
+                "Open",
+                &["string"],
+                "/repo/internal/store/store.go",
+            )];
+            assert_eq!(fqns(&decls)["n1"], "go.github.com/x/y.Open");
+            // The same file rendered from two checkouts agrees: a Markdown
+            // absolute module identity (`/repo/docs` and `/other/docs`) rebases
+            // to the SAME repo-relative identity.
+            assert_eq!(root_module_fqn("md", "/repo/docs", base), "md.docs");
+            assert_eq!(
+                root_module_fqn("md", "/other/docs", Path::new("/other")),
+                "md.docs"
+            );
+            // An empty scope stays empty — never a bare `<language>.` root.
+            assert_eq!(rooted_scope("go", "", base), "");
+        }
+    }
+
     /// e2e tier -- real I/O: these tests drive `ingest`/`ingest_with_reuse`,
     /// whose `ingest_records` spools to `std::env::temp_dir()` (two of them also
     /// stage real temp dirs of their own). Each is `#[ignore]`d, so a plain
@@ -2032,6 +2210,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
             );
         }
@@ -2072,6 +2251,7 @@ mod tests {
                     blacklist: &[],
                     language: "java",
                     config: None,
+                    base: None,
                 },
             );
             assert_eq!(report.shadowed_modules, 1);
@@ -2161,6 +2341,7 @@ mod tests {
                     blacklist: &[],
                     language: "java",
                     config: None,
+                    base: None,
                 },
             );
             // The struct `p.A.test` (from the shadowed package) wins over the
@@ -2248,6 +2429,7 @@ mod tests {
                     blacklist: &[],
                     language: "java",
                     config: None,
+                    base: None,
                 },
             );
             // The module is rooted; the unresolved name is not.
@@ -2328,6 +2510,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
             );
             assert_eq!(report.skipped, 0);
@@ -2409,6 +2592,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
             );
             let n = &graph.nodes[SCAN_HEAD];
@@ -2435,6 +2619,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
             );
             let n = &graph.nodes[SCAN_HEAD];
@@ -2486,6 +2671,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
             );
             assert_eq!(report.skipped, 0);
@@ -2551,6 +2737,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
             );
             // The planned node lands as a Struct with status=planned (no location).
@@ -2608,6 +2795,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
             );
             let fqn = "go.github.com/x/y.Gateway".to_string();
@@ -2655,6 +2843,7 @@ mod tests {
                     blacklist: &["go.drop.mod".to_string()],
                     language: "go",
                     config: None,
+                    base: None,
                 },
             );
             assert!(report.skipped >= 3);
@@ -2780,17 +2969,14 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
                 Some(&reuse),
             );
             // All nodes landed and the cross-file call survived (it would be lost if
             // edges were merged per-unit before every node existed).
-            assert!(
-                graph.nodes.contains_key("/fresh/b/b.go"),
-                "{:?}",
-                graph.nodes
-            );
-            assert!(graph.nodes.contains_key("/fresh/a/a.go"));
+            assert!(graph.nodes.contains_key("b/b.go"), "{:?}", graph.nodes);
+            assert!(graph.nodes.contains_key("a/a.go"));
             assert!(graph.nodes.contains_key("scratch/b.Later"));
             assert!(graph.nodes.contains_key("scratch/a.Leaf"));
             assert!(
@@ -2803,7 +2989,7 @@ mod tests {
             assert!(
                 graph
                     .contains
-                    .contains(&("scratch".to_string(), "/fresh/b/b.go".to_string()))
+                    .contains(&("scratch".to_string(), "b/b.go".to_string()))
             );
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -2836,11 +3022,11 @@ mod tests {
                 },
             );
             cached.nodes.insert(
-                "/fresh/b.go".to_string(),
+                "b.go".to_string(),
                 Node {
                     kind: NodeKind::File,
                     location: Some(Location {
-                        path: PathBuf::from("/fresh/b.go"),
+                        path: PathBuf::from("b.go"),
                         start: 0,
                         end: 0,
                         start_line: 1,
@@ -2858,7 +3044,7 @@ mod tests {
                     Node {
                         kind,
                         location: Some(Location {
-                            path: PathBuf::from("/fresh/b.go"),
+                            path: PathBuf::from("b.go"),
                             start: 0,
                             end: 1,
                             start_line,
@@ -2871,14 +3057,14 @@ mod tests {
             }
             cached
                 .contains
-                .insert(("go.scratch".to_string(), "/fresh/b.go".to_string()));
+                .insert(("go.scratch".to_string(), "b.go".to_string()));
             cached
                 .contains
-                .insert(("/fresh/b.go".to_string(), "go.scratch.Callee".to_string()));
+                .insert(("b.go".to_string(), "go.scratch.Callee".to_string()));
             cached
                 .contains
-                .insert(("/fresh/b.go".to_string(), "go.scratch.Model".to_string()));
-            let frag = FileFragment::from_graph(&cached, "/fresh/b.go", "b.go", "oid-b", "go");
+                .insert(("b.go".to_string(), "go.scratch.Model".to_string()));
+            let frag = FileFragment::from_graph(&cached, "b.go", "b.go", "oid-b", "go");
             store.put(&frag, "/fresh", &cache_key).unwrap();
 
             // The freshly re-emitted spool: a.go's Caller authors unresolved edges
@@ -2892,14 +3078,14 @@ mod tests {
                     parent: "scratch".to_string(),
                     name: "Caller".to_string(),
                     params: vec![],
-                    file: "/fresh/a.go".to_string(),
-                    path: "/fresh/a.go".to_string(),
+                    file: "a.go".to_string(),
+                    path: "a.go".to_string(),
                     start: 0,
                     end: 1,
                     start_line: 1,
                     end_line: 1,
                 },
-                file_rec("/fresh/a.go", "scratch", 10),
+                file_rec("a.go", "scratch", 10),
                 Record::Unresolved {
                     fqn: "go.scratch.Callee".to_string(),
                     category: Some("unknown".to_string()),
@@ -2940,6 +3126,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
                 Some(&reuse),
             );
@@ -2955,8 +3142,8 @@ mod tests {
                     parent: "scratch".to_string(),
                     name: "Caller".to_string(),
                     params: vec![],
-                    file: "/fresh/a.go".to_string(),
-                    path: "/fresh/a.go".to_string(),
+                    file: "a.go".to_string(),
+                    path: "a.go".to_string(),
                     start: 0,
                     end: 1,
                     start_line: 1,
@@ -2967,16 +3154,16 @@ mod tests {
                     parent: "scratch".to_string(),
                     name: "Callee".to_string(),
                     params: vec![],
-                    file: "/fresh/b.go".to_string(),
-                    path: "/fresh/b.go".to_string(),
+                    file: "b.go".to_string(),
+                    path: "b.go".to_string(),
                     start: 0,
                     end: 1,
                     start_line: 2,
                     end_line: 2,
                 },
-                srec("f3", "scratch", "Model", "/fresh/b.go"),
-                file_rec("/fresh/a.go", "scratch", 10),
-                file_rec("/fresh/b.go", "scratch", 9),
+                srec("f3", "scratch", "Model", "b.go"),
+                file_rec("a.go", "scratch", 10),
+                file_rec("b.go", "scratch", 9),
                 Record::Unresolved {
                     fqn: "ghost.External".to_string(),
                     category: Some("external".to_string()),
@@ -3001,6 +3188,7 @@ mod tests {
                     blacklist: &[],
                     language: "go",
                     config: None,
+                    base: None,
                 },
             );
 
@@ -3109,7 +3297,7 @@ mod tests {
                 code_type: "src".into(),
                 ..Node::default()
             };
-            let skipped = "/x/csharp/T.cs";
+            let skipped = "csharp/T.cs";
             let mut prev = Graph::default();
             prev.nodes.insert("Apg".into(), module());
             prev.nodes.insert("Apg.CsharpFrontend".into(), module());
@@ -3158,6 +3346,7 @@ mod tests {
                     blacklist: &[],
                     language: "csharp",
                     config: None,
+                    base: None,
                 },
                 Some(&reuse),
             );
@@ -3209,6 +3398,7 @@ mod tests {
                     blacklist: &[],
                     language: "csharp",
                     config: None,
+                    base: None,
                 },
                 Some(&not_skipped),
             );

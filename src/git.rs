@@ -673,26 +673,24 @@ fn membership_refusal(identity: &RepoIdentity, project: &str) -> anyhow::Error {
 // tree stay in sync by construction.
 // ---------------------------------------------------------------------------
 
-/// The path of `path` relative to the working directory of the checkout
-/// containing `apg_root`. Both sides are canonicalized: git2's workdir is
-/// canonical, while a mutation path may be lexical (e.g. through a
-/// /var → /private/var symlink).
-fn repo_rel(apg_root: &Path, path: &Path) -> anyhow::Result<PathBuf> {
-    let repo = discover_repo(apg_root)?;
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| anyhow::anyhow!("repository has no working directory"))?;
-    let path = canonical_allow_missing(path);
-    let workdir = canonical(workdir);
-    path.strip_prefix(&workdir)
-        .map(|r| r.to_path_buf())
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "cannot commit {}: it is outside the checkout {}",
-                path.display(),
-                workdir.display()
-            )
-        })
+/// The canonical repository-relative identity base of the checkout containing
+/// `root`: the git **toplevel** (the workdir, canonicalized) when `root` is
+/// inside a git repository, else `root` itself (the scan-root fallback for a
+/// non-git tree). This is the single base every identity-rendering module
+/// renders against — the ingestor's File/module identities and the fact cache's
+/// cross-checkout re-basing both consume it. A linked worktree resolves to its
+/// OWN root, so two checkouts at the same commit mint the same identities.
+///
+/// The base is canonicalized so a `/var` → `/private/var` symlink cannot make
+/// two spellings of one checkout diverge.
+pub fn repo_rel(root: &Path) -> PathBuf {
+    match git2::Repository::discover(root) {
+        Ok(repo) => repo
+            .workdir()
+            .map(canonical)
+            .unwrap_or_else(|| canonical(root)),
+        Err(_) => canonical(root),
+    }
 }
 
 /// Commits all `writes` (created/modified paths) and `deletes` (removed
@@ -722,13 +720,29 @@ pub fn commit_files(
     msg: &str,
 ) -> anyhow::Result<Option<String>> {
     let repo = discover_repo(apg_root)?;
+    let base = repo_rel(apg_root);
+    // The mutation paths may be lexical (e.g. through a `/var` →
+    // `/private/var` symlink), while the base is canonical: canonicalize the
+    // deepest existing ancestor before stripping.
+    let rel = |p: &Path| -> anyhow::Result<PathBuf> {
+        let path = canonical_allow_missing(p);
+        path.strip_prefix(&base)
+            .map(|r| r.to_path_buf())
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "cannot commit {}: it is outside the checkout {}",
+                    path.display(),
+                    base.display()
+                )
+            })
+    };
     let write_rels: Vec<PathBuf> = writes
         .iter()
-        .map(|p| repo_rel(apg_root, p))
+        .map(|p| rel(p))
         .collect::<anyhow::Result<_>>()?;
     let delete_rels: Vec<PathBuf> = deletes
         .iter()
-        .map(|p| repo_rel(apg_root, p))
+        .map(|p| rel(p))
         .collect::<anyhow::Result<_>>()?;
     let head = repo
         .head()
@@ -772,10 +786,12 @@ pub fn commit_file(apg_root: &Path, path: &Path, msg: &str) -> anyhow::Result<Op
 /// `apg: graph mutation (rel1, rel2, ...)`. Paths render checkout-relative
 /// when possible (the same form [`auto_commit`] uses).
 pub fn graph_mutation_message(apg_root: &Path, paths: &[&Path]) -> String {
+    let base = repo_rel(apg_root);
     let rels: Vec<String> = paths
         .iter()
         .map(|p| {
-            repo_rel(apg_root, p)
+            canonical_allow_missing(p)
+                .strip_prefix(&base)
                 .map(|r| r.display().to_string())
                 .unwrap_or_else(|_| p.display().to_string())
         })

@@ -1,5 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
-import { runCypher, lit } from "../lib/apg.ts"
+import path from "node:path"
+import { runCypher, lit, findApgRoot, resolveProjectPath } from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -15,9 +16,9 @@ export default tool({
   },
   async execute(args, context) {
     const fqn = args.fqn
-    const path = args.path
-    if (!fqn && !path) return "Error: provide fqn or path"
-    if (fqn && path) return "Error: provide only one of fqn or path"
+    const filePath = args.path
+    if (!fqn && !filePath) return "Error: provide fqn or path"
+    if (fqn && filePath) return "Error: provide only one of fqn or path"
     const limit = args.limit ? Math.max(1, Math.min(1000, Number(args.limit))) : 200
 
     let cypher: string
@@ -26,8 +27,12 @@ export default tool({
         `MATCH (n {fqn: ${lit(fqn)}})-[r:UnresolvedCall|UnresolvedUse]->(u:UnresolvedTarget) ` +
         `RETURN n.fqn as source, labels(r) as edge, u.fqn, u.category ORDER BY u.fqn LIMIT ${limit}`
     } else {
+      // The File fqn is the stored repo-relative identity; convert the caller's
+      // absolute path before matching.
+      const root = findApgRoot(context, args.directory)
+      const stored = filePath && path.isAbsolute(filePath) && root ? resolveProjectPath(root, filePath) : filePath
       cypher =
-        `MATCH (f:File {fqn: ${lit(path)}})-[:Contains]->(n)-[r:UnresolvedCall|UnresolvedUse]->(u:UnresolvedTarget) ` +
+        `MATCH (f:File {fqn: ${lit(stored ?? "")}})-[:Contains]->(n)-[r:UnresolvedCall|UnresolvedUse]->(u:UnresolvedTarget) ` +
         `RETURN n.fqn as source, labels(r) as edge, u.fqn, u.category ORDER BY n.fqn, u.fqn LIMIT ${limit}`
     }
     return runCypher(context, cypher, args.directory)

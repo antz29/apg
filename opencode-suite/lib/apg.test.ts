@@ -13,6 +13,7 @@ import {
   noteIfEmpty,
   isQueryError,
   expectQueryOk,
+  resolveProjectPath,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
 } from "./apg.ts"
@@ -62,3 +63,30 @@ test("noteIfEmpty appends only when there are no data rows", () => {
   expect(noteIfEmpty("headers\n", "(none)")).toBe("headers\n\n(none)")
   expect(noteIfEmpty("headers\nrow\n", "(none)")).toBe("headers\nrow\n")
 })
+
+// fix-module-identity task-27: the pure stored<->absolute conversion. No fs,
+// no subprocess, no apg spawn — `resolveProjectPath` is a path spelling
+// transform only.
+test("resolveProjectPath maps a stored repo-relative identity to an absolute path", () => {
+  const dir = "/home/u/repo"
+  expect(resolveProjectPath(dir, "src/a.rs")).toBe("/home/u/repo/src/a.rs")
+  expect(resolveProjectPath(dir, "pkg/sub/b.go")).toBe("/home/u/repo/pkg/sub/b.go")
+})
+
+test("resolveProjectPath recognizes an already-absolute input and maps it back to the stored value", () => {
+  const dir = "/home/u/repo"
+  expect(resolveProjectPath(dir, "/home/u/repo/src/a.rs")).toBe("src/a.rs")
+  // An absolute path outside the project dir has no stored spelling: unchanged.
+  expect(resolveProjectPath(dir, "/elsewhere/a.rs")).toBe("/elsewhere/a.rs")
+  // The empty cell (an absent path column) passes through.
+  expect(resolveProjectPath(dir, "")).toBe("")
+})
+
+test("resolveProjectPath round-trips in both directions", () => {
+  const dir = "/home/u/repo"
+  const stored = "src/deep/a.rs"
+  const absolute = "/home/u/repo/src/deep/a.rs"
+  expect(resolveProjectPath(dir, resolveProjectPath(dir, stored))).toBe(stored)
+  expect(resolveProjectPath(dir, resolveProjectPath(dir, absolute))).toBe(absolute)
+})
+

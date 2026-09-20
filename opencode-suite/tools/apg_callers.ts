@@ -25,7 +25,8 @@ export default tool({
     const ctCond = codeTypeCondition("c", args.codeType)
     if (ctCond) cypher += ` WHERE ${ctCond}`
     cypher += ` RETURN c.fqn, c.path, c.start_line, c.end_line, c.code_type ORDER BY c.fqn LIMIT ${limit}`
-    const out = await runCypher(context, cypher, args.directory)
+    // Column 1 is the caller's source-file `path` (stored repo-relative).
+    const out = await runCypher(context, cypher, args.directory, { rebaseColumns: [1] })
     return noteIfEmpty(
       out,
       "no results (FQN is exact — overloads carry parameter suffixes; use apg_find_symbol to locate one)",

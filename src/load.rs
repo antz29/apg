@@ -1744,6 +1744,14 @@ enum Export {
 /// (nodes) and resolved endpoints (edges), without opaque ids. A `Scan` node
 /// exports as a `scan_meta` control record on **line 1** (before every node
 /// and edge line), mirroring the `lang_switch` control-record convention.
+///
+/// Identity contract (`requirements.requirement.portable-graph-identity`,
+/// `solution.constraint.graph-stores-relative-only`): the graph this serializes
+/// carries repo-relative identities only — a File node's `fqn` is its
+/// `/`-separated path relative to the git toplevel (the scan root when
+/// non-git), and a Struct/Function's `path` is the same source-file identity.
+/// No absolute checkout path is emitted; the absolute path is reconstructed in
+/// the suite-tool boundary against the caller's project directory.
 pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
@@ -2643,6 +2651,103 @@ pub(crate) mod tests {
             assert!(out.contains("ext.Foo"), "unresolved_call: {out}");
 
             let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        #[ignore = "e2e tier: real I/O (parquet/db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+        fn graph_jsonl_carries_only_repo_relative_identities() {
+            // fix-module-identity task-14: the export carries repo-relative
+            // identities only — no absolute checkout path may appear as a
+            // File fqn or a Struct/Function `path`. The graph is assembled by
+            // the real ingestor over a fake repo base, then serialized.
+            use crate::schema::Record;
+            let abs_base = std::env::temp_dir().join(format!(
+                "apg-jsonl-identity-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let base_s = abs_base.to_string_lossy().into_owned();
+            let file = format!("{base_s}/pkg/a.go");
+            let records = vec![
+                Record::Module {
+                    fqn: "pkg".to_string(),
+                },
+                Record::File {
+                    path: file.clone(),
+                    parent: "pkg".to_string(),
+                    start_line: 1,
+                    end_line: 9,
+                },
+                Record::Struct {
+                    id: "s1".to_string(),
+                    parent: "pkg".to_string(),
+                    name: "A".to_string(),
+                    path: file.clone(),
+                    start: 0,
+                    end: 9,
+                    start_line: 3,
+                    end_line: 5,
+                },
+                Record::Function {
+                    id: "f1".to_string(),
+                    parent: "pkg".to_string(),
+                    name: "Leaf".to_string(),
+                    params: vec![],
+                    file: file.clone(),
+                    path: file.clone(),
+                    start: 7,
+                    end: 9,
+                    start_line: 7,
+                    end_line: 8,
+                },
+            ];
+            let (graph, _) = crate::ingest::ingest(
+                records,
+                &crate::ingest::IngestOptions {
+                    blacklist: &[],
+                    language: "go",
+                    config: None,
+                    base: Some(&abs_base),
+                },
+            );
+
+            let out = std::env::temp_dir().join(format!(
+                "apg-jsonl-identity-out-{}.jsonl",
+                std::process::id()
+            ));
+            write_graph_jsonl(&graph, &out).unwrap();
+            let text = std::fs::read_to_string(&out).unwrap();
+
+            // The File fqn and the Struct/Function paths are the repo-relative
+            // identity — never the absolute scanner path.
+            assert!(
+                text.contains("\"fqn\":\"pkg/a.go\""),
+                "relative file fqn: {text}"
+            );
+            assert!(!text.contains(&base_s), "no absolute checkout path: {text}");
+            for line in text.lines() {
+                let v: serde_json::Value = serde_json::from_str(line).unwrap();
+                let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                let located = match ty {
+                    "file" => v.get("fqn").and_then(|f| f.as_str()).map(str::to_string),
+                    "struct" | "function" => {
+                        v.get("path").and_then(|p| p.as_str()).map(str::to_string)
+                    }
+                    _ => None,
+                };
+                if let Some(p) = located {
+                    assert!(!p.starts_with('/'), "{ty} identity has no leading `/`: {p}");
+                    assert!(
+                        !p.contains(&base_s),
+                        "{ty} identity embeds no checkout path: {p}"
+                    );
+                }
+            }
+
+            let _ = std::fs::remove_file(&out);
         }
 
         #[test]

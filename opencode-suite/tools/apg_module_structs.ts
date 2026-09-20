@@ -26,6 +26,7 @@ export default tool({
     const ctCond = codeTypeCondition("s", args.codeType)
     if (ctCond) cypher += ` WHERE ${ctCond}`
     cypher += ` RETURN s.fqn, s.path, s.start_line, s.end_line, s.code_type ORDER BY s.fqn LIMIT ${limit}`
-    return runCypher(context, cypher, args.directory)
+    // Column 1 is the struct's source-file `path` (stored repo-relative).
+    return runCypher(context, cypher, args.directory, { rebaseColumns: [1] })
   },
 })

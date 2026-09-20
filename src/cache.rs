@@ -407,12 +407,21 @@ pub struct FragEdge {
     pub target_type: String,
 }
 
-/// Re-bases an absolute path FQN stored from `stored_root` onto `reader_root`;
-/// identifiers (which never carry a worktree-root prefix) pass through.
-fn rebase(stored_root: &str, reader_root: &str, s: &str) -> String {
+/// Re-bases a stored identity onto the **repo-relative** identity base
+/// (`requirements.requirement.portable-graph-identity`): a stored ABSOLUTE path
+/// (a legacy fact unit written from a checkout root) is stripped of its writer
+/// root to its `/`-separated tail; an identifier or an already repo-relative
+/// identity passes through unchanged.
+///
+/// `reader_root` is retained in the signature (the reading checkout's base) but
+/// is deliberately NOT concatenated: the persisted graph is checkout-
+/// independent, so a unit written in one worktree composes verbatim in another
+/// at the same commit. This promotes the cache's original checkout-relative
+/// model to the repo-relative base the whole graph now uses.
+fn rebase(stored_root: &str, _reader_root: &str, s: &str) -> String {
     match s.strip_prefix(stored_root) {
         Some(tail) if !tail.is_empty() && (tail.starts_with('/') || tail.starts_with('\\')) => {
-            format!("{reader_root}{tail}")
+            tail.trim_start_matches(['/', '\\']).to_string()
         }
         _ => s.to_string(),
     }
@@ -1387,6 +1396,33 @@ mod tests {
     mod unit {
         use super::*;
 
+        /// fix-module-identity task-13: `rebase` promotes the checkout-relative
+        /// cache model to the repo-relative identity base. A stored identity
+        /// (the form the cache now writes) passes through verbatim regardless of
+        /// the reading worktree; a legacy ABSOLUTE path is stripped of its
+        /// writer root to its `/`-separated tail — never re-joined onto the
+        /// reader's root, so a unit written in one worktree composes in another.
+        #[test]
+        fn rebase_yields_repo_relative_identity_for_both_worktrees() {
+            // A stored repo-relative identity is portable: two reader roots (two
+            // worktrees at the same commit) yield the SAME identity.
+            assert_eq!(rebase("/writer/wt", "/reader/wt", "src/a.rs"), "src/a.rs");
+            assert_eq!(rebase("/writer/wt", "/other/wt", "src/a.rs"), "src/a.rs");
+            // An identifier (a Module/Struct/Function fqn) passes through too.
+            assert_eq!(rebase("/writer/wt", "/reader/wt", "go.pkg.F"), "go.pkg.F");
+            // A legacy absolute path is stripped to its repo-relative tail.
+            assert_eq!(
+                rebase("/writer/wt", "/reader/wt", "/writer/wt/src/a.rs"),
+                "src/a.rs"
+            );
+            // An absolute path outside the writer root is left alone (no root to
+            // strip).
+            assert_eq!(
+                rebase("/writer/wt", "/reader/wt", "/elsewhere/a.rs"),
+                "/elsewhere/a.rs"
+            );
+        }
+
         #[test]
         fn cache_key_tracks_version_schema_projection_and_config() {
             let base = ScanConfigKey {
@@ -1658,14 +1694,14 @@ mod tests {
             // would otherwise see an empty list after one incremental generation).
             let f = nodes
                 .iter()
-                .find(|(fqn, _)| fqn == "/fresh/a.go.F")
+                .find(|(fqn, _)| fqn == "a.go.F")
                 .expect("the cached function projects");
             assert_eq!(f.1.params, vec!["int".to_string()]);
-            // The File node's FQN (an absolute path) is re-based onto the reader's
-            // root; a path-derived struct FQN is re-based too, while an
-            // identifier-shaped FQN (the module) passes through unchanged.
-            assert!(nodes.iter().any(|(f, _)| f == "/fresh/a.go"));
-            assert!(nodes.iter().any(|(f, _)| f == "/fresh/a.go.A"));
+            // Identities are repo-relative (`requirements.requirement.
+            // portable-graph-identity`): the stored File fqn/paths project
+            // verbatim, never the absolute checkout path.
+            assert!(nodes.iter().any(|(f, _)| f == "a.go"));
+            assert!(nodes.iter().any(|(f, _)| f == "a.go.A"));
             assert!(edges.iter().any(|e| e.kind == "contains"));
 
             // Different bytes (new OID) ⇒ not reusable.
@@ -1738,20 +1774,21 @@ mod tests {
             store.put(&frag, "/main", &cache_key).unwrap();
 
             // The fresh worktree has the SAME relative path + bytes (sharing keys
-            // are relative), so it reuses the unit, re-based onto its own root.
+            // are relative), so it reuses the unit; its repo-relative identities
+            // are the writing checkout's, verbatim.
             assert!(store.has("go", "src/a.go", "oid-a", &inputs, &cache_key));
             let (frag2, root) = store
                 .reuse("go", "src/a.go", "oid-a", &inputs, &cache_key)
                 .unwrap();
             let (mods, nodes, _) = frag2.project(&root, "/fresh");
-            // Module FQNs are identifiers, the File FQN is re-based.
+            // Module FQNs are identifiers; the File fqn/paths are repo-relative.
             assert_eq!(mods, vec!["fixture.mod".to_string()]);
             assert!(
                 nodes
                     .iter()
-                    .any(|(f, n)| f == "/fresh/src/a.go" && n.location.is_some())
+                    .any(|(f, n)| f == "src/a.go" && n.location.is_some())
             );
-            assert!(nodes.iter().any(|(f, _)| f == "/fresh/src/a.go.A"));
+            assert!(nodes.iter().any(|(f, _)| f == "src/a.go.A"));
             // Exactly one stored unit for the shared content.
             assert_eq!(store.len(), 1);
             let _ = std::fs::remove_dir_all(dir);
@@ -1873,6 +1910,90 @@ mod tests {
             });
             assert!(store.scaffolding("csharp", &drifted).is_none());
             let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// fix-module-identity task-18: cross-worktree cached reuse is
+        /// repo-relative. The cold main-checkout scan records the shared cache;
+        /// a second worktree at the same commit reuses it and mints exactly the
+        /// SAME File identities — no checkout root appears in either graph, so
+        /// the cache's original checkout-relative model is now the graph's
+        /// repo-relative base. Candidate binary only, scratch repo.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo/spawned apg/db.lbug); run via cargo test-e2e"]
+        fn cross_worktree_cached_reuse_is_repo_relative() {
+            use crate::testutil::{ApgCommand, Repo};
+            let repo = Repo::new("cache-rebase");
+            repo.write("go.mod", "module scratch\n\ngo 1.21\n");
+            repo.write(
+                "a/a.go",
+                "package a\n\n// Leaf returns 1.\nfunc Leaf() int { return 1 }\n",
+            );
+            repo.commit_all("source");
+
+            let home = std::env::temp_dir().join(format!("apg-cache-home-{}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+            let home_s = home.to_string_lossy().into_owned();
+            let scan = |dir: &Path| -> std::process::Output {
+                ApgCommand::new(&["scan", "."])
+                    .cwd(dir)
+                    .env("HOME", &home_s)
+                    .output()
+            };
+            let file_fqns = |dir: &Path| -> std::collections::BTreeSet<String> {
+                let text = std::fs::read_to_string(dir.join("apg/.trans/graph.jsonl")).unwrap();
+                text.lines()
+                    .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                    .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("file"))
+                    .filter_map(|v| v.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
+                    .collect()
+            };
+
+            // The cold main-checkout scan records the shared store.
+            let cold = scan(&repo.root);
+            assert!(
+                cold.status.success(),
+                "cold scan: {}",
+                String::from_utf8_lossy(&cold.stderr)
+            );
+            let main_files = file_fqns(&repo.root);
+            assert!(
+                main_files.contains("a/a.go"),
+                "repo-relative File identity: {main_files:?}"
+            );
+            assert!(
+                repo.root.join(".git/apg/facts/index.json").is_file(),
+                "the shared fact store must be indexed after a scan"
+            );
+
+            // A clean second worktree at the same commit reuses that store and
+            // mints the SAME identities.
+            let wt = repo.start_project("wt2");
+            let fresh = scan(&wt);
+            assert!(
+                fresh.status.success(),
+                "worktree scan: {}",
+                String::from_utf8_lossy(&fresh.stderr)
+            );
+            let fresh_err = String::from_utf8_lossy(&fresh.stderr).into_owned();
+            assert!(
+                fresh_err.contains("incremental") || fresh_err.contains("reusable file"),
+                "the worktree must reuse the shared cache: {fresh_err}"
+            );
+            let wt_files = file_fqns(&wt);
+            for f in &wt_files {
+                assert!(!f.starts_with('/'), "no absolute File fqn: {f}");
+                assert!(
+                    !f.contains(&repo.root.to_string_lossy().into_owned()),
+                    "no checkout component: {f}"
+                );
+            }
+            assert_eq!(
+                wt_files, main_files,
+                "cross-worktree identities must be identical"
+            );
+
+            let _ = std::fs::remove_dir_all(&repo.root);
+            let _ = std::fs::remove_dir_all(&home);
         }
     }
 }
