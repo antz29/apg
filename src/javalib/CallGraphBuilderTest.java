@@ -18,8 +18,7 @@ import java.util.regex.Pattern;
  * class-cache scan reuses unchanged packages instead of recompiling them.
  *
  * Run (from src/javalib after CallGraphBuilder.java is compiled):
- *   java --add-exports jdk.compiler/com.sun.source.tree=ALL-UNNAMED ...
- *        CallGraphBuilderTest
+ *   java CallGraphBuilderTest
  */
 public class CallGraphBuilderTest {
     static int failures = 0;

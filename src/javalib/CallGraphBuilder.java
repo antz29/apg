@@ -1,8 +1,7 @@
 import com.sun.source.tree.*;
 import com.sun.source.util.*;
-import com.sun.tools.javac.code.Symbol;
-import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.tree.JCTree;
+import javax.lang.model.element.*;
+import javax.lang.model.type.*;
 import javax.tools.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -290,6 +289,7 @@ public class CallGraphBuilder {
 
         System.err.println("[" + elapsed() + "] pass 1: assigning ids to declared classes and methods...");
         var c = new Collector(prefix);
+        c.useTask(task);
         // Pass 1: assign opaque ids to every declared class and method.
         c.collectAll(units);
         System.err.println("[" + elapsed() + "] pass 2: emitting nodes and edges...");
@@ -680,6 +680,7 @@ public class CallGraphBuilder {
 
         System.err.println("[" + elapsed() + "] pass 1: assigning ids to declared classes and methods...");
         var c = new Collector(prefix, true, surfaceStructs, surfaceFuncFqn);
+        c.useTask(task);
         c.collectAll(units);
         // feedback-103: emit the global Module->Module scaffolding for the
         // unchanged packages the per-file filter leaves out. Target packages
@@ -795,6 +796,7 @@ public class CallGraphBuilder {
                 Path abs = Paths.get(u.getSourceFile().toUri()).toAbsolutePath().normalize();
                 if (!collect.contains(abs)) continue;
                 var sc = new SurfaceScanner();
+                sc.useTask(task);
                 sc.scan(u, null);
                 FileRec rec = new FileRec();
                 rec.compiled = true;
@@ -850,6 +852,7 @@ public class CallGraphBuilder {
             var task = newTask(compiler, fm, List.of(file));
             for (CompilationUnitTree u : task.parse()) {
                 var sc = new SurfaceScanner();
+                sc.useTask(task);
                 sc.scan(u, null);
                 FileRec rec = new FileRec();
                 rec.compiled = true;
@@ -1160,13 +1163,13 @@ public class CallGraphBuilder {
      * symbol, walking up past synthetic anonymous/local classes ($-suffixed)
      * to the nearest named type.
      */
-    static String ownerFqn(Symbol owner) {
-        while (owner instanceof Symbol.ClassSymbol cs) {
-            String qn = cs.getQualifiedName().toString();
+    static String ownerFqn(Element owner) {
+        while (owner instanceof TypeElement te) {
+            String qn = te.getQualifiedName().toString();
             // Anonymous classes have an empty qualified name; walk up past them
             // (and past $-named synthetic classes) to the nearest named type.
             if (!qn.isEmpty() && qn.indexOf('$') < 0) return qn;
-            owner = cs.getEnclosingElement();
+            owner = te.getEnclosingElement();
         }
         return null;
     }
@@ -1176,13 +1179,12 @@ public class CallGraphBuilder {
      * declaration order (SPEC §2.3). The same rendering is used for method
      * declarations and call targets, so overloads resolve exactly.
      */
-    static List<String> paramStrings(Symbol.MethodSymbol ms) {
+    static List<String> paramStrings(ExecutableElement ms) {
         List<String> out = new ArrayList<>();
         if (ms == null) return out;
         try {
-            Type mt = ms.asType();
-            for (Type pt : mt.getParameterTypes()) {
-                out.add(typeString(pt));
+            for (VariableElement p : ms.getParameters()) {
+                out.add(typeString(p.asType()));
             }
         } catch (Throwable t) {
             out.clear();
@@ -1190,28 +1192,29 @@ public class CallGraphBuilder {
         return out;
     }
 
-    /** Renders a type: qualified for class types, recursed for arrays. */
-    static String typeString(Type t) {
+    /** Renders a type mirror: qualified for declared types, recursed for arrays. */
+    static String typeString(TypeMirror t) {
         if (t == null) return "";
-        if (t instanceof com.sun.tools.javac.code.Type.ArrayType at) {
-            return typeString(at.elemtype) + "[]";
+        if (t instanceof ArrayType at) {
+            return typeString(at.getComponentType()) + "[]";
         }
-        Symbol ts = t.tsym;
-        if (ts != null) return ts.getQualifiedName().toString();
+        if (t instanceof DeclaredType dt && dt.asElement() instanceof TypeElement te) {
+            return te.getQualifiedName().toString();
+        }
         return t.toString();
     }
 
     /**
      * Resolves the fully-qualified type name from an attributed type tree.
      * Arrays recurse to their element type; parameterized types use the raw
-     * type symbol. Null if the tree has no usable symbol.
+     * type element. Null if the tree has no usable type.
      */
-    static String typeFqn(Tree typeTree) {
+    static String typeFqn(Tree typeTree, Trees trees, TreePath path) {
         if (typeTree == null) return null;
-        if (typeTree instanceof ArrayTypeTree at) return typeFqn(at.getType());
-        JCTree jc = (JCTree) typeTree;
-        if (jc.type != null && jc.type.tsym instanceof Symbol.ClassSymbol cs) {
-            String qn = cs.getQualifiedName().toString();
+        if (typeTree instanceof ArrayTypeTree at) return typeFqn(at.getType(), trees, path);
+        TypeMirror t = trees.getTypeMirror(new TreePath(path, typeTree));
+        if (t instanceof DeclaredType dt && dt.asElement() instanceof TypeElement te) {
+            String qn = te.getQualifiedName().toString();
             if (qn.indexOf('<') >= 0 || qn.contains("<error>")) return null;
             return qn;
         }
@@ -1232,23 +1235,17 @@ public class CallGraphBuilder {
         return sel.toString();
     }
 
-    /** Symbol attributed onto a call/method-ref/new-class expression, or null. */
-    static Symbol symOf(Tree t) {
-        if (t instanceof JCTree.JCMethodInvocation inv) {
-            ExpressionTree sel = inv.getMethodSelect();
-            if (sel instanceof JCTree.JCIdent id) return id.sym;
-            if (sel instanceof JCTree.JCFieldAccess fa) return fa.sym;
-            return null;
-        }
-        if (t instanceof JCTree.JCNewClass nc) return nc.constructor;
-        if (t instanceof JCTree.JCMemberReference mref) return mref.sym;
-        return null;
+    /** Method/constructor element attributed onto a call/method-ref/new-class expression, or null. */
+    static Element symOf(Trees trees, TreePath path, Tree t) {
+        if (t == null) return null;
+        return trees.getElement(new TreePath(path, t));
     }
 
-    /** Method symbol attributed onto a method declaration, or null. */
-    static Symbol.MethodSymbol symOfDecl(MethodTree mt) {
-        if (mt instanceof JCTree.JCMethodDecl jm) return jm.sym;
-        return null;
+    /** Method element attributed onto a method declaration, or null. */
+    static ExecutableElement symOfDecl(Trees trees, TreePath path, MethodTree mt) {
+        if (mt == null) return null;
+        Element e = trees.getElement(new TreePath(path, mt));
+        return e instanceof ExecutableElement ee ? ee : null;
     }
 
     /**
@@ -1263,6 +1260,12 @@ public class CallGraphBuilder {
         final List<String> structs = new ArrayList<>();
         final List<String> funcs = new ArrayList<>();
         final List<String> flats = new ArrayList<>();
+        Trees trees;
+
+        /** Attach the public-API attribution services for this task. */
+        void useTask(JavacTask task) {
+            this.trees = Trees.instance(task);
+        }
 
         @Override
         public Void visitCompilationUnit(CompilationUnitTree cu, Void nil) {
@@ -1289,7 +1292,7 @@ public class CallGraphBuilder {
             if (insideAnonymousClass()) return super.visitMethod(mt, nil);
             String name = mt.getName().toString();
             if (name.equals("<error>")) return super.visitMethod(mt, nil);
-            List<String> params = paramStrings(symOfDecl(mt));
+            List<String> params = paramStrings(symOfDecl(trees, getCurrentPath(), mt));
             String parentFqn = pkg.isEmpty() ? cls : pkg + "." + cls;
             funcs.add(parentFqn + "." + name + "(" + String.join(",", params) + ")");
             return super.visitMethod(mt, nil);
@@ -1374,6 +1377,9 @@ public class CallGraphBuilder {
         final Set<String> unresolvedSeen = new HashSet<>();
         final Set<String> emittedPkg = new HashSet<>();
         final String idPrefix;
+        Trees trees;
+        SourcePositions sourcePos;
+        DocTrees docTrees;
 
         // Targeted-scan mode (phase-02 task-11): when true, a call/use whose
         // target is a project symbol NOT in the emitted target packages is
@@ -1403,6 +1409,13 @@ public class CallGraphBuilder {
             this.surfaceFuncFqn = surfaceFuncFqn;
             this.surfaceSimpleStruct = simpleStructIndex(surfaceStructs);
             this.surfaceCtorBySimple = constructorIndex(surfaceFuncFqn);
+        }
+
+        /** Attach the public-API attribution services for this task (call after analyze). */
+        void useTask(JavacTask task) {
+            this.trees = Trees.instance(task);
+            this.sourcePos = trees.getSourcePositions();
+            this.docTrees = DocTrees.instance(task);
         }
 
         // Phase-04 task-35: the COMPLETE project-class index the resolveCall
@@ -1636,7 +1649,7 @@ public class CallGraphBuilder {
                 String id = treeID.get(ct);
                 if (id != null) {
                     String parentFqn = classParentFor(pkg, outer);
-                    int[] span = classSpan((JCTree) ct);
+                    int[] span = classSpan(ct);
                     emit("{\"type\":\"struct\",\"id\":\"" + jstr(id)
                         + "\",\"parent\":\"" + jstr(parentFqn)
                         + "\",\"name\":\"" + jstr(name)
@@ -1690,7 +1703,7 @@ public class CallGraphBuilder {
             if (name.equals("<error>")) {
                 return super.visitMethod(mt, nil);
             }
-            List<String> params = paramStrings(symOfDecl(mt));
+            List<String> params = paramStrings(symOfDecl(trees, getCurrentPath(), mt));
             String parentFqn = pkg.isEmpty() ? cls : pkg + "." + cls;
             String key = parentFqn + "." + name + "(" + String.join(",", params) + ")";
 
@@ -1703,7 +1716,7 @@ public class CallGraphBuilder {
             } else {
                 String myId = treeID.get(mt);
                 if (myId != null) {
-                    int[] span = methodSpan((JCTree) mt);
+                    int[] span = methodSpan(mt);
                     StringBuilder paramsJson = new StringBuilder();
                     for (String p : params) {
                         if (paramsJson.length() > 0) paramsJson.append(',');
@@ -1734,8 +1747,8 @@ public class CallGraphBuilder {
         @Override
         public Void visitMethodInvocation(MethodInvocationTree mc, Void nil) {
             if (!mtd.isEmpty()) {
-                Symbol sym = symOf(mc);
-                Type recv = receiverType(mc.getMethodSelect());
+                Element sym = symOf(trees, getCurrentPath(), mc);
+                TypeMirror recv = receiverType(mc.getMethodSelect());
                 resolveCall(sym, recv == null ? null : typeFqnOf(recv), methodRawName(mc.getMethodSelect()));
             }
             return super.visitMethodInvocation(mc, nil);
@@ -1744,7 +1757,7 @@ public class CallGraphBuilder {
         @Override
         public Void visitMemberReference(MemberReferenceTree mref, Void nil) {
             if (!mtd.isEmpty()) {
-                Symbol sym = symOf(mref);
+                Element sym = symOf(trees, getCurrentPath(), mref);
                 resolveCall(sym, null, mref.getName().toString());
             }
             return super.visitMemberReference(mref, nil);
@@ -1754,8 +1767,8 @@ public class CallGraphBuilder {
         public Void visitNewClass(NewClassTree nc, Void nil) {
             if (!mtd.isEmpty()) {
                 recordUse(mtd, nc.getIdentifier());
-                Symbol sym = symOf(nc);
-                resolveCall(sym, typeFqn(nc.getIdentifier()), typeRawName(nc.getIdentifier()));
+                Element sym = symOf(trees, getCurrentPath(), nc);
+                resolveCall(sym, typeFqn(nc.getIdentifier(), trees, getCurrentPath()), typeRawName(nc.getIdentifier()));
             }
             return super.visitNewClass(nc, nil);
         }
@@ -1784,12 +1797,12 @@ public class CallGraphBuilder {
          * constructors disambiguate). Otherwise the receiver type (if a project
          * struct) becomes `uses`; everything else an `unresolved_call`.
          */
-        void resolveCall(Symbol sym, String recvFqn, String rawName) {
-            if (sym instanceof Symbol.MethodSymbol ms) {
+        void resolveCall(Element sym, String recvFqn, String rawName) {
+            if (sym instanceof ExecutableElement ms) {
                 // Calls into an anonymous class's own synthetic members (e.g.
                 // its generated <init> calling super()) have no stable identity.
-                Symbol directOwner = ms.getEnclosingElement();
-                if (directOwner instanceof Symbol.ClassSymbol ocs && ocs.getQualifiedName().length() == 0) {
+                Element directOwner = ms.getEnclosingElement();
+                if (directOwner instanceof TypeElement ocs && ocs.getQualifiedName().length() == 0) {
                     return;
                 }
                 String parent = ownerFqn(directOwner);
@@ -1865,7 +1878,7 @@ public class CallGraphBuilder {
          * are dropped (ubiquitous, low-signal).
          */
         void recordUse(String fromId, Tree type) {
-            String tfqn = typeFqn(type);
+            String tfqn = typeFqn(type, trees, getCurrentPath());
             if (tfqn != null) {
                 if (structID.containsKey(tfqn)) {
                     emitEdge("uses", fromId, structID.get(tfqn));
@@ -1897,17 +1910,16 @@ public class CallGraphBuilder {
         }
 
         /** Static type of the receiver expression of a method select, if any. */
-        static Type receiverType(ExpressionTree sel) {
+        TypeMirror receiverType(ExpressionTree sel) {
             if (!(sel instanceof MemberSelectTree ms)) return null;
             ExpressionTree expr = ms.getExpression();
-            if (!(expr instanceof JCTree jc)) return null;
-            return jc.type;
+            return trees.getTypeMirror(new TreePath(getCurrentPath(), expr));
         }
 
-        static String typeFqnOf(Type t) {
+        static String typeFqnOf(TypeMirror t) {
             if (t == null) return null;
-            if (t.tsym instanceof Symbol.ClassSymbol cs) {
-                String qn = cs.getQualifiedName().toString();
+            if (t instanceof DeclaredType dt && dt.asElement() instanceof TypeElement te) {
+                String qn = te.getQualifiedName().toString();
                 if (qn.indexOf('<') >= 0 || qn.contains("<error>")) return null;
                 return qn;
             }
@@ -1921,11 +1933,22 @@ public class CallGraphBuilder {
             return l > 0 ? (int) l : 1;
         }
 
+        /** True when the declaration tree carries a doc comment. */
+        boolean hasDocComment(Tree t) {
+            if (docTrees == null) return false;
+            try {
+                return docTrees.getDocCommentTree(new TreePath(getCurrentPath(), t)) != null;
+            } catch (Throwable ex) {
+                return false;
+            }
+        }
+
         /** 0-based span of a class declaration, including its doc comment. */
-        int[] classSpan(JCTree jc) {
-            JCTree.JCCompilationUnit jcCu = (JCTree.JCCompilationUnit) getCurrentPath().getCompilationUnit();
-            int start = jc.getStartPosition();
-            if (jcCu.docComments != null && jcCu.docComments.hasComment(jc)) {
+        int[] classSpan(Tree t) {
+            CompilationUnitTree cu = getCurrentPath().getCompilationUnit();
+            int treeStart = (int) sourcePos.getStartPosition(cu, t);
+            int start = treeStart;
+            if (hasDocComment(t)) {
                 for (int p = start; p >= 2; p--) {
                     if (sourceText.charAt(p - 1) == '*' && sourceText.charAt(p - 2) == '/') {
                         start = p - 2;
@@ -1933,8 +1956,8 @@ public class CallGraphBuilder {
                     }
                 }
             }
-            int bracePos = sourceText.indexOf('{', jc.getStartPosition());
-            int end = jc.getEndPosition(jcCu.endPositions);
+            int bracePos = sourceText.indexOf('{', treeStart);
+            int end = (int) sourcePos.getEndPosition(cu, t);
             if (end <= start) {
                 if (bracePos > 0) {
                     int close = matchingBraceEnd(sourceText, bracePos);
@@ -1947,10 +1970,11 @@ public class CallGraphBuilder {
         }
 
         /** 0-based span of a method declaration, including its doc comment. */
-        int[] methodSpan(JCTree jc) {
-            JCTree.JCCompilationUnit jcCu = (JCTree.JCCompilationUnit) getCurrentPath().getCompilationUnit();
-            int start = jc.getStartPosition();
-            if (jcCu.docComments != null && jcCu.docComments.hasComment(jc)) {
+        int[] methodSpan(Tree t) {
+            CompilationUnitTree cu = getCurrentPath().getCompilationUnit();
+            int treeStart = (int) sourcePos.getStartPosition(cu, t);
+            int start = treeStart;
+            if (hasDocComment(t)) {
                 for (int p = start; p >= 2; p--) {
                     if (sourceText.charAt(p - 1) == '*' && sourceText.charAt(p - 2) == '/') {
                         start = p - 2;
@@ -1958,9 +1982,9 @@ public class CallGraphBuilder {
                     }
                 }
             }
-            int end = jc.getEndPosition(jcCu.endPositions);
-            if (end < 0 && jc instanceof JCTree.JCMethodDecl md && md.body != null) {
-                end = md.body.getEndPosition(jcCu.endPositions);
+            int end = (int) sourcePos.getEndPosition(cu, t);
+            if (end < 0 && t instanceof MethodTree md && md.getBody() != null) {
+                end = (int) sourcePos.getEndPosition(cu, md.getBody());
             }
             if (end < 0) {
                 int open = sourceText.indexOf('{', start);

@@ -24,24 +24,20 @@ class ApgJava < Formula
     system "javac",
            "-d", "java-classes",
            "-proc:none",
-           # Target Java 17 bytecode so the compiled frontend runs on any JVM
-           # >= 17 regardless of the JDK that compiled it (the formula builds
-           # with brew's latest openjdk, but users run it with `java` on PATH).
-           # `--release` is incompatible with --add-exports on jdk.compiler, so
-           # -source/-target is used instead.
-           "-source", "17", "-target", "17",
-           "--add-exports", "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
-           "--add-exports", "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
-           "--add-exports", "jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
-           "--add-exports", "jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
+           # Target Java 21 bytecode and compile against the Java 21 public API
+           # only, so the compiled frontend runs on any JVM >= 21 regardless of
+           # the JDK that compiled it. The frontend uses no JDK-internal APIs,
+           # so `--release` (not -source/-target + --add-exports) is what keeps
+           # the build JDK's internals out of the artifact.
+           "--release", "21",
            "src/javalib/CallGraphBuilder.java"
     (share/"apg/frontends").install "java-classes"
   end
 
   def caveats
     <<~EOS
-      Scanning Java projects needs `java` on your PATH. Since openjdk is
-      keg-only, either link it or export:
+      Scanning Java projects needs `java` (JDK 21 or newer) on your PATH. Since
+      openjdk is keg-only, either link it or export:
 
         export PATH="#{formula_opt_bin("openjdk")}:$PATH"
     EOS

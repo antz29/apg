@@ -458,7 +458,7 @@ fn frontend_cmd(language: &str) -> Option<String> {
             "java" if dir.join("java-classes").is_dir() => {
                 let classes = dir.join("java-classes");
                 return Some(format!(
-                    "java -Xmx5g -cp {} --add-exports jdk.compiler/com.sun.source.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.source.util=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED CallGraphBuilder",
+                    "java -Xmx5g -cp {} CallGraphBuilder",
                     classes.display()
                 ));
             }
@@ -2628,7 +2628,7 @@ mod tests {
     /// the `[package] version` line on every release: the assertions below fail
     /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
     /// advertised release), so a bump commit cannot silently skip it.
-    const RELEASE_VERSION: &str = "0.15.0";
+    const RELEASE_VERSION: &str = "0.15.1";
 
     /// The `version = "..."` declared directly under a Cargo.toml `[package]`
     /// header.

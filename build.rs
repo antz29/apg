@@ -402,22 +402,13 @@ fn main() {
                 "-d",
                 java_classes.to_str().unwrap(),
                 "-proc:none",
-                // Target Java 17 bytecode so the frontend runs on any JVM >= 17
-                // regardless of the JDK that compiled it. `--release` conflicts
-                // with the --add-exports below (system-module export), so
-                // -source/-target is used instead.
-                "-source",
-                "17",
-                "-target",
-                "17",
-                "--add-exports",
-                "jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
-                "--add-exports",
-                "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
-                "--add-exports",
-                "jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
-                "--add-exports",
-                "jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
+                // Target Java 21 bytecode and compile against the Java 21 public
+                // API only, so the frontend runs on any JVM >= 21 regardless of
+                // the JDK that compiled it. The frontend uses no JDK-internal
+                // APIs, so `--release` (not -source/-target + --add-exports) is
+                // what keeps the build JDK's internals out of the artifact.
+                "--release",
+                "21",
                 "src/javalib/CallGraphBuilder.java",
             ])
             .status()
@@ -425,7 +416,7 @@ fn main() {
 
         if java_ok {
             let cmd = format!(
-                "java -Xmx5g -cp {} --add-exports jdk.compiler/com.sun.source.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.source.util=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED CallGraphBuilder",
+                "java -Xmx5g -cp {} CallGraphBuilder",
                 java_classes.display()
             );
             println!("cargo:rustc-env=APG_FRONTEND_JAVA={}", cmd);

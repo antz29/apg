@@ -45,7 +45,7 @@ languages you scan. Prebuilt bottles (macOS
 arm64) are
 published to each GitHub release by CI; if no bottle matches your system,
 Homebrew falls back to building from source. Java projects additionally need
-`java` on your PATH at scan time (see [below](#java-projects)); Rust projects
+`java` (JDK 21+) on your PATH at scan time (see [below](#java-projects)); Rust projects
 need a valid Cargo manifest (unlike C++, which tolerates bare directories), and
 the `apg-rust` formula builds the frontend with the current stable toolchain.
 TypeScript projects need `node` on your PATH at scan time (the `apg-ts`
@@ -128,7 +128,7 @@ Options:
 - `--force`: overwrite existing files without prompting
 - `--uninstall [component...]`: remove specific components or the entire install
 
-The binary links OpenSSL dynamically, so `libssl.so.3` must be present (it is on Ubuntu 22.04+/Debian 12+/Fedora 36+; the installer warns if it is missing). Java scan projects still need `java` on your PATH at scan time. TypeScript scan projects need `node` on your PATH.
+The binary links OpenSSL dynamically, so `libssl.so.3` must be present (it is on Ubuntu 22.04+/Debian 12+/Fedora 36+; the installer warns if it is missing). Java scan projects still need `java` (JDK 21+) on your PATH at scan time. TypeScript scan projects need `node` on your PATH.
 
 Verify:
 
@@ -386,9 +386,10 @@ First matching rule wins; otherwise `default`. `globs` match the full path;
 
 ## Java projects
 
-`apg` scans Java via a `java` process using javac's compiler API. The brew
-formula depends on `openjdk`, but openjdk is keg-only, so `java` is not on
-your PATH by default. Either link it or export it:
+`apg` scans Java via a `java` process using javac's public compiler API. It
+requires **JDK 21 or newer** on your PATH; older JDK releases are not
+supported. The brew formula depends on `openjdk`, but openjdk is keg-only, so
+`java` is not on your PATH by default. Either link it or export it:
 
 ```sh
 export PATH="$(brew --prefix openjdk)/bin:$PATH"
