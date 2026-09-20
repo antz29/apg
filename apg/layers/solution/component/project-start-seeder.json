@@ -4,7 +4,13 @@
   "name": "project-start-seeder",
   "body": "The `apg project start` branch-DB seeder: after the standard refusals it requires main's scan to be fresh for main's HEAD (refusing with `apg scan` guidance otherwise) and copies main's `apg/.trans` into the new worktree — no frontend scan.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd.project_start_at",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
