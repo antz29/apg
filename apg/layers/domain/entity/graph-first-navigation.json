@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.component.navigator-prompt-guidance",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.repo-agent-guide",
+      "properties": {}
     }
   ],
   "in": [
