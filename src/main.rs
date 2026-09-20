@@ -6088,8 +6088,9 @@ mod tests {
                     .find(signature)
                     .unwrap_or_else(|| panic!("APG_LIB must declare `{signature}`"));
                 // Skip the parameter list first: a braced option TYPE in the
-                // signature (`opts?: { rebaseColumns?: number[] }`) must not be
-                // mistaken for the body's opening brace.
+                // signature (`opts?: { rebaseColumns?: number[] | ((row:
+                // string[]) => number[]) }`) must not be mistaken for the
+                // body's opening brace — its nested parens are counted too.
                 let paren_open = src[start..]
                     .find('(')
                     .map(|i| start + i)

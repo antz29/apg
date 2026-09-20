@@ -14,13 +14,20 @@
 // release tag (see src/pylib/Cargo.toml), the same pattern as the Rust
 // frontend's rust-analyzer pin.
 //
-// Module model: a directory containing `__init__.py`/`__init__.pyi` is a
-// package; the dotted identity is built by walking up through
-// `__init__`-bearing ancestors. A file with no init-bearing ancestor is a flat
-// module named by its stem (matching plain-script / namespace layouts). The
-// frontend emits the DOTTED IDENTITY VERBATIM (`pkg`, `pkg.sub`, `foo`) with
-// NO `py.` prefix: the `py.` language root is applied INGESTOR-SIDE, so a
-// frontend-baked root would double-root. FQNs:
+// Module model: the identity boundary is the REPO BASE — the nearest
+// `.git`-bearing ancestor of the scan root (the git toplevel; a directory in a
+// normal checkout, a file in a linked worktree), or the scan root itself when
+// the tree is not a git checkout — never the scan root. `<repo>` and
+// `<repo>/subdir` scans therefore mint the same identity for the same file
+// (`requirements.requirement.portable-graph-identity`,
+// `domain.value.module-identity`). Every directory between the base and the
+// file contributes a dotted component — an `__init__.py`/`__init__.pyi`-bearing
+// regular package and a PEP-420 namespace directory alike — and the base itself
+// is the import root and never contributes its own name, so no module is named
+// after the checkout/scan-root directory. The frontend emits the DOTTED
+// IDENTITY VERBATIM (`pkg`, `pkg.sub`, `foo`) with NO `py.` prefix: the `py.`
+// language root is applied INGESTOR-SIDE, so a frontend-baked root would
+// double-root. FQNs:
 //
 //   pkg/sub/__init__.py         -> module `pkg.sub`
 //   pkg/sub/mod.py              -> module `pkg.sub.mod`
@@ -393,31 +400,52 @@ impl Scanner {
     }
 
     /// Computes the dotted module identity for a source file from its full
-    /// package directory path: every directory between the scan root and the
-    /// file is a package-or-PEP-420-namespace component (a directory with no
+    /// package directory path, relative to the REPO BASE (the git toplevel
+    /// found by walking up from the scan root, or the scan root when the tree
+    /// is not a git checkout): every directory between the base and the file
+    /// is a package-or-PEP-420-namespace component (a directory with no
     /// `__init__.py` is a namespace package and contributes its name just like
-    /// an `__init__.py`/`__init__.pyi`-bearing regular package). The scan root
-    /// is the import root and never contributes its own name, so no module is
-    /// named after the checkout/scan-root directory. A file outside the scan
-    /// root keeps the pre-namespace rule (only `__init__`-bearing ancestors).
+    /// an `__init__.py`/`__init__.pyi`-bearing regular package). The base is
+    /// the import root and never contributes its own name, so no module is
+    /// named after the checkout/scan-root directory — and because the boundary
+    /// is the repo base, `<repo>` and `<repo>/subdir` scans agree. A file
+    /// outside the repo base keeps the pre-namespace rule (only
+    /// `__init__`-bearing ancestors).
     fn module_fqn_for(&self, file: &Path) -> String {
         let is_init = file.file_stem().is_some_and(|s| s == "__init__");
         let stem = file
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "module".to_string());
-        let under_root = file.starts_with(&self.root);
+        // The identity boundary: walk up from the scan root for a `.git` entry
+        // (the git toplevel), falling back to the scan root when no ancestor is
+        // a checkout. Inline block — no new unit. The same repo-base model the
+        // TS frontend uses (`ts.apg-tsfrontend.identity.packageIdentity`), so
+        // the boundary is never the scan root.
+        let repo_base = {
+            let mut dir = self.root.clone();
+            loop {
+                if dir.join(".git").exists() {
+                    break dir;
+                }
+                match dir.parent() {
+                    Some(parent) => dir = parent.to_path_buf(),
+                    None => break self.root.clone(),
+                }
+            }
+        };
+        let under_base = file.starts_with(&repo_base);
         let mut ancestors: Vec<String> = Vec::new();
         let mut dir = file.parent().map(Path::to_path_buf);
         while let Some(d) = dir {
-            if under_root {
-                // Directories strictly below the import root all contribute;
-                // the root itself is the boundary (exclusive).
-                if d == self.root {
+            if under_base {
+                // Directories strictly below the repo base all contribute;
+                // the base itself is the boundary (exclusive).
+                if d == repo_base {
                     break;
                 }
             } else {
-                // Outside the scan tree: preserve the pre-namespace boundary.
+                // Outside the repo base: preserve the pre-namespace boundary.
                 let has_init = d.join("__init__.py").is_file() || d.join("__init__.pyi").is_file();
                 if !has_init {
                     break;
@@ -1643,6 +1671,81 @@ mod tests {
             assert!(
                 node_id(&recs, "function", "namespace_b.mod", "b").is_some(),
                 "namespace_b declaration missing"
+            );
+        }
+
+        #[test]
+        #[ignore = "e2e tier: spawns the built frontend over scratch temp dirs; run via cargo test-e2e"]
+        fn module_identity_is_repo_base_relative_and_scan_root_independent() {
+            // `root` is a git toplevel; the same file is scanned once as the
+            // whole repo and once from the `pkg` subdirectory. The identity
+            // boundary is the repo base (the git toplevel), never the scan
+            // root, so both scans must mint the same dotted identities
+            // (`requirements.requirement.portable-graph-identity` AC2+AC4).
+            let root = scratch_dir("repo-base");
+            std::fs::create_dir_all(root.join(".git")).expect("git toplevel marker");
+            write_file(&root, "pkg/__init__.py", "");
+            write_file(&root, "pkg/mod.py", "def f():\n    return 1\n");
+            // A PEP-420 namespace sibling (no `__init__.py`).
+            write_file(&root, "ns/mod.py", "def g():\n    return 2\n");
+
+            let repo_recs = records(&run_frontend(&root, &[]));
+            let sub_recs = records(&run_frontend(&root.join("pkg"), &[]));
+
+            let repo_modules = module_fqns(&repo_recs);
+            let sub_modules = module_fqns(&sub_recs);
+
+            // Repo-root scan: identities are relative to the git toplevel.
+            for expected in ["pkg", "pkg.mod", "ns", "ns.mod"] {
+                assert!(
+                    repo_modules.contains(expected),
+                    "repo scan missing module {expected}: {repo_modules:?}"
+                );
+            }
+            assert!(
+                !repo_modules.contains("mod"),
+                "same-stem modules must not collapse to the bare stem: {repo_modules:?}"
+            );
+
+            // Subdir scan of `pkg`: the SAME identities. The subdirectory is
+            // NOT the boundary, so the identity keeps its `pkg` prefix instead
+            // of regressing to the scan-root-relative bare stem `mod`.
+            assert!(
+                sub_modules.contains("pkg"),
+                "a subdir scan must keep the pkg package identity: {sub_modules:?}"
+            );
+            assert!(
+                sub_modules.contains("pkg.mod"),
+                "a subdir scan must keep pkg.mod: {sub_modules:?}"
+            );
+            assert!(
+                !sub_modules.contains("mod"),
+                "a subdir scan must not mint the scan-root-relative bare stem: {sub_modules:?}"
+            );
+
+            // The emitted File parent agrees with the module identity in both
+            // scans, so every Struct/Function fqn parented at it agrees too.
+            let parent_of = |recs: &[serde_json::Value], suffix: &str| -> Option<String> {
+                recs.iter()
+                    .filter(|r| r["type"] == "file")
+                    .find(|r| r["path"].as_str().is_some_and(|p| p.ends_with(suffix)))
+                    .and_then(|r| r["parent"].as_str().map(str::to_string))
+            };
+            assert_eq!(
+                parent_of(&repo_recs, "pkg/mod.py").as_deref(),
+                Some("pkg.mod")
+            );
+            assert_eq!(
+                parent_of(&sub_recs, "pkg/mod.py").as_deref(),
+                Some("pkg.mod")
+            );
+            assert_eq!(
+                parent_of(&sub_recs, "pkg/__init__.py").as_deref(),
+                Some("pkg")
+            );
+            assert!(
+                node_id(&sub_recs, "function", "pkg.mod", "f").is_some(),
+                "the subdir scan's declaration must hang under the repo-relative module"
             );
         }
 

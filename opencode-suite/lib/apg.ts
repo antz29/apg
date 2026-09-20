@@ -74,6 +74,25 @@ export function resolveProjectPath(projectDir: string, value: string): string {
   return path.join(projectDir, value)
 }
 
+/**
+ * The rebase-column set for one row of `apg_find_symbol`'s result, whose
+ * columns are `kind, n.fqn, n.path, n.start_line, n.end_line`.
+ *
+ * `apg_find_symbol` matches every node kind through one query, but the stored
+ * repo-relative identity lands in a DIFFERENT cell depending on the kind: a
+ * File row's `n.fqn` (column 1) IS its stored source path and File nodes carry
+ * no `path` (column 2 is empty), while a Struct/Function row's `n.fqn` is a
+ * symbol name and its `n.path` (column 2) is the stored source path. So a File
+ * row rebases its fqn cell and every other kind rebases its path cell — never
+ * both blindly, because a symbol fqn is not a path (`resolveProjectPath` would
+ * join it under the project directory into a bogus path).
+ *
+ * Pure: no fs, no subprocess, no `Bun.$` — safe for the `bun test` unit tier.
+ */
+export function findSymbolRebaseColumns(row: string[]): number[] {
+  return row[0] === "File" ? [1, 2] : [2]
+}
+
 
 /** Prefix of the error string runCypher returns when `apg query` exits non-zero;
  *  the exit code and the CLI's stderr follow it. Shared with `isQueryError` so
@@ -99,14 +118,17 @@ export const NO_DB_ERROR =
  * with no `opts`, the stored form is returned verbatim, so raw `apg query` is
  * untouched. A curated tool opts in by naming the CSV columns that carry a
  * stored repo-relative identity; those cells are resolved to absolute paths
- * under the caller's project directory before the CSV is re-serialized. The
+ * under the caller's project directory before the CSV is re-serialized. A
+ * tool whose identity cell depends on the row's kind (e.g. `apg_find_symbol`,
+ * where a File's identity is its fqn cell and a symbol's is its path cell)
+ * passes a predicate `(row) => number[]` instead of a fixed column list. The
  * header row is never rebased.
  */
 export async function runCypher(
   context: ToolContext,
   cypher: string,
   directory?: string,
-  opts?: { rebaseColumns?: number[] },
+  opts?: { rebaseColumns?: number[] | ((row: string[]) => number[]) },
 ): Promise<string> {
   const root = findApgRoot(context, directory)
   if (!root) {
@@ -117,13 +139,14 @@ export async function runCypher(
     return `${QUERY_FAILED_PREFIX} (exit ${result.exitCode}):\n${result.stderr.toString().trim()}`
   }
   const out = result.stdout.toString().trim()
-  const cols = opts?.rebaseColumns
-  if (!cols || cols.length === 0) return out
-  const rebased = csvToRows(out).map((row, i) =>
-    i === 0
-      ? row
-      : row.map((cell, j) => (cols.includes(j) ? resolveProjectPath(root, cell) : cell)),
-  )
+  const colsOpt = opts?.rebaseColumns
+  if (!colsOpt) return out
+  if (Array.isArray(colsOpt) && colsOpt.length === 0) return out
+  const rebased = csvToRows(out).map((row, i) => {
+    if (i === 0) return row
+    const cols = typeof colsOpt === "function" ? colsOpt(row) : colsOpt
+    return row.map((cell, j) => (cols.includes(j) ? resolveProjectPath(root, cell) : cell))
+  })
   return rebased
     .map((row) =>
       row

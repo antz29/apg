@@ -14,7 +14,13 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { runCypher, resolveProjectPath, csvToRows, type ToolContext } from "../lib/apg.ts"
+import {
+  runCypher,
+  resolveProjectPath,
+  findSymbolRebaseColumns,
+  csvToRows,
+  type ToolContext,
+} from "../lib/apg.ts"
 
 /// The candidate binary: `APG_BINARY`, else the in-repo debug build. The suite
 /// e2e is only meaningful against a binary that renders repo-relative
@@ -99,6 +105,23 @@ test.skipIf(!enabled || !binary)(
 
       // An absolute input maps back to the stored value the query matched.
       expect(resolveProjectPath(repo, path.join(repo, "pkg/a.go"))).toBe(stored)
+
+      // `apg_find_symbol`'s kind-aware boundary (feedback-17): its one query
+      // returns a File row whose identity is the `n.fqn` cell (column 1) and
+      // File nodes carry no `path`, so the old blind `rebaseColumns: [2]` was
+      // a no-op and a consumer got the stored relative path. Rebasing with
+      // `findSymbolRebaseColumns` resolves that fqn cell to an absolute path.
+      const toolQuery =
+        "MATCH (n) WHERE n.fqn CONTAINS 'a.go' AND labels(n) = 'File' " +
+        "RETURN labels(n) as kind, n.fqn, n.path, n.start_line, n.end_line"
+      const toolRows = csvToRows(
+        await runCypher(context, toolQuery, repo, { rebaseColumns: findSymbolRebaseColumns }),
+      )
+      const fileRow = toolRows.slice(1).find((r) => r[0] === "File")
+      expect(fileRow).toBeDefined()
+      const fileFqn = (fileRow as string[])[1]
+      expect(fileFqn).toBe(path.join(repo, "pkg/a.go"))
+      expect(existsSync(fileFqn)).toBe(true)
     } finally {
       if (previousBinary === undefined) delete process.env.APG_BINARY
       else process.env.APG_BINARY = previousBinary

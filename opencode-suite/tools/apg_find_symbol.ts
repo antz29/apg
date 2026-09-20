@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
-import { runCypher, lit, codeTypeCondition } from "../lib/apg.ts"
+import { runCypher, lit, codeTypeCondition, findSymbolRebaseColumns } from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -40,9 +40,11 @@ export default tool({
       cypher += ` AND ${conds.join(" AND ")}`
     }
     cypher += ` RETURN labels(n) as kind, n.fqn, n.path, n.start_line, n.end_line ORDER BY n.fqn LIMIT ${limit}`
-    // Column 2 is `n.path` — the stored repo-relative source-file identity for
-    // a Struct/Function (empty for a File, whose identity is its fqn in column
-    // 1 and stays the tool-input form other tools accept).
-    return runCypher(context, cypher, args.directory, { rebaseColumns: [2] })
+    // The stored repo-relative identity sits in a kind-dependent cell: a File's
+    // identity is its `n.fqn` (column 1; File nodes have no `path`), while a
+    // Struct/Function's identity is its `n.path` (column 2) and its fqn is a
+    // symbol name. `findSymbolRebaseColumns` rebases the right cell per row —
+    // a blind column rebase would turn a symbol fqn into a bogus path.
+    return runCypher(context, cypher, args.directory, { rebaseColumns: findSymbolRebaseColumns })
   },
 })

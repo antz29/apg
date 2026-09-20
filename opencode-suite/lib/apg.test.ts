@@ -14,6 +14,7 @@ import {
   isQueryError,
   expectQueryOk,
   resolveProjectPath,
+  findSymbolRebaseColumns,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
 } from "./apg.ts"
@@ -88,5 +89,29 @@ test("resolveProjectPath round-trips in both directions", () => {
   const absolute = "/home/u/repo/src/deep/a.rs"
   expect(resolveProjectPath(dir, resolveProjectPath(dir, stored))).toBe(stored)
   expect(resolveProjectPath(dir, resolveProjectPath(dir, absolute))).toBe(absolute)
+})
+
+// fix-module-identity feedback-17: `apg_find_symbol` is the one curated tool
+// whose identity cell is kind-dependent — a File row's fqn (column 1) is its
+// path, a symbol row's fqn is a symbol name and its path (column 2) is the
+// path. The selector must pick the identity cell per kind, never blind-rebase
+// column 1 (which would join a symbol name under the project dir).
+test("findSymbolRebaseColumns rebases a File's fqn but a symbol's path", () => {
+  // kind, n.fqn, n.path, start, end
+  expect(findSymbolRebaseColumns(["File", "src/a.rs", "", "1", "9"])).toEqual([1, 2])
+  expect(findSymbolRebaseColumns(["Struct", "pkg.A", "src/a.go", "1", "5"])).toEqual([2])
+  expect(findSymbolRebaseColumns(["Function", "pkg.Leaf", "src/a.go", "7", "9"])).toEqual([2])
+  // Module/UnresolvedTarget carry neither cell; the path column is a no-op.
+  expect(findSymbolRebaseColumns(["Module", "go.example/repo", "", "", ""])).toEqual([2])
+})
+
+// The failure this fixes: a blind column rebase of a symbol fqn would turn
+// `pkg.A` into `<projectDir>/pkg.A` (a path that does not exist). The selector
+// must never rebase column 1 for a non-File row.
+test("findSymbolRebaseColumns does not turn a symbol fqn into a path", () => {
+  const symbol = ["Struct", "pkg.A", "pkg/a.go", "1", "5"]
+  expect(findSymbolRebaseColumns(symbol)).not.toContain(1)
+  const file = ["File", "pkg/a.go", "", "1", "9"]
+  expect(findSymbolRebaseColumns(file)).toContain(1)
 })
 
