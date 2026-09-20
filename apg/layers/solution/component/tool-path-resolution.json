@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "ts.apg-opencode-suite.lib.apg.findApgRoot",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-opencode-suite.lib.apg.runCypher",
+      "properties": {}
     }
   ],
   "in": [
