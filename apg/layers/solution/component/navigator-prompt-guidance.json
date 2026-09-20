@@ -4,7 +4,13 @@
   "name": "navigator-prompt-guidance",
   "body": "The distributed agent-prompt surface: `opencode-suite/agents/*.md`, embedded in the apg binary via `include_str!` and installed by `apg init` into `~/.opencode/agents/`. It is where the navigator's non-negotiable rules and the agent-builder's generation rules live, so it is the surface that must carry the graph-first ordering and make every generated agent inherit it. Included files: `opencode-suite/agents/codebase-navigator.md` (the ordering rule) and `opencode-suite/agents/agent-builder.md` (rule 5, propagation to generated agents).",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/codebase-navigator.md",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "realised-by",
