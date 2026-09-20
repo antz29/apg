@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.portable-graph-identity",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.graph-first-navigation",
+      "properties": {}
     }
   ],
   "in": []
