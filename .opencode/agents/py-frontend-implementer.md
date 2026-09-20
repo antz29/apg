@@ -252,11 +252,12 @@ reviewer:    apg_review_reject <f>                               → status = op
   **facts only** (declarations, references, edges) in the unified JSONL schema —
   it never computes FQNs and never does graph assembly (the Rust ingestor does).
   Python edges are exact via `ty`.
-- **This crate is new on `main`.** A Python frontend already exists on the
-  unmerged `origin/grafaelw-more-languages` branch at `src/pylib/`
-  (`Cargo.toml`, `Cargo.lock`, `src/main.rs`); on `main` the directory does not
-  exist yet. Create it when a plan task calls for it and do not graft it onto
-  the root crate's build.
+- **This crate exists and is wired in.** `build.rs` builds it with
+  `cargo build --manifest-path src/pylib/Cargo.toml --release --bin pyfrontend`
+  and stages the `pyfrontend` binary into the active profile's `frontends/`
+  directory alongside the other frontends. It is a standalone, non-workspace
+  crate exactly like `src/mdlib`; keep it that way (its lockfile and target
+  tree stay independent).
 - **Tests** live in the crate (inline `#[cfg(test)]` and/or `tests/`); this
   roster has no separate test-implementers, so you own the frontend's source and
   its tests, and `cargo test --manifest-path src/pylib/Cargo.toml` is part of
@@ -338,11 +339,13 @@ reviewer:    apg_review_reject <f>                               → status = op
 - **There is no such thing as a pre-existing failure.** If your crate's `cargo
   test` is red, find the failing assertion and fix the code or the test until
   it is green.
-- The **aggregate repository gate** (`cargo build` then `cargo test` green) is
-  the **core implementer's** gate, run in the root crate. It compiles and
-  exercises your frontend through `build.rs`, but you do not run the root
-  crate's cargo yourself: keep your crate green and the core agent's aggregate
-  gate stays green.
+- The **aggregate repository gate** is the **core implementer's** gate, run in
+  the root crate: `scripts/gate.sh` (cargo fmt/check/clippy/build/test, then
+  `bun test` in `opencode-suite/` and `node --test` in `src/tslib/`);
+  `scripts/gate.sh --e2e` appends the opt-in e2e tier. It compiles and
+  exercises your frontend through `build.rs`, but you do not run the gate
+  yourself: keep your crate green and the core agent's aggregate gate stays
+  green.
 - A task is done only when its code exists and your crate's gates are green;
   the core implementer performs the branch commit at phase end.
 

@@ -331,11 +331,13 @@ reviewer:    apg_review_reject <f>                               → status = op
 - **There is no such thing as a pre-existing failure.** If your crate's `cargo
   test` is red, find the failing assertion and fix the code or the test until
   it is green.
-- The **aggregate repository gate** (`cargo build` then `cargo test` green) is
-  the **core implementer's** gate, run in the root crate. It compiles and
-  exercises your frontend through `build.rs`, but you do not run the root
-  crate's cargo yourself: keep your crate green and the core agent's aggregate
-  gate stays green.
+- The **aggregate repository gate** is the **core implementer's** gate, run in
+  the root crate: `scripts/gate.sh` (cargo fmt/check/clippy/build/test, then
+  `bun test` in `opencode-suite/` and `node --test` in `src/tslib/`);
+  `scripts/gate.sh --e2e` appends the opt-in e2e tier. It compiles and
+  exercises your frontend through `build.rs`, but you do not run the gate
+  yourself: keep your crate green and the core agent's aggregate gate stays
+  green.
 - A task is done only when its code exists and your crate's gates are green;
   the core implementer performs the branch commit at phase end.
 

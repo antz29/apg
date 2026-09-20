@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg TypeScript frontend (src/tslib/ — scanner.mjs, package.json, package-lock.json): the Node scanner that uses the official typescript compiler API to resolve calls/types exactly and emit the unified JSONL facts for the Rust ingestor. Owns src/tslib/** except src/tslib/node_modules/**; runs the node/npm/npx tsc gates. No git write (the core implementer commits the branch); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
+description: Implements plan tasks in the apg TypeScript frontend (src/tslib/ — scanner.ts, identity.mjs, package.json, package-lock.json): the Node scanner that uses the official typescript compiler API to resolve calls/types exactly and emit the unified JSONL facts for the Rust ingestor, with the node --test harnesses scanner.test.ts / identity.test.ts. Owns src/tslib/** except src/tslib/node_modules/**; runs the npm/node gates. No git write (the core implementer commits the branch); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
 mode: subagent
 hidden: true
 generated: true
@@ -80,6 +80,7 @@ permission:
     "npm *": allow
     "npx tsc": allow
     "npx tsc *": allow
+    "rm src/tslib/*.ts": allow
     "rm src/tslib/*.mjs": allow
   apg_query: allow
   apg_find_symbol: allow
@@ -230,15 +231,23 @@ reviewer:    apg_review_reject <f>                               → status = op
 
 ## The repo you implement in
 
-- **Your crate**: `src/tslib/` — `scanner.mjs` (the scanner), `package.json`,
-  `package-lock.json`, and the npm-installed `node_modules/`. It is a Node
-  script using the official `typescript` compiler API for exact call/type
-  resolution; `build.rs` runs `npm ci` and stages the scanner. It emits **facts
-  only** (declarations, references, edges) in the unified JSONL schema — it
-  never computes FQNs and never does graph assembly (the Rust ingestor does).
+- **Your crate**: `src/tslib/` — `scanner.ts` (the scanner source, marked
+  `// @ts-nocheck` and compiled transpile-only by `build.rs`), `identity.mjs`
+  (the package-identity helper the built scanner imports verbatim),
+  `package.json`, `package-lock.json`, its `*.test.ts` harnesses, and the
+  npm-installed `node_modules/`. `build.rs` runs `npm ci`, compiles `scanner.ts`
+  with the repo-local `typescript` compiler to a staged `scanner.mjs` (failing
+  loudly on any emit error), copies `identity.mjs` beside it, and stages both
+  as the `tsfrontend` artifact. The scanner uses the official `typescript`
+  compiler API for exact call/type resolution; it emits **facts only**
+  (declarations, references, edges) in the unified JSONL schema — it never
+  computes FQNs and never does graph assembly (the Rust ingestor does).
   `node_modules/` is always skipped by the scanner.
-- **Tests** live beside the code in `src/tslib/`; this roster has no separate
-  test-implementers, so you own the frontend's source and its tests.
+- **Tests** live beside the code as `src/tslib/scanner.test.ts` and
+  `src/tslib/identity.test.ts`, run by `node --test` from inside `src/tslib/`
+  (Node 22.7+ strips the TS types and drives the real scanner over a scratch
+  fixture). This roster has no separate test-implementers, so you own the
+  frontend's source and its tests, and `node --test` is part of your gate.
 - **The root crate and the build integration are NOT yours.** `build.rs`, the
   root `Cargo.toml`/`Cargo.lock`, `src/main.rs` (including `frontend_cmd`,
   `auto_detect_languages`, `available_languages`, `id_prefix_for`, and
@@ -290,7 +299,7 @@ reviewer:    apg_review_reject <f>                               → status = op
 - Only the exact allowed patterns match; everything else is denied.
 - **No pattern contains `&&`, `|`, `;`, `$()`/`$(...)`, or redirection — a
   chained command NEVER matches and is DENIED.** Run one command per bash
-  call. `npm ci && node scanner.mjs .` is denied; run them as separate calls.
+  call. `npm ci && node --test` is denied; run them as separate calls.
 - The bash **file-read commands are not granted** (`cat`, `head`, `tail`,
   `dd`, `rg`, `grep`, `git grep`) — read source with the `read`/`grep`/`glob`
   tools, whose graph-state read-guard applies. `git grep` is specifically
@@ -301,19 +310,25 @@ reviewer:    apg_review_reject <f>                               → status = op
 - **Gates**: `node`, `npm` (including `npm ci`), and `npx tsc` — argument
   variants allowed; one command per call, no chaining. Run them from inside
   your crate (`cd src/tslib` first) and reproduce what `build.rs` does.
-- **Deletion**: plain `rm src/tslib/*.mjs` only (no flags) — for removing a
-  source file you created/own. Nothing else is deletable.
+  `node --test` (the test suite) and `node node_modules/typescript/bin/tsc …`
+  (the build's compile form) both match the `node *` grant.
+- **Deletion**: plain `rm src/tslib/*.ts` / `rm src/tslib/*.mjs` only (no
+  flags) — for removing a source file you created/own. Nothing else is
+  deletable.
 
 ## Done gate — your crate-green contract, and the repo gate
 
-- Run **your crate's gates** (`npm ci` for a clean install, `npx tsc` for a
-  type check, `node scanner.mjs` to exercise the scanner — separate calls) and
-  fix everything they surface. Your phase is not done while any of them is red.
+- Run **your crate's gates** (`npm ci` for a clean install, `node --test` for
+  the test suite, and `npx tsc` — or `node node_modules/typescript/bin/tsc …`,
+  the form `build.rs` uses — to reproduce the compile — separate calls) and fix
+  everything they surface. Your phase is not done while any of them is red.
 - **There is no such thing as a pre-existing failure.** A type error or a
   broken scanner is not someone else's problem; fix it.
-- The **aggregate repository gate** (`cargo build` then `cargo test` green) is
-  the **core implementer's** gate, run in the root crate. It installs and
-  exercises your frontend through `build.rs`, but you do not run cargo
+- The **aggregate repository gate** is the **core implementer's** gate, run in
+  the root crate: `scripts/gate.sh` (cargo fmt/check/clippy/build/test, then
+  `bun test` in `opencode-suite/` and `node --test` in `src/tslib/`);
+  `scripts/gate.sh --e2e` appends the opt-in e2e tier. It installs and
+  exercises your frontend through `build.rs`, but you do not run the gate
   yourself: keep your crate green and the core agent's aggregate gate stays
   green.
 - A task is done only when its code exists and your crate's gates are green;
@@ -338,7 +353,8 @@ reviewer:    apg_review_reject <f>                               → status = op
    task's `tier` (unit/int/e2e) is the verification depth for `test` tasks. If the
    change you must make is not covered by the task's verb/target, **stop before
    editing** and report it (see *Discovered work stops you*).
-4. **Run your crate's gates** (separate calls). `npx tsc` must be clean.
+4. **Run your crate's gates** (separate calls). `node --test` must be green and
+   `npx tsc` must be clean.
 5. **Mark the task done**: `apg_plan_done <project> <task-fqn>` as you complete
    it — an **assertion only** (no promotion, no graph verification). If you
    later find the work wrong, `apg_plan_undone <project> <task-fqn>` and fix.

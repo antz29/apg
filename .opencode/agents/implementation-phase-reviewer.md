@@ -58,7 +58,6 @@ permission:
   apg_plan: allow
   apg_plan_tasks: allow
   apg_plan_phases: allow
-  apg_plan_verify: allow
   apg_review: allow
   apg_review_add: allow
   apg_review_resolve: allow
@@ -135,8 +134,8 @@ you.
   `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`,
   `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`, `apg_unresolved`,
   `apg_hunk`); the transient plan state via `apg_plan`, `apg_plan_tasks`,
-  `apg_plan_phases`, `apg_plan_verify`, and the
-  milestone-only `apg_plan_complete`; and the transient feedback store via
+  `apg_plan_phases`, and the milestone-only `apg_plan_complete`; and the
+  transient feedback store via
   `apg_review`, `apg_review_add`, `apg_review_resolve`, and `apg_review_reject`.
 - The durable spec node files and the transient plan/feedback files are **never
   read directly** — they are reached only via the tools above. Your `read`,
@@ -348,9 +347,10 @@ spec and the implementation:
   — you attach, resolve, and reject.
 - You **never scan** — if the graph is missing or stale, stop and report the
   exact failure to the coordinator, who runs the scan.
-- You **never run build gates** — verifying `cargo test` green is the
-  implementer's **asserted** done-gate; your gate is structural: code exists, is
-  wired, and matches the spec contract, with all `Feedback` resolved. You hold
+- You **never run build gates** — verifying the repo gate (`scripts/gate.sh`,
+  which carries the cargo/JS/TS suites) green is the implementer's **asserted**
+  done-gate; your gate is structural: code exists, is wired, and matches the
+  spec contract, with all `Feedback` resolved. You hold
   **no build/run surface at all** (no `cargo …`, no `scripts/gate.sh`) and are
   never to be granted one: review is subjective judgment of the artifact against
   the plan and the spec, not the machine's exit status. **A phase whose gate is

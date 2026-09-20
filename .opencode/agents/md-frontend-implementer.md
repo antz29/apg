@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the new apg Markdown frontend (src/mdlib/ — a standalone cargo project that builds the mdfrontend binary): parses Markdown and emits the unified JSONL facts for the Rust ingestor. Owns src/mdlib/** except src/mdlib/target/**; runs cargo with --manifest-path src/mdlib/Cargo.toml. No git write (the core implementer commits the branch); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
+description: Implements plan tasks in the apg Markdown frontend (src/mdlib/ — a standalone cargo project that builds the mdfrontend binary): parses Markdown and emits the unified JSONL facts for the Rust ingestor. Owns src/mdlib/** except src/mdlib/target/**; runs cargo with --manifest-path src/mdlib/Cargo.toml. No git write (the core implementer commits the branch); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
 mode: subagent
 hidden: true
 generated: true
@@ -248,9 +248,12 @@ reviewer:    apg_review_reject <f>                               → status = op
   Markdown and emits **facts only** (declarations, references, edges) in the
   unified JSONL schema — it never computes FQNs and never does graph assembly
   (the Rust ingestor does).
-- **This crate is new.** On `main` the directory does not exist yet; you create
-  it when a plan task calls for it. The crate is a fresh cargo project; do not
-  graft it onto the root crate's build.
+- **This crate exists and is wired in.** `build.rs` builds it with
+  `cargo build --manifest-path src/mdlib/Cargo.toml --release --bin mdfrontend`
+  and stages the `mdfrontend` binary into the active profile's `frontends/`
+  directory alongside the other frontends. It is a standalone, non-workspace
+  crate exactly like `src/rustlib`; keep it that way (its lockfile and target
+  tree stay independent).
 - **Tests** live in the crate (inline `#[cfg(test)]` and/or `tests/`); this
   roster has no separate test-implementers, so you own the frontend's source and
   its tests, and `cargo test --manifest-path src/mdlib/Cargo.toml` is part of
@@ -332,11 +335,13 @@ reviewer:    apg_review_reject <f>                               → status = op
 - **There is no such thing as a pre-existing failure.** If your crate's `cargo
   test` is red, find the failing assertion and fix the code or the test until
   it is green.
-- The **aggregate repository gate** (`cargo build` then `cargo test` green) is
-  the **core implementer's** gate, run in the root crate. It compiles and
-  exercises your frontend through `build.rs`, but you do not run the root
-  crate's cargo yourself: keep your crate green and the core agent's aggregate
-  gate stays green.
+- The **aggregate repository gate** is the **core implementer's** gate, run in
+  the root crate: `scripts/gate.sh` (cargo fmt/check/clippy/build/test, then
+  `bun test` in `opencode-suite/` and `node --test` in `src/tslib/`);
+  `scripts/gate.sh --e2e` appends the opt-in e2e tier. It compiles and
+  exercises your frontend through `build.rs`, but you do not run the gate
+  yourself: keep your crate green and the core agent's aggregate gate stays
+  green.
 - A task is done only when its code exists and your crate's gates are green;
   the core implementer performs the branch commit at phase end.
 

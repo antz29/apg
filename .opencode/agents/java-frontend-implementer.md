@@ -308,9 +308,11 @@ reviewer:    apg_review_reject <f>                               → status = op
   done while compilation is red or the scanner misbehaves.
 - **There is no such thing as a pre-existing failure.** A compile error or a
   broken scanner is not someone else's problem; fix it.
-- The **aggregate repository gate** (`cargo build` then `cargo test` green) is
-  the **core implementer's** gate, run in the root crate. It compiles and
-  exercises your frontend through `build.rs`, but you do not run cargo
+- The **aggregate repository gate** is the **core implementer's** gate, run in
+  the root crate: `scripts/gate.sh` (cargo fmt/check/clippy/build/test, then
+  `bun test` in `opencode-suite/` and `node --test` in `src/tslib/`);
+  `scripts/gate.sh --e2e` appends the opt-in e2e tier. It compiles and
+  exercises your frontend through `build.rs`, but you do not run the gate
   yourself: keep your crate compiling and the core agent's aggregate gate stays
   green.
 - A task is done only when its code exists and your crate's gates are green;

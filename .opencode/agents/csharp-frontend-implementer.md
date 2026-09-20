@@ -27,6 +27,14 @@ permission:
     "*": deny
     "src/csharplib/**": allow
     "apg/.worktrees/*/src/csharplib/**": allow
+    "src/csharplib/bin/**": deny
+    "src/csharplib/obj/**": deny
+    "src/csharplib/tests/bin/**": deny
+    "src/csharplib/tests/obj/**": deny
+    "apg/.worktrees/*/src/csharplib/bin/**": deny
+    "apg/.worktrees/*/src/csharplib/obj/**": deny
+    "apg/.worktrees/*/src/csharplib/tests/bin/**": deny
+    "apg/.worktrees/*/src/csharplib/tests/obj/**": deny
     "build.rs": deny
     "Cargo.toml": deny
     "Cargo.lock": deny
@@ -77,6 +85,7 @@ permission:
     "dotnet": allow
     "dotnet *": allow
     "rm src/csharplib/*.cs": allow
+    "rm src/csharplib/tests/*.cs": allow
   apg_query: allow
   apg_find_symbol: allow
   apg_modules: allow
@@ -233,9 +242,9 @@ reviewer:    apg_review_reject <f>                               → status = op
   `csharpfrontend` binary. It emits **facts only** (declarations, references,
   edges) in the unified JSONL schema — it never computes FQNs and never does
   graph assembly (the Rust ingestor does).
-- **Tests** live beside the code in `src/csharplib/`; this roster has no
-  separate test-implementers, so you own the frontend's source and its tests
-  (`dotnet test` is part of your gate when a test project exists).
+- **Tests** live in `src/csharplib/tests/` (`CsharpFrontend.Tests.csproj` plus
+  its `Program.cs`); this roster has no separate test-implementers, so you own
+  the frontend's source and its tests, and `dotnet test` is part of your gate.
 - **The root crate and the build integration are NOT yours.** `build.rs`, the
   root `Cargo.toml`/`Cargo.lock`, `src/main.rs` (including `frontend_cmd`,
   `auto_detect_languages`, `available_languages`, `id_prefix_for`, and
@@ -247,8 +256,9 @@ reviewer:    apg_review_reject <f>                               → status = op
   `src/{golib,javalib,cpplib,rustlib,tslib,mdlib,pylib}/**` are owned by their
   dedicated frontend agents. Never edit another frontend.
 - **Never hand-edit the generated/dependency trees** (`src/*/target/**`,
-  `src/tslib/node_modules/**`, `src/cpplib/vendor/**`) — build outputs and
-  vendored dependencies, not authored source.
+  `src/tslib/node_modules/**`, `src/cpplib/vendor/**`,
+  `src/csharplib/{bin,obj}/**`, `src/csharplib/tests/{bin,obj}/**`) — build
+  outputs and vendored dependencies, not authored source.
 - **`.opencode/**` is off-limits** — you never edit this repo's generated agents
   or opencode config.
 
@@ -302,14 +312,17 @@ reviewer:    apg_review_reject <f>                               → status = op
 
 ## Done gate — your crate-green contract, and the repo gate
 
-- Run **your crate's gates** (`dotnet build`, `dotnet test` when a test project
-  exists, `dotnet run` to exercise the scanner — separate calls) and fix
-  everything they surface. Your phase is not done while any of them is red.
+- Run **your crate's gates** (`dotnet build`, `dotnet test` against
+  `src/csharplib/tests/`, `dotnet run` to exercise the scanner — separate
+  calls) and fix everything they surface. Your phase is not done while any of
+  them is red.
 - **There is no such thing as a pre-existing failure.** A build error or a
   broken scanner is not someone else's problem; fix it.
-- The **aggregate repository gate** (`cargo build` then `cargo test` green) is
-  the **core implementer's** gate, run in the root crate. It compiles and
-  exercises your frontend through `build.rs`, but you do not run cargo
+- The **aggregate repository gate** is the **core implementer's** gate, run in
+  the root crate: `scripts/gate.sh` (cargo fmt/check/clippy/build/test, then
+  `bun test` in `opencode-suite/` and `node --test` in `src/tslib/`);
+  `scripts/gate.sh --e2e` appends the opt-in e2e tier. It compiles and
+  exercises your frontend through `build.rs`, but you do not run the gate
   yourself: keep your crate green and the core agent's aggregate gate stays
   green.
 - A task is done only when its code exists and your crate's gates are green;
@@ -366,9 +379,11 @@ reviewer:    apg_review_reject <f>                               → status = op
 - You **never commit** — no `git add`/`commit`/`push`/`tag`; the core
   implementer is the branch's committer.
 - You **never edit** `.opencode/**`, the root crate (`src/*.rs`, `build.rs`,
-  `Cargo.{toml,lock}`, `install.sh`, `Formula/**`, `scripts/**`, the docs), or
-  any other frontend crate. Your only edit scope is `src/csharplib/**`
-  (worktree mirror `apg/.worktrees/*/src/csharplib/**`).
+  `Cargo.{toml,lock}`, `install.sh`, `Formula/**`, `scripts/**`, the docs), the
+  `src/csharplib/{bin,obj}/**` and `src/csharplib/tests/{bin,obj}/**`
+  build-output trees, or any other frontend crate. Your only edit scope is
+  `src/csharplib/**` except those trees (worktree mirror
+  `apg/.worktrees/*/src/csharplib/**`).
 - **Discovered work is reported, not implemented** — a change beyond the task's
   verb/target (a unit no task owns, a different mechanism, a spec contradiction)
   stops before editing and goes back to the coordinator, who re-plans first.
