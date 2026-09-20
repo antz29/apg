@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "project-start-seeder",
+  "body": "The `apg project start` branch-DB seeder: after the standard refusals it requires main's scan to be fresh for main's HEAD (refusing with `apg scan` guidance otherwise) and copies main's `apg/.trans` into the new worktree — no frontend scan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
