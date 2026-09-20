@@ -877,6 +877,53 @@ fn warm_universe(
     out
 }
 
+/// The code-FQN universe contributed by this scan's **reused** fact units: each
+/// reused file's re-based fragment FQNs plus every skipped language's replayed
+/// module scaffolding — exactly the code nodes the win-B assembly splices in
+/// from the shared store (the incremental sibling of [`warm_universe`]).
+///
+/// The incremental full-universe seam ([`incremental::full_universe`]) derives
+/// its base from THIS checkout's previous export, which can lag the shared store
+/// when another worktree scanned ahead: a file that is byte-identical to the
+/// shared record but newer than the local export is reused (not re-emitted), so
+/// its code FQNs would drop out of the universe and falsely trip `spec drift`
+/// during `implemented-by` validation. Unioning this set in closes that gap.
+fn reuse_universe(
+    store_root: &Path,
+    cache_key: &cache::CacheKey,
+    files: &[(String, String, String)],
+    scaffold_langs: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let store = cache::FactStore::at(store_root.to_path_buf()).load();
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    for (rel, lang, oid) in files {
+        let Some((frag, stored_root)) = store.candidate(lang, rel, oid, cache_key) else {
+            continue;
+        };
+        let (modules, nodes, _) = frag.project(&stored_root, "");
+        out.extend(modules);
+        for (fqn, node) in nodes {
+            if node.status.is_none()
+                && matches!(
+                    node.kind,
+                    graph::NodeKind::Module
+                        | graph::NodeKind::Struct
+                        | graph::NodeKind::Function
+                        | graph::NodeKind::File
+                )
+            {
+                out.insert(fqn);
+            }
+        }
+    }
+    for lang in scaffold_langs {
+        if let Some(scaffolding) = store.scaffolding(lang, cache_key) {
+            out.extend(scaffolding.modules);
+        }
+    }
+    out
+}
+
 /// The win-C per-language frontend spawn verdict (phase-03 task-5).
 ///
 /// On the win-B incremental path (`full_scan == false`):
@@ -2158,7 +2205,22 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             })
             .map(|(f, _)| f.clone())
             .collect();
-        incremental::full_universe(&apg_root, &incremental, &emitted_fqns)
+        let mut universe = incremental::full_universe(&apg_root, &incremental, &emitted_fqns);
+        // The reused files' facts are spliced from the shared store, not
+        // re-emitted, so they contribute no spool FQNs. This checkout's previous
+        // export can lag the shared store (another worktree scanned ahead), so
+        // union in the reused units' own code FQNs — otherwise a reused file
+        // newer than the local export would drop out of the universe and falsely
+        // trip `spec drift`.
+        if let Some(plan) = &reuse_plan {
+            universe.extend(reuse_universe(
+                &plan.store_root,
+                &plan.cache_key,
+                &plan.files,
+                &plan.skipped_langs,
+            ));
+        }
+        universe
     };
 
     // Read the transient legs (`.trans/plans/*.jsonl` — the per-branch plan
@@ -6525,6 +6587,88 @@ mod tests {
 
                 let _ = std::fs::remove_dir_all(&base);
             }
+        }
+
+        /// Regression (reused-facts full-universe seam): a reused file whose
+        /// cached facts are newer than THIS checkout's local export must still be
+        /// in the code-FQN universe `ingest_tree` validates `implemented-by`
+        /// against. Reproduces the multi-worktree lag (a shared-store record
+        /// ahead of the local export) that made a merged code change look like
+        /// `spec drift` on main's rebuild.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/db.lbug/fact store); run via cargo test-e2e"]
+        fn acceptance_incremental_universe_includes_reused_facts_newer_than_local_export() {
+            let (base, repo_dir) = winb_scratch("reuse-universe", &winb_go_fixture());
+            let home = base.join("home");
+            let _ = winb_run(&repo_dir, &home, &["init", "."]);
+            scratch_commit_all(&repo_dir, "apg init");
+            let cold = winb_run(&repo_dir, &home, &["scan", "."]);
+            assert!(
+                cold.status.success(),
+                "cold scan: {}",
+                String::from_utf8_lossy(&cold.stderr)
+            );
+
+            // Snapshot the L0 local export (its code universe has no `New`).
+            let trans = repo_dir.join("apg/.trans");
+            let db0 = std::fs::read(trans.join("db.lbug")).unwrap();
+            let graph0 = std::fs::read(trans.join("graph.jsonl")).unwrap();
+
+            // L1: add a new code unit and scan, so the SHARED store records its
+            // FQN (and the local export advances too).
+            std::fs::write(
+                repo_dir.join("a/a.go"),
+                "package a\n\ntype A struct {\n\tX int\n}\n\nfunc Leaf() int { return 1 }\n\nfunc New() int { return 2 }\n",
+            )
+            .unwrap();
+            scratch_commit_all(&repo_dir, "add New");
+            let l1 = winb_run(&repo_dir, &home, &["scan", "."]);
+            assert!(
+                l1.status.success(),
+                "L1 scan: {}",
+                String::from_utf8_lossy(&l1.stderr)
+            );
+
+            // The code FQN the store now carries but the L0 export does not.
+            let graph = std::fs::read_to_string(trans.join("graph.jsonl")).unwrap();
+            let new_fqn = graph
+                .lines()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .find_map(|v| {
+                    let t = v.get("type").and_then(|t| t.as_str())?;
+                    let fqn = v.get("fqn").and_then(|f| f.as_str())?;
+                    (t == "function" && fqn.ends_with(".New")).then(|| fqn.to_string())
+                })
+                .expect("the L1 scan must carry the new function FQN");
+
+            // L2: an authored `implemented-by` to `New` plus a non-code change
+            // only, then rewind the LOCAL export to L0 (the shared store stays at
+            // L1 — the multi-worktree lag).
+            std::fs::create_dir_all(repo_dir.join("apg/layers/solution/component")).unwrap();
+            std::fs::write(
+                repo_dir.join("apg/layers/solution/component/scratch-seed.json"),
+                format!(
+                    "{{\n  \"layer\": \"solution\",\n  \"type\": \"component\",\n  \"name\": \"scratch-seed\",\n  \"body\": \"test component\",\n  \"properties\": {{}},\n  \"out\": [{{\"kind\": \"implemented-by\", \"target\": \"{new_fqn}\", \"properties\": {{}}}}],\n  \"in\": []\n}}\n"
+                ),
+            )
+            .unwrap();
+            std::fs::write(repo_dir.join("notes.txt"), "non-code change\n").unwrap();
+            scratch_commit_all(&repo_dir, "authored component + note");
+            std::fs::write(trans.join("db.lbug"), &db0).unwrap();
+            std::fs::write(trans.join("graph.jsonl"), &graph0).unwrap();
+
+            // The delta is non-code only, so `a/a.go` is REUSED from the store
+            // (it carries `New`); without the reused-facts union the universe
+            // would fall back to the L0 export and bail `spec drift`.
+            let inc = winb_run(&repo_dir, &home, &["scan", "."]);
+            let err = String::from_utf8_lossy(&inc.stderr);
+            assert!(
+                inc.status.success(),
+                "the reused unit's new FQN must be in the universe: {err}"
+            );
+            assert!(!err.contains("spec drift"), "no false spec drift: {err}");
+
+            let _ = std::fs::remove_dir_all(&base);
         }
 
         /// Phase-02 task-19 (int): cross-worktree cache sharing — the reuse half AND
