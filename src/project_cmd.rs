@@ -784,7 +784,7 @@ mod tests {
     // re-materializes in the layers model through the REAL project flow
     // (SPEC §6: "this spec ... will be re-materialized in the new model
     // later" — this is that re-materialization): start from the main
-    // checkout (worktree + branch + auto-scan) -> author the tiers as node
+    // checkout (worktree + branch + copied scan) -> author the tiers as node
     // files through the write_project funnel (the same funnel `apg node`/
     // `apg edge` use) -> the transient plan ingests alongside -> verify ->
     // merge -> main rebuild. Plus the SPEC §6 guard: the test worktree
@@ -2109,7 +2109,7 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
         fn merge_round_trip_start_mutate_verify_merge_rebuild() {
-            // Fold every scan (start auto-scan + the realize scan + the merge
+            // Fold every scan (main pre-scan + the realize scan + the merge
             // rebuild) into ONE CWD_LOCK hold. Each scan would otherwise
             // re-queue on the process-wide lock behind every other scanning e2e
             // test, and that re-queueing — not the scan itself — is what pushed
@@ -2246,8 +2246,8 @@ mod tests {
         #[test]
         #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
         fn full_dogfood_round_trip_suite_tool_ops_inside_the_worktree() {
-            // Fold the remaining scans (main pre-scan, start auto-scan, merge
-            // rebuild) into ONE CWD_LOCK hold. Each scan would otherwise
+            // Fold the scans (main pre-scan, merge rebuild) into ONE CWD_LOCK
+            // hold. Each scan would otherwise
             // re-queue on the process-wide lock behind every other scanning e2e
             // test, and that re-queueing — not the scan itself — is what pushed
             // this test past libtest's 60s warning.
@@ -2449,7 +2449,7 @@ mod tests {
             assert_eq!(repo.head_sha(), main_tip, "main's branch must not move");
 
             // 3. the branch DB already holds code + tiers + plan together: the
-            // start auto-scan supplied the code, and the step 2b/2c mutations
+            // copied main scan supplied the code, and the step 2b/2c mutations
             // merged the durable tiers and the transient plan into the live DB
             // (`write_project`'s `ingest_tree` and `write_jsonl_and_reingest`'s
             // `merge_records`). Asserting here — without a redundant full
@@ -2577,7 +2577,7 @@ mod tests {
             // untouched; AC (c): the default branch and the main checkout are
             // preserved (never-touch-default-branch).
             //
-            // Fold every scan (both start auto-scans + the merge rebuild) into
+            // Fold the scans (main pre-scan + the merge rebuild) into
             // ONE CWD_LOCK hold. Each scan would otherwise re-queue on the
             // process-wide lock behind every other scanning e2e test, and that
             // re-queueing — not the scan itself — is what pushed this test past
