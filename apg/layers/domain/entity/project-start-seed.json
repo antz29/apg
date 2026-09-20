@@ -18,6 +18,11 @@
       "kind": "drives",
       "source": "requirements.requirement.fast-project-start",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "domain.note.project-start-seed-kind-correction",
+      "properties": {}
     }
   ]
 }
