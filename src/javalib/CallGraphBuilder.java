@@ -41,6 +41,70 @@ public class CallGraphBuilder {
         System.err.flush();
     }
 
+    // ------------------------------------------------------------------
+    // Java module identity (phase-04)
+    //
+    // Every fact that names a scope goes through one of these four
+    // side-effect-free helpers: the module record (emitPkgHierarchy), the
+    // File record's parent (visitCompilationUnit) and a class's scope parent
+    // + in-stream identity (visitClass). The empty (default) package is the
+    // degenerate case: it must still produce a STABLE, NON-EMPTY module
+    // identity, or the module record is suppressed, the File is orphaned and
+    // its top-level class renders with a leading dot.
+    // ------------------------------------------------------------------
+
+    /**
+     * The module identity of the DEFAULT (unnamed) Java package. An empty
+     * package still needs a reachable root module — a module record, a
+     * non-empty File parent and a class parent with no leading dot — so it
+     * maps to this single, dot-free segment. It cannot collide with a real
+     * package or type: Java identifiers admit neither a space nor the
+     * parentheses, so no declared name can ever equal it.
+     */
+    static final String DEFAULT_PACKAGE_IDENTITY = "(default)";
+
+    /**
+     * The module identity a source's declared package is emitted as: a
+     * packaged input passes through unchanged, the empty (default) package
+     * yields {@link #DEFAULT_PACKAGE_IDENTITY} so its sources still get a root
+     * module. Pure: plain Strings only — no compilation unit, tree, file or
+     * output is touched.
+     */
+    static String moduleIdentityFor(String pkg) {
+        return (pkg == null || pkg.isEmpty()) ? DEFAULT_PACKAGE_IDENTITY : pkg;
+    }
+
+    /**
+     * The parent module identity of a source File's record: the source's
+     * module identity, never empty and never a leading-dot prefix. Pure.
+     */
+    static String fileParentFor(String pkg) {
+        return moduleIdentityFor(pkg);
+    }
+
+    /**
+     * The scope parent of a class declaration. A NESTED class keeps its
+     * enclosing class as parent (`pkg.Outer`, or the bare `Outer` in the
+     * default package); a TOP-LEVEL class's parent is its declaring package's
+     * module identity — never empty, never a leading dot. Pure.
+     */
+    static String classParentFor(String pkg, String outer) {
+        if (outer == null || outer.isEmpty()) return moduleIdentityFor(pkg);
+        return (pkg == null || pkg.isEmpty()) ? outer : pkg + "." + outer;
+    }
+
+    /**
+     * The class's in-stream declaration identity: `pkg.cls`, or the bare `cls`
+     * in the default package (no leading dot). This is the scanner's
+     * self-consistent key — shared with the member function parents and the
+     * unchanged-package declaration surface — so it deliberately keeps the
+     * bare class name for the default package even though the emitted scope
+     * parent is the default module identity. Pure.
+     */
+    static String classFqnFor(String pkg, String cls) {
+        return (pkg == null || pkg.isEmpty()) ? cls : pkg + "." + cls;
+    }
+
     public static void main(String[] args) throws Exception {
         Path dir = Paths.get(args[0]);
         // `--id-prefix <p>` (default "n") keeps opaque ids unique across
@@ -1416,10 +1480,15 @@ public class CallGraphBuilder {
         }
 
         void emitPkgHierarchy(String pkg) {
-            if (pkg.isEmpty()) return;
+            // The empty (default) package is NOT a no-op: moduleIdentityFor
+            // maps it to the non-empty default-package identity, so its
+            // sources get a real root module (and, via the ingestor's language
+            // rooting, an all-default-package scan still materialises the
+            // `java` Language root). A packaged input is unchanged.
+            String identity = moduleIdentityFor(pkg);
             String prev = "";
             String cur = "";
-            for (String seg : pkg.split("\\.")) {
+            for (String seg : identity.split("\\.")) {
                 cur = cur.isEmpty() ? seg : cur + "." + seg;
                 if (!emittedPkg.contains(cur)) {
                     emittedPkg.add(cur);
@@ -1495,7 +1564,7 @@ public class CallGraphBuilder {
                 LineMap lm = cu.getLineMap();
                 long last = sourceText.isEmpty() ? 1 : lm.getLineNumber(sourceText.length() - 1);
                 emit("{\"type\":\"file\",\"path\":\"" + jstr(currentFile)
-                    + "\",\"parent\":\"" + jstr(pkg)
+                    + "\",\"parent\":\"" + jstr(fileParentFor(pkg))
                     + "\",\"start_line\":1,\"end_line\":" + Math.max(1, last) + "}");
             }
             return super.visitCompilationUnit(cu, nil);
@@ -1547,7 +1616,7 @@ public class CallGraphBuilder {
             if (name.equals("<error>")) return super.visitClass(ct, nil);
             String outer = cls;
             cls = cls.isEmpty() ? name : cls + "." + name;
-            String fqn = pkg.isEmpty() ? cls : pkg + "." + cls;
+            String fqn = classFqnFor(pkg, cls);
 
             if (!emitting) {
                 if (!structID.containsKey(fqn)) {
@@ -1558,7 +1627,7 @@ public class CallGraphBuilder {
             } else {
                 String id = treeID.get(ct);
                 if (id != null) {
-                    String parentFqn = outer.isEmpty() ? pkg : pkg.isEmpty() ? outer : pkg + "." + outer;
+                    String parentFqn = classParentFor(pkg, outer);
                     int[] span = classSpan((JCTree) ct);
                     emit("{\"type\":\"struct\",\"id\":\"" + jstr(id)
                         + "\",\"parent\":\"" + jstr(parentFqn)

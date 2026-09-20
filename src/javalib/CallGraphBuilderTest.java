@@ -25,6 +25,9 @@ public class CallGraphBuilderTest {
     static int failures = 0;
 
     public static void main(String[] args) throws Exception {
+        // Phase-04: the pure module-identity helpers — no temp dir, no javac,
+        // no filesystem: run before any real-I/O case.
+        testModuleIdentityHelpers();
         Path base = Files.createTempDirectory("apg-java-test");
         try {
             Path proj = base.resolve("proj");
@@ -42,6 +45,7 @@ public class CallGraphBuilderTest {
             Path proj3 = base.resolve("proj-modules");
             writeModuleDescriptorFixture(proj3);
             testModuleDescriptorsDoNotDegradeAttribution(proj3, base);
+            testDefaultPackageModuleIdentity(base);
         } finally {
             deleteRec(base);
         }
@@ -560,6 +564,104 @@ public class CallGraphBuilderTest {
     }
 
     // ------------------------------------------------------------------
+    // Phase-04: default-package module identity
+    // ------------------------------------------------------------------
+
+    /**
+     * The extracted String helpers are pure and side-effect free (no temp dir,
+     * no javac, no filesystem): the empty (default) package yields a non-empty
+     * module identity; the File parent and a top-level class parent are that
+     * same identity; the class fqn has no leading dot; and packaged inputs
+     * (`pkg.b` / `B`) render exactly as they did before the extraction.
+     */
+    static void testModuleIdentityHelpers() {
+        String def = CallGraphBuilder.moduleIdentityFor("");
+        check("default package yields a non-empty module identity",
+            def != null && !def.isEmpty(), "identity: " + def);
+        check("a packaged module identity passes through unchanged",
+            "pkg.b".equals(CallGraphBuilder.moduleIdentityFor("pkg.b")),
+            "got: " + CallGraphBuilder.moduleIdentityFor("pkg.b"));
+        check("the File parent of the default package is the module identity",
+            def.equals(CallGraphBuilder.fileParentFor("")),
+            "got: " + CallGraphBuilder.fileParentFor(""));
+        check("the File parent of a packaged input is unchanged",
+            "pkg.b".equals(CallGraphBuilder.fileParentFor("pkg.b")),
+            "got: " + CallGraphBuilder.fileParentFor("pkg.b"));
+        check("a default-package top-level class parent is the module identity",
+            def.equals(CallGraphBuilder.classParentFor("", "")),
+            "got: " + CallGraphBuilder.classParentFor("", ""));
+        check("a default-package top-level class fqn has no leading dot",
+            CallGraphBuilder.classFqnFor("", "B").equals("B")
+                && !CallGraphBuilder.classFqnFor("", "B").startsWith("."),
+            "got: " + CallGraphBuilder.classFqnFor("", "B"));
+        check("a default-package nested class keeps the enclosing class as parent",
+            "Outer".equals(CallGraphBuilder.classParentFor("", "Outer")),
+            "got: " + CallGraphBuilder.classParentFor("", "Outer"));
+        check("packaged top-level class parent and fqn are unchanged",
+            "pkg.b".equals(CallGraphBuilder.classParentFor("pkg.b", ""))
+                && "pkg.b.B".equals(CallGraphBuilder.classFqnFor("pkg.b", "B")),
+            "parent: " + CallGraphBuilder.classParentFor("pkg.b", "")
+                + " fqn: " + CallGraphBuilder.classFqnFor("pkg.b", "B"));
+        check("packaged nested class parent is unchanged",
+            "pkg.a.Outer".equals(CallGraphBuilder.classParentFor("pkg.a", "Outer")),
+            "got: " + CallGraphBuilder.classParentFor("pkg.a", "Outer"));
+    }
+
+    /**
+     * Phase-04 e2e (CallGraphBuilderTest harness): a scratch DEFAULT-PACKAGE
+     * fixture (no `package` declaration) run through the real scanner. The
+     * package-less File must hang under a non-empty default-package module and
+     * the top-level class must render with a module parent — never a
+     * leading-dot fqn.
+     *
+     * The `java` Language root itself is materialised by the Rust ingestor,
+     * one Language node per language that emits at least one `module` record
+     * (`src/ingest.rs`: `for language in &languages`). This harness drives
+     * CallGraphBuilder.main directly (no ingestor), so it pins the frontend
+     * fact that makes the root exist: the non-empty default-package module
+     * record. The realised `java` Language node + Module->File->Struct subtree
+     * is asserted by the candidate-binary e2e in `src/main.rs`.
+     */
+    static void testDefaultPackageModuleIdentity(Path base) throws Exception {
+        Path proj = base.resolve("proj-default-pkg");
+        Files.createDirectories(proj);
+        Files.writeString(proj.resolve("Widget.java"), """
+            public class Widget {
+                public int size() { return 1; }
+            }
+            """, StandardCharsets.UTF_8);
+        Files.writeString(proj.resolve("Gadget.java"), """
+            class Gadget {
+                static class Inner { int v() { return 2; } }
+            }
+            """, StandardCharsets.UTF_8);
+        Path widget = proj.resolve("Widget.java").toAbsolutePath().normalize();
+        Path gadget = proj.resolve("Gadget.java").toAbsolutePath().normalize();
+
+        String def = CallGraphBuilder.moduleIdentityFor("");
+        String raw = run(proj).out;
+        Set<String> recs = normalize(raw);
+
+        check("default-package scan emits the non-empty default-package module record",
+            recs.contains("module|" + def), "records were:\n" + raw);
+        check("the package-less Files hang under the default-package module",
+            recs.contains("file|" + widget + "|" + def + "|1|3")
+                && recs.contains("file|" + gadget + "|" + def + "|1|3"),
+            "records were:\n" + raw);
+        check("no File record renders an empty module parent",
+            !raw.contains("\"type\":\"file\",\"path\":\"" + widget + "\",\"parent\":\"\"")
+                && !raw.contains("\"type\":\"file\",\"path\":\"" + gadget + "\",\"parent\":\"\""),
+            "records were:\n" + raw);
+        check("the top-level class parent is the default-package module",
+            structFqn(recs, widget, def + ".Widget") != null, "records were:\n" + raw);
+        check("no class record renders a leading-dot fqn",
+            noLeadingDotStruct(raw, widget) && noLeadingDotStruct(raw, gadget),
+            "records were:\n" + raw);
+        check("a nested class keeps its enclosing class as parent",
+            structFqn(recs, gadget, "Gadget.Inner") != null, "records were:\n" + raw);
+    }
+
+    // ------------------------------------------------------------------
     // Scanner invocation
     // ------------------------------------------------------------------
 
@@ -775,6 +877,33 @@ public class CallGraphBuilderTest {
         int n = 0;
         for (int i = raw.indexOf(key); i >= 0; i = raw.indexOf(key, i + 1)) n++;
         return n;
+    }
+
+    /**
+     * The normalized `struct` record fqn for `path` when it renders exactly
+     * `fqn` (`parent.name`), else null — the raw-scanner identity a
+     * leading-dot regression would break.
+     */
+    static String structFqn(Set<String> recs, Path path, String fqn) {
+        for (String s : recs) {
+            String[] p = s.split("\\|", -1);
+            if (p[0].equals("struct") && p[2].equals(path.toString()) && p[1].equals(fqn)) return p[1];
+        }
+        return null;
+    }
+
+    /** True when no `struct` record for `path` renders a leading-dot fqn. */
+    static boolean noLeadingDotStruct(String raw, Path path) {
+        String key = "\"type\":\"struct\"";
+        for (int i = raw.indexOf(key); i >= 0; i = raw.indexOf(key, i + 1)) {
+            int end = raw.indexOf('\n', i);
+            String line = raw.substring(i, end < 0 ? raw.length() : end);
+            if (!line.contains("\"path\":\"" + path + "\"")) continue;
+            String parent = str(line, "parent");
+            String name = str(line, "name");
+            if (parent == null || name == null || (parent + "." + name).startsWith(".")) return false;
+        }
+        return true;
     }
 
     static String listRec(Path p) throws Exception {
