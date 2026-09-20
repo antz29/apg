@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "note",
+  "name": "project-start-seed-kind-correction",
+  "body": "source: coordinator instruction — step 1 \"add domain value project-start-seed\", step 4 \"realise the value by the component\". Inconsistency: the running binary refuses `realised-by` with a `domain.value` source (allowed shapes: domain.group|entity|service -> solution.system|container|component), so a value can never be realised by the seeder component; every realisable narrow domain node in this spec is a group or entity (domain.entity.runtime-artifact -> components, domain.entity.tool-path-resolution -> component), while values (canonical-file-identity, module-identity) are never realised. Resolution: authored `domain.entity.project-start-seed` (kind=entity) instead of a value, drove the requirement to it, and realised it by `solution.component.project-start-seeder`; the requirement's drives to domain.group.graph-identity was dropped so coverage stays narrow. [autonomous]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
