@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.tool-path-resolution",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.navigator-prompt-guidance",
+      "properties": {}
     }
   ],
   "in": [

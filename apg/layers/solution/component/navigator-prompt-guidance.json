@@ -10,6 +10,11 @@
       "kind": "realised-by",
       "source": "domain.entity.graph-first-navigation",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
     }
   ]
 }
