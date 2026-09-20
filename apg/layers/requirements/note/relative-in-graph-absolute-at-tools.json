@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.portable-graph-identity",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.absolute-paths-at-tool-boundary",
+      "properties": {}
     }
   ],
   "in": []
