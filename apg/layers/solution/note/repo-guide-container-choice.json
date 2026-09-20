@@ -4,6 +4,12 @@
   "name": "repo-guide-container-choice",
   "body": "source: the proposed structure attached all three implemented-by targets — the two agent prompts and `AGENTS.md` — to a single component `solution.component.navigator-prompt-guidance` under `solution.container.opencode-suite`. Inconsistency: `AGENTS.md` is not part of the `opencode-suite/` distribution — it is not embedded via `include_str!` and not installed by `apg init` — so containing its component under the opencode-suite distribution would assert a shipping relationship that does not exist. Resolution: `solution.component.navigator-prompt-guidance` (under `solution.container.opencode-suite`) covers the two prompt files, and the repo guide is modelled as a second component `solution.component.repo-agent-guide` under the container whose repository it documents, `solution.container.scanner-cli`; both components are realised-by `domain.entity.graph-first-navigation`. This follows the fallback the proposal sanctioned (\"a second component under solution.container.scanner-cli\"). [autonomous]",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.component.repo-agent-guide",
+      "properties": {}
+    }
+  ],
   "in": []
 }

@@ -21,6 +21,11 @@
       "kind": "contains",
       "source": "solution.container.scanner-cli",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.repo-guide-container-choice",
+      "properties": {}
     }
   ]
 }
