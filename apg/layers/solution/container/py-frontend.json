@@ -16,6 +16,11 @@
       "kind": "implemented-by",
       "target": "rust.pyfrontend.detect_project_kind",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.pyfrontend.classify_project_markers",
+      "properties": {}
     }
   ],
   "in": [
