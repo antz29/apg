@@ -9,11 +9,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "csharp.Apg.CsharpFrontend.Scanner.Run",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "csharp.Apg.CsharpFrontend.Scanner.GetDefaultMetadataReferences",
       "properties": {}
     }
