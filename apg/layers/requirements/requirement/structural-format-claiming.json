@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.structural-format",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.misc-residual-format",
+      "properties": {}
     }
   ],
   "in": [
