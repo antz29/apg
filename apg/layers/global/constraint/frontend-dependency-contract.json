@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "frontend-dependency-contract",
+  "body": "Every language frontend apg ships must have a solution container that declares its build-time dependencies, its scan-time dependencies, and an exact engine pin, with every code unit it references resolving in the branch graph. A frontend without all three, or a code reference that does not resolve, is an incomplete contract.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
