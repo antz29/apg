@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "build-toolchain",
+  "body": "The pinned set of compilers and toolchains that CI and the split formulae use to build and stage the release artifacts. JDK 21 and .NET 10.0.x are already pinned; Go, Node/npm, and the Rust compiler currently float. Pinning the whole set makes a release reproducible.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
