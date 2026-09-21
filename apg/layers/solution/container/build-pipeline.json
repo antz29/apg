@@ -6,7 +6,13 @@
   "properties": {
     "kind": "app"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.build_script_build.main",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
