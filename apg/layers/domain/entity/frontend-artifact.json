@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.frontend-dependency-contract",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.frontend-dependency-docs",
+      "properties": {}
     }
   ]
 }
