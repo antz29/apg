@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "no-new-scan-time-deps",
+  "body": "The structural scanner introduces no scan-time dependency: it is a self-contained Rust binary that never shells out and needs nothing on `PATH`. Its build-time dependency is only a current stable Rust toolchain plus crates.io. Acceptance: a scan of a repository containing shell/YAML/TOML/JSON/XML/Dockerfile/Makefile/INI files with none of their toolchains installed still emits their `File` nodes and structure.",
+  "properties": {
+    "feature": "structural-graphing"
+  },
+  "out": [],
+  "in": []
+}
