@@ -6,7 +6,13 @@
   "properties": {
     "feature": "structural-graphing"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.every-tracked-file-graphed",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
