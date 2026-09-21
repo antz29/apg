@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.frontend-build-deps",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.frontend-scan-deps",
+      "properties": {}
     }
   ],
   "in": [
