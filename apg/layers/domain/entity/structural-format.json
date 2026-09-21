@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "target": "solution.component.structural-claiming",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.structural-stream-dispatch",
+      "properties": {}
     }
   ],
   "in": [
