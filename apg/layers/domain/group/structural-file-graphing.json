@@ -39,6 +39,11 @@
       "kind": "drives",
       "source": "requirements.requirement.structural-format-scope-config",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.structural-file-graphing",
+      "properties": {}
     }
   ]
 }
