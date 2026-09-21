@@ -4,6 +4,12 @@
   "name": "frontend-audit-reconciliation",
   "body": "Audit reconciliation (source brief vs branch graph). [autonomous] The brief said the spec has frontend containers for go/java/py/ts and nothing for cpp/csharp/md; the graph shows no rust-frontend container either (only go/java/ts/py exist), so this change-set adds rust-frontend alongside cpp/csharp/md. [autonomous] The brief said CI and the formulae pin JDK 21 and dotnet 10.0.x; only CI pins them (actions/setup-java, actions/setup-dotnet) — the formulae use unversioned depends_on for every toolchain, so the pin requirement covers CI plus the formula/installer build paths. [autonomous] The brief left the C++ engine unversioned; confirmed the vendored tree-sitter records only ABI v15 (no release version), so frontend-engine-pin requires recording it. All other audit cells were confirmed against the graph (go.apg/gofrontend.discoverModulesViaGoList runs `go list -m`; rust.apg-rustfrontend.load_project discovers the sysroot and runs build scripts; java.CallGraphBuilder.main uses ToolProvider.getSystemJavaCompiler; csharp Scanner is self-contained; rust.pyfrontend.detect_project_kind is marker-only).",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.frontend-dependency-contract",
+      "properties": {}
+    }
+  ],
   "in": []
 }
