@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "cpp-frontend",
-  "body": "The C++ frontend artifact (`src/cpplib/main.cpp` plus the vendored tree-sitter runtime and tree-sitter-cpp grammar, `cppfrontend`), built with gcc/g++ and no network. Build-time deps: `gcc` (`-std=c11`) and `g++` (`-std=c++17`); the grammar and runtime are vendored. Scan-time deps: none — a native self-contained binary. Engine pin: vendored tree-sitter (language ABI v15) plus vendored tree-sitter-cpp; the grammar/commit version is currently unrecorded, which this contract must fix.",
+  "body": "The C++ frontend artifact (`src/cpplib/main.cpp` plus the vendored tree-sitter runtime and tree-sitter-cpp grammar, `cppfrontend`), built with gcc/g++ and no network. Build-time deps: `gcc` (`-std=c11`) and `g++` (`-std=c++17`); the grammar and runtime are vendored. Scan-time deps: none — a native self-contained binary. Engine pin: the vendored tree-sitter language ABI **v15** (`TREE_SITTER_LANGUAGE_VERSION 15`, min-compatible v13, in `src/cpplib/vendor/tree-sitter/lib/include/tree_sitter/api.h`) together with the vendored tree-sitter-cpp grammar content itself (`src/cpplib/vendor/tree-sitter-cpp/src/parser.c` + `scanner.c`). Upstream ships no version for the vendored grammar — the vendor tree has no version file, `package.json`, or git metadata — so this is a content/ABI pin: a grammar update is detected as a change to the vendored sources rather than a version bump. The language-version ceiling is therefore the grammar as vendored in this tree.",
   "properties": {
     "kind": "app"
   },
