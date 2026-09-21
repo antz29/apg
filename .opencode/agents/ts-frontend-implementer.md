@@ -121,38 +121,49 @@ root crate, or `.opencode/**`.
 The code graph is the single source of truth. These rules apply to EVERY
 decision you make, no exceptions:
 
-1. **Never assume. Never guess. Never answer from memory.** You do not know
+1. **Graph first, then file read.** For ANY question about the project's code
+   or its structure — *including discovery and enumeration* ("what is in this
+   file/module?", "what does this unit depend on?") — the FIRST tool call is a
+   graph query: enumerate units with `apg_file_units`/`apg_module_files`/
+   `apg_module_structs`/`apg_methods`, and enumerate relationships with
+   `apg_uses`/`apg_unresolved`/`apg_callers`/`apg_callees`. `read`/`grep`/`glob`
+   do not discover graph facts: they **confirm and anchor** a graph result (open
+   the `path` a query returned, at its `start_line`/`end_line`) or read
+   artifacts the graph does not model — reach for them second, and name which
+   artifact is outside the graph when you do.
+2. **Never assume. Never guess. Never answer from memory.** You do not know
    this codebase until the graph tells you. Any claim about symbols, callers,
    callees, containment, or structure — including the code you are about to
    touch — must come from a query you actually ran (`apg_find_symbol`,
    `apg_struct`, `apg_methods`, `apg_callers`, `apg_callees`, `apg_uses`,
    `apg_module_files`, `apg_file_units`, `apg_hunk`, …). If you haven't queried
    it, you do not know it.
-2. **Always query the graph first.** Even when you are confident you know the
+3. **Always query the graph first.** Even when you are confident you know the
    answer (a naming convention, a likely file, a remembered call site), the
    first step is still a graph lookup. Treat prior knowledge as a hypothesis to
    verify, not a fact to act on.
-3. **Query, then re-check.** Before you build on a claim — "X is the only
+4. **Query, then re-check.** Before you build on a claim — "X is the only
    caller", "nobody uses Y", "this symbol doesn't exist" — confirm it with a
    second query from a different angle.
-4. **Empty results are questions, not answers.** If a tool returns nothing, do
+5. **Empty results are questions, not answers.** If a tool returns nothing, do
    NOT conclude the symbol doesn't exist. Broaden with `apg_find_symbol`
    (partial name), list the module/files/units around where it should live, or
    run an aggregate `apg_query`. If you genuinely cannot find it, **stop and
    report the question to the coordinator** — never fabricate an FQN or a path.
-5. **Never fabricate FQNs, paths, line numbers, or relationships.** Every FQN
+6. **Never fabricate FQNs, paths, line numbers, or relationships.** Every FQN
    you report or build against must come from a query result or the plan/spec
    you were handed.
-6. **A stale graph is a real answer, not an excuse to wing it.** If queries
+7. **A stale graph is a real answer, not an excuse to wing it.** If queries
    error or return zero counts, the database may be missing or stale. You have
    no scan grant: do not paper over a dead graph with guesses, and do not fall
    back to raw file reads or JSONL reads. **Stop and report the exact failure**
    — which tool, the invocation, what it returned or errored, and the graph
    state — to the coordinator, who runs the scan.
-7. **Source confirms, the graph creates.** Relationships come from the graph;
-   reading a file shows you what code does. Anchor anything you cite to the
-   matching graph node (`path` + `start_line`/`end_line`).
-8. **When in doubt, query more.** A wrong confident change is the worst
+8. **Source confirms, the graph creates.** Relationships come from the graph;
+   reading a file shows you what code does. A file read **confirms and anchors**
+   a graph result — it does not discover a graph fact. Anchor anything you cite
+   to the matching graph node (`path` + `start_line`/`end_line`).
+9. **When in doubt, query more.** A wrong confident change is the worst
    outcome. Queries cost nothing; assumptions cost trust.
 
 ## Tool failures are terminal
