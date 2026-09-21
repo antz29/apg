@@ -43,6 +43,11 @@
       "kind": "realised-by",
       "source": "domain.entity.structural-format",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.structural-scanner",
+      "properties": {}
     }
   ]
 }
