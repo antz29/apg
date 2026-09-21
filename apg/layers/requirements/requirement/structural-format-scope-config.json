@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "structural-format-scope-config",
+  "body": "A repository scopes what the structural scanner graphs through `apg/config.json`: an include/exclude glob section plus the `code_type` assigned to structural files. The default is ON — all text formats are graphed unless the config narrows the scope — because the goal is that every tracked file is a graph citizen. The scope section is orthogonal to the existing `types` classification rules: scope decides which files are claimed, `types` decides their `code_type`. Acceptance: a repository can exclude a directory from structural graphing (which is then absent from the graph), and structural files receive the configured `code_type` (Markdown keeps the existing `docs` classification; the non-Markdown structural formats default to a `config` type).",
+  "properties": {
+    "feature": "structural-graphing"
+  },
+  "out": [],
+  "in": []
+}
