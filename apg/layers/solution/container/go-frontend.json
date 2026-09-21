@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "go-frontend",
-  "body": "The Go frontend artifact (`src/golib/main.go`, `go.apg/gofrontend`). It points GOCACHE at a shared per-scan cache under the git-common-dir and loads packages with Tests enabled; it must not emit generated cache files or their synthetic symbols as package sources.",
+  "body": "The Go frontend artifact (`src/golib/main.go`, `go.apg/gofrontend`). It points GOCACHE at a shared per-scan cache under the git-common-dir and loads packages with Tests enabled; it must not emit generated cache files or their synthetic symbols as package sources. Build-time deps: Go >= 1.25 (`src/golib/go.mod` declares `go 1.25.0`) plus network to fetch `golang.org/x/tools v0.48.0`. Scan-time deps: `go` on PATH — `discoverModulesViaGoList` runs `go list -m` and the frontend loads packages through `go/packages`, so the compiling toolchain is also its type-checker. Engine pin: `golang.org/x/tools v0.48.0` jointly with the compiling toolchain's `go/types`; the language-version ceiling is the installed Go toolchain.",
   "properties": {
     "kind": "app"
   },
