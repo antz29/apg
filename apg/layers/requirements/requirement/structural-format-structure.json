@@ -6,7 +6,13 @@
   "properties": {
     "feature": "structural-graphing"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.structural-format",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
