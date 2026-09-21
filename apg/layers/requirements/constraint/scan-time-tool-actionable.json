@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "scan-time-tool-actionable",
+  "body": "A missing scan-time toolchain must fail with an error that names the tool and the language and states how to install it. It must never be silent, must never panic, and must not cause the language to be scanned as an empty graph.",
+  "properties": {
+    "attaches-to": "requirements.requirement.scan-time-toolchain-preflight"
+  },
+  "out": [],
+  "in": []
+}
