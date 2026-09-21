@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.container.go-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.rust-frontend",
+      "properties": {}
     }
   ],
   "in": [
