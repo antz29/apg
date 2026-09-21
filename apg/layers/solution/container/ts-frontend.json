@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.ts-package-rooting",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-tsfrontend.scanner.collectFile",
+      "properties": {}
     }
   ],
   "in": [
