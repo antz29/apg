@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "frontend-installer",
+  "body": "A person who installs the apg binary plus one or more language frontend formulae (or the `curl | sh` Linux packages) and then runs `apg scan` on a repository. They need to know which language toolchains must be on PATH (`go`, `cargo`/`rustc`, `java`, `node`) and, when one is missing, to receive an actionable error naming the toolchain instead of a cryptic failure or a silently empty scan.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
