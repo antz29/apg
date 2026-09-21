@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "frontend-artifact",
-  "body": "An installed per-language scanner frontend, spawned by the scan driver: `gofrontend`, `rustfrontend`, `cppfrontend`, `csharpfrontend`, the `java-classes` dir, `tsfrontend/scanner.mjs`, `pyfrontend`, `mdfrontend`. It is the unit that carries build-time deps, scan-time deps, and an engine pin.",
+  "body": "An installed per-language scanner frontend, spawned by the scan driver: `gofrontend`, `rustfrontend`, `cppfrontend`, `csharpfrontend`, the `java-classes` dir, `tsfrontend/scanner.mjs`, `pyfrontend`. It is the unit that carries build-time deps, scan-time deps, and an engine pin. The former `mdfrontend` is no longer a separate frontend artifact: Markdown is handled by the bundled structural scanner (`domain.entity.structural-scanner`), which covers several text formats and ships in the base package.",
   "properties": {
     "kind": "entity"
   },
