@@ -26,6 +26,11 @@
       "kind": "contains",
       "source": "solution.container.structural-scanner",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.structural-scanner",
+      "properties": {}
     }
   ]
 }
