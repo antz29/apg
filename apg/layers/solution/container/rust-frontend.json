@@ -6,13 +6,7 @@
   "properties": {
     "kind": "app"
   },
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg-rustfrontend.load_project",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
