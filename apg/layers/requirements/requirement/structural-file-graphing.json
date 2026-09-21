@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "structural-file-graphing",
+  "body": "The program graph must cover every tracked file in a scanned repository, not only the files a per-language code frontend claims. Today each frontend emits a `file` record only for the files it claims, so shell, YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, Ruby and plain-text files never get a `File` node and can never be a task target or an `implemented-by` target: the durable spec's spine cannot reach packaging/config surfaces, the verify gate's derived solution coverage cannot see them, and graph-first navigation must maintain an explicit \"not in the graph\" artifact class. This requirement is delivered by one bundled structural scanner that emits a `File` node for every tracked file it claims plus the structure of the text formats, shipped in the base package with no scan-time dependency. It decomposes into the sub-requirements below.",
+  "properties": {
+    "feature": "structural-graphing"
+  },
+  "out": [],
+  "in": []
+}
