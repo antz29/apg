@@ -48,6 +48,11 @@
       "kind": "realised-by",
       "source": "domain.entity.structural-scanner",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.structural-scanner-oroboros",
+      "properties": {}
     }
   ]
 }
