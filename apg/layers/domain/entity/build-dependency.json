@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "build-dependency",
+  "body": "A dependency needed to compile and stage a frontend: a compiler or toolchain (`go`, `cargo`+`rustc`, `javac`, `node`+`npm`, `gcc`+`g++`, `dotnet`), a package-resolution mechanism (Go module proxy, crates.io/git, npm, NuGet), and network access where the dependency is fetched rather than vendored. The base scanner additionally needs the prebuilt static liblbug and a linked OpenSSL.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
