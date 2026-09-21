@@ -1,0 +1,12 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "structural-file-graphing",
+  "body": "The structural-graphing capability: the text/config/data formats a repository contains, the bundled scanner that turns each into graph nodes, and the residual format that catches whatever no format claims. This group makes the question \"is file X in the graph, and what structure does it carry?\" answerable for the non-code surfaces — the packaging, configuration and data files a per-language code frontend never claims.",
+  "properties": {
+    "attribute": "core",
+    "root": "structural-format"
+  },
+  "out": [],
+  "in": []
+}
