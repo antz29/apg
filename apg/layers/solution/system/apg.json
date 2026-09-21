@@ -39,6 +39,11 @@
       "kind": "contains",
       "target": "solution.container.rust-frontend",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.cpp-frontend",
+      "properties": {}
     }
   ],
   "in": []
