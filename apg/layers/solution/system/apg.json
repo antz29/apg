@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "system",
   "name": "apg",
-  "body": "The apg program-graph tool: it scans a repository's source with per-language frontends, resolves canonical identities in the ingestor, and serves the graph to agents through the suite tools and the durable spec tiers. This change-set makes its identities checkout-independent and its start path reuse existing scans.",
+  "body": "The apg program-graph tool: it scans a repository's source with per-language frontends, resolves canonical identities in the ingestor, and serves the graph to agents through the suite tools and the durable spec tiers. Beyond the per-language code frontends it contains the bundled structural scanner, which graphs every tracked text/config/packaging file, and the build pipeline that stages them.",
   "properties": {},
   "out": [
     {
