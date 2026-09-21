@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.structural-scanner",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.build-dependency",
+      "properties": {}
     }
   ],
   "in": [

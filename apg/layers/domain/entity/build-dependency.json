@@ -28,6 +28,11 @@
       "kind": "drives",
       "source": "requirements.requirement.frontend-build-deps",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.structural-scanner-in-base-package",
+      "properties": {}
     }
   ]
 }
