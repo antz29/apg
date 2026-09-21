@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.java-package-hierarchy",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "java.CallGraphBuilder.main",
+      "properties": {}
     }
   ],
   "in": [
