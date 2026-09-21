@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "solution.system.apg",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.build-pipeline-non-graph-artifacts",
+      "properties": {}
     }
   ]
 }
