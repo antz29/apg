@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "structural-scanner-oroboros",
+  "body": "The oroboros (SPEC.md §8), recorded durably. The new `File` nodes (`Cargo.toml`, `Cargo.lock`, `LICENSE`, `install.sh`, `Formula/*.rb`, `.github/workflows/release.yml`, `apg/config.json`, `opencode-suite/package.json`, the per-crate manifests) exist only after a scan with the *next* (0.17.0) binary. Therefore the `apg-0.17.0` change-set cannot use those File FQNs as `implemented-by` targets or task targets: its own packaging edits — the `Formula/*.rb` set, `install.sh`, `.github/workflows/release.yml`, `Cargo.toml`/`Cargo.lock` — remain target-less maintainer tasks, exactly as today. The spec and plan stay expressed in the installed 0.16.1 binary's vocabulary. The `implemented-by` edges on `solution.container.structural-scanner` and its components deliberately target only code that resolves in the branch graph (the absorbed `rust.mdfrontend.*`, the `rust.apg.ingest`/`rust.apg.classify`/`rust.apg.git` boundary, `rust.build_script_build.*`) plus `solution.note`/`solution.component` bodies that name the non-graph edits — never a File FQN only the next binary renders. From 0.17.0 onward every file is targetable.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
