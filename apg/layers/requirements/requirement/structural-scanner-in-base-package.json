@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "structural-scanner-in-base-package",
+  "body": "The structural scanner ships in the base apg package, not as a separate per-format formula: `build.rs` compiles one binary (`structfrontend`) and stages it to `target/<profile>/frontends`, and the base Homebrew/installer artifacts carry it. `apg-md` retires as a separate formula, so the frontend set becomes the base `scanner` plus seven frontends (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`). Acceptance: the base package installs and runs the structural scanner with no extra install step, and the `apg-md` formula is gone.",
+  "properties": {
+    "feature": "structural-graphing"
+  },
+  "out": [],
+  "in": []
+}
