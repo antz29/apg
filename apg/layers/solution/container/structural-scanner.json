@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "structural-scanner",
+  "body": "The bundled structural scanner (`src/structlib`, binary `structfrontend`; absorbs `src/mdlib`), shipped in the base apg package. It emits a `File` node for every tracked file it claims and structure for the text formats — Markdown (unchanged `md` id), shell, YAML, JSON, TOML, XML, Dockerfile, Makefile and INI — with `misc` as the residual. It replaces `solution.container.md-frontend`: the Markdown frontend's code and its dependency contract move into the base. Build-time deps: a current stable Rust toolchain plus crates.io. Scan-time deps: none — it never shells out. Engine pin: serde/serde_json/unicode-normalization 0.1; the structural formats impose no language-version ceiling.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
