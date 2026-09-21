@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.mdfrontend.build_doc",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.mdfrontend.parse_headings",
+      "properties": {}
     }
   ],
   "in": [
