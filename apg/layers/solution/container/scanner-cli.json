@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "solution.component.frontend-dependency-docs",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.scan-time-preflight",
+      "properties": {}
     }
   ],
   "in": [
