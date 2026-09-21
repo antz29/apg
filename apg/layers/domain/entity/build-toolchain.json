@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "build-toolchain",
-  "body": "The pinned set of compilers and toolchains that CI and the split formulae use to build and stage the release artifacts. JDK 21 and .NET 10.0.x are already pinned; Go, Node/npm, and the Rust compiler currently float. Pinning the whole set makes a release reproducible.",
+  "body": "The pinned set of compilers and toolchains used to build and stage the release artifacts. Rust is exact on every path (root `rust-toolchain.toml`, `channel = 1.98.1`); Node is build-enforced (`src/tslib/.npmrc engine-strict`); Go is exact on the release Linux path (`GOTOOLCHAIN` + `actions/setup-go`) with a documented floor (`src/golib/go.mod` `toolchain go1.27.1`) on the bottle/ambient path; JDK 21 and .NET 10.0.x are pinned in CI. Pinning the set makes a release reproducible.",
   "properties": {
     "kind": "entity"
   },
