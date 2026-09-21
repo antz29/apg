@@ -2,7 +2,7 @@
   "layer": "global",
   "type": "constraint",
   "name": "build-toolchain-pins",
-  "body": "Every toolchain that compiles or stages a frontend must be pinned to an exact version in a repo-visible place and consumed by both the CI release build and the split formulae/installer. A floating toolchain — unversioned Go, Node/npm, or Rust compiler — is a violation. JDK 21 (actions/setup-java) and .NET 10.0.x (actions/setup-dotnet) are the reference for what a pin looks like.",
+  "body": "Every toolchain that compiles or stages a frontend must be pinned to an exact version in a repo-visible place and consumed by every build path that actually compiles a frontend: the CI release build (`.github/workflows/release.yml`'s `linux` job, which runs `cargo build --release` and drives `build.rs`, and its `bottle` job, which builds through the split formulae) and the split Homebrew formulae themselves. A floating toolchain — unversioned Go, Node/npm, or Rust compiler — is a violation. JDK 21 (`actions/setup-java`) and .NET 10.0.x (`actions/setup-dotnet`) are the reference for what a pin looks like. `install.sh` downloads prebuilt release tarballs and builds nothing, so it is not a pin consumer.",
   "properties": {},
   "out": [],
   "in": []
