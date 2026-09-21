@@ -4,6 +4,12 @@
   "name": "structural-scanner-design-decisions",
   "body": "Resolved open questions (SPEC.md §10), decided on the brief's explicit statements where present, else on the least-surprise reading; [with user] where a genuine judgment call was made. (1) Crate/binary: one crate `src/structlib` building one binary `structfrontend`, absorbing `src/mdlib`; the `md` id is preserved by the *stream id*, not by a surviving crate, so absorbing mdlib is safe and avoids a second artifact [autonomous — §4.1]. (2) Config scope default: ON (all text formats graphed) — §2's \"every tracked file gets a File node\" only holds if the default is on; the include/exclude section narrows it [with user]. (3) Config shape: a dedicated scope section carrying include/exclude globs plus a `code_type`, kept orthogonal to the existing `types` classification rules — overloading `types` would conflate \"which files\" with \"what type\" [with user]. (4) Structure depth: minimal but useful — top-level keys/jobs/steps, tables/keys, elements, stages/instructions, sections/keys, targets/variables/includes, shell functions, Markdown headings — no full parse tree [autonomous — §3's table]. (5) CSV/TSV stays `misc` [autonomous — §3 explicitly out of scope]. (6) Dispatch: one binary serving all structural formats; the existing driver-injected `lang_switch` contract is preserved (a scanner never emits `lang_switch` itself), so the driver enumerates the structural stream ids [with user]. (7) `code_type`: Markdown keeps the built-in `docs` classification; the non-Markdown structural formats default to a `config` type, overridable via the config section [with user].",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.structural-file-graphing",
+      "properties": {}
+    }
+  ],
   "in": []
 }

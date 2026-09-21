@@ -53,6 +53,11 @@
       "kind": "details",
       "source": "requirements.note.structural-file-graphing-reconciliation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.structural-scanner-design-decisions",
+      "properties": {}
     }
   ]
 }
