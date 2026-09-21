@@ -4,6 +4,12 @@
   "name": "frontend-maintainer",
   "body": "A person who builds, releases, or upgrades apg and its language frontends. They must know, before cutting a release, exactly which toolchain versions compile and stage each frontend, so a release is reproducible and an upgrade of a toolchain is a deliberate act rather than drift. Their interest is an explicit per-frontend dependency contract: build-time deps, scan-time deps, and the engine pin that sets the language-version ceiling.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.frontend-dependency-contract",
+      "properties": {}
+    }
+  ],
   "in": []
 }
