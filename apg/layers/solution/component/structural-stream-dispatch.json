@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.spawn_frontend",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontend_cmd",
+      "properties": {}
     }
   ],
   "in": [
