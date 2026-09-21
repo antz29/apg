@@ -24,6 +24,11 @@
       "kind": "contains",
       "target": "requirements.requirement.build-toolchain-pins",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.frontend-dependency-docs",
+      "properties": {}
     }
   ],
   "in": [
