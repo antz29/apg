@@ -26,6 +26,11 @@
       "kind": "contains",
       "source": "solution.container.scanner-cli",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.scan-time-tool",
+      "properties": {}
     }
   ]
 }
