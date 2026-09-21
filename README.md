@@ -288,7 +288,7 @@ Node types:
 | Label | Properties |
 |---|---|
 | `Module` | `fqn` |
-| `File` | `fqn` (absolute path), `start_line`, `end_line`, `code_type` |
+| `File` | `fqn` (path relative to the git toplevel / scan root — the file's identity), `start_line`, `end_line`, `code_type` |
 | `Struct` | `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type` |
 | `Function` | `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type` |
 | `UnresolvedTarget` | `fqn`, `category` (`builtin`/`stdlib`/`external`/`func-value`/`interface-method`/`unknown`) |
@@ -319,12 +319,14 @@ rooted npm-package + file-path-prefixed form: a class `Button` in
 namespace, so same-named symbols in different files never collide). The language
 roots are disjoint, so a cross-language collision (`rust.apg` vs `py.apg`) is
 impossible by construction. Files and foreign references are NOT rooted: a
-`File.fqn` is its absolute path and an `UnresolvedTarget` FQN stays verbatim.
+`File.fqn` is its repo-relative path (relative to the git toplevel, or the scan
+root outside a repo) and an `UnresolvedTarget` FQN stays verbatim.
 
 `start`/`end` are **0-based byte offsets**; `start_line`/`end_line` are
-**1-based inclusive line numbers**; `path` is absolute under the project
-directory. (Java and TypeScript scanners report `start`/`end` as UTF-16 code-unit
-offsets, matching their compilers' native positions.)
+**1-based inclusive line numbers**; `path` is the repo-relative source-file
+identity (the absolute path is reconstructed at the suite-tool boundary). (Java
+and TypeScript scanners report `start`/`end` as UTF-16 code-unit offsets,
+matching their compilers' native positions.)
 
 ## Graph-native specs and plans (the project model)
 
@@ -443,14 +445,18 @@ pointed at with `LBUG_LIBRARY_DIR` / `LBUG_INCLUDE_DIR`) and links OpenSSL
 base scanner's build deps are therefore Rust + network + that prebuilt static
 library; at scan time it needs nothing.
 
-The toolchains that compile or stage a frontend are pinned to exact versions
-in repo-visible files, and the CI release build consumes the same pins: Go
-`1.27.1` (`src/golib/go.mod`'s `toolchain` directive; CI sets `GOTOOLCHAIN`),
-Rust `1.98.1` (the repo-root `rust-toolchain.toml`, whose `channel` rustup's
-parent-walk applies to the main crate and all three cargo frontend crates —
-`src/rustlib`, `src/pylib`, `src/mdlib`), and Node `26.9.0`
-(`src/tslib/package.json`'s `engines.node`, enforced by
-`engine-strict=true` in `src/tslib/.npmrc`).
+The toolchains that compile or stage a frontend are pinned in repo-visible
+files consumed by every build path that compiles a frontend, exact where the
+mechanism can enforce it: Rust `1.98.1` (the repo-root `rust-toolchain.toml`,
+whose `channel` rustup's parent-walk applies to the main crate and all three
+cargo frontend crates — `src/rustlib`, `src/pylib`, `src/mdlib`), Node `26.9.0`
+(`src/tslib/package.json`'s `engines.node`, enforced fail-closed by
+`engine-strict=true` in `src/tslib/.npmrc`), and Go on the release Linux CI path
+(`GOTOOLCHAIN` + `actions/setup-go`, `1.27.1`). Where a path cannot enforce an
+exact version the requirement is a documented floor, not a floating latest:
+`src/golib/go.mod`'s `toolchain go1.27.1` directive bounds the bottle/ambient
+path (whose formula `depends_on "go"` is unversioned), so an ambient newer Go is
+used as-is.
 
 ```sh
 git clone git@github.com:antz29/apg.git

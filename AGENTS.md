@@ -53,12 +53,16 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   crates) and Markdown with stable Rust + crates.io, neither needing a runtime
   at scan time, bounded by Ruff/ty tag `0.16.6` (`salsa 0.27`) and
   `serde`/`serde_json`/`unicode-normalization` respectively. The build
-  toolchains are pinned to exact versions in repo-visible files consumed by
-  every frontend-compiling path: Go `1.27.1` (`src/golib/go.mod`'s `toolchain`),
-  Rust `1.98.1` (the repo-root `rust-toolchain.toml`, covering the main build and
-  all three cargo frontend crates), and Node `26.9.0` (`src/tslib/package.json`
-  `engines.node`, enforced by `engine-strict=true` in `src/tslib/.npmrc`),
-  matching the pins in `.github/workflows/release.yml`.
+  toolchains are pinned in repo-visible files consumed by every
+  frontend-compiling path, exact where the mechanism can enforce it: Rust
+  `1.98.1` (the repo-root `rust-toolchain.toml`, covering the main build and all
+  three cargo frontend crates) and Node `26.9.0` (`src/tslib/package.json`
+  `engines.node`, enforced fail-closed by `engine-strict=true` in
+  `src/tslib/.npmrc`). Go is exact on the release Linux CI path (`GOTOOLCHAIN` +
+  `actions/setup-go`, `1.27.1`) and a documented floor elsewhere —
+  `src/golib/go.mod`'s `toolchain go1.27.1` directive bounds the bottle/ambient
+  path, whose formula `depends_on "go"` is unversioned — matching the pins in
+  `.github/workflows/release.yml`.
 
 ## Project flow (the verified pattern)
 
