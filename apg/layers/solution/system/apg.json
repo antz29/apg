@@ -49,6 +49,11 @@
       "kind": "contains",
       "target": "solution.container.csharp-frontend",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.md-frontend",
+      "properties": {}
     }
   ],
   "in": []
