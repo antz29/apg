@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.build_script_build.build_frontends",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.build_script_build.main",
+      "properties": {}
     }
   ],
   "in": [
