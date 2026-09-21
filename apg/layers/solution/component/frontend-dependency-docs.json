@@ -4,7 +4,13 @@
   "name": "frontend-dependency-docs",
   "body": "The frontend dependency documentation: the per-frontend build-time / scan-time / engine-pin contract stated in README.md and in the pipeline section of AGENTS.md, kept in step with the spec's frontend containers.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "README.md",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
