@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.ingest.claim",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.is_blacklisted",
+      "properties": {}
     }
   ],
   "in": [
