@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "requirements.requirement.no-new-scan-time-deps",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.md-lang-id-preserved",
+      "properties": {}
     }
   ],
   "in": [
