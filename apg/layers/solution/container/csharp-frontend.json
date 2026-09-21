@@ -6,13 +6,7 @@
   "properties": {
     "kind": "app"
   },
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "csharp.Apg.CsharpFrontend.Scanner.GetDefaultMetadataReferences",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
