@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "scan-time-tool",
+  "body": "A tool that must be resolvable on PATH when `apg scan` runs for a language to be scanned: `go`, `cargo`/`rustc`, `java`, or `node`. Its absence is a preflight failure naming the tool — never a silent skip and never an empty graph.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
