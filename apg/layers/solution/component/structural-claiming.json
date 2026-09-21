@@ -4,7 +4,13 @@
   "name": "structural-claiming",
   "body": "The claim and scope boundary of the structural scanner: it skips code-frontend-claimed extensions, honours the standard exclusions (gitignore-aware path filtering, `target`/`node_modules`, `--exclude-path`), and applies the `apg/config.json` include/exclude scope plus the structural `code_type`. Reuses the existing classification machinery (`rust.apg.classify`, `rust.apg.git.path_is_ignored`) and the ingestor's claim/blacklist boundary (`rust.apg.ingest.claim`, `rust.apg.ingest.is_blacklisted`).",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.claim",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
