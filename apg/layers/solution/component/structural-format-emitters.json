@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "structural-format-emitters",
+  "body": "The per-format structure emitters inside the scanner: one emitter per format that turns a parsed file into the format's `Struct`/`contains` records — Markdown headings (the existing `rust.mdfrontend.build_doc` / `rust.mdfrontend.parse_headings`), shell functions, YAML keys/jobs/steps, JSON keys, TOML tables/keys, XML elements, Dockerfile stages and instructions, Makefile targets/variables/includes, INI sections/keys. `misc` emits `File` only.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
