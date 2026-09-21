@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "frontend-dependencies",
-  "body": "The frontend capability contract: every language apg ships a scanner for is a distinct frontend artifact with its own build-time dependencies, its own scan-time dependencies, and an engine pin that fixes the language-version ceiling. This group gathers those concepts so the question \"to scan language X, what do I need?\" has one answer.",
+  "body": "The frontend capability contract: every language apg ships a scanner for is a frontend with its own build-time dependencies, its own scan-time dependencies, and an engine pin that fixes the language-version ceiling. This group gathers those concepts so the question \"to scan language X, what do I need?\" has one answer. The per-language frontends are distinct artifacts (`domain.entity.frontend-artifact`); the bundled structural scanner is a single base-package artifact covering the text/config/data formats and has no language-version ceiling (`domain.entity.structural-scanner`, group `domain.group.structural-file-graphing`).",
   "properties": {
     "attribute": "core"
   },
