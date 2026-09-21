@@ -33,6 +33,11 @@
       "kind": "realised-by",
       "source": "domain.entity.build-dependency",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.build-toolchain",
+      "properties": {}
     }
   ]
 }
