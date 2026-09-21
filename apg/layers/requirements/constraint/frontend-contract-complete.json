@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "frontend-contract-complete",
+  "body": "For every language apg ships a frontend for, the spec must name the frontend's build-time dependencies, scan-time dependencies, and engine pin, and the frontend code named by the contract must resolve in the branch graph. A frontend declared without any of the three, or a code reference that does not resolve, is a violation.",
+  "properties": {
+    "attaches-to": "requirements.requirement.frontend-dependency-contract"
+  },
+  "out": [],
+  "in": []
+}
