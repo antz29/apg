@@ -33,6 +33,11 @@
       "kind": "realised-by",
       "source": "domain.entity.runtime-artifact",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.frontend-artifact",
+      "properties": {}
     }
   ]
 }
