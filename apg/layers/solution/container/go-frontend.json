@@ -11,11 +11,6 @@
       "kind": "contains",
       "target": "solution.component.go-build-cache",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "go.apg/gofrontend.discoverModulesViaGoList",
-      "properties": {}
     }
   ],
   "in": [
