@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.structural-file-graphing",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.structural-scanner-in-base-package",
+      "properties": {}
     }
   ]
 }
