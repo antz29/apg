@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "frontend-engine-pin",
+  "body": "For every frontend, the spec records the exact engine pin that sets its language-version ceiling, and says whether that ceiling is the pin alone or the user's toolchain. Pins: Go = `golang.org/x/tools v0.48.0` together with the compiling toolchain's `go/types` (ceiling = the installed Go toolchain); Java = the runtime JDK's `javac` via `ToolProvider.getSystemJavaCompiler()` (ceiling = the installed JDK ≥ 21); C++ = vendored tree-sitter (language ABI v15) plus vendored tree-sitter-cpp, whose grammar/commit version is currently NOT recorded and must be; Rust = rust-analyzer tag `2026-08-17` (0.0.348) plus the user's `cargo`/`rustc` used to load the target project; TypeScript = `typescript 5.9.3`; C# = Roslyn `Microsoft.CodeAnalysis.CSharp(.Workspaces) 4.12.0` parsed at `LanguageVersion.Latest`; Python = Ruff/ty tag `0.16.6` (salsa 0.27); Markdown = serde/serde_json/unicode-normalization 0.1 (plain text, no language-version ceiling). Acceptance: C++ records its engine version, and Go/Java/Rust state that their ceiling is the installed toolchain.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
