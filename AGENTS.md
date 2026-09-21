@@ -528,15 +528,16 @@ declared id verbatim (`go`/`java`/`cpp`/`rust`/`ts`/`js`/`csharp`/`py`/`md`).
 | kind | FQN |
 |---|---|
 | language root | `<language-id>` — the bare `lang_switch` id (e.g. `rust`); `Language —Contains→ Module` |
-| module | `<language-id>.<module-identity>` — the frontend emits the identity verbatim, the ingestor roots it (`rust.apg`, `py.pkg.sub`, `ts.@co/ui`, `md.<absolute-path>`) |
+| module | `<language-id>.<module-identity>` — the frontend emits the identity verbatim, the ingestor roots it (`rust.apg`, `py.pkg.sub`, `ts.@co/ui`, `md.<repo-relative-dir>`; a path identity is rendered repo-relative to the git toplevel / scan root) |
 | struct | `parent.name` — `parent` is the rooted module/scope FQN |
 | function (unique in scope) | `parent.name` |
 | function (overloaded) | `parent.name(T1,T2,...)` — erased, comma-separated params |
 | Go `init` | `parent.init#<file-basename>` |
 | TypeScript | `<language-id>.<pkg.relpath.name>` — the rooted npm package + dot-path prefix per ES-module file (`ts.@co/ui.src.components.Button.Button`); TS getters/setters land as overloads (`diameter()` / `diameter(number)`) |
 
-A `File` FQN is its absolute path and an `UnresolvedTarget` FQN is a foreign
-symbol name — neither is language-rooted.
+A `File` FQN is its repo-relative path (relative to the git toplevel, or the
+scan root outside a repo) and an `UnresolvedTarget` FQN is a foreign symbol
+name — neither is language-rooted.
 
 Because the language roots are disjoint, a cross-language module/symbol FQN
 collision is impossible by construction (`rust.apg` and `py.apg` both survive).
@@ -578,7 +579,7 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
 
 - 5 code node types:
   - `Module` — property: `fqn`
-  - `File` — properties: `fqn` (the absolute path), `start_line`, `end_line` (`1..total-lines`), `code_type`
+  - `File` — properties: `fqn` (the repo-relative path from the git toplevel / scan root), `start_line`, `end_line` (`1..total-lines`), `code_type`
   - `Struct` — properties: `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type`
   - `Function` — properties: `fqn`, `path`, `start`, `end`, `start_line`, `end_line`, `code_type`
   - `UnresolvedTarget` — properties: `fqn`, `category` (a call/type reference the scanner could not resolve to a project symbol; deduplicated by name)
@@ -739,7 +740,7 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   located node also carries `start_line`/`end_line`, **1-based inclusive line
   numbers**; use them (not byte offsets) when joining against diffs, hunks, or
   anything line-oriented.
-- `path` is an **absolute filesystem path** under the project directory. Read those files with `read`, `grep`, or `bash` to **confirm and anchor** a graph result (open the returned `path` at its `start_line`/`end_line`) or to read artifacts the graph does not model — never to discover a fact the graph carries.
+- `path` is the **repo-relative source-file identity** — the `/`-separated path from the git toplevel (or the scan root outside a repo), the same identity as a `File` FQN, never an absolute checkout path (the absolute path is reconstructed at the suite-tool boundary). Read those files with `read`, `grep`, or `bash` (resolving the relative path against the project directory) to **confirm and anchor** a graph result (open the file at its `start_line`/`end_line`) or to read artifacts the graph does not model — never to discover a fact the graph carries.
 
 ### Fidelity & noise
 

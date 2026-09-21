@@ -73,7 +73,7 @@ ceiling.
 
 | Frontend | Build-time deps | Scan-time deps | Engine pin (ceiling) |
 |---|---|---|---|
-| Go (`apg-go`) | Go ≥ 1.25 + network (`golang.org/x/tools v0.48.0`) | `go` on `PATH` (`go list` / `go/packages`) | `golang.org/x/tools v0.48.0` jointly with the compiling toolchain's `go/types` (ceiling = the installed Go toolchain) |
+| Go (`apg-go`) | Go ≥ 1.25 + network (`golang.org/x/tools v0.48.0`); build toolchain pinned exact `1.27.1` on the release Linux CI path (`GOTOOLCHAIN` + `actions/setup-go`) and floored by `src/golib/go.mod`'s `toolchain go1.27.1` on the bottle/ambient path (formula `depends_on "go"` is unversioned) | `go` on `PATH` (`go list` / `go/packages`) | `golang.org/x/tools v0.48.0` jointly with the compiling toolchain's `go/types` (ceiling = the installed Go toolchain) |
 | Java (`apg-java`) | JDK ≥ 21 (`javac --release 21`) | `java` (JDK ≥ 21), spawned `java -Xmx5g -cp <dir> CallGraphBuilder` | the runtime JDK's `javac` via `ToolProvider` (ceiling = the installed JDK ≥ 21) |
 | C++ (`apg-cpp`) | `gcc` (`-std=c11`) + `g++` (`-std=c++17`); vendored tree-sitter | none (native) | vendored tree-sitter language ABI v15 + vendored tree-sitter-cpp grammar content |
 | Rust (`apg-rust`) | stable Rust + network (git-pinned rust-analyzer crates) | `cargo` + `rustc` | rust-analyzer tag `2026-08-17` (0.0.348) |
