@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "requirements.requirement.md-lang-id-preserved",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.structural-format-claiming",
+      "properties": {}
     }
   ],
   "in": [
