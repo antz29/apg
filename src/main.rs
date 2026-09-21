@@ -987,9 +987,61 @@ fn should_spawn_language(
     !any_targets || !targets_empty
 }
 
+/// The scan-time tools a selected language's frontend requires on `PATH` when
+/// `apg scan` runs it (SPEC: `solution.component.scan-time-preflight`). A pure
+/// mapping — no I/O. The four self-contained frontends (`cpp`, `csharp`, `py`,
+/// `md`) require nothing, and neither does an unknown language id (never a
+/// false refusal). `ts`/`js` share the one unified frontend and its `node`
+/// runtime.
+fn scan_time_tools(language: &str) -> &'static [&'static str] {
+    match language {
+        "go" => &["go"],
+        "java" => &["java"],
+        "rust" => &["cargo", "rustc"],
+        "ts" | "js" => &["node"],
+        _ => &[],
+    }
+}
+
+/// The named, actionable error for a scan-time tool the selected language's
+/// frontend needs but `PATH` does not provide: the language, the missing tool,
+/// and how to install it. A pure builder — no panic, no I/O (SPEC:
+/// `global.constraint.scan-time-tool-failure-actionable`).
+fn scan_time_tool_error(language: &str, tool: &str) -> String {
+    let hint = match language {
+        "go" => "install Go with `brew install go`",
+        "java" => "install a JDK >= 21 (e.g. `brew install openjdk@21`)",
+        "rust" => "install the Rust toolchain with `brew install rust`",
+        "ts" | "js" => "install Node.js with `brew install node`",
+        _ => "install the required toolchain",
+    };
+    format!(
+        "scan-time toolchain preflight failed for the `{language}` frontend: \
+         required tool `{tool}` was not found on PATH — {hint}, then re-run `apg scan`"
+    )
+}
+
+/// Probes `PATH` for every tool `language`'s frontend needs and returns
+/// [`scan_time_tool_error`] for the first miss. This is the I/O unit (a real
+/// `PATH` probe); a tool-less language probes nothing and succeeds.
+fn scan_time_preflight(language: &str) -> anyhow::Result<()> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    for &tool in scan_time_tools(language) {
+        let found = std::env::split_paths(&path)
+            .any(|dir| dir.join(tool).is_file() || dir.join(format!("{tool}.exe")).is_file());
+        if !found {
+            anyhow::bail!("{}", scan_time_tool_error(language, tool));
+        }
+    }
+    Ok(())
+}
+
 /// Spawns one language's frontend for a scan phase, draining stdout to a spool
-/// and stderr to a log spool. Returns the spool path on success, `None` when
-/// the frontend failed (reported + skipped, never fatal).
+/// and stderr to a log spool. Returns `Ok(Some(spool))` on success and
+/// `Ok(None)` when the frontend process itself failed (reported + skipped,
+/// never fatal). An `Err` is reserved for a pre-spawn toolchain failure (a
+/// missing scan-time tool), which fails the whole scan with a named, actionable
+/// error rather than silently skipping the language and writing an empty graph.
 #[allow(clippy::too_many_arguments)]
 fn spawn_frontend(
     lang: &str,
@@ -1003,10 +1055,16 @@ fn spawn_frontend(
     targets: &[String],
     phase: u32,
     log: &mut Log,
-) -> Option<PathBuf> {
-    let cmd = frontend_cmd(lang).unwrap_or_else(|| {
-        panic!("frontend for language '{lang}' is not installed");
-    });
+) -> anyhow::Result<Option<PathBuf>> {
+    // Runtime scan-time toolchain preflight (SPEC:
+    // `solution.component.scan-time-preflight`): a selected language whose
+    // required tool is absent fails the whole scan here, before any spawn, with
+    // the named actionable error — never the cryptic panic this replaces, never
+    // a silent skip, never an empty graph. The four tool-less frontends
+    // (`cpp`, `csharp`, `py`, `md`) probe nothing and are unaffected.
+    scan_time_preflight(lang)?;
+    let cmd = frontend_cmd(lang)
+        .ok_or_else(|| anyhow::anyhow!("frontend for language '{lang}' is not installed"))?;
     let spool = tmp.join(format!("{lang}.p{phase}.jsonl"));
     let spool_file = std::fs::File::create(&spool).unwrap();
     let stderr_spool = tmp.join(format!("{lang}.p{phase}.stderr"));
@@ -1043,10 +1101,12 @@ fn spawn_frontend(
         .stdout(Stdio::from(spool_file.try_clone().unwrap()))
         .stderr(Stdio::from(stderr_file.try_clone().unwrap()));
     log.ln(&format!("[scan] running {lang} frontend..."));
-    let mut frontend_output = child.spawn().expect("Failed to run frontend");
+    let mut frontend_output = child
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("failed to run the {lang} frontend (`{cmd}`): {e}"))?;
     let ok = frontend_output
         .wait()
-        .expect("couldn't wait for frontend")
+        .map_err(|e| anyhow::anyhow!("couldn't wait for the {lang} frontend: {e}"))?
         .success();
     log.append_file(&stderr_spool);
     if !ok {
@@ -1056,10 +1116,10 @@ fn spawn_frontend(
         for line in tail_of(&stderr_spool, 10) {
             log.ln(&format!("  [{lang}] {line}"));
         }
-        return None;
+        return Ok(None);
     }
     log.ln(&format!("[scan] {lang} frontend exited"));
-    Some(spool)
+    Ok(Some(spool))
 }
 
 /// Parses the `--targets <file>` list: newline-delimited absolute paths, one
@@ -2007,7 +2067,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
                 &targets,
                 phase,
                 &mut log,
-            ) {
+            )? {
                 Some(spool) => {
                     // A phase-2 re-run replaces the language's phase-1 spool, so
                     // each language contributes exactly one stream (no duplicate
@@ -3735,6 +3795,57 @@ mod tests {
             assert!(
                 targets_for_language(&js_rel, Path::new("/root"), "go").is_empty(),
                 "a js/ts target must not be delivered to another language"
+            );
+        }
+
+        /// Phase-03 task-5: the pure scan-time toolchain mapping and the named,
+        /// actionable error text. The mapping is exactly the per-language
+        /// scan-time tool set (`go`; a JDK's `java`; `cargo` + `rustc`; `node`
+        /// for both `ts` and `js`) and nothing for the four self-contained
+        /// frontends; the error names the language, the missing tool, and its
+        /// install hint — no panic, no I/O.
+        #[test]
+        fn scan_time_tools_and_error_text() {
+            assert_eq!(scan_time_tools("go"), &["go"][..], "go needs the go tool");
+            assert_eq!(scan_time_tools("java"), &["java"][..], "java needs a JDK");
+            assert_eq!(
+                scan_time_tools("rust"),
+                &["cargo", "rustc"][..],
+                "rust needs cargo + rustc"
+            );
+            assert_eq!(scan_time_tools("ts"), &["node"][..], "ts needs node");
+            assert_eq!(scan_time_tools("js"), &["node"][..], "js needs node");
+            for lang in ["cpp", "csharp", "py", "md"] {
+                assert!(
+                    scan_time_tools(lang).is_empty(),
+                    "{lang} is self-contained at scan time"
+                );
+            }
+            assert!(
+                scan_time_tools("unknown-lang").is_empty(),
+                "an unknown language never demands a tool"
+            );
+
+            let go = scan_time_tool_error("go", "go");
+            assert!(go.contains("`go` frontend"), "names the language: {go}");
+            assert!(go.contains("required tool `go`"), "names the tool: {go}");
+            assert!(go.contains("brew install go"), "carries the hint: {go}");
+
+            let rust = scan_time_tool_error("rust", "cargo");
+            assert!(rust.contains("`cargo`"), "names the tool: {rust}");
+            assert!(
+                rust.contains("brew install rust"),
+                "carries the hint: {rust}"
+            );
+
+            let java = scan_time_tool_error("java", "java");
+            assert!(java.contains("JDK"), "carries the JDK hint: {java}");
+
+            let node = scan_time_tool_error("ts", "node");
+            assert!(node.contains("`node`"), "names node: {node}");
+            assert!(
+                node.contains("brew install node"),
+                "carries the hint: {node}"
             );
         }
 
@@ -9705,6 +9816,87 @@ mod tests {
                 "py opaque ids must carry the py prefix: {py_ids:?}"
             );
 
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// Phase-03 task-6: the scan-time toolchain preflight on the spawn path.
+        /// A scratch `/tmp` git repo with an isolated frontends dir carrying a
+        /// stub `gofrontend` (so `go` is selectable) and a stripped `PATH` (so
+        /// the `go` tool is absent) must fail `apg scan` with the named,
+        /// actionable error — no panic, and no silently-empty graph
+        /// (`global.constraint.no-real-project-test`).
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/PATH); run via cargo test-e2e"]
+        #[cfg(unix)]
+        fn scan_time_preflight_reports_missing_tool() {
+            use std::os::unix::fs::PermissionsExt;
+
+            let base = std::env::temp_dir().join(format!("apg-preflight-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(&base).unwrap();
+            let home = base.join("home");
+            std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin"))
+                .unwrap();
+
+            // A scratch git repo carrying a real Go source and a versioned `apg/`
+            // layout at the binary's own version, so a scan reaches the frontend
+            // spawn path rather than refusing on the layout gate.
+            let repo = testutil::Repo::new("preflight");
+            repo.write("main.go", "package main\n\nfunc main() {}\n");
+            repo.commit_all("go source");
+
+            // An isolated frontends dir holding ONLY a stub `gofrontend`: `go`
+            // is selectable, but the real Go toolchain is not on the stripped
+            // PATH below.
+            let fe = base.join("frontends");
+            std::fs::create_dir_all(&fe).unwrap();
+            let go_stub = fe.join("gofrontend");
+            std::fs::write(&go_stub, "#!/bin/sh\nexit 0\n").unwrap();
+            std::fs::set_permissions(&go_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            // An empty directory as PATH: every required scan-time tool misses.
+            let empty_path = base.join("empty-path");
+            std::fs::create_dir_all(&empty_path).unwrap();
+
+            let out = testutil::ApgCommand::new(&["scan", "--language", "go", "."])
+                .cwd(&repo.root)
+                .env("HOME", home.to_str().unwrap())
+                .env("APG_FRONTEND_DIR", fe.to_str().unwrap())
+                .env("PATH", empty_path.to_str().unwrap())
+                .output();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+            assert!(
+                !out.status.success(),
+                "a missing `go` tool must fail the scan, not skip the language: {stderr}"
+            );
+            assert!(
+                stderr.contains("scan-time toolchain preflight failed"),
+                "the failure must be the named preflight error: {stderr}"
+            );
+            assert!(
+                stderr.contains("`go` frontend") && stderr.contains("required tool `go`"),
+                "the error must name the language and the missing tool: {stderr}"
+            );
+            assert!(
+                stderr.contains("brew install go"),
+                "the error must carry the actionable install hint: {stderr}"
+            );
+            assert!(
+                !stderr.contains("panicked") && !stderr.contains("Failed to run frontend"),
+                "the missing tool must never surface as a cryptic panic: {stderr}"
+            );
+            // No empty graph: the scan bailed before writing one.
+            assert!(
+                !repo.root.join("apg/.trans/db.lbug").exists(),
+                "a preflight failure must not leave an empty graph"
+            );
+            assert!(
+                !repo.root.join("apg/.trans/graph.jsonl").exists(),
+                "a preflight failure must not leave an empty graph export"
+            );
+
+            testutil::remove(&repo);
             let _ = std::fs::remove_dir_all(&base);
         }
     }
