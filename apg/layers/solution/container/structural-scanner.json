@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "solution.component.structural-claiming",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.structural-stream-dispatch",
+      "properties": {}
     }
   ],
   "in": [
