@@ -41,6 +41,11 @@
       "kind": "realised-by",
       "target": "solution.container.ts-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.py-frontend",
+      "properties": {}
     }
   ],
   "in": [
