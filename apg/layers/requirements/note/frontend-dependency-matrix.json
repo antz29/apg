@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "frontend-dependency-matrix",
+  "body": "The durable per-frontend dependency matrix (confirmed against the branch graph unless noted). Base scanner (`apg`, `scanner-cli`): build Rust + prebuilt static liblbug 0.19.1 + network; scan-time none; links openssl@3, Linux runtime needs libssl.so.3. Go (`gofrontend`): build Go >= 1.25 (`src/golib/go.mod`) + network for golang.org/x/tools v0.48.0; scan-time `go`; engine x/tools v0.48.0 + the compiling toolchain's go/types. Java (`java-classes`): build javac with --release 21; scan-time `java` (JDK >= 21), spawned `java -Xmx5g -cp <dir> CallGraphBuilder`; engine the runtime JDK's javac via ToolProvider.getSystemJavaCompiler(). C++ (`cppfrontend`): build gcc (-std=c11) + g++ (-std=c++17); scan-time none; engine vendored tree-sitter (language ABI v15) + tree-sitter-cpp, version UNRECORDED. Rust (`rustfrontend`): build stable Rust + network (git-pinned ra_ap_* crates); scan-time `cargo` + `rustc`; engine rust-analyzer tag 2026-08-17 (0.0.348). TypeScript (`tsfrontend`): build node + npm ci; scan-time `node`; engine typescript 5.9.3. C# (`csharpfrontend`): build .NET SDK + NuGet; scan-time none (self-contained); engine Roslyn Microsoft.CodeAnalysis.CSharp(.Workspaces) 4.12.0 at LanguageVersion.Latest. Python (`pyfrontend`): build stable Rust + network (Ruff git crates); scan-time none (filesystem markers, never shells out); engine Ruff/ty tag 0.16.6, salsa 0.27. Markdown (`mdfrontend`): build stable Rust + crates.io; scan-time none; engine serde/serde_json/unicode-normalization 0.1.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
