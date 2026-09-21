@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "ts-frontend",
-  "body": "The TypeScript/JavaScript frontend artifact (`src/tslib/scanner.mjs`), spawned by the scan driver. It discovers npm packages and collects each package's sources. Must root modules from the repository-relative base and emit each source file exactly once.",
+  "body": "The TypeScript/JavaScript frontend artifact (`src/tslib/scanner.mjs`), spawned by the scan driver. It discovers npm packages and collects each package's sources. Must root modules from the repository-relative base and emit each source file exactly once. Build-time deps: `node` plus `npm ci` (`src/tslib/package.json` pins `typescript 5.9.3`). Scan-time deps: `node` on PATH — spawned as `node <dir>/scanner.mjs`. Engine pin: `typescript 5.9.3`, driven through `ts.createProgram`; the language-version ceiling is set by that pinned compiler.",
   "properties": {
     "kind": "app"
   },
