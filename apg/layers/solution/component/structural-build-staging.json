@@ -5,5 +5,11 @@
   "body": "The build-pipeline half that compiles and stages the bundled structural scanner: `build.rs` builds `structfrontend` and copies it to `target/<profile>/frontends` alongside the seven language frontends (`rust.build_script_build.build_frontends`, `rust.build_script_build.main`, `rust.build_script_build.copy_dir`). The formula/release edits that ship it in the base package (`Formula/scanner.rb`, `install.sh`, `.github/workflows/release.yml`) are non-graph maintainer edits — see `solution.note.structural-scanner-oroboros`.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.build-pipeline",
+      "properties": {}
+    }
+  ]
 }
