@@ -52,11 +52,6 @@
     },
     {
       "kind": "contains",
-      "target": "solution.container.md-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "solution.container.build-pipeline",
       "properties": {}
     },
