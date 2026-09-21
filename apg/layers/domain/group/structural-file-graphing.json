@@ -24,5 +24,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.every-tracked-file-graphed",
+      "properties": {}
+    }
+  ]
 }

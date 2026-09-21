@@ -6,7 +6,13 @@
   "properties": {
     "feature": "structural-graphing"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.group.structural-file-graphing",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
