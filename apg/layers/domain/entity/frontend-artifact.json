@@ -46,6 +46,11 @@
       "kind": "realised-by",
       "target": "solution.container.py-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.frontend-dependency-docs",
+      "properties": {}
     }
   ],
   "in": [
