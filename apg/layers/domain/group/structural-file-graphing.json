@@ -29,6 +29,11 @@
       "kind": "drives",
       "source": "requirements.requirement.every-tracked-file-graphed",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.structural-format-scope-config",
+      "properties": {}
     }
   ]
 }
