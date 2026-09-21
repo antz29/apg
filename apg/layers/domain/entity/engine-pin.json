@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "target": "solution.container.md-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.go-frontend",
+      "properties": {}
     }
   ],
   "in": [
