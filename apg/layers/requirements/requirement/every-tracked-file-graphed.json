@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "every-tracked-file-graphed",
+  "body": "A scan of a Git-tracked repository emits a `File` node for every tracked file, subject only to the config scope (`requirements.requirement.structural-format-scope-config`) and the standard exclusions (`.git`, `target`, `node_modules`, `.gitignore`, `--exclude-path`). The code frontends continue to claim their own source files; the bundled structural scanner claims the remainder — the text/config/data formats plus the `misc` residual — so no tracked file is left without a `File` node. Acceptance: a post-change scan of this repo emits File nodes for `Cargo.toml`/`Cargo.lock` (`toml`), `LICENSE` (`misc`), `install.sh` (`sh`), `.github/workflows/release.yml` (`yaml`), `opencode-suite/package.json` (`json`), `apg/config.json` (`json`) and the `Formula/*.rb` files (`misc`, pending `apg-ruby`).",
+  "properties": {
+    "feature": "structural-graphing"
+  },
+  "out": [],
+  "in": []
+}
