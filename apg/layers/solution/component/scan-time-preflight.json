@@ -4,13 +4,7 @@
   "name": "scan-time-preflight",
   "body": "The scan driver's preflight: before spawning a language's frontend, verify the language's scan-time tools are resolvable on PATH and fail with an actionable error naming the missing tool. It sits where a language is selected for spawning (`should_spawn_language`) and where its command is built (`frontend_cmd`). `available_languages` already probes installed frontend artifacts, which is a different question — artifact present, not toolchain present — and its silent-skip behaviour for a missing artifact is out of scope.",
   "properties": {},
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.should_spawn_language",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
