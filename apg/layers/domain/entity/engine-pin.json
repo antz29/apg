@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "target": "solution.container.csharp-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.md-frontend",
+      "properties": {}
     }
   ],
   "in": [
