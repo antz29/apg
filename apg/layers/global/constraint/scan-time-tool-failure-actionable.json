@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "scan-time-tool-failure-actionable",
+  "body": "When a selected language's frontend is installed but its scan-time toolchain is missing from PATH, `apg scan` must emit an error naming the missing tool and how to install it. It must not panic, must not silently skip the language, and must not record an empty graph for it.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
