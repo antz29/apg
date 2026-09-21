@@ -14,11 +14,6 @@
       "kind": "implemented-by",
       "target": "rust.apg.should_spawn_language",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.available_languages",
-      "properties": {}
     }
   ],
   "in": [
