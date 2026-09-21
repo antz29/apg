@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.mdfrontend.walk",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.mdfrontend.line_count",
+      "properties": {}
     }
   ],
   "in": [
