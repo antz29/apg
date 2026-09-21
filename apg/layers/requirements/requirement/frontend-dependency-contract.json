@@ -29,6 +29,11 @@
       "kind": "contains",
       "target": "requirements.requirement.frontend-dependency-docs",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.scan-time-toolchain-preflight",
+      "properties": {}
     }
   ],
   "in": [
