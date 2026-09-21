@@ -34,6 +34,11 @@
       "kind": "contains",
       "target": "solution.container.opencode-suite",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.rust-frontend",
+      "properties": {}
     }
   ],
   "in": []
