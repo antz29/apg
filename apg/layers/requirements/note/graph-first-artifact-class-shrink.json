@@ -4,6 +4,12 @@
   "name": "graph-first-artifact-class-shrink",
   "body": "Reconciliation of `requirements.requirement.graph-first-navigation` [autonomous]. Source: SPEC.md §1, §6. Its \"Not in the graph\" artifact class (`Cargo.toml`/`Cargo.lock`, `go.mod`/`go.sum`, `package.json`/`package-lock.json`, `*.csproj`, `Formula/*.rb`, `install.sh`, `.cargo/config.toml`, `.github/**`) was correct for the installed 0.16.1 binary, but 0.17.0's structural scanner graphs the text/config/packaging surfaces. The rule text is updated to the post-0.17.0 world: the in-graph set now includes every tracked text/config/packaging file the scanner claims; the not-in-graph set shrinks to genuinely ungraphable things — Ruby sources (`Formula/*.rb`, pending `apg-ruby`), binaries, and anything the config scope excludes. `solution.component.repo-agent-guide` (AGENTS.md) and `solution.component.navigator-prompt-guidance` (`opencode-suite/agents/codebase-navigator.md`) carry the same boundary text, so both need the corresponding edit. Both anchor File nodes resolve in the branch graph.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.graph-first-navigation",
+      "properties": {}
+    }
+  ],
   "in": []
 }

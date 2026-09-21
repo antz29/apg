@@ -33,6 +33,11 @@
       "kind": "details",
       "source": "requirements.note.fix-md-module-naming",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.graph-first-artifact-class-shrink",
+      "properties": {}
     }
   ]
 }
