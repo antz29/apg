@@ -17,6 +17,11 @@
       "kind": "contains",
       "target": "domain.entity.structural-scanner",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.misc-residual-format",
+      "properties": {}
     }
   ],
   "in": []
