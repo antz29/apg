@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.container.scanner-cli",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.go-frontend",
+      "properties": {}
     }
   ],
   "in": [
