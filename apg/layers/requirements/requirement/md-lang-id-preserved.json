@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "md-lang-id-preserved",
+  "body": "The structural scanner emits the existing `md` language id for Markdown, so every existing Markdown FQN is unchanged: the `md.<dir>` modules, the `md.AGENTS.md.<heading-path>` heading Structs, and the `md.opencode-suite/agents` subtree. This is a packaging consolidation (the Markdown frontend's code is absorbed into the bundled scanner), not a graph-identity break; emitting a new id (e.g. a `text` root) would move every Markdown FQN for no benefit. Acceptance: a post-change scan of this repo produces the same `md.*` module and heading FQN set as the pre-change scan, and the Markdown heading `Struct`s still resolve.",
+  "properties": {
+    "feature": "structural-graphing"
+  },
+  "out": [],
+  "in": []
+}
