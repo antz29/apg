@@ -34,6 +34,11 @@
       "kind": "contains",
       "target": "requirements.requirement.scan-time-toolchain-preflight",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.frontend-dependencies",
+      "properties": {}
     }
   ],
   "in": [

@@ -33,5 +33,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.frontend-dependency-contract",
+      "properties": {}
+    }
+  ]
 }
