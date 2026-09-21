@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.frontend-dependencies",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.frontend-build-deps",
+      "properties": {}
     }
   ]
 }
