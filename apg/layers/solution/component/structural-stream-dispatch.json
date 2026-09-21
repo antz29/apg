@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.available_languages",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.ingest_records",
+      "properties": {}
     }
   ],
   "in": [
