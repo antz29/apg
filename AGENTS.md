@@ -34,6 +34,31 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
   `cpp`, `rust`, `ts`, `csharp`, `py`, `md`; `0` to skip) limits what build.rs
   compiles.
+- **Frontend dependency baseline.** Each frontend's build-time deps, scan-time
+  deps (what must be on `PATH` when a user runs `apg scan`), and the engine pin
+  that sets its language-version ceiling are declared on its solution container
+  in the durable spec, and restated per frontend in README.md's *Frontend
+  dependency contract* table. In brief: Go builds with Go ≥ 1.25 + network
+  (`golang.org/x/tools v0.48.0`), needs `go` on `PATH`, and is bounded by
+  `x/tools v0.48.0` jointly with the compiling toolchain's `go/types`; Java
+  builds with `javac --release 21`, needs `java` (JDK ≥ 21), and is bounded by
+  the runtime JDK's `javac`; C++ builds with `gcc`/`g++` and vendored
+  tree-sitter, needs nothing at scan time, and is bounded by the vendored
+  tree-sitter language ABI v15 + tree-sitter-cpp grammar content; Rust builds
+  with stable Rust + network, needs `cargo`/`rustc`, and is bounded by
+  rust-analyzer tag `2026-08-17` (0.0.348); TypeScript builds with `node` +
+  `npm ci`, needs `node`, and is bounded by `typescript 5.9.3`; C# builds with a
+  .NET SDK (`net9.0`) + NuGet, is self-contained at scan time, and is bounded by
+  Roslyn `4.12.0`; Python builds with stable Rust + network (git-pinned Ruff/ty
+  crates) and Markdown with stable Rust + crates.io, neither needing a runtime
+  at scan time, bounded by Ruff/ty tag `0.16.6` (`salsa 0.27`) and
+  `serde`/`serde_json`/`unicode-normalization` respectively. The build
+  toolchains are pinned to exact versions in repo-visible files consumed by
+  every frontend-compiling path: Go `1.27.1` (`src/golib/go.mod`'s `toolchain`),
+  Rust `1.98.1` (the repo-root `rust-toolchain.toml`, covering the main build and
+  all three cargo frontend crates), and Node `26.9.0` (`src/tslib/package.json`
+  `engines.node`, enforced by `engine-strict=true` in `src/tslib/.npmrc`),
+  matching the pins in `.github/workflows/release.yml`.
 
 ## Project flow (the verified pattern)
 

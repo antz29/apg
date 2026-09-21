@@ -2,9 +2,10 @@
 
 **Program graph scanner + LadybugDB query CLI for opencode.**
 
-`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, or C#), builds a program graph of its
-types, functions, and call/use relationships, and stores it in a LadybugDB
-graph database that you can query with Cypher from inside opencode.
+`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, C#, Python, or
+Markdown), builds a program graph of its types, functions, and call/use
+relationships, and stores it in a LadybugDB graph database that you can query
+with Cypher from inside opencode.
 
 ```
 Scanner (per language) → Rust ingestor → apg/.trans/db.lbug + apg/.trans/graph.jsonl
@@ -13,7 +14,8 @@ Scanner (per language) → Rust ingestor → apg/.trans/db.lbug + apg/.trans/gra
 ## Features
 
 - **Per-language scanner frontends** installed separately via brew — install
-  only the languages you scan (Go, Java, C++, Rust, TypeScript, C#).
+  only the languages you scan (Go, Java, C++, Rust, TypeScript, C#, Python,
+  Markdown).
 - **Exact edges for Go, Java, Rust, TypeScript, and C#** — call resolution uses
   the compiler's type checker (go/types, javac, rust-analyzer, the official
   TypeScript compiler, or Roslyn); C++ is heuristic (tree-sitter), and
@@ -44,16 +46,41 @@ separate formulae (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`,
 languages you scan. Prebuilt bottles (macOS
 arm64) are
 published to each GitHub release by CI; if no bottle matches your system,
-Homebrew falls back to building from source. Java projects additionally need
-`java` (JDK 21+) on your PATH at scan time (see [below](#java-projects)); Rust projects
-need a valid Cargo manifest (unlike C++, which tolerates bare directories), and
-the `apg-rust` formula builds the frontend with the current stable toolchain.
-TypeScript projects need `node` on your PATH at scan time (the `apg-ts`
-frontend runs the official TypeScript compiler); a repo's `node_modules` is
-always skipped, and workspace-package imports resolve even before `npm install`.
-The C# frontend (`apg-csharp`) needs a .NET SDK only at build time — the
-published binary is self-contained. The Python frontend (`apg-py`) and the
-Markdown frontend (`apg-md`) need no language runtime at scan time.
+Homebrew falls back to building from source. Four frontends carry a
+**scan-time** dependency — the tool must be on your `PATH` when you run
+`apg scan`, because the frontend shells out to it: Go projects need `go`; Java
+projects need `java` (JDK 21+, see [below](#java-projects)); TypeScript
+projects need `node`; and Rust projects need `cargo` **and** `rustc`. Rust
+projects also need a valid Cargo manifest (unlike C++, which tolerates bare
+directories), and the `apg-rust` formula builds the frontend with the pinned
+stable toolchain (see [Building from source](#building-from-source)). A
+TypeScript repo's `node_modules` is always skipped, and workspace-package
+imports resolve even before `npm install`.
+
+The other four frontends need no runtime at scan time: the C++ frontend is a
+native tree-sitter binary, the C# frontend (`apg-csharp`) is a self-contained
+single-file publish (its .NET SDK is build-time only), and the Python
+(`apg-py`) and Markdown (`apg-md`) frontends resolve from filesystem markers
+or plain text and never shell out. On Linux the base `apg` binary links
+OpenSSL dynamically, so `libssl.so.3` must be present (the installer warns if
+it is missing — see [below](#install-linux-curl--sh)).
+
+### Frontend dependency contract
+
+Per frontend: what it needs **at build time**, what it needs **on `PATH` at
+scan time**, and the **pinned engine** whose version sets the language-version
+ceiling.
+
+| Frontend | Build-time deps | Scan-time deps | Engine pin (ceiling) |
+|---|---|---|---|
+| Go (`apg-go`) | Go ≥ 1.25 + network (`golang.org/x/tools v0.48.0`) | `go` on `PATH` (`go list` / `go/packages`) | `golang.org/x/tools v0.48.0` jointly with the compiling toolchain's `go/types` (ceiling = the installed Go toolchain) |
+| Java (`apg-java`) | JDK ≥ 21 (`javac --release 21`) | `java` (JDK ≥ 21), spawned `java -Xmx5g -cp <dir> CallGraphBuilder` | the runtime JDK's `javac` via `ToolProvider` (ceiling = the installed JDK ≥ 21) |
+| C++ (`apg-cpp`) | `gcc` (`-std=c11`) + `g++` (`-std=c++17`); vendored tree-sitter | none (native) | vendored tree-sitter language ABI v15 + vendored tree-sitter-cpp grammar content |
+| Rust (`apg-rust`) | stable Rust + network (git-pinned rust-analyzer crates) | `cargo` + `rustc` | rust-analyzer tag `2026-08-17` (0.0.348) |
+| TypeScript (`apg-ts`) | `node` + `npm ci` | `node` on `PATH`, spawned `node <dir>/scanner.mjs` | `typescript 5.9.3` |
+| C# (`apg-csharp`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file) | Roslyn `Microsoft.CodeAnalysis.CSharp 4.12.0` |
+| Python (`apg-py`) | stable Rust + network (git-pinned Ruff/ty crates) | none (filesystem markers, never shells out) | Ruff/ty tag `0.16.6` (`salsa 0.27`) |
+| Markdown (`apg-md`) | stable Rust + crates.io | none | `serde` / `serde_json` / `unicode-normalization` 0.1 |
 
 ## Install (Homebrew)
 
@@ -401,13 +428,29 @@ brew link --force openjdk
 
 ## Building from source
 
-Requires: Rust, `gcc`/`g++`, Go, `javac` (to build the frontends), plus
-`cmake` and `openssl` for the bundled LadybugDB. The Rust frontend additionally
-needs a current stable Rust toolchain (rust-analyzer tracks the newest stable)
-and network at build time to fetch the pinned rust-analyzer crates; the
-TypeScript frontend needs `node`/`npm` at build time (`build.rs` runs `npm ci`
-in `src/tslib`); the C# frontend needs a .NET SDK at build time
-(`build.rs` runs `dotnet publish`).
+Requires: a Rust toolchain and the native build deps — `gcc`/`g++` (the C++
+frontend), Go ≥ 1.25 (the Go frontend), `javac` 21 (the Java frontend),
+`node`/`npm` (the TypeScript frontend; `build.rs` runs `npm ci` in
+`src/tslib`), and a .NET SDK (the C# frontend; `build.rs` runs
+`dotnet publish`). Network is needed at build time to fetch the pinned
+rust-analyzer and Ruff/ty engine crates, `golang.org/x/tools`, and NuGet
+packages.
+
+The base binary does **not** bundle LadybugDB and needs no `cmake`: it links a
+**prebuilt static `liblbug`** (0.19.1, fetched from the LadybugDB release and
+pointed at with `LBUG_LIBRARY_DIR` / `LBUG_INCLUDE_DIR`) and links OpenSSL
+(`openssl@3` on macOS; `pkg-config` + `libssl-dev` on Linux) dynamically. The
+base scanner's build deps are therefore Rust + network + that prebuilt static
+library; at scan time it needs nothing.
+
+The toolchains that compile or stage a frontend are pinned to exact versions
+in repo-visible files, and the CI release build consumes the same pins: Go
+`1.27.1` (`src/golib/go.mod`'s `toolchain` directive; CI sets `GOTOOLCHAIN`),
+Rust `1.98.1` (the repo-root `rust-toolchain.toml`, whose `channel` rustup's
+parent-walk applies to the main crate and all three cargo frontend crates —
+`src/rustlib`, `src/pylib`, `src/mdlib`), and Node `26.9.0`
+(`src/tslib/package.json`'s `engines.node`, enforced by
+`engine-strict=true` in `src/tslib/.npmrc`).
 
 ```sh
 git clone git@github.com:antz29/apg.git
@@ -470,6 +513,8 @@ src/cpplib/          C++ scanner (tree-sitter)
 src/rustlib/         Rust scanner (rust-analyzer engine; separate Cargo project)
 src/tslib/           TypeScript scanner (official TypeScript compiler, Node)
 src/csharplib/       C# scanner (Roslyn; separate build)
+src/pylib/           Python scanner (Astral ty/Ruff engine; separate Cargo project)
+src/mdlib/           Markdown scanner (standalone non-workspace Rust crate)
 opencode-suite/      install template for `apg init` (tools/, lib/, agents/; embedded in src/main.rs)
 install.sh           curl | sh installer for Linux (prebuilt release tarballs)
 Formula/scanner.rb     apg binary (ingestor + query CLI)
@@ -479,6 +524,8 @@ Formula/apg-cpp.rb     C++ scanner frontend
 Formula/apg-rust.rb    Rust scanner frontend
 Formula/apg-ts.rb      TypeScript scanner frontend
 Formula/apg-csharp.rb  C# scanner frontend
+Formula/apg-py.rb      Python scanner frontend
+Formula/apg-md.rb      Markdown scanner frontend
 ```
 
 ## License
