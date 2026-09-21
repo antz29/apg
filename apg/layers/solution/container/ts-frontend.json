@@ -14,11 +14,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "ts.apg-tsfrontend.scanner.collectFile",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "ts.apg-tsfrontend.scanner.discoverPackages",
       "properties": {}
     }
