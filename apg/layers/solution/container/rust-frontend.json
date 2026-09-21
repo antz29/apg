@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "rust-frontend",
+  "body": "The Rust frontend artifact (`src/rustlib/src/main.rs`, `rust.apg-rustfrontend`), built by cargo from the pinned rust-analyzer engine crates. Build-time deps: a current stable Rust toolchain plus network to fetch the git-pinned `ra_ap_*` crates. Scan-time deps: `cargo` and `rustc` on PATH — `load_project` discovers the sysroot via `RustLibSource::Discover` and runs cargo build scripts unless `--no-build-scripts`. Engine pin: rust-analyzer tag `2026-08-17` (0.0.348); the language-version ceiling is the pinned engine jointly with the user's toolchain used to load the target workspace.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
