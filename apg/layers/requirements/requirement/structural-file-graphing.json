@@ -36,6 +36,11 @@
       "kind": "contains",
       "target": "requirements.requirement.structural-format-claiming",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.structural-format-scope-config",
+      "properties": {}
     }
   ],
   "in": [
