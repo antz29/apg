@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "java-frontend",
-  "body": "The Java frontend artifact (`src/javalib/CallGraphBuilder.java`). It walks compilation units and emits module/package scaffolding. Must give default-package sources a root module so their classes are reachable, rather than returning early on the empty package.",
+  "body": "The Java frontend artifact (`src/javalib/CallGraphBuilder.java`). It walks compilation units and emits module/package scaffolding. Must give default-package sources a root module so their classes are reachable, rather than returning early on the empty package. Build-time deps: `javac` with `--release 21` (JDK >= 21). Scan-time deps: `java` (JDK >= 21) on PATH — the scan driver spawns it as `java -Xmx5g -cp <dir> CallGraphBuilder`. Engine pin: the runtime JDK's `javac` via `ToolProvider.getSystemJavaCompiler()`; the language-version ceiling is the installed JDK (>= 21).",
   "properties": {
     "kind": "app"
   },
