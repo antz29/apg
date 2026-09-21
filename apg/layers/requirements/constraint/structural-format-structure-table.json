@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "structural-format-structure-table",
+  "body": "Each claimed format must emit exactly the structure named for it: `md` headings, `sh` functions, `yaml` keys/jobs/steps, `json` keys, `toml` tables/keys, `xml` elements, `dockerfile` stages and FROM/RUN/COPY/ENV instructions, `makefile` targets/variables/includes, `ini` sections/keys; `misc` emits a File node only. A format that emits only a File node, or structure beyond the named depth, violates the contract.",
+  "properties": {
+    "attaches-to": "requirements.requirement.structural-format-structure"
+  },
+  "out": [],
+  "in": []
+}
