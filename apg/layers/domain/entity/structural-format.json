@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "structural-format",
+  "body": "A text/config/data format the structural scanner claims and for which it emits structure: Markdown (`md`), shell (`sh`), YAML (`yaml`), JSON (`json`), TOML (`toml`), XML (`xml`), Dockerfile (`dockerfile`), Makefile (`makefile`), and the INI family (`.ini`/`.editorconfig`/`.gitconfig`/`.env`/`.properties`, id `ini`). Each has its own `lang_switch` id and emits its own structure (see `requirements.requirement.structural-format-structure`). Markdown keeps the pre-existing `md` id so its FQNs do not move.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
