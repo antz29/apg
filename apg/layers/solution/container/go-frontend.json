@@ -16,6 +16,11 @@
       "kind": "implemented-by",
       "target": "go.apg/gofrontend.main",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "go.apg/gofrontend.discoverModulesViaGoList",
+      "properties": {}
     }
   ],
   "in": [
