@@ -14,11 +14,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "java.CallGraphBuilder.main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "java.CallGraphBuilder.runFullScan",
       "properties": {}
     }
