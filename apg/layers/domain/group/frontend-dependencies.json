@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "domain.entity.frontend-artifact",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.engine-pin",
+      "properties": {}
     }
   ],
   "in": []
