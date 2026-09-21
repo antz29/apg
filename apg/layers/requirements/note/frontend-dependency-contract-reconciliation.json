@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "frontend-dependency-contract-reconciliation",
+  "body": "Reconciliation of the frontend-dependency-contract family for the Markdown→base move [autonomous]. Source: SPEC.md §5–§6. The dependency contract said \"eight apg language frontends (…, Markdown)\"; the brief says the eight-frontend set becomes seven plus the bundled structural scanner. Amended: `requirements.requirement.frontend-dependency-contract` (seven frontends + the bundled scanner), `frontend-build-deps` (Markdown's Rust+crates.io row now belongs to the bundled scanner), `frontend-scan-deps` (the no-scan-time-toolchain list now names the bundled scanner, not Markdown), `frontend-engine-pin` (seven containers; the structural formats impose no language-version ceiling), `frontend-dependency-docs` (README/AGENTS describe seven + the bundle), the durable matrix note `requirements.note.frontend-dependency-matrix` (Markdown row folded into the base-scanner row), the global law `global.constraint.frontend-dependency-contract` (now \"every frontend apg ships, including the bundled structural scanner\"), and `solution.container.build-pipeline` (eight → seven + the bundle; `apg-md` retires). `solution.component.frontend-dependency-docs` body amended to seven + the bundle. All eight code anchors the docs claim (`AGENTS.md`, `README.md`) still resolve.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
