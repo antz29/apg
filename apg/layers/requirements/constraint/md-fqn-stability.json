@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "md-fqn-stability",
+  "body": "The set of `md.*` module FQNs and `md.<file>.<heading-path>` heading Struct FQNs produced by a post-change scan must be identical to the pre-change set; no Markdown FQN may be renamed, moved under a new language root, or dropped.",
+  "properties": {
+    "attaches-to": "requirements.requirement.md-lang-id-preserved"
+  },
+  "out": [],
+  "in": []
+}
