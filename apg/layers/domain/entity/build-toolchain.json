@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "build-toolchain",
-  "body": "The pinned set of compilers and toolchains used to build and stage the release artifacts. Rust is exact on every path (root `rust-toolchain.toml`, `channel = 1.98.1`); Node is build-enforced (`src/tslib/.npmrc engine-strict`); Go is exact on the release Linux path (`GOTOOLCHAIN` + `actions/setup-go`) with a documented floor (`src/golib/go.mod` `toolchain go1.27.1`) on the bottle/ambient path; JDK 21 and .NET 10.0.x are pinned in CI. Pinning the set makes a release reproducible.",
+  "body": "The pinned set of compilers and toolchains used to build and stage the release artifacts. Rust is exact wherever rustup resolves the root `rust-toolchain.toml` (`channel = 1.98.1`) — in-repo dev and CI's `dtolnay/rust-toolchain@1.98.1` — while the Homebrew bottle path's unversioned `rust` (not rustup) ignores it. Node is enforced fail-closed on the 26.x line by `src/tslib/.npmrc engine-strict` plus `src/tslib/package.json`'s `engines.node` range `>=26.8.1 <27`, and exact (`26.9.0`) in CI. Go is exact on the release Linux path (`GOTOOLCHAIN` + `actions/setup-go`) with a documented floor (`src/golib/go.mod` `toolchain go1.27.1`) on the bottle/ambient path. JDK 21 and .NET 10.0.x are pinned in CI. Pinning the set makes a release reproducible.",
   "properties": {
     "kind": "entity"
   },
