@@ -26,6 +26,11 @@
       "kind": "contains",
       "target": "domain.entity.build-dependency",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.build-toolchain",
+      "properties": {}
     }
   ],
   "in": []
