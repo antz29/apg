@@ -3,7 +3,9 @@
   "type": "requirement",
   "name": "scan-time-toolchain-preflight",
   "body": "When `apg scan` selects a language whose frontend artifact is installed but whose required scan-time toolchain is absent from PATH, it reports a clear, actionable error naming the missing toolchain and the language, before or instead of a cryptic failure. Today a missing `node`/`java` reaches `Command::spawn().expect(\"Failed to run frontend\")` (a panic), and a missing `go`/`cargo` surfaces only as a frontend warning or an empty graph. Acceptance: each of `go`, `cargo`/`rustc`, `java`, and `node` yields a named error with an install hint; the four frontends with no scan-time toolchain are unaffected. This is distinct from detecting a language whose frontend artifact is not installed at all — that silent-skip behaviour is out of scope for this change-set.",
-  "properties": {},
+  "properties": {
+    "feature": "frontend-dependencies"
+  },
   "out": [
     {
       "kind": "drives",
