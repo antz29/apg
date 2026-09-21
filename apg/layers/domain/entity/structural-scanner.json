@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.structural-scanner-in-base-package",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.no-new-scan-time-deps",
+      "properties": {}
     }
   ]
 }
