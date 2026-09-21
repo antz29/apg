@@ -28,6 +28,11 @@
       "kind": "realised-by",
       "source": "domain.entity.frontend-artifact",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.engine-pin",
+      "properties": {}
     }
   ]
 }
