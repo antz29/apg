@@ -6,13 +6,7 @@
   "properties": {
     "kind": "app"
   },
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.build_script_build.build_frontends",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
