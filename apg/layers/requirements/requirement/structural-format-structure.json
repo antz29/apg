@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "structural-format-structure",
+  "body": "Each text format the structural scanner claims emits its structure as graph nodes under the format's `lang_switch` id, not just a `File` node: Markdown → heading `Struct`s (unchanged); shell → functions; YAML → keys/jobs/steps; JSON → keys; TOML → tables and keys; XML → elements; Dockerfile → stages and `FROM`/`RUN`/`COPY`/`ENV` instructions; Makefile → targets, variables and includes; INI → sections and keys. The residual `misc` format emits `File` only. Structure depth is deliberately minimal but useful — top-level keys/jobs/steps, tables/keys, elements, stages/instructions — not a full parse tree. Acceptance: a scan of a repository containing one file of each format emits the named structure for each.",
+  "properties": {
+    "feature": "structural-graphing"
+  },
+  "out": [],
+  "in": []
+}
