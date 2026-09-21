@@ -11,11 +11,6 @@
       "kind": "contains",
       "target": "solution.component.python-module-identity",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.pyfrontend.main",
-      "properties": {}
     }
   ],
   "in": [
