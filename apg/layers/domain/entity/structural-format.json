@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.structural-format-emitters",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.structural-claiming",
+      "properties": {}
     }
   ],
   "in": [
