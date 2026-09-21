@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "md-frontend",
+  "body": "The Markdown frontend artifact (`src/mdlib`, `mdfrontend`), a standalone non-workspace Rust crate. Build-time deps: a current stable Rust toolchain plus crates.io. Scan-time deps: none — it never shells out. Engine pin: serde/serde_json/unicode-normalization 0.1; the language has no version ceiling to impose.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
