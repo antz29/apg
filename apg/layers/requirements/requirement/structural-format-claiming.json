@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "structural-format-claiming",
+  "body": "The structural scanner claims a file only when no code frontend claims it: it skips the code extensions (`.rs`, `.go`, `.java`, `.cpp`, `.cc`, `.h`, `.ts`, `.tsx`, `.js`, `.jsx`, `.cs`, `.py`, `.pyi`) and honours the existing exclusions (`.git`, `target`, `node_modules`, `.gitignore`, `--exclude-path`). A file claimed by an explicit format stream is never re-emitted by `misc`; `misc` is the residual — it claims whatever no code frontend and no format stream claims, so adding formats only shrinks it. Lock files are covered by their format streams (`Cargo.lock` → `toml`, `package-lock.json` → `json`), leaving `misc` as `LICENSE`, dotfiles, fixtures and binaries. Acceptance: a file whose extension matches a code frontend never appears under a structural stream, and every remaining tracked file appears exactly once.",
+  "properties": {
+    "feature": "structural-graphing"
+  },
+  "out": [],
+  "in": []
+}
