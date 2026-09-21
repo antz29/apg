@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "build-pipeline",
-  "body": "The build + release pipeline that compiles and stages the eight frontends: `build.rs` (build script driven by `APG_BUILD_FRONTENDS`, used by dev and CI `cargo build`), the CI release workflow that builds the per-language packages and bottles, and the split Homebrew formulae plus `install.sh` that each build one frontend directly. It owns the toolchain pins. The CI workflow and the formulae are config artifacts the code graph does not model, so the plan carries their pin edits; `build.rs` is the graph-visible half of the pipeline.",
+  "body": "The build + release pipeline that compiles and stages the eight frontends: `build.rs` (build script driven by `APG_BUILD_FRONTENDS`, used by dev and CI `cargo build`), the CI release workflow — the `linux` job (builds and packages the per-language tarballs) and the `bottle` job (builds the bottles through the split formulae) — and the split Homebrew formulae (`apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py`/`apg-md`), each of which builds one frontend directly. It owns the toolchain pins. `install.sh` is a download-only installer of prebuilt release tarballs and is not part of this pipeline. The CI workflow and the formulae are config artifacts the code graph does not model, so the plan carries their pin edits; `build.rs` is the graph-visible half of the pipeline.",
   "properties": {
     "kind": "app"
   },
