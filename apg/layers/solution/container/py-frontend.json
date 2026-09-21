@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "py-frontend",
-  "body": "The Python frontend artifact (`src/pylib`, `rust.pyfrontend`). It computes dotted module identities per source file and must account for PEP-420 namespace packages, not only `__init__.py`-bearing ancestors.",
+  "body": "The Python frontend artifact (`src/pylib`, `rust.pyfrontend`). It computes dotted module identities per source file and must account for PEP-420 namespace packages, not only `__init__.py`-bearing ancestors. Build-time deps: a stable Rust toolchain plus network for the git-pinned Ruff/ty engine crates (`ruff_*`/`ty_*` tag `0.16.6`, `salsa 0.27`). Scan-time deps: none — it resolves the project from filesystem markers (`pyproject.toml`/`uv.lock`/`pyvenv.cfg`) and never probes for or shells out to a Python runtime. Engine pin: Ruff/ty tag `0.16.6`; the language-version ceiling is set by that pinned engine.",
   "properties": {
     "kind": "app"
   },
