@@ -4,7 +4,13 @@
   "name": "frontend-dependency-contract",
   "body": "Each of the eight apg language frontends (Go, Java, C++, Rust, TypeScript/JavaScript, C#, Python, Markdown) must have its dependency contract stated in the durable spec: (a) its build-time dependencies, (b) its scan-time dependencies (what must exist on PATH when a user runs `apg scan`), and (c) the pinned engine whose version sets the language-version ceiling. The declaration is attached to that frontend's solution container and every code unit it names resolves in the branch graph, so \"to scan X you need Y and Z\" is answerable and traceable from the spec. Today only four of the eight frontends have containers (go/java/ts/py); rust/cpp/csharp/md have none, and no frontend container names its build-time deps, scan-time deps, or an engine pin.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.frontend-build-deps",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
