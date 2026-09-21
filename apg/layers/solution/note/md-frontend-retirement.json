@@ -4,6 +4,12 @@
   "name": "md-frontend-retirement",
   "body": "Reconciliation record for retiring `solution.container.md-frontend` [autonomous]. Source: SPEC.md §5, §6. `solution.container.md-frontend` is removed and `solution.container.structural-scanner` takes its place. The system containment edge moves: `contains solution.system.apg → solution.container.structural-scanner` replaces `… → solution.container.md-frontend`. The two `realised-by` edges that pointed at md-frontend — from `domain.entity.engine-pin` and `domain.entity.frontend-artifact` — are intentionally NOT re-pointed to the structural scanner: the brief says \"Markdown is no longer a separate frontend artifact\", and the structural scanner has no language-version ceiling, so it is not an `engine-pin` subject and is deliberately not a per-language `frontend-artifact`. Those two entities keep their seven remaining container targets and their bodies are amended to say so; the bundled scanner is modelled instead by `domain.entity.structural-scanner`, which realises `solution.container.structural-scanner`. The Markdown frontend's code is absorbed, not deleted — `rust.mdfrontend` and its emitters are the real anchors under `solution.component.structural-scanner-crate` / `solution.component.structural-format-emitters`.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.container.structural-scanner",
+      "properties": {}
+    }
+  ],
   "in": []
 }

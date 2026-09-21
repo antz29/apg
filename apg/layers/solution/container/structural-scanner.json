@@ -53,6 +53,11 @@
       "kind": "details",
       "source": "solution.note.structural-scanner-oroboros",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.md-frontend-retirement",
+      "properties": {}
     }
   ]
 }
