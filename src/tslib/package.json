@@ -7,7 +7,7 @@
     "test": "node --test"
   },
   "engines": {
-    "node": "26.9.0"
+    "node": ">=26.8.1 <27"
   },
   "dependencies": {
     "typescript": "5.9.3"

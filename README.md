@@ -449,14 +449,17 @@ The toolchains that compile or stage a frontend are pinned in repo-visible
 files consumed by every build path that compiles a frontend, exact where the
 mechanism can enforce it: Rust `1.98.1` (the repo-root `rust-toolchain.toml`,
 whose `channel` rustup's parent-walk applies to the main crate and all three
-cargo frontend crates — `src/rustlib`, `src/pylib`, `src/mdlib`), Node `26.9.0`
-(`src/tslib/package.json`'s `engines.node`, enforced fail-closed by
-`engine-strict=true` in `src/tslib/.npmrc`), and Go on the release Linux CI path
-(`GOTOOLCHAIN` + `actions/setup-go`, `1.27.1`). Where a path cannot enforce an
-exact version the requirement is a documented floor, not a floating latest:
+cargo frontend crates — `src/rustlib`, `src/pylib`, `src/mdlib`), Node on the
+`26.x` line (`src/tslib/package.json`'s `engines.node` range `>=26.8.1 <27`,
+enforced fail-closed by `engine-strict=true` in `src/tslib/.npmrc`; CI pins the
+exact `26.9.0`), and Go on the release Linux CI path (`GOTOOLCHAIN` +
+`actions/setup-go`, `1.27.1`). Where a path cannot enforce an exact version the
+requirement is a documented floor or line, not a floating latest:
 `src/golib/go.mod`'s `toolchain go1.27.1` directive bounds the bottle/ambient
 path (whose formula `depends_on "go"` is unversioned), so an ambient newer Go is
-used as-is.
+used as-is; the Homebrew `bottle` path's unversioned `rust`/`node` follow the
+same model — its `rust` is not rustup and ignores the root `rust-toolchain.toml`,
+and its `node` floats within the `26.x` line that `engine-strict` admits.
 
 ```sh
 git clone git@github.com:antz29/apg.git
