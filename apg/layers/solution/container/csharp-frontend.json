@@ -6,7 +6,13 @@
   "properties": {
     "kind": "app"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "csharp.Apg.CsharpFrontend.Scanner.Run",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
