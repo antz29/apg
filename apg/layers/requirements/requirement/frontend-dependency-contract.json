@@ -39,6 +39,11 @@
       "kind": "drives",
       "target": "domain.group.frontend-dependencies",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.frontend-artifact",
+      "properties": {}
     }
   ],
   "in": [
