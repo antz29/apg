@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "frontend-artifact",
+  "body": "An installed per-language scanner frontend, spawned by the scan driver: `gofrontend`, `rustfrontend`, `cppfrontend`, `csharpfrontend`, the `java-classes` dir, `tsfrontend/scanner.mjs`, `pyfrontend`, `mdfrontend`. It is the unit that carries build-time deps, scan-time deps, and an engine pin.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
