@@ -6,13 +6,7 @@
   "properties": {
     "kind": "app"
   },
-  "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.mdfrontend.main",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
