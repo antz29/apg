@@ -6,7 +6,13 @@
   "properties": {
     "kind": "app"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "cpp.cpplib.main",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
