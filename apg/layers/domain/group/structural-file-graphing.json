@@ -7,6 +7,12 @@
     "attribute": "core",
     "root": "structural-format"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.structural-format",
+      "properties": {}
+    }
+  ],
   "in": []
 }
