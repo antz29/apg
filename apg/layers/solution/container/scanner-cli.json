@@ -53,6 +53,11 @@
       "kind": "realised-by",
       "source": "domain.entity.scan-time-tool",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.build-dependency",
+      "properties": {}
     }
   ]
 }

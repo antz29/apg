@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.container.build-pipeline",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.scanner-cli",
+      "properties": {}
     }
   ],
   "in": [
