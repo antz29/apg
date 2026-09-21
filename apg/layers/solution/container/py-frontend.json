@@ -21,6 +21,11 @@
       "kind": "implemented-by",
       "target": "rust.pyfrontend.classify_project_markers",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.pyfrontend.main",
+      "properties": {}
     }
   ],
   "in": [
