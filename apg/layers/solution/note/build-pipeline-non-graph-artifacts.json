@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "build-pipeline-non-graph-artifacts",
-  "body": "The build-toolchain pins live in artifacts the code graph does not model — `.github/workflows/release.yml` (YAML) and the split `Formula/apg-*.rb` (Ruby) — so no implemented-by edge can target them. This note is the durable record that the plan, not the code graph, owns their edits; `rust.build_script_build` (build.rs) is the graph-visible half of the pipeline.",
+  "body": "The build-toolchain pins live in artifacts the code graph does not model at 0.16.1 — `.github/workflows/release.yml` (YAML) and the split `Formula/apg-*.rb` (Ruby) — so no implemented-by edge can target them, and the plan, not the code graph, owns their edits; `rust.build_script_build` (build.rs) is the graph-visible half of the pipeline. This premise narrows with 0.17.0: the bundled structural scanner graphs `release.yml` (yaml) and `install.sh` (sh), and `Cargo.toml` (toml), so from the next binary onward those become targetable; only Ruby (`Formula/*.rb`, pending `apg-ruby`) remains genuinely ungraphable. For the 0.17.0 change-set itself the premise still holds — see `solution.note.structural-scanner-oroboros` — and the plan carries the formula/installer edits as non-graph maintainer tasks.",
   "properties": {},
   "out": [
     {
