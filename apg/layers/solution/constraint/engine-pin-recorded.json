@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "engine-pin-recorded",
-  "body": "Every frontend container states its engine pin with an exact version and the language-version ceiling that pin imposes. Where the ceiling is the user's installed toolchain rather than the pin alone (Go, Java, Rust), the container says so jointly. A frontend container that records no engine pin is a violation. The four pre-existing containers (go/java/ts/py) have been brought up to this contract; C++'s vendored tree-sitter/tree-sitter-cpp grammar version is still unrecorded and must be recorded.",
+  "body": "Every frontend container states its engine pin with an exact version — or, where upstream ships no version for a vendored engine/grammar, an explicit content/ABI identity — and the language-version ceiling that pin imposes. Where the ceiling is the user's installed toolchain rather than the pin alone (Go, Java, Rust), the container says so jointly. A frontend container that records neither an engine version nor a content/ABI identity for an unversioned vendored engine is a violation. All eight frontend containers satisfy this: Go/Java/Rust state the joint pin + installed-toolchain ceiling; TypeScript/C#/Python state exact engine versions; Markdown has no language ceiling to impose; and C++ records the tree-sitter language ABI v15 plus its vendored tree-sitter-cpp grammar content.",
   "properties": {
     "attaches-to": "solution.system.apg"
   },
