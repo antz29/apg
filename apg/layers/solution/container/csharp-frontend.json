@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "container",
+  "name": "csharp-frontend",
+  "body": "The C# frontend artifact (`src/csharplib/Program.cs`, `csharpfrontend`), published as a self-contained single-file binary. Build-time deps: a .NET SDK plus NuGet. Scan-time deps: none — the published binary carries its runtime and resolves references from its own trusted platform assemblies (`GetDefaultMetadataReferences`). Engine pin: Roslyn `Microsoft.CodeAnalysis.CSharp(.Workspaces) 4.12.0`, parsed at `LanguageVersion.Latest`, so the ceiling is the pinned Roslyn's maximum.",
+  "properties": {
+    "kind": "app"
+  },
+  "out": [],
+  "in": []
+}
