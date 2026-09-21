@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.git.path_is_ignored",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.classify.classify_code_type",
+      "properties": {}
     }
   ],
   "in": [
