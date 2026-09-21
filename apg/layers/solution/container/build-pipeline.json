@@ -28,6 +28,11 @@
       "kind": "details",
       "source": "solution.note.build-pipeline-non-graph-artifacts",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.build-dependency",
+      "properties": {}
     }
   ]
 }
