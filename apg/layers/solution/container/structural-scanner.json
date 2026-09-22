@@ -26,11 +26,6 @@
       "kind": "contains",
       "target": "solution.component.structural-stream-dispatch",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.mdfrontend",
-      "properties": {}
     }
   ],
   "in": [
