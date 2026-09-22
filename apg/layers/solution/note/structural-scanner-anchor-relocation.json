@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "structural-scanner-anchor-relocation",
+  "body": "Reconciliation of the structural-scanner `implemented-by` anchors (coordinator correction B) [with coordinator]. Source statement: `solution.container.structural-scanner` is `implemented-by` `rust.mdfrontend`, and `solution.component.structural-scanner-crate` is `implemented-by` `rust.mdfrontend` / `rust.mdfrontend.main` / `rust.mdfrontend.run`. Inconsistency: those FQNs resolve in the branch graph now — they are the inbound `src/mdlib` Markdown frontend the change-set absorbs into `src/structlib` (binary `structfrontend`) — but after implementation `src/mdlib` is gone, so the verify gate would see the three edges as drift. Resolution (deliberately NO edge authored to a non-existent FQN, per the parent-cannot-depend-on-the-child rule): the plan MUST re-point those three `implemented-by` edges to the new `src/structlib`/`structfrontend` FQNs once the code exists and resolves in a branch scan — the `md` stream id and the `rust.mdfrontend.*` units move under the new crate/binary. Until then the edges intentionally target the current, resolving `rust.mdfrontend.*` anchors; the plan phase that creates `src/structlib` carries the re-point task. See `solution.note.structural-scanner-oroboros` for the companion rule that no next-binary File surface is targeted. [with coordinator]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
