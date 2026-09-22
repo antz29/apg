@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "rust.structfrontend",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.structfrontend.main",
+      "properties": {}
     }
   ],
   "in": [
