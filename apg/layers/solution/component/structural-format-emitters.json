@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.structfrontend.build_doc",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.structfrontend.line_count",
+      "properties": {}
     }
   ],
   "in": [
