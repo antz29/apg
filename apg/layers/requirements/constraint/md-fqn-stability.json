@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "md-fqn-stability",
-  "body": "The set of `md.*` module FQNs and `md.<file>.<heading-path>` heading Struct FQNs produced by a post-change scan must be identical to the pre-change set; no Markdown FQN may be renamed, moved under a new language root, or dropped.",
+  "body": "The set of NON-ROOT `md.*` module FQNs and `md.<file>.<heading-path>` heading Struct FQNs produced by a post-change scan must be identical to the pre-change set; no non-root Markdown FQN may be renamed, moved under a new language root, or dropped. The repo-root module is the one deliberate exception: the pre-change root module name `md.apg` is the checkout-directory basename, so it violates `requirements.constraint.no-checkout-named-module` and must render repo-relative as `md.` (SPEC.md §4.3's `<repo-relative-dir>` rule). The non-root dir modules (`md.opencode-suite/agents`, `md.plans`) and all heading Structs (`md.AGENTS.md.*`, `md.README.md.*`, `md.opencode-suite/agents/*.md.*`, which are file-rooted and do not embed the module identity) are unchanged.",
   "properties": {
     "attaches-to": "requirements.requirement.md-lang-id-preserved"
   },
