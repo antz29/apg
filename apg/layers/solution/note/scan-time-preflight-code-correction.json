@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "scan-time-preflight-code-correction",
+  "body": "Reconciliation of `solution.component.scan-time-preflight` (coordinator correction A) [with coordinator]. Source statement: the component body called `rust.apg.scan_time_preflight` \"(planned)\". Inconsistency: the function is real in the branch graph (`rust.apg.scan_time_preflight`, `src/main.rs:1024-1037`; verified via `apg_find_symbol`), and the component already carries `implemented-by` edges to it and to `rust.apg.spawn_frontend`. Resolution: removed the \"(planned)\" qualifier from the body and noted the real anchors; no edge was added, re-pointed or retired, and no planned Implementation node is involved. Extends the family reconciliation in `solution.note.frontend-dependency-contract-reconciliation`.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
