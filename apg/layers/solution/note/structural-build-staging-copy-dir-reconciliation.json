@@ -4,6 +4,12 @@
   "name": "structural-build-staging-copy-dir-reconciliation",
   "body": "Reconciliation of the `structural-build-staging` `implemented-by` over-reach (source: feedback-11) [with coordinator]. Source statement: `solution.component.structural-build-staging` was `implemented-by` `rust.build_script_build.copy_dir`, alongside `rust.build_script_build.main` and `rust.build_script_build.build_frontends`. Inconsistency: `copy_dir` (build.rs:488-503) is a recursive directory copier used only to stage the Java class directory (`build.rs:425`) and the TypeScript `node_modules` (`build.rs:337`); the bundled structural scanner is a single binary (`structfrontend`), and every single-binary frontend stages with `std::fs::copy` in `build.rs::main` — `cppfrontend` (:172), `gofrontend` (:210), `rustfrontend` (:245), `mdfrontend` (:270-274), `pyfrontend` (:300-304), the TS `scanner.mjs` (:380) and `csharpfrontend` (:480). The `copy_dir` anchor was therefore spec over-reach and drove a spurious plan task. Resolution: dropped the `implemented-by rust.build_script_build.copy_dir` edge from the component (keeping `rust.build_script_build.main` and `rust.build_script_build.build_frontends`, both of which resolve in the branch graph) and removed `copy_dir` from the component body. The plan side must drop its corresponding coverage for `rust.build_script_build.copy_dir` under this component.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.component.structural-build-staging",
+      "properties": {}
+    }
+  ],
   "in": []
 }
