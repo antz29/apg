@@ -17,11 +17,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.mdfrontend.line_count",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.structfrontend.build_doc",
       "properties": {}
     }
