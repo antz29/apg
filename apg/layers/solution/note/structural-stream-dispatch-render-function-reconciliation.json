@@ -4,6 +4,12 @@
   "name": "structural-stream-dispatch-render-function-reconciliation",
   "body": "Reconciliation of the `structural-stream-dispatch` `implemented-by` over-reach (source: plan-review feedback-9, resolved on the plan side) [with coordinator]. Source statement: `solution.component.structural-stream-dispatch` was `implemented-by` `rust.apg.ingest.render_function_fqns`. Inconsistency: `render_function_fqns` (`src/ingest.rs:293-384`) takes `&[FuncDecl]` and is the language-generic Function-overload FQN renderer (unique → `parent.name`, overloaded → `parent.name(T1,T2,...)`, Go `init#<file-basename>`, the py same-scope duplicate rule); it renders function declarations only. The structural streams emit their declarations as `Struct` records — `solution.component.structural-scanner-crate` states the scanner streams `File`/`Struct`/`contains` records, `solution.component.structural-format-emitters` states each emitter turns a parsed file into the format's `Struct`/`contains` records (shell functions included), and `requirements.requirement.structural-format-structure` names them as graph nodes under the format's `lang_switch` id — so `render_function_fqns` is untouched by this change-set. Confirmed against the branch graph by the absorbed Markdown precedent (the mdlib frontend is the model for the structural emitters): `MATCH (f:Function) WHERE f.fqn STARTS WITH 'md.'` returns zero rows, while the Markdown heading nodes are all `Struct`s (`md.AGENTS.md.*`, `md.README.md.*`), and `src/mdlib/src/main.rs` emits `Rec::Struct` per heading. The edge was therefore spec over-reach and forced a spurious plan coverage task. Resolution: dropped the `implemented-by rust.apg.ingest.render_function_fqns` edge from the component and removed `render_function_fqns` from the component body. The component's other `implemented-by` targets (`rust.apg.available_languages`, `rust.apg.frontend_cmd`, `rust.apg.spawn_frontend`, `rust.apg.ingest.ingest_records`, `rust.apg.ingest.root_module_fqn`, `rust.apg.classify.builtin_code_type`) all resolve in the branch graph and are unchanged.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.component.structural-stream-dispatch",
+      "properties": {}
+    }
+  ],
   "in": []
 }

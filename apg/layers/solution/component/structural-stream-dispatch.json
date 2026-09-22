@@ -46,6 +46,11 @@
       "kind": "realised-by",
       "source": "domain.entity.structural-format",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.structural-stream-dispatch-render-function-reconciliation",
+      "properties": {}
     }
   ]
 }
