@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "graph-first-baseline-correction",
+  "body": "Reconciliation of `requirements.requirement.graph-first-navigation` (spec-review feedback-2 on the requirement) [with coordinator]. Source statement: the requirement's \"Observed today (at 0.16.1)\" paragraph claimed the navigator prompt stated neither a discovery ordering nor an artifact-class boundary, and cited \"rule 2 scoped by rule 1\" and \"rule 7\". Inconsistency: the branch `opencode-suite/agents/codebase-navigator.md` already has rule 1 \"Graph first, then file read\" covering ANY code/structure question including discovery and enumeration, and already names both the \"In the graph:\" and \"Not in the graph:\" classes; `AGENTS.md` already carries the qualifier; `opencode-suite/agents/agent-builder.md` rule 5 already propagates it; and the cited rule numbers 2/rule 7 do not exist. The paragraph also contradicted the sibling note `requirements.note.graph-first-artifact-class-shrink`. Resolution: reworded the baseline to the actual branch state and restated the acceptance criteria as an AMENDMENT — the genuine 0.17.0 delta is only to SHRINK the not-in-graph list in the navigator prompt and `AGENTS.md`, with the already-met ordering/dual-class/agent-builder/test criteria kept as no-regression requirements. [with coordinator]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
