@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "structural-build-staging",
-  "body": "The build-pipeline half that compiles and stages the bundled structural scanner: `build.rs` builds `structfrontend` and copies it to `target/<profile>/frontends` alongside the seven language frontends (`rust.build_script_build.build_frontends`, `rust.build_script_build.main`, `rust.build_script_build.copy_dir`). The formula/release edits that ship it in the base package (`Formula/scanner.rb`, `install.sh`, `.github/workflows/release.yml`) are non-graph maintainer edits — see `solution.note.structural-scanner-oroboros`.",
+  "body": "The build-pipeline half that compiles and stages the bundled structural scanner: `build.rs` builds `structfrontend` and copies it to `target/<profile>/frontends` alongside the seven language frontends (`rust.build_script_build.build_frontends`, `rust.build_script_build.main`). The formula/release edits that ship it in the base package (`Formula/scanner.rb`, `install.sh`, `.github/workflows/release.yml`) are non-graph maintainer edits — see `solution.note.structural-scanner-oroboros`. See `solution.note.structural-build-staging-copy-dir-reconciliation` for why `rust.build_script_build.copy_dir` is deliberately not an implementing unit.",
   "properties": {},
   "out": [
     {
