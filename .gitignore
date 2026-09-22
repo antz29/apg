@@ -1,6 +1,7 @@
 /target
 /src/rustlib/target
 /src/mdlib/target
+/src/structlib/target
 /src/pylib/target
 /src/tslib/node_modules
 /testdata/rust/fixture/target

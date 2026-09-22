@@ -85,6 +85,29 @@ struct FuncDecl {
     language: String,
 }
 
+/// True when the `apg/config.json` structural scope EXCLUDES the repo-relative
+/// `identity`: a non-empty `include` list requires a match, and any `exclude`
+/// match wins — the same rule the structural scanner's `in_scope` applies to
+/// its walk. An absent scope (or no config) is the default ON: nothing is
+/// excluded.
+fn structural_scope_excludes(identity: &str, config: Option<&ApgConfig>) -> bool {
+    let Some(scope) = config.and_then(|c| c.structural.as_ref()) else {
+        return false;
+    };
+    if !scope.include.is_empty()
+        && !scope
+            .include
+            .iter()
+            .any(|g| crate::classify::matches_glob(g, identity))
+    {
+        return true;
+    }
+    scope
+        .exclude
+        .iter()
+        .any(|g| crate::classify::matches_glob(g, identity))
+}
+
 /// The scan-hygiene predicate: a record is out of scope when
 ///
 /// - its canonical FQN carries a user blacklist prefix, or
@@ -95,10 +118,17 @@ struct FuncDecl {
 ///   identity already excludes ignored content, so keeping it would make the
 ///   graph a function of checkout state rather than of authored content.
 ///
+/// A record on a STRUCTURAL stream (see
+/// [`crate::classify::is_structural_language`]) is additionally dropped when the
+/// config scope excludes it, so the scanner's claim walk and this blacklist
+/// agree exactly on `target`/`.git`/gitignored/config-excluded paths and a
+/// structural record is never silently kept or lost. Code streams are
+/// unaffected.
+///
 /// `path` is `None` for records that carry no source location (modules) and
 /// for edge endpoints, whose FQN prefix is still honoured. An edge into a
 /// dropped record dangles and is pruned by the final cleanup.
-fn is_blacklisted(fqn: &str, path: Option<&str>, opts: &IngestOptions) -> bool {
+fn is_blacklisted(fqn: &str, path: Option<&str>, language: &str, opts: &IngestOptions) -> bool {
     if opts.blacklist.iter().any(|p| fqn.starts_with(p.as_str())) {
         return true;
     }
@@ -106,6 +136,11 @@ fn is_blacklisted(fqn: &str, path: Option<&str>, opts: &IngestOptions) -> bool {
         return false;
     };
     if crate::classify::is_build_output_path(path) {
+        return true;
+    }
+    if crate::classify::is_structural_language(language)
+        && structural_scope_excludes(path, opts.config)
+    {
         return true;
     }
     opts.base
@@ -730,7 +765,7 @@ fn ingest_records(
                     // (a Markdown identity is an absolute directory path) and
                     // roots it under the stream's `lang_switch` id.
                     let rooted = root_module_fqn(&lang, &fqn, base);
-                    if is_blacklisted(&rooted, None, opts) {
+                    if is_blacklisted(&rooted, None, &lang, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -760,7 +795,7 @@ fn ingest_records(
                     claim(&mut seen, &id, &fqn, NodeKind::Struct);
                     id_to_fqn.insert(id.clone(), fqn.clone());
                     let identity = repo_relative_identity(base, &path);
-                    if is_blacklisted(&fqn, Some(&identity), opts) {
+                    if is_blacklisted(&fqn, Some(&identity), &lang, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -819,7 +854,7 @@ fn ingest_records(
                     // canonical identity is its repo-relative path.
                     let parent = rooted_scope(&lang, &parent, base);
                     let identity = repo_relative_identity(base, &path);
-                    if is_blacklisted(&parent, Some(&identity), opts) {
+                    if is_blacklisted(&parent, Some(&identity), &lang, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1204,7 +1239,7 @@ fn ingest_records(
         let Some(fqn) = id_to_fqn.get(&f.id).cloned() else {
             continue;
         };
-        if is_blacklisted(&fqn, Some(&f.path), opts) {
+        if is_blacklisted(&fqn, Some(&f.path), &f.language, opts) {
             skipped += 1;
             continue;
         }
@@ -1339,7 +1374,9 @@ fn ingest_records(
                     }
                     let a = resolve(&from);
                     let b = resolve(&to);
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1348,7 +1385,9 @@ fn ingest_records(
                 Record::Calls { from, to } => {
                     let a = resolve(&from);
                     let b = resolve(&to);
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1357,7 +1396,9 @@ fn ingest_records(
                 Record::Uses { from, to } => {
                     let a = resolve(&from);
                     let b = resolve(&to);
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1369,7 +1410,7 @@ fn ingest_records(
                     target_type,
                 } => {
                     let a = resolve(&from);
-                    if is_blacklisted(&a, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1377,7 +1418,7 @@ fn ingest_records(
                 }
                 Record::UnresolvedUse { from, to } => {
                     let a = resolve(&from);
-                    if is_blacklisted(&a, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts) {
                         skipped += 1;
                         continue;
                     }
@@ -1388,7 +1429,9 @@ fn ingest_records(
                 // code, like any other edge.
                 Record::Details { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1396,7 +1439,9 @@ fn ingest_records(
                 }
                 Record::Reviews { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1404,7 +1449,9 @@ fn ingest_records(
                 }
                 Record::DependsOn { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1412,7 +1459,9 @@ fn ingest_records(
                 }
                 Record::Gates { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1420,7 +1469,9 @@ fn ingest_records(
                 }
                 Record::Satisfies { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1429,7 +1480,9 @@ fn ingest_records(
                 // Spine edges (GraphModel-SPEC.md; PHASE_01).
                 Record::Drives { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1437,7 +1490,9 @@ fn ingest_records(
                 }
                 Record::Represents { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1446,7 +1501,9 @@ fn ingest_records(
                 // New-model §3.3 spec edges (apg-projects).
                 Record::RealisedBy { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1454,7 +1511,9 @@ fn ingest_records(
                 }
                 Record::SpecImplementedBy { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1462,7 +1521,9 @@ fn ingest_records(
                 }
                 Record::Publishes { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -1470,7 +1531,9 @@ fn ingest_records(
                 }
                 Record::Subscribes { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, opts) || is_blacklisted(&b, None, opts) {
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
                         skipped += 1;
                         continue;
                     }
@@ -2112,6 +2175,41 @@ mod tests {
             let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
             claim(&mut seen, "n1", "rust.pkg.F", NodeKind::Function);
             claim(&mut seen, "n2", "rust.pkg.F", NodeKind::Function);
+        }
+
+        /// apg-0.17.0 phase-01 task-20: the claim guard accepts the structural
+        /// scanner's language-rooted identities — the bare per-format roots
+        /// (`md.`/`sh.`/…/`misc.`), rooted submodules, and file-rooted
+        /// declarations — without a false same-FQN collision. A re-claim by the
+        /// same declaration id (a module's FQN is its id) is idempotent; the
+        /// genuine same-kind collision still panics (pinned by
+        /// `same_kind_claim_still_panics_under_rooting`).
+        #[test]
+        fn structural_identities_claim_without_false_collision() {
+            let mut seen: HashMap<String, (String, NodeKind)> = HashMap::new();
+            // The bare per-format roots are distinct module FQNs.
+            for root in [
+                "md.",
+                "sh.",
+                "yaml.",
+                "json.",
+                "toml.",
+                "xml.",
+                "dockerfile.",
+                "makefile.",
+                "ini.",
+                "misc.",
+            ] {
+                claim(&mut seen, root, root, NodeKind::Module);
+            }
+            // A rooted submodule and file-rooted declarations coexist with
+            // their stream root.
+            claim(&mut seen, "md.docs", "md.docs", NodeKind::Module);
+            claim(&mut seen, "n1", "md.docs/guide.md", NodeKind::Struct);
+            claim(&mut seen, "n2", "md.AGENTS.md.title", NodeKind::Struct);
+            // A re-claim by the same declaration id is idempotent.
+            claim(&mut seen, "md.", "md.", NodeKind::Module);
+            assert_eq!(seen.len(), 13);
         }
 
         /// The edge spool round-trips through an IN-MEMORY `Vec<u8>`/`Cursor`, not a

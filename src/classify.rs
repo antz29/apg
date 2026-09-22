@@ -11,6 +11,25 @@ pub struct CodeTypeRule {
     pub names: Vec<String>,
 }
 
+/// The `apg/config.json` **structural scope** section: the include/exclude
+/// globs deciding which files the bundled structural scanner
+/// (`structfrontend`) claims, plus the structural `code_type` it assigns them.
+/// It is orthogonal to the existing [`CodeTypeRule`] `types` list — scope
+/// decides *which files* are claimed, `types` decides a code record's
+/// classification — and mirrors the shape the scanner itself loads
+/// (`structfrontend`'s `StructuralScope`: `include`/`exclude`/`code_type`). An
+/// absent section is the default ON: an empty include/exclude claims
+/// everything the extension taxonomy routes.
+#[derive(serde::Deserialize, Default)]
+pub struct StructuralScope {
+    #[serde(default)]
+    pub include: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    #[serde(default)]
+    pub code_type: Option<String>,
+}
+
 /// Project-level classification config (apg.json), replacing the built-in
 /// defaults when present.
 #[derive(serde::Deserialize, Default)]
@@ -19,6 +38,10 @@ pub struct ApgConfig {
     pub default: String,
     #[serde(default)]
     pub types: Vec<CodeTypeRule>,
+    /// The structural-scope section (see [`StructuralScope`]); `None` means the
+    /// scanner's defaults (claim everything, `config`).
+    #[serde(default)]
+    pub structural: Option<StructuralScope>,
 }
 
 fn default_code_type() -> String {
@@ -45,9 +68,26 @@ impl ApgConfig {
     }
 }
 
+/// The bundled structural scanner's stream ids (`structfrontend`'s injected
+/// `lang_switch` ids): Markdown plus the per-format text/config/data streams and
+/// the residual `misc`. A record on one of these streams takes its `code_type`
+/// from the config's [`StructuralScope`] rather than the code `types`/`default`
+/// rules; `md` keeps the built-in `docs` classification.
+pub fn is_structural_language(language: &str) -> bool {
+    matches!(
+        language,
+        "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini" | "misc"
+    )
+}
+
 /// Classifies a Struct/Function node's code type. When a config is present it
 /// fully replaces the built-in defaults: the first rule whose glob matches the
 /// path or whose name pattern matches the node name/FQN wins, else `default`.
+///
+/// A STRUCTURAL record is the one exception: instead of falling through to
+/// `default` it takes the config's structural `code_type` (default `config`),
+/// with `md` keeping its built-in `docs` classification. The `types` rules
+/// themselves are unchanged, so a code record's classification is unaffected.
 pub fn classify_code_type(
     path: &str,
     fqn: &str,
@@ -70,9 +110,27 @@ pub fn classify_code_type(
                 }
             }
         }
+        if is_structural_language(language) {
+            return structural_code_type(path, language, cfg);
+        }
         return cfg.default.clone();
     }
     builtin_code_type(path, language).to_string()
+}
+
+/// The structural `code_type` for a record on `language`: the config's
+/// `structural.code_type` when set, else `config` — except Markdown, which
+/// keeps the built-in `docs` classification (its generated/external segments
+/// included), matching the scanner-side decision that Markdown is documentation
+/// while the other structural formats are configuration.
+fn structural_code_type(path: &str, language: &str, cfg: &ApgConfig) -> String {
+    if language == "md" {
+        return builtin_code_type(path, "md").to_string();
+    }
+    cfg.structural
+        .as_ref()
+        .and_then(|scope| scope.code_type.clone())
+        .unwrap_or_else(|| "config".to_string())
 }
 
 /// True when a JavaScript file's FILENAME carries a genuine bundle marker:
@@ -352,6 +410,73 @@ mod tests {
             ] {
                 assert!(!is_build_output_path(p), "{p} must stay authored source");
             }
+        }
+
+        /// apg-0.17.0 phase-01 task-18: with a config present, a STRUCTURAL
+        /// record takes the config's structural `code_type` (default `config`)
+        /// instead of falling through to `default`; `md` keeps its built-in
+        /// `docs` classification; a configured `code_type` overrides the non-md
+        /// default; and a code record is unchanged.
+        #[test]
+        fn structural_streams_take_the_configured_code_type() {
+            let default_cfg = ApgConfig {
+                default: "src".to_string(),
+                types: Vec::new(),
+                structural: Some(StructuralScope::default()),
+            };
+            for lang in [
+                "sh",
+                "yaml",
+                "json",
+                "toml",
+                "xml",
+                "dockerfile",
+                "makefile",
+                "ini",
+                "misc",
+            ] {
+                assert_eq!(
+                    classify_code_type("a/file", "a/file", lang, Some(&default_cfg)),
+                    "config",
+                    "{lang} must default to `config`"
+                );
+            }
+            assert_eq!(
+                classify_code_type("AGENTS.md", "md.AGENTS.md", "md", Some(&default_cfg)),
+                "docs",
+                "Markdown keeps its built-in docs classification"
+            );
+
+            // A configured structural code_type overrides the non-md default,
+            // but Markdown still keeps `docs`.
+            let custom = ApgConfig {
+                default: "src".to_string(),
+                types: Vec::new(),
+                structural: Some(StructuralScope {
+                    include: Vec::new(),
+                    exclude: Vec::new(),
+                    code_type: Some("cfg".to_string()),
+                }),
+            };
+            assert_eq!(
+                classify_code_type("ci.yml", "yaml.ci.yml", "yaml", Some(&custom)),
+                "cfg"
+            );
+            assert_eq!(
+                classify_code_type("AGENTS.md", "md.AGENTS.md", "md", Some(&custom)),
+                "docs"
+            );
+
+            // A code stream is unchanged: it still falls through to `default`,
+            // and with no config the built-in classifier is consulted.
+            assert_eq!(
+                classify_code_type("src/a.rs", "rust.a", "rust", Some(&custom)),
+                "src"
+            );
+            assert_eq!(
+                classify_code_type("src/a.rs", "rust.a", "rust", None),
+                "src"
+            );
         }
     }
 }

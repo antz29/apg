@@ -1,10 +1,10 @@
 [package]
-name = "mdfrontend"
+name = "structfrontend"
 version = "0.0.0"
 edition = "2021"
 
 [[bin]]
-name = "mdfrontend"
+name = "structfrontend"
 path = "src/main.rs"
 
 [dependencies]

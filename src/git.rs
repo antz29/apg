@@ -153,6 +153,14 @@ pub fn checkout_clean(dir: &Path) -> bool {
 /// path, so an absolute input is made relative to the canonicalized workdir
 /// first (a path outside the checkout is not ignored); a relative input is
 /// taken as already workdir-relative.
+///
+/// A **tracked** path is never reported ignored: Git's ignore rules apply to
+/// untracked content only, and the scan's walk emits every tracked file, so
+/// treating a tracked file that happens to match an ignore glob as ignored
+/// would silently drop it from the graph (the walk's claim and the ingestor's
+/// blacklist must agree — `requirements.constraint.structural-file-graphing-scope`:
+/// every Git-tracked file is graphed). The checkout-identity use — an untracked
+/// worktree-location probe — is unaffected.
 pub fn path_is_ignored(main_root: &Path, path: &Path) -> bool {
     let Ok(repo) = discover_repo(main_root) else {
         return false;
@@ -169,6 +177,17 @@ pub fn path_is_ignored(main_root: &Path, path: &Path) -> bool {
         path.to_path_buf()
     };
     if rel.as_os_str().is_empty() {
+        return false;
+    }
+    // Index-blind rule lookup: decline a tracked path before consulting the
+    // rules. A tracked path that is staged as deleted is absent from the index
+    // and falls through to the rules, which is correct — it is being removed.
+    if repo
+        .index()
+        .ok()
+        .and_then(|index| index.get_path(&rel, 0).map(|_| ()))
+        .is_some()
+    {
         return false;
     }
     repo.status_should_ignore(&rel).unwrap_or(false)
@@ -1907,6 +1926,54 @@ mod tests {
                 checked >= 10,
                 "expected the flat src/*.rs set, checked {checked}"
             );
+        }
+
+        // ------------------------------------------------------------------
+        // Structural claim boundary: the gitignore predicate is the ingestor's
+        // share of the walk's claim boundary (apg-0.17.0 phase-01 task-21).
+        // ------------------------------------------------------------------
+
+        /// A TRACKED path is never reported ignored (Git's ignore rules apply to
+        /// untracked content only; the walk emits every tracked file, so a
+        /// tracked file matching an ignore glob must stay in the graph), while
+        /// an untracked ignored path still is — in both repo-relative and
+        /// absolute spellings. The checkout-identity use (an untracked worktree
+        /// probe) is unaffected.
+        #[test]
+        #[ignore = "e2e tier: real git I/O (scratch repo); run via cargo test-e2e"]
+        fn path_is_ignored_declines_tracked_and_reports_untracked() {
+            let repo = fixture_repo("gitignore-boundary");
+            // Commit the file FIRST, then ignore its name: it is tracked, so
+            // the ignore rule never covers it.
+            repo.write("secrets.env", "TRACKED=1\n");
+            repo.commit_all("track secrets.env");
+            repo.write(
+                ".gitignore",
+                "apg/.trans/\napg/.worktrees/\nsecrets.env\nbuild-out/\n",
+            );
+            repo.commit_all("ignore secrets.env and build-out");
+
+            assert!(
+                !path_is_ignored(&repo.root, Path::new("secrets.env")),
+                "a tracked path must never read as ignored"
+            );
+            assert!(
+                !path_is_ignored(&repo.root, &repo.root.join("secrets.env")),
+                "the absolute spelling of a tracked path must never read as ignored"
+            );
+            assert!(
+                !path_is_ignored(&repo.root, Path::new(".gitignore")),
+                "an ordinary tracked path must not read as ignored"
+            );
+
+            // An untracked path matching an ignore rule is ignored.
+            repo.write("build-out/leak.txt", "leak\n");
+            assert!(
+                path_is_ignored(&repo.root, Path::new("build-out/leak.txt")),
+                "an untracked ignored path must read as ignored"
+            );
+
+            testutil::remove(&repo);
         }
     }
 
