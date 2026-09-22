@@ -63,6 +63,11 @@
       "kind": "details",
       "source": "solution.note.md-frontend-retirement",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.structural-scanner-anchor-relocation",
+      "properties": {}
     }
   ]
 }
