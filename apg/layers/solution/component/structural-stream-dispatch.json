@@ -32,11 +32,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.ingest.render_function_fqns",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.classify.builtin_code_type",
       "properties": {}
     }
