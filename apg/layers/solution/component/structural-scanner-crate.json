@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.mdfrontend.run",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.structfrontend",
       "properties": {}
     },
