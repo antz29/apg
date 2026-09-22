@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "every-tracked-file-graphed-spine-narrowing",
+  "body": "Reconciliation of `requirements.requirement.every-tracked-file-graphed` (source: holistic-review feedback-20) [with coordinator]. Source statement: the new requirement drove BOTH `domain.entity.source-file` and `domain.group.structural-file-graphing`. Inconsistency: `domain.entity.source-file` is prior change-set work — it is `realised-by` `solution.component.identity-layer`, whose `implemented-by` set (`rust.apg.git`, `rust.apg.git.repo_rel`, `rust.apg.ingest`, `rust.apg.ingest.root_module_fqn`, `rust.apg.load`, `rust.apg.load.write_graph_jsonl`) is not modified by this change-set. Because a satisfied requirement's spine is coverage-checked (`rust.apg.plan_cmd.coverage_check`), the second drive made the verify gate demand tasks over untouched prior code and refuse with \"coverage incomplete\". Resolution: dropped the `drives requirements.requirement.every-tracked-file-graphed -> domain.entity.source-file` edge. The requirement's remaining drive to `domain.group.structural-file-graphing` (which is `realised-by` `solution.container.structural-scanner`) is the correct spine for this change-set. No other requirement's drive to `domain.entity.source-file` (repo-relative-file-identity, portable-graph-identity) was touched.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
