@@ -38,6 +38,11 @@
       "kind": "details",
       "source": "requirements.note.graph-first-artifact-class-shrink",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.graph-first-baseline-correction",
+      "properties": {}
     }
   ]
 }
