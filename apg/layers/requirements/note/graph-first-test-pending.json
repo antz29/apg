@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.graph-first-navigation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.tests.e2e.graph_first_rule_stated_in_navigator_prompt_and_guide",
+      "properties": {}
     }
   ],
   "in": []
