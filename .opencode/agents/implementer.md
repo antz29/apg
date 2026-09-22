@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks on the apg repo's shared/root surface — the Rust core crate (edition 2024, flat src/*.rs with inline #[cfg(test)] tests), build.rs, Cargo.{toml,lock}, install.sh, Formula/**, the docs, and the in-tree opencode-suite/** product source. Owns the root/shared-only surface; the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,mdlib,pylib}) are owned by their dedicated frontend agents. Runs the repo done-gate `scripts/gate.sh` (cargo fmt/check/clippy/build/test, then `bun test` in opencode-suite and `node --test` in src/tslib; `--e2e` appends the opt-in e2e tier, which carries the release-version guard), marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, attaches task notes (apg_plan_note), reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback — apg_review_action is the coordinator's tool), and commits at phase end (git add/commit; push and tag are human-approved via ask). Never edits .opencode/**, the frontend crates, or the generated/dependency trees.
+description: Implements plan tasks on the apg repo's shared/root surface — the Rust core crate (edition 2024, flat src/*.rs with inline #[cfg(test)] tests), build.rs, Cargo.{toml,lock}, install.sh, Formula/**, .github/**, the docs, and the in-tree opencode-suite/** product source. Owns the root/shared-only surface; the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,mdlib,pylib}) are owned by their dedicated frontend agents. Runs the repo done-gate `scripts/gate.sh` (cargo fmt/check/clippy/build/test, then `bun test` in opencode-suite and `node --test` in src/tslib; `--e2e` appends the opt-in e2e tier, which carries the release-version guard), marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, attaches task notes (apg_plan_note), reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback — apg_review_action is the coordinator's tool), and commits at phase end (git add/commit; push and tag are human-approved via ask). Never edits .opencode/**, the frontend crates, or the generated/dependency trees.
 mode: subagent
 hidden: true
 generated: true
@@ -31,6 +31,7 @@ permission:
     "Cargo.lock": allow
     "install.sh": allow
     "Formula/**": allow
+    ".github/**": allow
     "opencode-suite/**": allow
     "SPEC.md": allow
     "SPEC-*.md": allow
@@ -44,6 +45,7 @@ permission:
     "apg/.worktrees/*/Cargo.lock": allow
     "apg/.worktrees/*/install.sh": allow
     "apg/.worktrees/*/Formula/**": allow
+    "apg/.worktrees/*/.github/**": allow
     "apg/.worktrees/*/opencode-suite/**": allow
     "apg/.worktrees/*/SPEC.md": allow
     "apg/.worktrees/*/SPEC-*.md": allow
