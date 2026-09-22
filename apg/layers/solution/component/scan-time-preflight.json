@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.entity.scan-time-tool",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.scan-time-preflight-code-correction",
+      "properties": {}
     }
   ]
 }
