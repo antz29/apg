@@ -38,6 +38,11 @@
       "kind": "realised-by",
       "source": "domain.group.source-layout",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.source-module",
+      "properties": {}
     }
   ]
 }
