@@ -43,6 +43,11 @@
       "kind": "drives",
       "source": "requirements.requirement.tier-separable-tests",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.testable-library-surface",
+      "properties": {}
     }
   ]
 }

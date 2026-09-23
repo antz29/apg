@@ -6,7 +6,13 @@
   "properties": {
     "feature": "test-layout"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.group.source-layout",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
