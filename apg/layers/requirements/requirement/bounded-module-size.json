@@ -21,6 +21,11 @@
       "kind": "drives",
       "target": "domain.value.module-size-budget",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.source-file",
+      "properties": {}
     }
   ],
   "in": [
