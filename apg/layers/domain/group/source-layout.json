@@ -61,6 +61,11 @@
       "kind": "realised-by",
       "target": "solution.container.cpp-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.java-frontend",
+      "properties": {}
     }
   ],
   "in": [
