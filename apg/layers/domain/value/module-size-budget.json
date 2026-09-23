@@ -10,6 +10,11 @@
       "kind": "contains",
       "source": "domain.group.source-layout",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.bounded-module-size",
+      "properties": {}
     }
   ]
 }
