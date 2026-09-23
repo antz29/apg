@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "module-size-scope",
+  "body": "Scope and observable completion for the budget: it applies to first-party Rust production source under `src/` (excluding `vendor/` and generated files); test files (`src/<module>/tests.rs`, `tests/**`) are excluded, and so are the per-language frontend crates in this change-set. Completion is observable by enumerating first-party production source files and their line counts and finding none over the budget (a note may justify an exception).",
+  "properties": {
+    "attaches-to": "requirements.requirement.bounded-module-size"
+  },
+  "out": [],
+  "in": []
+}
