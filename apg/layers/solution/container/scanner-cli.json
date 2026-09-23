@@ -86,6 +86,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.project_cmd",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice",
+      "properties": {}
     }
   ],
   "in": [
