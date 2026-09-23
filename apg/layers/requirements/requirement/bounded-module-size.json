@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "bounded-module-size",
+  "body": "Every first-party production source file of the apg root crate stays within a small line budget (roughly 400 lines), so a reader can hold one module in mind. Test code is accounted separately: a module's unit/int tests live in a sibling `tests.rs` and do not count against the production budget, and the top-level e2e test crates are not production source. The budget is a design bound checked by enumerating first-party source files and their line counts, not a runtime behaviour.",
+  "properties": {
+    "feature": "module-size"
+  },
+  "out": [],
+  "in": []
+}
