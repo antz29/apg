@@ -43,6 +43,11 @@
       "kind": "details",
       "source": "requirements.note.decomposition-reframe-reconciliation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.dry-fixture-duplication",
+      "properties": {}
     }
   ]
 }
