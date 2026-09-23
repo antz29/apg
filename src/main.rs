@@ -381,6 +381,26 @@ fn frontend_dir() -> Option<PathBuf> {
     .find(|c| c.is_dir())
 }
 
+/// The bundled structural scanner's stream ids, in canonical order: Markdown
+/// plus the per-format structural streams and the residual `misc`. ONE
+/// `structfrontend` binary serves all of them; the driver injects one
+/// `lang_switch` per id and spawns one tool-less stream per id (the
+/// per-stream `--stream <id>` selector). They are NOT extension-detectable —
+/// `misc` has no extension and `md` alone is not the bundle — so the driver
+/// enumerates them whenever `structfrontend` is installed.
+const STRUCTURAL_LANGUAGES: &[&str] = &[
+    "md",
+    "sh",
+    "yaml",
+    "json",
+    "toml",
+    "xml",
+    "dockerfile",
+    "makefile",
+    "ini",
+    "misc",
+];
+
 fn available_languages() -> Vec<String> {
     if let Some(dir) = frontend_dir() {
         let mut langs = Vec::new();
@@ -396,8 +416,11 @@ fn available_languages() -> Vec<String> {
         if dir.join("csharpfrontend").exists() || dir.join("csharpfrontend.exe").exists() {
             langs.push("csharp".into());
         }
-        if dir.join("mdfrontend").exists() {
-            langs.push("md".into());
+        if dir.join("structfrontend").exists() {
+            // The bundled structural scanner: one binary serving the `md` stream
+            // plus every per-format structural stream and the residual `misc`,
+            // listed in canonical order.
+            langs.extend(STRUCTURAL_LANGUAGES.iter().map(|s| s.to_string()));
         }
         if dir.join("pyfrontend").exists() {
             langs.push("py".into());
@@ -438,8 +461,15 @@ fn frontend_cmd(language: &str) -> Option<String> {
             "rust" if dir.join("rustfrontend").exists() => {
                 return Some(dir.join("rustfrontend").display().to_string());
             }
-            "md" if dir.join("mdfrontend").exists() => {
-                return Some(dir.join("mdfrontend").display().to_string());
+            "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini"
+            | "misc"
+                if dir.join("structfrontend").exists() =>
+            {
+                // ONE binary serves every structural stream id. `frontend_cmd`
+                // returns ONLY the command line: the per-stream `--stream <id>`
+                // selector is appended at spawn time by `spawn_frontend`, the
+                // single owner of that flag.
+                return Some(dir.join("structfrontend").display().to_string());
             }
             "py" if dir.join("pyfrontend").exists() => {
                 return Some(dir.join("pyfrontend").display().to_string());
@@ -475,7 +505,10 @@ fn frontend_cmd(language: &str) -> Option<String> {
         "cpp" => option_env!("APG_FRONTEND_CPP"),
         "go" => option_env!("APG_FRONTEND_GO"),
         "rust" => option_env!("APG_FRONTEND_RUST"),
-        "md" => option_env!("APG_FRONTEND_MD"),
+        // The bundled structural scanner serves every structural stream id from
+        // one baked artifact (`build.rs` stages `structfrontend`).
+        "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini"
+        | "misc" => option_env!("APG_FRONTEND_STRUCT"),
         "py" => option_env!("APG_FRONTEND_PY"),
         "csharp" => option_env!("APG_FRONTEND_CSHARP"),
         "java" => option_env!("APG_FRONTEND_JAVA"),
@@ -619,6 +652,17 @@ fn auto_detect_languages(dir: &std::path::Path, available: &[String]) -> Vec<Str
     if out.iter().any(|l| l == "ts") {
         out.retain(|l| l != "js");
     }
+    // The bundled structural scanner is NOT extension-detectable: `misc` has no
+    // extension and `md` alone is not the bundle, so whenever its
+    // `structfrontend` is installed the structural stream ids are selected as a
+    // whole, in canonical order, after the code languages. The `md` candidate
+    // above is subsumed by this bundle (dropped here, re-added below).
+    out.retain(|l| !classify::is_structural_language(l));
+    for lang in STRUCTURAL_LANGUAGES {
+        if available.iter().any(|l| l == lang) {
+            out.push(lang.to_string());
+        }
+    }
     out
 }
 
@@ -636,6 +680,19 @@ fn id_prefix_for(language: &str) -> &'static str {
         "js" => "js",
         "csharp" => "cs",
         "md" => "md",
+        // The bundled structural scanner's per-format streams each get a
+        // distinct short prefix (one spawn per stream, each restarting its
+        // opaque-id counter at `n1`), so merged structural streams cannot
+        // collide opaque ids.
+        "sh" => "sh",
+        "yaml" => "ya",
+        "json" => "jn",
+        "toml" => "tm",
+        "xml" => "xm",
+        "dockerfile" => "df",
+        "makefile" => "mk",
+        "ini" => "ini",
+        "misc" => "mi",
         "py" => "py",
         _ => "x",
     }
@@ -989,16 +1046,24 @@ fn should_spawn_language(
 
 /// The scan-time tools a selected language's frontend requires on `PATH` when
 /// `apg scan` runs it (SPEC: `solution.component.scan-time-preflight`). A pure
-/// mapping — no I/O. The four self-contained frontends (`cpp`, `csharp`, `py`,
-/// `md`) require nothing, and neither does an unknown language id (never a
-/// false refusal). `ts`/`js` share the one unified frontend and its `node`
-/// runtime.
+/// mapping — no I/O. The self-contained frontends (`cpp`, `csharp`, `py`) and
+/// the bundled structural scanner's every stream id (`md`, `sh`, `yaml`,
+/// `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `misc`) require
+/// nothing — the structural arm is explicit so the exemption is intentional,
+/// not the unknown-id catch-all — and neither does an unknown language id
+/// (never a false refusal). `ts`/`js` share the one unified frontend and its
+/// `node` runtime.
 fn scan_time_tools(language: &str) -> &'static [&'static str] {
     match language {
         "go" => &["go"],
         "java" => &["java"],
         "rust" => &["cargo", "rustc"],
         "ts" | "js" => &["node"],
+        // The bundled structural scanner is self-contained: it never shells out
+        // and needs nothing on `PATH`, so every structural stream id is
+        // tool-less.
+        "md" | "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini"
+        | "misc" => &[],
         _ => &[],
     }
 }
@@ -1023,7 +1088,10 @@ fn scan_time_tool_error(language: &str, tool: &str) -> String {
 
 /// Probes `PATH` for every tool `language`'s frontend needs and returns
 /// [`scan_time_tool_error`] for the first miss. This is the I/O unit (a real
-/// `PATH` probe); a tool-less language probes nothing and succeeds.
+/// `PATH` probe); a tool-less language probes nothing and succeeds — the
+/// self-contained `cpp`/`csharp`/`py` frontends and every structural stream id
+/// of the bundled scanner (`md`, `sh`, `yaml`, `json`, `toml`, `xml`,
+/// `dockerfile`, `makefile`, `ini`, `misc`) are all tool-less.
 fn scan_time_preflight(language: &str) -> anyhow::Result<()> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     for &tool in scan_time_tools(language) {
@@ -1060,8 +1128,9 @@ fn spawn_frontend(
     // `solution.component.scan-time-preflight`): a selected language whose
     // required tool is absent fails the whole scan here, before any spawn, with
     // the named actionable error — never the cryptic panic this replaces, never
-    // a silent skip, never an empty graph. The four tool-less frontends
-    // (`cpp`, `csharp`, `py`, `md`) probe nothing and are unaffected.
+    // a silent skip, never an empty graph. The tool-less frontends
+    // (`cpp`, `csharp`, `py`) and every structural stream id of the bundled
+    // scanner (`md`, `sh`, …) probe nothing and are unaffected.
     scan_time_preflight(lang)?;
     let cmd = frontend_cmd(lang)
         .ok_or_else(|| anyhow::anyhow!("frontend for language '{lang}' is not installed"))?;
@@ -1083,6 +1152,15 @@ fn spawn_frontend(
     }
     if multi {
         child.arg("--id-prefix").arg(id_prefix_for(lang));
+    }
+    // The per-stream selector for the bundled structural scanner: ONE binary
+    // serves every structural stream id, so the spawn must name the stream it
+    // emits. `spawn_frontend` is the SINGLE OWNER of `--stream` (frontend_cmd
+    // returns only the command line); it is appended unconditionally for a
+    // structural id — even a single-language scan must not re-emit the whole
+    // structural graph under one `lang_switch`.
+    if classify::is_structural_language(lang) {
+        child.arg("--stream").arg(lang);
     }
     // Win-B target-set hand-off (task-9) plus the pinned cache hand-off on the
     // full-scan path (phase-04 tasks 33/34): append whenever ANY part of the
@@ -1866,7 +1944,7 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
         );
     }
 
-    let languages: Vec<String> = if !language_args.is_empty() {
+    let mut languages: Vec<String> = if !language_args.is_empty() {
         for l in &language_args {
             if !available.iter().any(|a| a == l) {
                 panic!(
@@ -1884,6 +1962,16 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
             detected
         }
     };
+    // The structural stream ids are selected whenever the bundled
+    // `structfrontend` is installed: they are not extension-detectable (the
+    // driver enumerates them), so neither `--language` nor auto-detection can
+    // name them, and the selection must not drop them. Appended in canonical
+    // order after the code languages.
+    for lang in STRUCTURAL_LANGUAGES {
+        if available.iter().any(|l| l == lang) && !languages.iter().any(|l| l == lang) {
+            languages.push(lang.to_string());
+        }
+    }
     log.ln(&format!("Languages: {}", languages.join(", ")));
 
     if !blacklist.is_empty() {
@@ -3084,44 +3172,50 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase-07 Markdown frontend acceptance helpers (task-13). Non-#[test]
+    // Phase-07 Markdown frontend acceptance helpers (task-13), retargeted onto
+    // the bundled structural scanner (apg-0.17.0 phase-04 task-8). Non-#[test]
     // helpers, so they live at the `mod tests` root.
     // -----------------------------------------------------------------------
 
-    /// The staged Markdown frontend the candidate runs
-    /// (`<profile>/frontends/mdfrontend`), resolved from `testutil::apg_bin()`
-    /// — the same artifact `apg scan` spawns. Fails loudly naming the build,
-    /// like [`rust_frontend_bin`].
+    /// The staged bundled structural scanner the candidate runs
+    /// (`<profile>/frontends/structfrontend`), resolved from
+    /// `testutil::apg_bin()` — the same artifact `apg scan` spawns. It serves
+    /// the `md` stream (the absorbed Markdown frontend) among every structural
+    /// stream, so the Markdown acceptance drives it with `--stream md`. Fails
+    /// loudly naming the build, like [`rust_frontend_bin`].
     fn md_frontend_bin() -> PathBuf {
         let apg = crate::testutil::apg_bin();
         let bin = apg
             .parent()
             .expect("apg binary has a parent")
             .join("frontends")
-            .join("mdfrontend");
+            .join("structfrontend");
         assert!(
             bin.is_file(),
-            "markdown frontend not found at {} — build it first: \
-             cargo build --config 'env.APG_BUILD_FRONTENDS=\"md\"'",
+            "structural frontend not found at {} — build it first: \
+             cargo build --config 'env.APG_BUILD_FRONTENDS=\"struct\"'",
             bin.display()
         );
         bin
     }
 
-    /// Runs the Markdown frontend directly over `repo_dir` and parses its
-    /// emitted unified-schema records — the fixture's scanner spool, fed to the
-    /// in-process ingestor so the shadow counters can be observed POSITIVELY
-    /// (a real scan only prints a warning when they are non-zero, so the
-    /// warning's absence alone would be vacuous).
+    /// Runs the bundled structural scanner's `md` stream directly over
+    /// `repo_dir` and parses its emitted unified-schema records — the fixture's
+    /// scanner spool, fed to the in-process ingestor so the shadow counters can
+    /// be observed POSITIVELY (a real scan only prints a warning when they are
+    /// non-zero, so the warning's absence alone would be vacuous). `--stream md`
+    /// preserves the retired `mdfrontend`'s md-only emission (the one binary
+    /// otherwise emits every structural stream).
     fn md_frontend_records(repo_dir: &Path) -> Vec<crate::schema::Record> {
         let bin = md_frontend_bin();
         let out = std::process::Command::new(&bin)
             .arg(repo_dir)
+            .args(["--stream", "md"])
             .output()
             .unwrap_or_else(|e| panic!("spawn {}: {e}", bin.display()));
         assert!(
             out.status.success(),
-            "mdfrontend failed over {}: {}",
+            "structfrontend (md stream) failed over {}: {}",
             repo_dir.display(),
             String::from_utf8_lossy(&out.stderr)
         );
@@ -8192,10 +8286,19 @@ mod tests {
                 Some(&1),
                 "(b) crate-b must be discovered exactly once: {modules:?}"
             );
+            // Count only the RUST crate modules: the bundled structural scanner
+            // now legitimately mints `toml.`/`json.`/`misc.` modules for the
+            // tracked manifest/config files, so the total module set is no
+            // longer code-only. `rust.` is the Rust stream root, so this scopes
+            // the discovered-project count to the crates under test.
+            let rust_project_total: usize = modules
+                .iter()
+                .filter(|(fqn, _)| fqn.starts_with("rust."))
+                .map(|(_, n)| *n)
+                .sum();
             assert_eq!(
-                modules.values().sum::<usize>(),
-                2,
-                "(b) discovered projects must equal the workspace's 2 projects: {modules:?}"
+                rust_project_total, 2,
+                "(b) discovered Rust projects must equal the workspace's 2 projects: {modules:?}"
             );
             let symbols = export_symbol_fqns(&recs);
             assert!(
@@ -8969,14 +9072,48 @@ mod tests {
                     "md file `{rel}` must be a `{expected}` File node: {file_type:?}"
                 );
             }
-            // `.mdx` yields NO node at all — not a File, not a Struct.
+            // `.mdx` is NOT Markdown to the bundled scanner: it yields NO `md.*`
+            // node (no md module, no heading Struct). It is a residual `misc`
+            // File instead — the every-tracked-file-graphed design — so a `.mdx`
+            // File node is classified `config`, and an `.mdx`-only directory
+            // roots as `misc.<dir>`, never `md.<dir>`.
+            let mdx_files: BTreeSet<String> = recs
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("file"))
+                .filter_map(|r| r.get("fqn").and_then(|f| f.as_str()).map(str::to_string))
+                .filter(|f| f.ends_with(".mdx"))
+                .collect();
+            for rel in ["notes/draft.mdx", "onlymdx/draft.mdx"] {
+                assert!(
+                    mdx_files.contains(&at(rel)),
+                    "`{rel}` must be a residual `misc` File node: {mdx_files:?}"
+                );
+                assert_eq!(
+                    file_type.get(&at(rel)).map(String::as_str),
+                    Some("config"),
+                    "the `.mdx` File `{rel}` must classify `config` (residual misc): {file_type:?}"
+                );
+            }
+            // No `md.*` node is drawn from a `.mdx` file: an `.mdx`-only
+            // directory never roots as `md.<dir>` (it roots as `misc.<dir>`),
+            // and no heading Struct's FQN embeds a `.mdx` path.
             assert!(
-                !export_file_paths(&recs).iter().any(|f| f.ends_with(".mdx"))
-                    && !recs.iter().any(|r| r
-                        .get("path")
-                        .and_then(|p| p.as_str())
-                        .is_some_and(|p| p.ends_with(".mdx"))),
-                "no node may be drawn from an .mdx file"
+                !module_counts.contains_key(&md_at("onlymdx")),
+                "an .mdx-only directory must never root as `md.onlymdx`: {module_counts:?}"
+            );
+            assert_eq!(
+                module_counts.get("misc.onlymdx").copied(),
+                Some(1),
+                "an .mdx-only directory must root as `misc.onlymdx`: {module_counts:?}"
+            );
+            assert!(
+                !recs.iter().any(|r| {
+                    r.get("type").and_then(|t| t.as_str()) == Some("struct")
+                        && r.get("fqn")
+                            .and_then(|f| f.as_str())
+                            .is_some_and(|f| f.starts_with("md.") && f.contains(".mdx"))
+                }),
+                "no `md.*` heading Struct may be drawn from an .mdx file"
             );
 
             let struct_fqns: BTreeSet<String> = recs
@@ -9273,15 +9410,38 @@ mod tests {
                 "a `third_party/` file must classify external: {types:?}"
             );
 
-            // (4) `.pyx` and `site-packages` yield NO code node.
-            let locations = export_code_locations(&recs);
+            // (4) `.pyx` and `site-packages` yield NO PYTHON code node. The
+            // bundled structural scanner legitimately mints residual `misc`
+            // File nodes for the tracked files it claims (e.g. `cy/mod.pyx`,
+            // `.gitignore`) — every tracked file is graphed — so scope the
+            // check to the Python stream: a py File carries its Python
+            // code_type, while a structural File classifies `config`. The
+            // Python code-node assertions stay intact.
+            let py_locations: Vec<String> = recs
+                .iter()
+                .filter_map(|r| {
+                    let ty = r.get("type").and_then(|t| t.as_str())?;
+                    let path = match ty {
+                        "file" => {
+                            // Subtract the structural `misc`/format File facts.
+                            if r.get("code_type").and_then(|c| c.as_str()) == Some("config") {
+                                return None;
+                            }
+                            r.get("fqn").and_then(|f| f.as_str())
+                        }
+                        "struct" | "function" => r.get("path").and_then(|p| p.as_str()),
+                        _ => None,
+                    }?;
+                    Some(path.to_string())
+                })
+                .collect();
             assert!(
-                !locations.iter().any(|p| p.ends_with(".pyx")),
-                "a `.pyx` must never become a code node: {locations:?}"
+                !py_locations.iter().any(|p| p.ends_with(".pyx")),
+                "a `.pyx` must never become a Python code node: {py_locations:?}"
             );
             assert!(
-                !locations.iter().any(|p| p.contains("site-packages")),
-                "a `site-packages` tree must never become a code node: {locations:?}"
+                !py_locations.iter().any(|p| p.contains("site-packages")),
+                "a `site-packages` tree must never become a Python code node: {py_locations:?}"
             );
 
             // (5) The BUILTIN py arm + shadow counters, observed POSITIVELY on
@@ -9897,6 +10057,281 @@ mod tests {
             );
 
             testutil::remove(&repo);
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// apg-0.17.0 phase-03 task-10 (e2e, scratch /tmp repo, CANDIDATE binary
+        /// only — `global.constraint.no-real-project-test`): a REAL scan with the
+        /// bundled structural scanner emits a File node for every tracked file it
+        /// claims, while the code frontend keeps its own file.
+        ///
+        /// `build.rs` does not stage `structfrontend` until phase-04, so the
+        /// test is self-sufficient: it builds the isolated `src/structlib` crate
+        /// and stages its binary into a per-test frontends dir (with the
+        /// profile's `gofrontend`) that the spawned scan resolves via
+        /// `APG_FRONTEND_DIR` — the shared profile dir is never touched.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo + staged structfrontend + spawned apg); run via cargo test-e2e"]
+        fn structural_scan_emits_file_node_per_tracked_file() {
+            let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+            let struct_bin = manifest_dir.join("src/structlib/target/debug/structfrontend");
+            if !struct_bin.is_file() {
+                let status = std::process::Command::new("cargo")
+                    .args([
+                        "build",
+                        "--manifest-path",
+                        "src/structlib/Cargo.toml",
+                        "--bin",
+                        "structfrontend",
+                    ])
+                    .current_dir(manifest_dir)
+                    .status()
+                    .expect("run cargo build for src/structlib");
+                assert!(status.success(), "src/structlib must build");
+            }
+            assert!(
+                struct_bin.is_file(),
+                "structfrontend not built at {} — run: cargo build --manifest-path \
+                 src/structlib/Cargo.toml --bin structfrontend",
+                struct_bin.display()
+            );
+
+            let (base, repo_dir, home) = md_scratch(
+                "structural-files",
+                &[
+                    ("go.mod", "module scratch\n\ngo 1.21\n"),
+                    ("main.go", "package main\n\nfunc main() {}\n"),
+                    ("run.sh", "#!/bin/sh\n\nhello() {\n  echo hi\n}\n"),
+                    (
+                        "ci.yaml",
+                        "name: ci\njobs:\n  build:\n    steps:\n      - run: make\n",
+                    ),
+                    ("data.json", "{\n  \"alpha\": 1,\n  \"beta\": 2\n}\n"),
+                    ("config.toml", "[package]\nname = \"x\"\n"),
+                    ("LICENSE", "MIT\n"),
+                ],
+            );
+
+            // A per-test frontends dir: the built structfrontend + the profile's
+            // real gofrontend (the code frontend whose file the structural
+            // scanner must NOT claim).
+            let fe = base.join("frontends");
+            std::fs::create_dir_all(&fe).unwrap();
+            std::fs::copy(&struct_bin, fe.join("structfrontend")).unwrap();
+            let profile_frontends = crate::testutil::apg_bin()
+                .parent()
+                .expect("apg binary has a parent")
+                .join("frontends");
+            let go = profile_frontends.join("gofrontend");
+            assert!(
+                go.is_file(),
+                "gofrontend not staged at {} — build it first: cargo build",
+                go.display()
+            );
+            std::fs::copy(&go, fe.join("gofrontend")).unwrap();
+
+            let scan = testutil::ApgCommand::new(&["scan", "."])
+                .cwd(&repo_dir)
+                .env("HOME", home.to_str().unwrap())
+                .env("APG_FRONTEND_DIR", fe.to_str().unwrap())
+                .output();
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "structural scan failed: {stderr}");
+            assert!(
+                stderr.contains("Languages: go, md"),
+                "the code language + structural bundle must be selected: {stderr}"
+            );
+            assert!(
+                stderr.contains("[scan] running go frontend")
+                    && stderr.contains("[scan] running md frontend"),
+                "both the go and the structural frontend must run: {stderr}"
+            );
+
+            let recs = export_records(&repo_dir);
+            // (1) every tracked file the structural scanner claims has a File
+            // node (the repo-relative path is the File FQN).
+            let files = export_file_paths(&recs);
+            for rel in [
+                "run.sh",
+                "ci.yaml",
+                "data.json",
+                "config.toml",
+                "LICENSE",
+                "main.go",
+            ] {
+                assert!(
+                    files.contains(rel),
+                    "`{rel}` must have a File node: {files:?}"
+                );
+            }
+            // (2) the code frontend keeps its own file: `main.go` is classified
+            // by the go frontend (`src`), not by the structural scanner
+            // (`config`); the structural files are `config`.
+            let file_type: std::collections::BTreeMap<String, String> = recs
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("file"))
+                .map(|r| {
+                    (
+                        r.get("fqn")
+                            .and_then(|f| f.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        r.get("code_type")
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    )
+                })
+                .collect();
+            for rel in ["run.sh", "ci.yaml", "data.json", "config.toml", "LICENSE"] {
+                assert_eq!(
+                    file_type.get(rel).map(String::as_str),
+                    Some("config"),
+                    "structural file `{rel}` must classify config: {file_type:?}"
+                );
+            }
+            assert_eq!(
+                file_type.get("main.go").map(String::as_str),
+                Some("src"),
+                "the go frontend must keep `main.go` (code_type src): {file_type:?}"
+            );
+            // (3) the structural scanner declares structure for its formats.
+            let symbols = export_symbol_fqns(&recs);
+            assert!(
+                symbols.contains("sh.run.sh.hello"),
+                "the shell function must be a Struct: {symbols:?}"
+            );
+            assert!(
+                symbols.contains("yaml.ci.yaml.name"),
+                "the YAML top-level key must be a Struct: {symbols:?}"
+            );
+            assert!(
+                symbols.contains("json.data.json.alpha"),
+                "the JSON top-level key must be a Struct: {symbols:?}"
+            );
+            assert!(
+                symbols.contains("toml.config.toml.package"),
+                "the TOML table must be a Struct: {symbols:?}"
+            );
+            // (4) the residual `misc` stream emits a File only.
+            assert!(
+                export_symbols_at(&recs, "LICENSE").is_empty(),
+                "a misc file must declare no Struct: {:?}",
+                export_symbols_at(&recs, "LICENSE")
+            );
+
+            let _ = std::fs::remove_dir_all(&base);
+        }
+
+        /// apg-0.17.0 phase-03 task-11 (e2e, scratch /tmp repo, CANDIDATE binary
+        /// only): a REAL scan with a root Markdown file renders the repo-root
+        /// module repo-relative as `md.` (never the checkout basename), keeps
+        /// the non-root `md.*` module and the heading Structs unchanged, and
+        /// `md.` Contains the repo-root File. Self-sufficient staging (phase-04
+        /// owns the build.rs staging), so the shared profile dir is untouched.
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch /tmp repo + staged structfrontend + spawned apg); run via cargo test-e2e"]
+        fn structural_markdown_repo_root_renders_md_root() {
+            let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+            let struct_bin = manifest_dir.join("src/structlib/target/debug/structfrontend");
+            if !struct_bin.is_file() {
+                let status = std::process::Command::new("cargo")
+                    .args([
+                        "build",
+                        "--manifest-path",
+                        "src/structlib/Cargo.toml",
+                        "--bin",
+                        "structfrontend",
+                    ])
+                    .current_dir(manifest_dir)
+                    .status()
+                    .expect("run cargo build for src/structlib");
+                assert!(status.success(), "src/structlib must build");
+            }
+            assert!(
+                struct_bin.is_file(),
+                "structfrontend not built at {} — run: cargo build --manifest-path \
+                 src/structlib/Cargo.toml --bin structfrontend",
+                struct_bin.display()
+            );
+
+            let (base, repo_dir, home) = md_scratch(
+                "structural-md-root",
+                &[
+                    ("README.md", "# Root Heading\n\nprose\n"),
+                    ("docs/guide.md", "# Guide\n"),
+                ],
+            );
+
+            let fe = base.join("frontends");
+            std::fs::create_dir_all(&fe).unwrap();
+            std::fs::copy(&struct_bin, fe.join("structfrontend")).unwrap();
+
+            let scan = testutil::ApgCommand::new(&["scan", "."])
+                .cwd(&repo_dir)
+                .env("HOME", home.to_str().unwrap())
+                .env("APG_FRONTEND_DIR", fe.to_str().unwrap())
+                .output();
+            let stderr = String::from_utf8_lossy(&scan.stderr).to_string();
+            assert!(scan.status.success(), "markdown scan failed: {stderr}");
+            assert!(
+                stderr.contains("[scan] running md frontend"),
+                "the structural md stream must run: {stderr}"
+            );
+
+            let recs = export_records(&repo_dir);
+            // (1) the repo-root module renders the bare `md.` root, and the
+            // non-root directory keeps its `md.*` identity.
+            let modules = export_modules(&recs);
+            assert!(
+                modules.contains("md."),
+                "the repo-root module must render `md.`: {modules:?}"
+            );
+            assert!(
+                modules.contains("md.docs"),
+                "the non-root dir module must render `md.docs`: {modules:?}"
+            );
+            // Never the checkout basename (the scratch repo dir is `repo`).
+            let basename = repo_dir.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(
+                !modules.contains(&format!("md.{basename}")),
+                "the repo-root module must not be checkout-named `md.{basename}`: {modules:?}"
+            );
+            // (2) the heading Structs are unchanged.
+            let symbols = export_symbol_fqns(&recs);
+            for f in ["md.README.md.root-heading", "md.docs/guide.md.guide"] {
+                assert!(
+                    symbols.contains(f),
+                    "the heading Struct `{f}` must be unchanged: {symbols:?}"
+                );
+            }
+            // (3) root-File containment: the repo-root module Contains the
+            // repo-root File (no regression vs the retired `md.apg` root).
+            let contains: BTreeSet<(String, String)> = recs
+                .iter()
+                .filter(|r| r.get("type").and_then(|t| t.as_str()) == Some("contains"))
+                .map(|r| {
+                    (
+                        r.get("from")
+                            .and_then(|f| f.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        r.get("to")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    )
+                })
+                .collect();
+            assert!(
+                contains.contains(&("md.".to_string(), "README.md".to_string())),
+                "`md.` must Contain the repo-root `README.md`: {contains:?}"
+            );
+            assert!(
+                contains.contains(&("md.docs".to_string(), "docs/guide.md".to_string())),
+                "`md.docs` must Contain `docs/guide.md`: {contains:?}"
+            );
+
             let _ = std::fs::remove_dir_all(&base);
         }
     }

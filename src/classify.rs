@@ -317,6 +317,15 @@ fn builtin_code_type(path: &str, language: &str) -> &'static str {
             }
             "docs"
         }
+        // The bundled structural scanner's non-Markdown streams: the structural
+        // formats are configuration/data, so with no config they classify
+        // `config` — never the code default `src`. Markdown keeps its own `md`
+        // arm above (`docs`). With a config present the same decision is made
+        // by `structural_code_type` (the config's structural `code_type`,
+        // default `config`).
+        "sh" | "yaml" | "json" | "toml" | "xml" | "dockerfile" | "makefile" | "ini" | "misc" => {
+            "config"
+        }
         _ => "src",
     }
 }

@@ -1,8 +1,9 @@
-# Scanner formula — the `apg` binary (ingestor + query CLI). No scanner
-# frontends are bundled; install the per-language frontend formulae
-# (apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py, apg-md)
-# which drop their artifacts into $(brew --prefix)/share/apg/frontends. The bin/apg
-# wrapper points the binary at that directory via APG_FRONTEND_DIR.
+# Scanner formula — the `apg` binary (ingestor + query CLI) plus the bundled
+# structural scanner. The structural scanner is built from src/structlib and
+# installed into the shared frontends dir alongside the per-language frontend
+# formulae (apg-go, apg-java, apg-cpp, apg-rust, apg-ts, apg-csharp, apg-py),
+# which drop their artifacts into $(brew --prefix)/share/apg/frontends. The
+# bin/apg wrapper points the binary at that directory via APG_FRONTEND_DIR.
 
 class Scanner < Formula
   desc "Program graph scanner + LadybugDB query CLI for opencode"
@@ -47,9 +48,10 @@ class Scanner < Formula
     ENV["LBUG_LIBRARY_DIR"] = lbug_dir.to_s
     ENV["LBUG_INCLUDE_DIR"] = lbug_dir.to_s
 
-    # Do not compile any scanner frontends in this build; the separate
-    # apg-go / apg-java / apg-cpp / apg-rust / apg-ts / apg-csharp / apg-py /
-    # apg-md formulae provide them.
+    # Do not compile any per-language scanner frontends in this build; the
+    # separate apg-go / apg-java / apg-cpp / apg-rust / apg-ts / apg-csharp /
+    # apg-py formulae provide them. The bundled structural scanner is built
+    # separately below (from src/structlib).
     ENV["APG_BUILD_FRONTENDS"] = "0"
 
     # Install the real binary into libexec (not bin/), then bin/apg becomes a
@@ -59,11 +61,25 @@ class Scanner < Formula
 
     (bin/"apg").write_env_script libexec/"bin"/"apg",
                                  APG_FRONTEND_DIR: "#{HOMEBREW_PREFIX}/share/apg/frontends"
+
+    # The bundled structural scanner: ONE `structfrontend` binary serving the
+    # `md` stream plus every per-format structural stream and the residual
+    # `misc`. Built directly from src/structlib (a standalone, non-workspace
+    # crate) and dropped into the shared frontends dir beside the per-language
+    # frontends. Scanning with it needs no runtime and never shells out.
+    cd "src/structlib" do
+      system "cargo", "build", "--release", "--bin", "structfrontend"
+    end
+    (share/"apg/frontends").install "src/structlib/target/release/structfrontend"
   end
 
   def caveats
     <<~EOS
-      apg needs at least one scanner frontend. Install the ones you use:
+      The bundled structural scanner (Markdown plus shell, YAML, JSON, TOML,
+      XML, Dockerfile, Makefile, INI and other text files) ships with this
+      formula — no separate install is needed.
+
+      apg also needs at least one code scanner frontend. Install the ones you use:
 
         brew install antz29/apg/apg-go       # Go
         brew install antz29/apg/apg-java     # Java
@@ -72,12 +88,12 @@ class Scanner < Formula
         brew install antz29/apg/apg-ts       # TypeScript (needs `node` at scan time)
         brew install antz29/apg/apg-csharp   # C# (needs `dotnet` at build time only)
         brew install antz29/apg/apg-py       # Python (no Python runtime needed at scan time)
-        brew install antz29/apg/apg-md       # Markdown (no runtime needed at scan time)
     EOS
   end
 
   test do
     assert_match "apg #{version}", shell_output("#{bin}/apg --version")
     assert_match "USAGE", shell_output("#{bin}/apg --help")
+    assert_path_exists share/"apg/frontends/structfrontend"
   end
 end

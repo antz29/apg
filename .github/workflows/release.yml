@@ -37,7 +37,7 @@ jobs:
       - name: Build and install formulae with --build-bottle
         run: |
           brew install --build-bottle antz29/apg/scanner
-          brew install --build-bottle antz29/apg/apg-go antz29/apg/apg-java antz29/apg/apg-cpp antz29/apg/apg-rust antz29/apg/apg-ts antz29/apg/apg-csharp antz29/apg/apg-py antz29/apg/apg-md
+          brew install --build-bottle antz29/apg/apg-go antz29/apg/apg-java antz29/apg/apg-cpp antz29/apg/apg-rust antz29/apg/apg-ts antz29/apg/apg-csharp antz29/apg/apg-py
 
       - name: Create bottles
         working-directory: ${{ runner.temp }}
@@ -45,7 +45,7 @@ jobs:
           brew bottle \
             --json \
             --root-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
-            scanner apg-go apg-java apg-cpp apg-rust apg-ts apg-csharp apg-py apg-md
+            scanner apg-go apg-java apg-cpp apg-rust apg-ts apg-csharp apg-py
 
       - name: Upload bottle artifacts
         uses: actions/upload-artifact@v7
@@ -131,16 +131,17 @@ jobs:
           echo "LBUG_LIBRARY_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
           echo "LBUG_INCLUDE_DIR=${PWD}/lbug-static" >>"$GITHUB_ENV"
 
-      # build.rs compiles all frontends (Go, C++, Java, Rust, TS, C#, Python,
-      # Markdown) and stages them into target/release/frontends; the default
-      # APG_BUILD_FRONTENDS (unset) does exactly what we want here.
+      # build.rs compiles all frontends (Go, C++, Java, Rust, TS, C#, Python
+      # and the bundled structural scanner) and stages them into
+      # target/release/frontends; the default APG_BUILD_FRONTENDS (unset) does
+      # exactly what we want here.
       - name: Build apg + frontends
         run: cargo build --release
 
       - name: Verify every frontend was built
         run: |
           for f in cppfrontend gofrontend rustfrontend csharpfrontend \
-                   java-classes tsfrontend pyfrontend mdfrontend; do
+                   java-classes tsfrontend pyfrontend structfrontend; do
             test -e "target/release/frontends/$f" \
               || { echo "frontend not staged: $f"; exit 1; }
           done
@@ -149,8 +150,12 @@ jobs:
         run: |
           mkdir -p dist/packages
 
-          # 1. Base scanner
-          tar -C target/release -czf "dist/packages/apg-linux-${{ matrix.arch }}.tar.gz" apg
+          # 1. Base scanner — also carries the bundled structural scanner
+          #    (structfrontend), so a base install can scan the structural
+          #    streams with no extra package.
+          cp target/release/frontends/structfrontend target/release/structfrontend
+          tar -C target/release -czf "dist/packages/apg-linux-${{ matrix.arch }}.tar.gz" apg structfrontend
+          rm -f target/release/structfrontend
 
           # 2. Per-language frontends
           tar -C target/release/frontends -czf "dist/packages/apg-cpp-linux-${{ matrix.arch }}.tar.gz" cppfrontend
@@ -160,7 +165,6 @@ jobs:
           tar -C target/release/frontends -czf "dist/packages/apg-java-linux-${{ matrix.arch }}.tar.gz" java-classes
           tar -C target/release/frontends -czf "dist/packages/apg-ts-linux-${{ matrix.arch }}.tar.gz" tsfrontend
           tar -C target/release/frontends -czf "dist/packages/apg-py-linux-${{ matrix.arch }}.tar.gz" pyfrontend
-          tar -C target/release/frontends -czf "dist/packages/apg-md-linux-${{ matrix.arch }}.tar.gz" mdfrontend
 
           # 3. All-in-one bundle
           mkdir -p dist/all/frontends

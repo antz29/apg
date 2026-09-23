@@ -2,8 +2,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Which frontends to compile in this build. `APG_BUILD_FRONTENDS` is a
-/// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `md`,
-/// `py`); `0`/`none`/empty skips all.
+/// comma-separated allowlist (`go`, `java`, `cpp`, `rust`, `ts`, `csharp`,
+/// `struct`, `py`); `0`/`none`/empty skips all.
+/// `struct` is the bundled structural scanner — ONE `structfrontend` binary
+/// serving the `md` stream plus every per-format structural stream and the
+/// residual `misc` — replacing the retired standalone `md` frontend.
 /// Unset = build everything (the dev default). The brew `scanner` formula sets
 /// `0`; the per-language `apg-go`/`apg-java`/`apg-cpp`/`apg-rust`/`apg-ts`/`apg-csharp`/`apg-py` formulae build each
 /// frontend directly and don't use build.rs for that.
@@ -19,7 +22,7 @@ fn build_frontends() -> Vec<String> {
             "rust".into(),
             "ts".into(),
             "csharp".into(),
-            "md".into(),
+            "struct".into(),
             "py".into(),
         ],
     }
@@ -41,8 +44,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/tslib/identity.mjs");
     println!("cargo:rerun-if-changed=src/csharplib/CsharpFrontend.csproj");
     println!("cargo:rerun-if-changed=src/csharplib/Program.cs");
-    println!("cargo:rerun-if-changed=src/mdlib/Cargo.toml");
-    println!("cargo:rerun-if-changed=src/mdlib/src/main.rs");
+    println!("cargo:rerun-if-changed=src/structlib/Cargo.toml");
+    println!("cargo:rerun-if-changed=src/structlib/src/main.rs");
     println!("cargo:rerun-if-changed=src/pylib/Cargo.toml");
     println!("cargo:rerun-if-changed=src/pylib/src/main.rs");
 
@@ -247,31 +250,52 @@ fn main() {
         }
     }
 
-    // --- Markdown frontend (standalone Rust crate, compiled in isolation) ---
-    if enabled(&frontends, "md") {
-        // Compile mdlib with cargo into its own isolated target dir
-        // (src/mdlib/target). ALWAYS `--release`, independent of the outer
+    // --- Structural frontend (bundled scanner, standalone Rust crate, compiled in isolation) ---
+    if enabled(&frontends, "struct") {
+        // Compile structlib with cargo into its own isolated target dir
+        // (src/structlib/target). ALWAYS `--release`, independent of the outer
         // cargo profile, and staged into the ACTIVE outer profile's frontends
-        // dir (same rationale as rustlib above). mdlib is a standalone,
+        // dir (same rationale as rustlib above). structlib is a standalone,
         // non-workspace crate exactly like src/rustlib, so its lockfile and
-        // target tree stay independent. On failure, skip md rather than
-        // aborting the whole build (like the other frontends).
-        let mdfrontend = Path::new("src/mdlib")
+        // target tree stay independent. ONE `structfrontend` binary serves every
+        // structural stream id — the `md` stream plus the per-format streams and
+        // the residual `misc` — and the baked `APG_FRONTEND_STRUCT` points at
+        // its staged path (`frontend_cmd`'s dev fallback for every structural
+        // id). On failure, skip the structural scanner rather than aborting the
+        // whole build (like the other frontends).
+        let structfrontend = Path::new("src/structlib")
             .join("target")
             .join("release")
-            .join("mdfrontend");
+            .join("structfrontend");
         let mut cmd = Command::new("cargo");
         cmd.arg("build")
             .arg("--manifest-path")
-            .arg("src/mdlib/Cargo.toml")
+            .arg("src/structlib/Cargo.toml")
             .arg("--release")
             .arg("--bin")
-            .arg("mdfrontend");
-        let md_ok = cmd.status().is_ok_and(|s| s.success()) && mdfrontend.exists();
-        if md_ok {
-            println!("cargo:rustc-env=APG_FRONTEND_MD={}", mdfrontend.display());
-            let _ = std::fs::copy(&mdfrontend, stage_dir.join("mdfrontend"));
-            languages.push("md".into());
+            .arg("structfrontend");
+        let struct_ok = cmd.status().is_ok_and(|s| s.success()) && structfrontend.exists();
+        if struct_ok {
+            let staged = stage_dir.join("structfrontend");
+            let _ = std::fs::copy(&structfrontend, &staged);
+            println!("cargo:rustc-env=APG_FRONTEND_STRUCT={}", staged.display());
+            // The structural scanner's stream ids (canonical order, mirroring
+            // `STRUCTURAL_LANGUAGES` in src/main.rs): the baked `APG_LANGUAGES`
+            // fallback enumerates them when no runtime frontends dir is found.
+            for id in [
+                "md",
+                "sh",
+                "yaml",
+                "json",
+                "toml",
+                "xml",
+                "dockerfile",
+                "makefile",
+                "ini",
+                "misc",
+            ] {
+                languages.push(id.into());
+            }
         }
     }
 
@@ -281,11 +305,11 @@ fn main() {
         // (src/pylib/target). ALWAYS `--release`, independent of the outer
         // cargo profile, and staged into the ACTIVE outer profile's frontends
         // dir (same rationale as rustlib above). pylib is a standalone,
-        // non-workspace crate exactly like src/mdlib, so its lockfile and
-        // target tree stay independent. The staged artifact is the `pyfrontend`
-        // binary (the crate's `[[bin]]` name — unaffected by the `[package]`
-        // name). On failure, skip py rather than aborting the whole build
-        // (like the other frontends).
+        // non-workspace crate exactly like src/rustlib and src/structlib, so
+        // its lockfile and target tree stay independent. The staged artifact is
+        // the `pyfrontend` binary (the crate's `[[bin]]` name — unaffected by
+        // the `[package]` name). On failure, skip py rather than aborting the
+        // whole build (like the other frontends).
         let pyfrontend = Path::new("src/pylib")
             .join("target")
             .join("release")

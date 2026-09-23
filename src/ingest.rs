@@ -126,13 +126,38 @@ fn structural_scope_excludes(identity: &str, config: Option<&ApgConfig>) -> bool
 /// unaffected.
 ///
 /// `path` is `None` for records that carry no source location (modules) and
-/// for edge endpoints, whose FQN prefix is still honoured. An edge into a
-/// dropped record dangles and is pruned by the final cleanup.
+/// for edge endpoints, whose FQN prefix is still honoured. A **structural
+/// module** identity is a repo-relative tree in disguise (`misc.apg/.trans`):
+/// the scanner's walk prunes only `target`/`node_modules`/`.git`/`.worktrees`
+/// and never consults `.gitignore`, so a path-less structural module whose
+/// identity sits under a gitignored/build-output tree is dropped here exactly
+/// as its File records are — otherwise an empty `module:misc.<ignored-tree>`
+/// would survive. The check is scoped to an fqn actually rooted under the
+/// current structural language id, so a code FQN or an opaque id is never
+/// re-interpreted as a path. An edge into a dropped record dangles and is
+/// pruned by the final cleanup.
 fn is_blacklisted(fqn: &str, path: Option<&str>, language: &str, opts: &IngestOptions) -> bool {
     if opts.blacklist.iter().any(|p| fqn.starts_with(p.as_str())) {
         return true;
     }
     let Some(path) = path else {
+        // The bare `<language>.` root (empty identity) is the repo root: it is
+        // never build-output/gitignored, so it always survives.
+        if crate::classify::is_structural_language(language)
+            && let Some(identity) = fqn
+                .strip_prefix(language)
+                .and_then(|rest| rest.strip_prefix('.'))
+        {
+            if crate::classify::is_build_output_path(identity) {
+                return true;
+            }
+            if opts
+                .base
+                .is_some_and(|base| crate::git::path_is_ignored(base, Path::new(identity)))
+            {
+                return true;
+            }
+        }
         return false;
     };
     if crate::classify::is_build_output_path(path) {
@@ -160,6 +185,12 @@ fn file_basename(file: &str) -> String {
 /// component and no `..` segment. An already-relative identity (a frontend's
 /// dotted package identity, e.g. `pkg.sub` or `@co/ui.src`) passes through
 /// unchanged; an absolute path under `base` is stripped to its tail.
+///
+/// A path that resolves to `base` **itself** — the repository root, whose
+/// repo-relative identity is empty — renders the empty string, NOT the
+/// `file_name(base)` checkout basename: a module rooted at the repo root is
+/// the bare `<language>.` root (`md.`), never a checkout-named module
+/// (`md.apg`) (`requirements.constraint.no-checkout-named-module`).
 ///
 /// A path outside `base`, or one whose tail would escape `base` with `..`,
 /// falls back to its file name so an identity can never embed a checkout
@@ -206,7 +237,11 @@ pub fn repo_relative_identity(base: &Path, path: &str) -> String {
         }
     }
     if out.is_empty() {
-        return fallback();
+        // The path resolves to the base itself (or an empty identity): the
+        // repo-root identity is empty. Every genuinely escaping/foreign path
+        // returned `fallback()` above, so only the under-base/empty case lands
+        // here.
+        return String::new();
     }
     out.join("/")
 }
@@ -222,7 +257,17 @@ pub fn repo_relative_identity(base: &Path, path: &str) -> String {
 /// root_module_fqn("py",   "pkg.sub",    base) -> "py.pkg.sub"
 /// root_module_fqn("ts",   "@co/ui.src", base) -> "ts.@co/ui.src"
 /// root_module_fqn("md",   "/abs/docs",  base) -> "md.docs"
+/// root_module_fqn("md",   "",           base) -> "md."     // the repo root
+/// root_module_fqn("sh",   "",           base) -> "sh."     // the repo root
 /// ```
+///
+/// The bundled structural scanner emits each module identity repo-relative to
+/// the repository base — EMPTY at the repo root. Rooting an empty identity
+/// therefore renders the bare `<language>.` root (`md.`, `sh.`, …), which is
+/// the repo-root module, never a checkout-named module (`md.apg`); this is the
+/// ingestor half of the `md.apg` → `md.` relocation (the emitter half is the
+/// scanner's `repo_relative_dir`). Every non-root structural identity roots
+/// under its stream id exactly like a code module (`md.docs`, `yaml.ci`).
 ///
 /// The frontends emit the module identity VERBATIM and UNROOTED (a
 /// frontend-baked root would double-root once the ingestor applies it); the
@@ -852,7 +897,20 @@ fn ingest_records(
                     // the file and everything in it is out of scope too. The
                     // parent module FQN is rooted (PHASE_09), and the file's
                     // canonical identity is its repo-relative path.
-                    let parent = rooted_scope(&lang, &parent, base);
+                    //
+                    // A STRUCTURAL stream's EMPTY module identity is the
+                    // repository root, not the scanner anomaly `rooted_scope`
+                    // leaves empty for a code declaration: root it to the bare
+                    // `<language>.` root module so the `Module → File` edge from
+                    // the repo-root module to the repo-root files survives
+                    // (`md.` ⊃ the repo-root Markdown files). A code stream's
+                    // empty parent stays empty (the anomaly).
+                    let parent =
+                        if parent.is_empty() && crate::classify::is_structural_language(&lang) {
+                            root_module_fqn(&lang, "", base)
+                        } else {
+                            rooted_scope(&lang, &parent, base)
+                        };
                     let identity = repo_relative_identity(base, &path);
                     if is_blacklisted(&parent, Some(&identity), &lang, opts) {
                         skipped += 1;
@@ -2104,12 +2162,16 @@ mod tests {
             assert_eq!(rooted_scope("rust", "apg", base), "rust.apg");
         }
 
-        /// fix-module-identity task-2: `repo_relative_identity` renders a
-        /// scanner path relative to the git-toplevel base (the scan root is the
-        /// non-git fallback), `/`-separated, with no leading `/` and no `..`
-        /// segment. An already-relative frontend identity passes through; an
-        /// absolute path under the base is stripped; a path that would escape
-        /// the base falls back to its file name.
+        /// fix-module-identity task-2 / apg-0.17.0 phase-03 task-12:
+        /// `repo_relative_identity` renders a scanner path relative to the
+        /// git-toplevel base (the scan root is the non-git fallback),
+        /// `/`-separated, with no leading `/` and no `..` segment. An
+        /// already-relative frontend identity passes through; an absolute path
+        /// under the base is stripped. A path resolving to the base ITSELF —
+        /// the repo root — renders the EMPTY repo-relative identity (never the
+        /// `file_name(base)` checkout basename), so `root_module_fqn` on it
+        /// renders the bare `md.` root. A genuinely escaping/foreign path keeps
+        /// the file-name fallback.
         #[test]
         fn repo_relative_identity_is_checkout_independent() {
             let base = Path::new("/repo");
@@ -2118,8 +2180,15 @@ mod tests {
                 repo_relative_identity(base, "/repo/src/load.rs"),
                 "src/load.rs"
             );
-            // The base itself resolves to the bare file name (never empty).
-            assert_eq!(repo_relative_identity(base, "/repo"), "repo");
+            // The base itself resolves to the EMPTY repo-root identity — never
+            // the checkout basename `repo`.
+            assert_eq!(repo_relative_identity(base, "/repo"), "");
+            assert_eq!(repo_relative_identity(base, ""), "");
+            // Rooting that empty identity renders the bare `<language>.` root:
+            // the repo-root Markdown module is `md.`, never `md.repo`.
+            assert_eq!(root_module_fqn("md", "", base), "md.");
+            assert_eq!(root_module_fqn("md", "/repo", base), "md.");
+            assert_eq!(root_module_fqn("sh", "", base), "sh.");
             // A relative identity passes through unchanged.
             assert_eq!(repo_relative_identity(base, "apg.ingest"), "apg.ingest");
             assert_eq!(repo_relative_identity(base, "@co/ui.src"), "@co/ui.src");
@@ -2128,8 +2197,11 @@ mod tests {
                 repo_relative_identity(base, "/repo/a/./b/../c.rs"),
                 "a/c.rs"
             );
-            // No `..` can survive: an escaping relative path falls back.
+            // No `..` can survive: an escaping relative path falls back to its
+            // file name (the checkout component never leaks into an identity).
             assert_eq!(repo_relative_identity(base, "../etc/passwd"), "passwd");
+            // A foreign absolute path outside the base also keeps the fallback.
+            assert_eq!(repo_relative_identity(base, "/other/repo"), "repo");
             let out = repo_relative_identity(base, "/repo/../etc/passwd");
             assert!(!out.starts_with('/'), "no leading slash: {out}");
             assert!(!out.split('/').any(|c| c == ".."), "no .. segment: {out}");
@@ -2304,6 +2376,97 @@ mod tests {
             );
             // An empty scope stays empty — never a bare `<language>.` root.
             assert_eq!(rooted_scope("go", "", base), "");
+        }
+
+        /// apg-0.17.0 phase-03 task-9: the structural streams' identity chain
+        /// wires [`classify_code_type`] + [`root_module_fqn`] +
+        /// [`render_function_fqns`] over every structural stream id — a
+        /// structural module roots under its stream id (`md.`/`sh.`/`yaml.` at
+        /// the repo root; `yaml.sub/dir` for a subdirectory), a declaration
+        /// renders `parent.name` off the rooted parent, the code_type is
+        /// `config` (`md` keeps `docs`), and an empty repo-root identity renders
+        /// the bare `md.` root. Pure in-memory: two-plus units wired, no I/O.
+        #[test]
+        fn structural_streams_root_render_and_classify() {
+            let base = Path::new("/repo");
+            // The repo-root module of every structural stream is its bare root;
+            // a subdirectory identity roots under the stream id.
+            for lang in [
+                "md",
+                "sh",
+                "yaml",
+                "json",
+                "toml",
+                "xml",
+                "dockerfile",
+                "makefile",
+                "ini",
+                "misc",
+            ] {
+                assert_eq!(root_module_fqn(lang, "", base), format!("{lang}."));
+                assert_eq!(
+                    root_module_fqn(lang, "sub/dir", base),
+                    format!("{lang}.sub/dir")
+                );
+            }
+            // An absolute directory identity under the base renders repo-relative
+            // and roots under its stream id (the repo base itself is the empty
+            // repo-root identity → the bare root, never a checkout basename).
+            assert_eq!(root_module_fqn("yaml", "/repo/ci", base), "yaml.ci");
+            assert_eq!(root_module_fqn("md", "/repo", base), "md.");
+
+            // A declaration under a rooted structural module renders
+            // `parent.name`: a shell function in the repo-root `run.sh` renders
+            // `sh.run.sh.hello` (the emitter file-roots the Struct, so the
+            // parent is the rooted file identity).
+            let sh_parent = root_module_fqn("sh", "/repo/run.sh", base);
+            assert_eq!(sh_parent, "sh.run.sh");
+            let decls = [fd("n1", &sh_parent, "hello", &[], "/repo/run.sh")];
+            assert_eq!(fqns(&decls)["n1"], "sh.run.sh.hello");
+            // The root module and the file-rooted declaration coexist.
+            let md_parent = root_module_fqn("md", "/repo/README.md", base);
+            let md_decls = [fd("n2", &md_parent, "intro", &[], "/repo/README.md")];
+            assert_eq!(fqns(&md_decls)["n2"], "md.README.md.intro");
+
+            // The code_type: non-md structural streams are `config`, Markdown
+            // keeps its built-in `docs` (no config present).
+            for lang in [
+                "sh",
+                "yaml",
+                "json",
+                "toml",
+                "xml",
+                "dockerfile",
+                "makefile",
+                "ini",
+                "misc",
+            ] {
+                assert_eq!(
+                    crate::classify::classify_code_type("run.sh", "sh.run.sh", lang, None),
+                    "config",
+                    "{lang} must classify config"
+                );
+            }
+            assert_eq!(
+                crate::classify::classify_code_type("README.md", "md.README.md", "md", None),
+                "docs",
+                "Markdown keeps docs"
+            );
+            // With the init-style config present the structural decision is the
+            // same (the config's structural `code_type` default).
+            let cfg = crate::classify::ApgConfig {
+                default: "src".to_string(),
+                types: Vec::new(),
+                structural: Some(crate::classify::StructuralScope::default()),
+            };
+            assert_eq!(
+                crate::classify::classify_code_type("ci.yml", "yaml.ci.yml", "yaml", Some(&cfg)),
+                "config"
+            );
+            assert_eq!(
+                crate::classify::classify_code_type("README.md", "md.README.md", "md", Some(&cfg)),
+                "docs"
+            );
         }
     }
 
@@ -3548,7 +3711,26 @@ mod tests {
             use crate::testutil::{ApgCommand, Repo};
 
             let repo = Repo::new("p3-splice-e2e");
-            let home = repo.root.join("home");
+            // The isolated HOME lives OUTSIDE the scanned repo. Every scan runs
+            // the Go frontend, and the `go` toolchain writes its telemetry (and
+            // may write other caches) under HOME; with HOME inside `repo.root`
+            // those files are new, untracked members of the scanned tree, so a
+            // later scan treats them as changed `misc` targets — spawning a
+            // FILTERED misc stream and skipping its scaffolding replay, which
+            // makes the splice assembly diverge from a full rebuild. Keeping
+            // HOME outside keeps every scan looking at the same tree.
+            let home = repo
+                .root
+                .parent()
+                .expect("the repo has a parent scratch dir")
+                .join(format!(
+                    "{}-home-{}",
+                    repo.root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    std::process::id()
+                ));
             std::fs::create_dir_all(&home).unwrap();
             // A real Go module: `b` depends on `a`, `c` depends on `b`.
             repo.write("go.mod", "module scratch\n\ngo 1.21\n");
@@ -3629,8 +3811,29 @@ mod tests {
             // Snapshot the spliced pair, then FORCE a full rebuild of the SAME tree:
             // clear the DB, the export AND the shared fact cache so neither the
             // fast-path nor win-B reuse can engage.
-            let spliced_db = repo.root.join("spliced.lbug");
-            let spliced_jsonl = repo.root.join("spliced.jsonl");
+            //
+            // The snapshots live OUTSIDE the scanned tree: the bundled structural
+            // scanner graphs every untracked, non-gitignored file it walks, so a
+            // `spliced.lbug`/`spliced.jsonl` written inside `repo.root` would be
+            // graphed by the full rebuild but not by the splice snapshot that
+            // predates it — the oracle would then compare two different trees.
+            // The parent scratch dir is outside the scan root, so both scans see
+            // exactly the same tree.
+            let snapshot_dir = repo
+                .root
+                .parent()
+                .expect("the repo has a parent scratch dir")
+                .join(format!(
+                    "{}-splice-snapshot-{}",
+                    repo.root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    std::process::id()
+                ));
+            std::fs::create_dir_all(&snapshot_dir).unwrap();
+            let spliced_db = snapshot_dir.join("spliced.lbug");
+            let spliced_jsonl = snapshot_dir.join("spliced.jsonl");
             std::fs::copy(&db_path, &spliced_db).unwrap();
             std::fs::copy(&jsonl_path, &spliced_jsonl).unwrap();
             std::fs::remove_file(&db_path).unwrap();
@@ -3790,6 +3993,8 @@ mod tests {
                 "the round-tripped export must reproduce the scan_meta line"
             );
 
+            let _ = std::fs::remove_dir_all(&home);
+            let _ = std::fs::remove_dir_all(&snapshot_dir);
             let _ = std::fs::remove_dir_all(&repo.root);
         }
     }

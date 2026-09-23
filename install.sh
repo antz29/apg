@@ -15,7 +15,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user go rust
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,rust
 #
-#   # Install everything (scanner + all 8 frontends):
+#   # Install everything (scanner + all 7 frontends):
 #   curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
 #
 # Layout (mirrors the brew formula): the real binary lives in
@@ -42,7 +42,7 @@ raw_frontends=""
 install_all=0
 components=""
 
-ALL_FRONTENDS="cpp go rust csharp java ts py md"
+ALL_FRONTENDS="cpp go rust csharp java ts py"
 
 usage() {
     cat <<'EOF'
@@ -52,7 +52,7 @@ Installs apg and scanner frontends for Linux from GitHub releases.
 Components can be installed individually or all together.
 
 Components:
-  scanner         The core apg CLI (default if none specified)
+  scanner         The core apg CLI + bundled structural scanner (default if none specified)
   go              Go scanner frontend (gofrontend)
   rust            Rust scanner frontend (rustfrontend)
   cpp             C++ scanner frontend (cppfrontend)
@@ -60,7 +60,6 @@ Components:
   java            Java scanner frontend (java-classes)
   ts              TypeScript scanner frontend (tsfrontend)
   py              Python scanner frontend (pyfrontend)
-  md              Markdown scanner frontend (mdfrontend)
   all             Core scanner + all frontends
 
 Options:
@@ -106,9 +105,8 @@ normalize_component() {
         java | apg-java) echo "java" ;;
         ts | typescript | apg-ts) echo "ts" ;;
         py | python | apg-py) echo "py" ;;
-        md | markdown | apg-md) echo "md" ;;
         all) echo "all" ;;
-        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, py, md, all)" ;;
+        *) die "unknown component: $1 (valid: scanner, go, rust, cpp, csharp, java, ts, py, all)" ;;
     esac
 }
 
@@ -184,7 +182,7 @@ if [ "$uninstall" -eq 1 ]; then
     for c in $components; do
         case "$c" in
             scanner)
-                rm -f "$real_bin" "$wrapper"
+                rm -f "$real_bin" "$wrapper" "$frontends_dir/structfrontend"
                 echo "Removed scanner from ${prefix}."
                 ;;
             cpp)
@@ -214,10 +212,6 @@ if [ "$uninstall" -eq 1 ]; then
             py)
                 rm -f "$frontends_dir/pyfrontend"
                 echo "Removed Python frontend."
-                ;;
-            md)
-                rm -f "$frontends_dir/mdfrontend"
-                echo "Removed Markdown frontend."
                 ;;
         esac
     done
@@ -371,6 +365,13 @@ if [ "$target_scanner" -eq 1 ]; then
     [ -x "$work/extract_scanner/apg" ] || die "${tarball} does not contain an executable 'apg'"
 
     install -m 0755 "$work/extract_scanner/apg" "$real_bin"
+
+    # The base bundle also ships the bundled structural scanner (ONE binary
+    # serving the `md` stream plus every per-format structural stream and the
+    # residual `misc`); install it into the shared frontends dir.
+    [ -x "$work/extract_scanner/structfrontend" ] || die "${tarball} does not contain 'structfrontend'"
+    install -m 0755 "$work/extract_scanner/structfrontend" "$frontends_dir/structfrontend"
+
     {
         printf '#!/bin/sh\n'
         printf 'export APG_FRONTEND_DIR="%s"\n' "$frontends_dir"
@@ -421,10 +422,6 @@ for f in $target_frontends; do
             [ -x "$work/extract_${f}/pyfrontend" ] || die "${tarball} does not contain 'pyfrontend'"
             install -m 0755 "$work/extract_${f}/pyfrontend" "$frontends_dir/pyfrontend"
             ;;
-        md)
-            [ -x "$work/extract_${f}/mdfrontend" ] || die "${tarball} does not contain 'mdfrontend'"
-            install -m 0755 "$work/extract_${f}/mdfrontend" "$frontends_dir/mdfrontend"
-            ;;
     esac
 
     installed_components="${installed_components}${installed_components:+, }${f}"
@@ -461,7 +458,6 @@ for lang in $ALL_FRONTENDS; do
         java) [ -d "$frontends_dir/java-classes" ] && present=1 ;;
         ts) [ -d "$frontends_dir/tsfrontend" ] && present=1 ;;
         py) [ -x "$frontends_dir/pyfrontend" ] && present=1 ;;
-        md) [ -x "$frontends_dir/mdfrontend" ] && present=1 ;;
     esac
     if [ "$present" -eq 1 ]; then
         installed_langs="${installed_langs}${installed_langs:+ }$lang"
@@ -469,6 +465,14 @@ for lang in $ALL_FRONTENDS; do
         missing_langs="${missing_langs}${missing_langs:+ }$lang"
     fi
 done
+
+# The base bundle ships the bundled structural scanner (one binary serving the
+# `md` stream plus every per-format structural stream and the residual `misc`).
+if [ -x "$frontends_dir/structfrontend" ]; then
+    bundled_structural="present"
+else
+    bundled_structural="missing"
+fi
 
 # Language-specific warnings
 case " $installed_langs " in
@@ -496,6 +500,7 @@ apg ${release} (${installed_components:-no changes}) installed to ${prefix}.
   Wrapper:   ${wrapper}
   Frontends: ${frontends_dir}
              Installed: ${installed_langs:-none}
+             Bundled:   structural scanner (${bundled_structural})
 EOF
 
 if [ -n "$missing_langs" ]; then

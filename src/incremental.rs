@@ -569,20 +569,55 @@ pub const CPP_EXTENSIONS: &[&str] = &[
 /// per-language granularity key for the fact store.
 ///
 /// The returned token is the **scan language id** (`go`, `java`, `rust`, `ts`,
-/// `csharp`, `py`, `cpp`, `md`) so it can be compared directly against the
-/// scan's detected/requested language ids — `apg.targets_for_language` filters
-/// the win-B target set with exactly this comparison. `.py`/`.pyi` therefore
-/// return `"py"`, NOT `"python"` (the scan-side vocabulary is `py`: the
-/// detector candidate, `frontend_cmd`, `id_prefix_for` and the `lang_switch`
-/// record all use it). The same token is the per-file/per-module label in the
-/// fact store and module scaffolding (`ReuseFile.lang`, `FileFragment`), where
-/// it is only ever compared against other `language_of`-derived labels, so the
-/// token rename is internally consistent.
+/// `csharp`, `py`, `cpp`, `md`, and the bundled structural scanner's `sh`,
+/// `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `misc`) so
+/// it can be compared directly against the scan's detected/requested language
+/// ids — `apg.targets_for_language` filters the win-B target set with exactly
+/// this comparison. `.py`/`.pyi` therefore return `"py"`, NOT `"python"` (the
+/// scan-side vocabulary is `py`: the detector candidate, `frontend_cmd`,
+/// `id_prefix_for` and the `lang_switch` record all use it). The same token is
+/// the per-file/per-module label in the fact store and module scaffolding
+/// (`ReuseFile.lang`, `FileFragment`), where it is only ever compared against
+/// other `language_of`-derived labels, so the token rename is internally
+/// consistent.
+///
+/// The structural mappings mirror the bundled scanner's `stream_for_path`
+/// taxonomy exactly (its filename-keyed formats included), so each structural
+/// stream gets its own changed-file target set and `should_spawn_language` no
+/// longer skips a changed structural stream (changed structural facts were
+/// silently dropped before). The residual — an unknown extension, a dotfile,
+/// a fixture or a binary — is the `misc` stream, matching the scanner's
+/// residual, so every tracked file is graphed.
 pub fn language_of(rel: &str) -> &'static str {
-    let ext = Path::new(rel)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let path = Path::new(rel);
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    // Filename-keyed structural formats first: Dockerfile/Makefile and the
+    // extension-less config dotfiles carry no (or an ambiguous) extension.
+    // Mirrors `structfrontend`'s `stream_for_path`.
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if name == "cargo.lock" {
+        return "toml";
+    }
+    if name == "package-lock.json" {
+        return "json";
+    }
+    if name == "dockerfile" || name.starts_with("dockerfile.") || name.ends_with(".dockerfile") {
+        return "dockerfile";
+    }
+    if name == "makefile" || name == "gnumakefile" || name.ends_with(".mk") {
+        return "makefile";
+    }
+    if name == ".editorconfig"
+        || name == ".gitconfig"
+        || name == ".env"
+        || name.starts_with(".env.")
+    {
+        return "ini";
+    }
     match ext {
         "go" => "go",
         "java" => "java",
@@ -592,7 +627,13 @@ pub fn language_of(rel: &str) -> &'static str {
         "py" | "pyi" => "py",
         _ if CPP_EXTENSIONS.contains(&ext) => "cpp",
         "md" | "markdown" => "md",
-        _ => "other",
+        "sh" | "bash" | "zsh" | "ksh" => "sh",
+        "yaml" | "yml" => "yaml",
+        "json" => "json",
+        "toml" => "toml",
+        "xml" => "xml",
+        "ini" | "cfg" | "conf" | "properties" | "env" => "ini",
+        _ => "misc",
     }
 }
 
@@ -643,7 +684,40 @@ mod tests {
             assert_eq!(language_of("x.tpp"), "cpp");
             assert_eq!(language_of("x.ipp"), "cpp");
             assert_eq!(language_of("x.md"), "md");
-            assert_eq!(language_of("x.unknown"), "other");
+            // apg-0.17.0 phase-03 task-17: the structural stream mappings mirror
+            // the bundled scanner's `stream_for_path` taxonomy — extension-keyed
+            // and filename-keyed — so each structural stream gets its own
+            // changed-file target set.
+            assert_eq!(language_of("run.sh"), "sh");
+            assert_eq!(language_of("run.bash"), "sh");
+            assert_eq!(language_of("run.zsh"), "sh");
+            assert_eq!(language_of("ci.yaml"), "yaml");
+            assert_eq!(language_of("ci.yml"), "yaml");
+            assert_eq!(language_of("data.json"), "json");
+            assert_eq!(language_of("package-lock.json"), "json");
+            assert_eq!(language_of("config.toml"), "toml");
+            assert_eq!(language_of("Cargo.lock"), "toml");
+            assert_eq!(language_of("pom.xml"), "xml");
+            assert_eq!(language_of("Dockerfile"), "dockerfile");
+            assert_eq!(language_of("app.dockerfile"), "dockerfile");
+            assert_eq!(language_of("Makefile"), "makefile");
+            assert_eq!(language_of("makefile"), "makefile");
+            assert_eq!(language_of("GNUmakefile"), "makefile");
+            assert_eq!(language_of("rules.mk"), "makefile");
+            assert_eq!(language_of("app.ini"), "ini");
+            assert_eq!(language_of("app.cfg"), "ini");
+            assert_eq!(language_of("app.conf"), "ini");
+            assert_eq!(language_of("build.properties"), "ini");
+            assert_eq!(language_of(".editorconfig"), "ini");
+            assert_eq!(language_of(".gitconfig"), "ini");
+            assert_eq!(language_of(".env"), "ini");
+            assert_eq!(language_of(".env.local"), "ini");
+            // The residual — unknown extension, extension-less, dotfile, fixture
+            // or binary — is the `misc` stream, matching the scanner's residual.
+            assert_eq!(language_of("x.unknown"), "misc");
+            assert_eq!(language_of("LICENSE"), "misc");
+            assert_eq!(language_of(".gitignore"), "misc");
+            assert_eq!(language_of("fixtures/blob.bin"), "misc");
         }
 
         #[test]

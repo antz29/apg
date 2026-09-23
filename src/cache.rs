@@ -291,7 +291,13 @@ fn walk_files(
             }
             walk_files(base, &p, repo, out);
         } else {
-            if name.starts_with(".git") {
+            // `.git` is the metadata DIR in a primary checkout (already pruned
+            // by `SKIP_DIRS`) but a FILE in a linked worktree; skip exactly that
+            // entry. A tracked `.gitignore`/`.gitattributes`/`.gitmodules` is
+            // ordinary scanned content — the structural `misc` stream graphs it
+            // — so it MUST stay in the manifest, or the cached/incremental/splice
+            // assemblies drop its File fact and the `misc.` scaffolding.
+            if name == ".git" {
                 continue;
             }
             if repo.is_some_and(|r| r.status_should_ignore(&p).unwrap_or(false)) {
