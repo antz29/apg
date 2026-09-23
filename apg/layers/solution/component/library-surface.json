@@ -15,6 +15,11 @@
       "kind": "realised-by",
       "source": "domain.entity.source-module",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.library-surface",
+      "properties": {}
     }
   ]
 }
