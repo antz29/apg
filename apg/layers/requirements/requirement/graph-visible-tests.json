@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "graph-visible-tests",
+  "body": "A module's tests are discoverable through the code graph. Relocated tests carry a path the graph classifies as test code (a `tests` path segment: `src/<module>/tests.rs` and `tests/**`), so an agent can find the tests for a symbol and select a tier by `code_type` instead of guessing from an oversized `main.rs` whose inline tests are classified as `src`.",
+  "properties": {
+    "feature": "test-layout"
+  },
+  "out": [],
+  "in": []
+}
