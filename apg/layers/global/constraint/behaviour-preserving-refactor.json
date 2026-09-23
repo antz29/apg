@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "behaviour-preserving-refactor",
+  "body": "The cleanup is a refactor: it moves code and tests and splits files, but changes no observable behaviour of the `apg` binary or of its library API. The existing test suite is the proof — every test that passes before the cleanup passes after it, with the same assertions and expected results; no test is weakened, deleted, or rewritten to accommodate a behaviour change. A change in behaviour is a different change-set, not this one.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
