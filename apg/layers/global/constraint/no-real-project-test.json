@@ -5,5 +5,11 @@
   "body": "A candidate binary under test is never pointed at a real project — not the apg repo, not any checkout a developer cares about. Every e2e scenario exercises it against a throwaway git repo under `/tmp`, so `init`/`scan`/`project`/`merge` mutations never touch real state. The apg repo's own graph is rebuilt only by the installed (released) binary, never by an in-tree candidate build.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "global.note.agents-md-test-laws-drift",
+      "properties": {}
+    }
+  ]
 }

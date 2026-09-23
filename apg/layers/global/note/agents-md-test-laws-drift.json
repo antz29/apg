@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "global.constraint.self-contained-tests",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "global.constraint.no-real-project-test",
+      "properties": {}
     }
   ],
   "in": []
