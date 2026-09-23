@@ -2,9 +2,9 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "module-size-scope",
-  "body": "Scope and observable completion for the budget: it applies to first-party Rust production source under `src/` (excluding `vendor/` and generated files); test files (`src/<module>/tests.rs`, `tests/**`) are excluded, and so are the per-language frontend crates in this change-set. Completion is observable by enumerating first-party production source files and their line counts and finding none over the budget (a note may justify an exception).",
+  "body": "Scope and observable completion for the decomposition law. It applies repo-wide over first-party source, excluding vendored code (`src/cpplib/vendor/**`) and testdata (`testdata/**`): the root Rust crate (`src/*.rs` + `build.rs`) and the eight frontend crates — `structlib` (`src/structlib/src/main.rs`), `pylib` (`src/pylib/src/main.rs`), `rustlib` (`src/rustlib/src/main.rs`), `cpplib` (`src/cpplib/main.cpp` + its non-vendor sources), `javalib` (`src/javalib/CallGraphBuilder.java`), `golib` (`src/golib/main.go`), `csharplib` (`src/csharplib/Program.cs`), `tslib` (`src/tslib/scanner.ts`). Test files (`src/<module>/tests.rs`, `tests/**`) are not production source and are accounted separately, as are the frontend crates' own test files. Completion is observable by review of the module set — module names and responsibilities, and a duplicated-symbol inventory — not by a line-count threshold; the ~400-line figure is a signal (`domain.value.module-size-signal`), never a target, and a split that hits the number without improving cohesion is itself a violation.",
   "properties": {
-    "attaches-to": "requirements.requirement.bounded-module-size"
+    "attaches-to": "requirements.requirement.decomposed-source-modules"
   },
   "out": [],
   "in": []
