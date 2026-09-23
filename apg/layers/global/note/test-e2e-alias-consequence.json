@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "note",
+  "name": "test-e2e-alias-consequence",
+  "body": "feedback-3 (`global.constraint.test-tier-boundaries`): the constraint mandated e2e tests in top-level `tests/<module>_e2e.rs` integration crates but required no module nesting, while the `.cargo/config.toml` alias `test-e2e = \"test tests::e2e:: -- --ignored\"` selects by libtest path substring. A top-level integration crate's libtest paths are `<file_stem>::…`/`e2e::…`, never `tests::e2e::`, so the alias as written would select ZERO relocated e2e tests, leaving all 310 unreachable. [autonomous] Resolution: the constraint now requires each `tests/<module>_e2e.rs` crate to wrap its tests in a module named `e2e` (so libtest paths contain the `e2e::` segment) and pins the alias to `test-e2e = \"test e2e:: -- --ignored\"` — the same path-substring mechanism as the unit/int aliases, uniform across crates and preserving the four documented invocations. Plan consequence: the relocation must also edit `.cargo/config.toml` to the new alias; that file has no `File` node (like `Cargo.toml`, `scripts/gate.sh`, `apg/config.json`), so the plan-writer must schedule it as ungraphed config work.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
