@@ -5150,11 +5150,14 @@ mod tests {
         /// query, and `read`/`grep`/`glob` confirm and anchor a graph result or
         /// read artifacts the graph does not model; they never discover a graph
         /// fact. The navigator's rule names both artifact classes; 0.17.0 SHRINKS
-        /// the not-in-graph class to Ruby sources (`apg-ruby` is pending),
-        /// binaries and config-excluded paths, while the in-graph class now names
-        /// the tracked text/config/packaging files the bundled structural scanner
-        /// claims. `agent-builder.md` rule 5 makes every generated agent inherit
-        /// the ordering aligned to that shrunk boundary.
+        /// the not-in-graph class to "no symbols, not no node" — Ruby sources
+        /// (`apg-ruby` is pending) and binaries have no frontend, so they appear
+        /// only as residual `misc` `File` nodes with no Module/Struct/Function
+        /// facts, and only the config-scope / standard-exclusion paths have no
+        /// node at all; the in-graph class names the tracked
+        /// text/config/packaging files the bundled structural scanner claims.
+        /// `agent-builder.md` rule 5 makes every generated agent inherit the
+        /// ordering aligned to that shrunk boundary.
         #[test]
         #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
         fn graph_first_rule_stated_in_navigator_prompt_and_guide() {
@@ -5179,8 +5182,14 @@ mod tests {
                 );
             }
 
-            // The rule names both artifact classes.
-            for needle in ["In the graph:", "Not in the graph:"] {
+            // The rule names both artifact classes. The not-in-graph header now
+            // carries the corrected boundary inline — `Not in the graph (no
+            // symbols, not no node):` — so pin the parenthetical header, not the
+            // bare `Not in the graph:` prefix the reword no longer contains.
+            for needle in [
+                "In the graph:",
+                "Not in the graph (no symbols, not no node):",
+            ] {
                 assert!(
                     navigator.contains(needle),
                     "the navigator prompt's rule must name the `{needle}` artifact class"
@@ -5210,6 +5219,22 @@ mod tests {
                     "the navigator's shrunk not-in-graph class must name `{needle}`"
                 );
             }
+            // The corrected boundary is "no symbols, not no node": Ruby sources
+            // and binaries have no frontend, so they appear only as residual
+            // `misc` File nodes with no Module/Struct/Function facts; only
+            // config-scope / standard-exclusion paths have no node at all.
+            for needle in ["no symbols", "misc"] {
+                assert!(
+                    navigator.contains(needle),
+                    "the navigator's not-in-graph class must convey `{needle}` — the \
+                     residual `misc` File-node mechanism for frontend-less sources"
+                );
+            }
+            assert!(
+                navigator.contains("no Module/Struct/Function facts"),
+                "the navigator's not-in-graph class must state that the residual \
+                 `misc` File nodes carry no Module/Struct/Function facts"
+            );
 
             // AGENTS.md carries the same qualifier in the file-tool guidance
             // ("Other tools" and the "Read those files with read, grep, or bash"
@@ -5242,6 +5267,11 @@ mod tests {
                      shrunk not-in-graph boundary via `{needle}`"
                 );
             }
+            assert!(
+                builder.contains("no symbols"),
+                "agent-builder.md rule 5 must carry the same \"no symbols\" sense of \
+                 the shrunk not-in-graph boundary"
+            );
         }
 
         /// The coordinator-mediated feedback cycle is embedded in the shipped

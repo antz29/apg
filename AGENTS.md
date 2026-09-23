@@ -793,8 +793,10 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   also the tracked text/config/packaging files the bundled structural scanner
   claims (`Cargo.toml`, `install.sh`, `.github/workflows/release.yml`, Markdown,
   shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI and residual `misc`).
-  **Not in the graph:** Ruby sources (no frontend yet — `apg-ruby` is pending),
-  binaries, and paths excluded by the config scope (the structural scanner's
+  **Not in the graph (no symbols, not no node):** Ruby sources (no frontend yet
+  — `apg-ruby` is pending) and binaries have no frontend, so they appear only
+  as residual `misc` `File` nodes with no symbols. The only paths with no node
+  at all are those excluded by the config scope (the structural scanner's
   include/exclude globs, `--exclude-path`, and the `.gitignore`/`target`/
   `node_modules` prunes). The graph-first ordering above is unchanged: for a
   fact either class carries, query first.

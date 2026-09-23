@@ -105,9 +105,13 @@ no exceptions:
      structural scanner graphs (`Cargo.toml`/`Cargo.lock` (toml), `install.sh`
      (sh), `.github/workflows/release.yml` (yaml), `apg/config.json` and
      `opencode-suite/package.json` (json), `LICENSE` (misc)).
-   - **Not in the graph:** artifacts no scanner claims — Ruby sources
-     (`Formula/*.rb`; there is no Ruby frontend yet, `apg-ruby` is pending),
-     binaries, and any path the config scope (`apg/config.json`) excludes.
+   - **Not in the graph (no symbols, not no node):** Ruby sources
+     (`Formula/*.rb`; there is no Ruby frontend yet, `apg-ruby` is pending) and
+     binaries have no frontend, so they appear only as residual `misc` `File`
+     nodes with no Module/Struct/Function facts. The only genuinely unclaimed
+     paths — with no node at all — are those the config scope (`apg/config.json`)
+     and the standard exclusions (`.git`, `target`, `node_modules`,
+     `.gitignore`, `--exclude-path`) remove.
 2. **Never assume. Never guess. Never answer from memory.** You do not know
    this codebase until the graph tells you. Any claim about the code or its
    structure — symbols, callers, callees, type usage, containment, structure —
