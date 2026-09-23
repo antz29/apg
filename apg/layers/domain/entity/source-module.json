@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "source-module",
-  "body": "A first-party module of the apg root crate: one production source file plus the sibling test file that holds its unit/int tests. It is the unit of the module-size budget and of graph navigation — a symbol resolves to one source module, and the module's tests are reachable from it.",
+  "body": "A first-party module of an apg crate — the root crate or one of the eight frontend crates: one production source file plus the sibling test file that holds its unit/int tests. It is the unit of the decomposition law and of graph navigation — a symbol resolves to one source module, and the module's tests are reachable from it. Cohesive, single-responsibility modules with single-sourced shared logic are what the law requires; a module's size is only a signal (`domain.value.module-size-signal`) that its decomposition deserves review.",
   "properties": {
     "kind": "entity"
   },
