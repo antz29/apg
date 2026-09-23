@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "library-surface",
+  "body": "The crate-internal API of the apg root crate that tests outside the declaring module reach: the module tree and the functions/structs the inline tests currently call directly (`testutil` builders, `ingest::ingest`, `cache::CacheKey::compute`, `layers::read_node_file`, `plan_cmd::plan_verify_at`, …). It exists so white-box tests can move out of the source module tree without losing access to the code under test.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
