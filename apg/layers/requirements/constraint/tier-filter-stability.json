@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "tier-filter-stability",
+  "body": "The four documented cargo invocations must keep selecting the tiers they name after the layout change: `cargo test` (the default gate) selects unit+int only and cannot reach an e2e test; `cargo test-unit` selects only `tests::unit::`; `cargo test-int` selects only `tests::int::`; `cargo test-e2e` selects only the `#[ignore]`d `tests::e2e::` tier. A unit/int test that no longer sits under a `tests::unit::` / `tests::int::` path, or an e2e test reachable by a plain `cargo test`, is a violation.",
+  "properties": {
+    "attaches-to": "requirements.requirement.tier-separable-tests"
+  },
+  "out": [],
+  "in": []
+}
