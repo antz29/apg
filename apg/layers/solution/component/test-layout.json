@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.entity.test-harness",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.test-layout-relocation",
+      "properties": {}
     }
   ]
 }
