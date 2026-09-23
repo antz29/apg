@@ -81,6 +81,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.git",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd",
+      "properties": {}
     }
   ],
   "in": [
