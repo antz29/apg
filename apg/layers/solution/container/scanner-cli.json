@@ -51,6 +51,11 @@
       "kind": "contains",
       "target": "solution.component.test-layout",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg",
+      "properties": {}
     }
   ],
   "in": [
