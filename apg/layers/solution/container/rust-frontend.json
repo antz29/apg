@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.rust-crate-identity",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg-rustfrontend",
+      "properties": {}
     }
   ],
   "in": [
