@@ -5,5 +5,11 @@
   "body": "The indicative size of a first-party source file — roughly 400 lines of production code — used as a SIGNAL for decomposition review, never as a target. A file above the signal is a prompt to inspect whether its responsibilities are cohesive and whether it should be split; the number itself is not an acceptance threshold, and a change that splits a file to fall under it without improving cohesion is a violation of the decomposition law. Test code is accounted separately and does not count against the signal.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.decomposed-source-modules",
+      "properties": {}
+    }
+  ]
 }

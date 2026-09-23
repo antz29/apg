@@ -16,6 +16,11 @@
       "kind": "drives",
       "target": "domain.entity.source-module",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.module-size-signal",
+      "properties": {}
     }
   ],
   "in": [
