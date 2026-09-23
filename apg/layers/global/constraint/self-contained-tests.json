@@ -5,5 +5,11 @@
   "body": "The whole test suite is self-contained: every e2e scenario builds its own scratch `/tmp` git repo (or synthetic `target/`/DB tree) and drives the candidate binary against it. No test reads `$HOME`, an external checkout, or any other developer-local path, so `cargo test-e2e` needs no `cargo build --release` — a debug `cargo build` is enough.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "global.note.agents-md-test-laws-drift",
+      "properties": {}
+    }
+  ]
 }
