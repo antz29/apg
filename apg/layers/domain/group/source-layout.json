@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "source-layout",
+  "body": "The layout of the apg root crate: how its production source is divided into modules, how its tests are organized into tiers and where they live, and the library surface that makes the crate-internal API reachable from tests outside the declaring module. These are the structural concerns the cleanup bounds and restructures.",
+  "properties": {
+    "attribute": "core"
+  },
+  "out": [],
+  "in": []
+}
