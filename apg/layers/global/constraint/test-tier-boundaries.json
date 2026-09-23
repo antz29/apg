@@ -10,6 +10,11 @@
       "kind": "details",
       "source": "global.note.agents-md-test-laws-drift",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "global.note.test-e2e-alias-consequence",
+      "properties": {}
     }
   ]
 }
