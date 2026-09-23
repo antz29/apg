@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.container.structural-scanner",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.py-frontend",
+      "properties": {}
     }
   ],
   "in": [
