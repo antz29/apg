@@ -68,6 +68,11 @@
       "kind": "details",
       "source": "solution.note.structural-scanner-anchor-relocation",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.source-layout",
+      "properties": {}
     }
   ]
 }
