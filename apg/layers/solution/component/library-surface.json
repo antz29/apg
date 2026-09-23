@@ -4,7 +4,13 @@
   "name": "library-surface",
   "body": "The root crate's library target: `src/lib.rs` owns the module tree and exposes the crate-internal API the tests reach, and `src/main.rs` becomes a thin binary that calls into it. It realises the `library-surface` and `source-module` domain entities and is the prerequisite for moving the e2e tests into a top-level `tests/` integration crate.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
