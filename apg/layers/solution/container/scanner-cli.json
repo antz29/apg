@@ -66,6 +66,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.load",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache",
+      "properties": {}
     }
   ],
   "in": [
