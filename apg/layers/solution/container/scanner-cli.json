@@ -76,6 +76,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.delta",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git",
+      "properties": {}
     }
   ],
   "in": [
