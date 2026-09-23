@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.bounded-module-size",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.testable-library-surface",
+      "properties": {}
     }
   ]
 }
