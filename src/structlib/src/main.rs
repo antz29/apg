@@ -46,11 +46,16 @@ use unicode_normalization::UnicodeNormalization;
 const EXCLUDED_DIRS: &[&str] = &["target", "node_modules", ".git", ".worktrees"];
 
 /// The code-frontend extensions the structural scanner never claims: a file a
-/// code frontend parses stays that frontend's. `.c` is deliberately absent —
-/// only the extensions below are code-claimed, so an unlisted `.c` file falls
-/// to the residual `misc` stream.
+/// code frontend parses stays that frontend's. This is the UNION of every
+/// shipped code frontend's accepted extensions — Rust/Go/Java/C#/Python
+/// (`rs go java cs py pyi`), C++'s sources and headers
+/// (`cpp cc cxx c++ h hpp hh hxx tpp ipp`), and the unified JS/TS module
+/// variants (`ts tsx mts cts js jsx mjs cjs`). `.c` is deliberately absent —
+/// the C++ frontend does not claim it, so a tracked `.c` file falls to the
+/// residual `misc` stream.
 const CODE_EXTENSIONS: &[&str] = &[
-    "rs", "go", "java", "cpp", "cc", "h", "ts", "tsx", "js", "jsx", "cs", "py", "pyi",
+    "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp", "ipp", "ts",
+    "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "py", "pyi",
 ];
 
 /// Unified JSONL records (SPEC §2). `id` is a scanner-local opaque counter; the
@@ -2149,9 +2154,14 @@ mod tests {
         #[test]
         fn claim_and_scope_predicates() {
             // The complete extension→stream routing, including the code-extension
-            // skip and the residual `misc`.
+            // skip and the residual `misc`. The skip list is the UNION of every
+            // shipped code frontend's extensions: the C++ extras
+            // (`.cxx/.c++/.hpp/.hh/.hxx/.tpp/.ipp`) and the unified JS/TS module
+            // variants (`.mts/.cts/.mjs/.cjs`) are code-claimed too, while `.c`
+            // stays residual `misc` (the C++ frontend does not claim it).
             let code = [
-                "rs", "go", "java", "cpp", "cc", "h", "ts", "tsx", "js", "jsx", "cs", "py", "pyi",
+                "rs", "go", "java", "cpp", "cc", "cxx", "c++", "h", "hpp", "hh", "hxx", "tpp",
+                "ipp", "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "cs", "py", "pyi",
             ];
             for ext in code {
                 assert_eq!(
@@ -2441,6 +2451,8 @@ mod tests {
                 ("src/main.rs", None),
                 ("src/app.go", None),
                 ("src/lib.ts", None),
+                ("src/widget.hpp", None),
+                ("src/esm.mjs", None),
                 ("README.md", Some("md")),
                 ("scripts/build.sh", Some("sh")),
                 ("ci.yml", Some("yaml")),
