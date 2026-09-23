@@ -262,8 +262,9 @@ never a mutation place.
    or structure question — discovery and enumeration included — the first tool
    call is a graph query, and `read`/`grep`/`glob` confirm and anchor a graph
    result (open the returned `path` at its `start_line`/`end_line`) or read
-   artifacts the graph does not model; they never discover a fact the graph
-   carries).
+   artifacts the graph does not model — the shrunk not-in-graph class is now
+   Ruby sources pending `apg-ruby`, binaries, and config-excluded paths; they
+   never discover a fact the graph carries).
 6. **Permission style — deny-by-default, no chaining.** Every agent gets a
    bash block that denies `*` and allows only exact command patterns. **No
    pattern may contain `&&`, `|`, `;`, `$(`/`)`, or redirection** — a chained

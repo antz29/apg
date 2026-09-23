@@ -5149,10 +5149,12 @@ mod tests {
         /// discovery and enumeration included — the first tool call is a graph
         /// query, and `read`/`grep`/`glob` confirm and anchor a graph result or
         /// read artifacts the graph does not model; they never discover a graph
-        /// fact. The navigator's rule names both artifact classes (in-graph:
-        /// scanned source, the scanned Markdown, `build.rs`; not-in-graph: the
-        /// build/packaging manifests and scripts), and `agent-builder.md` rule 5
-        /// makes every generated agent inherit the ordering.
+        /// fact. The navigator's rule names both artifact classes; 0.17.0 SHRINKS
+        /// the not-in-graph class to Ruby sources (`apg-ruby` is pending),
+        /// binaries and config-excluded paths, while the in-graph class now names
+        /// the tracked text/config/packaging files the bundled structural scanner
+        /// claims. `agent-builder.md` rule 5 makes every generated agent inherit
+        /// the ordering aligned to that shrunk boundary.
         #[test]
         #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
         fn graph_first_rule_stated_in_navigator_prompt_and_guide() {
@@ -5185,6 +5187,30 @@ mod tests {
                 );
             }
 
+            // 0.17.0 SHRINKS the boundary. The in-graph class must name the
+            // tracked text/config/packaging files the bundled structural scanner
+            // claims (no longer a "not in the graph" class).
+            for needle in [
+                "text/config/packaging",
+                "Cargo.toml",
+                "install.sh",
+                "release.yml",
+            ] {
+                assert!(
+                    navigator.contains(needle),
+                    "the navigator's in-graph class must name `{needle}` — a tracked \
+                     text/config/packaging file the structural scanner claims"
+                );
+            }
+            // …and the not-in-graph class shrinks to Ruby sources (no frontend
+            // yet, `apg-ruby` pending), binaries and config-excluded paths.
+            for needle in ["Ruby", "apg-ruby", "binaries", "config scope"] {
+                assert!(
+                    navigator.contains(needle),
+                    "the navigator's shrunk not-in-graph class must name `{needle}`"
+                );
+            }
+
             // AGENTS.md carries the same qualifier in the file-tool guidance
             // ("Other tools" and the "Read those files with read, grep, or bash"
             // line): file tools confirm/anchor graph results or read non-modelled
@@ -5207,6 +5233,15 @@ mod tests {
                 builder.contains("graph-first, then-file-read ordering"),
                 "agent-builder.md rule 5 must require generated agents to inherit the graph-first ordering"
             );
+            // …aligned to the shrunk 0.17.0 not-in-graph boundary, so a generated
+            // agent inherits the same artifact-class list.
+            for needle in ["Ruby", "apg-ruby", "binaries"] {
+                assert!(
+                    builder.contains(needle),
+                    "agent-builder.md rule 5 must align generated agents to the \
+                     shrunk not-in-graph boundary via `{needle}`"
+                );
+            }
         }
 
         /// The coordinator-mediated feedback cycle is embedded in the shipped

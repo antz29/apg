@@ -98,13 +98,16 @@ no exceptions:
    the `path` a query returned, at its `start_line`/`end_line`) or read
    artifacts the graph does not model — reach for them second, and name which
    artifact is outside the graph when you do.
-   - **In the graph:** all scanned source (`src/**`), the scanned Markdown
-     (`AGENTS.md`/`README.md` and `opencode-suite/agents/*.md`, each scanned by
-     the Markdown frontend and present as a File node), and `build.rs`.
-   - **Not in the graph:** build/packaging manifests and scripts —
-     `Cargo.toml`/`Cargo.lock`, `go.mod`/`go.sum`,
-     `package.json`/`package-lock.json`, `*.csproj`, `Formula/*.rb`,
-     `install.sh`, `.cargo/config.toml`, `.github/**`.
+   - **In the graph:** every tracked file the code frontends or the bundled
+     structural scanner claims — all scanned source (`src/**`, `build.rs`), the
+     scanned Markdown (`AGENTS.md`/`README.md` and `opencode-suite/**`, each
+     present as a File node), and the tracked text/config/packaging files the
+     structural scanner graphs (`Cargo.toml`/`Cargo.lock` (toml), `install.sh`
+     (sh), `.github/workflows/release.yml` (yaml), `apg/config.json` and
+     `opencode-suite/package.json` (json), `LICENSE` (misc)).
+   - **Not in the graph:** artifacts no scanner claims — Ruby sources
+     (`Formula/*.rb`; there is no Ruby frontend yet, `apg-ruby` is pending),
+     binaries, and any path the config scope (`apg/config.json`) excludes.
 2. **Never assume. Never guess. Never answer from memory.** You do not know
    this codebase until the graph tells you. Any claim about the code or its
    structure — symbols, callers, callees, type usage, containment, structure —

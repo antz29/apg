@@ -2,20 +2,24 @@
 
 **Program graph scanner + LadybugDB query CLI for opencode.**
 
-`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, C#, Python, or
-Markdown), builds a program graph of its types, functions, and call/use
-relationships, and stores it in a LadybugDB graph database that you can query
-with Cypher from inside opencode.
+`apg` parses a codebase (Go, Java, C++, Rust, TypeScript, C#, Python), builds
+a program graph of its types, functions, and call/use relationships, and
+stores it in a LadybugDB graph database that you can query with Cypher from
+inside opencode. The bundled structural scanner also graphs the tracked
+text/config/packaging files the code frontends don't claim — Markdown, shell,
+YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, and residual files.
 
 ```
-Scanner (per language) → Rust ingestor → apg/.trans/db.lbug + apg/.trans/graph.jsonl
+Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug + apg/.trans/graph.jsonl
 ```
 
 ## Features
 
 - **Per-language scanner frontends** installed separately via brew — install
-  only the languages you scan (Go, Java, C++, Rust, TypeScript, C#, Python,
-  Markdown).
+  only the languages you scan (Go, Java, C++, Rust, TypeScript, C#, Python),
+  plus a **bundled structural scanner** in the base package that graphs the
+  tracked text/config/packaging files the code frontends don't claim (Markdown,
+  shell, YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, and residual files).
 - **Exact edges for Go, Java, Rust, TypeScript, and C#** — call resolution uses
   the compiler's type checker (go/types, javac, rust-analyzer, the official
   TypeScript compiler, or Roslyn); C++ is heuristic (tree-sitter), and
@@ -25,7 +29,8 @@ Scanner (per language) → Rust ingestor → apg/.trans/db.lbug + apg/.trans/gra
   language present and merges their graphs into a single `apg/.trans/db.lbug` (a Go
   backend + TS frontend repo is one database, not two).
 - **Everything is included** — tests, generated, and vendored code are scanned;
-  filter by `code_type` (`src`, `test`, `generated`, `external`) in queries.
+  filter by `code_type` (`src`, `test`, `generated`, `external`, and the
+  structural `config`/`docs`) in queries.
 - **`apg init`** installs an opencode tool suite (find symbols, list methods,
   trace callers/callees, map diff hunks, …), so you can query the graph from
   chat without writing Cypher.
@@ -40,9 +45,10 @@ Scanner (per language) → Rust ingestor → apg/.trans/db.lbug + apg/.trans/gra
 - [Homebrew](https://brew.sh/) (for the brew install)
 - [opencode](https://opencode.ai) (for the chat plugin)
 
-The `scanner` formula builds the `apg` binary; the language frontends are
+The `scanner` formula builds the `apg` binary and ships the bundled
+**structural scanner** (`structfrontend`); the per-language frontends are
 separate formulae (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`,
-`apg-csharp`, `apg-py`, `apg-md`). Install the base plus the frontends for the
+`apg-csharp`, `apg-py`). Install the base plus the frontends for the
 languages you scan. Prebuilt bottles (macOS
 arm64) are
 published to each GitHub release by CI; if no bottle matches your system,
@@ -57,11 +63,12 @@ stable toolchain (see [Building from source](#building-from-source)). A
 TypeScript repo's `node_modules` is always skipped, and workspace-package
 imports resolve even before `npm install`.
 
-The other four frontends need no runtime at scan time: the C++ frontend is a
+The other three frontends need no runtime at scan time: the C++ frontend is a
 native tree-sitter binary, the C# frontend (`apg-csharp`) is a self-contained
 single-file publish (its .NET SDK is build-time only), and the Python
-(`apg-py`) and Markdown (`apg-md`) frontends resolve from filesystem markers
-or plain text and never shell out. On Linux the base `apg` binary links
+(`apg-py`) frontend resolves from filesystem markers and never shells out. The
+bundled structural scanner is likewise self-contained and never shells out —
+it needs nothing on `PATH`. On Linux the base `apg` binary links
 OpenSSL dynamically, so `libssl.so.3` must be present (the installer warns if
 it is missing — see [below](#install-linux-curl--sh)).
 
@@ -80,7 +87,7 @@ ceiling.
 | TypeScript (`apg-ts`) | `node` + `npm ci` | `node` on `PATH`, spawned `node <dir>/scanner.mjs` | `typescript 5.9.3` |
 | C# (`apg-csharp`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file) | Roslyn `Microsoft.CodeAnalysis.CSharp 4.12.0` |
 | Python (`apg-py`) | stable Rust + network (git-pinned Ruff/ty crates) | none (filesystem markers, never shells out) | Ruff/ty tag `0.16.6` (`salsa 0.27`) |
-| Markdown (`apg-md`) | stable Rust + crates.io | none | `serde` / `serde_json` / `unicode-normalization` 0.1 |
+| Structural (`structfrontend`, in base `scanner`) | stable Rust + crates.io | none (self-contained binary, never shells out) | `serde` / `serde_json` / `unicode-normalization` 0.1 (no language-version ceiling) |
 
 ## Install (Homebrew)
 
@@ -93,8 +100,7 @@ brew install antz29/apg/scanner \
              antz29/apg/apg-rust \
              antz29/apg/apg-ts \
              antz29/apg/apg-csharp \
-             antz29/apg/apg-py \
-             antz29/apg/apg-md
+             antz29/apg/apg-py
 ```
 
 Install only the frontends you need:
@@ -140,7 +146,7 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 # Or use the --frontends flag:
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user --frontends go,ts
 
-# Install everything (scanner + all 8 frontends):
+# Install everything (scanner + all 7 frontends):
 curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s -- --user all
 ```
 
@@ -278,8 +284,8 @@ graph (see [Graph-native specs and plans](#graph-native-specs-and-plans)).
 
 Every row carries `fqn`, `path`, and `start_line`/`end_line` where relevant, so
 the agent can jump straight to source. All suite tools accept an optional
-`codeType` (`src`/`test`/`generated`/`external`); omitted = all code, matching
-the raw graph.
+`codeType` (`src`/`test`/`generated`/`external`, plus the structural
+`config`/`docs`); omitted = all code, matching the raw graph.
 
 ## Graph data model
 
@@ -321,6 +327,14 @@ roots are disjoint, so a cross-language collision (`rust.apg` vs `py.apg`) is
 impossible by construction. Files and foreign references are NOT rooted: a
 `File.fqn` is its repo-relative path (relative to the git toplevel, or the scan
 root outside a repo) and an `UnresolvedTarget` FQN stays verbatim.
+
+The bundled structural scanner contributes `File` nodes — and `Struct` nodes for
+the structures each format exposes (Markdown headings, shell functions, YAML
+keys, TOML tables, …) — for the tracked text/config/packaging files the code
+frontends don't claim. They are rooted under the structural stream ids (`md`,
+`sh`, `yaml`, `json`, `toml`, `xml`, `dockerfile`, `makefile`, `ini`, `misc`)
+and their `code_type` is `config`, except Markdown (`md`), which keeps the
+built-in `docs`.
 
 `start`/`end` are **0-based byte offsets**; `start_line`/`end_line` are
 **1-based inclusive line numbers**; `path` is the repo-relative source-file
@@ -396,10 +410,10 @@ node), `modifies`/`deletes` (existing code), `renames`/`moves` (`--fqn` source
 ## Configuration
 
 `apg/config.json` (or a legacy `apg.json` at the project root) customizes
-code-type classification. Built-in defaults per language (test/generated/
-external) apply when no config is present. For Rust: `test` = `*_test.rs` or a
-`test`/`tests` path segment; `generated` = `gen`/`generated` segment; `external`
-= `vendor`. Shape:
+code-type classification and the structural scanner's file scope. Built-in
+defaults per language (test/generated/external) apply when no config is
+present. For Rust: `test` = `*_test.rs` or a `test`/`tests` path segment;
+`generated` = `gen`/`generated` segment; `external` = `vendor`. Shape:
 
 ```json
 {
@@ -408,12 +422,29 @@ external) apply when no config is present. For Rust: `test` = `*_test.rs` or a
     { "name": "test", "globs": ["**/test/**", "**/*_test.go"], "names": ["Test*"] },
     { "name": "generated", "globs": ["**/*.pb.go", "**/gen/**"] },
     { "name": "external", "globs": ["vendor/**"] }
-  ]
+  ],
+  "structural": {
+    "include": ["docs/**", "src/**"],
+    "exclude": ["**/*.min.js"],
+    "code_type": "config"
+  }
 }
 ```
 
-First matching rule wins; otherwise `default`. `globs` match the full path;
-`names` match the node simple name or FQN.
+First matching `types` rule wins; otherwise `default`. `globs` match the full
+path; `names` match the node simple name or FQN.
+
+The optional **`structural`** section is orthogonal to `default`/`types`: it
+scopes *which files the bundled structural scanner claims* and the `code_type`
+it assigns them. `include`/`exclude` are globs matched against the repo-relative
+path (`*` matches any run including `/`, `?` a single character); an empty
+`include` claims everything the extension taxonomy routes, a non-empty `include`
+is an allowlist, and `exclude` always wins. The section is **on by default** —
+with no `structural` section, every tracked text/config/packaging file the code
+frontends don't claim is graphed. Structural records take the `code_type`
+`config` unless `code_type` overrides it — except Markdown (`md`), which keeps
+the built-in `docs` classification; a matching `types` rule still takes
+precedence over this structural fallback.
 
 ## Java projects
 
@@ -435,21 +466,23 @@ frontend), Go ≥ 1.25 (the Go frontend), `javac` 21 (the Java frontend),
 `node`/`npm` (the TypeScript frontend; `build.rs` runs `npm ci` in
 `src/tslib`), and a .NET SDK (the C# frontend; `build.rs` runs
 `dotnet publish`). Network is needed at build time to fetch the pinned
-rust-analyzer and Ruff/ty engine crates, `golang.org/x/tools`, and NuGet
-packages.
+rust-analyzer and Ruff/ty engine crates, `golang.org/x/tools`, the structural
+scanner's crates.io dependencies, and NuGet packages.
 
 The base binary does **not** bundle LadybugDB and needs no `cmake`: it links a
 **prebuilt static `liblbug`** (0.19.1, fetched from the LadybugDB release and
 pointed at with `LBUG_LIBRARY_DIR` / `LBUG_INCLUDE_DIR`) and links OpenSSL
 (`openssl@3` on macOS; `pkg-config` + `libssl-dev` on Linux) dynamically. The
 base scanner's build deps are therefore Rust + network + that prebuilt static
-library; at scan time it needs nothing.
+library; at scan time it needs nothing. The bundled structural scanner
+(`src/structlib`, a standalone non-workspace crate) is built the same way and
+is equally self-contained at scan time.
 
 The toolchains that compile or stage a frontend are pinned in repo-visible
 files consumed by every build path that compiles a frontend, exact where the
 mechanism can enforce it: Rust `1.98.1` (the repo-root `rust-toolchain.toml`,
 whose `channel` rustup's parent-walk applies to the main crate and all three
-cargo frontend crates — `src/rustlib`, `src/pylib`, `src/mdlib`), Node on the
+cargo frontend crates — `src/rustlib`, `src/pylib`, `src/structlib`), Node on the
 `26.x` line (`src/tslib/package.json`'s `engines.node` range `>=26.8.1 <27`,
 enforced fail-closed by `engine-strict=true` in `src/tslib/.npmrc`; CI pins the
 exact `26.9.0`), and Go on the release Linux CI path (`GOTOOLCHAIN` +
@@ -472,8 +505,8 @@ cargo build --release
 `target/<profile>/frontends`, which the binary finds at runtime relative to
 itself (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`). Set
 `APG_FRONTEND_DIR` to override, or `APG_BUILD_FRONTENDS` (comma-separated
-allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `py`, `md`; `0` to skip
-all) to
+allowlist: `go`, `java`, `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`; `0` to
+skip all; `struct` is the bundled structural scanner) to
 limit what build.rs compiles — the split brew formulae rely on this.
 
 The test suite is split into three tiers (`global.constraint.test-tier-boundaries`):
@@ -523,10 +556,10 @@ src/rustlib/         Rust scanner (rust-analyzer engine; separate Cargo project)
 src/tslib/           TypeScript scanner (official TypeScript compiler, Node)
 src/csharplib/       C# scanner (Roslyn; separate build)
 src/pylib/           Python scanner (Astral ty/Ruff engine; separate Cargo project)
-src/mdlib/           Markdown scanner (standalone non-workspace Rust crate)
+src/structlib/       bundled structural scanner — Markdown + shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI + residual misc (standalone non-workspace Rust crate; absorbs the retired src/mdlib)
 opencode-suite/      install template for `apg init` (tools/, lib/, agents/; embedded in src/main.rs)
 install.sh           curl | sh installer for Linux (prebuilt release tarballs)
-Formula/scanner.rb     apg binary (ingestor + query CLI)
+Formula/scanner.rb     apg binary (ingestor + query CLI) + bundled structural scanner
 Formula/apg-go.rb      Go scanner frontend
 Formula/apg-java.rb    Java scanner frontend
 Formula/apg-cpp.rb     C++ scanner frontend
@@ -534,7 +567,6 @@ Formula/apg-rust.rb    Rust scanner frontend
 Formula/apg-ts.rb      TypeScript scanner frontend
 Formula/apg-csharp.rb  C# scanner frontend
 Formula/apg-py.rb      Python scanner frontend
-Formula/apg-md.rb      Markdown scanner frontend
 ```
 
 ## License

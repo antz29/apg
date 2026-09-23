@@ -3903,18 +3903,17 @@ mod tests {
             );
 
             // The Scan row: REFRESHED by the delta (never the seeded cold-scan
-            // row) and exactly the spliced export's line 1. Two separate scans
-            // legitimately carry different `scanned_at`/content keys, so the
+            // row) and exactly the spliced export's line 1. The refresh proof is
+            // the row DIFFERENCE plus the per-row content-key tie: `scanned_at`
+            // has one-second resolution, so under a serial e2e run the cold scan
+            // and the forced rebuild can land in the same wall-clock second and
+            // a `scanned_at`-only difference is NOT a reliable discriminator. The
             // full-rebuild comparison is on the identity fields (sha/clean), with
-            // the line-1 tie asserted per scan.
+            // the line-1 ties asserted per scan.
             let spliced_scan = db_scan_row(&spliced_db);
             assert_ne!(
                 spliced_scan, cold_scan,
                 "the seeded Scan row must be deleted+reinserted, not preserved"
-            );
-            assert_ne!(
-                spliced_scan.3, cold_scan.3,
-                "the refreshed Scan row must carry THIS scan's scanned_at: {spliced_scan:?} vs {cold_scan:?}"
             );
             let spliced_jsonl_text = std::fs::read_to_string(&spliced_jsonl).unwrap();
             let spliced_first = spliced_jsonl_text.lines().next().unwrap();

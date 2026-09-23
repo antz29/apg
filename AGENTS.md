@@ -12,8 +12,13 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   compiler API, npm-installed with a committed `package-lock.json`, C#:
   `src/csharplib/Program.cs` — a standalone single-file `csharpfrontend` binary
   built on Roslyn `Microsoft.CodeAnalysis.CSharp`, Python: `src/pylib` — a
-  standalone `pyfrontend` built on Astral's `ty`/Ruff engine crates, Markdown:
-  `src/mdlib` — a standalone `mdfrontend`) parses a codebase and streams
+  standalone `pyfrontend` built on Astral's `ty`/Ruff engine crates, and the
+  bundled structural scanner: `src/structlib` — a standalone `structfrontend`
+  binary that graphs every tracked text/config/packaging file the code frontends
+  don't claim, serving the Markdown stream (absorbing the retired `src/mdlib`
+  Markdown frontend) plus the per-format structural streams — shell, YAML, JSON,
+  TOML, XML, Dockerfile, Makefile, INI — and residual `misc`) parses a codebase
+  and streams
   one JSON object per
   line to stdout — the **unified JSONL schema** (see `SPEC.md` §2). It emits
   *facts only*: declarations, references, edges. It never computes FQNs and
@@ -27,13 +32,17 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   `go build` for Go, `javac` for Java, `cargo build` for the Rust frontend —
   `src/rustlib`, a separate Cargo project, pinned to a rust-analyzer release
   tag, `npm ci` for the TypeScript frontend — `src/tslib`, `cargo build` for
-  the Python (`src/pylib`) and Markdown (`src/mdlib`) crates) and stages them to
-  `target/<profile>/frontends`. Run a scan with `apg scan <dir>` (or the
+  the Python (`src/pylib`) and bundled structural (`src/structlib`) crates) and
+  stages them to `target/<profile>/frontends`. The base `apg` binary itself is
+  built against a prebuilt static liblbug plus `openssl@3` (no bundled
+  LadybugDB and no `cmake`); the Homebrew `scanner` formula installs it together
+  with the bundled `structfrontend`, while the seven per-language frontends ship
+  as their own formulae. Run a scan with `apg scan <dir>` (or the
   `apg_scan` tool). `apg` resolves frontends at runtime relative to the binary
   (`<exe_dir>/frontends` or `<exe_dir>/../libexec/frontends`) or via
   `APG_FRONTEND_DIR`. `APG_BUILD_FRONTENDS` (comma-separated: `go`, `java`,
-  `cpp`, `rust`, `ts`, `csharp`, `py`, `md`; `0` to skip) limits what build.rs
-  compiles.
+  `cpp`, `rust`, `ts`, `csharp`, `struct`, `py`; `0` to skip) limits what
+  build.rs compiles — `struct` is the bundled structural scanner.
 - **Frontend dependency baseline.** Each frontend's build-time deps, scan-time
   deps (what must be on `PATH` when a user runs `apg scan`), and the engine pin
   that sets its language-version ceiling are declared on its solution container
@@ -50,9 +59,13 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   `npm ci`, needs `node`, and is bounded by `typescript 5.9.3`; C# builds with a
   .NET SDK (`net9.0`) + NuGet, is self-contained at scan time, and is bounded by
   Roslyn `4.12.0`; Python builds with stable Rust + network (git-pinned Ruff/ty
-  crates) and Markdown with stable Rust + crates.io, neither needing a runtime
-  at scan time, bounded by Ruff/ty tag `0.16.6` (`salsa 0.27`) and
-  `serde`/`serde_json`/`unicode-normalization` respectively. The build
+  crates) and needs no runtime at scan time, bounded by Ruff/ty tag `0.16.6`
+  (`salsa 0.27`). The bundled structural scanner (`structfrontend`,
+  `src/structlib`, absorbing the retired `src/mdlib` Markdown frontend) builds
+  with stable Rust + crates.io and needs nothing at scan time (it never shells
+  out), bounded by `serde`/`serde_json`/`unicode-normalization` 0.1 with no
+  language-version ceiling; it is not a per-language formula — the base
+  `scanner` package ships it. The build
   toolchains are pinned in repo-visible files consumed by every
   frontend-compiling path, exact where the mechanism can enforce it: Rust
   `1.98.1` (the repo-root `rust-toolchain.toml`, covering the main build and all
@@ -259,9 +272,9 @@ tools take an optional `codeType` (default: all code); exact-FQN tools hint
 when a lookup comes up empty (overloads carry `(params)` suffixes).
 
 The `apg` binary is brew-installable via split formulae (tap
-`https://github.com/antz29/apg.git`): `scanner` (the binary), plus eight frontend
-formulae — `apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`,
-`apg-py`, `apg-md` —
+`https://github.com/antz29/apg.git`): the base `scanner` formula (the binary
+plus the bundled structural scanner), and seven per-language frontend formulae —
+`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py` —
 each dropping its artifacts into `$(brew --prefix)/share/apg/frontends` (the
 `scanner` formula's `bin/apg` wrapper sets `APG_FRONTEND_DIR` to that dir).
 On Linux there's a `curl | sh` installer (`install.sh` — installs the base
@@ -463,8 +476,8 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    `RELEASE_VERSION` literal (`version = "X.Y.Z"`).
 3. **Commit the release content** (the version bump + whatever ships in it).
    This commit is the **release HEAD**.
-4. **Repoint all 8 formulae** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
-   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`, `apg-md`):
+4. **Repoint all 7 formulae** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
+   `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`):
    `tag:` → `vX.Y.Z`,
    `revision:` → the release-HEAD SHA, `root_url` →
    `releases/download/vX.Y.Z`, and bump each `rebuild N` by 1. Commit as
@@ -776,6 +789,15 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   and enumeration included ("what is in this file/module?", "what does this
   unit depend on?") — the first tool call is a graph query (the `apg_*` suite,
   or `apg_query`); reach for a file tool second.
+- **In the graph:** the tracked source every language frontend claims, and now
+  also the tracked text/config/packaging files the bundled structural scanner
+  claims (`Cargo.toml`, `install.sh`, `.github/workflows/release.yml`, Markdown,
+  shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI and residual `misc`).
+  **Not in the graph:** Ruby sources (no frontend yet — `apg-ruby` is pending),
+  binaries, and paths excluded by the config scope (the structural scanner's
+  include/exclude globs, `--exclude-path`, and the `.gitignore`/`target`/
+  `node_modules` prunes). The graph-first ordering above is unchanged: for a
+  fact either class carries, query first.
 - Extract byte ranges with: `dd if=<file> bs=1 skip=<start> count=<end-start> 2>/dev/null`
 - Use `rg` (ripgrep) in bash for fast content search **of artifacts the graph
   does not model** — for in-graph facts, a graph query comes first.

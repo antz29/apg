@@ -1,6 +1,6 @@
 # Pin the Rust compiler for the whole repository. A root toolchain file is
 # found by rustup's parent-walk from every crate, so it covers the main `apg`
-# build and all three cargo frontend crates (src/rustlib, src/pylib, src/mdlib)
+# build and all three cargo frontend crates (src/rustlib, src/pylib, src/structlib)
 # without any per-crate file or formula edit. Keep it in lockstep with the Rust
 # pin in .github/workflows/release.yml.
 [toolchain]
