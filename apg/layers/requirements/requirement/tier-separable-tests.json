@@ -28,6 +28,11 @@
       "kind": "contains",
       "source": "requirements.stakeholder.source-maintainer",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.source-layout-decisions",
+      "properties": {}
     }
   ]
 }
