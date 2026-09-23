@@ -493,11 +493,6 @@ struct Doc {
     /// The repo-relative module identity of the document's directory (empty at
     /// the repository base).
     dir: String,
-    /// The document's line count. `run` computes the File record's `end_line`
-    /// uniformly with `line_count` for every stream, so this is consumed by the
-    /// absorbed emitter's fact set (and its `int` test) rather than the binary.
-    #[allow(dead_code)]
-    end_line: u32,
     sections: Vec<Section>,
 }
 
@@ -748,7 +743,6 @@ fn build_doc(path: &Path, bytes: &[u8], base: &Path, id_prefix: &str, next_id: &
     Doc {
         path: path_str,
         dir,
-        end_line: line_count(&text),
         sections,
     }
 }
@@ -2415,7 +2409,6 @@ mod tests {
             );
             assert_eq!(doc.path, "/repo/docs/a.md");
             assert_eq!(doc.dir, "docs");
-            assert_eq!(doc.end_line, 4);
             assert_eq!(
                 doc.sections
                     .iter()
