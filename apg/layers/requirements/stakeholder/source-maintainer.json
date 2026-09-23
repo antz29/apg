@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "contains",
-      "target": "requirements.requirement.bounded-module-size",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "requirements.requirement.tier-separable-tests",
       "properties": {}
     },
