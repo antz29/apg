@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "source-module",
+  "body": "A first-party module of the apg root crate: one production source file plus the sibling test file that holds its unit/int tests. It is the unit of the module-size budget and of graph navigation — a symbol resolves to one source module, and the module's tests are reachable from it.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
