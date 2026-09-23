@@ -23,6 +23,11 @@
       "kind": "contains",
       "source": "requirements.user.graph-consumer",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.graph-visible-tests-config-premise",
+      "properties": {}
     }
   ]
 }

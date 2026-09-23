@@ -4,6 +4,12 @@
   "name": "graph-visible-tests-config-premise",
   "body": "Reconciliation of `requirements.requirement.graph-visible-tests` (spec-review apg-cleanup/feedback-1).\n\nsource: the requirement claimed relocated tests \"carry a path the graph classifies as test code (a `tests` path segment: `src/<module>/tests.rs` and `tests/**`), so an agent can find the tests for a symbol and select a tier by `code_type`\".\n\ninconsistency (two independent premises, both false):\n1. `apg/config.json` is `{\"default\": \"src\", \"types\": [], \"version\": \"0.16.1\"}`. A present config replaces the built-in per-language defaults (`src/classify.rs::classify_code_type` iterates `cfg.types` then returns `cfg.default`), so every code record classifies `src`. The branch graph confirms it: 125 `File` nodes, all `code_type=src`, zero `test` — including obvious tests such as `src/tslib/scanner.test.ts`, `src/golib/main_test.go` and `src/csharplib/tests/Program.cs`.\n2. Even with the built-in defaults, `src/<module>/tests.rs` would not classify `test`: `src/classify.rs::builtin_code_type`'s `rust` arm matches only a `*_test.rs` filename suffix or a literal `test`/`tests` path segment (`has_seg`), and the relocated file's last segment is `tests.rs`, not `tests`.\n\nresolution: restated the requirement to state the true, useful intent — apg's own relocated tests (`src/<module>/tests.rs`, top-level `tests/**`) must classify as `test` code in apg's own graph — with acceptance criteria observable through `apg query`. This is satisfiable by populating `apg/config.json`'s `types` with a `test` rule covering the relocated layout (e.g. globs `**/tests.rs` and `tests/**`); `apg/config.json` is a config/manifest artifact with no `File` node in the branch graph (like `Cargo.toml`/`.cargo/config.toml`), so the plan must own that edit without an FQN target. The spine is unchanged: `requirements.user.graph-consumer ⊃ graph-visible-tests`, with `drives` to `domain.entity.test-tier` and `domain.entity.test-harness`. [autonomous]",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.graph-visible-tests",
+      "properties": {}
+    }
+  ],
   "in": []
 }
