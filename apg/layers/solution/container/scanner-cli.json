@@ -71,6 +71,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.cache",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.delta",
+      "properties": {}
     }
   ],
   "in": [
