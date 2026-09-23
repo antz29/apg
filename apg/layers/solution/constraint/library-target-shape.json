@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "library-target-shape",
+  "body": "The library target must own the module tree, not duplicate it: `src/lib.rs` declares the `mod` tree and the crate-internal API, and `src/main.rs` is a thin binary that calls into the library. No production logic may be duplicated between `lib.rs` and `main.rs`, and moving a unit into the library must not change its behaviour or its FQN.",
+  "properties": {
+    "attaches-to": "solution.component.library-surface"
+  },
+  "out": [],
+  "in": []
+}
