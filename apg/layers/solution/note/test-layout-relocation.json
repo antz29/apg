@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "solution.component.test-layout",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.library-surface",
+      "properties": {}
     }
   ],
   "in": []
