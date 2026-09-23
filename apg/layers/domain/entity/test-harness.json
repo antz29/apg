@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "test-harness",
+  "body": "The shared test-helper layer: scratch-repo builders, the candidate-binary driver, and JSONL/fixture helpers used across tiers (today `src/testutil.rs` plus the per-module `mod tests` fixtures — 149 helper fns in `main.rs`, 105 in `plan_cmd.rs`, 104 in `layers.rs`, 75 in `splice.rs`). It must be reachable from both the sibling unit/int tests and the top-level e2e crates without duplication.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
