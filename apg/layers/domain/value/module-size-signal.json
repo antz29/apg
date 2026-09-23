@@ -10,6 +10,11 @@
       "kind": "drives",
       "source": "requirements.requirement.decomposed-source-modules",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.source-layout",
+      "properties": {}
     }
   ]
 }

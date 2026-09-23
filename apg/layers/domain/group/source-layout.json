@@ -36,6 +36,11 @@
       "kind": "realised-by",
       "target": "solution.container.scanner-cli",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.module-size-signal",
+      "properties": {}
     }
   ],
   "in": [
