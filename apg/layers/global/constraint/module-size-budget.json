@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "module-size-budget",
+  "body": "Every first-party production source file of the apg repository must stay within a small line budget — roughly 400 lines of production code per file. Test code is accounted separately: a module's unit/int tests live in a sibling `tests.rs` and do not count against the production budget, and top-level e2e test crates are not production source. `vendor/` and generated files are out of scope. A file over the budget is a violation unless a note records why it must be. The budget is a whole-repository law; this change-set applies it to the apg root Rust crate's first-party source (`src/*.rs`).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
