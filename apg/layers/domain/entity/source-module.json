@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "target": "solution.container.py-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.rust-frontend",
+      "properties": {}
     }
   ],
   "in": [
