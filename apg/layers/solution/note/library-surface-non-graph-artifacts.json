@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "library-surface-non-graph-artifacts",
+  "body": "NON-GRAPH BUILD ARTIFACTS + the lib/bin FQN risk — recorded for the plan-writer, not solved by the spec [autonomous]. The installed binary's graph has no `File` node for `Cargo.toml`, `.cargo/config.toml`, `scripts/gate.sh` or `rust-toolchain.toml`, so none can be an `implemented-by` target or a task target in this change-set; the plan carries their edits as non-graph tasks. Separately, adding `src/lib.rs` alongside `src/main.rs` makes two source files want the module identity `rust.apg` — the crate-root module currently belongs to `src/main.rs` — so the plan must decide how the library target is rooted (and whether the binary re-exports or renames) without colliding the FQN. This is a plan-writer decision; the spec only records it.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
