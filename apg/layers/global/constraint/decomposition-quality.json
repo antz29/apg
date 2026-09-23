@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "decomposition-quality",
+  "body": "First-party source must be well-decomposed, DRY, modular and maintainable: modules are cohesive and single-responsibility, boundaries between them are clear, and shared logic is single-sourced rather than copy-pasted. Line count is a diagnostic signal, not a target — an over-large file prompts a review of its decomposition, and deliberately splitting a file merely to satisfy a number, without improving cohesion, is itself a violation. Scope is repo-wide over first-party source, excluding vendored code (`src/cpplib/vendor/**`) and testdata (`testdata/**`): the root Rust crate (`src/*.rs` + `build.rs`) and the eight frontend crates (`structlib`, `pylib`, `rustlib`, `cpplib` non-vendor sources, `javalib`, `golib`, `csharplib`, `tslib`). A file over the indicative signal (~400 production lines) is a prompt to inspect decomposition, not a violation by itself; a duplicated helper across modules is a DRY violation.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
