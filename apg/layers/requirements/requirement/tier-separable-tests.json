@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "tier-separable-tests",
+  "body": "Tests are organized so each tier can be selected independently and the default gate stays fast. Unit and int tests live beside their module in a sibling `tests.rs` that preserves the module path, so libtest's `…::tests::unit::` and `…::tests::int::` filters keep selecting them; every e2e test lives outside the production module tree in a top-level `tests/` integration crate and carries the `#[ignore = \"e2e tier: …; run via cargo test-e2e\"]` marker. A plain `cargo test` runs unit+int only; `cargo test-e2e` runs the e2e tier. The four documented invocations keep selecting the tiers they name.",
+  "properties": {
+    "feature": "test-layout"
+  },
+  "out": [],
+  "in": []
+}
