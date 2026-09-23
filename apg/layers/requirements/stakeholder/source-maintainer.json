@@ -14,6 +14,11 @@
       "kind": "contains",
       "target": "requirements.requirement.tier-separable-tests",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.decomposed-source-modules",
+      "properties": {}
     }
   ],
   "in": []
