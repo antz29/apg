@@ -36,6 +36,11 @@
       "kind": "realised-by",
       "target": "solution.container.java-frontend",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.go-frontend",
+      "properties": {}
     }
   ],
   "in": [
