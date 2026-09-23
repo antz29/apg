@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "source-layout",
-  "body": "The layout of the apg root crate: how its production source is divided into modules, how its tests are organized into tiers and where they live, and the library surface that makes the crate-internal API reachable from tests outside the declaring module. These are the structural concerns the cleanup bounds and restructures.",
+  "body": "The decomposition of apg's first-party source: how production source is divided into cohesive modules across the root crate and the eight frontend crates, how its tests are organized into tiers and where they live, and the library surface that makes the crate-internal API reachable from tests outside the declaring module. These are the structural concerns the cleanup decomposes and restructures — the layout is chosen for cohesion and reuse, never to satisfy a line count.",
   "properties": {
     "attribute": "core"
   },
