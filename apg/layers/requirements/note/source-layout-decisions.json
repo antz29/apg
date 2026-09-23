@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "source-layout-decisions",
+  "body": "Decisions for the apg-cleanup change-set, recorded because they are not derivable from the code graph. [with user] (1) Introduce a library target: `src/lib.rs` owns the module tree; `src/main.rs` becomes a thin binary — the prerequisite for moving e2e tests out of the module tree. (2) e2e → top-level `tests/`: the 310 e2e tests move to per-source-module files (`tests/main_e2e.rs`, `tests/plan_cmd_e2e.rs`, …) sharing a `tests/common/mod.rs` helper module. (3) unit + int → sibling `tests.rs`: each source module's inline `mod tests` moves to a sibling module file (e.g. `src/plan_cmd/tests.rs` via `#[cfg(test)] mod tests;`), preserving module paths so the `…::tests::unit::` / `…::tests::int::` filters keep working. (4) Bounded source file size: roughly 400 lines of production per file, test code accounted separately. (5) Behaviour-preserving: no behaviour change; the existing suite is the proof. [autonomous] FQNs in this spec are the branch graph's language-rooted identities (`rust.apg.*`), matching the existing durable spec; the cargo aliases in `.cargo/config.toml` are libtest path filters and must be updated with the new layout.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
