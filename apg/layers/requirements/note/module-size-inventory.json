@@ -4,6 +4,12 @@
   "name": "module-size-inventory",
   "body": "Branch-graph inventory motivating the budget. 32 first-party files exceed 400 lines (excluding `vendor/` and `.md`): 22 exceed 1000, 12 exceed 2000. The longest are `src/main.rs` (10,403 lines; production ends around line 2811), `src/plan_cmd.rs` (7,469; ~2,156 production), `src/layers.rs` (5,720), `src/splice.rs` (4,317), `src/ingest.rs` (4,000), `src/load.rs` (3,505), `src/project_cmd.rs` (2,986; ~628 production), `src/structlib/src/main.rs` (2,617), `src/artifacts.rs` (2,300), `src/node_cmd.rs` (2,137), `src/javalib/CallGraphBuilder.java` (2,034), `src/cache.rs` (2,022). The dominant cause is inline `#[cfg(test)] mod tests`: ~675 test functions (142 unit, 8 int, 310 e2e) across 23 files; `src/main.rs`'s tests span lines 2822–10401 (~73% of the file), and `src/node_cmd.rs` is ~438 production vs 1,697 test. [with user] This change-set applies the budget to the apg root Rust crate (`src/*.rs`, the `scanner-cli` container); the bundled frontend crates appear in the inventory but their splitting is out of scope for this change-set.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.bounded-module-size",
+      "properties": {}
+    }
+  ],
   "in": []
 }

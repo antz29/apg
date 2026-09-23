@@ -33,6 +33,11 @@
       "kind": "details",
       "source": "requirements.note.source-layout-decisions",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.module-size-inventory",
+      "properties": {}
     }
   ]
 }
