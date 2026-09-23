@@ -4,6 +4,12 @@
   "name": "source-maintainer",
   "body": "A person who reads, edits, reviews, and extends the apg root crate. They hold one module in mind at a time, so an oversized source file forces them to scroll past thousands of lines of inline tests to find the unit they meant to change. Their interest is a source tree of small, single-purpose modules, each with its tests adjacent and its production code accounted separately from its tests.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.bounded-module-size",
+      "properties": {}
+    }
+  ],
   "in": []
 }
