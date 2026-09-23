@@ -28,11 +28,6 @@
       "properties": {}
     },
     {
-      "kind": "contains",
-      "target": "domain.value.module-size-budget",
-      "properties": {}
-    },
-    {
       "kind": "realised-by",
       "target": "solution.container.scanner-cli",
       "properties": {}
