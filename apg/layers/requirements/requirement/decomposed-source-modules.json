@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.group.source-layout",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.source-module",
+      "properties": {}
     }
   ],
   "in": [
