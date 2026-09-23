@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.component.library-surface",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.structural-scanner",
+      "properties": {}
     }
   ],
   "in": [
