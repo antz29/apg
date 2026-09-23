@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "test-layout-relocation",
+  "body": "The relocation in detail. Sibling tests: `#[cfg(test)] mod tests;` in each source module points at `src/<module>/tests.rs`, keeping the module path (`rust.apg.plan_cmd.tests.e2e`) so the existing tier filters and graph queries still resolve. Top-level e2e: one integration crate per source module (`tests/main_e2e.rs`, `tests/plan_cmd_e2e.rs`, `tests/git_e2e.rs`, …) with a shared `tests/common/mod.rs`; each e2e test keeps `#[ignore = \"e2e tier: …; run via cargo test-e2e\"]`. White-box dependency: 268 of 310 e2e tests call crate-internal functions, and `testutil` is `#[cfg(test)] mod testutil;` in `main.rs` today — it must become part of the library surface (or be re-homed into the shared `common` harness) for the integration crates to compile. Handoff: `src/lib.rs` and `tests/**` do not exist in the branch graph, so this component's `implemented-by` targets (`rust.apg`, `rust.apg.testutil`) are the existing modules it will re-home; the plan-writer declares the new files as planned nodes and points `implemented-by` at them once they exist.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
