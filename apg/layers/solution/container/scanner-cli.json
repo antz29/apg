@@ -41,6 +41,11 @@
       "kind": "contains",
       "target": "solution.component.scan-time-preflight",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.library-surface",
+      "properties": {}
     }
   ],
   "in": [
