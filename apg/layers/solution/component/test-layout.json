@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "test-layout",
-  "body": "The test organization of the root crate: each source module's unit/int tests move to a sibling `tests.rs` (preserving the module path so the `…::tests::unit::` / `…::tests::int::` filters keep working), the e2e tests move to per-source-module top-level `tests/` crates sharing a `tests/common/mod.rs` harness, and the cargo aliases in `.cargo/config.toml` are updated to the new libtest path filters.",
+  "body": "The test organization of the root crate: each source module's unit/int tests move to a sibling `tests.rs` (preserving the module path so the `…::tests::unit::` / `…::tests::int::` filters keep working), the e2e tests move to per-source-module top-level `tests/` crates sharing a `tests/common/mod.rs` harness, and the cargo aliases in `.cargo/config.toml` are updated to the new libtest path filters. The layout is chosen for cohesion and reuse — tests beside their module, shared fixtures in exactly one place — not to reduce any file's line count.",
   "properties": {},
   "out": [
     {
