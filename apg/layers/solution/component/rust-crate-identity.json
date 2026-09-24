@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "rust-crate-identity",
+  "body": "The Rust frontend's crate-identity and module-prefix mechanism: `rust.apg-rustfrontend.package_prefix_map` (which decides, per crate root, whether the cargo package name overrides the module prefix) and `rust.apg-rustfrontend.crate_prefix` (which renders a crate's prefix from the package override, else the target display name, else the root module name). It must give each local crate of a multi-target package a distinct, stable prefix. `rust.apg.ingest.insert_node` is the ingestor-side backstop that panics on any residual duplicate project node FQN.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
