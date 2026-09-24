@@ -996,7 +996,9 @@ struct LocalCrate {
 ///   duplicate.
 ///
 /// A multi-target package with DISTINCT target names gets no override and keeps
-/// exactly its current `rust.foo` / `rust.foo-cli` rendering
+/// exactly its current `rust.foo` / `rust.foo_cli` rendering (rust-analyzer
+/// normalizes the bin target's display name; the manifest keeps
+/// `[[bin]] name = "foo-cli"`)
 /// (`requirements.constraint.rust-crate-fqn-stability`).
 fn package_prefix_map(ctx: &Ctx<'_>, crates: &[Crate]) -> HashMap<String, String> {
     let locals: Vec<LocalCrate> = crates
