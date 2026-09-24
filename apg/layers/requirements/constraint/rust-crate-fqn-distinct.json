@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "rust-crate-fqn-distinct",
+  "body": "No two local crates of the same Cargo package may render the same module FQN. A package that declares both a library target and a binary target with the same target name — the default lib+bin package, e.g. `[package] name = \"apg\"` producing lib target `apg` and bin target `apg` — must give each crate a distinct, stable module prefix, so the two crate roots render distinct module FQNs and `apg scan` completes without a `duplicate project node FQN` panic. Distinctness is a property of the rendered module identity, not of any particular disambiguation scheme: any scheme that yields distinct, stable prefixes satisfies it.",
+  "properties": {
+    "attaches-to": "requirements.requirement.rust-multitarget-crate-identity"
+  },
+  "out": [],
+  "in": []
+}
