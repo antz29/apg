@@ -12,6 +12,11 @@
       "kind": "drives",
       "source": "requirements.requirement.rust-multitarget-crate-identity",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.graph-identity",
+      "properties": {}
     }
   ]
 }
