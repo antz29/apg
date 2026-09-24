@@ -213,12 +213,14 @@ struct Ctx<'db> {
     vfs: &'db Vfs,
     /// Cargo package name keyed by the crate-root file's absolute path, for
     /// every target of every package the loaded project resolved (phase-05
-    /// task-10). Consulted only for crates whose package maps to a single local
-    /// crate, via the per-project `package_prefix` below.
+    /// task-10). Consulted by [`package_prefix_map`] to group local crates by
+    /// package and to prefer the package identity over the target/display name.
     package_by_root: HashMap<String, String>,
     /// Resolved prefix override by crate-root absolute path: the cargo package
-    /// name for a package with exactly one local crate. Populated per loaded
-    /// project by [`scan`]; an empty map means "use the display-name fallback".
+    /// name for a single-target package, and the distinct `<pkg>-bin` prefix for
+    /// the bin of a colliding lib + bin package (libbin-fix). Populated per
+    /// loaded project by [`scan`]; an absent entry means "use the display-name
+    /// fallback".
     package_prefix: HashMap<String, String>,
 }
 
@@ -403,9 +405,10 @@ fn scan(
     // but `[[bin]] name = "rustfrontend"`, so the target/display name would
     // otherwise render `rustfrontend.*` and shadow the package identity. The
     // package name is preferred ONLY when the package maps to exactly one local
-    // crate: a package with several targets (lib + bins/examples) keeps each
-    // target's display name, so distinct crates never collapse onto one prefix
-    // (never worse than the display-name behaviour it replaces).
+    // crate. A package with several targets keeps each target's display name,
+    // EXCEPT when two would render the same prefix (the default lib + bin
+    // package): the bin then gets a distinct `<pkg>-bin` prefix so distinct
+    // crates never collapse onto one module FQN (libbin-fix).
     ctx.package_prefix = package_prefix_map(&ctx, &crates);
     crates.sort_by_key(|k| crate_prefix(&ctx, *k));
 
@@ -969,44 +972,104 @@ fn package_roots(cargo: &CargoWorkspace) -> HashMap<String, String> {
     out
 }
 
-/// The module-prefix override for one loaded project: crate-root path -> cargo
-/// package name, for every local crate whose package has EXACTLY ONE local
-/// crate target (phase-05 task-10). A package with several targets keeps the
-/// display-name fallback, so a lib + bin package does not collapse both crates
-/// onto one module FQN.
+/// One local crate's module-prefix inputs: its crate-root path, its cargo
+/// package name, and the prefix it renders when no override applies.
+struct LocalCrate {
+    root: String,
+    package: String,
+    fallback: String,
+}
+
+/// The module-prefix override for one loaded project: crate-root path -> module
+/// prefix, for the crates [`crate_prefix`] must not render from its fallback.
+///
+/// Two cases get an override:
+///
+/// * a package with EXACTLY ONE local crate target — the cargo package name is
+///   preferred over the target/display name (`src/rustlib` declares
+///   `[package] name = "apg-rustfrontend"` but `[[bin]] name = "rustfrontend"`,
+///   so the display name would shadow the package identity) (phase-05 task-10);
+/// * a package whose local crates would otherwise COLLIDE on the same fallback
+///   prefix — the default lib + bin package, where both targets carry the
+///   package name: the bin gets a distinct `<pkg>-bin` prefix so the two crate
+///   roots render distinct module FQNs instead of the ingestor panicking on a
+///   duplicate.
+///
+/// A multi-target package with DISTINCT target names gets no override and keeps
+/// exactly its current `rust.foo` / `rust.foo-cli` rendering
+/// (`requirements.constraint.rust-crate-fqn-stability`).
 fn package_prefix_map(ctx: &Ctx<'_>, crates: &[Crate]) -> HashMap<String, String> {
+    let locals: Vec<LocalCrate> = crates
+        .iter()
+        .filter_map(|k| {
+            let root = path_of(ctx, k.root_file(ctx.db));
+            let package = ctx.package_by_root.get(&root)?.clone();
+            Some(LocalCrate {
+                root,
+                package,
+                fallback: fallback_prefix(ctx, *k),
+            })
+        })
+        .collect();
+
     let mut counts: HashMap<&str, usize> = HashMap::new();
-    for k in crates {
-        let root = path_of(ctx, k.root_file(ctx.db));
-        if let Some(pkg) = ctx.package_by_root.get(&root) {
-            *counts.entry(pkg.as_str()).or_insert(0) += 1;
-        }
+    for l in &locals {
+        *counts.entry(l.package.as_str()).or_insert(0) += 1;
     }
+
+    // Local crates grouped by (package, fallback prefix). A group of more than
+    // one is a display-name collision: without an override both crate roots
+    // render the same module FQN and the ingestor panics on the duplicate.
+    let mut groups: HashMap<(&str, &str), Vec<usize>> = HashMap::new();
+    for (i, l) in locals.iter().enumerate() {
+        groups
+            .entry((l.package.as_str(), l.fallback.as_str()))
+            .or_default()
+            .push(i);
+    }
+
     let mut prefix: HashMap<String, String> = HashMap::new();
-    for k in crates {
-        let root = path_of(ctx, k.root_file(ctx.db));
-        if let Some(pkg) = ctx.package_by_root.get(&root) {
-            if counts.get(pkg.as_str()).copied() == Some(1) {
-                prefix.insert(root, pkg.clone());
+    for (i, l) in locals.iter().enumerate() {
+        let group = groups
+            .get(&(l.package.as_str(), l.fallback.as_str()))
+            .expect("every local crate was grouped above");
+        if group.len() < 2 {
+            // No collision: the single-target package takes the package-name
+            // override; a multi-target package keeps the display-name fallback.
+            if counts.get(l.package.as_str()).copied() == Some(1) {
+                prefix.insert(l.root.clone(), l.package.clone());
             }
+            continue;
         }
+        // Collision: the keeper keeps its existing prefix and the bin(s) get a
+        // distinct suffix. The keeper is the lib target (root file `lib.rs`)
+        // when there is one, else the lowest root path — deterministic, and for
+        // the default lib + bin package always the lib.
+        let keeper = group
+            .iter()
+            .copied()
+            .find(|&j| is_lib_root(&locals[j].root))
+            .unwrap_or_else(|| *group.iter().min().expect("group is non-empty"));
+        if i == keeper {
+            continue;
+        }
+        // `<pkg>-bin` for the single colliding bin. Cargo admits at most a lib
+        // and a bin sharing a name, so an over-full group is theoretical; a
+        // further member is disambiguated by its root file stem.
+        let others = group.iter().filter(|&&j| j != keeper).count();
+        let suffix = if others <= 1 {
+            "bin".to_string()
+        } else {
+            format!("bin-{}", root_stem(&l.root))
+        };
+        prefix.insert(l.root.clone(), format!("{}-{suffix}", l.package));
     }
     prefix
 }
 
-// ── FQN / path helpers ────────────────────────────────────────────────
-
-fn crate_prefix(ctx: &Ctx<'_>, krate: Crate) -> String {
-    // Prefer the cargo PACKAGE name (phase-05 task-10) for a crate whose
-    // package maps to a single local target: the target/display name can be the
-    // `[[bin]]` name rather than the package identity (`rustfrontend` vs
-    // `apg-rustfrontend`). Falls back to the display-name-then-root-module-name
-    // chain for synthetic/no-manifest crates, multi-target packages, and
-    // foreign crates.
-    let root = path_of(ctx, krate.root_file(ctx.db));
-    if let Some(pkg) = ctx.package_prefix.get(&root) {
-        return pkg.clone();
-    }
+/// The prefix a crate renders when no override applies: its display name, then
+/// its root-module name, then the literal `crate`.
+fn fallback_prefix(ctx: &Ctx<'_>, krate: Crate) -> String {
     if let Some(display) = krate.display_name(ctx.db) {
         return display.to_string();
     }
@@ -1014,6 +1077,38 @@ fn crate_prefix(ctx: &Ctx<'_>, krate: Crate) -> String {
         return name.as_str().to_string();
     }
     "crate".to_string()
+}
+
+/// Whether a crate-root path is a Cargo library target's root (`src/lib.rs`, or
+/// a `[lib] path` ending in `lib.rs`).
+fn is_lib_root(root: &str) -> bool {
+    std::path::Path::new(root)
+        .file_name()
+        .is_some_and(|n| n == "lib.rs")
+}
+
+/// A crate-root file's stem, for disambiguating an over-full collision group.
+fn root_stem(root: &str) -> String {
+    std::path::Path::new(root)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| root.to_string())
+}
+
+// ── FQN / path helpers ────────────────────────────────────────────────
+
+fn crate_prefix(ctx: &Ctx<'_>, krate: Crate) -> String {
+    // The loaded project's override takes precedence (phase-05 task-10,
+    // libbin-fix): the cargo PACKAGE name for a single-target package, and the
+    // distinct `<pkg>-bin` prefix for the bin of a colliding lib + bin package.
+    // Everything else renders its per-target display-name-then-root-module-name
+    // fallback unchanged, so synthetic/no-manifest crates, distinct-name
+    // multi-target packages, and foreign crates are unaffected.
+    let root = path_of(ctx, krate.root_file(ctx.db));
+    if let Some(pkg) = ctx.package_prefix.get(&root) {
+        return pkg.clone();
+    }
+    fallback_prefix(ctx, krate)
 }
 
 fn module_fqn_full(ctx: &Ctx<'_>, m: Module) -> String {

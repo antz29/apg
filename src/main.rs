@@ -10399,5 +10399,154 @@ mod tests {
 
             let _ = std::fs::remove_dir_all(&base);
         }
+
+        // -------------------------------------------------------------------
+        // libbin-fix (e2e): Rust multi-target crate identity. Scratch Cargo
+        // packages under std::env::temp_dir(), driving the staged rust frontend
+        // + the in-process ingestor via `rust_frontend_records` — no committed
+        // `testdata/**` fixture (testdata is inside apg's own scan scope, so a
+        // committed default lib+bin fixture would panic the repo's own scan).
+        // -------------------------------------------------------------------
+
+        /// libbin-fix (e2e): a scratch DEFAULT lib + bin Cargo package —
+        /// `[package] name = "foo"` with an auto-discovered `src/lib.rs` (lib)
+        /// and `src/main.rs` (bin), both rendering the same display name — must
+        /// ingest without the duplicate-FQN panic, and its two crate roots must
+        /// render DISTINCT module FQNs, each enumerable under its own prefix
+        /// (the lib marker under one root, the bin marker under the other).
+        ///
+        /// The post-fix disambiguating suffix is deliberately NOT pinned: the
+        /// frontend owns that spelling. Only the PRESERVATION of already-scanned
+        /// FQNs is a contract — pinned by
+        /// [`rust_multitarget_crate_fqns_are_stable`].
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch Cargo package/spawned rust frontend); run via cargo test-e2e"]
+        fn rust_default_libbin_crate_roots_are_distinct() {
+            let repo = crate::testutil::Repo::new("rust-libbin-collision");
+            repo.write(
+                "Cargo.toml",
+                "[package]\nname = \"foo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            );
+            repo.write("src/lib.rs", "pub struct LibMarker;\n");
+            repo.write("src/main.rs", "pub struct BinMarker;\nfn main() {}\n");
+            repo.commit_all("fixture");
+
+            let records = rust_frontend_records(&repo.root);
+            assert!(
+                !records.is_empty(),
+                "the rust frontend must emit scanner records for the scratch package"
+            );
+
+            // The in-process ingestor is where `insert_node` panics on a
+            // duplicate same-kind FQN; completing it without a panic IS the
+            // collision assertion (the pre-fix crate roots both rendered
+            // `rust.foo`).
+            let opts = crate::ingest::IngestOptions {
+                blacklist: &[],
+                language: "rust",
+                config: None,
+                base: None,
+            };
+            let ingested = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::ingest::ingest(records, &opts)
+            }))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "ingesting a default lib+bin package must not panic on a \
+                     duplicate crate-root FQN (libbin-fix)"
+                )
+            });
+            let (graph, _report) = ingested;
+
+            // The two crate roots are exactly the module nodes parenting each
+            // target's marker; they must be DISTINCT, each enumerable with its
+            // own subtree.
+            let modules: BTreeSet<String> = graph
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.kind == crate::graph::NodeKind::Module)
+                .map(|(fqn, _)| fqn.clone())
+                .collect();
+            let lib_root = modules
+                .iter()
+                .find(|m| graph.nodes.contains_key(&format!("{m}.LibMarker")))
+                .unwrap_or_else(|| panic!("the lib crate root must parent LibMarker: {modules:?}"));
+            let bin_root = modules
+                .iter()
+                .find(|m| graph.nodes.contains_key(&format!("{m}.BinMarker")))
+                .unwrap_or_else(|| panic!("the bin crate root must parent BinMarker: {modules:?}"));
+            assert!(
+                modules.len() >= 2,
+                "a default lib+bin package must render two crate-root modules: {modules:?}"
+            );
+            assert_ne!(
+                lib_root, bin_root,
+                "the two crate roots must render distinct module FQNs: {modules:?}"
+            );
+
+            let _ = std::fs::remove_dir_all(&repo.root);
+        }
+
+        /// libbin-fix (e2e) regression: a DISTINCT-name multi-target Cargo
+        /// package — `[package] name = "foo"`, `[lib] name = "foo"`,
+        /// `[[bin]] name = "foo-cli"` — must keep EXACTLY its current crate-root
+        /// module FQNs. The collision-only disambiguation must not leak into a
+        /// package whose targets are already distinct, so `rust.foo` and
+        /// `rust.foo_cli` are unchanged (rust-analyzer normalizes the bin's
+        /// display name to a valid identifier — the literal is `rust.foo_cli`,
+        /// underscore).
+        #[test]
+        #[ignore = "e2e tier: real I/O (scratch Cargo package/spawned rust frontend); run via cargo test-e2e"]
+        fn rust_multitarget_crate_fqns_are_stable() {
+            let repo = crate::testutil::Repo::new("rust-libbin-stable");
+            repo.write(
+                "Cargo.toml",
+                "[package]\nname = \"foo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+                 [lib]\nname = \"foo\"\n\n\
+                 [[bin]]\nname = \"foo-cli\"\npath = \"src/main.rs\"\n",
+            );
+            repo.write("src/lib.rs", "pub struct LibMarker;\n");
+            repo.write("src/main.rs", "pub struct BinMarker;\nfn main() {}\n");
+            repo.commit_all("fixture");
+
+            let records = rust_frontend_records(&repo.root);
+            let (graph, _report) = crate::ingest::ingest(
+                records,
+                &crate::ingest::IngestOptions {
+                    blacklist: &[],
+                    language: "rust",
+                    config: None,
+                    base: None,
+                },
+            );
+
+            let modules: BTreeSet<String> = graph
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.kind == crate::graph::NodeKind::Module)
+                .map(|(fqn, _)| fqn.clone())
+                .collect();
+            for pinned in ["rust.foo", "rust.foo_cli"] {
+                assert!(
+                    modules.contains(pinned),
+                    "the distinct-name multi-target package must keep `{pinned}` \
+                     unchanged: {modules:?}"
+                );
+            }
+            // …and each marker hangs under its own pinned crate root, so the
+            // pinned FQNs are the roots' identities, not incidental.
+            assert!(
+                graph.nodes.contains_key("rust.foo.LibMarker"),
+                "LibMarker must hang under `rust.foo`: {:?}",
+                graph.nodes.keys().collect::<Vec<_>>()
+            );
+            assert!(
+                graph.nodes.contains_key("rust.foo_cli.BinMarker"),
+                "BinMarker must hang under `rust.foo_cli`: {:?}",
+                graph.nodes.keys().collect::<Vec<_>>()
+            );
+
+            let _ = std::fs::remove_dir_all(&repo.root);
+        }
     }
 }
