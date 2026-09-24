@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "rust-multitarget-crate-identity",
+  "body": "The Rust frontend must scan a Cargo package that declares both a library target and a binary target, giving each crate a distinct, stable module identity, so `apg scan` completes without a duplicate-FQN panic and the two crates' units are addressable under separate module prefixes.\n\nToday a default lib+bin package cannot be scanned: `rust.apg-rustfrontend.package_prefix_map` only assigns the cargo package name as a module prefix when the package has exactly one local crate target, and `rust.apg-rustfrontend.crate_prefix` then falls back to the target display name. When the lib and bin targets share a name (the default, e.g. `[package] name = \"apg\"`), both crate roots render the module FQN `rust.apg` and `rust.apg.ingest.insert_node` panics on the duplicate project node FQN.\n\nAcceptance criteria:\n- `apg scan` of a package with both a library and a binary target completes without a duplicate-FQN panic.\n- The two crate roots render distinct module FQNs.\n- Each crate's units are reachable under its own module prefix (module-based tools enumerate both subtrees).\n- No package that scans today changes any FQN (see `requirements.constraint.rust-crate-fqn-stability`).",
+  "properties": {
+    "feature": "graph-identity"
+  },
+  "out": [],
+  "in": []
+}
