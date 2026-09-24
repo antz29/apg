@@ -25,11 +25,6 @@
       "kind": "drives",
       "source": "requirements.requirement.python-namespace-package-identity",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.rust-multitarget-crate-identity",
-      "properties": {}
     }
   ]
 }
