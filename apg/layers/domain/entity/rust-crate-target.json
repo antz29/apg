@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "rust-crate-target",
+  "body": "A local crate target of a Cargo package: the unit the Rust frontend loads for a library, binary, example, test, or bench target. Its graph identity is a module prefix rendered by the frontend; two distinct crate targets of the same package must carry distinct prefixes so their modules do not collide. In a default lib+bin package the library target and the binary target both take the package's name, so their display names are identical and the package name cannot disambiguate them.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
