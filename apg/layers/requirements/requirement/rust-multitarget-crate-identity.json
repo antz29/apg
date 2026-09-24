@@ -6,7 +6,13 @@
   "properties": {
     "feature": "graph-identity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.rust-crate-target",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
