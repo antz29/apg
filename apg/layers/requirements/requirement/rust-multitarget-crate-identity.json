@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.rust-crate-target",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.module-identity",
+      "properties": {}
     }
   ],
   "in": [
