@@ -10,6 +10,11 @@
       "kind": "realised-by",
       "source": "domain.entity.rust-crate-target",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.rust-frontend",
+      "properties": {}
     }
   ]
 }
