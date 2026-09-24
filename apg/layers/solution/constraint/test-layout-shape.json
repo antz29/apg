@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "test-layout-shape",
-  "body": "Layout contract: every source module with tests gets a sibling `src/<module>/tests.rs` reached by `#[cfg(test)] mod tests;`; every module's e2e tests get a top-level `tests/<module>_e2e.rs` crate; shared fixtures live in exactly one place (`tests/common/mod.rs`, plus the library's `testutil`), never duplicated per tier; non-test helpers stay at the test-module root, never inside a `unit`/`int`/`e2e` submodule.",
+  "body": "Layout contract: every source module with tests gets a sibling `src/<module>/tests.rs` reached by `#[cfg(test)] mod tests;`; every module's e2e tests get a `tests/<module>_e2e.rs` integration crate at the top level of the crate that owns the module — per-crate, never a single repo-root `tests/` shared by all crates, since the frontend crates are separate projects and keep their e2e tests with themselves (e.g. `src/pylib/tests/`, `src/structlib/tests/`); shared fixtures live in exactly one place (`tests/common/mod.rs`, plus the library's `testutil`), never duplicated per tier; non-test helpers stay at the test-module root, never inside a `unit`/`int`/`e2e` submodule.",
   "properties": {
     "attaches-to": "solution.component.test-layout"
   },
