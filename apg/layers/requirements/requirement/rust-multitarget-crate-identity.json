@@ -16,11 +16,6 @@
       "kind": "drives",
       "target": "domain.value.module-identity",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.group.graph-identity",
-      "properties": {}
     }
   ],
   "in": [
