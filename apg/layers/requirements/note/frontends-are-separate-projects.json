@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.tier-separable-tests",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.test-layout",
+      "properties": {}
     }
   ],
   "in": []
