@@ -14,11 +14,6 @@
       "kind": "implemented-by",
       "target": "rust.apg-rustfrontend.crate_prefix",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.ingest.insert_node",
-      "properties": {}
     }
   ],
   "in": [
