@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "rust-libbin-defect",
+  "body": "source: the `libbin-fix` change-set brief, verified against the branch graph and the source it anchors. Inconsistency: a default lib+bin Cargo package cannot be scanned. `rust.apg-rustfrontend.package_prefix_map` (src/rustlib/src/main.rs:972–995) assigns the cargo package name as a module prefix only when the package maps to exactly one local crate target; a multi-target package gets no override. `rust.apg-rustfrontend.crate_prefix` (:999–1017) then falls back to `krate.display_name()`. For a default lib+bin package (`[package] name = \"apg\"` → lib target `apg`, bin target `apg`) both crates return the same display name, so both crate roots render the module FQN `rust.apg`. `rust.apg.ingest.insert_node` (src/ingest.rs:466–489) reaches the `duplicate project node FQN` arm and panics (line 486) on the duplicate non-planned node. The frontend's own comments (:406–408, :974–976) claim \"distinct crates never collapse onto one prefix\" — true only when the targets have different names, false for the default lib+bin case. Resolution: give each crate of a multi-target package a distinct, stable module prefix, subject to `requirements.constraint.rust-crate-fqn-distinct` and `requirements.constraint.rust-crate-fqn-stability`; the exact disambiguation scheme is an implementation decision and is not pinned in the spec. [autonomous]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
