@@ -4,6 +4,12 @@
   "name": "frontends-are-separate-projects",
   "body": "SCOPE DECISION — the frontend crates are separate projects; tests live with their crate [with user]. Source statement: the spec's test-layout wording said every e2e test lives in \"a top-level `tests/` integration crate\", which read as a single repo-root `tests/` and left the frontend crates' tests ambiguous. Decision: the frontend crates are separate projects, so their e2e tests live with them in their own crate-local `tests/` directory — e.g. `src/pylib/tests/`, `src/structlib/tests/` — never in the root crate's `tests/`. Each first-party crate that carries inline tests requiring white-box access gets its own library surface (lib target) so its tests can move out of the production module tree: today the root `apg` crate, `structlib` and `pylib` — the only two frontend crates carrying inline `#[cfg(test)] mod tests` modules, confirmed in the branch graph as `rust.structfrontend.tests.*` (25 fns: 11 unit, 4 int, 1 e2e, 9 helpers) and `rust.pyfrontend.tests.*` (23 fns: 6 unit, 8 e2e, 9 helpers). The other frontends already keep their tests in separate files by language convention (`src/javalib/CallGraphBuilderTest.java`, `src/golib/main_test.go`, `src/csharplib/tests/Program.cs`, `src/tslib/scanner.test.ts`), so they need no lib surface for relocation and their e2e-by-definition tests are already separate. Resolution: `global.constraint.test-tier-boundaries` and `solution.constraint.test-layout-shape` now state that \"top-level `tests/`\" means the crate's OWN top-level `tests/` directory (per-crate) and that each frontend crate's e2e tests are selected by the same `e2e::` substring filter within that crate's own test invocation; `requirements.requirement.tier-separable-tests` was reworded to match; `solution.constraint.library-target-shape` already stated the general per-crate lib-target rule and needed no change. The spine is unchanged.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.tier-separable-tests",
+      "properties": {}
+    }
+  ],
   "in": []
 }
