@@ -33,6 +33,11 @@
       "kind": "details",
       "source": "requirements.note.rust-libbin-defect",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.rust-libbin-test-coverage",
+      "properties": {}
     }
   ]
 }
