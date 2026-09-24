@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg-rustfrontend.package_prefix_map",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg-rustfrontend.crate_prefix",
+      "properties": {}
     }
   ],
   "in": [
