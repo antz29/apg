@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "rust-libbin-test-coverage",
+  "body": "source: the `libbin-fix` brief's test-coverage finding. Gap: no test exercises a default lib+bin Cargo package. The only Rust test fixture (`testdata/rust/fixture`) is lib-only, and the only bin fixture in the tests is the frontend's own bin-only package, so the collision is latent. Resolution (for the plan): add a new lib+bin Cargo fixture under `testdata/rust/` using the default names (a package whose library and binary targets share the package name), plus an e2e test asserting `apg scan` succeeds and the two crates render distinct module FQNs. `testdata/**` is excluded from a different change-set's decomposition scope, but here the fixture is required for this requirement. [autonomous]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
