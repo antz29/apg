@@ -51,6 +51,11 @@
       "kind": "contains",
       "target": "requirements.requirement.absolute-paths-at-tool-boundary",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.rust-multitarget-crate-identity",
+      "properties": {}
     }
   ],
   "in": [
