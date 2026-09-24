@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "rust-crate-fqn-stability",
+  "body": "The Rust frontend fix must be FQN-stable for every package that scans today: it may change rendered module/symbol FQNs only for packages whose crates currently collide (multi-target packages with duplicate target display names), which today make `apg scan` panic and therefore have no existing FQN to preserve. A package with a single local crate target, a lib-only package, and a bin-only package must keep exactly the module FQNs they render today. This is the change-set's reading of `global.constraint.checkout-independent-graph-identity` and the parent-cannot-depend-on-the-child rule: the plan and spec use the running binary's vocabulary, so the fix may not rename any currently-resolvable FQN.",
+  "properties": {
+    "attaches-to": "requirements.requirement.rust-multitarget-crate-identity"
+  },
+  "out": [],
+  "in": []
+}
