@@ -973,6 +973,52 @@ pub fn av(args: &[&str]) -> Vec<String> {
     args.iter().map(|s| s.to_string()).collect()
 }
 
+/// A layers `NodeFile` with the given identity and `(kind, target)` out-edges
+/// — the pure builder for `plan_cmd`'s coverage/spine fixtures. Used by BOTH
+/// the unit/int tier (sibling `src/plan_cmd/tests.rs`) and the relocated e2e
+/// crate, so it is single-sourced here per
+/// `solution.constraint.test-layout-shape`.
+pub fn nf(
+    layer: &str,
+    node_type: &str,
+    name: &str,
+    edges: &[(&str, &str)],
+) -> crate::layers::NodeFile {
+    crate::layers::NodeFile {
+        layer: layer.to_string(),
+        node_type: node_type.to_string(),
+        name: name.to_string(),
+        body: String::new(),
+        properties: std::collections::BTreeMap::new(),
+        out: edges
+            .iter()
+            .map(|(k, t)| crate::layers::OutEdge {
+                kind: k.to_string(),
+                target: t.to_string(),
+                properties: std::collections::BTreeMap::new(),
+            })
+            .collect(),
+        in_edges: Vec::new(),
+    }
+}
+
+/// A single-task plan record (`<project>/plan.phase-01.task-1`) with the given
+/// verb and target(s) — the coverage touch source. Shared by `plan_cmd`'s
+/// unit/int and e2e tiers, single-sourced here per
+/// `solution.constraint.test-layout-shape`.
+pub fn task_rec(verb: &str, target: &str, new_fqn: &str) -> crate::schema::Record {
+    crate::schema::Record::Task {
+        fqn: "foo/plan.phase-01.task-1".to_string(),
+        title: "T".to_string(),
+        kind: "source".to_string(),
+        tier: String::new(),
+        status: "pending".to_string(),
+        verb: verb.to_string(),
+        target: target.to_string(),
+        new_fqn: new_fqn.to_string(),
+    }
+}
+
 /// A hermetic stand-in for `apg scan` (tests never spawn frontends): pipes the
 /// checkout's `*.scan.jsonl` payloads through the real ingest pipeline, then
 /// chains the same post-code leg `cmd_scan` assembles — the durable
