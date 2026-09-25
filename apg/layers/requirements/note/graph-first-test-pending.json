@@ -16,11 +16,5 @@
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "details",
-      "source": "requirements.note.graph-first-test-fqn-repoint",
-      "properties": {}
-    }
-  ]
+  "in": []
 }
