@@ -43,6 +43,11 @@
       "kind": "details",
       "source": "requirements.note.graph-first-baseline-correction",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.graph-first-test-fqn-repoint",
+      "properties": {}
     }
   ]
 }
