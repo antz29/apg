@@ -245,6 +245,385 @@ pub fn located(kind: NodeKind, path: &str) -> Node {
     }
 }
 
+/// Reads `graph.jsonl` back into a [`Graph`] — the re-ingest leg of the
+/// export round-trip (PHASE_01 done gate: "JSONL → DB → JSONL round-trip for
+/// each" node/edge kind). Mirror of `crate::load::write_graph_jsonl`: every
+/// `Export` record line is mapped back to the graph node or edge it came from.
+/// A `scan_meta` control record on line 1 reconstructs the `Scan` node at
+/// `SCAN_HEAD` (it is never emitted as a node line). Unknown `type`s are an
+/// error so a new export kind cannot silently vanish on the way back in.
+///
+/// Shared by the relocated e2e crates and the root module tree's own tests
+/// (single-sourced here per `solution.constraint.test-layout-shape`).
+pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
+    let text = std::fs::read_to_string(path)?;
+    let mut g = Graph::default();
+
+    for line in text.lines() {
+        let v: serde_json::Value = serde_json::from_str(line)?;
+        let t = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let o = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+        let u = |k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+        let located = || {
+            Some(Location {
+                path: s("path").into(),
+                start: u("start"),
+                end: u("end"),
+                start_line: u("start_line"),
+                end_line: u("end_line"),
+            })
+        };
+        match t {
+            "scan_meta" => {
+                let mut n = Node {
+                    kind: NodeKind::Scan,
+                    ..Node::default()
+                };
+                n.git_sha = o("git_sha");
+                n.git_clean = v.get("git_clean").and_then(|x| x.as_bool());
+                n.content_key = o("content_key");
+                n.scanned_at = o("scanned_at");
+                g.nodes.insert(crate::schema::SCAN_HEAD.to_string(), n);
+            }
+            "language" => {
+                // A language-root node (`lang_switch` id, e.g. `rust`) carries
+                // only its fqn — no location, no code_type; this mirrors
+                // `Export::Language` (PHASE_09 language rooting) so the record
+                // round-trips instead of hitting the unknown-type bail.
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Language,
+                        ..Node::default()
+                    },
+                );
+            }
+            "module" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Module,
+                        status: o("status"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "struct" => {
+                let fqn = s("fqn");
+                g.nodes.insert(
+                    fqn,
+                    Node {
+                        kind: NodeKind::Struct,
+                        location: located(),
+                        code_type: s("code_type"),
+                        status: o("status"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "function" => {
+                let fqn = s("fqn");
+                g.nodes.insert(
+                    fqn,
+                    Node {
+                        kind: NodeKind::Function,
+                        location: located(),
+                        code_type: s("code_type"),
+                        status: o("status"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "file" => {
+                // A File node's fqn IS its absolute path (no separate path
+                // field is exported); the line range rides as the span.
+                let fqn = s("fqn");
+                g.nodes.insert(
+                    fqn.clone(),
+                    Node {
+                        kind: NodeKind::File,
+                        location: Some(Location {
+                            path: fqn.into(),
+                            start: 0,
+                            end: 0,
+                            start_line: u("start_line"),
+                            end_line: u("end_line"),
+                        }),
+                        code_type: s("code_type"),
+                        status: o("status"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "unresolved" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::UnresolvedTarget,
+                        category: o("category"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "requirement" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Requirement,
+                        id: o("id"),
+                        title: o("title"),
+                        body: o("body"),
+                        feature: o("feature"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "note" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Note,
+                        body: o("body"),
+                        sub_kind: o("kind"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "feedback" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Feedback,
+                        body: o("body"),
+                        status: o("status"),
+                        disposition: o("disposition"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "plan" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Plan,
+                        title: o("title"),
+                        strategy: o("strategy"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "plan_phase" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::PlanPhase,
+                        number: v.get("number").and_then(|x| x.as_u64()).map(|x| x as u32),
+                        title: o("title"),
+                        deliverable: o("deliverable"),
+                        status: o("status"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "task" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Task,
+                        title: o("title"),
+                        sub_kind: o("kind"),
+                        tier: o("tier"),
+                        status: o("status"),
+                        verb: o("verb"),
+                        target: o("target"),
+                        new_fqn: o("new_fqn"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "stakeholder" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Stakeholder,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "entity" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Entity,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "system" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::System,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "container" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Container,
+                        name: o("name"),
+                        sub_kind: o("kind"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "component" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Component,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "user" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::User,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "group" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Group,
+                        name: o("name"),
+                        attribute: o("attribute"),
+                        root: o("root"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "value" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Value,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "service" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Service,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "person" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Person,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "constraint" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Constraint,
+                        name: o("name"),
+                        body: o("body"),
+                        attaches_to: o("attaches-to"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "contains" => {
+                g.contains.insert((s("from"), s("to")));
+            }
+            "calls" => {
+                g.calls.insert((s("from"), s("to")));
+            }
+            "uses" => {
+                g.uses.insert((s("from"), s("to")));
+            }
+            "unresolved_call" => {
+                g.unresolved_calls
+                    .insert((s("from"), s("to"), s("target_type")));
+            }
+            "unresolved_use" => {
+                g.unresolved_uses.insert((s("from"), s("to")));
+            }
+            "details" => {
+                g.details.insert((s("from"), s("to")));
+            }
+            "reviews" => {
+                g.reviews.insert((s("from"), s("to")));
+            }
+            "depends_on" => {
+                g.depends_on.insert((s("from"), s("to")));
+            }
+            "gates" => {
+                g.gates.insert((s("from"), s("to")));
+            }
+            "satisfies" => {
+                g.satisfies.insert((s("from"), s("to")));
+            }
+            "drives" => {
+                g.drives.insert((s("from"), s("to")));
+            }
+            "represents" => {
+                g.represents.insert((s("from"), s("to")));
+            }
+            "realised-by" => {
+                g.realised_by.insert((s("from"), s("to")));
+            }
+            "implemented-by" => {
+                g.spec_implemented_by.insert((s("from"), s("to")));
+            }
+            "publishes" => {
+                g.publishes.insert((s("from"), s("to")));
+            }
+            "subscribes" => {
+                g.subscribes.insert((s("from"), s("to")));
+            }
+            other => {
+                anyhow::bail!("graph.jsonl record with unknown type `{other}`");
+            }
+        }
+    }
+    Ok(g)
+}
+
 // ---------------------------------------------------------------------------
 // Cross-process CLI harness: concurrency and read-your-writes tests must drive
 // N separate `apg` processes, not in-process command calls. In-process calls

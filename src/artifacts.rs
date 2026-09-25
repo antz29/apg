@@ -329,10 +329,10 @@ impl ArtifactDb {
         Ok(Connection::new(&self.db)?)
     }
 
-    /// Runs a query and returns its formatted output. Test-only: the shipping
-    /// CLI paths use label-typed queries via [`count`](Self::count) or the
-    /// query subcommand.
-    #[cfg(test)]
+    /// Runs a query and returns its formatted output. Used by the test suite
+    /// (the relocated e2e crates reach it as `apg::artifacts::ArtifactDb::q`);
+    /// the shipping CLI paths use label-typed queries via
+    /// [`count`](Self::count) or the query subcommand.
     pub fn q(&self, query: &str) -> anyhow::Result<String> {
         Ok(self.conn()?.query(query)?.to_string())
     }
