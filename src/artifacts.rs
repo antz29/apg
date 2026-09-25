@@ -802,7 +802,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
 /// pairs `apg edge add` can author). The merge guard
 /// ([`rel_pair_allowed`]) admits the authored pairs; the scanned pairs never
 /// reach this merge (they come from the load path, not a record set).
-pub(crate) fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str)> {
+pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str)> {
     match r {
         Record::Contains { from, to } => Some(("Contains", from, to)),
         Record::Calls { from, to } => Some(("Calls", from, to)),
@@ -862,8 +862,7 @@ pub fn node_fqn(r: &Record) -> Option<&str> {
 /// The DB label and FQN of a node record — the exact pair [`merge_records`]
 /// MERGEs. The projection-equals-sources check (phase-05 task-9) uses it to
 /// derive the expected node set from the source record stream.
-#[cfg(test)]
-pub(crate) fn node_label_fqn(r: &Record) -> Option<(&'static str, &str)> {
+pub fn node_label_fqn(r: &Record) -> Option<(&'static str, &str)> {
     node_merge(r).map(|(label, fqn, _)| (label, fqn))
 }
 

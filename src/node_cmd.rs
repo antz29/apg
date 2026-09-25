@@ -109,7 +109,7 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
 /// store (existence checks + RMW); applying it is the durable sequence. The
 /// phase-03 session coordinator builds a change and applies it itself (single
 /// writer), so this one builder serves both the direct and the routed path.
-pub(crate) struct Change {
+pub struct Change {
     pub writes: Vec<NodeFile>,
     pub deletes: Vec<PathBuf>,
     pub message: String,
@@ -117,7 +117,7 @@ pub(crate) struct Change {
 
 /// Build the complete change for one `node`/`edge` mutation (the shared
 /// read-modify-write the direct command and the session coordinator both run).
-pub(crate) fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Result<Change> {
+pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Result<Change> {
     let Some(sub) = args.first().map(|s| s.as_str()) else {
         anyhow::bail!("usage: apg {kind} <add|update|rm> …");
     };

@@ -14,11 +14,13 @@
 //! code graph); this module provides the git half plus the graph.jsonl
 //! `scan_meta` writers every fixture needs to stay fresh.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::graph::{Graph, Location, Node, NodeKind};
+use crate::layers::{InEdge, NodeFile, OutEdge};
 use crate::load;
 use crate::schema;
 use crate::specs;
@@ -243,6 +245,50 @@ pub fn located(kind: NodeKind, path: &str) -> Node {
         }),
         ..Node::default()
     }
+}
+
+/// A bare `layers::NodeFile` with no edges — the identity fields set, body
+/// empty — for building node-file/edge fixtures. A pure builder shared by the
+/// unit/int and e2e tiers and single-sourced here per
+/// `solution.constraint.test-layout-shape`; it performs no I/O and may be used
+/// by any tier.
+pub fn node(layer: &str, node_type: &str, name: &str) -> NodeFile {
+    NodeFile {
+        layer: layer.to_string(),
+        node_type: node_type.to_string(),
+        name: name.to_string(),
+        body: String::new(),
+        properties: BTreeMap::new(),
+        out: Vec::new(),
+        in_edges: Vec::new(),
+    }
+}
+
+/// A bare `layers::OutEdge` with no properties — a pure builder shared by the
+/// unit/int and e2e tiers.
+pub fn out_edge(kind: &str, target: &str) -> OutEdge {
+    OutEdge {
+        kind: kind.to_string(),
+        target: target.to_string(),
+        properties: BTreeMap::new(),
+    }
+}
+
+/// A bare `layers::InEdge` with no properties — a pure builder shared by the
+/// unit/int and e2e tiers.
+pub fn in_edge(kind: &str, source: &str) -> InEdge {
+    InEdge {
+        kind: kind.to_string(),
+        source: source.to_string(),
+        properties: BTreeMap::new(),
+    }
+}
+
+/// A caller-supplied code-FQN universe: the scanned set or the planned set,
+/// both plain [`BTreeSet`]s of opaque FQN strings. A pure builder shared by the
+/// unit/int and e2e tiers.
+pub fn code_universe(fqns: &[&str]) -> BTreeSet<String> {
+    fqns.iter().map(|s| s.to_string()).collect()
 }
 
 /// Reads `graph.jsonl` back into a [`Graph`] — the re-ingest leg of the
