@@ -1,6 +1,10 @@
-//! Shared test scaffolding (compiled only under `cargo test`): real git
+//! Shared test scaffolding (an unconditional public library module): real git
 //! fixtures built entirely with git2 — the git CLI is never shelled out to
 //! anywhere in src (R6), so fixture construction cannot use it either.
+//!
+//! It compiles unconditionally (not only under `cfg(test)`) so the relocated
+//! e2e integration crates can reach it as `apg::testutil`; nothing here is
+//! ever called by production code.
 //!
 //! R4 consequence: mutation-command tests no longer run against non-git
 //! temp dirs — a write must happen inside a real project context (the
@@ -9,8 +13,6 @@
 //! worktree. The DB builders stay per-module (each test module needs its own
 //! code graph); this module provides the git half plus the graph.jsonl
 //! `scan_meta` writers every fixture needs to stay fresh.
-
-#![cfg(test)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
