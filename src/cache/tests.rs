@@ -1,4 +1,5 @@
 use super::*;
+use crate::classify::{ApgConfig, CodeTypeRule, StructuralScope};
 use crate::graph::Graph;
 
 fn located_node(kind: NodeKind, path: &str) -> Node {
@@ -20,6 +21,24 @@ fn module_node() -> Node {
     Node {
         kind: NodeKind::Module,
         ..Node::default()
+    }
+}
+
+/// A one-glob `types` rule for the cache-key classification test.
+fn code_type_rule(name: &str, glob: &str) -> CodeTypeRule {
+    CodeTypeRule {
+        name: name.to_string(),
+        globs: vec![glob.to_string()],
+        names: vec!["Test*".to_string()],
+    }
+}
+
+/// A present structural scope for the cache-key classification test.
+fn structural_scope() -> StructuralScope {
+    StructuralScope {
+        include: vec!["**/*.yml".to_string()],
+        exclude: vec!["vendor/**".to_string()],
+        code_type: Some("config".to_string()),
     }
 }
 
@@ -143,6 +162,7 @@ mod unit {
             languages: vec!["go".into()],
             excludes: vec![],
             modules: vec![],
+            classification: classification_digest(None),
         };
         let k = CacheKey::compute(&base);
         // The binary version is folded in.
@@ -166,6 +186,152 @@ mod unit {
         );
         // Identical configs render identical keys.
         assert!(CacheKey::compute(&base).matches(&CacheKey::compute(&base)));
+    }
+
+    /// phase-03 task-4 (Defect B): the loaded classification config
+    /// (`apg/config.json`) is part of the global cache key. `classify_code_type`
+    /// runs at ingest and only a FULL load reclassifies, so a classification
+    /// change must force a full scan rather than silently reuse cached
+    /// `code_type`s. Equal configs fold to equal keys and the digest is
+    /// deterministic; a change to the `types` rules (or their order), the
+    /// `default`, or the structural scope moves the key; and the existing
+    /// language/exclude/module identity is unchanged.
+    #[test]
+    fn cache_key_folds_the_classification_config() {
+        let a = ApgConfig {
+            default: "src".into(),
+            types: vec![code_type_rule("test", "**/tests/**")],
+            structural: Some(structural_scope()),
+        };
+        let a_again = ApgConfig {
+            default: "src".into(),
+            types: vec![code_type_rule("test", "**/tests/**")],
+            structural: Some(structural_scope()),
+        };
+        let key = |cfg: Option<&ApgConfig>| {
+            CacheKey::compute(&ScanConfigKey {
+                languages: vec!["go".into()],
+                excludes: vec![],
+                modules: vec![],
+                classification: classification_digest(cfg),
+            })
+        };
+
+        // (a) Equal configs → the same key; the digest is deterministic, and an
+        // absent config has its own distinct, stable identity.
+        let ka = key(Some(&a));
+        let digest_a = classification_digest(Some(&a));
+        let digest_none = classification_digest(None);
+        assert!(ka.matches(&key(Some(&a_again))));
+        assert_eq!(classification_digest(Some(&a_again)), digest_a);
+        assert_eq!(classification_digest(None), digest_none);
+        assert_ne!(digest_a, digest_none);
+        assert!(!ka.matches(&key(None)));
+
+        // (b) Each graph-affecting field moves the key.
+        // `types`: a different glob, a different rule name, a different `names`
+        // list, and a different rule ORDER (first-match wins) each matter.
+        let glob_changed = ApgConfig {
+            default: "src".into(),
+            types: vec![code_type_rule("test", "**/spec/**")],
+            structural: Some(structural_scope()),
+        };
+        assert!(!ka.matches(&key(Some(&glob_changed))));
+        let name_changed = ApgConfig {
+            default: "src".into(),
+            types: vec![code_type_rule("generated", "**/tests/**")],
+            structural: Some(structural_scope()),
+        };
+        assert!(!ka.matches(&key(Some(&name_changed))));
+        let names_changed = ApgConfig {
+            default: "src".into(),
+            types: vec![CodeTypeRule {
+                names: vec!["Other*".into()],
+                ..code_type_rule("test", "**/tests/**")
+            }],
+            structural: Some(structural_scope()),
+        };
+        assert!(!ka.matches(&key(Some(&names_changed))));
+        let ordered = |first: (&str, &str), second: (&str, &str)| ApgConfig {
+            default: "src".into(),
+            types: vec![
+                code_type_rule(first.0, first.1),
+                code_type_rule(second.0, second.1),
+            ],
+            structural: Some(structural_scope()),
+        };
+        assert!(
+            !key(Some(&ordered(
+                ("test", "**/tests/**"),
+                ("generated", "**/*.pb.go")
+            )))
+            .matches(&key(Some(&ordered(
+                ("generated", "**/*.pb.go"),
+                ("test", "**/tests/**")
+            ))))
+        );
+        // `default`.
+        let default_changed = ApgConfig {
+            default: "lib".into(),
+            types: vec![code_type_rule("test", "**/tests/**")],
+            structural: Some(structural_scope()),
+        };
+        assert!(!ka.matches(&key(Some(&default_changed))));
+        // Structural scope: include, exclude, code_type, and absence vs presence.
+        let include_changed = ApgConfig {
+            default: "src".into(),
+            types: vec![code_type_rule("test", "**/tests/**")],
+            structural: Some(StructuralScope {
+                include: vec!["**/*.yaml".into()],
+                ..structural_scope()
+            }),
+        };
+        assert!(!ka.matches(&key(Some(&include_changed))));
+        let exclude_changed = ApgConfig {
+            default: "src".into(),
+            types: vec![code_type_rule("test", "**/tests/**")],
+            structural: Some(StructuralScope {
+                exclude: vec!["third_party/**".into()],
+                ..structural_scope()
+            }),
+        };
+        assert!(!ka.matches(&key(Some(&exclude_changed))));
+        let code_type_changed = ApgConfig {
+            default: "src".into(),
+            types: vec![code_type_rule("test", "**/tests/**")],
+            structural: Some(StructuralScope {
+                code_type: Some("cfg".into()),
+                ..structural_scope()
+            }),
+        };
+        assert!(!ka.matches(&key(Some(&code_type_changed))));
+        let no_structural = ApgConfig {
+            default: "src".into(),
+            types: vec![code_type_rule("test", "**/tests/**")],
+            structural: None,
+        };
+        assert!(!ka.matches(&key(Some(&no_structural))));
+
+        // (c) The language/exclude/module identity still holds: each moves the
+        // key on its own, independent of the classification digest, while an
+        // identical config stays stable.
+        let base = ScanConfigKey {
+            languages: vec!["go".into()],
+            excludes: vec![],
+            modules: vec![],
+            classification: classification_digest(Some(&a)),
+        };
+        let built = CacheKey::compute(&base);
+        let mut lang = base.clone();
+        lang.languages.push("java".into());
+        assert!(!built.matches(&CacheKey::compute(&lang)));
+        let mut excl = base.clone();
+        excl.excludes.push("vendor".into());
+        assert!(!built.matches(&CacheKey::compute(&excl)));
+        let mut mods = base.clone();
+        mods.modules.push("core".into());
+        assert!(!built.matches(&CacheKey::compute(&mods)));
+        assert!(built.matches(&CacheKey::compute(&base)));
     }
 
     #[test]

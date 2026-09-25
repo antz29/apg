@@ -1992,11 +1992,15 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     let config = classify::ApgConfig::load(&project_dir);
 
     // The scan config identity shared by the warm-cache probe and the win-B
-    // preparation: the exact languages/excludes/modules this scan runs with.
+    // preparation: the exact languages/excludes/modules this scan runs with,
+    // plus the classification-config identity (`apg/config.json`) — the
+    // ingestor folds that config into every record's `code_type`, so a config
+    // change must invalidate the incremental splice and force a full load.
     let scan_config = cache::ScanConfigKey {
         languages: languages.clone(),
         excludes: path_excludes.clone(),
         modules: module_dirs.clone(),
+        classification: cache::classification_digest(config.as_ref()),
     };
 
     // Win-B incremental preparation (phase-02 task-8): the content manifest,
