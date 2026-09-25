@@ -300,18 +300,28 @@ Every test in the repo belongs to exactly one of three tiers, defined by the law
   test is named or wherever it lives. The body wins over any name or evidence
   list — if it does real I/O, it is e2e.
 
-**Tier-marker convention.** Inside each `#[cfg(test)] mod tests`, every test
-lives in exactly one tier submodule named `unit`, `int` or `e2e`, so libtest's
-path filter selects a tier (`…::tests::unit::`, `…::tests::int::`,
-`…::tests::e2e::`). Every **e2e** test also carries
-`#[ignore = "e2e tier: …; run via cargo test-e2e"]`, so a plain `cargo test` can
-never reach it. Each tier submodule starts with `use super::*;`.
+**Test layout.** The **unit/int** tiers live in a sibling `src/<module>/tests.rs`
+(or `src/tests.rs` for the crate root), reached by a `#[cfg(test)] mod tests;`
+declaration in the production module — the frontend crates' library roots
+included (`src/structlib/src/tests.rs`, `src/pylib/src/tests.rs`). Every
+unit/int test still sits in an inner `unit` or `int` submodule, so libtest's
+path filter selects a tier (`…::tests::unit::`, `…::tests::int::`). The **e2e**
+tier moved OUT of the production module tree into the crate's own top-level
+`tests/<module>_e2e.rs` integration crate — the root crate's `tests/*_e2e.rs`
+(e.g. `tests/main_e2e.rs`, `tests/splice_e2e.rs`) plus the frontend crates'
+`src/structlib/tests/structlib_e2e.rs` and `src/pylib/tests/pylib_e2e.rs`. Each
+is wrapped in `mod e2e` and shares its crate's `tests/common/mod.rs`, so its
+libtest paths are `e2e::…` (no longer `tests::e2e::…`). Every **e2e** test also
+carries `#[ignore = "e2e tier: …; run via cargo test-e2e"]`, so a plain
+`cargo test` can never reach it. Each tier submodule starts with `use super::*;`.
 
-**Helpers stay at the `mod tests` root.** Only `#[test]` functions move into a
-tier. Every non-test helper/fixture/builder/test-util stays at the `mod tests`
-root (or in one shared `common` child module of `mod tests`), is never moved into
-a tier and never duplicated per tier; a helper that sibling tiers must reach
-stays at the root with `pub(super)`/`pub(crate)` visibility.
+**Helpers stay out of tiers.** Only `#[test]` functions move into a tier. Every
+non-test helper/fixture/builder/test-util is never moved into a tier and never
+duplicated per tier; a helper that sibling tiers — or the relocated e2e
+integration crate — must reach now lives on the shared public library harness
+`apg::testutil` (`src/testutil.rs`, an unconditional public module) or the
+crate's `tests/common/mod.rs`, never stranded in a production module's inline
+`mod tests`. Clippy `-D warnings` is what catches a stranded or unused helper.
 
 **A tier may select ZERO tests.** The repo has few genuine pure unit tests, and
 no genuine 2+-unit pure tests at all, so an empty selection is a valid, named
@@ -323,12 +333,19 @@ invocation; a module with no test of a given tier simply omits that submodule.
 cargo test          # DEFAULT GATE: unit+int only, seconds, e2e unreachable
 cargo test-unit     # unit tier only     (= cargo test tests::unit::)
 cargo test-int      # int tier only      (= cargo test tests::int::)
-cargo test-e2e      # e2e tier only, opt-in (= cargo test tests::e2e:: -- --ignored)
+cargo test-e2e      # e2e tier only, opt-in (= cargo test e2e:: -- --ignored --test-threads=4)
 ```
 
+The `--test-threads=4` bound is **required**, not cosmetic: lbug reserves ~8 TiB
+of virtual address space per `Database`, and the heavy `tests/splice_e2e.rs`
+(19 e2e tests) exhausts the process address space at libtest's default thread
+count (`Buffer manager exception: Mmap for size 8796093022208 failed`) while
+passing at `--test-threads=4` with byte-identical test bodies.
+
 `cargo test` runs **unit+int only** and stays seconds-fast: the e2e tests are
-`#[ignore]`d and live under `tests::e2e::`, so they are excluded from and
-unreachable through the default gate. **e2e is the FINAL gate only** and obeys
+`#[ignore]`d and live in the per-crate `tests/*_e2e.rs` integration crates under
+`mod e2e` (`e2e::…`), so they are excluded from and unreachable through the
+default gate. **e2e is the FINAL gate only** and obeys
 `global.constraint.no-real-project-test`: the candidate binary is exercised
 against a scratch `/tmp` git repo, never a real project (see below).
 
@@ -336,13 +353,22 @@ against a scratch `/tmp` git repo, never a real project (see below).
 exact sequence `cargo fmt --check` → `cargo check --all-targets` → `cargo clippy
 --all-targets -- -D warnings` → `cargo build` → `cargo test` (the default
 unit+int suite), stopping at the first failure; `scripts/gate.sh --e2e` appends
-the opt-in e2e tier. It is **run-only** — `scripts/**` is not in an agent's edit
+its opt-in e2e step. It is **run-only** — `scripts/**` is not in an agent's edit
 grant, so the sequence cannot be rewritten beneath a running agent.
+
+**The frontend crates are separate cargo projects** (there is no root
+`[workspace]`), so their tiers are run from their own directories, never by the
+root gate: `(cd src/structlib && cargo test)` /
+`(cd src/structlib && cargo test e2e:: -- --ignored --test-threads=4)`, and
+likewise `src/pylib`. Wiring those invocations into `scripts/gate.sh` is a
+**maintainer action** (`scripts/**` is outside an agent's edit grant), so the
+root `scripts/gate.sh` does NOT run them — invoke them yourself when a change
+touches a frontend crate.
 
 Listing quirks (verified): `cargo test -- --list` **includes `#[ignore]`d
 tests**, and `cargo test-e2e -- --list` mis-composes to a double `--` and
 *executes* the e2e tier instead of listing it — to list the e2e tier use the raw
-form `cargo test tests::e2e:: -- --ignored --list`.
+form `cargo test e2e:: -- --ignored --list`.
 
 **Release gate note.** The release-version guard tests
 (`cargo_manifest_and_lockfile_declare_release_version`,
@@ -358,6 +384,13 @@ scratch `/tmp` git repo (or synthetic `target/`/DB tree) and drives the candidat
 binary against it. No test reads `$HOME`, an external checkout, or any other
 developer-local path, so `cargo test-e2e` needs no `cargo build --release` —
 `cargo build` (debug) is enough.
+
+**Tests are graph-visible.** `apg/config.json` now carries an explicit `test`
+type whose globs (`tests/**`, `**/tests/**`, `**/tests.rs`, `**/*.test.ts`,
+`**/*.test.tsx`, `**/*_test.go`, `**/*Test.java`, `**/*Tests.java`,
+`**/*_test.rs`) classify the relocated tests as `code_type = 'test'`, so tests
+are queryable with `WHERE f.code_type = 'test'` while production modules stay
+`src`.
 
 ## Testing a new binary (scratch repo in /tmp)
 
@@ -466,7 +499,7 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    pass (not just `cargo check`). `cargo test` is the fast unit+int default gate
    and does **not** run the release-version guard: those tests read
    `Cargo.toml`/`Cargo.lock`/`README.md` from disk and are therefore **e2e**, so
-   the guard runs under `cargo test-e2e` (`cargo test tests::e2e:: -- --ignored`)
+   the guard runs under `cargo test-e2e` (`cargo test e2e:: -- --ignored`)
    — a stale `RELEASE_VERSION` literal ships the release HEAD red unless the e2e
    tier is run. Build first because the cross-process tests spawn
    `target/<profile>/apg` (`src/testutil.rs`), which `cargo test` alone does not
