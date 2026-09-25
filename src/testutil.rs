@@ -399,8 +399,10 @@ pub fn start_session_process(wt: &Path, home: &Path) -> SessionProcess {
 }
 
 /// Commits `rels` on `wt`'s current branch (git2 — the same mechanics
-/// `git::commit_files` uses).
-pub fn wt_commit(wt: &Path, rels: &[&str], msg: &str) {
+/// `git::commit_files` uses), returning the new branch HEAD sha. The sha is
+/// the handle a caller re-anchors `scan_meta` against so the branch graph
+/// stays fresh; callers that only need the commit still discard the return.
+pub fn wt_commit(wt: &Path, rels: &[&str], msg: &str) -> String {
     let repo = git2::Repository::open(wt).unwrap();
     let mut index = repo.index().unwrap();
     for rel in rels {
@@ -412,7 +414,30 @@ pub fn wt_commit(wt: &Path, rels: &[&str], msg: &str) {
     let sig = repo.signature().unwrap();
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &[&head])
+        .unwrap()
+        .to_string()
+}
+
+/// Commits `rels` on `wt`'s current branch (git2) and returns the new branch
+/// HEAD sha. Unlike [`wt_commit`] it stages through the index pathspec matcher,
+/// so `rels` may name a directory or a git pathspec — the superset needed by
+/// test setup that deliberately writes outside the commit funnel, before a
+/// scan_meta re-anchor. The single canonical home for the relocated e2e
+/// crates' `wt_commit_paths` fixtures.
+pub fn wt_commit_paths(wt: &Path, rels: &[&str], msg: &str) -> String {
+    let repo = git2::Repository::open(wt).unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(rels.iter().copied(), git2::IndexAddOption::DEFAULT, None)
         .unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &[&head])
+        .unwrap()
+        .to_string()
 }
 
 /// The number of commits reachable from the checkout's HEAD — used to assert
@@ -524,6 +549,20 @@ pub fn payload_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     walk(dir, &mut out);
     out.sort();
+    out
+}
+
+/// Runs `f` with the process cwd temporarily set to `dir`, restoring it after.
+/// The single canonical home for the relocated e2e crates' cwd-scoped fixtures
+/// (`apg::testutil::with_cwd`); serialized behind [`CWD_LOCK`] so a chdir never
+/// interleaves with [`scan_checkout`], which also mutates the process-global
+/// cwd.
+pub fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let old = std::env::current_dir().unwrap();
+    std::env::set_current_dir(dir).unwrap();
+    let out = f();
+    std::env::set_current_dir(old).unwrap();
     out
 }
 
