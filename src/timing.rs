@@ -65,7 +65,7 @@ impl Phase {
 pub(crate) const HUMAN_PREFIX: &str = "[timing]";
 
 /// The machine-readable report line's prefix (the JSON object follows it).
-pub(crate) const MACHINE_PREFIX: &str = "[timing-json] ";
+pub const MACHINE_PREFIX: &str = "[timing-json] ";
 
 /// The `frontend-skipped` marker appended to the human line when the frontend
 /// phase never ran (the whole-tree freshness fast-path).
@@ -76,7 +76,7 @@ pub(crate) const FRONTEND_SKIPPED_MARKER: &str = "frontend-skipped";
 /// `frontend-skipped` flag so a fast path is distinguishable from a genuinely
 /// instant frontend run.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct TimingReport {
+pub struct TimingReport {
     durations: [Duration; 4],
     frontend_skipped: bool,
 }
@@ -108,7 +108,7 @@ impl TimingReport {
     }
 
     /// Whether the frontend phase was skipped this scan.
-    pub(crate) fn frontend_skipped(&self) -> bool {
+    pub fn frontend_skipped(&self) -> bool {
         self.frontend_skipped
     }
 
@@ -151,8 +151,7 @@ impl TimingReport {
     /// malformed or foreign line is never mistaken for a report). The parser is
     /// the report model's reader and is exercised by the in-process round-trip
     /// tests (task-6) and the real-scan acceptance test (task-11).
-    #[cfg(test)]
-    pub(crate) fn from_machine_line(line: &str) -> Option<TimingReport> {
+    pub fn from_machine_line(line: &str) -> Option<TimingReport> {
         let line = line.trim();
         let json = line.strip_prefix(MACHINE_PREFIX).unwrap_or(line);
         let value: serde_json::Value = serde_json::from_str(json).ok()?;
