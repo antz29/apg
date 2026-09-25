@@ -18,4 +18,13 @@ test-unit = "test tests::unit::"
 # integration tier only -- pure in-memory, 2+ units wired, no real I/O.
 test-int = "test tests::int::"
 # e2e tier only -- real I/O; the ONLY e2e entry point (opt-in final gate).
-test-e2e = "test tests::e2e:: -- --ignored"
+# The root crate's e2e tests were relocated out of the inline `mod tests` into
+# top-level `tests/*_e2e.rs` integration crates, each wrapping its tests in
+# `mod e2e` -- so the `e2e::` filter selects them (their libtest paths are
+# `e2e::<test>`, no longer `tests::e2e::<test>`).
+# Thread-bounded to 4: lbug reserves ~8 TiB of virtual address space per
+# `Database` and the heavy crates (e.g. `splice_e2e`) exhaust the process
+# address space at libtest's default parallelism
+# (`Buffer manager exception: Mmap for size 8796093022208 failed`), while they
+# pass at this bound.
+test-e2e = "test e2e:: -- --ignored --test-threads=4"
