@@ -1785,7 +1785,11 @@ fn edge_record(from: &str, kind: &str, to: &str) -> anyhow::Result<Record> {
 /// Read every durable node file under `apg/layers/` into a [`NodeFile`] vector
 /// (no validation) — the identity universe `validate_change` and `write_project`
 /// resolve writes against. The FQN is derived from the path, never read.
-pub(crate) fn read_existing_nodes(apg_root: &Path) -> anyhow::Result<Vec<NodeFile>> {
+///
+/// Public so the relocated e2e crates reach it as
+/// `apg::layers::read_existing_nodes` (e.g. the `testutil` crash-durability
+/// test pairs the read store with [`check_edge_pairing`]).
+pub fn read_existing_nodes(apg_root: &Path) -> anyhow::Result<Vec<NodeFile>> {
     let mut nodes: Vec<NodeFile> = Vec::new();
     for (layer_dir, types) in LAYERS_TREE {
         for node_type in *types {
