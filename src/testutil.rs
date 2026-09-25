@@ -964,6 +964,15 @@ pub fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     out
 }
 
+/// The `Vec<String>` CLI-argv shape the node/plan command dispatchers take
+/// (positionals + repeatable flags). A pure builder used by BOTH the unit/int
+/// tier and the e2e tier of `node_cmd` (and the sibling `plan_cmd` relocation),
+/// so it has exactly one definition here per
+/// `solution.constraint.test-layout-shape`.
+pub fn av(args: &[&str]) -> Vec<String> {
+    args.iter().map(|s| s.to_string()).collect()
+}
+
 /// A hermetic stand-in for `apg scan` (tests never spawn frontends): pipes the
 /// checkout's `*.scan.jsonl` payloads through the real ingest pipeline, then
 /// chains the same post-code leg `cmd_scan` assembles — the durable
