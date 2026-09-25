@@ -1,12 +1,5 @@
 use super::*;
 
-// `read_graph_jsonl` now lives on the shared harness (`apg::testutil`) — the
-// single definition the relocated e2e crate reaches directly. Re-export it
-// under the old `crate::load::tests::read_graph_jsonl` path so the still-inline
-// e2e tests in `src/splice.rs` / `src/ingest.rs` keep resolving until their own
-// relocation tasks move them onto `crate::testutil` too.
-pub(crate) use crate::testutil::read_graph_jsonl;
-
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
