@@ -33,9 +33,7 @@ mod unit {
         for v in ["", "banana", "0", "v0.10.4", "0.10-beta", "0..4"] {
             assert_eq!(
                 check_version(BIN, Some(v)),
-                Err(VersionBlock::Malformed {
-                    raw: v.to_string()
-                }),
+                Err(VersionBlock::Malformed { raw: v.to_string() }),
                 "layout `{v}` must be malformed"
             );
         }
@@ -132,8 +130,7 @@ mod unit {
             assert!(newer.contains(needle), "newer block text: {newer}");
         }
         // Unversioned: init guidance.
-        let unversioned =
-            block_message(&VersionBlock::Unversioned, BIN, path, "re-run `apg scan`");
+        let unversioned = block_message(&VersionBlock::Unversioned, BIN, path, "re-run `apg scan`");
         for needle in [
             "no layout version",
             "apg init",
