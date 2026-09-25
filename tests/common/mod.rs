@@ -3,7 +3,7 @@
 //! Each integration-test binary in `tests/` (a `tests/*_e2e.rs` crate)
 //! includes this module separately via `mod common;`, so items unused by a
 //! given binary are expected.
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
 
 // Keep this thin: the fixtures are single-sourced on the public library
 // harness `apg::testutil` (the exactly-one-definition home for `with_cwd`,
