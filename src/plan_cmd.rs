@@ -1621,7 +1621,7 @@ fn realization_candidates(fqn: &str) -> Vec<String> {
 /// nodes, unresolved feedback, coverage gaps). Guarded: refuses outside the
 /// project context and against a stale branch DB (a verdict is only
 /// meaningful against the branch's graph — R5).
-pub(crate) fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
+pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     crate::git::require_membership(apg_root, project)?;
     if crate::git::is_stale(apg_root) {
         anyhow::bail!(
