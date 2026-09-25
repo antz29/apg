@@ -408,7 +408,11 @@ impl Coordinator {
     /// apply it — atomic write + exactly one commit — then apply the exact
     /// projection delta write-through through the session-held DB handle. The
     /// session already holds the extended flock, so nothing is re-acquired.
-    pub fn handle_mutation(&self, kind: &str, args: &[String]) -> Reply {
+    ///
+    /// Crate-private: it is driven only by [`serve`](Self::serve) over the wire,
+    /// and its `Reply` wire type stays internal. Integration crates reach the
+    /// session through the public `forward_*`/`signal_end`/`socket_path` surface.
+    pub(crate) fn handle_mutation(&self, kind: &str, args: &[String]) -> Reply {
         match self.apply_mutation(kind, args) {
             Ok(output) => Reply::Ok { output },
             Err(e) => Reply::Err {

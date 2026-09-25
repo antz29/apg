@@ -24,7 +24,7 @@ pub mod plan_cmd;
 pub mod project_cmd;
 pub mod review_cmd;
 pub mod schema;
-mod session;
+pub mod session;
 pub mod specs;
 pub mod splice;
 pub mod testutil;
