@@ -353,16 +353,19 @@ against a scratch `/tmp` git repo, never a real project (see below).
 exact sequence `cargo fmt --check` → `cargo check --all-targets` → `cargo clippy
 --all-targets -- -D warnings` → `cargo build` → `cargo test` (the default
 unit+int suite), stopping at the first failure; `scripts/gate.sh --e2e` appends
-its opt-in e2e step. It is **run-only** — `scripts/**` is not in an agent's edit
-grant, so the sequence cannot be rewritten beneath a running agent.
+its opt-in e2e step. It is **run-only for every agent except
+`build-implementer`, which owns `scripts/**`** and may change a step — the
+safety property is that no *other* agent can rewrite the gate beneath itself
+while it is running.
 
 **The frontend crates are separate cargo projects** (there is no root
 `[workspace]`), so their tiers are run from their own directories, never by the
 root gate: `(cd src/structlib && cargo test)` /
 `(cd src/structlib && cargo test e2e:: -- --ignored --test-threads=4)`, and
-likewise `src/pylib`. Wiring those invocations into `scripts/gate.sh` is a
-**maintainer action** (`scripts/**` is outside an agent's edit grant), so the
-root `scripts/gate.sh` does NOT run them — invoke them yourself when a change
+likewise `src/pylib`. Wiring those invocations into `scripts/gate.sh` has not
+been done (`scripts/**` is **run-only for every agent except
+`build-implementer`, which owns it** and may change a step), so the root
+`scripts/gate.sh` does NOT run them — invoke them yourself when a change
 touches a frontend crate.
 
 Listing quirks (verified): `cargo test -- --list` **includes `#[ignore]`d

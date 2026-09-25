@@ -11,9 +11,10 @@
 # would add a tool dependency this repo does not need.
 #
 # OWNERSHIP
-# Scaffolded agents are granted this file as an exact bash pattern — they may
-# RUN it, but `scripts/**` is not in their edit grant, so the sequence cannot be
-# rewritten beneath them. Changing a step is a maintainer change.
+# The gate is granted run-only as an exact bash pattern to the scaffolded
+# agents — they may RUN it but not edit it. `build-implementer` owns
+# `scripts/**` and is the one agent that may change a step, so the sequence
+# cannot be rewritten beneath any other agent that is running it.
 #
 # USAGE
 #   scripts/gate.sh          # fmt --check, check, clippy, build, test
@@ -52,8 +53,8 @@ step "node --test   (src/tslib: node)"
 (cd src/tslib && node --test)
 
 if [ "${1:-}" = "--e2e" ]; then
-  step "cargo test tests::e2e:: -- --ignored --test-threads=${E2E_THREADS:-1}"
-  cargo test tests::e2e:: -- --ignored --test-threads="${E2E_THREADS:-1}"
+  step "cargo test e2e:: -- --ignored --test-threads=${E2E_THREADS:-1}"
+  cargo test e2e:: -- --ignored --test-threads="${E2E_THREADS:-1}"
 fi
 
 printf '\n=== gate GREEN ===\n'
