@@ -1,5 +1,20 @@
 {
   "default": "src",
-  "types": [],
+  "types": [
+    {
+      "name": "test",
+      "globs": [
+        "tests/**",
+        "**/tests/**",
+        "**/tests.rs",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*_test.go",
+        "**/*Test.java",
+        "**/*Tests.java",
+        "**/*_test.rs"
+      ]
+    }
+  ],
   "version": "0.17.0"
 }
