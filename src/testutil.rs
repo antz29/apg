@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::graph::{Graph, Node, NodeKind};
+use crate::graph::{Graph, Location, Node, NodeKind};
 use crate::load;
 use crate::schema;
 use crate::specs;
@@ -224,6 +224,25 @@ pub fn touch_db(apg_root: &Path) {
 /// Removes the fixture repo's temp dir (each test cleans up after itself).
 pub fn remove(repo: &Repo) {
     let _ = std::fs::remove_dir_all(&repo.root);
+}
+
+/// A located `Graph` node fixture — the File/Struct/Function shape the
+/// frontends emit, with a one-line span at `path`. A pure builder shared by
+/// the unit/int and e2e tiers and single-sourced here per
+/// `solution.constraint.test-layout-shape`; unlike the I/O harness below it
+/// performs no I/O and may be used by any tier.
+pub fn located(kind: NodeKind, path: &str) -> Node {
+    Node {
+        kind,
+        location: Some(Location {
+            path: PathBuf::from(path),
+            start: 0,
+            end: 1,
+            start_line: 1,
+            end_line: 1,
+        }),
+        ..Node::default()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -719,8 +738,10 @@ mod tests {
     /// (= `cargo test tests::e2e:: -- --ignored`). apg.testutil's own
     /// non-`#[test]` items (Repo, ApgCommand, spawn_apg, start_session_process,
     /// scan_checkout, payload helpers) are the E2E HARNESS and live at module
-    /// level, never inside a tier. PIN: apg.testutil is e2e-only
-    /// infrastructure — it must not be used by a unit/int test.
+    /// level, never inside a tier. PIN: testutil's I/O harness (the
+    /// git/process/db fixtures) is e2e-only — it must not be used by a
+    /// unit/int test; the pure graph-fixture builder `located` performs no I/O
+    /// and may be shared by any tier.
     mod e2e {
         use super::*;
 
