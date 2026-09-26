@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "python-scanner-class-move",
+  "body": "source: the durable spine edge solution.component.python-module-identity —implemented-by→ rust.pyfrontend.Scanner.module_fqn_for, authored while the Python scanner lived in the flat src/pylib lib.rs.\n\nInconsistency: the pylib decomposition (plan apg-cleanup, phase-04 task-5) splits the crate into cohesive modules, so the moved scanner units gain a module segment in their Rust FQN. The old flat FQN rust.pyfrontend.Scanner.module_fqn_for ceases to exist; the scanner moves to src/pylib/scanner.rs and its method's new FQN is rust.pyfrontend.scanner.Scanner.module_fqn_for. The verifying scan would have shown the authored implemented-by target as drift.\n\nResolution: re-pointed the implemented-by edge here, before the verifying scan, from rust.pyfrontend.Scanner.module_fqn_for to the already-planned rust.pyfrontend.scanner.Scanner.module_fqn_for (pending until the decomposition lands; the planned Implementation node is kept, no real code authored). The preserved flat FQNs — the rust.pyfrontend module, parse_args, run, Args, usage, read_target_set and ensure_artifact_dir — are untouched. [with coordinator]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
