@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.structfrontend.line_count",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.structfrontend.parse_headings",
       "properties": {}
     },
