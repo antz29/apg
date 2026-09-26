@@ -39,6 +39,11 @@
       "kind": "details",
       "target": "rust.apg.project_cmd.merge",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.delete",
+      "properties": {}
     }
   ],
   "in": []
