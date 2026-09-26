@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "rust.apg.cache.manifest",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.cache.fragment",
+      "properties": {}
     }
   ],
   "in": []
