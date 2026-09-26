@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "rust.apg.load.export",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.identity",
+      "properties": {}
     }
   ],
   "in": []
