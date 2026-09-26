@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "rust.apg.git.state",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.git.identity",
+      "properties": {}
     }
   ],
   "in": []
