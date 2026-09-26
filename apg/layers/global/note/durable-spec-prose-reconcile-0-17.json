@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "global.note.agents-md-test-laws-drift",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.note.library-surface-non-graph-artifacts",
+      "properties": {}
     }
   ],
   "in": []
