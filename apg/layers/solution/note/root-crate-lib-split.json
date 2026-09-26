@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "rust.apg.warm",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.scan",
+      "properties": {}
     }
   ],
   "in": []
