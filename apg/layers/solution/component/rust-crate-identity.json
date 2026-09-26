@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg-rustfrontend.package_prefix_map",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg-rustfrontend.identity.crate_prefix",
       "properties": {}
     },
