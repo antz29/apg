@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.classify",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.blacklist.is_blacklisted",
+      "properties": {}
     }
   ],
   "in": [
