@@ -1,0 +1,698 @@
+//! The atomic multi-file write-through and the durable-mutation orchestrator
+//! (SPEC §2.2/§4.1/§4.2): validate the complete change, write every affected
+//! node file (and delete the removed ones) in one logical mutation, commit
+//! once, and re-merge the exact delta into the live DB.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use crate::artifacts;
+use crate::git;
+use crate::schema::Record;
+
+use super::catalog::{LAYERS_DIR, LAYERS_TREE, Layer, StoragePolicy, TRANS_DIR};
+use super::code_refs::validate_code_refs;
+use super::node_file::{NodeFile, fqn};
+use super::tree::ingest_tree;
+use super::validate::{
+    check_edge_pairing, eval_constraint, parse_fqn, valid_name, validate_edges, validate_node,
+};
+use super::{layer_of, validate_assembled_rules};
+
+// ---------------------------------------------------------------------------
+// SPEC §4.1 — atomic multi-file write-through (phase-3 task-11)
+// ---------------------------------------------------------------------------
+
+/// Write a SET of node files atomically (SPEC §4.1 "renames / deletions are
+/// atomic write-throughs"): one logical mutation updates ALL affected files —
+/// the moved/removed file plus every referencing file whose edges/FQNs change
+/// — and commits once. `writes` is the complete set of affected node files
+/// (full new content for each); each path is derived from its own
+/// layer/type/name, exactly as [`write_node`] derives it
+/// (`<apg_root>/layers/<layer>/<type>/<name>.json`).
+///
+/// The complete proposed change is validated BEFORE anything is written, and
+/// on any failure the previous state is restored — never leave mismatched
+/// endpoint files. The pre-check here is **structural**, not semantic:
+///
+/// - a plans-layer node is refused (plans is transient — `.trans/plans/` only
+///   — never a durable node-file layer);
+/// - an allowlist-violating name is refused (reuse [`valid_name`] — never
+///   sanitized);
+/// - two `writes` entries colliding on the same path/FQN are refused.
+///
+/// The FULL semantic validation — [`validate_node`] uniqueness against the
+/// whole store, [`check_edge_pairing`], the edge matrix ([`validate_edges`]) —
+/// is the caller's job: `write_project` (task-16) runs validate_node/
+/// validate_edges before this, and `ingest_tree` (task-15) runs pairing.
+///
+/// Atomicity: for every path, the pre-existing bytes are recorded
+/// (`None` when the file did not exist) BEFORE any write; then all files are
+/// written (parent dirs created). If ANY write fails, every path is restored —
+/// write back the recorded bytes, or delete the file if it did not previously
+/// exist — and the error is returned. After all writes succeed, the affected
+/// paths are committed in a single commit; a commit failure rolls the writes
+/// back too. Outside a git repo there is no commit — the mutation still lands
+/// on disk (keeps non-git temp-dir tests working; real mutations run in a
+/// project worktree).
+// (Unused until write_project, phase-3 task-16, calls it.)
+#[allow(dead_code)]
+pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()> {
+    // --- Structural pre-check (before any filesystem touch) ---
+    let mut paths: Vec<PathBuf> = Vec::with_capacity(writes.len());
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    for node in writes {
+        let layer = Layer::ALL
+            .iter()
+            .find(|l| l.layer_dir() == node.layer)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("unknown layer `{}`", node.layer))?;
+        if layer.storage() == StoragePolicy::TransientPlans {
+            anyhow::bail!(
+                "layer `plans` is transient (apg/.trans/plans/) — not a durable node-file layer"
+            );
+        }
+        if !valid_name(&node.name) {
+            anyhow::bail!(
+                "node name `{}` is invalid — the name allowlist is [a-z0-9][a-z0-9-]* (refused, never sanitized)",
+                node.name
+            );
+        }
+        let path = apg_root
+            .join(LAYERS_DIR)
+            .join(layer.layer_dir())
+            .join(&node.node_type)
+            .join(format!("{}.json", node.name));
+        if !seen.insert(path.clone()) {
+            anyhow::bail!(
+                "duplicate write: two entries target `{}` — one logical mutation touches each node file once",
+                path.display()
+            );
+        }
+        paths.push(path);
+    }
+
+    // Serialize every node file up front — a serialization failure is caught
+    // before anything is written, so no rollback is needed for it.
+    let serialized: Vec<String> = writes
+        .iter()
+        .map(serde_json::to_string_pretty)
+        .collect::<Result<_, _>>()
+        .map_err(|e| anyhow::anyhow!("serialize node file failed: {e}"))?;
+
+    // Record the pre-existing bytes of every path BEFORE any write (None = the
+    // file did not exist) — the snapshot a failure restores from.
+    let mut prior: Vec<Option<Vec<u8>>> = Vec::with_capacity(paths.len());
+    for path in &paths {
+        prior.push(std::fs::read(path).ok());
+    }
+
+    // Write every file; on the first failure restore the whole set and return.
+    for (i, path) in paths.iter().enumerate() {
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!(
+                "create_dir_all {} failed: {e}",
+                parent.display()
+            ));
+        }
+        if let Err(e) = std::fs::write(path, &serialized[i]) {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!("write {} failed: {e}", path.display()));
+        }
+    }
+
+    // Commit once — all affected paths together. Outside a git repo there is
+    // no commit (the mutation still lands on disk); a commit failure rolls the
+    // writes back so a failed mutation never leaves mismatched files.
+    if git::in_repo(apg_root) {
+        let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
+        let msg = git::graph_mutation_message(apg_root, &refs);
+        match git::commit_files(apg_root, &refs, &[], &msg) {
+            Ok(Some(_)) => {
+                // Re-anchor the staleness gate's recorded scan_meta (mirrors
+                // the JSONL funnel's auto-commit — DB and tree in sync by
+                // construction). A re-anchor failure degrades to a warning.
+                if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
+                    eprintln!(
+                        "apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}"
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                rollback(&paths, &prior);
+                return Err(e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Restore the previous state of every path after a failed write: write back
+/// the recorded bytes, or delete the file when it did not previously exist.
+/// Best-effort — the caller returns the primary failure; a rollback step that
+/// cannot be applied (e.g. a path blocked by a directory) is left as-is.
+// (Unused until write_project, phase-3 task-16, wires write_through.)
+#[allow(dead_code)]
+fn rollback(paths: &[PathBuf], prior: &[Option<Vec<u8>>]) {
+    for (path, prev) in paths.iter().zip(prior.iter()) {
+        match prev {
+            Some(bytes) => {
+                let _ = std::fs::write(path, bytes);
+            }
+            None => {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SPEC §4.1/§4.2 — the durable mutation orchestrator (phase-3 task-16)
+// ---------------------------------------------------------------------------
+
+/// Read every durable node file under `apg/layers/` into a [`NodeFile`] vector
+/// (no validation) — the identity universe `validate_change` and `write_project`
+/// resolve writes against. The FQN is derived from the path, never read.
+///
+/// Public so the relocated e2e crates reach it as
+/// `apg::layers::read_existing_nodes` (e.g. the `testutil` crash-durability
+/// test pairs the read store with [`check_edge_pairing`]).
+pub fn read_existing_nodes(apg_root: &Path) -> anyhow::Result<Vec<NodeFile>> {
+    let mut nodes: Vec<NodeFile> = Vec::new();
+    for (layer_dir, types) in LAYERS_TREE {
+        for node_type in *types {
+            let dir = apg_root.join(LAYERS_DIR).join(layer_dir).join(node_type);
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.extension().is_some_and(|e| e == "json") {
+                    continue;
+                }
+                let name = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+                let nf: NodeFile = serde_json::from_str(&text)
+                    .map_err(|e| anyhow::anyhow!("{}: bad node file: {e}", path.display()))?;
+                if nf.layer != *layer_dir || nf.node_type != *node_type || nf.name != name {
+                    anyhow::bail!(
+                        "node file {}: layer/type/name fields must match the path segments",
+                        path.display()
+                    );
+                }
+                nodes.push(nf);
+            }
+        }
+    }
+    nodes.sort_by(|a, b| (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name)));
+    Ok(nodes)
+}
+
+/// Derive the (layer, type, name) identity of a node file path under
+/// `apg/layers/` (the inverse of [`write_node`]'s path derivation).
+fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, String)> {
+    let rel = path.strip_prefix(apg_root.join(LAYERS_DIR)).ok()?;
+    let mut comps = rel.components();
+    let layer_dir = comps.next()?.as_os_str().to_str()?.to_string();
+    let node_type = comps.next()?.as_os_str().to_str()?.to_string();
+    let name = comps.next()?.as_os_str().to_str()?.to_string();
+    let name = name.strip_suffix(".json")?.to_string();
+    let layer = Layer::ALL.iter().find(|l| l.layer_dir() == layer_dir)?;
+    Some((*layer, node_type, name))
+}
+
+/// Validate a complete proposed mutation BEFORE anything is written (SPEC
+/// §4.1 "the complete proposed change is validated before anything is
+/// written"): every written node passes [`validate_node`], every written node's
+/// out-edge passes [`validate_edges`], the assembled post-mutation set
+/// (existing nodes minus deleted/overwritten, plus the writes) satisfies the
+/// property-aware §3.3 rules ([`validate_assembled_rules`]: acyclic
+/// contains/depends-on trees; `Entity (kind: event)` publishes/subscribes
+/// targets) and [`check_edge_pairing`], every written constraint's
+/// `attaches-to` reference resolves against the post-mutation universe
+/// ([`eval_constraint`], R14), and — when the `graph.jsonl` export exists —
+/// every assembled `implemented-by` target is Real or Pending against the
+/// exported scanned graph ([`validate_code_refs`]; a Drift target aborts before
+/// the write). Validation never opens `db.lbug`. Pure read — no write.
+pub fn validate_change(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+) -> anyhow::Result<()> {
+    let mut existing: BTreeMap<String, NodeFile> = BTreeMap::new();
+    for n in read_existing_nodes(apg_root)? {
+        let f = fqn(layer_of(&n.layer), &n.node_type, &n.name);
+        existing.insert(f, n);
+    }
+
+    // Remove the deleted files and the overwritten files from the current set.
+    let mut deleted_fqns: BTreeSet<String> = BTreeSet::new();
+    for path in deletes {
+        if let Some((layer, node_type, name)) = identity_from_path(apg_root, path) {
+            deleted_fqns.insert(fqn(layer, &node_type, &name));
+        }
+    }
+    let written_fqns: BTreeSet<String> = writes
+        .iter()
+        .map(|n| fqn(layer_of(&n.layer), &n.node_type, &n.name))
+        .collect();
+    existing.retain(|f, _| !deleted_fqns.contains(f) && !written_fqns.contains(f));
+
+    // The uniqueness universe: everything currently present EXCEPT the nodes
+    // this change (re)writes — so an overwrite does not trip its own uniqueness.
+    let mut universe: BTreeSet<(Layer, String, String)> = existing
+        .keys()
+        .map(|f| {
+            let (l, t, n) = parse_fqn(f).expect("existing FQN must parse");
+            (l, t, n)
+        })
+        .collect();
+
+    // Per-node + per-edge validation over the written set (a write that also
+    // appears among the deletes is contradictory — refuse).
+    for n in writes {
+        let layer = layer_of(&n.layer);
+        validate_node(layer, &n.node_type, &n.name, &n.properties, &universe)?;
+        universe.insert((layer, n.node_type.clone(), n.name.clone()));
+    }
+    for n in writes {
+        let from = fqn(layer_of(&n.layer), &n.node_type, &n.name);
+        let edges: Vec<(&str, &str, &str)> = n
+            .out
+            .iter()
+            .map(|oe| (oe.kind.as_str(), from.as_str(), oe.target.as_str()))
+            .collect();
+        validate_edges(&edges)?;
+    }
+
+    // The assembled post-mutation node set, FQN → node file (a write overrides
+    // the current file) — the property-aware §3.3 rules and the code-ref drift
+    // check need the full set, not just the writes.
+    let mut assembled: BTreeMap<String, &NodeFile> =
+        existing.iter().map(|(f, n)| (f.clone(), n)).collect();
+    for n in writes {
+        assembled.insert(fqn(layer_of(&n.layer), &n.node_type, &n.name), n);
+    }
+
+    // SPEC §3.3 property rules over the assembled set: contains/depends-on
+    // trees acyclic, and publishes/subscribes targets are Entity (kind: event).
+    // Both abort before anything is written.
+    validate_assembled_rules(&assembled, &universe)?;
+
+    // Code-ref drift (SPEC §4.1): an `implemented-by` target gone from the
+    // scanned graph must abort BEFORE anything is written — otherwise the
+    // file lands and commits and only the step-5 re-merge fails (a committed
+    // partial mutation). Decoupled from the DB: when `graph.jsonl` exists it is
+    // the sole code-identity source (real code FQNs UNION the plan store's
+    // planned FQNs), resolved WITHOUT opening `db.lbug`. When `graph.jsonl` is
+    // absent, code-FQN refs are recorded **unvalidated** even when `db.lbug`
+    // exists (deliberate: `db.lbug` is a derived projection and is never opened
+    // for validation); the next scan re-validates them.
+    if apg_root.join(TRANS_DIR).join("graph.jsonl").exists() {
+        let (scanned, planned) = artifacts::code_universes_from_export(apg_root)?;
+        let refs: Vec<&str> = assembled
+            .values()
+            .flat_map(|n| n.out.iter())
+            .filter(|oe| oe.kind == "implemented-by")
+            .map(|oe| oe.target.as_str())
+            .collect();
+        validate_code_refs(&refs, &scanned, &planned)?;
+    }
+
+    // Constraint reference validation (R14): a written constraint's
+    // `attaches-to` must resolve against the post-mutation universe — a
+    // non-thing reference is refused BEFORE anything is written. (Without
+    // this, the files would land and the step-5 re-merge would fail
+    // afterwards, leaving a committed partial mutation.)
+    for n in writes {
+        if n.node_type != "constraint" {
+            continue;
+        }
+        let layer = layer_of(&n.layer);
+        let mut own_universe = universe.clone();
+        own_universe.remove(&(layer, n.node_type.clone(), n.name.clone()));
+        eval_constraint(layer, &n.name, &n.properties, &own_universe)?;
+    }
+
+    // Pairwise symmetry over the assembled post-mutation set.
+    let mut merged: Vec<NodeFile> = existing.into_values().collect();
+    merged.extend(writes.iter().cloned());
+    check_edge_pairing(&merged)?;
+    Ok(())
+}
+
+/// Write a SET of node files atomically AND delete a set of node-file paths,
+/// in one logical mutation (SPEC §4.1 "renames / deletions are atomic
+/// write-throughs"): snapshot the prior state of every affected path, write
+/// the writes, remove the deletes, and on any failure restore every path —
+/// never leave mismatched endpoint files. Commits once. `write_through` (the
+/// write-only primitive, task-11) delegates here with an empty delete list.
+pub fn write_through_with_deletes(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+) -> anyhow::Result<()> {
+    // Structural pre-check: no plans layer, valid names, no duplicate write
+    // path, and a path may not be both written and deleted.
+    let mut write_paths: Vec<PathBuf> = Vec::with_capacity(writes.len());
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    for node in writes {
+        let layer = Layer::ALL
+            .iter()
+            .find(|l| l.layer_dir() == node.layer)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("unknown layer `{}`", node.layer))?;
+        if layer.storage() == StoragePolicy::TransientPlans {
+            anyhow::bail!(
+                "layer `plans` is transient (apg/.trans/plans/) — not a durable node-file layer"
+            );
+        }
+        if !valid_name(&node.name) {
+            anyhow::bail!(
+                "node name `{}` is invalid — the name allowlist is [a-z0-9][a-z0-9-]* (refused, never sanitized)",
+                node.name
+            );
+        }
+        let path = apg_root
+            .join(LAYERS_DIR)
+            .join(layer.layer_dir())
+            .join(&node.node_type)
+            .join(format!("{}.json", node.name));
+        if !seen.insert(path.clone()) {
+            anyhow::bail!(
+                "duplicate write: two entries target `{}` — one logical mutation touches each node file once",
+                path.display()
+            );
+        }
+        write_paths.push(path);
+    }
+    for d in deletes {
+        if write_paths.contains(d) {
+            anyhow::bail!(
+                "a path cannot be both written and deleted in one mutation: {}",
+                d.display()
+            );
+        }
+    }
+
+    // Serialize up front — a serialization failure is caught before any write.
+    let serialized: Vec<String> = writes
+        .iter()
+        .map(serde_json::to_string_pretty)
+        .collect::<Result<_, _>>()
+        .map_err(|e| anyhow::anyhow!("serialize node file failed: {e}"))?;
+
+    // Snapshot the prior state of every affected path (writes and deletes).
+    let mut paths: Vec<PathBuf> = write_paths.clone();
+    paths.extend(deletes.iter().cloned());
+    let mut prior: Vec<Option<Vec<u8>>> = Vec::with_capacity(paths.len());
+    for path in &paths {
+        prior.push(std::fs::read(path).ok());
+    }
+
+    // Apply: write the writes, remove the deletes; restore everything on the
+    // first failure.
+    for (i, path) in write_paths.iter().enumerate() {
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!(
+                "create_dir_all {} failed: {e}",
+                parent.display()
+            ));
+        }
+        if let Err(e) = std::fs::write(path, &serialized[i]) {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!("write {} failed: {e}", path.display()));
+        }
+    }
+    for path in deletes {
+        if let Err(e) = std::fs::remove_file(path) {
+            rollback(&paths, &prior);
+            return Err(anyhow::anyhow!("delete {} failed: {e}", path.display()));
+        }
+    }
+
+    // Commit once. Outside a git repo there is no commit; a commit failure
+    // rolls back so a failed mutation never leaves mismatched files.
+    if git::in_repo(apg_root) {
+        let write_refs: Vec<&Path> = write_paths.iter().map(|p| p.as_path()).collect();
+        let delete_refs: Vec<&Path> = deletes.iter().map(|p| p.as_path()).collect();
+        let all_refs: Vec<&Path> = write_refs
+            .iter()
+            .chain(delete_refs.iter())
+            .copied()
+            .collect();
+        let msg = git::graph_mutation_message(apg_root, &all_refs);
+        match git::commit_files(apg_root, &write_refs, &delete_refs, &msg) {
+            // The durable write is now committed — the system-of-record
+            // durability point. The staleness re-anchor and the projection are
+            // the caller's (`write_project`), applied only AFTER this commit.
+            Ok(Some(_)) | Ok(None) => {}
+            Err(e) => {
+                rollback(&paths, &prior);
+                return Err(e);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A test-only failure-injection point on the durable mutation path, at the
+/// commit→project boundary (phase-05 task-14). The durable file write + its
+/// single commit land FIRST; the projection apply follows. A test installs a
+/// one-shot hook to force a failure at exactly one boundary — not a normal
+/// projection error path.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MutationBoundary {
+    /// After validation, BEFORE the durable file write/commit: a failure here
+    /// leaves the mutation in neither the durable store nor the projection.
+    BeforeCommit,
+    /// AFTER the durable file write + commit, BEFORE the projection apply: a
+    /// failure here leaves the committed state durable while the projection
+    /// stays prior — the next rebuild reproduces the committed state.
+    BeforeProject,
+}
+
+type MutationHook = (MutationBoundary, Box<dyn FnOnce() -> anyhow::Result<()>>);
+
+thread_local! {
+    static MUTATION_HOOK: std::cell::RefCell<Option<MutationHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Install a one-shot hook that fires at `point` on the next `write_project`
+/// in THIS thread (tests run one per thread, so a hook never leaks across
+/// tests). A returned `Err` stands in for a crash at the boundary.
+pub fn install_mutation_hook(
+    point: MutationBoundary,
+    hook: impl FnOnce() -> anyhow::Result<()> + 'static,
+) {
+    MUTATION_HOOK.with(|cell| *cell.borrow_mut() = Some((point, Box::new(hook))));
+}
+
+fn fire_mutation_hook(point: MutationBoundary) -> anyhow::Result<()> {
+    let hook = MUTATION_HOOK.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        match slot.as_ref() {
+            Some((p, _)) if *p == point => slot.take().map(|(_, hook)| hook),
+            _ => None,
+        }
+    });
+    match hook {
+        Some(hook) => hook(),
+        None => Ok(()),
+    }
+}
+
+/// The exact FQN delete set a durable node/edge mutation applies to the
+/// projection (phase-05 tasks 4/6): every written FQN (removed ∪ changed —
+/// detaching a written node drops its old incident edges, so the MERGE-only
+/// re-merge cannot leave a vanished edge) plus every deleted FQN. Never a
+/// whole layer-dir prefix.
+fn projection_deletes(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for n in writes {
+        out.insert(fqn(layer_of(&n.layer), &n.node_type, &n.name));
+    }
+    for path in deletes {
+        if let Some((layer, node_type, name)) = identity_from_path(apg_root, path) {
+            out.insert(fqn(layer, &node_type, &name));
+        }
+    }
+    out
+}
+
+/// The injectable projection apply `write_project_with` threads through: given
+/// the exact FQN delete set (removed ∪ changed) and the source records, apply
+/// them to `db.lbug` in one transaction.
+pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyhow::Result<()>;
+
+/// The durable-mutation orchestrator (SPEC §2.2/§4.1/§4.2): one logical
+/// node/edge mutation — the full set of affected node files `writes` plus the
+/// paths `deletes` to remove — guarded, validated, written atomically, and
+/// re-merged into the live DB. Mirrors `artifacts::write_jsonl_and_reingest`'s
+/// envelope for node files:
+///
+/// 1. **Membership guard** — node files have no project segment, so any
+///    project context satisfies the guard (`git::require_project_context`).
+/// 2. **Staleness gate** — refuse-on-stale when a DB exists, before any write.
+/// 3. **Validate the complete change** ([`validate_change`]) before writing.
+/// 4. **Atomic write + delete + single commit** ([`write_through_with_deletes`])
+///    — the system-of-record durability point, and the ONLY step that controls
+///    the flock-guaranteed one-commit-per-mutation. No durable write is ever
+///    buffered: the files hit disk (and git) before anything is projected.
+/// 5. **Re-anchor the staleness gate's `scan_meta`** after the commit
+///    (graph.jsonl only — never opens `db.lbug`).
+/// 6. **Projection delta** — apply the exact durable delta
+///    ([`projection_deletes`] = removed ∪ changed FQNs, guarded for planned
+///    code FQNs) to the live DB, in one transaction, AFTER the durable commit
+///    (commit-then-project). The same transaction re-MERGEs the worktree's
+///    transient record set ([`append_transient_records`]: the plan store + the
+///    five feedback tier mirrors) so a changed-FQN DETACH cannot drop a
+///    pre-existing transient pairing (`Feedback -[:Reviews]-> <node>`).
+///    Skipped when no DB exists (the files are the durable form); a re-ingest
+///    failure leaves the committed durable state authoritative.
+pub fn write_project(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+) -> anyhow::Result<()> {
+    write_project_with(apg_root, writes, deletes, &|deletes, records| {
+        artifacts::reingest_layers(apg_root, deletes, records)
+    })
+}
+
+/// [`write_project`] with an injectable projection apply. The direct path uses
+/// the default (open `db.lbug`, apply the delta, close); the phase-03 session
+/// coordinator passes a closure that applies the delta through the DB handle it
+/// already owns, so the session amortizes ONE open/parse across N mutations
+/// while every mutation's projection delta still lands synchronously as the
+/// mutation completes (the open is amortized, visibility never is).
+pub fn write_project_with(
+    apg_root: &Path,
+    writes: &[NodeFile],
+    deletes: &[PathBuf],
+    project: ProjectionApply<'_>,
+) -> anyhow::Result<()> {
+    // 1. Membership guard (writes only happen inside a project context).
+    git::require_project_context(apg_root)?;
+
+    // 2. Staleness gate (refuse-on-stale when a DB exists).
+    if apg_root.join(TRANS_DIR).join("db.lbug").exists()
+        && let Some(msg) = git::refusal_message(apg_root)
+    {
+        anyhow::bail!("{msg}");
+    }
+
+    // 3. Validate the complete change before anything is written.
+    validate_change(apg_root, writes, deletes)?;
+
+    // Test-only injection at the BEFORE-COMMIT boundary (phase-05 task-14,
+    // window 2): a failure here must leave the mutation in neither the durable
+    // store nor the projection.
+    fire_mutation_hook(MutationBoundary::BeforeCommit)?;
+
+    // 4. Atomic write + delete + single commit — the durability point. This is
+    //    the whole flock-held sequence's controlled commit.
+    write_through_with_deletes(apg_root, writes, deletes)?;
+
+    // 5. Re-anchor the staleness gate's recorded scan_meta AFTER the commit
+    //    (mirrors the JSONL funnel's auto-commit: DB and tree in sync by
+    //    construction, so consecutive node/edge mutations never trip the
+    //    refuse-on-stale gate). graph.jsonl only — no db.lbug open. A re-anchor
+    //    failure degrades to a warning — the mutation already landed.
+    if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
+        eprintln!("apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}");
+    }
+
+    // Test-only injection at the commit→project boundary (phase-05 task-14,
+    // window 1): the durable write is committed by now; a failure here leaves
+    // the projection prior and the committed state reproducible by a rebuild.
+    fire_mutation_hook(MutationBoundary::BeforeProject)?;
+
+    // 6. Projection delta — applied only AFTER the durable commit
+    //    (commit-then-project). Skipped when there is no query index yet.
+    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
+        let graph_jsonl = apg_root.join(TRANS_DIR).join("graph.jsonl");
+        let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root)?;
+        if !graph_jsonl.exists() {
+            // No code-identity source: the mutation still lands (the durable
+            // node files are authoritative), but its code-FQN refs are
+            // recorded UNVALIDATED. Treat every implemented-by target as
+            // pending so the projection re-merge records them instead of
+            // rejecting them as drift. The next scan re-validates.
+            for n in read_existing_nodes(apg_root)? {
+                for oe in &n.out {
+                    if oe.kind == "implemented-by" {
+                        planned.insert(oe.target.clone());
+                    }
+                }
+            }
+            for n in writes {
+                for oe in &n.out {
+                    if oe.kind == "implemented-by" {
+                        planned.insert(oe.target.clone());
+                    }
+                }
+            }
+        }
+        let mut records = ingest_tree(apg_root, &scanned, &planned)?;
+        // The durable tree is the only source of DURABLE records, but a durable
+        // mutation detaches every changed FQN — and with it any incident
+        // TRANSIENT edge. Here that is precisely `Feedback -[:Reviews]-> <node>`:
+        // `detach_delete_project` DETACH-deletes the changed node, taking the
+        // Reviews edge with it, and a MERGE of the durable records alone cannot
+        // put it back. Append the worktree's transient record set (the plan
+        // store + the five feedback tier mirrors) so the same transaction also
+        // re-MERGEs it — a durable mutation then leaves any pre-existing
+        // Feedback/Reviews pairing intact, with no later transient write needed.
+        //
+        // `.trans` is branch-local, so every file here is this project's
+        // transient state; this is an idempotent MERGE (the DETACH set above is
+        // durable-FQN-only), never a delete. It cannot resurrect an edge to a
+        // node removed by a `node rm`: `merge_edge`'s dangling-endpoint guard
+        // resolves each endpoint through `known` (this record set), the code
+        // graph, then the LIVE DB (`node_label`), and skips the MERGE when
+        // either endpoint is absent — a node already detached by this apply is
+        // gone from the DB, so its transient edges stay gone.
+        append_transient_records(apg_root, &mut records)?;
+        let deletes = projection_deletes(apg_root, writes, deletes);
+        project(&deletes, &records)?;
+    }
+    Ok(())
+}
+
+/// Appends the worktree's transient record set to `records`: the plan store
+/// (`.trans/plans/*.jsonl`) plus the five feedback tier mirrors
+/// (`.trans/<tier>/*.jsonl`), via the public enumerators
+/// [`specs::plan_files`](crate::specs::plan_files) /
+/// [`specs::trans_mirror_files`](crate::specs::trans_mirror_files). Used by
+/// [`write_project_with`]'s projection apply so a durable mutation re-MERGEs
+/// the transient nodes/edges (notably `Feedback -[:Reviews]-> <durable node>`)
+/// that its changed-FQN DETACH would otherwise drop. Errors loudly on a
+/// malformed transient file (never a silent skip).
+fn append_transient_records(apg_root: &Path, records: &mut Vec<Record>) -> anyhow::Result<()> {
+    for path in crate::specs::plan_files(apg_root)
+        .into_iter()
+        .chain(crate::specs::trans_mirror_files(apg_root))
+    {
+        records.extend(crate::specs::read_jsonl(&path)?);
+    }
+    Ok(())
+}
