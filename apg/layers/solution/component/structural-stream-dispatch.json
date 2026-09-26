@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.frontend_cmd",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.ingest.ingest_records",
       "properties": {}
     },
