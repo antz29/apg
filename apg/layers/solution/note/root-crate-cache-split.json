@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "root-crate-cache-split",
+  "body": "Wave F of the multi-wave task-19 root-crate decomposition (behaviour-preserving, no CLI change). `src/cache.rs` is decomposed into `src/cache/{manifest,fragment,factstore}.rs`; `src/cache/mod.rs` holds only the module declarations and re-exports, and the file-level `#![allow(dead_code)]` moves into `mod.rs`. `src/cache/tests.rs` stays put, so the test module FQN `rust.apg.cache.tests` is preserved; the module FQN `rust.apg.cache` is likewise preserved by `mod.rs`. The single durable edge `solution.component.scan-driver` —implemented-by→ `rust.apg.cache.rebase` was re-pointed to the planned post-split FQN `rust.apg.cache.fragment.rebase` (the free fn `rebase` moves into `fragment.rs`). The container-level edge `solution.container.scanner-cli` —implemented-by→ `rust.apg.cache` and the `solution.component.scan-driver` —implemented-by→ `rust.apg.splice` edge are untouched.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
