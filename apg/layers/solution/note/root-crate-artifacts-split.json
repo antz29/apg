@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "root-crate-artifacts-split",
+  "body": "Wave G of the multi-wave task-19 root-crate decomposition (behaviour-preserving, no CLI change). `src/artifacts.rs` is decomposed into `src/artifacts/{db,merge,project}.rs` plus `src/artifacts/mod.rs`. `ParsedArgs` and `parse_args` STAY in `mod.rs` (preserved), so the module FQN `rust.apg.artifacts` is preserved. `src/artifacts/tests.rs` stays put, so the test module FQN `rust.apg.artifacts.tests` is preserved. `ArtifactDb` is declared in `db.rs`, so all its methods render under `rust.apg.artifacts.db.ArtifactDb.*` even though the impl blocks are split across db/merge/project. No durable `implemented-by` edge targets an artifacts unit, so none are re-pointed.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
