@@ -38,21 +38,52 @@ fn enabled(langs: &[String], lang: &str) -> bool {
 /// `APG_BUILD_FRONTENDS` re-stages (and re-tests) the selected frontends
 /// instead of reusing a stale build-script fingerprint.
 fn watch_frontend_sources() {
-    println!("cargo:rerun-if-changed=src/javalib/CallGraphBuilder.java");
-    println!("cargo:rerun-if-changed=src/golib/main.go");
-    println!("cargo:rerun-if-changed=src/cpplib/main.cpp");
-    println!("cargo:rerun-if-changed=src/rustlib/Cargo.toml");
-    println!("cargo:rerun-if-changed=src/rustlib/src/main.rs");
-    println!("cargo:rerun-if-changed=src/tslib/package.json");
-    println!("cargo:rerun-if-changed=src/tslib/package-lock.json");
-    println!("cargo:rerun-if-changed=src/tslib/scanner.ts");
-    println!("cargo:rerun-if-changed=src/tslib/identity.mjs");
-    println!("cargo:rerun-if-changed=src/csharplib/CsharpFrontend.csproj");
-    println!("cargo:rerun-if-changed=src/csharplib/Program.cs");
-    println!("cargo:rerun-if-changed=src/structlib/Cargo.toml");
-    println!("cargo:rerun-if-changed=src/structlib/src/main.rs");
-    println!("cargo:rerun-if-changed=src/pylib/Cargo.toml");
-    println!("cargo:rerun-if-changed=src/pylib/src/main.rs");
+    // Walk each frontend's SOURCE tree and emit one `cargo:rerun-if-changed`
+    // per regular file, so ANY edit to a frontend file re-runs the build
+    // script (and therefore re-stages the frontend). A hand-listed watch set
+    // went stale the moment a frontend was split into new submodule files: a
+    // brand-new file the list never named left the build-script fingerprint
+    // unchanged, so `cargo build` could stage a STALE frontend. The worklist
+    // is iterative (no recursion) and the emitted paths stay relative to the
+    // crate root. Pruned directory names never carry frontend source: vendored
+    // trees (`src/cpplib/vendor`), npm installs (`node_modules`), cargo build
+    // output (`target`), csharp build output (`bin`/`obj`) and VCS metadata
+    // (`.git`).
+    let roots = [
+        "src/golib",
+        "src/javalib",
+        "src/cpplib",
+        "src/rustlib",
+        "src/tslib",
+        "src/csharplib",
+        "src/structlib",
+        "src/pylib",
+    ];
+    let mut stack: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            if file_type.is_dir() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if !matches!(
+                    name,
+                    "vendor" | "node_modules" | "target" | "bin" | "obj" | ".git"
+                ) {
+                    stack.push(path);
+                }
+            } else if file_type.is_file() {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
 
     println!("cargo:rerun-if-env-changed=APG_BUILD_FRONTENDS");
 }
@@ -456,12 +487,23 @@ fn stage_ts(out_dir: &str, stage_dir: &Path) -> Vec<String> {
             );
         }
         let _ = std::fs::copy(&emitted, stage_ts.join("scanner.mjs"));
-        // The built scanner keeps `import { packageIdentity } from
-        // "./identity.mjs"` verbatim (the source module is not compiled by
-        // the tsc invocation above), so the staged `identity.mjs` must sit
-        // next to the staged `scanner.mjs` for that import to resolve. It is
-        // plain side-effect-free ESM, copied as-is.
-        let _ = std::fs::copy(tslib.join("identity.mjs"), stage_ts.join("identity.mjs"));
+        // The built scanner imports its sidecar modules by relative path
+        // (`./state.mjs`, `./emit.mjs`, `./discovery.mjs`, `./program.mjs`,
+        // `./declarations.mjs`, `./resolve.mjs`, `./walk.mjs`, and
+        // `./identity.mjs`). The tsc invocation above compiles ONLY
+        // `scanner.ts`, so every `.mjs` sidecar must be staged next to the
+        // staged `scanner.mjs` for those imports to resolve — otherwise the
+        // staged frontend dies with MODULE_NOT_FOUND. They are plain ESM,
+        // copied verbatim; `scanner.mjs` itself is the compiled artifact and
+        // is not among them.
+        if let Ok(entries) = std::fs::read_dir(tslib) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().and_then(|e| e.to_str()) == Some("mjs") {
+                    let _ = std::fs::copy(&p, stage_ts.join(entry.file_name()));
+                }
+            }
+        }
         println!(
             "cargo:rustc-env=APG_FRONTEND_TS={}",
             stage_ts.join("scanner.mjs").display()
