@@ -34,6 +34,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.load.export.write_graph_jsonl",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.identity.repo_rel",
+      "properties": {}
     }
   ],
   "in": [
