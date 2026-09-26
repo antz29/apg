@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.structfrontend.md.parse_headings",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.structfrontend.md.build_doc",
+      "properties": {}
     }
   ],
   "in": [
