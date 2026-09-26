@@ -13,14 +13,36 @@
 //! collisions (a legal JVM package/type sharing a name, or a class in a
 //! shadowed package colliding with a method of the shadowing class) resolve by
 //! precedence: struct > module, struct > function.
+//!
+//! The cohesive groups live in submodules — identity rendering ([`identity`]),
+//! the scan-hygiene predicate ([`blacklist`]), function FQN rendering
+//! ([`render`]), and the edge codec/validators ([`edges`]) — all re-exported
+//! here so `crate::ingest::<name>` keeps resolving. The FQN-bearing core
+//! (`ingest_records`, `claim`, and the machinery they call) stays in this
+//! module, so `rust.apg.ingest.ingest_records` / `rust.apg.ingest.claim` keep
+//! exactly their FQNs.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 
 use crate::classify::{ApgConfig, classify_code_type};
 use crate::graph::{Graph, Location, Node, NodeKind};
 use crate::schema::{Record, SCAN_HEAD};
+
+pub mod blacklist;
+pub mod edges;
+pub mod identity;
+pub mod render;
+
+pub use identity::*;
+
+pub(crate) use blacklist::is_blacklisted;
+pub(crate) use edges::{
+    EdgeReader, filter_edges, is_solution_kind, kind_is, valid_contains_pair, write_edge,
+};
+pub(crate) use identity::{root_edge_endpoint, root_module_endpoint, rooted_scope};
+pub(crate) use render::{FuncDecl, render_function_fqns};
 
 pub struct IngestOptions<'a> {
     pub blacklist: &'a [String],
@@ -68,280 +90,6 @@ pub struct IngestReport {
     pub shadowed_functions: u64,
 }
 
-#[derive(Debug, Clone)]
-struct FuncDecl {
-    id: String,
-    parent: String,
-    name: String,
-    params: Vec<String>,
-    file: String,
-    path: String,
-    start: u32,
-    end: u32,
-    start_line: u32,
-    end_line: u32,
-    /// Language this declaration was scanned under (a `lang_switch` record may
-    /// set it mid-stream when a scan covers multiple languages).
-    language: String,
-}
-
-/// True when the `apg/config.json` structural scope EXCLUDES the repo-relative
-/// `identity`: a non-empty `include` list requires a match, and any `exclude`
-/// match wins — the same rule the structural scanner's `in_scope` applies to
-/// its walk. An absent scope (or no config) is the default ON: nothing is
-/// excluded.
-fn structural_scope_excludes(identity: &str, config: Option<&ApgConfig>) -> bool {
-    let Some(scope) = config.and_then(|c| c.structural.as_ref()) else {
-        return false;
-    };
-    if !scope.include.is_empty()
-        && !scope
-            .include
-            .iter()
-            .any(|g| crate::classify::matches_glob(g, identity))
-    {
-        return true;
-    }
-    scope
-        .exclude
-        .iter()
-        .any(|g| crate::classify::matches_glob(g, identity))
-}
-
-/// The scan-hygiene predicate: a record is out of scope when
-///
-/// - its canonical FQN carries a user blacklist prefix, or
-/// - its repo-relative source path (or identity) sits under a default
-///   build-output tree — `.git/**` or `target/**`, via the shared
-///   [`crate::classify::is_build_output_path`] predicate, or
-/// - that path is gitignored by the containing checkout: the scan's content
-///   identity already excludes ignored content, so keeping it would make the
-///   graph a function of checkout state rather than of authored content.
-///
-/// A record on a STRUCTURAL stream (see
-/// [`crate::classify::is_structural_language`]) is additionally dropped when the
-/// config scope excludes it, so the scanner's claim walk and this blacklist
-/// agree exactly on `target`/`.git`/gitignored/config-excluded paths and a
-/// structural record is never silently kept or lost. Code streams are
-/// unaffected.
-///
-/// `path` is `None` for records that carry no source location (modules) and
-/// for edge endpoints, whose FQN prefix is still honoured. A **structural
-/// module** identity is a repo-relative tree in disguise (`misc.apg/.trans`):
-/// the scanner's walk prunes only `target`/`node_modules`/`.git`/`.worktrees`
-/// and never consults `.gitignore`, so a path-less structural module whose
-/// identity sits under a gitignored/build-output tree is dropped here exactly
-/// as its File records are — otherwise an empty `module:misc.<ignored-tree>`
-/// would survive. The check is scoped to an fqn actually rooted under the
-/// current structural language id, so a code FQN or an opaque id is never
-/// re-interpreted as a path. An edge into a dropped record dangles and is
-/// pruned by the final cleanup.
-fn is_blacklisted(fqn: &str, path: Option<&str>, language: &str, opts: &IngestOptions) -> bool {
-    if opts.blacklist.iter().any(|p| fqn.starts_with(p.as_str())) {
-        return true;
-    }
-    let Some(path) = path else {
-        // The bare `<language>.` root (empty identity) is the repo root: it is
-        // never build-output/gitignored, so it always survives.
-        if crate::classify::is_structural_language(language)
-            && let Some(identity) = fqn
-                .strip_prefix(language)
-                .and_then(|rest| rest.strip_prefix('.'))
-        {
-            if crate::classify::is_build_output_path(identity) {
-                return true;
-            }
-            if opts
-                .base
-                .is_some_and(|base| crate::git::path_is_ignored(base, Path::new(identity)))
-            {
-                return true;
-            }
-        }
-        return false;
-    };
-    if crate::classify::is_build_output_path(path) {
-        return true;
-    }
-    if crate::classify::is_structural_language(language)
-        && structural_scope_excludes(path, opts.config)
-    {
-        return true;
-    }
-    opts.base
-        .is_some_and(|base| crate::git::path_is_ignored(base, Path::new(path)))
-}
-
-fn file_basename(file: &str) -> String {
-    std::path::Path::new(file)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| file.to_string())
-}
-
-/// Renders a scanner path as its checkout-independent identity relative to
-/// `base` (the git toplevel, or the scan root when the scanned tree is not a
-/// git repository): a `/`-separated path with no leading separator, no `.`
-/// component and no `..` segment. An already-relative identity (a frontend's
-/// dotted package identity, e.g. `pkg.sub` or `@co/ui.src`) passes through
-/// unchanged; an absolute path under `base` is stripped to its tail.
-///
-/// A path that resolves to `base` **itself** — the repository root, whose
-/// repo-relative identity is empty — renders the empty string, NOT the
-/// `file_name(base)` checkout basename: a module rooted at the repo root is
-/// the bare `<language>.` root (`md.`), never a checkout-named module
-/// (`md.apg`) (`requirements.constraint.no-checkout-named-module`).
-///
-/// A path outside `base`, or one whose tail would escape `base` with `..`,
-/// falls back to its file name so an identity can never embed a checkout
-/// component (a leading `/` or a `..` segment is a violation —
-/// `requirements.constraint.file-identity-is-repo-relative`).
-///
-/// An empty `base` is the pure pass-through sentinel the in-memory renderer
-/// tests use: the input is returned verbatim.
-pub fn repo_relative_identity(base: &Path, path: &str) -> String {
-    if base.as_os_str().is_empty() {
-        return path.to_string();
-    }
-    let fallback = || -> String {
-        let name = Path::new(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        if name.is_empty() {
-            path.replace('\\', "/").trim_start_matches('/').to_string()
-        } else {
-            name
-        }
-    };
-    let p = Path::new(path);
-    let candidate = if p.is_absolute() {
-        match p.strip_prefix(base) {
-            Ok(rel) => rel.to_path_buf(),
-            Err(_) => return fallback(),
-        }
-    } else {
-        p.to_path_buf()
-    };
-    let mut out: Vec<String> = Vec::new();
-    for comp in candidate.components() {
-        match comp {
-            std::path::Component::Normal(s) => out.push(s.to_string_lossy().replace('\\', "/")),
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                if out.pop().is_none() {
-                    return fallback();
-                }
-            }
-            std::path::Component::RootDir | std::path::Component::Prefix(_) => {}
-        }
-    }
-    if out.is_empty() {
-        // The path resolves to the base itself (or an empty identity): the
-        // repo-root identity is empty. Every genuinely escaping/foreign path
-        // returned `fallback()` above, so only the under-base/empty case lands
-        // here.
-        return String::new();
-    }
-    out.join("/")
-}
-
-/// Renders a module's canonical FQN by rooting its frontend-emitted dotted
-/// identity under the `lang_switch` language id (PHASE_09 language rooting)
-/// after rendering the identity repo-relative against `base` (a Markdown
-/// module identity is an absolute directory path; every other frontend emits a
-/// relative identity, which passes through unchanged):
-///
-/// ```text
-/// root_module_fqn("rust", "apg.ingest", base) -> "rust.apg.ingest"
-/// root_module_fqn("py",   "pkg.sub",    base) -> "py.pkg.sub"
-/// root_module_fqn("ts",   "@co/ui.src", base) -> "ts.@co/ui.src"
-/// root_module_fqn("md",   "/abs/docs",  base) -> "md.docs"
-/// root_module_fqn("md",   "",           base) -> "md."     // the repo root
-/// root_module_fqn("sh",   "",           base) -> "sh."     // the repo root
-/// ```
-///
-/// The bundled structural scanner emits each module identity repo-relative to
-/// the repository base — EMPTY at the repo root. Rooting an empty identity
-/// therefore renders the bare `<language>.` root (`md.`, `sh.`, …), which is
-/// the repo-root module, never a checkout-named module (`md.apg`); this is the
-/// ingestor half of the `md.apg` → `md.` relocation (the emitter half is the
-/// scanner's `repo_relative_dir`). Every non-root structural identity roots
-/// under its stream id exactly like a code module (`md.docs`, `yaml.ci`).
-///
-/// The frontends emit the module identity VERBATIM and UNROOTED (a
-/// frontend-baked root would double-root once the ingestor applies it); the
-/// ingestor applies the `lang_switch` id here. Rooting is what makes two
-/// languages that both define a module identity `apg` distinct (`rust.apg` vs
-/// `py.apg`), so a cross-language module-module FQN collision is impossible by
-/// construction. Every declaration's scope parent begins with a module identity,
-/// so `parent.name` inherits the root without a second transform.
-pub fn root_module_fqn(language: &str, identity: &str, base: &Path) -> String {
-    format!("{language}.{}", repo_relative_identity(base, identity))
-}
-
-/// Applies [`root_module_fqn`] to a declaration's scope parent (or a module
-/// identity), leaving an EMPTY parent empty — a declaration with no scope is a
-/// scanner anomaly and must not become the bare `<language>.` root.
-fn rooted_scope(language: &str, parent: &str, base: &Path) -> String {
-    if parent.is_empty() {
-        String::new()
-    } else {
-        root_module_fqn(language, parent, base)
-    }
-}
-
-/// Roots a `contains` endpoint iff it is a known module identity (the frontends
-/// emit `Module -> Module` containment with the raw identity endpoints, while
-/// declaration containment uses opaque ids this must never rewrite). Module
-/// records for both endpoints are emitted before their containment edge (the
-/// frontends emit global module scaffolding first), so membership is exact.
-fn root_module_endpoint(
-    language: &str,
-    endpoint: &str,
-    module_identities: &HashMap<String, HashSet<String>>,
-    base: &Path,
-) -> String {
-    match module_identities.get(language) {
-        Some(ids) if ids.contains(endpoint) => root_module_fqn(language, endpoint, base),
-        _ => endpoint.to_string(),
-    }
-}
-
-/// Roots a scanner-fact edge endpoint that names a **project symbol**, not a
-/// module: a cross-stream (`--targets`) edge carries the target's canonical FQN
-/// instead of an opaque id (phase-02 task-9), and the frontend emits that FQN
-/// UNROOTED. The endpoint is rooted by its longest module-identity prefix
-/// (walked right-to-left over `.`/`/` boundaries, so a nested module wins over
-/// its parent); an opaque id or a foreign name has no such prefix and is left
-/// unchanged. Only the CURRENT stream's language identities are consulted, so
-/// two languages that both define `apg` can never cross.
-fn root_edge_endpoint(
-    language: &str,
-    endpoint: &str,
-    module_identities: &HashMap<String, HashSet<String>>,
-    base: &Path,
-) -> String {
-    let Some(identities) = module_identities.get(language) else {
-        return endpoint.to_string();
-    };
-    if identities.contains(endpoint) {
-        return root_module_fqn(language, endpoint, base);
-    }
-    let bytes = endpoint.as_bytes();
-    let mut sep = bytes.len();
-    while sep > 0 {
-        sep -= 1;
-        if (bytes[sep] == b'.' || bytes[sep] == b'/')
-            && sep > 0
-            && identities.contains(&endpoint[..sep])
-        {
-            return root_module_fqn(language, endpoint, base);
-        }
-    }
-    endpoint.to_string()
-}
-
 /// `None` for empty strings, so spec/plan node fields that are absent stay
 /// absent in the DB (queryable with `IS NULL`) instead of storing `""`.
 fn opt(s: String) -> Option<String> {
@@ -368,99 +116,6 @@ fn claim(seen: &mut HashMap<String, (String, NodeKind)>, id: &str, fqn: &str, ki
     } else {
         seen.insert(fqn.to_string(), (id.to_string(), kind));
     }
-}
-
-/// Renders the FQN of every function declaration (SPEC §4).
-///
-/// PHASE_09 language rooting: each `FuncDecl.parent` is already the ROOTED
-/// scope FQN (the caller applies [`root_module_fqn`] to the frontend's raw
-/// parent before buffering — see `ingest_records`), so `parent.name` inherits
-/// the language root for every declaration whose parent is a module (e.g.
-/// `rust.apg.ingest.foo`). The suffix/shape rules below are unchanged.
-///
-/// Declarations are grouped by `(parent, name)`: a singleton group renders
-/// `parent.name`, an overloaded group renders `parent.name(T1,T2,...)` for every
-/// member. Go `init` functions carry no signature, so each is rendered
-/// `parent.init#<file-basename>` instead. The per-declaration language drives
-/// the Go `init` special case (multi-language scans mix languages in one
-/// buffer).
-///
-/// The `py` stream additionally needs same-scope duplicate-name disambiguation
-/// (Python `@overload` stubs whose annotations erase identically, and a
-/// conditional redefinition): within a colliding subgroup — members erasing to
-/// the SAME param list, including the both-empty `()` case — every member
-/// renders the full form `parent.name(T1,T2,...)#<file-basename>:<start_line>`,
-/// retaining the erased param-list suffix. Every non-py stream is unchanged.
-fn render_function_fqns(decls: &[FuncDecl]) -> Vec<(String, String)> {
-    let mut groups: HashMap<(&str, &str), Vec<usize>> = HashMap::new();
-    for (i, d) in decls.iter().enumerate() {
-        groups
-            .entry((d.parent.as_str(), d.name.as_str()))
-            .or_default()
-            .push(i);
-    }
-
-    let mut out = Vec::with_capacity(decls.len());
-    for ((parent, name), idxs) in groups {
-        if name == "init" && idxs.iter().any(|&i| decls[i].language == "go") {
-            for i in idxs {
-                out.push((
-                    decls[i].id.clone(),
-                    format!("{parent}.init#{}", file_basename(&decls[i].file)),
-                ));
-            }
-        } else if idxs.len() == 1 {
-            let d = &decls[idxs[0]];
-            out.push((d.id.clone(), format!("{parent}.{name}")));
-        } else if idxs.iter().all(|&i| decls[i].language == "py") {
-            // Python same-scope duplicate-name rule, scoped to the `py` stream
-            // (every non-py stream keeps the existing overload shape). Bucket
-            // the group by erased param list: a subgroup of more than one
-            // member cannot share `parent.name(T1,T2,...)`, so each colliding
-            // member renders the full form with its retained param-list suffix
-            // plus the `#<file-basename>:<start_line>` disambiguator. A member
-            // whose erased param list is unique in the group keeps the bare
-            // overload form.
-            let mut buckets: Vec<(String, Vec<usize>)> = Vec::new();
-            for &i in &idxs {
-                let key = decls[i].params.join(",");
-                match buckets.iter_mut().find(|(k, _)| *k == key) {
-                    Some((_, members)) => members.push(i),
-                    None => buckets.push((key, vec![i])),
-                }
-            }
-            for (params, members) in buckets {
-                if members.len() > 1 {
-                    for i in members {
-                        let d = &decls[i];
-                        out.push((
-                            d.id.clone(),
-                            format!(
-                                "{parent}.{name}({params})#{}:{}",
-                                file_basename(&d.file),
-                                d.start_line
-                            ),
-                        ));
-                    }
-                } else {
-                    let d = &decls[members[0]];
-                    out.push((
-                        d.id.clone(),
-                        format!("{parent}.{name}({})", d.params.join(",")),
-                    ));
-                }
-            }
-        } else {
-            for i in idxs {
-                let d = &decls[i];
-                out.push((
-                    d.id.clone(),
-                    format!("{parent}.{name}({})", d.params.join(",")),
-                ));
-            }
-        }
-    }
-    out
 }
 
 fn insert_node(graph: &mut Graph, fqn: String, node: Node) {
@@ -1724,154 +1379,6 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     graph.subscribes = filter_edges(graph, &graph.subscribes, |g, a, b| {
         kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
     });
-}
-
-/// Whether a `(from, to)` kind pair is a valid `Contains` edge (SPEC §7, R2,
-/// R21): the six code pairs, the two plan pairs, the §3.1 requirements tree
-/// (Stakeholder/User/Requirement ⊃ Requirement), the plain-named domain
-/// hierarchy (Group ⊃ Group/Entity/Value/Service), and the solution hierarchy
-/// (System ⊃ Container ⊃ Component).
-fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
-    matches!(
-        (a, b),
-        (NodeKind::Language, NodeKind::Module)
-            | (NodeKind::Module, NodeKind::Module)
-            | (NodeKind::Module, NodeKind::File)
-            | (NodeKind::File, NodeKind::Struct)
-            | (NodeKind::File, NodeKind::Function)
-            | (NodeKind::Struct, NodeKind::Struct)
-            | (NodeKind::Struct, NodeKind::Function)
-            | (NodeKind::Plan, NodeKind::PlanPhase)
-            | (NodeKind::PlanPhase, NodeKind::Task)
-            // New-model §3.3 `contains` rows (apg-projects): the requirements
-            // tree and the plain-named domain hierarchy.
-            | (NodeKind::Stakeholder, NodeKind::Requirement)
-            | (NodeKind::User, NodeKind::Requirement)
-            | (NodeKind::Requirement, NodeKind::Requirement)
-            | (NodeKind::Group, NodeKind::Group)
-            | (NodeKind::Group, NodeKind::Entity)
-            | (NodeKind::Group, NodeKind::Value)
-            | (NodeKind::Group, NodeKind::Service)
-            | (NodeKind::System, NodeKind::Container)
-            | (NodeKind::Container, NodeKind::Component)
-    )
-}
-
-fn kind_is(graph: &Graph, fqn: &str, k: NodeKind) -> bool {
-    graph.nodes.get(fqn).is_some_and(|n| n.kind == k)
-}
-
-/// The Solution-tier (C4) node kinds: System, Container, Component.
-fn is_solution_kind(graph: &Graph, fqn: &str) -> bool {
-    graph.nodes.get(fqn).is_some_and(|n| {
-        matches!(
-            n.kind,
-            NodeKind::System | NodeKind::Container | NodeKind::Component
-        )
-    })
-}
-
-/// Returns the edges of `edges` that pass `keep`. A free function so each call
-/// scopes its immutable borrow of `graph` (unlike a capturing closure, which
-/// would block a later mutable borrow).
-fn filter_edges(
-    graph: &Graph,
-    edges: &HashSet<(String, String)>,
-    keep: impl Fn(&Graph, &str, &str) -> bool,
-) -> HashSet<(String, String)> {
-    edges
-        .iter()
-        .filter(|(a, b)| keep(graph, a, b))
-        .cloned()
-        .collect()
-}
-
-/// Binary spool format for edge records: one u8 tag (0 contains, 1 calls,
-/// 2 uses, 3 unresolved_call, 4 unresolved_use, 5 details, 6 reviews,
-/// 7 depends_on, 8 gates, 9 satisfies, 10 drives, 11 represents,
-/// 12 realised_by, 13 spec_implemented_by, 14 publishes, 15 subscribes)
-/// followed by three length-prefixed UTF-8 strings (from, to, target_type;
-/// the last empty for most).
-fn write_edge(w: &mut impl Write, r: Record) {
-    match r {
-        Record::Contains { from, to } => write_edge_fields(w, 0, &from, &to, ""),
-        Record::Calls { from, to } => write_edge_fields(w, 1, &from, &to, ""),
-        Record::Uses { from, to } => write_edge_fields(w, 2, &from, &to, ""),
-        Record::UnresolvedCall {
-            from,
-            to,
-            target_type,
-        } => write_edge_fields(w, 3, &from, &to, &target_type),
-        Record::UnresolvedUse { from, to } => write_edge_fields(w, 4, &from, &to, ""),
-        Record::Details { from, to } => write_edge_fields(w, 5, &from, &to, ""),
-        Record::Reviews { from, to } => write_edge_fields(w, 6, &from, &to, ""),
-        Record::DependsOn { from, to } => write_edge_fields(w, 7, &from, &to, ""),
-        Record::Gates { from, to } => write_edge_fields(w, 8, &from, &to, ""),
-        Record::Satisfies { from, to } => write_edge_fields(w, 9, &from, &to, ""),
-        Record::Drives { from, to } => write_edge_fields(w, 10, &from, &to, ""),
-        Record::Represents { from, to } => write_edge_fields(w, 11, &from, &to, ""),
-        Record::RealisedBy { from, to } => write_edge_fields(w, 12, &from, &to, ""),
-        Record::SpecImplementedBy { from, to } => write_edge_fields(w, 13, &from, &to, ""),
-        Record::Publishes { from, to } => write_edge_fields(w, 14, &from, &to, ""),
-        Record::Subscribes { from, to } => write_edge_fields(w, 15, &from, &to, ""),
-        other => unreachable!("non-edge record reached the edge spool: {other:?}"),
-    }
-}
-
-fn write_edge_fields(w: &mut impl Write, tag: u8, a: &str, b: &str, c: &str) {
-    w.write_all(&[tag]).unwrap();
-    for s in [a, b, c] {
-        w.write_all(&(s.len() as u32).to_le_bytes()).unwrap();
-        w.write_all(s.as_bytes()).unwrap();
-    }
-}
-
-struct EdgeReader<R: BufRead> {
-    r: R,
-}
-
-impl<R: BufRead> EdgeReader<R> {
-    fn next_edge(&mut self) -> Option<Record> {
-        let mut tag = [0u8; 1];
-        if self.r.read_exact(&mut tag).is_err() {
-            return None;
-        }
-        let a = self.read_str();
-        let b = self.read_str();
-        let c = self.read_str();
-        Some(match tag[0] {
-            0 => Record::Contains { from: a, to: b },
-            1 => Record::Calls { from: a, to: b },
-            2 => Record::Uses { from: a, to: b },
-            3 => Record::UnresolvedCall {
-                from: a,
-                to: b,
-                target_type: c,
-            },
-            4 => Record::UnresolvedUse { from: a, to: b },
-            5 => Record::Details { from: a, to: b },
-            6 => Record::Reviews { from: a, to: b },
-            7 => Record::DependsOn { from: a, to: b },
-            8 => Record::Gates { from: a, to: b },
-            9 => Record::Satisfies { from: a, to: b },
-            10 => Record::Drives { from: a, to: b },
-            11 => Record::Represents { from: a, to: b },
-            12 => Record::RealisedBy { from: a, to: b },
-            13 => Record::SpecImplementedBy { from: a, to: b },
-            14 => Record::Publishes { from: a, to: b },
-            15 => Record::Subscribes { from: a, to: b },
-            t => panic!("bad edge spool tag: {t}"),
-        })
-    }
-
-    fn read_str(&mut self) -> String {
-        let mut len = [0u8; 4];
-        self.r.read_exact(&mut len).unwrap();
-        let n = u32::from_le_bytes(len) as usize;
-        let mut buf = vec![0u8; n];
-        self.r.read_exact(&mut buf).unwrap();
-        String::from_utf8(buf).unwrap()
-    }
 }
 
 #[cfg(test)]
