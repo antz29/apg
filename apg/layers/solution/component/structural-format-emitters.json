@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.structfrontend.discovery.walk",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.structfrontend.lines.line_count",
+      "properties": {}
     }
   ],
   "in": [
