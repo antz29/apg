@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "rust.apg.scan",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.pipeline",
+      "properties": {}
     }
   ],
   "in": []
