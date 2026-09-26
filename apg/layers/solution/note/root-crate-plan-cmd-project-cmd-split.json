@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "root-crate-plan-cmd-project-cmd-split",
+  "body": "Wave C of the multi-wave task-19 root-crate decomposition. `src/plan_cmd.rs` is decomposed into `src/plan_cmd/{envelope,authoring,status,verify,render}.rs`; `src/project_cmd.rs` is decomposed into `src/project_cmd/{start,merge,delete}.rs`. `cmd_plan` and `cmd_project` (together with `require_apg_root`, `validate_project_name`, `worktree_hosting`) stay in their `mod.rs` roots and keep the module-level FQNs. The 4 durable `implemented-by` edges on `project-start-seeder`/`scan-driver` were re-pointed to the post-split planned FQNs (`rust.apg.project_cmd.start.*`). Neither split changes CLI behaviour.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
