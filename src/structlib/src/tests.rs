@@ -1,4 +1,22 @@
-use super::*;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+use crate::builder::Structure;
+use crate::config::{glob_match, StructuralScope};
+use crate::discovery::{in_scope, is_pruned_dir, stream_for_path, under_excluded_tree};
+use crate::formats::dockerfile::emit_dockerfile;
+use crate::formats::emit_misc;
+use crate::formats::ini::emit_ini;
+use crate::formats::json::emit_json;
+use crate::formats::makefile::emit_makefile;
+use crate::formats::sh::emit_sh;
+use crate::formats::toml::emit_toml;
+use crate::formats::xml::emit_xml;
+use crate::formats::yaml::emit_yaml;
+use crate::lines::line_count;
+use crate::md::{build_doc, parse_headings, Doc};
+use crate::paths::repo_relative_dir;
+use crate::record::{write_rec, Rec};
 
 // ── shared helpers (kept at the `mod tests` root, reached by every tier) ──
 
