@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg-rustfrontend.crate_prefix",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg-rustfrontend.identity.crate_prefix",
       "properties": {}
     }
