@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "rust.apg.ingest.identity",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.blacklist",
+      "properties": {}
     }
   ],
   "in": []
