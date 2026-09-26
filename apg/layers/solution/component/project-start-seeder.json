@@ -29,6 +29,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.project_cmd.start.copy_trans_artifacts",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd.start.project_start_at",
+      "properties": {}
     }
   ],
   "in": [
