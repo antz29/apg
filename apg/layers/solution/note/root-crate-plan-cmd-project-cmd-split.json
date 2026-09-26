@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "rust.apg.plan_cmd.verify",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.render",
+      "properties": {}
     }
   ],
   "in": []
