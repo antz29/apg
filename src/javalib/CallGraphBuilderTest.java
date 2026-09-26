@@ -363,7 +363,7 @@ public class CallGraphBuilderTest {
      * so the file is never silently absent from the surface/class context.
      */
     static void testSurfaceFromSourceRecoversDroppedDeclarations(Path proj) {
-        CallGraphBuilder.FileRec rec = CallGraphBuilder.surfaceFromSource(bFile(proj));
+        ClassSurfaceCache.FileRec rec = DeclarationSurface.surfaceFromSource(bFile(proj));
         check("surfaceFromSource recovers the dropped source's struct declarations",
             rec != null && rec.structs.contains("pkg.b.B"),
             "rec structs: " + (rec == null ? "null" : rec.structs));
@@ -575,36 +575,36 @@ public class CallGraphBuilderTest {
      * (`pkg.b` / `B`) render exactly as they did before the extraction.
      */
     static void testModuleIdentityHelpers() {
-        String def = CallGraphBuilder.moduleIdentityFor("");
+        String def = SymbolNaming.moduleIdentityFor("");
         check("default package yields a non-empty module identity",
             def != null && !def.isEmpty(), "identity: " + def);
         check("a packaged module identity passes through unchanged",
-            "pkg.b".equals(CallGraphBuilder.moduleIdentityFor("pkg.b")),
-            "got: " + CallGraphBuilder.moduleIdentityFor("pkg.b"));
+            "pkg.b".equals(SymbolNaming.moduleIdentityFor("pkg.b")),
+            "got: " + SymbolNaming.moduleIdentityFor("pkg.b"));
         check("the File parent of the default package is the module identity",
-            def.equals(CallGraphBuilder.fileParentFor("")),
-            "got: " + CallGraphBuilder.fileParentFor(""));
+            def.equals(SymbolNaming.fileParentFor("")),
+            "got: " + SymbolNaming.fileParentFor(""));
         check("the File parent of a packaged input is unchanged",
-            "pkg.b".equals(CallGraphBuilder.fileParentFor("pkg.b")),
-            "got: " + CallGraphBuilder.fileParentFor("pkg.b"));
+            "pkg.b".equals(SymbolNaming.fileParentFor("pkg.b")),
+            "got: " + SymbolNaming.fileParentFor("pkg.b"));
         check("a default-package top-level class parent is the module identity",
-            def.equals(CallGraphBuilder.classParentFor("", "")),
-            "got: " + CallGraphBuilder.classParentFor("", ""));
+            def.equals(SymbolNaming.classParentFor("", "")),
+            "got: " + SymbolNaming.classParentFor("", ""));
         check("a default-package top-level class fqn has no leading dot",
-            CallGraphBuilder.classFqnFor("", "B").equals("B")
-                && !CallGraphBuilder.classFqnFor("", "B").startsWith("."),
-            "got: " + CallGraphBuilder.classFqnFor("", "B"));
+            SymbolNaming.classFqnFor("", "B").equals("B")
+                && !SymbolNaming.classFqnFor("", "B").startsWith("."),
+            "got: " + SymbolNaming.classFqnFor("", "B"));
         check("a default-package nested class keeps the enclosing class as parent",
-            "Outer".equals(CallGraphBuilder.classParentFor("", "Outer")),
-            "got: " + CallGraphBuilder.classParentFor("", "Outer"));
+            "Outer".equals(SymbolNaming.classParentFor("", "Outer")),
+            "got: " + SymbolNaming.classParentFor("", "Outer"));
         check("packaged top-level class parent and fqn are unchanged",
-            "pkg.b".equals(CallGraphBuilder.classParentFor("pkg.b", ""))
-                && "pkg.b.B".equals(CallGraphBuilder.classFqnFor("pkg.b", "B")),
-            "parent: " + CallGraphBuilder.classParentFor("pkg.b", "")
-                + " fqn: " + CallGraphBuilder.classFqnFor("pkg.b", "B"));
+            "pkg.b".equals(SymbolNaming.classParentFor("pkg.b", ""))
+                && "pkg.b.B".equals(SymbolNaming.classFqnFor("pkg.b", "B")),
+            "parent: " + SymbolNaming.classParentFor("pkg.b", "")
+                + " fqn: " + SymbolNaming.classFqnFor("pkg.b", "B"));
         check("packaged nested class parent is unchanged",
-            "pkg.a.Outer".equals(CallGraphBuilder.classParentFor("pkg.a", "Outer")),
-            "got: " + CallGraphBuilder.classParentFor("pkg.a", "Outer"));
+            "pkg.a.Outer".equals(SymbolNaming.classParentFor("pkg.a", "Outer")),
+            "got: " + SymbolNaming.classParentFor("pkg.a", "Outer"));
     }
 
     /**
@@ -638,7 +638,7 @@ public class CallGraphBuilderTest {
         Path widget = proj.resolve("Widget.java").toAbsolutePath().normalize();
         Path gadget = proj.resolve("Gadget.java").toAbsolutePath().normalize();
 
-        String def = CallGraphBuilder.moduleIdentityFor("");
+        String def = SymbolNaming.moduleIdentityFor("");
         String raw = run(proj).out;
         Set<String> recs = normalize(raw);
 
@@ -691,7 +691,7 @@ public class CallGraphBuilderTest {
             """, StandardCharsets.UTF_8);
         Path rootFile = proj.resolve("Root.java").toAbsolutePath().normalize();
         Path bFile = proj.resolve("pkg/b/B.java").toAbsolutePath().normalize();
-        String def = CallGraphBuilder.moduleIdentityFor("");
+        String def = SymbolNaming.moduleIdentityFor("");
 
         Set<String> full = normalize(run(proj).out);
         check("full scan emits the default-package module alongside the packaged ones",
