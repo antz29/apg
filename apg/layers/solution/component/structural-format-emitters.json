@@ -19,11 +19,6 @@
       "kind": "implemented-by",
       "target": "rust.structfrontend.parse_headings",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.structfrontend.walk",
-      "properties": {}
     }
   ],
   "in": [
