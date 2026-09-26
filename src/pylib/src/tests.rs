@@ -5,7 +5,15 @@
 //! libtest path filter. Non-test helpers stay at this module's root (never
 //! inside a tier); this tier needs none.
 
-use super::*;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use crate::environment::{ProjectKind, classify_project_markers};
+use crate::exclusions::is_excluded_dir_name;
+use crate::identity::{
+    canonical_function_fqn, canonical_struct_fqn, dotted_identity, identities_from_targets,
+};
+use crate::unresolved::{PathOrigin, classify_unresolved};
 
 mod unit {
     use super::*;
