@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "java-collector-class-move",
+  "body": "source: the durable spine edge solution.component.java-package-hierarchy —implemented-by→ java.CallGraphBuilder.Collector.emitPkgHierarchy, authored while Collector was a nested class of CallGraphBuilder.\n\nInconsistency: the Java frontend decomposition moves the nested Collector out to a top-level class, so the emitted method FQN becomes java.Collector.emitPkgHierarchy; the old nested FQN java.CallGraphBuilder.Collector.emitPkgHierarchy ceases to exist, and the Dockerfile/scan would have shown the authored implemented-by target as drift.\n\nResolution: re-pointed the implemented-by edge here, before the verifying scan, from java.CallGraphBuilder.Collector.emitPkgHierarchy to the already-planned java.Collector.emitPkgHierarchy (pending until the decomposition lands), and updated the component body's FQN reference accordingly. [with coordinator]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
