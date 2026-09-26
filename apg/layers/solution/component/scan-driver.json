@@ -17,11 +17,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.cache.rebase",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.splice",
       "properties": {}
     },
