@@ -21,6 +21,12 @@ class ApgJava < Formula
 
   def install
     mkdir "java-classes"
+    # Compile the whole non-test Java source set: the frontend is a set of
+    # sibling default-package classes (CallGraphBuilder plus its collaborators),
+    # so javac must be handed every source file — listing CallGraphBuilder.java
+    # alone would not find a sibling class. The test class is excluded: it is
+    # not part of the shipped frontend.
+    sources = Dir["src/javalib/*.java"].reject { |f| f.end_with?("CallGraphBuilderTest.java") }.sort
     system "javac",
            "-d", "java-classes",
            "-proc:none",
@@ -30,7 +36,7 @@ class ApgJava < Formula
            # so `--release` (not -source/-target + --add-exports) is what keeps
            # the build JDK's internals out of the artifact.
            "--release", "21",
-           "src/javalib/CallGraphBuilder.java"
+           *sources
     (share/"apg/frontends").install "java-classes"
   end
 

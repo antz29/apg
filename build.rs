@@ -421,6 +421,26 @@ fn main() {
         let java_classes = Path::new(&out_dir).join("java-classes");
         std::fs::create_dir_all(&java_classes).ok();
 
+        // Compile the whole non-test Java source set: the frontend is a set of
+        // sibling default-package classes (CallGraphBuilder plus its
+        // collaborators), so javac must be handed every source file — listing
+        // CallGraphBuilder.java alone would not find a sibling class. The test
+        // class is excluded: it is not part of the shipped frontend.
+        let mut java_sources: Vec<PathBuf> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir("src/javalib") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let is_java = path.extension().is_some_and(|ext| ext == "java");
+                let is_test = path
+                    .file_name()
+                    .is_some_and(|name| name == "CallGraphBuilderTest.java");
+                if is_java && !is_test {
+                    java_sources.push(path);
+                }
+            }
+        }
+        java_sources.sort();
+
         let java_ok = Command::new("javac")
             .args([
                 "-d",
@@ -433,8 +453,8 @@ fn main() {
                 // what keeps the build JDK's internals out of the artifact.
                 "--release",
                 "21",
-                "src/javalib/CallGraphBuilder.java",
             ])
+            .args(&java_sources)
             .status()
             .is_ok_and(|s| s.success());
 
