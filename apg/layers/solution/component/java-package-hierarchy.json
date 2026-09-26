@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.entity.java-package",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.java-collector-class-move",
+      "properties": {}
     }
   ]
 }
