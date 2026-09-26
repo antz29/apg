@@ -26,6 +26,11 @@
       "kind": "contains",
       "source": "solution.container.rust-frontend",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.rust-identity-module-move",
+      "properties": {}
     }
   ]
 }
