@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.spawn_frontend",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.ingest.ingest_records",
       "properties": {}
     },
