@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.ingest.blacklist.is_blacklisted",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.state.path_is_ignored",
+      "properties": {}
     }
   ],
   "in": [
