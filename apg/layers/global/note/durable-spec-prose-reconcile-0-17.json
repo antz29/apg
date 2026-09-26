@@ -34,6 +34,11 @@
       "kind": "details",
       "target": "solution.note.library-surface-non-graph-artifacts",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.note.md-frontend-retirement",
+      "properties": {}
     }
   ],
   "in": []
