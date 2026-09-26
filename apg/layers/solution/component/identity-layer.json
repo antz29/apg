@@ -22,11 +22,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.git.repo_rel",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.ingest.identity.root_module_fqn",
       "properties": {}
     },
