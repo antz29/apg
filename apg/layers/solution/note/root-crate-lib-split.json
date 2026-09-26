@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "rust.apg.pipeline",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.query",
+      "properties": {}
     }
   ],
   "in": []
