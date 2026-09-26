@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.ingest.is_blacklisted",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.classify",
       "properties": {}
     },
