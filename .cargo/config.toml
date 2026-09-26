@@ -9,9 +9,11 @@
 # fast default gate) runs the unit+int tiers only and can never reach an e2e
 # test; e2e is the opt-in FINAL gate only.
 #
-# Helpers/fixtures/builders stay at the `mod tests` root -- only `#[test]`
-# functions move into a tier submodule, and each tier submodule starts with
-# `use super::*;`.
+# Helpers/fixtures/builders stay OUT of tiers -- they live on the shared
+# public harness `apg::testutil` (src/testutil.rs) or the crate's
+# `tests/common/mod.rs`, never in a tier submodule and never stranded in a
+# production module's inline `mod tests`. Only `#[test]` functions move into
+# a tier, and each tier submodule starts with `use super::*;`.
 [alias]
 # unit tier only -- pure in-memory, exactly 1 unit, no real I/O.
 test-unit = "test tests::unit::"
