@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "rust.apg.ingest.blacklist",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.ingest.render",
+      "properties": {}
     }
   ],
   "in": []
