@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.entity.python-module",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.python-scanner-class-move",
+      "properties": {}
     }
   ]
 }
