@@ -34,6 +34,11 @@
       "kind": "details",
       "target": "rust.apg.project_cmd.start",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.merge",
+      "properties": {}
     }
   ],
   "in": []
