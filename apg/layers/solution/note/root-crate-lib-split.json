@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "rust.apg.frontends",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.warm",
+      "properties": {}
     }
   ],
   "in": []
