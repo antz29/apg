@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "rust.apg.load.tables",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.load.export",
+      "properties": {}
     }
   ],
   "in": []
