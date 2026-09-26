@@ -1182,16 +1182,40 @@ fn dynamic_js_fixture() -> Vec<(&'static str, &'static str)> {
     )]
 }
 
-/// Phase-06 task-15 fixture: a COPY of the ported `src/tslib` —
-/// `scanner.ts` + its `package.json` (`name: apg-tsfrontend`) — as the scan
-/// target. Reading the real repo source is why this is e2e.
+/// Phase-06 task-15 fixture: a COPY of the whole ported `src/tslib` source
+/// set — `scanner.ts` and its `.mjs` sidecars plus its `package.json`
+/// (`name: apg-tsfrontend`), skipping `node_modules` and every non-source
+/// file — as the scan target. Reading the real repo source is why this is
+/// e2e.
 fn tslib_self_scan_fixture() -> Vec<(&'static str, String)> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let scanner = std::fs::read_to_string(root.join("src/tslib/scanner.ts"))
-        .expect("read src/tslib/scanner.ts");
-    let pkg = std::fs::read_to_string(root.join("src/tslib/package.json"))
-        .expect("read src/tslib/package.json");
-    vec![("tslib/scanner.ts", scanner), ("tslib/package.json", pkg)]
+    let dir = root.join("src/tslib");
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+        .map(|e| e.unwrap_or_else(|e| panic!("read {} entry: {e}", dir.display())))
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    entries
+        .into_iter()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                return None; // skip `node_modules` and any nested directory
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let is_source = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e == "ts" || e == "mjs");
+            if name != "package.json" && !is_source {
+                return None; // only .ts/.mjs sources plus the package manifest
+            }
+            let body = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let key: &'static str = Box::leak(format!("tslib/{name}").into_boxed_str());
+            Some((key, body))
+        })
+        .collect()
 }
 
 // -----------------------------------------------------------------------
@@ -5847,11 +5871,12 @@ mod e2e {
     }
 
     /// Phase-06 task-15 (e2e): the self-scan acceptance — the candidate's
-    /// BUILT/STAGED unified frontend scans a scratch COPY of the ported
-    /// `src/tslib` (`scanner.ts` + its `package.json`). The graph is not just
-    /// an empty module node: the package module, a File node for scanner.ts,
-    /// the ported declaration units, and at least one resolve-only edge.
-    /// Never points the candidate at the real apg checkout.
+    /// BUILT/STAGED unified frontend scans a scratch COPY of the whole ported
+    /// `src/tslib` source set (`scanner.ts`, its `.mjs` sidecars and its
+    /// `package.json`). The graph is not just an empty module node: the
+    /// package module, a File node for scanner.ts, the ported declaration
+    /// units (now in their post-split sidecar modules), and at least one
+    /// resolve-only edge. Never points the candidate at the real apg checkout.
     #[test]
     #[ignore = "e2e tier: real I/O (scratch /tmp repo scanned by the candidate binary); run via cargo test-e2e"]
     fn self_scan_of_ported_tslib_produces_symbols() {
@@ -5867,36 +5892,28 @@ mod e2e {
             "the copied package module must be present: {:?}",
             export_modules(&records)
         );
-        let scanner = export_file_ending(&records, "/tslib/scanner.ts")
+        let _ = export_file_ending(&records, "/tslib/scanner.ts")
             .expect("scanner.ts must be a File node");
-        let syms = export_symbols_at(&records, &scanner);
-        assert!(
-            !syms.is_empty(),
-            "scanner.ts must declare symbols, got none"
-        );
-        for unit in [
-            "collectFile",
-            "emitNode",
-            "discoverPackages",
-            "collectSources",
-            "isSourceExt",
-            "relPrefix",
-            "workspaceHost",
-            "emitEdge",
-            "emitUnresolved",
-            "registerStruct",
-            "registerFunction",
-            "handleCall",
-            "handleNew",
-            "handleType",
-            "handleJsx",
-            "walkNode",
+        let syms = export_symbol_fqns(&records);
+        for fqn in [
+            "ts.apg-tsfrontend.declarations.collectFile",
+            "ts.apg-tsfrontend.declarations.registerStruct",
+            "ts.apg-tsfrontend.declarations.registerFunction",
+            "ts.apg-tsfrontend.emit.emitNode",
+            "ts.apg-tsfrontend.emit.emitEdge",
+            "ts.apg-tsfrontend.emit.emitUnresolved",
+            "ts.apg-tsfrontend.discovery.discoverPackages",
+            "ts.apg-tsfrontend.discovery.collectSources",
+            "ts.apg-tsfrontend.discovery.isSourceExt",
+            "ts.apg-tsfrontend.discovery.relPrefix",
+            "ts.apg-tsfrontend.program.workspaceHost",
+            "ts.apg-tsfrontend.walk.handleCall",
+            "ts.apg-tsfrontend.walk.handleNew",
+            "ts.apg-tsfrontend.walk.handleType",
+            "ts.apg-tsfrontend.walk.handleJsx",
+            "ts.apg-tsfrontend.walk.walkNode",
         ] {
-            let fqn = format!("ts.apg-tsfrontend.scanner.{unit}");
-            assert!(
-                syms.contains(&fqn),
-                "ported unit {fqn} must be a symbol: {syms:?}"
-            );
+            assert!(syms.contains(fqn), "ported unit {fqn} must be a symbol");
         }
         assert!(
             has_resolved_project_edge(&records),
