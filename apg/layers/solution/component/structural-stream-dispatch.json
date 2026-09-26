@@ -34,6 +34,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.classify.builtin_code_type",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.available_languages",
+      "properties": {}
     }
   ],
   "in": [
