@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "rust.apg.load.parquet",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.load.tables",
+      "properties": {}
     }
   ],
   "in": []
