@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.frontends.spawn_frontend",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.scan_time_preflight",
+      "properties": {}
     }
   ],
   "in": [
