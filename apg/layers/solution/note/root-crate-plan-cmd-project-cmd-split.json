@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "rust.apg.plan_cmd.status",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.verify",
+      "properties": {}
     }
   ],
   "in": []
