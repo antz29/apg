@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "requirements.note.decomposition-reframe-reconciliation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "global.note.agents-md-test-laws-drift",
+      "properties": {}
     }
   ],
   "in": []

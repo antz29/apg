@@ -21,5 +21,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "global.note.durable-spec-prose-reconcile-0-17",
+      "properties": {}
+    }
+  ]
 }
