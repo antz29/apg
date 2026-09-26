@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.entity.typescript-package",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.ts-package-rooting-module-move",
+      "properties": {}
     }
   ]
 }
