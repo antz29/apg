@@ -39,6 +39,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.splice",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.should_spawn_language",
+      "properties": {}
     }
   ],
   "in": [
