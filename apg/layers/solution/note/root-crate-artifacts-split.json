@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "rust.apg.artifacts.merge",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.project",
+      "properties": {}
     }
   ],
   "in": []
