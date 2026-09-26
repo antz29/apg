@@ -146,7 +146,7 @@ vocabulary — **the parent can never depend on its future child**:
 - **The plan and the durable spec use the running binary's FQNs.** Task targets,
   planned-node FQNs and `implemented-by` targets are the *language-agnostic code
   identities the installed binary renders* (`apg.cmd_scan`,
-  `apg-tsfrontend.scanner.collectFile`), never a rendering only the next binary
+  `ts.apg-tsfrontend.declarations.collectFile`), never a rendering only the next binary
   produces (`rust.apg.cmd_scan`). A change-set that alters how the *next* binary
   renders FQNs (e.g. language rooting) must not make the *current* plan or spec
   depend on that rendering; the next binary's tolerance
