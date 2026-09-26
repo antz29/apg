@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "rust.apg.plan_cmd.envelope",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.plan_cmd.authoring",
+      "properties": {}
     }
   ],
   "in": []
