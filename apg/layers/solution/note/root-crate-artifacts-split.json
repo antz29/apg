@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "rust.apg.artifacts.db",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.artifacts.merge",
+      "properties": {}
     }
   ],
   "in": []
