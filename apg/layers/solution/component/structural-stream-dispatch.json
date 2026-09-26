@@ -34,6 +34,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.frontends.spawn_frontend",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.identity.root_module_fqn",
+      "properties": {}
     }
   ],
   "in": [
