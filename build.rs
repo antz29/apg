@@ -32,7 +32,12 @@ fn enabled(langs: &[String], lang: &str) -> bool {
     langs.iter().any(|l| l == lang)
 }
 
-fn main() {
+/// Emit the `cargo:rerun-if-changed` / `cargo:rerun-if-env-changed` directives
+/// that make the build script re-run when a frontend source changes. Also
+/// re-run when the frontend allowlist changes, so toggling
+/// `APG_BUILD_FRONTENDS` re-stages (and re-tests) the selected frontends
+/// instead of reusing a stale build-script fingerprint.
+fn watch_frontend_sources() {
     println!("cargo:rerun-if-changed=src/javalib/CallGraphBuilder.java");
     println!("cargo:rerun-if-changed=src/golib/main.go");
     println!("cargo:rerun-if-changed=src/cpplib/main.cpp");
@@ -49,19 +54,15 @@ fn main() {
     println!("cargo:rerun-if-changed=src/pylib/Cargo.toml");
     println!("cargo:rerun-if-changed=src/pylib/src/main.rs");
 
-    // Re-run when the frontend allowlist changes, so toggling
-    // `APG_BUILD_FRONTENDS` re-stages (and re-tests) the selected frontends
-    // instead of reusing a stale build-script fingerprint.
     println!("cargo:rerun-if-env-changed=APG_BUILD_FRONTENDS");
+}
 
+/// Directory the runtime uses to find frontends relative to the binary:
+/// <target>/<profile>/frontends. Also populated by `apg`'s runtime lookup
+/// (see `frontend_dir` in main.rs) so dev builds and the brew formula can
+/// both resolve frontends from a known spot. Created here (best effort).
+fn stage_dir() -> PathBuf {
     let out_dir = std::env::var("OUT_DIR").unwrap();
-    let frontends = build_frontends();
-    let mut languages: Vec<String> = Vec::new();
-
-    // Directory the runtime uses to find frontends relative to the binary:
-    // <target>/<profile>/frontends. Also populated by `apg`'s runtime lookup
-    // (see `frontend_dir` in main.rs) so dev builds and the brew formula can
-    // both resolve frontends from a known spot.
     let profile_dir = PathBuf::from(&out_dir)
         .parent()
         .and_then(|p| p.parent())
@@ -70,463 +71,534 @@ fn main() {
         .to_path_buf();
     let stage_dir = profile_dir.join("frontends");
     std::fs::create_dir_all(&stage_dir).ok();
+    stage_dir
+}
 
-    // --- C++ frontend (tree-sitter, no external deps) ---
+fn main() {
+    watch_frontend_sources();
+
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let stage_dir = stage_dir();
+    let frontends = build_frontends();
+    let mut languages: Vec<String> = Vec::new();
+
     if enabled(&frontends, "cpp") {
-        let cppfrontend = Path::new(&out_dir).join("cppfrontend");
-        let cpplib = Path::new("src/cpplib");
-        let vendor = cpplib.join("vendor");
-
-        let runtime_o = Path::new(&out_dir).join("ts_runtime.o");
-        let parser_o = Path::new(&out_dir).join("ts_cpp_parser.o");
-        let scanner_o = Path::new(&out_dir).join("ts_cpp_scanner.o");
-        let main_o = Path::new(&out_dir).join("cppfrontend_main.o");
-        let ts_inc = vendor.join("tree-sitter/lib/include");
-        let ts_src = vendor.join("tree-sitter/lib/src");
-        let cpp_inc = vendor.join("tree-sitter-cpp/src");
-
-        let rt_ok = Command::new("gcc")
-            .args([
-                "-c",
-                "-fPIC",
-                "-std=c11",
-                "-D_GNU_SOURCE",
-                "-I",
-                ts_inc.to_str().unwrap(),
-                "-I",
-                ts_src.to_str().unwrap(),
-                ts_src.join("lib.c").to_str().unwrap(),
-                "-o",
-                runtime_o.to_str().unwrap(),
-            ])
-            .status()
-            .is_ok_and(|s| s.success());
-
-        let parser_ok = Command::new("gcc")
-            .args([
-                "-c",
-                "-fPIC",
-                "-std=c11",
-                "-I",
-                cpp_inc.to_str().unwrap(),
-                "-I",
-                ts_inc.to_str().unwrap(),
-                vendor
-                    .join("tree-sitter-cpp/src/parser.c")
-                    .to_str()
-                    .unwrap(),
-                "-o",
-                parser_o.to_str().unwrap(),
-            ])
-            .status()
-            .is_ok_and(|s| s.success());
-
-        let scanner_ok = Command::new("gcc")
-            .args([
-                "-c",
-                "-fPIC",
-                "-std=c11",
-                "-I",
-                cpp_inc.to_str().unwrap(),
-                "-I",
-                ts_inc.to_str().unwrap(),
-                vendor
-                    .join("tree-sitter-cpp/src/scanner.c")
-                    .to_str()
-                    .unwrap(),
-                "-o",
-                scanner_o.to_str().unwrap(),
-            ])
-            .status()
-            .is_ok_and(|s| s.success());
-
-        let main_ok = Command::new("g++")
-            .args([
-                "-c",
-                "-fPIC",
-                "-std=c++17",
-                "-I",
-                ts_inc.to_str().unwrap(),
-                "-I",
-                cpp_inc.to_str().unwrap(),
-                cpplib.join("main.cpp").to_str().unwrap(),
-                "-o",
-                main_o.to_str().unwrap(),
-            ])
-            .status()
-            .is_ok_and(|s| s.success());
-
-        if rt_ok && parser_ok && scanner_ok && main_ok {
-            let link_ok = Command::new("g++")
-                .args([
-                    runtime_o.to_str().unwrap(),
-                    parser_o.to_str().unwrap(),
-                    scanner_o.to_str().unwrap(),
-                    main_o.to_str().unwrap(),
-                    "-lm",
-                    "-o",
-                    cppfrontend.to_str().unwrap(),
-                ])
-                .status()
-                .is_ok_and(|s| s.success());
-
-            if link_ok {
-                println!("cargo:rustc-env=APG_FRONTEND_CPP={}", cppfrontend.display());
-                let _ = std::fs::copy(&cppfrontend, stage_dir.join("cppfrontend"));
-
-                // Execute the frontend's own fixture. cpplib has no other test
-                // harness (it is a standalone C++ binary), so the cross-file
-                // filtered-emission self-test is the only thing that exercises
-                // `scan_root`'s target-set path; run it here so `cargo build` /
-                // `cargo test` actually execute it and a regression fails the
-                // aggregate build rather than passing unnoticed. Scoped to the
-                // C++ stage — the other frontend stages are untouched.
-                match Command::new(&cppfrontend).arg("--self-test").output() {
-                    Ok(out) if out.status.success() => {
-                        print!("{}", String::from_utf8_lossy(&out.stdout));
-                    }
-                    Ok(out) => panic!(
-                        "cppfrontend --self-test failed ({}):\n{}\n{}",
-                        out.status,
-                        String::from_utf8_lossy(&out.stdout),
-                        String::from_utf8_lossy(&out.stderr),
-                    ),
-                    Err(e) => panic!("failed to run cppfrontend --self-test: {e}"),
-                }
-
-                languages.push("cpp".into());
-            }
-        }
+        languages.extend(stage_cpp(&out_dir, &stage_dir));
     }
-
-    // --- Go frontend ---
     if enabled(&frontends, "go") {
-        let gofrontend = Path::new(&out_dir).join("gofrontend");
-        let go_ok = Command::new("go")
-            .args(["build", "-o", gofrontend.to_str().unwrap(), "."])
-            .current_dir("src/golib")
-            .status()
-            .is_ok_and(|s| s.success());
-
-        if go_ok {
-            println!("cargo:rustc-env=APG_FRONTEND_GO={}", gofrontend.display());
-            let _ = std::fs::copy(&gofrontend, stage_dir.join("gofrontend"));
-            languages.push("go".into());
-        }
+        languages.extend(stage_go(&out_dir, &stage_dir));
     }
-
-    // --- Rust frontend (rust-analyzer engine, compiled in isolation) ---
     if enabled(&frontends, "rust") {
-        // Compile rustlib with cargo into its own isolated target dir
-        // (src/rustlib/target). The frontend is ALWAYS built with `--release`,
-        // independent of the outer cargo profile: rust-analyzer's startup cost
-        // dominates every Rust scan, and the unoptimized debug frontend is ~7x
-        // slower than the optimized one. The optimized artifact is staged into
-        // the ACTIVE outer profile's frontends dir
-        // (`target/<outer-profile>/frontends`), so a debug-profile `apg` spawns
-        // the fast frontend instead of the debug sibling. Deps resolve from
-        // src/rustlib/Cargo.lock; bump the pinned rust-analyzer rev in
-        // src/rustlib/Cargo.toml atomically. On failure, skip rust rather
-        // than aborting the whole build (like the other frontends).
-        let rustfrontend = Path::new("src/rustlib")
-            .join("target")
-            .join("release")
-            .join("rustfrontend");
-        let mut cmd = Command::new("cargo");
-        cmd.arg("build")
-            .arg("--manifest-path")
-            .arg("src/rustlib/Cargo.toml")
-            .arg("--release")
-            .arg("--bin")
-            .arg("rustfrontend");
-        let rust_ok = cmd.status().is_ok_and(|s| s.success()) && rustfrontend.exists();
-        if rust_ok {
-            println!(
-                "cargo:rustc-env=APG_FRONTEND_RUST={}",
-                rustfrontend.display()
-            );
-            let _ = std::fs::copy(&rustfrontend, stage_dir.join("rustfrontend"));
-            languages.push("rust".into());
-        }
+        languages.extend(stage_rust(&stage_dir));
     }
-
-    // --- Structural frontend (bundled scanner, standalone Rust crate, compiled in isolation) ---
     if enabled(&frontends, "struct") {
-        // Compile structlib with cargo into its own isolated target dir
-        // (src/structlib/target). ALWAYS `--release`, independent of the outer
-        // cargo profile, and staged into the ACTIVE outer profile's frontends
-        // dir (same rationale as rustlib above). structlib is a standalone,
-        // non-workspace crate exactly like src/rustlib, so its lockfile and
-        // target tree stay independent. ONE `structfrontend` binary serves every
-        // structural stream id — the `md` stream plus the per-format streams and
-        // the residual `misc` — and the baked `APG_FRONTEND_STRUCT` points at
-        // its staged path (`frontend_cmd`'s dev fallback for every structural
-        // id). On failure, skip the structural scanner rather than aborting the
-        // whole build (like the other frontends).
-        let structfrontend = Path::new("src/structlib")
-            .join("target")
-            .join("release")
-            .join("structfrontend");
-        let mut cmd = Command::new("cargo");
-        cmd.arg("build")
-            .arg("--manifest-path")
-            .arg("src/structlib/Cargo.toml")
-            .arg("--release")
-            .arg("--bin")
-            .arg("structfrontend");
-        let struct_ok = cmd.status().is_ok_and(|s| s.success()) && structfrontend.exists();
-        if struct_ok {
-            let staged = stage_dir.join("structfrontend");
-            let _ = std::fs::copy(&structfrontend, &staged);
-            println!("cargo:rustc-env=APG_FRONTEND_STRUCT={}", staged.display());
-            // The structural scanner's stream ids (canonical order, mirroring
-            // `STRUCTURAL_LANGUAGES` in src/main.rs): the baked `APG_LANGUAGES`
-            // fallback enumerates them when no runtime frontends dir is found.
-            for id in [
-                "md",
-                "sh",
-                "yaml",
-                "json",
-                "toml",
-                "xml",
-                "dockerfile",
-                "makefile",
-                "ini",
-                "misc",
-            ] {
-                languages.push(id.into());
-            }
-        }
+        languages.extend(stage_struct(&stage_dir));
     }
-
-    // --- Python frontend (Astral ty engine, compiled in isolation) ---
     if enabled(&frontends, "py") {
-        // Compile pylib with cargo into its own isolated target dir
-        // (src/pylib/target). ALWAYS `--release`, independent of the outer
-        // cargo profile, and staged into the ACTIVE outer profile's frontends
-        // dir (same rationale as rustlib above). pylib is a standalone,
-        // non-workspace crate exactly like src/rustlib and src/structlib, so
-        // its lockfile and target tree stay independent. The staged artifact is
-        // the `pyfrontend` binary (the crate's `[[bin]]` name — unaffected by
-        // the `[package]` name). On failure, skip py rather than aborting the
-        // whole build (like the other frontends).
-        let pyfrontend = Path::new("src/pylib")
-            .join("target")
-            .join("release")
-            .join("pyfrontend");
-        let mut cmd = Command::new("cargo");
-        cmd.arg("build")
-            .arg("--manifest-path")
-            .arg("src/pylib/Cargo.toml")
-            .arg("--release")
-            .arg("--bin")
-            .arg("pyfrontend");
-        let py_ok = cmd.status().is_ok_and(|s| s.success()) && pyfrontend.exists();
-        if py_ok {
-            println!("cargo:rustc-env=APG_FRONTEND_PY={}", pyfrontend.display());
-            let _ = std::fs::copy(&pyfrontend, stage_dir.join("pyfrontend"));
-            languages.push("py".into());
-        }
+        languages.extend(stage_py(&stage_dir));
     }
-
-    // --- Unified JS/TS frontend (Node + official TypeScript compiler) ---
     if enabled(&frontends, "ts") {
-        // npm ci (with the committed package-lock) installs typescript into
-        // src/tslib/node_modules. Skipped when already installed so repeated
-        // builds don't re-fetch. The staged frontend is the BUILT artifact:
-        // `scanner.ts` (transpile-only, `@ts-nocheck`) is compiled to
-        // `scanner.js` by the repo-local compiler and staged as
-        // `tsfrontend/scanner.mjs`. `.mjs` is unconditionally ESM to node, so no
-        // staged package.json is needed and the runtime name/path stays exactly
-        // what `frontend_cmd` runs (`node <dir>/tsfrontend/scanner.mjs`) and what
-        // `APG_FRONTEND_TS` names. The staged `node_modules` is required — the
-        // built scanner imports `typescript` at runtime.
-        let tslib = Path::new("src/tslib");
-        let ts_dep = tslib
-            .join("node_modules")
-            .join("typescript")
-            .join("package.json");
-        let ts_ok = if ts_dep.is_file() {
-            true
-        } else {
-            Command::new("npm")
-                .args(["ci", "--no-audit", "--no-fund"])
-                .current_dir(tslib)
-                .status()
-                .is_ok_and(|s| s.success())
-        };
-        if ts_ok {
-            let stage_ts = stage_dir.join("tsfrontend");
-            std::fs::create_dir_all(&stage_ts).ok();
-            copy_dir(&tslib.join("node_modules"), &stage_ts.join("node_modules"));
-
-            // Compile the ported source to the staged artifact. `scanner.ts`
-            // carries `// @ts-nocheck` (transpile-only, no semantic typecheck);
-            // `--noEmitOnError` still fails this step on any syntax/emit error
-            // rather than staging a broken artifact. The emitted `scanner.js`
-            // is renamed to `scanner.mjs` on stage.
-            let ts_build = Path::new(&out_dir).join("tsfrontend-build");
-            let _ = std::fs::remove_dir_all(&ts_build);
-            std::fs::create_dir_all(&ts_build).ok();
-            let tsc = tslib
-                .join("node_modules")
-                .join("typescript")
-                .join("bin")
-                .join("tsc");
-            let compile_ok = Command::new("node")
-                .arg(tsc.to_str().unwrap())
-                .arg(tslib.join("scanner.ts").to_str().unwrap())
-                .args([
-                    "--module",
-                    "esnext",
-                    "--target",
-                    "esnext",
-                    "--moduleResolution",
-                    "bundler",
-                    "--allowJs",
-                    "false",
-                    "--skipLibCheck",
-                    "--noEmitOnError",
-                    "--outDir",
-                    ts_build.to_str().unwrap(),
-                ])
-                .status()
-                .is_ok_and(|s| s.success());
-            let emitted = ts_build.join("scanner.js");
-            if !compile_ok || !emitted.is_file() {
-                panic!(
-                    "tsfrontend compile failed: `node {} {}` did not emit {} — fix src/tslib/scanner.ts",
-                    tsc.display(),
-                    tslib.join("scanner.ts").display(),
-                    emitted.display()
-                );
-            }
-            let _ = std::fs::copy(&emitted, stage_ts.join("scanner.mjs"));
-            // The built scanner keeps `import { packageIdentity } from
-            // "./identity.mjs"` verbatim (the source module is not compiled by
-            // the tsc invocation above), so the staged `identity.mjs` must sit
-            // next to the staged `scanner.mjs` for that import to resolve. It is
-            // plain side-effect-free ESM, copied as-is.
-            let _ = std::fs::copy(tslib.join("identity.mjs"), stage_ts.join("identity.mjs"));
-            println!(
-                "cargo:rustc-env=APG_FRONTEND_TS={}",
-                stage_ts.join("scanner.mjs").display()
-            );
-            languages.push("ts".into());
-        }
+        languages.extend(stage_ts(&out_dir, &stage_dir));
     }
-
-    // --- Java frontend ---
     if enabled(&frontends, "java") {
-        let java_classes = Path::new(&out_dir).join("java-classes");
-        std::fs::create_dir_all(&java_classes).ok();
-
-        // Compile the whole non-test Java source set: the frontend is a set of
-        // sibling default-package classes (CallGraphBuilder plus its
-        // collaborators), so javac must be handed every source file — listing
-        // CallGraphBuilder.java alone would not find a sibling class. The test
-        // class is excluded: it is not part of the shipped frontend.
-        let mut java_sources: Vec<PathBuf> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir("src/javalib") {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let is_java = path.extension().is_some_and(|ext| ext == "java");
-                let is_test = path
-                    .file_name()
-                    .is_some_and(|name| name == "CallGraphBuilderTest.java");
-                if is_java && !is_test {
-                    java_sources.push(path);
-                }
-            }
-        }
-        java_sources.sort();
-
-        let java_ok = Command::new("javac")
-            .args([
-                "-d",
-                java_classes.to_str().unwrap(),
-                "-proc:none",
-                // Target Java 21 bytecode and compile against the Java 21 public
-                // API only, so the frontend runs on any JVM >= 21 regardless of
-                // the JDK that compiled it. The frontend uses no JDK-internal
-                // APIs, so `--release` (not -source/-target + --add-exports) is
-                // what keeps the build JDK's internals out of the artifact.
-                "--release",
-                "21",
-            ])
-            .args(&java_sources)
-            .status()
-            .is_ok_and(|s| s.success());
-
-        if java_ok {
-            let cmd = format!(
-                "java -Xmx5g -cp {} CallGraphBuilder",
-                java_classes.display()
-            );
-            println!("cargo:rustc-env=APG_FRONTEND_JAVA={}", cmd);
-            let stage_java = stage_dir.join("java-classes");
-            std::fs::create_dir_all(&stage_java).ok();
-            copy_dir(&java_classes, &stage_java);
-            languages.push("java".into());
-        }
+        languages.extend(stage_java(&out_dir, &stage_dir));
     }
-
-    // --- C# frontend (Roslyn, published as self-contained single-file) ---
     if enabled(&frontends, "csharp") {
-        let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-        let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-
-        let rid = match (
-            target_os.as_str(),
-            target_arch.as_str(),
-            target_env.as_str(),
-        ) {
-            ("linux", "x86_64", "musl") => "linux-musl-x64",
-            ("linux", "aarch64", "musl") => "linux-musl-arm64",
-            ("linux", "x86_64", _) => "linux-x64",
-            ("linux", "aarch64", _) => "linux-arm64",
-            ("macos", "x86_64", _) => "osx-x64",
-            ("macos", "aarch64", _) => "osx-arm64",
-            ("windows", "x86_64", _) => "win-x64",
-            ("windows", "aarch64", _) => "win-arm64",
-            _ => "linux-x64",
-        };
-
-        let cs_dist = Path::new(&out_dir).join("csharp-dist");
-        let mut cmd = Command::new("dotnet");
-        cmd.arg("publish")
-            .arg("src/csharplib/CsharpFrontend.csproj")
-            .arg("-c")
-            .arg("Release")
-            .arg("-r")
-            .arg(rid)
-            .arg("--self-contained")
-            .arg("true")
-            .arg("-p:PublishSingleFile=true")
-            .arg("-p:PublishReadyToRun=true")
-            .arg("-o")
-            .arg(cs_dist.to_str().unwrap());
-
-        let exe_name = if target_os == "windows" {
-            "csharpfrontend.exe"
-        } else {
-            "csharpfrontend"
-        };
-        let csharpfrontend = cs_dist.join(exe_name);
-
-        let cs_ok = cmd.status().is_ok_and(|s| s.success()) && csharpfrontend.exists();
-        if cs_ok {
-            println!(
-                "cargo:rustc-env=APG_FRONTEND_CSHARP={}",
-                csharpfrontend.display()
-            );
-            let _ = std::fs::copy(&csharpfrontend, stage_dir.join(exe_name));
-            languages.push("csharp".into());
-        }
+        languages.extend(stage_csharp(&out_dir, &stage_dir));
     }
 
     println!("cargo:rustc-env=APG_LANGUAGES={}", languages.join(","));
+}
+
+/// C++ frontend (tree-sitter, no external deps).
+fn stage_cpp(out_dir: &str, stage_dir: &Path) -> Vec<String> {
+    let cppfrontend = Path::new(out_dir).join("cppfrontend");
+    let cpplib = Path::new("src/cpplib");
+    let vendor = cpplib.join("vendor");
+
+    let runtime_o = Path::new(out_dir).join("ts_runtime.o");
+    let parser_o = Path::new(out_dir).join("ts_cpp_parser.o");
+    let scanner_o = Path::new(out_dir).join("ts_cpp_scanner.o");
+    let main_o = Path::new(out_dir).join("cppfrontend_main.o");
+    let ts_inc = vendor.join("tree-sitter/lib/include");
+    let ts_src = vendor.join("tree-sitter/lib/src");
+    let cpp_inc = vendor.join("tree-sitter-cpp/src");
+
+    let rt_ok = Command::new("gcc")
+        .args([
+            "-c",
+            "-fPIC",
+            "-std=c11",
+            "-D_GNU_SOURCE",
+            "-I",
+            ts_inc.to_str().unwrap(),
+            "-I",
+            ts_src.to_str().unwrap(),
+            ts_src.join("lib.c").to_str().unwrap(),
+            "-o",
+            runtime_o.to_str().unwrap(),
+        ])
+        .status()
+        .is_ok_and(|s| s.success());
+
+    let parser_ok = Command::new("gcc")
+        .args([
+            "-c",
+            "-fPIC",
+            "-std=c11",
+            "-I",
+            cpp_inc.to_str().unwrap(),
+            "-I",
+            ts_inc.to_str().unwrap(),
+            vendor
+                .join("tree-sitter-cpp/src/parser.c")
+                .to_str()
+                .unwrap(),
+            "-o",
+            parser_o.to_str().unwrap(),
+        ])
+        .status()
+        .is_ok_and(|s| s.success());
+
+    let scanner_ok = Command::new("gcc")
+        .args([
+            "-c",
+            "-fPIC",
+            "-std=c11",
+            "-I",
+            cpp_inc.to_str().unwrap(),
+            "-I",
+            ts_inc.to_str().unwrap(),
+            vendor
+                .join("tree-sitter-cpp/src/scanner.c")
+                .to_str()
+                .unwrap(),
+            "-o",
+            scanner_o.to_str().unwrap(),
+        ])
+        .status()
+        .is_ok_and(|s| s.success());
+
+    let main_ok = Command::new("g++")
+        .args([
+            "-c",
+            "-fPIC",
+            "-std=c++17",
+            "-I",
+            ts_inc.to_str().unwrap(),
+            "-I",
+            cpp_inc.to_str().unwrap(),
+            cpplib.join("main.cpp").to_str().unwrap(),
+            "-o",
+            main_o.to_str().unwrap(),
+        ])
+        .status()
+        .is_ok_and(|s| s.success());
+
+    if rt_ok && parser_ok && scanner_ok && main_ok {
+        let link_ok = Command::new("g++")
+            .args([
+                runtime_o.to_str().unwrap(),
+                parser_o.to_str().unwrap(),
+                scanner_o.to_str().unwrap(),
+                main_o.to_str().unwrap(),
+                "-lm",
+                "-o",
+                cppfrontend.to_str().unwrap(),
+            ])
+            .status()
+            .is_ok_and(|s| s.success());
+
+        if link_ok {
+            println!("cargo:rustc-env=APG_FRONTEND_CPP={}", cppfrontend.display());
+            let _ = std::fs::copy(&cppfrontend, stage_dir.join("cppfrontend"));
+
+            cpp_self_test(&cppfrontend);
+
+            return vec!["cpp".into()];
+        }
+    }
+
+    Vec::new()
+}
+
+/// Execute the frontend's own fixture. cpplib has no other test harness (it is
+/// a standalone C++ binary), so the cross-file filtered-emission self-test is
+/// the only thing that exercises `scan_root`'s target-set path; run it here so
+/// `cargo build` / `cargo test` actually execute it and a regression fails the
+/// aggregate build rather than passing unnoticed. Scoped to the C++ stage —
+/// the other frontend stages are untouched.
+fn cpp_self_test(cppfrontend: &Path) {
+    match Command::new(cppfrontend).arg("--self-test").output() {
+        Ok(out) if out.status.success() => {
+            print!("{}", String::from_utf8_lossy(&out.stdout));
+        }
+        Ok(out) => panic!(
+            "cppfrontend --self-test failed ({}):\n{}\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        ),
+        Err(e) => panic!("failed to run cppfrontend --self-test: {e}"),
+    }
+}
+
+/// Go frontend.
+fn stage_go(out_dir: &str, stage_dir: &Path) -> Vec<String> {
+    let gofrontend = Path::new(out_dir).join("gofrontend");
+    let go_ok = Command::new("go")
+        .args(["build", "-o", gofrontend.to_str().unwrap(), "."])
+        .current_dir("src/golib")
+        .status()
+        .is_ok_and(|s| s.success());
+
+    if go_ok {
+        println!("cargo:rustc-env=APG_FRONTEND_GO={}", gofrontend.display());
+        let _ = std::fs::copy(&gofrontend, stage_dir.join("gofrontend"));
+        return vec!["go".into()];
+    }
+
+    Vec::new()
+}
+
+/// Rust frontend (rust-analyzer engine, compiled in isolation).
+fn stage_rust(stage_dir: &Path) -> Vec<String> {
+    // Compile rustlib with cargo into its own isolated target dir
+    // (src/rustlib/target). The frontend is ALWAYS built with `--release`,
+    // independent of the outer cargo profile: rust-analyzer's startup cost
+    // dominates every Rust scan, and the unoptimized debug frontend is ~7x
+    // slower than the optimized one. The optimized artifact is staged into
+    // the ACTIVE outer profile's frontends dir
+    // (`target/<outer-profile>/frontends`), so a debug-profile `apg` spawns
+    // the fast frontend instead of the debug sibling. Deps resolve from
+    // src/rustlib/Cargo.lock; bump the pinned rust-analyzer rev in
+    // src/rustlib/Cargo.toml atomically. On failure, skip rust rather
+    // than aborting the whole build (like the other frontends).
+    let rustfrontend = Path::new("src/rustlib")
+        .join("target")
+        .join("release")
+        .join("rustfrontend");
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("--manifest-path")
+        .arg("src/rustlib/Cargo.toml")
+        .arg("--release")
+        .arg("--bin")
+        .arg("rustfrontend");
+    let rust_ok = cmd.status().is_ok_and(|s| s.success()) && rustfrontend.exists();
+    if rust_ok {
+        println!(
+            "cargo:rustc-env=APG_FRONTEND_RUST={}",
+            rustfrontend.display()
+        );
+        let _ = std::fs::copy(&rustfrontend, stage_dir.join("rustfrontend"));
+        return vec!["rust".into()];
+    }
+
+    Vec::new()
+}
+
+/// Structural frontend (bundled scanner, standalone Rust crate, compiled in isolation).
+fn stage_struct(stage_dir: &Path) -> Vec<String> {
+    // Compile structlib with cargo into its own isolated target dir
+    // (src/structlib/target). ALWAYS `--release`, independent of the outer
+    // cargo profile, and staged into the ACTIVE outer profile's frontends
+    // dir (same rationale as rustlib above). structlib is a standalone,
+    // non-workspace crate exactly like src/rustlib, so its lockfile and
+    // target tree stay independent. ONE `structfrontend` binary serves every
+    // structural stream id — the `md` stream plus the per-format streams and
+    // the residual `misc` — and the baked `APG_FRONTEND_STRUCT` points at
+    // its staged path (`frontend_cmd`'s dev fallback for every structural
+    // id). On failure, skip the structural scanner rather than aborting the
+    // whole build (like the other frontends).
+    let structfrontend = Path::new("src/structlib")
+        .join("target")
+        .join("release")
+        .join("structfrontend");
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("--manifest-path")
+        .arg("src/structlib/Cargo.toml")
+        .arg("--release")
+        .arg("--bin")
+        .arg("structfrontend");
+    let struct_ok = cmd.status().is_ok_and(|s| s.success()) && structfrontend.exists();
+    if struct_ok {
+        let staged = stage_dir.join("structfrontend");
+        let _ = std::fs::copy(&structfrontend, &staged);
+        println!("cargo:rustc-env=APG_FRONTEND_STRUCT={}", staged.display());
+        // The structural scanner's stream ids (canonical order, mirroring
+        // `STRUCTURAL_LANGUAGES` in src/main.rs): the baked `APG_LANGUAGES`
+        // fallback enumerates them when no runtime frontends dir is found.
+        let mut ids: Vec<String> = Vec::new();
+        for id in [
+            "md",
+            "sh",
+            "yaml",
+            "json",
+            "toml",
+            "xml",
+            "dockerfile",
+            "makefile",
+            "ini",
+            "misc",
+        ] {
+            ids.push(id.into());
+        }
+        return ids;
+    }
+
+    Vec::new()
+}
+
+/// Python frontend (Astral ty engine, compiled in isolation).
+fn stage_py(stage_dir: &Path) -> Vec<String> {
+    // Compile pylib with cargo into its own isolated target dir
+    // (src/pylib/target). ALWAYS `--release`, independent of the outer
+    // cargo profile, and staged into the ACTIVE outer profile's frontends
+    // dir (same rationale as rustlib above). pylib is a standalone,
+    // non-workspace crate exactly like src/rustlib and src/structlib, so
+    // its lockfile and target tree stay independent. The staged artifact is
+    // the `pyfrontend` binary (the crate's `[[bin]]` name — unaffected by
+    // the `[package]` name). On failure, skip py rather than aborting the
+    // whole build (like the other frontends).
+    let pyfrontend = Path::new("src/pylib")
+        .join("target")
+        .join("release")
+        .join("pyfrontend");
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("--manifest-path")
+        .arg("src/pylib/Cargo.toml")
+        .arg("--release")
+        .arg("--bin")
+        .arg("pyfrontend");
+    let py_ok = cmd.status().is_ok_and(|s| s.success()) && pyfrontend.exists();
+    if py_ok {
+        println!("cargo:rustc-env=APG_FRONTEND_PY={}", pyfrontend.display());
+        let _ = std::fs::copy(&pyfrontend, stage_dir.join("pyfrontend"));
+        return vec!["py".into()];
+    }
+
+    Vec::new()
+}
+
+/// Unified JS/TS frontend (Node + official TypeScript compiler).
+fn stage_ts(out_dir: &str, stage_dir: &Path) -> Vec<String> {
+    // npm ci (with the committed package-lock) installs typescript into
+    // src/tslib/node_modules. Skipped when already installed so repeated
+    // builds don't re-fetch. The staged frontend is the BUILT artifact:
+    // `scanner.ts` (transpile-only, `@ts-nocheck`) is compiled to
+    // `scanner.js` by the repo-local compiler and staged as
+    // `tsfrontend/scanner.mjs`. `.mjs` is unconditionally ESM to node, so no
+    // staged package.json is needed and the runtime name/path stays exactly
+    // what `frontend_cmd` runs (`node <dir>/tsfrontend/scanner.mjs`) and what
+    // `APG_FRONTEND_TS` names. The staged `node_modules` is required — the
+    // built scanner imports `typescript` at runtime.
+    let tslib = Path::new("src/tslib");
+    let ts_dep = tslib
+        .join("node_modules")
+        .join("typescript")
+        .join("package.json");
+    let ts_ok = if ts_dep.is_file() {
+        true
+    } else {
+        Command::new("npm")
+            .args(["ci", "--no-audit", "--no-fund"])
+            .current_dir(tslib)
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    if ts_ok {
+        let stage_ts = stage_dir.join("tsfrontend");
+        std::fs::create_dir_all(&stage_ts).ok();
+        copy_dir(&tslib.join("node_modules"), &stage_ts.join("node_modules"));
+
+        // Compile the ported source to the staged artifact. `scanner.ts`
+        // carries `// @ts-nocheck` (transpile-only, no semantic typecheck);
+        // `--noEmitOnError` still fails this step on any syntax/emit error
+        // rather than staging a broken artifact. The emitted `scanner.js`
+        // is renamed to `scanner.mjs` on stage.
+        let ts_build = Path::new(out_dir).join("tsfrontend-build");
+        let _ = std::fs::remove_dir_all(&ts_build);
+        std::fs::create_dir_all(&ts_build).ok();
+        let tsc = tslib
+            .join("node_modules")
+            .join("typescript")
+            .join("bin")
+            .join("tsc");
+        let compile_ok = Command::new("node")
+            .arg(tsc.to_str().unwrap())
+            .arg(tslib.join("scanner.ts").to_str().unwrap())
+            .args([
+                "--module",
+                "esnext",
+                "--target",
+                "esnext",
+                "--moduleResolution",
+                "bundler",
+                "--allowJs",
+                "false",
+                "--skipLibCheck",
+                "--noEmitOnError",
+                "--outDir",
+                ts_build.to_str().unwrap(),
+            ])
+            .status()
+            .is_ok_and(|s| s.success());
+        let emitted = ts_build.join("scanner.js");
+        if !compile_ok || !emitted.is_file() {
+            panic!(
+                "tsfrontend compile failed: `node {} {}` did not emit {} — fix src/tslib/scanner.ts",
+                tsc.display(),
+                tslib.join("scanner.ts").display(),
+                emitted.display()
+            );
+        }
+        let _ = std::fs::copy(&emitted, stage_ts.join("scanner.mjs"));
+        // The built scanner keeps `import { packageIdentity } from
+        // "./identity.mjs"` verbatim (the source module is not compiled by
+        // the tsc invocation above), so the staged `identity.mjs` must sit
+        // next to the staged `scanner.mjs` for that import to resolve. It is
+        // plain side-effect-free ESM, copied as-is.
+        let _ = std::fs::copy(tslib.join("identity.mjs"), stage_ts.join("identity.mjs"));
+        println!(
+            "cargo:rustc-env=APG_FRONTEND_TS={}",
+            stage_ts.join("scanner.mjs").display()
+        );
+        return vec!["ts".into()];
+    }
+
+    Vec::new()
+}
+
+/// Java frontend.
+fn stage_java(out_dir: &str, stage_dir: &Path) -> Vec<String> {
+    let java_classes = Path::new(out_dir).join("java-classes");
+    std::fs::create_dir_all(&java_classes).ok();
+
+    // Compile the whole non-test Java source set: the frontend is a set of
+    // sibling default-package classes (CallGraphBuilder plus its
+    // collaborators), so javac must be handed every source file — listing
+    // CallGraphBuilder.java alone would not find a sibling class. The test
+    // class is excluded: it is not part of the shipped frontend.
+    let java_sources = java_sources();
+
+    let java_ok = Command::new("javac")
+        .args([
+            "-d",
+            java_classes.to_str().unwrap(),
+            "-proc:none",
+            // Target Java 21 bytecode and compile against the Java 21 public
+            // API only, so the frontend runs on any JVM >= 21 regardless of
+            // the JDK that compiled it. The frontend uses no JDK-internal
+            // APIs, so `--release` (not -source/-target + --add-exports) is
+            // what keeps the build JDK's internals out of the artifact.
+            "--release",
+            "21",
+        ])
+        .args(&java_sources)
+        .status()
+        .is_ok_and(|s| s.success());
+
+    if java_ok {
+        let cmd = format!(
+            "java -Xmx5g -cp {} CallGraphBuilder",
+            java_classes.display()
+        );
+        println!("cargo:rustc-env=APG_FRONTEND_JAVA={}", cmd);
+        let stage_java = stage_dir.join("java-classes");
+        std::fs::create_dir_all(&stage_java).ok();
+        copy_dir(&java_classes, &stage_java);
+        return vec!["java".into()];
+    }
+
+    Vec::new()
+}
+
+/// Collect every non-test Java source under `src/javalib` (sorted).
+fn java_sources() -> Vec<PathBuf> {
+    let mut java_sources: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("src/javalib") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_java = path.extension().is_some_and(|ext| ext == "java");
+            let is_test = path
+                .file_name()
+                .is_some_and(|name| name == "CallGraphBuilderTest.java");
+            if is_java && !is_test {
+                java_sources.push(path);
+            }
+        }
+    }
+    java_sources.sort();
+    java_sources
+}
+
+/// C# frontend (Roslyn, published as self-contained single-file).
+fn stage_csharp(out_dir: &str, stage_dir: &Path) -> Vec<String> {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    let rid = csharp_rid();
+
+    let cs_dist = Path::new(out_dir).join("csharp-dist");
+    let mut cmd = Command::new("dotnet");
+    cmd.arg("publish")
+        .arg("src/csharplib/CsharpFrontend.csproj")
+        .arg("-c")
+        .arg("Release")
+        .arg("-r")
+        .arg(rid)
+        .arg("--self-contained")
+        .arg("true")
+        .arg("-p:PublishSingleFile=true")
+        .arg("-p:PublishReadyToRun=true")
+        .arg("-o")
+        .arg(cs_dist.to_str().unwrap());
+
+    let exe_name = if target_os == "windows" {
+        "csharpfrontend.exe"
+    } else {
+        "csharpfrontend"
+    };
+    let csharpfrontend = cs_dist.join(exe_name);
+
+    let cs_ok = cmd.status().is_ok_and(|s| s.success()) && csharpfrontend.exists();
+    if cs_ok {
+        println!(
+            "cargo:rustc-env=APG_FRONTEND_CSHARP={}",
+            csharpfrontend.display()
+        );
+        let _ = std::fs::copy(&csharpfrontend, stage_dir.join(exe_name));
+        return vec!["csharp".into()];
+    }
+
+    Vec::new()
+}
+
+/// Map (CARGO_CFG_TARGET_OS, CARGO_CFG_TARGET_ARCH, CARGO_CFG_TARGET_ENV) to
+/// the dotnet runtime identifier used by `dotnet publish`.
+fn csharp_rid() -> String {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+    let rid = match (
+        target_os.as_str(),
+        target_arch.as_str(),
+        target_env.as_str(),
+    ) {
+        ("linux", "x86_64", "musl") => "linux-musl-x64",
+        ("linux", "aarch64", "musl") => "linux-musl-arm64",
+        ("linux", "x86_64", _) => "linux-x64",
+        ("linux", "aarch64", _) => "linux-arm64",
+        ("macos", "x86_64", _) => "osx-x64",
+        ("macos", "aarch64", _) => "osx-arm64",
+        ("windows", "x86_64", _) => "win-x64",
+        ("windows", "aarch64", _) => "win-arm64",
+        _ => "linux-x64",
+    };
+    rid.to_string()
 }
 
 fn copy_dir(from: &Path, to: &Path) {
