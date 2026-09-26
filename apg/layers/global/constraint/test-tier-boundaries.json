@@ -15,6 +15,11 @@
       "kind": "details",
       "source": "global.note.test-e2e-alias-consequence",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "global.note.durable-spec-prose-reconcile-0-17",
+      "properties": {}
     }
   ]
 }

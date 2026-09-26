@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "solution.component.structural-scanner-crate",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "global.constraint.test-tier-boundaries",
+      "properties": {}
     }
   ],
   "in": []
