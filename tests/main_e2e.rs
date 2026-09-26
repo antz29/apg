@@ -2350,6 +2350,84 @@ mod e2e {
         assert!(!readme.contains("0.11"), "README must not reference 0.11");
     }
 
+    /// Phase-03 task-3: the committed `apg/config.json` must classify the
+    /// relocated test layout as `test` while production stays `src`. Reads the
+    /// repo's own committed config from disk (the release-version guards'
+    /// `env!("CARGO_MANIFEST_DIR")` mechanism), so it guards the config AS
+    /// COMMITTED — never a branch scan, because the apg repo's own graph is
+    /// built by the installed parent binary and so could never reflect a
+    /// branch's config change.
+    #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn committed_config_classifies_relocated_test_layout_as_test() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let config = apg::classify::ApgConfig::load(Path::new(root))
+            .expect("the committed apg/config.json must load");
+        let code_type = |path: &str, language: &str| {
+            apg::classify::classify_code_type(path, path, language, Some(&config))
+        };
+
+        // The relocated test layout: the root crate's top-level e2e crates, the
+        // sibling `src/<module>/tests.rs` unit/int files, the frontend crates'
+        // sibling tests and own top-level e2e crates, the C#/Go/Java frontend
+        // tests, and the opencode-suite TS tests.
+        for (path, language) in [
+            ("tests/main_e2e.rs", "rust"),
+            ("tests/common/mod.rs", "rust"),
+            ("tests/splice_e2e.rs", "rust"),
+            ("src/tests.rs", "rust"),
+            ("src/classify/tests.rs", "rust"),
+            ("src/layers/tests.rs", "rust"),
+            ("src/structlib/src/tests.rs", "rust"),
+            ("src/pylib/src/tests.rs", "rust"),
+            ("src/structlib/tests/structlib_e2e.rs", "rust"),
+            ("src/pylib/tests/pylib_e2e.rs", "rust"),
+            ("src/csharplib/tests/Program.cs", "csharp"),
+            ("src/golib/main_test.go", "go"),
+            ("src/javalib/CallGraphBuilderTest.java", "java"),
+            ("src/tslib/scanner.test.ts", "ts"),
+            ("src/tslib/identity.test.ts", "ts"),
+            ("opencode-suite/lib/apg.test.ts", "ts"),
+            ("opencode-suite/tests/boundary.e2e.test.ts", "ts"),
+        ] {
+            assert_eq!(
+                code_type(path, language),
+                "test",
+                "{path} must classify as `test`"
+            );
+        }
+
+        // Production modules stay `src`.
+        for (path, language) in [
+            ("src/main.rs", "rust"),
+            ("src/lib.rs", "rust"),
+            ("src/cache.rs", "rust"),
+            ("src/classify.rs", "rust"),
+            ("src/structlib/src/lib.rs", "rust"),
+            ("build.rs", "rust"),
+        ] {
+            assert_eq!(
+                code_type(path, language),
+                "src",
+                "{path} must classify as `src`"
+            );
+        }
+
+        // Forward guards: the rule's suffix/segment globs catch plausible new
+        // test files, not only the exact paths listed above.
+        for (path, language) in [
+            ("src/X.test.tsx", "ts"),
+            ("src/YTests.java", "java"),
+            ("src/z_test.rs", "rust"),
+        ] {
+            assert_eq!(
+                code_type(path, language),
+                "test",
+                "{path} must classify as `test`"
+            );
+        }
+    }
+
     /// Phase-7 task-1 (E2E, top-level dispatch): the strict-mutation surface's
     /// refusal sweep. Every create arm — `node add`, `edge add`, `plan add`
     /// (the plan itself), and `plan add phase|task|planned` — refuses an
