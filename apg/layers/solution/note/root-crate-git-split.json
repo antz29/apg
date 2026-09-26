@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "root-crate-git-split",
+  "body": "Wave G of the multi-wave task-19 root-crate decomposition (behaviour-preserving, no CLI change). `src/git.rs` is decomposed into `src/git/{state,identity,commit,time}.rs` plus `src/git/mod.rs`; the module FQN `rust.apg.git` is preserved. `src/git/tests.rs` stays put, so the test module FQN `rust.apg.git.tests` is preserved. Three durable `implemented-by` edges were re-pointed to the post-split planned FQNs: `solution.component.scan-hygiene` and `solution.component.structural-claiming` —implemented-by→ `rust.apg.git.state.path_is_ignored` (was `rust.apg.git.path_is_ignored`), and `solution.component.identity-layer` —implemented-by→ `rust.apg.git.identity.repo_rel` (was `rust.apg.git.repo_rel`). The module-level edges `solution.component.identity-layer` —implemented-by→ `rust.apg.git` and `solution.container.scanner-cli` —implemented-by→ `rust.apg.git` are preserved.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
