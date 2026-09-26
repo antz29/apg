@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "rust.apg.plan_cmd.render",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.project_cmd.start",
+      "properties": {}
     }
   ],
   "in": []
