@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "rust.apg.logging",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.frontends",
+      "properties": {}
     }
   ],
   "in": []
