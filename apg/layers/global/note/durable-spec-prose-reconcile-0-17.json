@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "global.note.test-e2e-alias-consequence",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.note.decomposition-reframe-reconciliation",
+      "properties": {}
     }
   ],
   "in": []
