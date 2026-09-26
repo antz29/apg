@@ -4,6 +4,12 @@
   "name": "root-crate-lib-split",
   "body": "Reconciliation for task-19 wave 1 (root-crate decomposition). The root crate's library target `src/lib.rs` (module FQN `rust.apg`) is decomposed into 7 sibling modules — `logging`, `frontends`, `warm`, `scan`, `pipeline`, `query`, `install` — each in its own `src/<name>.rs` sibling file beside `src/lib.rs`. The layout is deliberately flat, NOT nested (e.g. not `src/scan/mod.rs`): `src/lib.rs` uses `include_str!(\"../opencode-suite/...\")` paths relative to its own directory, and moving the crate root into a nested directory would break those paths. 44 units move out of the crate root into these modules; the 6 crate-root units `main`, `help_text`, `print_help`, `session_cmd`, `find_apg_root`, and `find_or_create_apg_root` keep their FQNs in the crate root. This is wave 1 of a 4-wave task-19 decomposition of the root crate; the other 11 files follow in later waves. The seven durable `implemented-by` edges that referenced the moved unit FQNs were re-pointed to the planned post-split FQNs so the Requirement → Domain → Solution → code spine stays intact while the split is pending. [with user]",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "rust.apg.logging",
+      "properties": {}
+    }
+  ],
   "in": []
 }
