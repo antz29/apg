@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.project_cmd.project_start_at",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.delta.full_scan_reason",
       "properties": {}
     },
