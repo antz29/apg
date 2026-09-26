@@ -1,0 +1,418 @@
+//! The seed half of the splice (phase-03 task-1): resolve and validate the
+//! previous `db.lbug`, whole-file copy it to a same-directory temp sibling, and
+//! open the copy read-write — the [`SeedDecision`] surface the pipeline
+//! dispatches on.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use lbug::{Connection, Database, SystemConfig};
+
+use crate::load;
+
+/// The previous `db.lbug` path under an `apg/` layout root.
+pub fn db_path(apg_root: &Path) -> PathBuf {
+    apg_root.join(crate::specs::TRANS).join("db.lbug")
+}
+
+/// Seeds the splice working DB from the database at `previous`.
+///
+/// Happy path: `previous` exists, opens, and its schema matches this binary's —
+/// the file is whole-copied to a temp sibling in the same directory and the copy
+/// is opened read-write. Every validation failure yields a [`SeedFallback`] and
+/// the caller runs the existing full load. The previous DB is only ever read (it
+/// is opened read-only during validation) and is never modified.
+///
+/// The caller (task-4) owns the disposition of the returned copy: pass it to
+/// task-2/task-3, or [`discard`](SeededDb::discard) it when abandoning the
+/// splice.
+pub fn seed(previous: &Path) -> SeedDecision {
+    if !previous.exists() {
+        return SeedDecision::FullLoad(SeedFallback::MissingPrevious);
+    }
+    if let Err(fallback) = validate_compatible(previous) {
+        return SeedDecision::FullLoad(fallback);
+    }
+
+    let temp_path = temp_sibling(previous);
+    // A leftover at this exact pid+nanos path is impossible, but a clear first
+    // guarantees `fs::copy` can never fail on one.
+    let _ = std::fs::remove_file(&temp_path);
+    if let Err(e) = std::fs::copy(previous, &temp_path) {
+        return SeedDecision::FullLoad(SeedFallback::Unreadable(format!(
+            "seed copy of {} failed: {e}",
+            previous.display()
+        )));
+    }
+
+    match Database::new(&temp_path, SystemConfig::default()) {
+        Ok(db) => SeedDecision::Seed(SeededDb {
+            db,
+            temp_path,
+            target_path: previous.to_path_buf(),
+        }),
+        Err(e) => {
+            // Never leave a half-seeded temp behind for task-3 to publish.
+            let _ = std::fs::remove_file(&temp_path);
+            SeedDecision::FullLoad(SeedFallback::SeededCopyUnreadable(e.to_string()))
+        }
+    }
+}
+
+/// [`seed`] over an `apg/` layout root: resolves
+/// `<apg_root>/.trans/db.lbug` and seeds from it.
+pub fn seed_from_apg_root(apg_root: &Path) -> SeedDecision {
+    seed(&db_path(apg_root))
+}
+
+/// The content-identity key recorded in `previous`'s single `Scan` row
+/// (SCAN_HEAD), or `None` when the DB carries no `Scan` row or an empty key (a
+/// pre-hardening DB). This is the identity of the tree the DB was BUILT from —
+/// the seed's own account of itself.
+pub fn recorded_content_key(previous: &Path) -> anyhow::Result<Option<String>> {
+    let db = Database::new(previous, SystemConfig::default().read_only(true))?;
+    let conn = Connection::new(&db)?;
+    let (_, rows) = query_rows(&conn, "MATCH (s:Scan) RETURN s.content_key AS content_key")?;
+    Ok(rows.first().map(|r| cell(r, 0)).filter(|s| !s.is_empty()))
+}
+
+/// The equivalence-guarded seed (feedback-101).
+///
+/// The delta/manifest are **shared** across worktrees
+/// (`<git-common-dir>/apg/facts`) while the seeded DB is **local** to this
+/// worktree. The splice is exact only when the LOCAL seed was built from the
+/// SAME tree content the shared [`crate::delta::ScanRecord`] (and hence the
+/// delta) was derived from. If another worktree (or main) scans in between, the
+/// shared record advances past this worktree's DB: the manifest diff no longer
+/// describes the local DB, an empty/partial target set leaves the stale seeded
+/// rows in place, and the published DB is not a full rebuild — which the next
+/// freshness fast-path then reuses. `content_key` folds the HEAD sha and the
+/// working-tree/index/untracked content, so an equal key means the same tree
+/// content; a mismatch (or a missing key on either side) is ineligible.
+///
+/// `expected` is the shared recorded key (`ScanRecord::content_key`) captured
+/// BEFORE the completed scan rewrites it. The caller runs the existing full
+/// load on any [`SeedFallback`], keeping it the correctness reference.
+pub fn seed_checked(previous: &Path, expected: Option<&str>) -> SeedDecision {
+    if !previous.exists() {
+        return SeedDecision::FullLoad(SeedFallback::MissingPrevious);
+    }
+    let seed_key = match recorded_content_key(previous) {
+        Ok(key) => key,
+        Err(e) => return SeedDecision::FullLoad(SeedFallback::Unreadable(e.to_string())),
+    };
+    if !seed_key_matches(seed_key.as_deref(), expected) {
+        return SeedDecision::FullLoad(SeedFallback::StaleSeed {
+            seed: seed_key.unwrap_or_else(|| "(none)".to_string()),
+            recorded: expected.unwrap_or("(none)").to_string(),
+        });
+    }
+    seed(previous)
+}
+
+/// The pure content-key equivalence the seed guard applies (task-10): the seed
+/// is current iff BOTH sides carry a key and they are equal. A missing key on
+/// either side is never equivalent — a seed DB or a shared record written before
+/// the phase-01 content key cannot be verified as the same tree, so the caller
+/// runs the full load (the correctness reference) rather than publish a
+/// divergence. No filesystem, no database.
+pub fn seed_key_matches(seed: Option<&str>, expected: Option<&str>) -> bool {
+    matches!((seed, expected), (Some(s), Some(r)) if s == r)
+}
+
+/// Opens `previous` read-only and compares its structural fingerprint to this
+/// binary's `create_schema`. A read failure or a fingerprint mismatch is the
+/// invalidation. No temp file is created on this path.
+fn validate_compatible(previous: &Path) -> Result<(), SeedFallback> {
+    let db = Database::new(previous, SystemConfig::default().read_only(true))
+        .map_err(|e| SeedFallback::Unreadable(e.to_string()))?;
+    let conn = Connection::new(&db).map_err(|e| SeedFallback::Unreadable(e.to_string()))?;
+    let actual = extract_schema(&conn).map_err(|e| SeedFallback::Unreadable(e.to_string()))?;
+    let expected = expected_schema()
+        .map_err(|e| SeedFallback::Unreadable(format!("cannot derive the expected schema: {e}")))?;
+    if actual != expected {
+        return Err(SeedFallback::IncompatibleSchema(diff_summary(
+            &actual, &expected,
+        )));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Schema fingerprint
+// ---------------------------------------------------------------------------
+
+/// One column of a node/rel table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnShape {
+    name: String,
+    type_name: String,
+    primary_key: bool,
+}
+
+/// One table's structural shape: its kind (`NODE`/`REL`), its ordered columns,
+/// and — for a rel table — its declared `(from, to)` connections.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableShape {
+    kind: String,
+    columns: Vec<ColumnShape>,
+    connections: Vec<(String, String)>,
+}
+
+/// The whole-DB structural fingerprint: table name → shape. A `BTreeMap` so the
+/// engine's internal table ordering never affects the comparison.
+pub type SchemaFingerprint = BTreeMap<String, TableShape>;
+
+/// This binary's expected schema fingerprint: run its own `create_schema`
+/// against a throwaway in-memory DB and introspect it. Deriving the expectation
+/// from the very DDL the full load uses makes the check self-maintaining — a
+/// schema change can never leave a stale expectation behind.
+fn expected_schema() -> anyhow::Result<SchemaFingerprint> {
+    let db = Database::in_memory(SystemConfig::default())?;
+    let conn = Connection::new(&db)?;
+    load::create_schema(&conn)?;
+    extract_schema(&conn)
+}
+
+/// Reads the whole structural fingerprint of the open DB: every table's name,
+/// kind (`NODE`/`REL`), columns (name/type/primary-key) and, for rel tables, its
+/// declared `(from, to)` connections.
+pub fn extract_schema(conn: &Connection) -> anyhow::Result<SchemaFingerprint> {
+    let (names, rows) = query_rows(conn, "CALL show_tables() RETURN name, type")?;
+    let name_i = column_index(&names, "name")?;
+    let type_i = column_index(&names, "type")?;
+
+    let mut out = BTreeMap::new();
+    for row in rows {
+        let name = cell(&row, name_i);
+        let kind = cell(&row, type_i);
+        let columns = table_columns(conn, &name)?;
+        let connections = if kind == "REL" {
+            table_connections(conn, &name)?
+        } else {
+            Vec::new()
+        };
+        out.insert(
+            name,
+            TableShape {
+                kind,
+                columns,
+                connections,
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// The ordered columns of `table` (`primary key` is absent on rel tables).
+fn table_columns(conn: &Connection, table: &str) -> anyhow::Result<Vec<ColumnShape>> {
+    let (names, rows) = query_rows(
+        conn,
+        &format!("CALL table_info('{}') RETURN *", cypher_escape(table)),
+    )?;
+    let name_i = column_index(&names, "name")?;
+    let type_i = column_index(&names, "type")?;
+    let pk_i = names.iter().position(|n| n == "primary key");
+
+    let mut columns = Vec::with_capacity(rows.len());
+    for row in rows {
+        columns.push(ColumnShape {
+            name: cell(&row, name_i),
+            type_name: cell(&row, type_i),
+            primary_key: pk_i.is_some_and(|i| cell(&row, i) == "True"),
+        });
+    }
+    Ok(columns)
+}
+
+/// The declared `(from, to)` connections of a rel `table`.
+fn table_connections(conn: &Connection, table: &str) -> anyhow::Result<Vec<(String, String)>> {
+    let (names, rows) = query_rows(
+        conn,
+        &format!("CALL show_connection('{}') RETURN *", cypher_escape(table)),
+    )?;
+    let from_i = column_index(&names, "source table name")?;
+    let to_i = column_index(&names, "destination table name")?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (cell(&r, from_i), cell(&r, to_i)))
+        .collect())
+}
+
+/// A compact human explanation of the fingerprint difference — the
+/// missing/extra/changed table names only (a full column diff would be noise on
+/// a scan log line).
+fn diff_summary(actual: &SchemaFingerprint, expected: &SchemaFingerprint) -> String {
+    let missing: Vec<&str> = expected
+        .keys()
+        .filter(|k| !actual.contains_key(*k))
+        .map(String::as_str)
+        .collect();
+    let extra: Vec<&str> = actual
+        .keys()
+        .filter(|k| !expected.contains_key(*k))
+        .map(String::as_str)
+        .collect();
+    let changed: Vec<&str> = expected
+        .iter()
+        .filter(|(k, v)| actual.get(*k).is_some_and(|a| a != *v))
+        .map(|(k, _)| k.as_str())
+        .collect();
+
+    let mut parts = Vec::new();
+    if !missing.is_empty() {
+        parts.push(format!("missing tables: {}", missing.join(", ")));
+    }
+    if !extra.is_empty() {
+        parts.push(format!("unexpected tables: {}", extra.join(", ")));
+    }
+    if !changed.is_empty() {
+        parts.push(format!("changed tables: {}", changed.join(", ")));
+    }
+    if parts.is_empty() {
+        parts.push("schema differs".to_string());
+    }
+    parts.join("; ")
+}
+
+// ---------------------------------------------------------------------------
+// Query plumbing
+// ---------------------------------------------------------------------------
+
+/// Runs `query` and returns its column names plus every row's cells as strings.
+pub fn query_rows(
+    conn: &Connection,
+    query: &str,
+) -> anyhow::Result<(Vec<String>, Vec<Vec<String>>)> {
+    let result = conn.query(query)?;
+    let names = result.get_column_names();
+    let rows = result
+        .map(|row| row.iter().map(|v| v.to_string()).collect())
+        .collect();
+    Ok((names, rows))
+}
+
+/// The index of column `want` in a result's header.
+pub fn column_index(names: &[String], want: &str) -> anyhow::Result<usize> {
+    names
+        .iter()
+        .position(|n| n == want)
+        .ok_or_else(|| anyhow::anyhow!("query result is missing the `{want}` column: {names:?}"))
+}
+
+/// Cell `i` of `row`, or an empty string when the row is short.
+pub fn cell(row: &[String], i: usize) -> String {
+    row.get(i).cloned().unwrap_or_default()
+}
+
+/// Escapes a value for a single-quoted Cypher string literal.
+pub(super) fn cypher_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+/// The temp sibling of `target`, in the SAME directory as `target` so task-3's
+/// publish is an atomic, same-filesystem `rename`.
+fn temp_sibling(target: &Path) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let file = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "db.lbug".to_string());
+    let dir = target.parent().unwrap_or_else(|| Path::new("."));
+    dir.join(format!(".{file}.seed-{}-{nanos}.tmp", std::process::id()))
+}
+
+// ---------------------------------------------------------------------------
+// The exposed decision surface
+// ---------------------------------------------------------------------------
+
+/// A seeded working DB: the whole-file copy of the previous DB, open and ready
+/// for task-2's DML delta.
+pub struct SeededDb {
+    /// The open copy. Task-2 opens a [`Connection`] on it and applies the delta.
+    ///
+    /// This handle must be DROPPED before task-3 renames `temp_path` over
+    /// `target_path`: a live handle keeps the old inode open, so the rename
+    /// would swap the directory entry without the open handle writing to the
+    /// published file.
+    pub db: Database,
+    /// The temp sibling holding the copy; task-3 renames it over `target_path`.
+    pub temp_path: PathBuf,
+    /// The previous `db.lbug` the copy was seeded from, and the rename target.
+    pub target_path: PathBuf,
+}
+
+impl SeededDb {
+    /// A fresh connection to the seeded copy — task-2's DML surface.
+    pub fn conn(&self) -> anyhow::Result<Connection<'_>> {
+        Ok(Connection::new(&self.db)?)
+    }
+
+    /// Removes the temp copy — the abandon path when the splice is dropped
+    /// before the task-3 publish (e.g. a delta-application failure falls back to
+    /// the full load). A missing temp is not an error.
+    pub fn discard(&self) -> std::io::Result<()> {
+        match std::fs::remove_file(&self.temp_path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// Why the seed was invalidated and the existing full load must run. Every
+/// variant means the same thing to the caller: run
+/// `remove + create_schema + copy_from`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SeedFallback {
+    /// There is no previous `db.lbug` to seed from.
+    MissingPrevious,
+    /// The previous file could not be opened/read — a storage-format/version
+    /// mismatch or corruption. Carries the engine error.
+    Unreadable(String),
+    /// The previous DB opened but its schema differs from this binary's
+    /// `create_schema` — a schema/version mismatch. Carries a table summary.
+    IncompatibleSchema(String),
+    /// The previous DB was built from a **different tree** than the shared scan
+    /// record the delta was derived from — another worktree (or main) scanned
+    /// in between, so the shared manifest no longer describes this LOCAL DB.
+    /// Seeding it and applying the delta would publish a DB that is not a full
+    /// rebuild, so the caller runs the full load. Carries the seed's recorded
+    /// content-identity key and the expected (shared) one (feedback-101).
+    StaleSeed { seed: String, recorded: String },
+    /// The whole-file copy succeeded but the copied DB could not be opened.
+    SeededCopyUnreadable(String),
+}
+
+impl SeedFallback {
+    /// A one-line human description for the scan log / dispatch seam.
+    pub fn describe(&self) -> String {
+        match self {
+            SeedFallback::MissingPrevious => "no previous db.lbug to seed from".to_string(),
+            SeedFallback::Unreadable(e) => {
+                format!("previous db.lbug is not usable by this binary: {e}")
+            }
+            SeedFallback::IncompatibleSchema(d) => {
+                format!("previous db.lbug schema is incompatible: {d}")
+            }
+            SeedFallback::StaleSeed { seed, recorded } => format!(
+                "previous db.lbug was built from content {seed} but the shared scan record is {recorded} (another worktree scanned) — full load"
+            ),
+            SeedFallback::SeededCopyUnreadable(e) => {
+                format!("seeded db.lbug copy could not be opened: {e}")
+            }
+        }
+    }
+}
+
+/// The seed half's decision: splice from the seeded copy, or fall back to the
+/// existing full load.
+pub enum SeedDecision {
+    /// The previous DB was copied, opened, and is ready for task-2's delta.
+    Seed(SeededDb),
+    /// The seed was invalidated — run the existing full load.
+    FullLoad(SeedFallback),
+}
