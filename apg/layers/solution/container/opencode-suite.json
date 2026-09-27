@@ -36,6 +36,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/tests/boundary.e2e.test.ts",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.agent-fs-tool-suite",
+      "properties": {}
     }
   ],
   "in": [
