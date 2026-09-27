@@ -15,6 +15,8 @@ import {
   expectQueryOk,
   resolveProjectPath,
   findSymbolRebaseColumns,
+  scopeProjectRequirements,
+  REQUIREMENT_FQN_PREFIX,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
 } from "./apg.ts"
@@ -113,5 +115,90 @@ test("findSymbolRebaseColumns does not turn a symbol fqn into a path", () => {
   expect(findSymbolRebaseColumns(symbol)).not.toContain(1)
   const file = ["File", "pkg/a.go", "", "1", "9"]
   expect(findSymbolRebaseColumns(file)).toContain(1)
+})
+
+// apg-plan-phases-scoping phase-01: the PURE project-requirement scoping core.
+// `scopeProjectRequirements` is the scoping DECISION — side-effect-free (no fs,
+// no subprocess, no db, no git), so it lives in the `bun test` unit tier; the
+// git branch-delta wrapper that feeds it is covered by the opt-in boundary
+// e2e. `satisfies` is THIS project's `Satisfies` relation (requirement FQN ->
+// this project's phase FQNs): a foreign project's edge is filtered by the
+// caller and never reaches the core.
+const REQ = REQUIREMENT_FQN_PREFIX
+
+test("scopes a branch-added-only requirement and reports it unsatisfied", () => {
+  const scope = scopeProjectRequirements([`${REQ}added`], ["added"], new Map())
+  expect(scope.inScope).toEqual([`${REQ}added`])
+  expect(scope.unsatisfied).toEqual([`${REQ}added`])
+  expect(scope.overSatisfied).toEqual([])
+})
+
+test("scopes a satisfied-only requirement with no unsatisfied finding", () => {
+  const scope = scopeProjectRequirements(
+    [`${REQ}done`],
+    [],
+    new Map([[`${REQ}done`, ["proj/plan.phase-01"]]]),
+  )
+  expect(scope.inScope).toEqual([`${REQ}done`])
+  expect(scope.unsatisfied).toEqual([])
+  expect(scope.overSatisfied).toEqual([])
+})
+
+test("unions branch-added and this project's Satisfied requirements in graph order", () => {
+  const scope = scopeProjectRequirements(
+    [`${REQ}added`, `${REQ}done`],
+    ["added"],
+    new Map([[`${REQ}done`, ["proj/plan.phase-01"]]]),
+  )
+  expect(scope.inScope).toEqual([`${REQ}added`, `${REQ}done`])
+  expect(scope.unsatisfied).toEqual([`${REQ}added`])
+  expect(scope.overSatisfied).toEqual([])
+})
+
+test("reports no in-scope requirements when nothing is branch-added or satisfied", () => {
+  const scope = scopeProjectRequirements([`${REQ}other`], [], new Map())
+  expect(scope.inScope).toEqual([])
+  expect(scope.unsatisfied).toEqual([])
+  expect(scope.overSatisfied).toEqual([])
+})
+
+test("an in-scope branch-added requirement with no Satisfies is unsatisfied", () => {
+  const scope = scopeProjectRequirements(
+    [`${REQ}added`, `${REQ}done`],
+    ["added"],
+    new Map([[`${REQ}done`, ["proj/plan.phase-01"]]]),
+  )
+  expect(scope.unsatisfied).toEqual([`${REQ}added`])
+})
+
+test("reports a requirement Satisfied by two phases of this project as over-satisfied", () => {
+  const scope = scopeProjectRequirements(
+    [`${REQ}twice`],
+    [],
+    new Map([[`${REQ}twice`, ["proj/plan.phase-01", "proj/plan.phase-02"]]]),
+  )
+  expect(scope.overSatisfied).toEqual([
+    { requirement: `${REQ}twice`, phases: ["proj/plan.phase-01", "proj/plan.phase-02"] },
+  ])
+  expect(scope.unsatisfied).toEqual([])
+})
+
+test("a requirement Satisfied by another project's phase is not over-satisfied by this project", () => {
+  // `b` is also Satisfied by `other/plan.phase-01` in the raw relation; the
+  // caller filters the map to THIS project's phases, so `b` has exactly one
+  // satisfying phase here and must not read over-satisfied.
+  const single = scopeProjectRequirements(
+    [`${REQ}b`],
+    [],
+    new Map([[`${REQ}b`, ["proj/plan.phase-01"]]]),
+  )
+  expect(single.overSatisfied).toEqual([])
+  expect(single.inScope).toEqual([`${REQ}b`])
+  // A requirement delivered by another project ONLY (absent from this
+  // project's Satisfies) is outside the scope entirely — the bug this fixes.
+  const foreign = scopeProjectRequirements([`${REQ}c`], [], new Map())
+  expect(foreign.inScope).toEqual([])
+  expect(foreign.overSatisfied).toEqual([])
+  expect(foreign.unsatisfied).toEqual([])
 })
 

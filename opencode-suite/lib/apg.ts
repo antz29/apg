@@ -7,7 +7,7 @@
 // and Cypher string-literal escaping (so structured args can never break out
 // of or inject into a query).
 
-import { existsSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
 import path from "node:path"
 
 export interface ToolContext {
@@ -314,4 +314,172 @@ export async function isPendingAnchor(context: ToolContext, fqn: string): Promis
     if (out.split("\n").filter((l) => l.length > 0).length > 1) return true
   }
   return false
+}
+
+// ── Project requirement scoping (apg_plan_phases) ──────────────────────────
+//
+// `apg_plan_phases` must report only the requirements the CURRENT
+// project/branch is responsible for. A project's plan is transient and dies
+// with its branch, so requirements delivered by earlier projects keep no
+// surviving `Satisfies` edge and used to read "unsatisfied" forever. The
+// scoping DECISION is a PURE function here (no fs, no subprocess, no db, no
+// git) so the side-effect-free `bun test` unit tier can cover it; the git
+// branch delta that feeds it is a thin subprocess WRAPPER (real I/O, hence
+// e2e — see `opencode-suite/tests/boundary.e2e.test.ts`).
+
+/** The layer directory holding one `<name>.json` node file per requirement —
+ *  the file basename IS the requirement name. */
+export const REQUIREMENT_LAYER_DIR = "apg/layers/requirements/requirement"
+
+/** The fixed FQN stem every requirement node carries
+ *  (`requirements.requirement.<name>`). */
+export const REQUIREMENT_FQN_PREFIX = "requirements.requirement."
+
+/** The project-scoped view of the requirement layer. */
+export interface RequirementScope {
+  /** In-scope requirement FQNs — branch-added ∪ this project's Satisfied — in
+   *  the graph's requirement order (see `scopeProjectRequirements`). */
+  inScope: string[]
+  /** In-scope requirement FQNs no phase of THIS project Satisfies. */
+  unsatisfied: string[]
+  /** In-scope requirements Satisfied by more than one phase of THIS project,
+   *  with those (this project's) phase FQNs. */
+  overSatisfied: Array<{ requirement: string; phases: string[] }>
+}
+
+/**
+ * The PURE project-requirement scoping decision. No fs, no subprocess, no
+ * `Bun.$`, no db, no git — safe for the `bun test` unit tier.
+ *
+ * - `allRequirements` — the full requirement FQN set (the graph's
+ *   `Requirement` nodes). It orders `inScope` (the emitted findings follow the
+ *   graph's requirement order), and any in-scope requirement it does not list
+ *   is appended, so the union is never truncated.
+ * - `branchAdded` — the branch-added requirement NAMES (the
+ *   `apg/layers/requirements/requirement/<name>.json` basenames); each maps to
+ *   `requirements.requirement.<name>`.
+ * - `satisfies` — THIS project's `Satisfies` relation: requirement FQN -> the
+ *   this-project phase FQNs that Satisfy it. The caller filters to this
+ *   project's phases (another project's `Satisfies` edge never enters the map),
+ *   so more than one value means more than one phase OF THIS PROJECT.
+ *
+ * In scope = branch-added requirements ∪ requirements this project's phases
+ * Satisfy. A requirement is `unsatisfied` when it is in scope but no phase of
+ * this project Satisfies it (equivalently, a branch-added requirement the
+ * project's plan does not satisfy). Requirements delivered by earlier projects
+ * — whose transient `Satisfies` edges did not survive their branch — are
+ * outside the scope and are not reported.
+ */
+export function scopeProjectRequirements(
+  allRequirements: Iterable<string>,
+  branchAdded: Iterable<string>,
+  satisfies: ReadonlyMap<string, readonly string[]>,
+): RequirementScope {
+  const added = new Set<string>()
+  for (const name of branchAdded) added.add(`${REQUIREMENT_FQN_PREFIX}${name}`)
+  const satisfied = new Set(satisfies.keys())
+  const scope = new Set<string>([...added, ...satisfied])
+
+  const inScope: string[] = []
+  const seen = new Set<string>()
+  for (const fqn of allRequirements) {
+    if (scope.has(fqn) && !seen.has(fqn)) {
+      seen.add(fqn)
+      inScope.push(fqn)
+    }
+  }
+  for (const fqn of scope) {
+    if (!seen.has(fqn)) {
+      seen.add(fqn)
+      inScope.push(fqn)
+    }
+  }
+
+  return {
+    inScope,
+    unsatisfied: inScope.filter((fqn) => !satisfied.has(fqn)),
+    overSatisfied: inScope
+      .map((fqn) => ({ requirement: fqn, phases: [...(satisfies.get(fqn) ?? [])] }))
+      .filter((entry) => entry.phases.length > 1),
+  }
+}
+
+/**
+ * The repo's default branch ref at `projectRoot`, or `null` when it cannot be
+ * resolved. The NAME comes from `origin/HEAD`'s target when the remote-tracking
+ * symref exists (e.g. `origin/main` -> `main`), else `main`; the ref is then
+ * resolved local-branch first (`refs/heads/<name>`), then remote-tracking
+ * (`refs/remotes/origin/<name>`) — the same preference the binary's
+ * `rust.apg.plan_cmd.verify.solution_nodes_added_on_branch` uses when it peels
+ * the default branch.
+ */
+async function defaultBranchRef(projectRoot: string): Promise<string | null> {
+  let name = "main"
+  const head = await Bun.$`git symbolic-ref --short refs/remotes/origin/HEAD`
+    .cwd(projectRoot)
+    .quiet()
+    .nothrow()
+  const headRef = head.stdout.toString().trim()
+  if (head.exitCode === 0 && headRef) name = headRef.replace(/^[^/]+\//, "")
+
+  const local = await Bun.$`git rev-parse --verify --quiet refs/heads/${name}`
+    .cwd(projectRoot)
+    .quiet()
+    .nothrow()
+  if (local.exitCode === 0) return name
+  const remote = await Bun.$`git rev-parse --verify --quiet refs/remotes/origin/${name}`
+    .cwd(projectRoot)
+    .quiet()
+    .nothrow()
+  if (remote.exitCode === 0) return `origin/${name}`
+  return null
+}
+
+/**
+ * The git branch delta for the REQUIREMENT layer: the requirement names whose
+ * `apg/layers/requirements/requirement/<name>.json` node file is present on
+ * this branch but absent from the repo's default branch's tree. Mirrors the
+ * binary's `solution_nodes_added_on_branch` (a layer node file present on the
+ * branch but absent from the default tree), adapted to the requirement layer.
+ *
+ * Real I/O — `Bun.$` git subprocesses with cwd at the project root — so it is
+ * covered by the opt-in suite e2e, never the side-effect-free unit tier. The
+ * pure `scopeProjectRequirements` consumes its result (the returned names feed
+ * its `branchAdded` argument). Returns an empty set when no project root is
+ * found or no default branch resolves, so the caller falls back to the
+ * Satisfies-only scope — exactly the binary's empty-delta fallback.
+ */
+export async function branchAddedRequirementNames(
+  context: ToolContext,
+  directory?: string,
+): Promise<Set<string>> {
+  const root = findApgRoot(context, directory)
+  if (!root) return new Set()
+  const branch = await defaultBranchRef(root)
+  if (!branch) return new Set()
+
+  // The names present on this branch's working tree ...
+  const dir = path.join(root, REQUIREMENT_LAYER_DIR)
+  const names = existsSync(dir)
+    ? readdirSync(dir)
+        .filter((f) => f.endsWith(".json"))
+        .map((f) => f.slice(0, -".json".length))
+    : []
+
+  // ... minus the names already carried by the default branch's tree.
+  const listed = await Bun.$`git ls-tree -r --name-only ${branch} -- ${REQUIREMENT_LAYER_DIR}`
+    .cwd(root)
+    .quiet()
+    .nothrow()
+  const present = new Set<string>()
+  if (listed.exitCode === 0) {
+    for (const line of listed.stdout.toString().split("\n")) {
+      const rel = line.trim()
+      if (rel.endsWith(".json")) present.add(path.basename(rel, ".json"))
+    }
+  }
+
+  const added = new Set<string>()
+  for (const name of names) if (!present.has(name)) added.add(name)
+  return added
 }
