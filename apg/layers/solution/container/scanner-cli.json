@@ -91,6 +91,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.splice",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cache-classification-key",
+      "properties": {}
     }
   ],
   "in": [
