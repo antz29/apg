@@ -96,6 +96,11 @@
       "kind": "contains",
       "target": "solution.component.cache-classification-key",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.agent-fs-install-registry",
+      "properties": {}
     }
   ],
   "in": [
