@@ -4,7 +4,13 @@
   "name": "agent-fs-tool-suite",
   "body": "The agent filesystem tool suite: the three new suite tools `apg_rm`, `apg_mv`, `apg_cp` (planned files `opencode-suite/tools/apg_rm.ts`, `opencode-suite/tools/apg_mv.ts`, `opencode-suite/tools/apg_cp.ts` — declared as planned Implementation nodes by the plan-writer) plus the shared `opencode-suite/lib/apg.ts` plumbing they reuse and extend. Each tool takes the caller's project `directory` plus the operation's path(s), resolves them against the project root via the existing `findApgRoot` / `resolveProjectPath` boundary, and performs a plain filesystem operation, refusing a path that escapes the project/worktree boundary. The shared lib holds the single-sourced path-resolution/containment helper the three tools call (DRY per `global.constraint.decomposition-quality`). The tools are product source embedded via `include_str!` and installed by `apg init` (see `solution.component.agent-fs-install-registry`), per `solution.constraint.suite-is-product-source`; the repo's own `.opencode/agents/**` are consumer artifacts and are never edited by this change-set.\n\nimplemented-by: `opencode-suite/lib/apg.ts` (the shared plumbing the tools extend). The three tool files are planned — their FQNs (`opencode-suite/tools/apg_rm.ts`, `opencode-suite/tools/apg_mv.ts`, `opencode-suite/tools/apg_cp.ts`) are declared by the plan-writer and become implemented-by targets once they exist.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/lib/apg.ts",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
