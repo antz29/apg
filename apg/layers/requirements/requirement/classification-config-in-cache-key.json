@@ -6,7 +6,13 @@
   "properties": {
     "feature": "graph-identity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.value.cache-key",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
