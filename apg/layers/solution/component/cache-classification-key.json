@@ -31,6 +31,11 @@
       "kind": "realised-by",
       "source": "domain.entity.classification-config",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.cache-key-classification-folding",
+      "properties": {}
     }
   ]
 }
