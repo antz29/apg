@@ -34,6 +34,11 @@
       "kind": "details",
       "target": "requirements.constraint.plan-tooling-change-boundary",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.constraint.suite-is-product-source",
+      "properties": {}
     }
   ],
   "in": []
