@@ -31,6 +31,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/lib/apg.test.ts",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tests/boundary.e2e.test.ts",
+      "properties": {}
     }
   ],
   "in": [
