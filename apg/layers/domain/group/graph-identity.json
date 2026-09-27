@@ -62,6 +62,11 @@
       "kind": "contains",
       "target": "domain.entity.rust-crate-target",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.cache-key",
+      "properties": {}
     }
   ],
   "in": [
