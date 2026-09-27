@@ -406,21 +406,58 @@ export function scopeProjectRequirements(
 
 /**
  * The repo's default branch ref at `projectRoot`, or `null` when it cannot be
- * resolved. The NAME comes from `origin/HEAD`'s target when the remote-tracking
- * symref exists (e.g. `origin/main` -> `main`), else `main`; the ref is then
- * resolved local-branch first (`refs/heads/<name>`), then remote-tracking
- * (`refs/remotes/origin/<name>`) — the same preference the binary's
- * `rust.apg.plan_cmd.verify.solution_nodes_added_on_branch` uses when it peels
- * the default branch.
+ * resolved. The NAME mirrors the binary's
+ * `rust.apg.git.identity.repo_identity` default-branch resolution, origin-first:
+ *
+ * 1. `origin/HEAD`'s symbolic target when the remote-tracking symref exists
+ *    (`origin/main` -> `main`) — the binary's `origin_default_branch`;
+ * 2. else the MAIN checkout's symbolic HEAD — the primary `git worktree list`
+ *    entry (the repo's original working tree), whose checked-out branch is the
+ *    default — the binary's `main_checkout_head`;
+ * 3. else `null` (the empty-delta fallback).
+ *
+ * The NAME is then peeled local-branch first (`refs/heads/<name>`), then
+ * remote-tracking (`refs/remotes/origin/<name>`) — the same preference the
+ * binary's `solution_nodes_added_on_branch` uses when it peels the default
+ * branch.
  */
 async function defaultBranchRef(projectRoot: string): Promise<string | null> {
-  let name = "main"
+  let name: string | null = null
   const head = await Bun.$`git symbolic-ref --short refs/remotes/origin/HEAD`
     .cwd(projectRoot)
     .quiet()
     .nothrow()
   const headRef = head.stdout.toString().trim()
-  if (head.exitCode === 0 && headRef) name = headRef.replace(/^[^/]+\//, "")
+  if (head.exitCode === 0 && headRef) name = headRef.replace(/^origin\//, "")
+
+  // No `origin/HEAD`: the default is the MAIN checkout's checked-out branch.
+  // `git worktree list --porcelain` lists the main worktree first; its symbolic
+  // HEAD is the default. A detached/unborn main checkout yields nothing, so the
+  // name stays unresolved and the caller sees an empty delta.
+  if (!name) {
+    const worktrees = await Bun.$`git worktree list --porcelain`
+      .cwd(projectRoot)
+      .quiet()
+      .nothrow()
+    if (worktrees.exitCode === 0) {
+      const main = worktrees.stdout
+        .toString()
+        .split("\n")
+        .find((line) => line.startsWith("worktree "))
+        ?.slice("worktree ".length)
+        .trim()
+      if (main) {
+        const mainHead = await Bun.$`git -C ${main} symbolic-ref --short HEAD`
+          .cwd(projectRoot)
+          .quiet()
+          .nothrow()
+        const mainRef = mainHead.stdout.toString().trim()
+        if (mainHead.exitCode === 0 && mainRef) name = mainRef
+      }
+    }
+  }
+
+  if (!name) return null
 
   const local = await Bun.$`git rev-parse --verify --quiet refs/heads/${name}`
     .cwd(projectRoot)
@@ -446,8 +483,12 @@ async function defaultBranchRef(projectRoot: string): Promise<string | null> {
  * covered by the opt-in suite e2e, never the side-effect-free unit tier. The
  * pure `scopeProjectRequirements` consumes its result (the returned names feed
  * its `branchAdded` argument). Returns an empty set when no project root is
- * found or no default branch resolves, so the caller falls back to the
- * Satisfies-only scope — exactly the binary's empty-delta fallback.
+ * found, when no default branch resolves (a detached/unborn main checkout with
+ * no `origin/HEAD`), or when the resolved name has neither a local nor a
+ * remote-tracking ref, so the caller falls back to the Satisfies-only scope.
+ * Only the first of these mirrors the binary's `default_branch`-None empty-delta
+ * fallback; the unresolvable-ref case is an error there, and the suite stays
+ * deliberately conservative (empty, not a throw).
  */
 export async function branchAddedRequirementNames(
   context: ToolContext,

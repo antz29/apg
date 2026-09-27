@@ -73,10 +73,17 @@ function requirementNode(name: string): string {
 
 /// A scratch git repo with an `apg/` layout: a dummy `apg/.trans/db.lbug` (so
 /// `findApgRoot` resolves) and one PRE-EXISTING requirement node file,
-/// committed on `main`; then a `feature` branch that adds one NEW requirement
-/// node file and commits it. Returns the repo root (its parent is the
+/// committed on the DEFAULT branch; a LINKED worktree on a `feature` branch
+/// then adds one NEW requirement node file and commits it. The main checkout
+/// stays on the default branch — the real apg topology (project branches live
+/// in linked worktrees) — so the default-branch NAME comes from the main
+/// checkout's symbolic HEAD (`main_checkout_head`), never the feature branch
+/// the delta is measured against. `defaultBranch` is parameterized so a
+/// NON-`main` default (`master`) exercises the no-`origin/HEAD` fallback; no
+/// remote is ever added, so `origin/HEAD` is always absent. Returns the main
+/// checkout root and the feature worktree root (their common parent is the
 /// throwaway base dir the caller removes).
-function scratchRequirementRepo(): string {
+function scratchRequirementRepo(defaultBranch = "main"): { repo: string; worktree: string } {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-reqdelta-"))
   const repo = path.join(base, "repo")
   const reqDir = path.join(repo, "apg", "layers", "requirements", "requirement")
@@ -85,18 +92,23 @@ function scratchRequirementRepo(): string {
   fs.writeFileSync(path.join(repo, "apg", ".trans", "db.lbug"), "")
   fs.writeFileSync(path.join(reqDir, "req-preexisting.json"), requirementNode("req-preexisting"))
 
-  const run = (cmd: string[]) => Bun.spawnSync({ cmd, cwd: repo, stdout: "pipe", stderr: "pipe" })
-  run(["git", "init", "-q", "-b", "main"])
+  const run = (cmd: string[], cwd: string = repo) =>
+    Bun.spawnSync({ cmd, cwd, stdout: "pipe", stderr: "pipe" })
+  run(["git", "init", "-q", "-b", defaultBranch])
   run(["git", "config", "user.email", "apg@localhost"])
   run(["git", "config", "user.name", "apg"])
   run(["git", "add", "-A"])
   run(["git", "commit", "-q", "-m", "init"])
 
-  run(["git", "checkout", "-q", "-b", "feature"])
-  fs.writeFileSync(path.join(reqDir, "req-branch-added.json"), requirementNode("req-branch-added"))
-  run(["git", "add", "-A"])
-  run(["git", "commit", "-q", "-m", "add requirement"])
-  return repo
+  // The feature branch lives in a LINKED worktree; the main checkout stays on
+  // the default branch.
+  const worktree = path.join(base, "feature-wt")
+  run(["git", "worktree", "add", "-q", "-b", "feature", worktree])
+  const wtReqDir = path.join(worktree, "apg", "layers", "requirements", "requirement")
+  fs.writeFileSync(path.join(wtReqDir, "req-branch-added.json"), requirementNode("req-branch-added"))
+  run(["git", "add", "-A"], worktree)
+  run(["git", "commit", "-q", "-m", "add requirement"], worktree)
+  return { repo, worktree }
 }
 
 test.skipIf(!enabled || !binary)(
@@ -191,19 +203,22 @@ test.skipIf(!enabled || !binary)(
 test.skipIf(!enabled)(
   "e2e: git branch delta reports exactly the branch-added requirement names",
   async () => {
-    const repo = scratchRequirementRepo()
+    const { repo, worktree } = scratchRequirementRepo()
     try {
-      const context: ToolContext = { directory: repo, worktree: repo }
-      const added = await branchAddedRequirementNames(context, repo)
+      const context: ToolContext = { directory: worktree, worktree }
+      const added = await branchAddedRequirementNames(context, worktree)
 
       // Exactly the requirement node file added on this branch — not the
-      // pre-existing one already carried by `main`.
+      // pre-existing one already carried by the default branch.
       expect([...added].sort()).toEqual(["req-branch-added"])
       expect(added.has("req-preexisting")).toBe(false)
 
-      // Back on the default branch the delta is empty: no false positives.
-      Bun.spawnSync({ cmd: ["git", "checkout", "-q", "main"], cwd: repo, stdout: "pipe", stderr: "pipe" })
-      const none = await branchAddedRequirementNames(context, repo)
+      // The main checkout, on the default branch, sees an empty delta: no false
+      // positives.
+      const none = await branchAddedRequirementNames(
+        { directory: repo, worktree: repo },
+        repo,
+      )
       expect([...none]).toEqual([])
     } finally {
       fs.rmSync(path.dirname(repo), { recursive: true, force: true })
@@ -214,10 +229,10 @@ test.skipIf(!enabled)(
 test.skipIf(!enabled)(
   "e2e: the git branch delta drives the project-scoped requirement decision",
   async () => {
-    const repo = scratchRequirementRepo()
+    const { worktree } = scratchRequirementRepo()
     try {
-      const context: ToolContext = { directory: repo, worktree: repo }
-      const branchAdded = await branchAddedRequirementNames(context, repo)
+      const context: ToolContext = { directory: worktree, worktree }
+      const branchAdded = await branchAddedRequirementNames(context, worktree)
 
       const req = (name: string) => `${REQUIREMENT_FQN_PREFIX}${name}`
       // `req-preexisting` was delivered by an earlier project (its transient
@@ -232,6 +247,46 @@ test.skipIf(!enabled)(
       expect(scope.inScope).toEqual([req("req-branch-added")])
       expect(scope.unsatisfied).toEqual([req("req-branch-added")])
       expect(scope.overSatisfied).toEqual([])
+    } finally {
+      fs.rmSync(path.dirname(worktree), { recursive: true, force: true })
+    }
+  },
+)
+
+// apg-plan-phases-scoping phase-01.task-3 (feedback-4) / phase-03.task-3: a
+// NON-`main` default branch with NO `origin/HEAD` must resolve its NAME from the
+// MAIN checkout's symbolic HEAD — the binary's `main_checkout_head` fallback —
+// not a hardcoded `main`. The branch delta must therefore report the
+// branch-added requirement, not silently return empty.
+test.skipIf(!enabled)(
+  "e2e: a non-main default branch with no origin/HEAD resolves via the main checkout HEAD",
+  async () => {
+    const { repo, worktree } = scratchRequirementRepo("master")
+    try {
+      const context: ToolContext = { directory: worktree, worktree }
+      const added = await branchAddedRequirementNames(context, worktree)
+
+      // The default resolved to the main checkout's `master`, so the
+      // branch-added requirement IS reported — not a silent empty set from a
+      // hardcoded `main` (which has no local ref here).
+      expect([...added].sort()).toEqual(["req-branch-added"])
+      expect(added.has("req-preexisting")).toBe(false)
+
+      // Guard the premise: the main checkout is on `master` and `origin/HEAD`
+      // is genuinely absent, so the main-checkout-HEAD fallback is what was
+      // exercised (never the origin/HEAD branch).
+      const mainHead = Bun.spawnSync({
+        cmd: ["git", "-C", repo, "symbolic-ref", "--short", "HEAD"],
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      expect(mainHead.stdout.toString().trim()).toBe("master")
+      const originHead = Bun.spawnSync({
+        cmd: ["git", "-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      expect(originHead.exitCode).not.toBe(0)
     } finally {
       fs.rmSync(path.dirname(repo), { recursive: true, force: true })
     }
