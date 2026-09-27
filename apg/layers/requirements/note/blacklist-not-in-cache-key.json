@@ -11,11 +11,5 @@
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "details",
-      "source": "requirements.note.cache-key-classification-folding",
-      "properties": {}
-    }
-  ]
+  "in": []
 }
