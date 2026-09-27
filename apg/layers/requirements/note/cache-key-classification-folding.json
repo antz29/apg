@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.classification-config-in-cache-key",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.value.cache-key",
+      "properties": {}
     }
   ],
   "in": []
