@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "navigator-cadence-stated",
+  "body": "The distributed `codebase-navigator` prompt must state the per-task execution cadence and the stale-graph constraint that motivates it: (a) one task per implementer session — the implementer does the work, commits, and returns without marking done; (b) a coordinator quick verify (not a review) of the commit against the task's expected path(s)/FQN(s), with the tree clean and the target resolved (or still pending, for a `creates`); (c) a scan of the worktree to advance the recorded HEAD; (d) resuming the same session only to mark done (`apg_plan_done` + `apg_plan_note`); (e) a target-less task that writes nothing and leaves the tree clean needs no commit and no scan; and (f) file-level/aggregate tasks are ordered after their unit tasks and gate tasks are last in the phase. A prompt that retains the \"marks them done … commits at phase end\" ordering violates this law. Prose; assessed by review.",
+  "properties": {
+    "attaches-to": "requirements.requirement.navigator-task-cadence"
+  },
+  "out": [],
+  "in": []
+}
