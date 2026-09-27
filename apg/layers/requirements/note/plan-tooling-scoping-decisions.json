@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "solution.container.opencode-suite",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.constraint.plan-tooling-change-boundary",
+      "properties": {}
     }
   ],
   "in": []
