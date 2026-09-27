@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "cache-classification-key",
+  "body": "The cache-key classification mechanism: the `rust.apg.cache.manifest.ScanConfigKey` classification field carrying `apg/config.json`'s graph-affecting classification identity (`domain.entity.classification-config`), `rust.apg.cache.manifest.CacheKey.compute` folding it into the `config` digest so a classification-config change forces a full load, and `rust.apg.scan.cmd_scan` parsing the config and constructing the key. The plan-declared helpers `rust.apg.cache.manifest.classification_digest` and `rust.apg.cache.manifest.classification_render` render and digest the identity; they are not yet `implemented-by` targets (planned nodes the plan-writer declares). A narrow owner, deliberately distinct from the broad `solution.component.scan-driver`: it is the component the classification-config requirement's spine reaches, so the verify gate's derived solution coverage enforces exactly this change-set's key code.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
