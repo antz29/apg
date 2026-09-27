@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "domain.value.cache-key",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.note.blacklist-not-in-cache-key",
+      "properties": {}
     }
   ],
   "in": []
