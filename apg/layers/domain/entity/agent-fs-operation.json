@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.agent-fs-permission-grants",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.agent-fs-install-registry",
+      "properties": {}
     }
   ],
   "in": [
