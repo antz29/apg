@@ -6,7 +6,13 @@
   "properties": {
     "feature": "durable-spec-integrity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.details-edge",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
