@@ -21,6 +21,11 @@
       "kind": "contains",
       "source": "solution.container.opencode-suite",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.navigator-task-cadence-decision",
+      "properties": {}
     }
   ]
 }
