@@ -21,6 +21,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_plan_phases.ts",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/lib/apg.ts",
+      "properties": {}
     }
   ],
   "in": [
