@@ -6,7 +6,13 @@
   "properties": {
     "feature": "plan-tooling"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.group.plan-tooling",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
