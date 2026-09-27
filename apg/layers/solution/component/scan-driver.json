@@ -39,6 +39,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.cache.fragment.rebase",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.manifest.ScanConfigKey",
+      "properties": {}
     }
   ],
   "in": [
