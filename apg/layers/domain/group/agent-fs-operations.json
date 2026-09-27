@@ -12,6 +12,11 @@
       "kind": "contains",
       "target": "domain.entity.agent-fs-operation",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.permission-scope",
+      "properties": {}
     }
   ],
   "in": []
