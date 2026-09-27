@@ -53,6 +53,11 @@
       "kind": "realised-by",
       "source": "domain.entity.plan-phases-tool",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.plan-tooling-scoping-decisions",
+      "properties": {}
     }
   ]
 }

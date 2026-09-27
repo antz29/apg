@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "domain.value.project-requirement-scope",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.container.opencode-suite",
+      "properties": {}
     }
   ],
   "in": []
