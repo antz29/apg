@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "details-edge",
+  "body": "The durable spec's `details` edge kind: a note-source annotation edge that attaches a durable note to the thing it explains. Its source must be a `Note` (any of the four authored layers plus `global`). Its canonical TARGET set is every authored node — stakeholder/user/requirement/group/entity/value/service/system/container/component/person/constraint, in any layer — or any code FQN (module/file/struct/function), with exactly one exclusion: a `Note` (any layer).\n\n`Note`→`Note` `details` is deliberately excluded, because a note may not detail another note. `Note` stays REVIEWABLE: that is the distinct `Reviews` edge (`Feedback`→`Note`), untouched by this rule.\n\nThe write surface (`rust.apg.layers.validate.validate_edge`) and the projection (`rust.apg.load.tables.spec_rel_pairs`'s `Details` target list, which omits `Note`) must agree on exactly this set: every write-accepted pair is projection-admitted, so no accepted edge is ever dropped, and the excluded pair is refused at write time rather than accepted-and-dropped. The projection's exclusion is canonical; the write surface is the side that moves.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
