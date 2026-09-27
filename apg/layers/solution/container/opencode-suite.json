@@ -41,6 +41,11 @@
       "kind": "contains",
       "target": "solution.component.agent-fs-tool-suite",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.agent-fs-permission-grants",
+      "properties": {}
     }
   ],
   "in": [
