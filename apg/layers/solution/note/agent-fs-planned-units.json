@@ -4,6 +4,12 @@
   "name": "agent-fs-planned-units",
   "body": "Planned-unit handoff for `solution.component.agent-fs-tool-suite`. The three new tool files do not exist in the branch graph, so they cannot yet be `implemented-by` targets. The plan-writer declares them as planned Implementation nodes at their real code FQNs (File kind), each the target of a `creates` task:\n\n  opencode-suite/tools/apg_rm.ts\n  opencode-suite/tools/apg_mv.ts\n  opencode-suite/tools/apg_cp.ts\n\nOnce they exist, `solution.component.agent-fs-tool-suite` —implemented-by→ each of them. The component's current resolving anchor is `opencode-suite/lib/apg.ts` (the shared plumbing the tools reuse/extend). The install registry (`solution.component.agent-fs-install-registry`) is anchored on the module `rust.apg.install` because `SUITE_TOOLS` is a `const`, which the code graph does not model as its own node.\n\nTest-tier split (per `global.constraint.test-tier-boundaries`): the fs tools' executable path logic is real I/O (filesystem), hence e2e — exercised against a scratch `/tmp` repo per `global.constraint.no-real-project-test`; any pure helper added to `opencode-suite/lib/apg.ts` (path normalization / containment decision) belongs in the `bun test` unit tier (`opencode-suite/lib/apg.test.ts`), side-effect-free.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.component.agent-fs-tool-suite",
+      "properties": {}
+    }
+  ],
   "in": []
 }
