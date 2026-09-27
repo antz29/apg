@@ -7,5 +7,11 @@
     "feature": "agent-fs-tools"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.user.code-writer-agent",
+      "properties": {}
+    }
+  ]
 }
