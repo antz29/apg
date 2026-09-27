@@ -44,6 +44,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.cache.manifest.ScanConfigKey",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.manifest.CacheKey.compute",
+      "properties": {}
     }
   ],
   "in": [
