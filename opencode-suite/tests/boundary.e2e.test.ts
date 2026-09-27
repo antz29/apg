@@ -1,7 +1,10 @@
-// e2e boundary test for the curated suite tools' stored<->absolute conversion.
+// e2e boundary test for the curated suite tools: the stored<->absolute identity
+// conversion (against a candidate `apg` binary) and the git branch-delta
+// requirement wrapper (git/fs only). Both are real I/O, so both are opt-in
+// suite e2e.
 //
-// OPT-IN: real I/O (a scratch /tmp git repo scanned by the candidate `apg`
-// binary, spawning `apg query`). Plain `bun test` skips it; run it with
+// OPT-IN: real I/O (a scratch /tmp git repo, spawning `apg query`, git
+// subprocesses). Plain `bun test` skips it; run it with
 //
 //   APG_SUITE_E2E=1 APG_BINARY="$PWD/target/debug/apg" \
 //     bun test tests/boundary.e2e.test.ts
@@ -18,6 +21,9 @@ import {
   runCypher,
   resolveProjectPath,
   findSymbolRebaseColumns,
+  branchAddedRequirementNames,
+  scopeProjectRequirements,
+  REQUIREMENT_FQN_PREFIX,
   csvToRows,
   type ToolContext,
 } from "../lib/apg.ts"
@@ -45,12 +51,51 @@ function scratchRepo(): string {
     path.join(repo, "pkg", "a.go"),
     "package pkg\n\n// A is a struct.\ntype A struct {\n\tX int\n}\n\n// Leaf returns 1.\nfunc Leaf() int { return 1 }\n",
   )
+  // The Go frontend loads packages through `go/packages`, which needs a module;
+  // without `go.mod` the scan emits no Go nodes (mirrors every Rust e2e scratch
+  // Go repo, e.g. `tests/main_e2e.rs`).
+  fs.writeFileSync(path.join(repo, "go.mod"), "module scratch\n\ngo 1.21\n")
   const run = (cmd: string[]) => Bun.spawnSync({ cmd, cwd: repo, stdout: "pipe", stderr: "pipe" })
   run(["git", "init", "-q", "-b", "main"])
   run(["git", "config", "user.email", "apg@localhost"])
   run(["git", "config", "user.name", "apg"])
   run(["git", "add", "-A"])
   run(["git", "commit", "-q", "-m", "init"])
+  return repo
+}
+
+/// A one-line requirement node-file body. `branchAddedRequirementNames` only
+/// reads the file BASENAMES (the file name IS the requirement name), so the
+/// JSON only needs to be plausible, not schema-valid.
+function requirementNode(name: string): string {
+  return `${JSON.stringify({ layer: "requirements", type: "requirement", name, body: `req ${name}`, feature: "test" })}\n`
+}
+
+/// A scratch git repo with an `apg/` layout: a dummy `apg/.trans/db.lbug` (so
+/// `findApgRoot` resolves) and one PRE-EXISTING requirement node file,
+/// committed on `main`; then a `feature` branch that adds one NEW requirement
+/// node file and commits it. Returns the repo root (its parent is the
+/// throwaway base dir the caller removes).
+function scratchRequirementRepo(): string {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-reqdelta-"))
+  const repo = path.join(base, "repo")
+  const reqDir = path.join(repo, "apg", "layers", "requirements", "requirement")
+  fs.mkdirSync(reqDir, { recursive: true })
+  fs.mkdirSync(path.join(repo, "apg", ".trans"), { recursive: true })
+  fs.writeFileSync(path.join(repo, "apg", ".trans", "db.lbug"), "")
+  fs.writeFileSync(path.join(reqDir, "req-preexisting.json"), requirementNode("req-preexisting"))
+
+  const run = (cmd: string[]) => Bun.spawnSync({ cmd, cwd: repo, stdout: "pipe", stderr: "pipe" })
+  run(["git", "init", "-q", "-b", "main"])
+  run(["git", "config", "user.email", "apg@localhost"])
+  run(["git", "config", "user.name", "apg"])
+  run(["git", "add", "-A"])
+  run(["git", "commit", "-q", "-m", "init"])
+
+  run(["git", "checkout", "-q", "-b", "feature"])
+  fs.writeFileSync(path.join(reqDir, "req-branch-added.json"), requirementNode("req-branch-added"))
+  run(["git", "add", "-A"])
+  run(["git", "commit", "-q", "-m", "add requirement"])
   return repo
 }
 
@@ -91,13 +136,19 @@ test.skipIf(!enabled || !binary)(
 
       // A curated tool opts in to rebasing the File-fqn column: the stored
       // identity resolves to an existing absolute path under the caller's
-      // project directory.
+      // project directory. The structural scanner also graphs the `init`
+      // scaffold (`.gitignore`, `apg/config.json`) and `go.mod`, so select the
+      // Go file's row rather than assuming row order.
       const rebased = await runCypher(context, query, repo, { rebaseColumns: [0] })
       const rows = csvToRows(rebased)
-      const stored = rows[1][0]
-      const resolved = resolveProjectPath(repo, stored)
+      const resolved = rows
+        .slice(1)
+        .map((r) => r[0])
+        .find((v) => v.endsWith(path.join("pkg", "a.go")))
       expect(resolved).toBe(path.join(repo, "pkg/a.go"))
-      expect(existsSync(resolved)).toBe(true)
+      const stored = resolveProjectPath(repo, resolved as string)
+      expect(stored).toBe("pkg/a.go")
+      expect(existsSync(resolved as string)).toBe(true)
       // The same stored identity resolves under a DIFFERENT checkout root to a
       // different absolute path (the two checkouts at one commit).
       const other = path.join(path.dirname(repo), "other-checkout")
@@ -127,6 +178,62 @@ test.skipIf(!enabled || !binary)(
       else process.env.APG_BINARY = previousBinary
       fs.rmSync(path.dirname(repo), { recursive: true, force: true })
       fs.rmSync(home, { recursive: true, force: true })
+    }
+  },
+)
+
+// apg-plan-phases-scoping phase-03: the git branch-delta WRAPPER is real I/O
+// (`Bun.$` git subprocesses) so it is covered here, at the opt-in e2e tier; the
+// pure scoping core it feeds is unit-covered in `lib/apg.test.ts`. This wrapper
+// needs only git + fs (no candidate `apg` binary), so it gates on the e2e opt-in
+// alone.
+
+test.skipIf(!enabled)(
+  "e2e: git branch delta reports exactly the branch-added requirement names",
+  async () => {
+    const repo = scratchRequirementRepo()
+    try {
+      const context: ToolContext = { directory: repo, worktree: repo }
+      const added = await branchAddedRequirementNames(context, repo)
+
+      // Exactly the requirement node file added on this branch — not the
+      // pre-existing one already carried by `main`.
+      expect([...added].sort()).toEqual(["req-branch-added"])
+      expect(added.has("req-preexisting")).toBe(false)
+
+      // Back on the default branch the delta is empty: no false positives.
+      Bun.spawnSync({ cmd: ["git", "checkout", "-q", "main"], cwd: repo, stdout: "pipe", stderr: "pipe" })
+      const none = await branchAddedRequirementNames(context, repo)
+      expect([...none]).toEqual([])
+    } finally {
+      fs.rmSync(path.dirname(repo), { recursive: true, force: true })
+    }
+  },
+)
+
+test.skipIf(!enabled)(
+  "e2e: the git branch delta drives the project-scoped requirement decision",
+  async () => {
+    const repo = scratchRequirementRepo()
+    try {
+      const context: ToolContext = { directory: repo, worktree: repo }
+      const branchAdded = await branchAddedRequirementNames(context, repo)
+
+      const req = (name: string) => `${REQUIREMENT_FQN_PREFIX}${name}`
+      // `req-preexisting` was delivered by an earlier project (its transient
+      // `Satisfies` edge died with its branch); THIS project's plan satisfies
+      // nothing. Only the branch-added requirement is in scope, so the
+      // earlier-delivered one is NOT reported unsatisfied.
+      const scope = scopeProjectRequirements(
+        [req("req-preexisting"), req("req-branch-added")],
+        branchAdded,
+        new Map(),
+      )
+      expect(scope.inScope).toEqual([req("req-branch-added")])
+      expect(scope.unsatisfied).toEqual([req("req-branch-added")])
+      expect(scope.overSatisfied).toEqual([])
+    } finally {
+      fs.rmSync(path.dirname(repo), { recursive: true, force: true })
     }
   },
 )
