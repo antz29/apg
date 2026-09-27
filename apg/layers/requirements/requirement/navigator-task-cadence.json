@@ -6,7 +6,13 @@
   "properties": {
     "feature": "navigator-task-cadence"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.task-execution-cadence",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
