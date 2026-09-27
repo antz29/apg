@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.graph-visible-tests",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.plan-phases-project-scoping",
+      "properties": {}
     }
   ],
   "in": []
