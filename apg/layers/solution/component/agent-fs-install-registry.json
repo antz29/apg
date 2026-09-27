@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.entity.agent-fs-operation",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.agent-fs-operations",
+      "properties": {}
     }
   ]
 }
