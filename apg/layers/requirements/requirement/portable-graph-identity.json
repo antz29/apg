@@ -56,6 +56,11 @@
       "kind": "contains",
       "target": "requirements.requirement.rust-multitarget-crate-identity",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.classification-config-in-cache-key",
+      "properties": {}
     }
   ],
   "in": [
