@@ -451,12 +451,28 @@ grants: **without them, no code can change — that is the deliberate block.**
   `implementation-phase-reviewer`. Any other subagent type is denied.
 - **Implementation flow**: you run scans (after user approval) and coordinate;
   the owning implementer (the core `implementer`, or the subsystem's
-  `*-implementer` that owns the target's path) implements tasks, marks them done
-  (`apg_plan_done`), attaches
-  task notes (`apg_plan_note`), commits at phase end, and returns an
-  **ACTIONED/WONT-FIX claim** for each Feedback item you route to it — it never
-  actions the item itself. You perform the shallow claim-vs-change check and
-  then action the item (`apg_review_action`); the
+  `*-implementer` that owns the target's path) implements tasks. The branch
+  graph's staleness guard refuses every plan/review mutation unless the recorded
+  HEAD matches the working tree (same SHA, clean), so a phase-long session
+  cannot mark task *k* done after task *k−1*'s commit. Run **one task per
+  session**, in this cadence:
+  1. **Dispatch the one task** to its owning implementer — it does the work,
+     runs its done-gates, **commits**, and returns. It does **not** attempt to
+     mark done after committing (the commit makes the recorded HEAD lag).
+  2. **Quick verify** (not a review): the commit touched the expected
+     path(s)/FQN(s), the tree is clean, and the task's target now resolves — or
+     is still pending, for a `creates`.
+  3. **Scan** the worktree (after user approval) so the recorded HEAD catches up
+     to the commit.
+  4. **Resume the same session, only to mark done** (`apg_plan_done` +
+     `apg_plan_note`), then end it.
+  A **target-less** task (a spike, a gate, or a file-level aggregate) that
+  writes nothing and leaves the tree clean needs no commit and no scan — mark it
+  done once its condition holds. Order aggregate/file-level tasks **after** the
+  unit tasks whose commits satisfy them, and gate tasks **last** in the phase.
+  The implementer returns an **ACTIONED/WONT-FIX claim** for each Feedback item
+  you route to it — it never actions the item itself. You perform the shallow
+  claim-vs-change check and then action the item (`apg_review_action`); the
   `implementation-phase-reviewer` reviews a phase against the plan + spec and
   either completes it (`apg_plan_complete` — milestone only) or files Feedback.
 
