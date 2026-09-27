@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_mv.ts",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_cp.ts",
+      "properties": {}
     }
   ],
   "in": [
