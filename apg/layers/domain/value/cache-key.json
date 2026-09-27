@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "cache-key",
+  "body": "The version/format/config identity that invalidates the whole scan cache when it drifts (`rust.apg.cache.manifest.CacheKey`): the binary's own version + the scanner JSONL schema/format + the ingestor projection-rules version + the scan config (languages, excludes, modules) + the classification-config identity of `apg/config.json`.\n\nA mismatch forces a full load — for correctness, never as a heuristic: the same content at the same commit assembled under a different config yields a different graph, so a cached projection produced under the old config must be discarded. Equal inputs yield equal keys; any graph-affecting input drift moves the key. It is the value the shared fact store keys each per-file unit by (the store is repo-wide, shared across every worktree and branch of the repository), which is why a config change must invalidate the whole store, not one file.\n\nThe classification component is a stable digest of the parsed config's `default`, its ordered `types` rules (name, globs, names, and rule order), and its `structural` scope (include, exclude, code_type); it excludes the binary-managed `version` field and uses a distinct stable sentinel when no config is present. Named by the code doc-comments in `rust.apg.cache` (module docs), `rust.apg.cache.manifest.CacheKey`, and `rust.apg.frontends`' `--cache-key` hand-off doc.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
