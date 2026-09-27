@@ -4,7 +4,13 @@
   "name": "details-target-validation",
   "body": "The durable layers write-surface validator's `details` rule: the `details` arm of `rust.apg.layers.validate.validate_edge` must refuse a `details` edge whose target is a `Note` (any layer) while continuing to accept every other authored node and any code FQN, and while requiring the source to be a `Note`. It implements the write half of `domain.entity.details-edge`'s canonical target set.\n\nThe projection half — `rust.apg.load.tables.spec_rel_pairs`'s `Details` target list (which deliberately omits `Note`), the `Details` rel table, and the deliberate-exclusion comment in `src/load/tables.rs` — is canonical and STAYS UNCHANGED. `rust.apg.load.tables.spec_rel_pairs` is deliberately NOT an `implemented-by` target of this component: it is unchanged, and naming it would force a plan task on untouched code; the projection's deliberate exclusion is expressed in `domain.entity.details-edge` and its law instead. A narrow owner, deliberately distinct from any broad layers component, so the verify gate's derived solution coverage enforces exactly the validator code this change-set changes and nothing else.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.layers.validate.validate_edge",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "realised-by",
