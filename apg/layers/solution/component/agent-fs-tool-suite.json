@@ -26,6 +26,11 @@
       "kind": "details",
       "source": "solution.note.agent-fs-planned-units",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.agent-fs-operations",
+      "properties": {}
     }
   ]
 }

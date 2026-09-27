@@ -17,6 +17,11 @@
       "kind": "contains",
       "target": "domain.value.permission-scope",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.agent-fs-tool-suite",
+      "properties": {}
     }
   ],
   "in": [
