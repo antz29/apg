@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "source": "domain.entity.task-execution-cadence",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
     }
   ]
 }

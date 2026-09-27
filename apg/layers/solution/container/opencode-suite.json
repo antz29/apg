@@ -46,6 +46,11 @@
       "kind": "contains",
       "target": "solution.component.agent-fs-permission-grants",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.codebase-navigator-prompt",
+      "properties": {}
     }
   ],
   "in": [
