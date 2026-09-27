@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "task-execution-cadence",
+  "body": "The cadence for executing one plan task to a durable \"done\" under the branch graph's content-identity staleness guard: one task per implementer session; the implementer commits its work and returns; the coordinator quick-verifies the commit against the task's target, scans so the recorded HEAD catches up, then resumes the session only to mark done (`apg_plan_done`) and note (`apg_plan_note`). It exists because the guard refuses every plan/review mutation unless the recorded HEAD matches the working tree (same sha and clean), so \"mark done then commit\" and \"mark done while dirty\" are both impossible; the cadence is the ordering that survives the guard. Target-less tasks (spikes, gates, file-level aggregates) that write nothing and leave the tree clean need no commit/scan — their stated condition is the completion signal — and their tasks are ordered after the units they aggregate, with gate tasks last. This is the ordering discipline for MUTATING the plan; it is distinct from `domain.entity.graph-first-navigation`, the ordering discipline for querying the graph.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
