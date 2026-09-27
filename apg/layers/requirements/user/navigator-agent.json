@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "navigator-agent",
+  "body": "The distributed `codebase-navigator` agent (installed by `apg init` into `~/.opencode/agents/`) acting as the coordinator of a project worktree: it runs scans, dispatches one plan task at a time to its owning implementer, quick-verifies each returned commit, and performs the merge act on human approval. It uses the suite's plan/review tooling (`apg_plan_*`, `apg_review_*`) and the mutation surface, all of which are refused unless the branch graph is fresh. Its interest is a prompt whose implementation-flow text is executable under that guard — an ordering of commit, scan, and mark-done that the guard actually admits.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
