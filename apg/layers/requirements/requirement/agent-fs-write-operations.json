@@ -16,6 +16,11 @@
       "kind": "drives",
       "target": "domain.entity.agent-fs-operation",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.permission-scope",
+      "properties": {}
     }
   ],
   "in": [
