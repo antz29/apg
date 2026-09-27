@@ -23,6 +23,7 @@ import {
   findSymbolRebaseColumns,
   branchAddedRequirementNames,
   scopeProjectRequirements,
+  fsScopeDecision,
   REQUIREMENT_FQN_PREFIX,
   csvToRows,
   type ToolContext,
@@ -292,3 +293,134 @@ test.skipIf(!enabled)(
     }
   },
 )
+
+// agent-fs-tools phase-01.task-8: the PLUGIN-FREE self-enforcement core. These
+// scenarios import ONLY `../lib/apg.ts` (no `@opencode-ai/plugin`, so no
+// node_modules/network is needed) and pass the acting agent's granted globs as
+// a LITERAL argument — the context shape the task-1 spike pins is irrelevant
+// here. Each scenario evaluates `fsScopeDecision` AND applies the
+// corresponding real fs op gated on the decision, against a scratch /tmp git
+// repo (`global.constraint.no-real-project-test`).
+
+/// A scratch git repo with an in-grant `src/` tree and an out-of-grant
+/// `outside.txt`, committed. Returns its root.
+function scratchFsRepo(): string {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-fsscope-"))
+  const repo = path.join(base, "repo")
+  fs.mkdirSync(path.join(repo, "src"), { recursive: true })
+  fs.writeFileSync(path.join(repo, "src", "a.rs"), "fn a() {}\n")
+  fs.writeFileSync(path.join(repo, "src", "b.rs"), "fn b() {}\n")
+  fs.writeFileSync(path.join(repo, "outside.txt"), "outside\n")
+  const run = (cmd: string[]) => Bun.spawnSync({ cmd, cwd: repo, stdout: "pipe", stderr: "pipe" })
+  run(["git", "init", "-q", "-b", "main"])
+  run(["git", "config", "user.email", "apg@localhost"])
+  run(["git", "config", "user.name", "apg"])
+  run(["git", "add", "-A"])
+  run(["git", "commit", "-q", "-m", "init"])
+  return repo
+}
+
+test.skipIf(!enabled)(
+  "e2e: fsScopeDecision gates a real unlink — in-grant removed, out-of-grant refused",
+  () => {
+    const repo = scratchFsRepo()
+    try {
+      const grants = ["src/*.rs"]
+
+      // In-grant: allowed, so the real op mutates the tree.
+      const inGrant = path.join(repo, "src", "a.rs")
+      const allowed = fsScopeDecision(repo, inGrant, grants)
+      expect(allowed.allowed).toBe(true)
+      if (allowed.allowed) fs.unlinkSync(inGrant)
+      expect(existsSync(inGrant)).toBe(false)
+
+      // Out-of-grant: refused, so the tree is untouched.
+      const outGrant = path.join(repo, "outside.txt")
+      const refused = fsScopeDecision(repo, outGrant, grants)
+      expect(refused.allowed).toBe(false)
+      if (refused.allowed) fs.unlinkSync(outGrant)
+      expect(existsSync(outGrant)).toBe(true)
+
+      // Boundary escape (`..`) is refused even when a glob would match.
+      const escape = path.join(repo, "..", "escape.txt")
+      const d = fsScopeDecision(repo, escape, ["**/*"])
+      expect(d.allowed).toBe(false)
+      expect(d.inBoundary).toBe(false)
+      expect(d.reason).toContain("boundary")
+    } finally {
+      fs.rmSync(path.dirname(repo), { recursive: true, force: true })
+    }
+  },
+)
+
+test.skipIf(!enabled)(
+  "e2e: fsScopeDecision gates a real rename — BOTH endpoints must be in grant",
+  () => {
+    const repo = scratchFsRepo()
+    try {
+      const grants = ["src/*.rs"]
+
+      // Both endpoints in grant: the rename mutates the tree.
+      const from = path.join(repo, "src", "a.rs")
+      const to = path.join(repo, "src", "renamed.rs")
+      expect(fsScopeDecision(repo, from, grants).allowed).toBe(true)
+      expect(fsScopeDecision(repo, to, grants).allowed).toBe(true)
+      fs.renameSync(from, to)
+      expect(existsSync(to)).toBe(true)
+      expect(existsSync(from)).toBe(false)
+
+      // Destination out of grant: refused, tree untouched.
+      const badTo = path.join(repo, "outside-moved.rs")
+      const dFrom = fsScopeDecision(repo, to, grants)
+      const dTo = fsScopeDecision(repo, badTo, grants)
+      expect(dFrom.allowed).toBe(true)
+      expect(dTo.allowed).toBe(false)
+      if (dFrom.allowed && dTo.allowed) fs.renameSync(to, badTo)
+      expect(existsSync(to)).toBe(true)
+      expect(existsSync(badTo)).toBe(false)
+
+      // Source out of grant: also refused.
+      const badFrom = path.join(repo, "outside.txt")
+      expect(fsScopeDecision(repo, badFrom, grants).allowed).toBe(false)
+      expect(existsSync(badFrom)).toBe(true)
+    } finally {
+      fs.rmSync(path.dirname(repo), { recursive: true, force: true })
+    }
+  },
+)
+
+test.skipIf(!enabled)(
+  "e2e: fsScopeDecision gates a real copy — BOTH endpoints must be in grant",
+  () => {
+    const repo = scratchFsRepo()
+    try {
+      const grants = ["src/*.rs"]
+
+      // Both endpoints in grant: the copy mutates the tree (source stays).
+      const from = path.join(repo, "src", "a.rs")
+      const to = path.join(repo, "src", "copy.rs")
+      expect(fsScopeDecision(repo, from, grants).allowed).toBe(true)
+      expect(fsScopeDecision(repo, to, grants).allowed).toBe(true)
+      fs.cpSync(from, to, { recursive: true })
+      expect(existsSync(to)).toBe(true)
+      expect(existsSync(from)).toBe(true)
+
+      // Destination out of grant: refused, tree untouched.
+      const badTo = path.join(repo, "outside-copy.rs")
+      const dFrom = fsScopeDecision(repo, from, grants)
+      const dTo = fsScopeDecision(repo, badTo, grants)
+      expect(dFrom.allowed).toBe(true)
+      expect(dTo.allowed).toBe(false)
+      if (dFrom.allowed && dTo.allowed) fs.cpSync(from, badTo, { recursive: true })
+      expect(existsSync(badTo)).toBe(false)
+
+      // Source out of grant: also refused.
+      const badFrom = path.join(repo, "outside.txt")
+      expect(fsScopeDecision(repo, badFrom, grants).allowed).toBe(false)
+      expect(existsSync(path.join(repo, "src", "copy.rs"))).toBe(true)
+    } finally {
+      fs.rmSync(path.dirname(repo), { recursive: true, force: true })
+    }
+  },
+)
+

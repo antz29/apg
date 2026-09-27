@@ -16,6 +16,7 @@ import {
   resolveProjectPath,
   findSymbolRebaseColumns,
   scopeProjectRequirements,
+  fsScopeDecision,
   REQUIREMENT_FQN_PREFIX,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
@@ -201,4 +202,46 @@ test("a requirement Satisfied by another project's phase is not over-satisfied b
   expect(foreign.overSatisfied).toEqual([])
   expect(foreign.unsatisfied).toEqual([])
 })
+
+// agent-fs-tools phase-01.task-7: the PURE self-enforcement core for the fs
+// tools. `fsScopeDecision` is side-effect-free (no fs, no process, no db), so
+// it lives in the `bun test` unit tier; the real-fs application path is the
+// opt-in boundary e2e. Two INDEPENDENT tests, both required to allow.
+test("fsScopeDecision allows a path matched by a granted glob inside the boundary", () => {
+  const d = fsScopeDecision("/repo", "/repo/src/a.rs", ["src/*.rs"])
+  expect(d.allowed).toBe(true)
+  expect(d.globMatched).toBe(true)
+  expect(d.inBoundary).toBe(true)
+  expect(d.relativePath).toBe("src/a.rs")
+  expect(d.reason).toBe(null)
+})
+
+test("fsScopeDecision refuses a path outside the granted globs", () => {
+  const d = fsScopeDecision("/repo", "/repo/build/x.rs", ["src/*.rs"])
+  expect(d.allowed).toBe(false)
+  expect(d.globMatched).toBe(false)
+  expect(d.inBoundary).toBe(true)
+  expect(d.reason).toContain("granted globs")
+})
+
+test("fsScopeDecision refuses a ..-escaping path even when a glob would match", () => {
+  const d = fsScopeDecision("/repo", "/repo/../etc/passwd", ["**/*"])
+  expect(d.allowed).toBe(false)
+  expect(d.globMatched).toBe(false)
+  expect(d.inBoundary).toBe(false)
+  expect(d.reason).toContain("boundary")
+})
+
+test("fsScopeDecision resolves a relative candidate against projectRoot", () => {
+  const d = fsScopeDecision("/repo", "src/deep/b.rs", ["**/*.rs"])
+  expect(d.allowed).toBe(true)
+  expect(d.relativePath).toBe("src/deep/b.rs")
+})
+
+test("fsScopeDecision: `*` does not cross /, `**` does, `**/` matches zero dirs", () => {
+  expect(fsScopeDecision("/repo", "/repo/src/deep/a.rs", ["src/*.rs"]).allowed).toBe(false)
+  expect(fsScopeDecision("/repo", "/repo/src/deep/a.rs", ["src/**/*.rs"]).allowed).toBe(true)
+  expect(fsScopeDecision("/repo", "/repo/a.rs", ["**/*.rs"]).allowed).toBe(true)
+})
+
 

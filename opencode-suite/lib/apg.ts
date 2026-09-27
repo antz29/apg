@@ -7,12 +7,20 @@
 // and Cypher string-literal escaping (so structured args can never break out
 // of or inject into a query).
 
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { homedir } from "node:os"
 import path from "node:path"
 
 export interface ToolContext {
   directory: string
   worktree: string
+  /**
+   * The acting agent's NAME, as carried on opencode's v1 tool context
+   * (`@opencode-ai/plugin` `ToolContext.agent`). Typed structurally here so
+   * this module never imports the plugin at runtime — the tools receive the
+   * real field, the plugin-free unit/e2e tiers simply omit it.
+   */
+  agent?: string
 }
 
 /** The apg binary to spawn: APG_BINARY env override, default "apg" on PATH. */
@@ -72,6 +80,205 @@ export function resolveProjectPath(projectDir: string, value: string): string {
     return rel.split(path.sep).join("/")
   }
   return path.join(projectDir, value)
+}
+
+// ── Filesystem scope enforcement (apg_rm / apg_mv / apg_cp) ────────────────
+//
+// The three fs tools (`opencode-suite/tools/apg_rm.ts` / `apg_mv.ts` /
+// `apg_cp.ts`) SELF-ENFORCE per-path scope so a code-writer implementer can
+// implement plan `deletes`/`renames`/`moves` tasks only inside the surface it
+// owns. The opencode tool-level grant is just the callability gate; the real
+// boundary is decided here. The DECISION is PURE (`fsScopeDecision`: no fs, no
+// process, no db) so the side-effect-free `bun test` unit tier covers it; the
+// acting-agent permission read (`agentFsGlobs`) is real file I/O, covered by
+// the opt-in suite e2e. This module stays PLUGIN-FREE — the acting agent name
+// arrives as a plain string on the tool context, so nothing here imports
+// `@opencode-ai/plugin` at runtime.
+
+/** The outcome of checking one candidate path against one acting agent's
+ *  grants. `allowed` is the conjunction of the two independent tests the fs
+ *  tools enforce: `globMatched` (the path is inside the agent's granted globs)
+ *  and `inBoundary` (the path does not escape the caller's project/worktree
+ *  root). `reason` is the human-readable refusal, or `null` when allowed. */
+export interface FsScopeDecision {
+  allowed: boolean
+  /** `candidate`, resolved and expressed relative to `projectRoot` in `/`-form
+   *  (the spelling the granted globs match). */
+  relativePath: string
+  /** True when `relativePath` matched at least one granted glob. */
+  globMatched: boolean
+  /** True when the resolved path stays inside `projectRoot` (no `..`/absolute
+   *  escape). */
+  inBoundary: boolean
+  /** Why the path was refused, or `null` when `allowed`. */
+  reason: string | null
+}
+
+/**
+ * Compiles one path glob to an anchored RegExp. A single star matches within a
+ * path segment; a double star crosses path separators; a question mark matches
+ * one non-separator character. A double star immediately followed by a
+ * separator also matches the zero-directory case (so the Rust-file doublestar
+ * pattern matches a bare basename). Every other metacharacter is escaped
+ * literally. Globs match slash-separated relative paths.
+ */
+const globToRegExp = (glob: string): RegExp => {
+  let re = ""
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i]
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        i++
+        if (glob[i + 1] === "/") {
+          i++
+          re += "(?:.*/)?"
+        } else {
+          re += ".*"
+        }
+      } else {
+        re += "[^/]*"
+      }
+    } else if (c === "?") {
+      re += "[^/]"
+    } else if ("\\^$.|+()[]{}".includes(c)) {
+      re += "\\" + c
+    } else {
+      re += c
+    }
+  }
+  return new RegExp("^" + re + "$")
+}
+
+/** True when a `/`-separated relative path matches a path glob. */
+const globMatch = (glob: string, relativePath: string): boolean =>
+  globToRegExp(glob).test(relativePath)
+
+/**
+ * The PURE filesystem scope decision. No fs, no process, no db, no git — safe
+ * for the side-effect-free `bun test` unit tier, and the direct, plugin-free
+ * target of the opt-in suite e2e (`opencode-suite/tests/boundary.e2e.test.ts`).
+ *
+ * - `projectRoot` — the caller's project/worktree directory; `candidatePath`
+ *   (absolute, or relative to `projectRoot`) is resolved against it.
+ * - `grantedGlobs` — the acting agent's granted path globs (its write scope,
+ *   read from its permission block by `agentFsGlobs`); a literal argument here
+ *   so the decision never depends on the plugin context.
+ *
+ * Two INDEPENDENT tests, both required: the resolved path must stay inside
+ * `projectRoot` (`inBoundary` — a `..`/absolute escape is refused even when it
+ * matches a glob), and its `projectRoot`-relative `/`-form must match at least
+ * one granted glob (`globMatched`). Symlinks are not resolved; the check is on
+ * the lexical path the caller supplied.
+ */
+export function fsScopeDecision(
+  projectRoot: string,
+  candidatePath: string,
+  grantedGlobs: readonly string[],
+): FsScopeDecision {
+  const rootAbs = path.resolve(projectRoot)
+  const candidateAbs = path.isAbsolute(candidatePath)
+    ? path.resolve(candidatePath)
+    : path.resolve(rootAbs, candidatePath)
+  const rel = path.relative(rootAbs, candidateAbs)
+  const inBoundary = rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))
+  const relativePath = rel.split(path.sep).join("/")
+  const globMatched = inBoundary && grantedGlobs.some((g) => globMatch(g, relativePath))
+  const allowed = inBoundary && globMatched
+  const reason = allowed
+    ? null
+    : !inBoundary
+      ? "path escapes the project/worktree boundary"
+      : "path is not within the acting agent's granted globs"
+  return { allowed, relativePath, globMatched, inBoundary, reason }
+}
+
+/**
+ * Extracts the YAML frontmatter body (between the leading `---` fences) from an
+ * agent config file, or `null` when the file is not a fenced-frontmatter doc.
+ */
+function frontmatter(text: string): string | null {
+  const lines = text.split("\n")
+  if (lines[0]?.trim() !== "---") return null
+  const end = lines.indexOf("---", 1)
+  if (end < 0) return null
+  return lines.slice(1, end).join("\n")
+}
+
+/** Leading-space count of a line (indentation depth). */
+function indentOf(line: string): number {
+  return line.length - line.trimStart().length
+}
+
+/**
+ * The `permission.edit` ALLOW globs from an agent's frontmatter `permission`
+ * block — the agent's write scope. Extracts the `edit:` mapping (a line whose
+ * only content is `edit:` under `permission:`) and collects each child entry
+ * spelled `"<glob>": allow` (quoted or bare key). Deny entries are skipped: the
+ * returned list is the positive grant set `fsScopeDecision` consumes. Returns
+ * `null`/`[]` only after the caller has read a file that carries no `edit:`
+ * block.
+ */
+function editAllowGlobs(frontmatterBody: string): string[] {
+  const lines = frontmatterBody.split("\n")
+  const start = lines.findIndex((l) => /^\s+edit:\s*$/.test(l))
+  if (start < 0) return []
+  const baseIndent = indentOf(lines[start])
+  const globs: string[] = []
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === "") continue
+    if (indentOf(line) <= baseIndent) break
+    const m = /^\s+(?:"([^"]+)"|'([^']+)'|(\S+?)):\s*(allow|deny)\s*$/.exec(line)
+    if (m && m[4] === "allow") {
+      const glob = m[1] ?? m[2] ?? m[3]
+      if (!globs.includes(glob)) globs.push(glob)
+    }
+  }
+  return globs
+}
+
+/** Reads one agent config file and returns its `permission.edit` allow globs,
+ *  or `null` when the file does not exist / cannot be read. */
+function readAgentEditGlobs(file: string): string[] | null {
+  if (!existsSync(file)) return null
+  try {
+    const fm = frontmatter(readFileSync(file, "utf8"))
+    return fm === null ? [] : editAllowGlobs(fm)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolves the ACTING agent (from the plain `context.agent` string the opencode
+ * tool context carries) to its granted path globs. There is no permission field
+ * on the tool context, so the grants are read from the agent's config file —
+ * markdown with a fenced YAML frontmatter whose `permission.edit` block lists
+ * the agent's path grants. The project agent file
+ * (`<dir>/.opencode/agents/<agent>.md`) wins over the globally-installed one
+ * (`~/.opencode/agents/<agent>.md`, where `apg init` installs the distributed
+ * suite). Returns `[]` when no agent name is present or no config resolves, so
+ * a caller refuses every path rather than allowing one by default.
+ *
+ * Real file I/O, so it is covered by the opt-in suite e2e, never the pure unit
+ * tier. It stays plugin-free: the name is a structural field, not a plugin type.
+ */
+export function agentFsGlobs(context: ToolContext, directory?: string): string[] {
+  const name = context.agent
+  if (!name) return []
+  const roots = [directory, context.directory, context.worktree].filter(
+    (p): p is string => typeof p === "string" && p.length > 0,
+  )
+  for (const root of roots) {
+    const globs = readAgentEditGlobs(path.join(root, ".opencode", "agents", `${name}.md`))
+    if (globs !== null) return globs
+  }
+  const home = process.env.HOME || homedir()
+  if (home) {
+    const globs = readAgentEditGlobs(path.join(home, ".opencode", "agents", `${name}.md`))
+    if (globs !== null) return globs
+  }
+  return []
 }
 
 /**
