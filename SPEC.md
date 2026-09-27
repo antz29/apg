@@ -1,55 +1,44 @@
-# apg-cache-config-key — fold the classification-config identity into the scan cache key
+# apg-plan-phases-scoping — scope the tool's requirement set to the project
 
 > High-level change-set definition. The durable spec lives in `apg/layers/` (authored
 > through `apg_node`/`apg_edge`); this file is the work brief, not the graph.
 
 ## Goal
-Include the graph-affecting **classification-config identity** of `apg/config.json`
-(its `default`, ordered `types` rules, and `structural` scope) in the global scan
-**cache key**, so a classification change forces a **full load** instead of silently
-reusing cached `code_type` values.
+`apg_plan_phases` must report only the requirements the **current project / branch** is
+responsible for — not every global requirement in the layers store.
 
 ## Why
-`code_type` is computed at ingest from a record's `path` + `apg/config.json`, and only
-a **full load** reclassifies. The cache key currently folds binary version + JSONL
-schema + ingestor projection rules + the scan config (languages / excludes / modules)
-— but **not** the classification config. A `apg/config.json` edit can therefore leave
-stale classifications in the incremental / splice path. This is a correctness bug in
-the released binary.
+`opencode-suite/tools/apg_plan_phases.ts` loads **all** `Requirement` nodes
+(lines 40–42) and reports any without a `Satisfies` edge as "unsatisfied" (line 82).
+Requirements delivered by other projects (or shipped with no plan at all) therefore
+read "unsatisfied" for every project forever — noise that masks real gaps. Observed in
+apg-cleanup: 24–25 previously-delivered requirements read "unsatisfied".
 
-## Status / provenance
-- The fix previously landed at `cbb2cd69` ("fold classification config into the scan
-  cache key"), then was **reverted** by `d68c1c07` as out-of-scope for the apg-cleanup
-  refactor-only change-set ("handed to a separate project"). Recover the patch from
-  `cbb2cd69`.
-- Adapt it to the post-decomposition layout: `src/cache.rs` → `src/cache/manifest.rs`;
-  `cmd_scan` moved `src/lib.rs` → `src/scan.rs`.
+## Model
+The binary's `solution_nodes_added_on_branch` (`src/plan_cmd/verify.rs`) already answers
+"what did this branch add?"; mirror that principle — a requirement is in scope for the
+project when this project / branch is responsible for it.
 
 ## Scope
-- Add `classification: String` to `ScanConfigKey`, plus `classification_digest` /
-  `classification_render` (a stable digest of `default` + ordered `types` + `structural`;
-  excludes the binary-managed `version`; a distinct sentinel for "no config").
-- Fold the digest into `CacheKey::compute`.
-- Compute it in `cmd_scan` (`src/scan.rs`) from the loaded `ApgConfig`.
-- Update every `ScanConfigKey` construction / use site: `src/cache/manifest.rs`,
-  `src/scan.rs`, `src/delta.rs`, `src/incremental/prepare.rs`, `src/warm.rs`.
-- Update / extend tests: `src/cache/tests.rs` (the
-  `cache_key_folds_the_classification_config` test from `cbb2cd69`), `src/delta/tests.rs`,
-  `tests/{cache,delta,incremental}_e2e.rs`.
-- Reconcile the durable spec: add / reconcile a `domain.value.cache-key` node describing
-  the classification-config component (currently unmaterialized).
+- Scope the requirement set in `opencode-suite/tools/apg_plan_phases.ts` to branch-added
+  requirements (or requirements Satisfied by this project's phases), so the
+  "unsatisfied" / "over-satisfied" findings become project-local.
+- Keep the existing findings unchanged: no-tasks, done-but-under-review, Gates cycles.
+- Add / extend the suite test coverage for the scoped behaviour.
+- Anchor: `solution.container.opencode-suite`.
+- The suite is **product source** embedded via `include_str!` and installed by
+  `apg init`; the repo's own `.opencode/**` are regenerated out-of-band — never edited
+  here.
 
 ## Non-goals
-- No scan-behaviour change beyond cache invalidation.
-- No unrelated cache / manifest changes.
+- No change to the `apg` binary or to other suite tools.
 
 ## Acceptance
-- Equal configs → equal keys; each graph-affecting field (`default`; `types` globs,
-  names, and rule **order**; `structural` include / exclude / code_type; absence vs
-  presence) moves the key; languages / excludes / modules still move it independently.
-- `cargo test` (unit+int) green; `cache` / `delta` / `incremental` e2e green.
+- Suite tests (`bun test`; `src/tslib` `node --test` where relevant) green.
+- The suite e2e (`full_dogfood_round_trip_suite_tool_ops_inside_the_worktree`,
+  `suite_tools_query_error_guard_is_structural`) green.
 - `scripts/gate.sh` green; `apg plan verify` green; merge.
 
 ## Open questions
-- Sentinel semantics for "no `apg/config.json`" (must be distinct and stable) — mirror
-  `cbb2cd69`.
+- Exact definition of "in scope": requirements added on the branch vs requirements with
+  a `Satisfies` in the project vs both. Decide in the spec (spec-first).
