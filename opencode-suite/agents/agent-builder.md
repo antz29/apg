@@ -183,6 +183,15 @@ never a mutation place.
   embedded in the body. **Enumerate every generated agent's grant explicitly —
   never a vague "suite" — and never include `apg_plan_render`** — that
   projection tool is navigator/coordinator-only.
+- **Filesystem scope tools — the implementer's `deletes`/`renames`/`moves`
+  surface.** Grant `apg_rm`/`apg_mv`/`apg_cp` deny-by-default as a per-tool glob
+  map (`"*": deny`, then the implementer's owned-path globs and their
+  `apg/.worktrees/*/` mirrors — never a scalar `: allow`, never a blanket
+  `"*": allow`), and drop the `bash:` `rm` pattern they supersede (rules 6 and
+  10; `apg_mv`/`apg_cp` check BOTH the source and the destination). The tools
+  self-enforce per-path scope from those granted globs. This is a scoped-write
+  surface only — the read-only apg-suite list above stays read-only — and it
+  belongs to the implementer's grant shape, never the test-implementer's.
 
 ### unit/int/e2e-test-implementer(s) (per detected tier, where a test tier is file-separable)
 - **Edit** scoped to the tier's test-file globs; **source denied**.
@@ -271,9 +280,11 @@ never a mutation place.
    pattern may contain `&&`, `|`, `;`, `$(`/`)`, or redirection** — a chained
    command must never match. Write bash is banned generally; the only write
    grants are the narrow, explicit ones the role needs (implementer:
-   `git add`/`git commit`, its verified build gates,    plain `rm <path>` with no
-   flags inside its owned dirs). **`git push` and `git tag` are human-approved —
-   scaffold them as `ask` so they prompt for explicit human approval.**
+   `git add`/`git commit`, its verified build gates, and the path-scoped fs-tool
+   grants `apg_rm`/`apg_mv`/`apg_cp` — never a bash `rm`/`mv`/`cp` pattern, so
+   `deletes`/`renames`/`moves` tasks run through the tools). **`git push` and
+   `git tag` are human-approved — scaffold them as `ask` so they prompt for
+   explicit human approval.**
    **Permission values are `allow`, `deny`, or — for the git push/tag
    human-approval gates — `ask`; `external_directory` is always `"*": deny`
    with `/tmp/**` allowed (or narrower, never broader).** A scaffolded agent
@@ -301,9 +312,14 @@ never a mutation place.
     allow and every deny an agent gets for a repo-root path MUST be duplicated
     under `apg/.worktrees/*/` (e.g. `src/*.rs` → also `apg/.worktrees/*/src/*.rs`;
     `src/golib/**` deny → also `apg/.worktrees/*/src/golib/**` deny). An agent
-    whose grants cover only the main checkout cannot touch the worktree it must
-    mutate — the scaffold is broken. Bash command patterns and tool grants need
-    no variants (they are cwd-agnostic; the agents `cd` into the worktree).
+   whose grants cover only the main checkout cannot touch the worktree it must
+   mutate — the scaffold is broken. **Cwd-agnostic bash command patterns ONLY
+   are exempt** (they carry no path; the agents `cd` into the worktree): the
+   path-scoped fs-tool glob grants (`apg_rm`/`apg_mv`/`apg_cp`) are NOT exempt —
+   the tools self-enforce per-path scope from the acting agent's granted globs
+   (the `permission.edit` allow globs), which opencode resolves against the
+   session workspace root, so those grants ARE mirrored under
+   `apg/.worktrees/*/` exactly like edit globs.
 
 ## Workflow
 

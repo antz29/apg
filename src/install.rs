@@ -153,6 +153,19 @@ pub const SUITE_TOOLS: &[(&str, &str)] = &[
         "apg_plan_verify.ts",
         include_str!("../opencode-suite/tools/apg_plan_verify.ts"),
     ),
+    // Filesystem scope tools.
+    (
+        "apg_rm.ts",
+        include_str!("../opencode-suite/tools/apg_rm.ts"),
+    ),
+    (
+        "apg_mv.ts",
+        include_str!("../opencode-suite/tools/apg_mv.ts"),
+    ),
+    (
+        "apg_cp.ts",
+        include_str!("../opencode-suite/tools/apg_cp.ts"),
+    ),
 ];
 
 /// Shared helper module used by the suite tools (`lib/apg.ts`), installed by

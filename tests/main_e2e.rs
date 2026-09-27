@@ -1844,6 +1844,9 @@ mod e2e {
             "apg_edge.ts",
             "apg_project.ts",
             "apg_plan_verify.ts",
+            "apg_rm.ts",
+            "apg_mv.ts",
+            "apg_cp.ts",
         ] {
             let p = dir.join("tools").join(name);
             assert!(p.exists(), "{name} must install");
@@ -1873,6 +1876,9 @@ mod e2e {
             "apg_edge.ts",
             "apg_project.ts",
             "apg_plan_verify.ts",
+            "apg_rm.ts",
+            "apg_mv.ts",
+            "apg_cp.ts",
         ] {
             assert!(names.contains(&name), "SUITE_TOOLS embeds {name}");
         }
