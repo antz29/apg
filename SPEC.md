@@ -1,44 +1,46 @@
-# apg-plan-phases-scoping — scope the tool's requirement set to the project
+# apg-details-target — align the `details` write surface with the projection
 
 > High-level change-set definition. The durable spec lives in `apg/layers/` (authored
 > through `apg_node`/`apg_edge`); this file is the work brief, not the graph.
 
 ## Goal
-`apg_plan_phases` must report only the requirements the **current project / branch** is
-responsible for — not every global requirement in the layers store.
+Remove the `details` write/load asymmetry: today the write surface accepts a
+`Note → Note` `details` edge, but the load projection silently **drops** it.
 
 ## Why
-`opencode-suite/tools/apg_plan_phases.ts` loads **all** `Requirement` nodes
-(lines 40–42) and reports any without a `Satisfies` edge as "unsatisfied" (line 82).
-Requirements delivered by other projects (or shipped with no plan at all) therefore
-read "unsatisfied" for every project forever — noise that masks real gaps. Observed in
-apg-cleanup: 24–25 previously-delivered requirements read "unsatisfied".
+- **Write** accepts it: `src/layers/validate.rs` (the `details` rule, ~lines 425–430)
+  accepts a note source → **any** target, including another `Note`; pinned by
+  `src/layers/tests.rs:529` (`details_accepts_any_target_and_enforces_note_source`).
+- **Load** excludes it: the `Details` REL TABLE (`src/load/tables.rs:1062`) omits `Note`
+  as a target — comment at lines 818–819: "`Note` is deliberately NOT a `Details`
+  target" — so the pair is dropped, not a binder error. Pinned by
+  `src/load/tests.rs:26–55` and `tests/artifacts_e2e.rs:152`
+  (`illegal_details_pair_is_projected_away_not_a_binder_error`).
+- Result: an edge accepted at write time is **silently lost** at projection — data loss
+  with no error. (Workaround in practice: avoid `details` edges whose target is a Note.)
 
-## Model
-The binary's `solution_nodes_added_on_branch` (`src/plan_cmd/verify.rs`) already answers
-"what did this branch add?"; mirror that principle — a requirement is in scope for the
-project when this project / branch is responsible for it.
+## Decision (spec-first)
+Pick the canonical side and reconcile the spec's `details` definition:
+- **Recommended:** tighten the **write** surface to refuse `Note → Note` — matches the
+  deliberate projection exclusion, and needs no DB / schema change; then reconcile the
+  spec prose.
+- **Alternative:** admit `Note` to the `Details` target list (schema + projection
+  change), if the spec intends `details` targets to include notes.
 
 ## Scope
-- Scope the requirement set in `opencode-suite/tools/apg_plan_phases.ts` to branch-added
-  requirements (or requirements Satisfied by this project's phases), so the
-  "unsatisfied" / "over-satisfied" findings become project-local.
-- Keep the existing findings unchanged: no-tasks, done-but-under-review, Gates cycles.
-- Add / extend the suite test coverage for the scoped behaviour.
-- Anchor: `solution.container.opencode-suite`.
-- The suite is **product source** embedded via `include_str!` and installed by
-  `apg init`; the repo's own `.opencode/**` are regenerated out-of-band — never edited
-  here.
+- `src/layers/validate.rs` (+ `src/layers/tests.rs`) and/or `src/load/tables.rs`
+  (+ its tests / `tests/artifacts_e2e.rs`).
+- Reconcile the durable `details` edge-kind spec (SPEC §3.3) so write and projection
+  agree.
 
 ## Non-goals
-- No change to the `apg` binary or to other suite tools.
+- `Reviews` (`Feedback → Note`) stays exactly as-is — `Note` remains reviewable.
 
 ## Acceptance
-- Suite tests (`bun test`; `src/tslib` `node --test` where relevant) green.
-- The suite e2e (`full_dogfood_round_trip_suite_tool_ops_inside_the_worktree`,
-  `suite_tools_query_error_guard_is_structural`) green.
-- `scripts/gate.sh` green; `apg plan verify` green; merge.
+- The asymmetry test flips to assert the chosen consistent behaviour.
+- `layers` / `load` / `artifacts` e2e green; `scripts/gate.sh` green; `apg plan verify`
+  green; merge.
 
 ## Open questions
-- Exact definition of "in scope": requirements added on the branch vs requirements with
-  a `Satisfies` in the project vs both. Decide in the spec (spec-first).
+- Which side is canonical (write-refuses vs projection-admits)? Decide in the spec, then
+  implement.
