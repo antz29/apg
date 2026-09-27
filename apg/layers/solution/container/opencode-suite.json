@@ -26,6 +26,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/lib/apg.ts",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/lib/apg.test.ts",
+      "properties": {}
     }
   ],
   "in": [
