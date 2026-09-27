@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "cache-key-classification-completeness",
+  "body": "Law (prose; assessed by review): the classification component of the cache key must be a stable, discriminating digest of exactly the graph-affecting classification inputs in `apg/config.json` — the `default` code type; the ordered `types` rules (each rule's name, globs, and names, and the rule order, since the first match wins); and the `structural` scope (include, exclude, code_type). It must distinguish absence from presence by a distinct, stable sentinel, and must exclude the binary-managed `version` field (the binary's own version is already folded into the key separately). Equal classification configs must yield equal digests; any change to a graph-affecting field must move the digest and force a full load.",
+  "properties": {
+    "attaches-to": "domain.value.cache-key"
+  },
+  "out": [],
+  "in": []
+}
