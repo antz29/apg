@@ -33,6 +33,11 @@
       "kind": "details",
       "source": "requirements.note.cache-key-classification-folding",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.details-target-reconciliation",
+      "properties": {}
     }
   ]
 }
