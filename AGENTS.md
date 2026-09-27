@@ -263,7 +263,10 @@ abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_project` (start/verify/merge), `apg_node` / `apg_edge` (durable
 node-file add/update/rm mutations), `apg_plan_add` (the plan add/update/rm
 authoring surface), `apg_plan` (+ phases/tasks/verify/done/undone/note/complete/
-render), `apg_review` (+ add/action/resolve/reject).
+render), `apg_review` (+ add/action/resolve/reject), and the path-scoped
+filesystem tools `apg_rm` / `apg_mv` / `apg_cp` (remove/move/copy that
+self-enforce the acting agent's granted path scope and the project/worktree
+boundary).
 Shared plumbing
 lives in `~/.opencode/lib/apg.ts`
 (root discovery, `apg query`/`apg project`/`apg node`/`apg edge`/`apg plan`/`apg review` subprocess,
