@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.plan-phases-project-scoping",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.group.plan-tooling",
+      "properties": {}
     }
   ],
   "in": []
