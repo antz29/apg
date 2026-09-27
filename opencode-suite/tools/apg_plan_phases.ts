@@ -1,5 +1,13 @@
 import { tool } from "@opencode-ai/plugin"
-import { runCypher, lit, csvToRows } from "../lib/apg.ts"
+import {
+  runCypher,
+  lit,
+  csvToRows,
+  branchAddedRequirementNames,
+  scopeProjectRequirements,
+  REQUIREMENT_FQN_PREFIX,
+  type RequirementScope,
+} from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -22,9 +30,8 @@ export default tool({
     // returned as the tool result instead of crashing with an opaque
     // exception. Containers consumed after the block are declared here.
     let phases: string[][]
-    let reqs: string[][]
+    let scope: RequirementScope
     let gates: Array<[string, string]>
-    const satBy = new Map<string, string[]>()
     const taskCount = new Map<string, number>()
     const doneSet = new Set<string>()
     const feedbackUnderReview = new Set<string>()
@@ -36,18 +43,32 @@ export default tool({
 
       // Requirements live in the layers store (global FQNs
       // `requirements.requirement.<name>`, no project prefix); the plan's
-      // Satisfies edges point at them by FQN.
-      reqs = csvToRows(
+      // Satisfies edges point at them by FQN. The full set only ORDERS the
+      // scoped findings and is unioned with the scope, so a requirement the
+      // scope does not cover is never emitted.
+      const allReqs = csvToRows(
         await runCypher(context, `MATCH (r:Requirement) RETURN r.fqn`, args.directory),
       )
-      // Satisfying phase per requirement — count, not membership: the spec
-      // requires every requirement Satisfied by EXACTLY one phase, so >1 is a
-      // finding too (not just 0).
+        .slice(1)
+        .map((r) => r[0])
+
+      // THIS project's Satisfies relation only — count, not membership: the
+      // spec requires every requirement Satisfied by EXACTLY one phase of the
+      // project, so >1 is a finding too (not just 0). Filtering to `pfx`
+      // keeps another project's transient Satisfies edge out of both the scope
+      // and the exactly-one-phase rule.
+      const satBy = new Map<string, string[]>()
       for (const [r, p] of csvToRows(
-        await runCypher(context, "MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn, pp.fqn", args.directory),
+        await runCypher(context, `MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) WHERE pp.fqn STARTS WITH ${lit(pfx)} RETURN r.fqn, pp.fqn`, args.directory),
       ).slice(1)) {
         satBy.set(r, [...(satBy.get(r) ?? []), p])
       }
+
+      // The scope DECISION is the shared pure core; the git branch delta that
+      // feeds it is the shared subprocess wrapper (real I/O, e2e-covered).
+      const branchAdded = await branchAddedRequirementNames(context, args.directory)
+      scope = scopeProjectRequirements(allReqs, branchAdded, satBy)
+
       gates = csvToRows(
         await runCypher(context, `MATCH (a:PlanPhase)-[:Gates]->(b:PlanPhase) WHERE a.fqn STARTS WITH ${lit(pfx)} RETURN a.fqn, b.fqn`, args.directory),
       ).slice(1) as Array<[string, string]>
@@ -78,19 +99,18 @@ export default tool({
     const cycle = detectCycle(gates)
     if (cycle) lines.push(`!! Gates cycle detected: ${cycle.join(" -> ")}`)
 
-    const reqName = (r: string[]) => r[1] || r[0].replace("requirements.requirement.", "")
-    const unsatisfied = reqs.slice(1).filter((r) => !satBy.has(r[0]))
-    if (unsatisfied.length) {
-      lines.push(`!! unsatisfied requirements (no PlanPhase Satisfies them): ${unsatisfied.map(reqName).join(", ")}`)
+    // Findings are scoped to THIS project: `scope` is the branch-added ∪
+    // this-project's-Satisfied set, so a requirement delivered by an earlier
+    // project (its transient Satisfies edge gone with its branch) is not
+    // reported unsatisfied here.
+    const reqName = (fqn: string) => fqn.replace(REQUIREMENT_FQN_PREFIX, "")
+    if (scope.unsatisfied.length) {
+      lines.push(`!! unsatisfied requirements (no PlanPhase Satisfies them): ${scope.unsatisfied.map(reqName).join(", ")}`)
     }
-    const overSatisfied = reqs
-      .slice(1)
-      .map((r) => [r, satBy.get(r[0]) ?? []] as const)
-      .filter(([, ps]) => ps.length > 1)
-    if (overSatisfied.length) {
-      for (const [r, ps] of overSatisfied) {
-        const phases = ps.map((p) => p.replace(pfx, "")).join(", ")
-        lines.push(`!! ${reqName(r)} Satisfied by more than one phase (${phases}) — every requirement must be Satisfied by exactly one phase`)
+    if (scope.overSatisfied.length) {
+      for (const { requirement, phases: projectPhases } of scope.overSatisfied) {
+        const phases = projectPhases.map((p) => p.replace(pfx, "")).join(", ")
+        lines.push(`!! ${reqName(requirement)} Satisfied by more than one phase (${phases}) — every requirement must be Satisfied by exactly one phase`)
       }
     }
     return lines.join("\n")
