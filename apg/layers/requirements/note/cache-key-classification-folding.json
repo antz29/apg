@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "requirements.note.blacklist-not-in-cache-key",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.fast-project-start",
+      "properties": {}
     }
   ],
   "in": []

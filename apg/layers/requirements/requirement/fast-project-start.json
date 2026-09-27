@@ -28,6 +28,11 @@
       "kind": "details",
       "source": "requirements.note.blacklist-not-in-cache-key",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.cache-key-classification-folding",
+      "properties": {}
     }
   ]
 }
