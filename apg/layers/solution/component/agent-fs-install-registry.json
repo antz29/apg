@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "agent-fs-install-registry",
+  "body": "The install registry that ships the fs tools: the `SUITE_TOOLS` table in `rust.apg.install` (`src/install.rs`) gains one `(filename, include_str!(...))` entry per new tool (`apg_rm.ts`, `apg_mv.ts`, `apg_cp.ts`), so `apg init` embeds and installs them into `~/.opencode/tools/` like every other suite tool. The table is consumed by `rust.apg.install.install_suite`, which writes each entry to the tools dir. `SUITE_TOOLS` is a `const`, so the module `rust.apg.install` is the graph-resolvable anchor for the registry entry.\n\nimplemented-by: `rust.apg.install` (the registry const's module) and the install-assertion e2e `rust.main_e2e.e2e.suite_installs_node_edge_project_tools_and_retires_spec_invariant`, which is extended to assert the three tools are embedded and installed.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
