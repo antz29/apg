@@ -48,6 +48,11 @@
       "kind": "details",
       "source": "requirements.note.graph-first-test-fqn-repoint",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.details-target-reconciliation",
+      "properties": {}
     }
   ]
 }

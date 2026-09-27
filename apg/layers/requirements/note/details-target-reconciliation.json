@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "requirements.requirement.fast-project-start",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.graph-first-navigation",
+      "properties": {}
     }
   ],
   "in": []
