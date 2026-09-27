@@ -526,14 +526,30 @@ mod unit {
         }
     }
 
-    /// `details` accepts any target — authored OR code — and enforces that the
-    /// source is a `note` (spanning every authoring layer).
+    /// `details` accepts any target — authored OR code — except a `note`
+    /// (a Note-to-Note pair has no durable edge), and enforces that the source
+    /// is a `note` (spanning every authoring layer).
     #[test]
-    fn details_accepts_any_target_and_enforces_note_source() {
+    fn details_refuses_note_target_and_enforces_note_source() {
+        // Every other authored node target — any layer — plus a code FQN is
+        // accepted.
         for target in [
+            "requirements.stakeholder.sh1",
+            "requirements.user.u1",
             "requirements.requirement.r1",
+            "requirements.constraint.c1",
+            "domain.group.g1",
             "domain.entity.e1",
+            "domain.value.v1",
+            "domain.service.svc1",
+            "domain.constraint.c1",
             "solution.system.sys1",
+            "solution.container.ct1",
+            "solution.component.cp1",
+            "solution.person.p1",
+            "solution.constraint.c1",
+            "implementation.constraint.c1",
+            "global.constraint.c1",
             // A code FQN target is exempt (not parsed).
             "apg.artifacts.write_jsonl_and_reingest",
         ] {
@@ -553,6 +569,25 @@ mod unit {
                 validate_edge("details", src, "requirements.requirement.r1").is_ok(),
                 "{src} must be a valid details source"
             );
+        }
+        // A `note` target in any layer is refused, naming the kind, source and
+        // target.
+        for target in [
+            "requirements.note.n2",
+            "domain.note.n2",
+            "solution.note.n2",
+            "implementation.note.n2",
+            "global.note.n2",
+        ] {
+            let msg = validate_edge("details", "requirements.note.n1", target)
+                .unwrap_err()
+                .to_string();
+            assert!(msg.contains("details"), "must name kind: {msg}");
+            assert!(
+                msg.contains("requirements.note.n1"),
+                "must name source: {msg}"
+            );
+            assert!(msg.contains(target), "must name target: {msg}");
         }
         for src in [
             "requirements.requirement.r1",

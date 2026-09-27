@@ -401,9 +401,9 @@ pub fn validate_edges(edges: &[(&str, &str, &str)]) -> anyhow::Result<()> {
 /// The source of every §3.3 edge is an authored node — parsed first, so a
 /// malformed source FQN or unknown layer is a dangling-reference write-time
 /// error for every kind. `implemented-by` (code-FQN target) and `details`
-/// (any-node target) have a code-exempt **target**: only their source is
-/// validated here; code-FQN validation against the scanned graph is task-10
-/// ([`validate_code_refs`]). For every other kind, both endpoints must parse
+/// (any target node except a `note`) have a code-exempt **target**: only their
+/// source is validated here; code-FQN validation against the scanned graph is
+/// task-10 ([`validate_code_refs`]). For every other kind, both endpoints must parse
 /// as authored-node FQNs and the (layer, type) shape must match a matrix row.
 pub(crate) fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::Result<()> {
     let (src_layer, src_type, _src_name) = parse_fqn(source)?;
@@ -422,13 +422,25 @@ pub(crate) fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::R
             }
             Ok(())
         }
-        // details: Note (any layer) → any node, authored OR code. The target is
-        // exempt; only the source's note-ness is checked.
+        // details: Note (any layer) → any node, authored OR code, EXCEPT a
+        // `note` target. The graph projection deliberately omits Note from its
+        // Details target list (`load::tables::spec_rel_pairs`), so a
+        // Note-to-Note pair would be accepted here and then silently dropped —
+        // refuse it with an actionable error instead. The target is still not
+        // validated against the scanned graph: a target that does not parse as
+        // an authored-node FQN (a code FQN) stays exempt.
         "details" => {
             if src_type.as_str() != "note" {
                 anyhow::bail!(
                     "`details` source `{source}` must be a `note` (any layer), not {}.{src_type}",
                     src_layer.layer_dir()
+                );
+            }
+            if let Ok((_dst_layer, dst_type, _dst_name)) = parse_fqn(target)
+                && dst_type.as_str() == "note"
+            {
+                anyhow::bail!(
+                    "`details` target `{target}` from source `{source}` must not be a `note` — a Note-to-Note `details` pair has no durable edge"
                 );
             }
             Ok(())
