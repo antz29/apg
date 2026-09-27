@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "plan-tooling-change-boundary",
+  "body": "Non-goal boundary (prose; assessed by review): this change-set makes no change to the `apg` binary (no `src/**` Rust) and no change to suite tools other than `apg_plan_phases`. It is confined to `opencode-suite/tools/apg_plan_phases.ts`, the shared `opencode-suite/lib/apg.ts` helper that tool uses, and their suite tests (`opencode-suite/lib/apg.test.ts`, `opencode-suite/tests/boundary.e2e.test.ts`). The binary's graph, plan and verify behaviour is untouched; the shared-lib change must be additive and must not alter the behaviour of any other suite tool.",
+  "properties": {
+    "attaches-to": "requirements.requirement.plan-phases-project-scoping"
+  },
+  "out": [],
+  "in": []
+}
