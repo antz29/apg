@@ -22,8 +22,11 @@
 //!
 //! The global cache key ([`CacheKey`], `domain.value.cache-key`) is the
 //! version/format/config identity that invalidates the whole cache on drift:
-//! binary version, scanner JSONL schema/format, ingestor projection rules, and
-//! the scan config (languages, excludes, modules).
+//! binary version, scanner JSONL schema/format, ingestor projection rules, the
+//! scan config (languages, excludes, modules), and the classification config
+//! (`apg/config.json`'s `default` / `types` / `structural` — the ingestor folds
+//! it into each record's `code_type`, so a config change must force a full
+//! load).
 
 // This module lands the phase-02 win-B content-addressed API; a few of its
 // accessors (e.g. `FactStore::has`, `Manifest::rebase_root`) are consumed by

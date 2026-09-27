@@ -8,6 +8,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::classify::ApgConfig;
+
 /// The scanner JSONL schema/format version folded into [`CacheKey`]. Bump when
 /// the wire format changes in a way that invalidates stored facts.
 pub const JSONL_SCHEMA_VERSION: &str = "1";
@@ -28,19 +30,74 @@ pub const JSONL_SCHEMA_VERSION: &str = "1";
 pub const PROJECTION_RULES_VERSION: &str = "2";
 
 /// The scan config identity folded into the global cache key: the exact set of
-/// languages, path excludes, and module restrictions a scan ran with. A change
-/// to any of them invalidates the whole cache (the projection could differ).
+/// languages, path excludes, and module restrictions a scan ran with, plus the
+/// **classification-config identity** of the loaded `apg/config.json`. A change
+/// to any of them invalidates the whole cache (the projection or the per-record
+/// `code_type` column could differ).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScanConfigKey {
     pub languages: Vec<String>,
     pub excludes: Vec<String>,
     pub modules: Vec<String>,
+    /// The digest of the graph-affecting `apg/config.json` fields (the
+    /// classification `default` + the ordered `types` rules + the structural
+    /// scope), or the distinct sentinel when no config is present — see
+    /// [`classification_digest`]. The binary-managed `version` is excluded.
+    pub classification: String,
+}
+
+/// The classification-config identity digest folded into the cache key: a
+/// stable digest of the graph-affecting fields of a loaded `apg/config.json`,
+/// or a distinct sentinel when no config is present. Equal configs always
+/// digest equal (deterministic across processes); only a genuine change to the
+/// classification `default`, the ordered `types` rules (globs/names), or the
+/// structural `include`/`exclude`/`code_type` scope moves it. No mtime, no raw
+/// whitespace, no binary-managed `version`.
+pub fn classification_digest(config: Option<&ApgConfig>) -> String {
+    let rendering = match config {
+        Some(cfg) => classification_render(cfg),
+        None => "\u{0}none".to_string(),
+    };
+    digest_str(&rendering)
+}
+
+/// The canonical rendering of [`ApgConfig`]'s graph-affecting fields: the
+/// `default` code type, the `types` rules in **declared order** (first-match
+/// wins), and the structural scope. Values are `\0`-separated so a value can
+/// never alias a field boundary. The rule order is preserved because it is
+/// significant; the inner list order is preserved too for a byte-stable
+/// rendering, though it does not change classification.
+fn classification_render(cfg: &ApgConfig) -> String {
+    let mut out = String::from("default\0");
+    out.push_str(&cfg.default);
+    for rule in &cfg.types {
+        out.push_str("\0type\0");
+        out.push_str(&rule.name);
+        out.push_str("\0globs\0");
+        out.push_str(&rule.globs.join("\0"));
+        out.push_str("\0names\0");
+        out.push_str(&rule.names.join("\0"));
+    }
+    out.push_str("\0structural\0");
+    match &cfg.structural {
+        Some(scope) => {
+            out.push_str("exclude\0");
+            out.push_str(&scope.exclude.join("\0"));
+            out.push_str("\0include\0");
+            out.push_str(&scope.include.join("\0"));
+            out.push_str("\0code_type\0");
+            out.push_str(scope.code_type.as_deref().unwrap_or(""));
+        }
+        None => out.push_str("none"),
+    }
+    out
 }
 
 /// The version/format/config identity that invalidates the whole cache when it
 /// drifts (`domain.value.cache-key`): binary version + JSONL schema/format +
-/// ingestor projection rules + scan config. A mismatch forces a full scan for
-/// correctness, never as a heuristic.
+/// ingestor projection rules + the scan config (languages/excludes/modules) +
+/// the classification config. A mismatch forces a full scan for correctness,
+/// never as a heuristic.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CacheKey {
     pub binary_version: String,
@@ -52,7 +109,9 @@ pub struct CacheKey {
 impl CacheKey {
     /// Builds the key for a scan config: the binary's own version plus the
     /// pinned schema/projection versions plus a stable digest of the scan
-    /// config (a sorted, `\0`-joined rendering so ordering never matters).
+    /// config (a sorted, `\0`-joined rendering so ordering never matters). The
+    /// classification-config identity is already canonical, so it folds in as
+    /// one opaque part.
     pub fn compute(config: &ScanConfigKey) -> CacheKey {
         let mut parts: Vec<String> = Vec::new();
         for (tag, vals) in [
@@ -66,6 +125,7 @@ impl CacheKey {
                 parts.push(format!("{tag}={v}"));
             }
         }
+        parts.push(format!("classify={}", config.classification));
         CacheKey {
             binary_version: env!("CARGO_PKG_VERSION").to_string(),
             jsonl_schema: JSONL_SCHEMA_VERSION.to_string(),
