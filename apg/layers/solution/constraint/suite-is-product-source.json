@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "suite-is-product-source",
+  "body": "`opencode-suite/**` is product source: the tools and the shared lib are embedded into the `apg` binary via `include_str!` (`src/install.rs`, e.g. `apg_plan_phases.ts` at lines 120-123) and installed by `apg init` into `~/.opencode/`. This change-set authors the change in `opencode-suite/**`; the repo's own `.opencode/**` are consumer artifacts regenerated out-of-band from the installed release and are NEVER edited here. Satisfaction is assessed by review.",
+  "properties": {
+    "attaches-to": "solution.container.opencode-suite"
+  },
+  "out": [],
+  "in": []
+}
