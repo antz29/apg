@@ -24,6 +24,7 @@ import {
   branchAddedRequirementNames,
   scopeProjectRequirements,
   fsScopeDecision,
+  agentFsGlobs,
   REQUIREMENT_FQN_PREFIX,
   csvToRows,
   type ToolContext,
@@ -423,4 +424,107 @@ test.skipIf(!enabled)(
     }
   },
 )
+
+// agent-fs-tools feedback-8: `agentFsGlobs` — the acting-agent permission read
+// that feeds `fsScopeDecision` — is real file I/O, so it is covered here at the
+// opt-in e2e tier, plugin-free (imports only `../lib/apg.ts` + node/bun
+// builtins). `HOME` is redirected to the scratch tree so the global fallback
+// never reads a real `$HOME` (`global.constraint.no-real-project-test`).
+
+/// A scratch base with a project dir (holding one agent file) and an isolated
+/// HOME. Returns the base (for cleanup), the project root, and the scratch home.
+function scratchAgentDir(
+  name: string,
+  frontmatter: string,
+): { base: string; repo: string; home: string } {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-agentfs-"))
+  const repo = path.join(base, "repo")
+  const home = path.join(base, "home")
+  fs.mkdirSync(path.join(repo, ".opencode", "agents"), { recursive: true })
+  fs.mkdirSync(home, { recursive: true })
+  fs.writeFileSync(path.join(repo, ".opencode", "agents", `${name}.md`), frontmatter)
+  return { base, repo, home }
+}
+
+test.skipIf(!enabled)(
+  "e2e: agentFsGlobs reads the project agent's permission.edit allow globs, excluding deny",
+  () => {
+    const agent = "scoped-agent"
+    const file = [
+      "---",
+      "description: scratch scoped agent",
+      "permission:",
+      '  "*": deny',
+      "  edit:",
+      '    "*": deny',
+      '    "src/*.rs": allow',
+      '    "opencode-suite/**": allow',
+      '    "secret/**": deny',
+      "---",
+      "",
+      "# Scoped agent",
+      "",
+    ].join("\n")
+    const { base, repo, home } = scratchAgentDir(agent, file)
+    const prevHome = process.env.HOME
+    process.env.HOME = home
+    try {
+      const globs = agentFsGlobs({ agent, directory: repo, worktree: repo }, repo)
+      // Only the ALLOW globs, in file order; the deny entries are not grants.
+      expect(globs).toEqual(["src/*.rs", "opencode-suite/**"])
+      expect(globs).not.toContain("secret/**")
+      expect(globs).not.toContain("*")
+
+      // The read result actually feeds scope enforcement: an allow glob passes,
+      // a deny-only path and a non-granted path are refused.
+      expect(fsScopeDecision(repo, path.join(repo, "src", "a.rs"), globs).allowed).toBe(true)
+      expect(fsScopeDecision(repo, path.join(repo, "opencode-suite", "x.ts"), globs).allowed).toBe(
+        true,
+      )
+      expect(fsScopeDecision(repo, path.join(repo, "secret", "k.txt"), globs).allowed).toBe(false)
+      expect(fsScopeDecision(repo, path.join(repo, "build", "x.rs"), globs).allowed).toBe(false)
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+test.skipIf(!enabled)(
+  "e2e: agentFsGlobs fails closed when no agent file resolves, and reads the global fallback",
+  () => {
+    // The project holds an unrelated agent, and the isolated HOME is empty.
+    const { base, repo, home } = scratchAgentDir(
+      "present-agent",
+      '---\npermission:\n  edit:\n    "src/*.rs": allow\n---\n',
+    )
+    const prevHome = process.env.HOME
+    process.env.HOME = home
+    try {
+      // Missing project file + empty HOME: fail-closed `[]`, never a default.
+      expect(agentFsGlobs({ agent: "unknown-agent", directory: repo, worktree: repo }, repo)).toEqual(
+        [],
+      )
+      // No agent name at all is likewise fail-closed.
+      expect(agentFsGlobs({ directory: repo, worktree: repo }, repo)).toEqual([])
+
+      // With no project file, the globally-installed agent file is the fallback
+      // (`apg init` installs the distributed suite under `~/.opencode/agents/`).
+      fs.mkdirSync(path.join(home, ".opencode", "agents"), { recursive: true })
+      fs.writeFileSync(
+        path.join(home, ".opencode", "agents", "global-agent.md"),
+        '---\npermission:\n  edit:\n    "lib/*.ts": allow\n---\n',
+      )
+      expect(
+        agentFsGlobs({ agent: "global-agent", directory: repo, worktree: repo }, repo),
+      ).toEqual(["lib/*.ts"])
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
 
