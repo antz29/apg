@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "classification-config",
+  "body": "The graph-affecting classification identity of `apg/config.json`: the `default` code type, the ordered `types` rules (each rule's name, globs, and names, and the rule order — the first matching rule wins), and the `structural` scope (include, exclude, code_type). It is a distinct entity because `code_type` is computed at ingest from a record's `path` plus this config (`rust.apg.classify.classify_code_type`), so a change to any graph-affecting field changes the assembled graph. Equal configs must yield equal identity; absence — of the config, and of its `structural` section — is carried by a distinct stable sentinel; the binary-managed `version` field is excluded, because the binary's own version is already folded into the key separately. It is the entity folded into `domain.value.cache-key`, realised by `solution.component.cache-classification-key`.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
