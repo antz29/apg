@@ -5,5 +5,11 @@
   "body": "The set of requirements a project/branch is responsible for: branch-added requirements (a `apg/layers/requirements/requirement/<name>.json` layer file present on this branch but absent from the repo's default branch — the requirements-layer analogue of the binary's `solution_nodes_added_on_branch`) UNION the requirements this project's phases `Satisfies`. It is the scope `apg_plan_phases` reports on; requirements outside it — delivered by other projects whose transient plans did not survive — are not reported as unsatisfied.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.plan-tooling",
+      "properties": {}
+    }
+  ]
 }

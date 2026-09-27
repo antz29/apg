@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "domain.entity.plan-phases-tool",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.project-requirement-scope",
+      "properties": {}
     }
   ],
   "in": []
