@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "agent-fs-per-path-permission",
+  "body": "Law (prose; assessed by review): the per-path permission scoping IS the mechanism. A custom suite tool's path argument is matched against the acting agent's granted path globs in its permission block (the same glob mechanism as `edit`, worktree-mirrored), so the grant is scoped to exactly the role's owned surface rather than the tool being allowed wholesale.\n\nAcceptance: a generated implementer's permission block expresses `apg_rm` / `apg_mv` / `apg_cp` as a deny-by-default glob map whose allow entries are exactly the role's owned path globs plus their `apg/.worktrees/*/` mirrors — never a scalar `: allow`, and never a blanket `\"*\": allow`. A path outside the granted globs is refused by the permission layer.\n\nFALLBACK (open question, to confirm against opencode): if opencode treats a custom tool's permission as tool-level only (no per-path argument matching), the scoping must instead be enforced inside the tool — it resolves its path argument against the caller's project directory and refuses a path outside the acting role's granted surface. The requirement's observable acceptance (out-of-scope path refused) is unchanged under either mechanism; only where the enforcement lives moves.",
+  "properties": {
+    "attaches-to": "requirements.requirement.agent-fs-write-operations"
+  },
+  "out": [],
+  "in": []
+}
