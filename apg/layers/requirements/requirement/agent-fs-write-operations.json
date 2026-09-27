@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-fs-tools"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.group.agent-fs-operations",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

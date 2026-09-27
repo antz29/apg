@@ -19,5 +19,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.agent-fs-write-operations",
+      "properties": {}
+    }
+  ]
 }
