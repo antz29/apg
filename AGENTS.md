@@ -661,7 +661,8 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
   the authored `implemented-by` kind: System/Container/Component → code),
   `Calls` (Service→Service), `Publishes`/`Subscribes` (Service → event
   Entity), `DependsOn` (Requirement→Requirement), `Uses` (Person→System),
-  `Represents` (User→Entity, Entity→Person), `Details` (Note→any).
+  `Represents` (User→Entity, Entity→Person), `Details` (Note→any node but
+  `Note`, or a code FQN).
   Transient: `Gates` (PlanPhase→PlanPhase), `Satisfies` (PlanPhase→
   Requirement), `Reviews` (Feedback→any). Dependency and `contains` trees are
   acyclic; a dangling FQN is a write-time error (see the layers section
@@ -704,7 +705,8 @@ The **spine** threads the tiers end to end:
 scanned graph: resolves → real; planned → pending, not an error; gone →
 drift, an error), `calls`, `publishes`/`subscribes` (Service → event Entity),
 `depends-on`, `uses` (Person → System), `represents` (User → Entity, Entity →
-Person), `details` (Note → any). Any requirement traces down to the code that
+Person), `details` (Note → any node but `Note`, or a code FQN). Any requirement
+traces down to the code that
 implements it; any code traces up to the why. A requirement is `delivered`
 when review concludes the spine reaches it — satisfaction is by review, not
 asserted by the binary.
