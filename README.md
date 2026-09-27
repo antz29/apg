@@ -277,6 +277,9 @@ agent to explore the graph directly — it will pick the right tool:
 | `apg_node` / `apg_edge` | durable spec mutations — node files under `apg/layers/`, paired edges |
 | `apg_plan` / `apg_plan_*` | plan phases/tasks/planned nodes, task notes, verify gate |
 | `apg_review` / `apg_review_*` | coordinator-mediated writer↔reviewer feedback cycle (transient mirrors) |
+| `apg_rm` | path-scoped remove — resolves its path against the caller's project dir and self-enforces the acting agent's granted globs + the project/worktree boundary |
+| `apg_mv` | path-scoped move/rename — source and destination each resolved against the caller's project dir and scope-checked (agent globs + worktree boundary; both ends) |
+| `apg_cp` | path-scoped copy — source and destination each resolved against the caller's project dir and scope-checked (agent globs + worktree boundary; both ends) |
 
 The code-graph tools above return location data; the `apg_project`/`apg_node`/
 `apg_edge`/`apg_plan_*`/`apg_review_*` tools operate on the project's spec/plan
