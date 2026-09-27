@@ -28,6 +28,11 @@
       "kind": "realised-by",
       "source": "domain.group.plan-tooling",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.plan-phases-tool",
+      "properties": {}
     }
   ]
 }
