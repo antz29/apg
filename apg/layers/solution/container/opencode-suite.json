@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "solution.component.navigator-prompt-guidance",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_phases.ts",
+      "properties": {}
     }
   ],
   "in": [
