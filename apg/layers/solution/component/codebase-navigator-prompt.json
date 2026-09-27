@@ -5,5 +5,11 @@
   "body": "The distributed `codebase-navigator` agent prompt file `opencode-suite/agents/codebase-navigator.md` (product source embedded into the `apg` binary via `include_str!` and installed by `apg init` into `~/.opencode/agents/`), as the surface that must carry the per-task implementation cadence — its \"Implementation flow\" section. It is product source in the opencode-suite distribution (`solution.container.opencode-suite`); the repo's own `.opencode/agents/**` are consumer artifacts and are never edited by this change-set.\n\nDeliberately a NARROW owner, distinct from the broad `solution.component.navigator-prompt-guidance` (which owns `opencode-suite/agents/*.md` collectively, including `agent-builder.md`, and is realised-by `domain.entity.graph-first-navigation`): a satisfied requirement's spine is coverage-checked (`rust.apg.plan_cmd.verify.coverage_check`), so driving this docs-only requirement through the broad component would make the verify gate demand tasks over the untouched `opencode-suite/agents/agent-builder.md`. This component's `implemented-by` set is exactly the one file the change-set edits.\n\nimplemented-by: `opencode-suite/agents/codebase-navigator.md`.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.task-execution-cadence",
+      "properties": {}
+    }
+  ]
 }
