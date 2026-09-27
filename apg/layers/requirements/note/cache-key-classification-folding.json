@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "requirements.requirement.fast-project-start",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.classification-config",
+      "properties": {}
     }
   ],
   "in": []
