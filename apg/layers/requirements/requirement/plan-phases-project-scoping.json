@@ -16,6 +16,11 @@
       "kind": "drives",
       "target": "domain.entity.plan-phases-tool",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.project-requirement-scope",
+      "properties": {}
     }
   ],
   "in": [
