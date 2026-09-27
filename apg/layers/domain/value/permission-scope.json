@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "permission-scope",
+  "body": "The per-path scope under which an agent's filesystem operation is permitted: the set of repo-relative glob patterns granted to that agent for the fs tools, mirrored under `apg/.worktrees/*/` so the same grant covers the worktree the agent mutates. It is the agent's owned surface expressed for path matching — narrow by construction (deny-by-default, exactly the source/config/test globs the role owns), never a blanket capability. A path outside the scope is refused; the scope is what makes the capability safe to grant at all.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
