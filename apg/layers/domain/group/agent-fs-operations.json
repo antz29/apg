@@ -7,6 +7,12 @@
     "attribute": "core",
     "root": "agent-fs-operation"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.agent-fs-operation",
+      "properties": {}
+    }
+  ],
   "in": []
 }
