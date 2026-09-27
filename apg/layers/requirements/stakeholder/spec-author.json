@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "stakeholder",
+  "name": "spec-author",
+  "body": "A person or agent with an interest in the durable spec's coherence: they author spec nodes and edges through `apg node add` / `apg edge add` (from inside a project worktree) and read them back through `apg_query`. They rely on one invariant — an edge the write surface accepts is visible in the graph. An edge accepted at write time and then silently dropped by the graph projection (as a `Note`→`Note` `details` edge is today) is invisible data loss; a pair the projection deliberately excludes must instead be refused at write time with an actionable error. Their interest is that the write surface and the graph projection agree on one canonical edge vocabulary.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
