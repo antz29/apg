@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.install",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.main_e2e.e2e.suite_installs_node_edge_project_tools_and_retires_spec_invariant",
+      "properties": {}
     }
   ],
   "in": [
