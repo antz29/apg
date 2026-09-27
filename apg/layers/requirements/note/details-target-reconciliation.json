@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.details-target-set-consistency",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.details-edge",
+      "properties": {}
     }
   ],
   "in": []
