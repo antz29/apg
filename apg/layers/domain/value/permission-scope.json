@@ -25,6 +25,11 @@
       "kind": "details",
       "source": "requirements.note.worktree-write-scope-decisions",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.fs-scope-deny-mirror",
+      "properties": {}
     }
   ]
 }
