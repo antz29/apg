@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.agent-fs-write-operations",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.code-writer-worktree-only-writes",
+      "properties": {}
     }
   ],
   "in": []
