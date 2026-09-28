@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "reviewer-upgrade-removal-guide",
+  "body": "Distributing `implementation-phase-reviewer` means a repo that already carries a repo-local `.opencode/agents/implementation-phase-reviewer.md` will, after `apg init`, hit `apg init`'s duplicate-install warning. That warning is CORRECT and stays: `apg init` never deletes anything and warns loudly when a project's `.opencode/` holds files duplicating the installed suite. The upgrade guide (`APG_UPGRADE_DOC` in `src/install.rs`, installed at `~/.opencode/lib/apg-upgrade.md`) must tell users to MANUALLY remove their local `implementation-phase-reviewer.md` when upgrading to the release that first distributes it. Phrase it for that release: a generic \"when upgrading to the release that first distributes the reviewer\" is fine, and `0.18.0` may be named illustratively.\n\nAcceptance criteria:\n- `APG_UPGRADE_DOC` carries an explicit upgrade step and/or common-issue entry telling users to delete a repo-local `implementation-phase-reviewer.md` after upgrading to the first release that distributes it.\n- `apg init`'s duplicate-install warning behaviour is unchanged: it still warns and still never deletes anything.\n- `upgrade_doc_covers_version_field_gate_and_fix_steps` is extended with a reviewer-removal needle.\n- Scope is `rust.apg.install` plus that one e2e test; no `apg init` behaviour change.",
+  "properties": {
+    "feature": "agent-builder-roster-cleanup"
+  },
+  "out": [],
+  "in": []
+}
