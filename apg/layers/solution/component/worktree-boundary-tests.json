@@ -4,7 +4,13 @@
   "name": "worktree-boundary-tests",
   "body": "The opt-in suite e2e `opencode-suite/tests/boundary.e2e.test.ts` as the surface that pins the worktree write boundary: a code-writer fs-op whose path resolves into the main checkout is refused whatever `directory` is passed, the matching worktree path inside a worktree-rooted grant succeeds, and `..`/absolute escapes stay refused. Deliberately a NARROW owner (implemented-by exactly this one file) so `rust.apg.plan_cmd.verify.coverage_check` maps the requirement's coverage 1:1 to the edited test surface.\n\nimplemented-by: `opencode-suite/tests/boundary.e2e.test.ts`.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tests/boundary.e2e.test.ts",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
