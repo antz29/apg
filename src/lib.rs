@@ -75,7 +75,7 @@ USAGE:
   apg init [dir]              Set up apg/ (config.json carrying the binary
                               version + .trans/ + .worktrees/), scaffold the
                               repo .gitignore for the apg layout entries,
-                              install/update the opencode apg tool suite + six
+                              install/update the opencode apg tool suite + seven
                               distributed agents + the upgrade guide in
                               ~/.opencode/, and warn loudly about project
                               .opencode/ files that duplicate the installed

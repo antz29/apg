@@ -382,8 +382,10 @@ mutates the graph), the project context comes first:
    planned nodes realized, all feedback resolved, coverage holds), produce the
    **human-gate summary** (work done, task notes, deviations still present),
    get human approval, then run **`apg project merge <name>`** from the main
-   checkout — verify gate → merge → unguarded main rebuild. **Push/tag remain
-   human — never agent.**
+   checkout — verify gate → merge → unguarded main rebuild. **Push/tag are
+   human-approved acts**: the code-writer agents never push/tag; the only agent
+   granted them is the optional per-repo `release-agent` (as `ask`), which you
+   dispatch only after obtaining explicit user consent.
 
 ### Spec authoring (delegate — never author inline)
 
