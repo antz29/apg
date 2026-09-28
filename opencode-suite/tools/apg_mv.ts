@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import fs from "node:fs"
 import path from "node:path"
-import { agentFsGlobs, fsScopeDecision } from "../lib/apg.ts"
+import { agentFsGlobs, fsScopeDecision, mainCheckoutRoot } from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -17,16 +17,28 @@ export default tool({
   async execute(args, context) {
     const { from, to } = args
     if (!from || !to) return "Error: from and to are required"
-    const root = args.directory || context.directory
-    const granted = agentFsGlobs(context, root)
+    const directory = args.directory || context.directory
 
-    const src = path.isAbsolute(from) ? path.resolve(from) : path.resolve(root, from)
-    const dst = path.isAbsolute(to) ? path.resolve(to) : path.resolve(root, to)
+    // The write boundary is anchored to the MAIN checkout, not the caller's
+    // `directory`: a worktree's grants live in the main checkout's agent file
+    // and are written against that root (`apg/.worktrees/<project>/<glob>`), so
+    // the decision frame is resolved from the caller's directory but is NEVER
+    // the caller's directory itself. BOTH endpoints still resolve against the
+    // caller's directory (the stored argument contract); only the SCOPE frame is
+    // main.
+    const frame = await mainCheckoutRoot(context, directory)
+    if (!frame) {
+      return "Refused: could not resolve the main checkout root for the given directory (is it inside a git repository?) — nothing moved"
+    }
+    const granted = agentFsGlobs(context, frame.root, frame.root)
+
+    const src = path.isAbsolute(from) ? path.resolve(from) : path.resolve(directory, from)
+    const dst = path.isAbsolute(to) ? path.resolve(to) : path.resolve(directory, to)
     for (const [label, abs] of [
       ["source", src],
       ["destination", dst],
     ] as const) {
-      const decision = fsScopeDecision(root, abs, granted)
+      const decision = fsScopeDecision(frame.root, abs, granted, frame.project)
       if (!decision.allowed) return `Refused: ${label} ${abs} — ${decision.reason}`
     }
 
