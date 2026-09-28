@@ -15,6 +15,11 @@
       "kind": "realised-by",
       "source": "domain.entity.distributed-agent-set",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.agent-file-migration",
+      "properties": {}
     }
   ]
 }
