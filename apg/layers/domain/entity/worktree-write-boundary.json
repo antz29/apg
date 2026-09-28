@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.component.agent-builder-prompt",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.agent-fs-permission-grants",
+      "properties": {}
     }
   ],
   "in": [
