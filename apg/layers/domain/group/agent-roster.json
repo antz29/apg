@@ -7,6 +7,12 @@
     "attribute": "core",
     "root": "distributed-agent-set"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.generated-agent-set",
+      "properties": {}
+    }
+  ],
   "in": []
 }
