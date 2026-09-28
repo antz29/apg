@@ -1,0 +1,12 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "agent-roster",
+  "body": "The two-set classification of the apg opencode agent roster and the boundary between them: agents the suite DISTRIBUTES (`apg init` installs them into `~/.opencode/agents/` from `opencode-suite/agents/**`, embedded in the binary via `include_str!`) versus agents each repo GENERATES (the `agent-builder` scaffolds them into `.opencode/agents/**` and commits them on the main checkout). An agent belongs to exactly one set by its nature: the distributed set is repo-agnostic shipped product source, and the generated set is repo-specific (agents that carry the repo's own paths, build gates, and edit grants). A third, supporting concern is the migration of a repo's local files when an agent moves from the generated set into the distributed set.\n\nThis group is the change-set's frame: R1 removes an unsupported option from the generated set, R2 moves the reviewer from the generated set into the distributed set, and the migration requirement documents the reconciliation that move forces.",
+  "properties": {
+    "attribute": "core",
+    "root": "distributed-agent-set"
+  },
+  "out": [],
+  "in": []
+}
