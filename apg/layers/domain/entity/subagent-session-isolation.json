@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "subagent-session-isolation",
+  "body": "The session-lifecycle policy that governs how the `codebase-navigator` (the coordinator actor, `requirements.user.navigator-agent`) uses the `task` tool: a dispatch is a FRESH, isolated subagent session, one dispatch = one self-contained unit of work, and a new task is always a new dispatch. The single permitted resume is the within-dispatch hand-back loop — the subagent returns needing a navigator action (a scan, a quick verify, an `apg_review_action`), the navigator performs it, and resumes that same session only to finish the same task (the mark-done step) before ending it. A resumed session is never used to start a new/different task, a reviewer is never resumed (each review round is a fresh dispatch), and resumption is never carried across phases.\n\nIt exists because subagent context (the context window of a resumed session) is finite: repeatedly resuming one session across tasks and phases accumulates context until the subagent breaks, so isolation — not reuse — is the design. It REFINES `domain.entity.task-execution-cadence`'s \"resumes the session only to mark done\" step by bounding resumption: the cadence names the ordering for mutating the plan (commit → quick verify → scan → resume to mark done), while this entity states that the resume is the ONLY one allowed, is confined to the same dispatch, and never covers a new task or a reviewer. It is realised by the navigator prompt (`solution.component.codebase-navigator-prompt`) that must state it and by the coherence test (`solution.component.navigator-isolation-coherence-test`) that pins it.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
