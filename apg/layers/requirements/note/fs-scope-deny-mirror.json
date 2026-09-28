@@ -49,6 +49,11 @@
       "kind": "details",
       "target": "solution.component.agent-fs-permission-grants",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.agent-fs-tool-suite",
+      "properties": {}
     }
   ],
   "in": []
