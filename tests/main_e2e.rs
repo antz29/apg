@@ -2186,6 +2186,50 @@ mod e2e {
             "the navigator must no longer claim the implementer actions Feedback"
         );
 
+        // Session isolation (the law): the navigator prompt bounds subagent
+        // session reuse. These needles pin the requirement
+        // `requirements.requirement.navigator-session-isolation`; each is a
+        // literal substring of the embedded prompt and stays within one
+        // hard-wrapped source line (markdown emphasis and the em dash are part
+        // of the source, so a needle crossing a `**` boundary mid-phrase would
+        // never match).
+        for needle in [
+            // (1) fresh, isolated session; no `task_id`; one dispatch = one
+            // self-contained unit of work; a new task is always a new dispatch.
+            "**Session isolation (the law)**",
+            "isolated subagent session — no `task_id`",
+            "self-contained unit of work",
+            "starting a new task is always a new",
+            "never a resume",
+            // (2) the one permitted resume is the same-dispatch hand-back that
+            // finishes the same task and then ends it.
+            "The **only** permitted resume",
+            "hand-back loop within **one** dispatch",
+            "that same session only to finish the same",
+            "then end it",
+            // (5) the retained "Resume … only to mark done" step is explicitly
+            // scoped to that bounded hand-back, not a general licence.
+            "Resume that same session, only to mark done",
+            "This is the **only** permitted resume",
+            // (3) resumption is never used to start a new/different task, a
+            // reviewer is never resumed (each review round is a fresh
+            // dispatch), and it is never carried across phases.
+            "used to start a new or different task",
+            "is **never** used to resume a",
+            "each review round is a **fresh dispatch**",
+            "carried across phases",
+            // (4) the motivation: subagent context is finite, isolation is the
+            // design.
+            "context is finite",
+            "a repeatedly resumed session accumulates context until it breaks",
+            "**isolation — not reuse — is the design**",
+        ] {
+            assert!(
+                navigator.contains(needle),
+                "the navigator prompt must pin the session-isolation prose ({needle})"
+            );
+        }
+
         // The reviewer prompts point the action step at the coordinator: the
         // writer returns a claim, the coordinator actions it.
         for name in ["spec-review.md", "plan-review.md"] {
