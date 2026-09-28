@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.main_e2e.e2e.installed_agent_prompts_state_file_access_read_guard",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/implementation-phase-reviewer.md",
+      "properties": {}
     }
   ],
   "in": [
