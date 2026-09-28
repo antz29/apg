@@ -28,6 +28,11 @@
       "kind": "details",
       "source": "requirements.note.worktree-write-scope-decisions",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.agent-fs-operations",
+      "properties": {}
     }
   ]
 }
