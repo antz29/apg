@@ -34,6 +34,11 @@
       "kind": "details",
       "target": "domain.entity.main-integration",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.agent-builder-model-map",
+      "properties": {}
     }
   ],
   "in": []
