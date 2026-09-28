@@ -56,6 +56,11 @@
       "kind": "realised-by",
       "source": "domain.entity.scan-authorization",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.navigator-scan-permission-decision",
+      "properties": {}
     }
   ]
 }
