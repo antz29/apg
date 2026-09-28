@@ -273,9 +273,12 @@ const globMatch = (glob: string, relativePath: string): boolean =>
  *   root (discovered by `mainCheckoutRoot`), the same root opencode resolves an
  *   agent's path-scoped grants against, so a worktree-rooted grant matches
  *   exactly the worktree path it names.
- * - `grantedGlobs` — the acting agent's granted path globs (its write scope,
- *   read from its permission block by `agentFsGlobs`); a literal argument here
- *   so the decision never depends on the plugin context.
+ * - `grantedRules` — the acting agent's granted path scope as the ordered
+ *   `{ glob, allow }` rules `agentFsGlobs` reads from its permission block
+ *   (BOTH allow and deny, in FILE ORDER, duplicates preserved). A bare glob
+ *   string is still accepted for pre-flip callers (the legacy allow-only list
+ *   the unit tests pass). A literal argument here so the decision never depends
+ *   on the plugin context.
  * - `project` — the acting worktree's project name `<p>` (or `null` when the
  *   caller is in the main checkout). Passing it puts the decision in
  *   MAIN-ANCHORED mode: the candidate must resolve under
@@ -299,7 +302,7 @@ const globMatch = (glob: string, relativePath: string): boolean =>
 export function fsScopeDecision(
   mainRoot: string,
   candidatePath: string,
-  grantedGlobs: readonly string[],
+  grantedRules: readonly ({ glob: string; allow: boolean } | string)[],
   project?: string | null,
 ): FsScopeDecision {
   const rootAbs = path.resolve(mainRoot)
@@ -322,6 +325,17 @@ export function fsScopeDecision(
     : worktreePrefix !== null
       ? relativePath.startsWith(worktreePrefix)
       : /^apg\/\.worktrees\/[^/]+\//.test(relativePath)
+
+  // Interim (worktree-write-scope phase-04.task-4.5): `agentFsGlobs` now returns
+  // the ordered `{ glob, allow }` rules. The last-matching-rule semantics (a deny
+  // revokes, no match refuses) land in task-4.6, so for now derive the legacy
+  // allow-only glob set these tests and the fs tools already exercise — a bare
+  // string entry is a legacy allow glob; an object entry grants only when
+  // `allow`. Threading the rules through here keeps the decision and the tools
+  // behaviour-unchanged while the rule list replaces the allow-only list.
+  const grantedGlobs = grantedRules.flatMap((rule) =>
+    typeof rule === "string" ? [rule] : rule.allow ? [rule.glob] : [],
+  )
 
   const globMatched = inBoundary && grantedGlobs.some((g) => globMatch(g, relativePath))
   const allowed = inBoundary && inWorktree && globMatched
@@ -404,8 +418,11 @@ function readAgentEditGlobs(file: string): { glob: string; allow: boolean }[] | 
 
 /**
  * Resolves the ACTING agent (from the plain `context.agent` string the opencode
- * tool context carries) to its granted path globs. There is no permission field
- * on the tool context, so the grants are read from the agent's config file —
+ * tool context carries) to its granted path scope — returned as the ordered
+ * `{ glob, allow }` rules (BOTH allow and deny, in FILE ORDER, duplicates
+ * preserved) so the tools and `fsScopeDecision` receive the whole rule list, not
+ * just the allow-side projection. There is no permission field
+ * on the tool context, so the rules are read from the agent's config file —
  * markdown with a fenced YAML frontmatter whose `permission.edit` block lists
  * the agent's path grants.
  *
@@ -416,7 +433,7 @@ function readAgentEditGlobs(file: string): { glob: string; allow: boolean }[] | 
  * the config is then read from `<mainRoot>/.opencode/agents/<agent>.md` and the
  * caller's `directory` is NOT consulted, so the resolved grants are identical
  * for every spelling of that directory (relative, trailing slash, symlink). The
- * grants are returned VERBATIM — already main-root-relative, the worktree-rooted
+ * rules are returned VERBATIM — already main-root-relative, the worktree-rooted
  * `apg/.worktrees/<project>/<glob>` forms `fsScopeDecision` matches against in
  * its main-anchored mode; the reader never rewrites them.
  *
@@ -434,18 +451,9 @@ export function agentFsGlobs(
   context: ToolContext,
   directory?: string,
   mainRoot?: string | null,
-): string[] {
+): { glob: string; allow: boolean }[] {
   const name = context.agent
   if (!name) return []
-  // Interim adaptation (worktree-write-scope phase-04.task-4.12): `readAgentEditGlobs`
-  // now returns the ordered allow+deny rule list. The `agentFsGlobs` semantic flip is
-  // owned by task-4.5, so map the rules back to the legacy allow-only, deduped glob
-  // list (in rule order) to keep `fsScopeDecision` and the fs tools unchanged.
-  const legacyGlobs = (rules: { glob: string; allow: boolean }[]): string[] => {
-    const out: string[] = []
-    for (const rule of rules) if (rule.allow && !out.includes(rule.glob)) out.push(rule.glob)
-    return out
-  }
   // A resolved main root is the whole search frame: the agent file lives on main
   // and its grants are written against that root. Without one, keep the legacy
   // caller-directory search so an existing 2-argument caller still works.
@@ -454,12 +462,12 @@ export function agentFsGlobs(
   )
   for (const root of roots) {
     const rules = readAgentEditGlobs(path.join(root, ".opencode", "agents", `${name}.md`))
-    if (rules !== null) return legacyGlobs(rules)
+    if (rules !== null) return rules
   }
   const home = process.env.HOME || homedir()
   if (home) {
     const rules = readAgentEditGlobs(path.join(home, ".opencode", "agents", `${name}.md`))
-    if (rules !== null) return legacyGlobs(rules)
+    if (rules !== null) return rules
   }
   return []
 }
