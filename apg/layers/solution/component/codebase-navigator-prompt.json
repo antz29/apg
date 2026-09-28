@@ -26,6 +26,11 @@
       "kind": "details",
       "source": "requirements.note.navigator-task-cadence-decision",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.agent-scaffold-flow",
+      "properties": {}
     }
   ]
 }
