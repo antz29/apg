@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "scan-consent-via-permission",
+  "body": "The distributed `codebase-navigator` prompt must not carry a bespoke scan-consent ritual. Scan authorization is delegated to opencode's per-call tool permission: the navigator's frontmatter grants `apg_scan: ask`, so opencode prompts the user on each call and the user may choose \"always allow\" to suppress future prompts. No \"ask the user first\" / \"get explicit approval before starting one\" / \"ask the user before running a scan\" / \"(after user approval)\" scan wording and no `question`-tool scan-consent step may remain. The stale-graph intent is retained: when the graph is missing or stale the agent runs `apg_scan` rather than guessing, and never re-runs a scan silently. Prose; assessed by review.",
+  "properties": {
+    "attaches-to": "requirements.requirement.navigator-scan-permission"
+  },
+  "out": [],
+  "in": []
+}
