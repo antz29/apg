@@ -7,5 +7,11 @@
     "attaches-to": "requirements.requirement.code-writer-worktree-only-writes"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "requirements.note.worktree-write-scope-decisions",
+      "properties": {}
+    }
+  ]
 }
