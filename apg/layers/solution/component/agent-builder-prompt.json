@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "agent-builder-prompt",
+  "body": "The distributed `agent-builder` agent template `opencode-suite/agents/agent-builder.md` (product source embedded into the `apg` binary via `include_str!` in `rust.apg.install`'s `AGENTS` table — `src/install.rs:255-277` — and installed by `apg init` into `~/.opencode/agents/`) as the surface that must carry this change-set's two edits: (a) its own frontmatter `bash:` block gains `git add *` and `git commit *` alongside the existing read-only git patterns, and non-negotiable rule 2 is amended to permit add+commit (push/tag stay human); (b) the body states that it scaffolds/updates `.opencode/agents/**` on the main checkout and commits there.\n\nDeliberately a NARROW owner, distinct from BOTH existing owners of this file: the broad `solution.component.navigator-prompt-guidance` (which owns the two prompt files collectively and is realised-by the unrelated `domain.entity.graph-first-navigation`) and `solution.component.agent-fs-permission-grants` (which owns this same file for the fs-tool grants). A satisfied requirement's spine is coverage-checked (`rust.apg.plan_cmd.verify.coverage_check`), so giving this requirement a component whose `implemented-by` set is exactly the one file it edits keeps the derived coverage a 1:1 mapping to the edited surface rather than resolving through the broad component that spans both prompt files — the same precedent as `solution.component.codebase-navigator-prompt`. It is product source in the opencode-suite distribution (`solution.container.opencode-suite`); the repo's own `.opencode/agents/**` are consumer artifacts and are never edited by this change-set.\n\nimplemented-by: `opencode-suite/agents/agent-builder.md`.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
