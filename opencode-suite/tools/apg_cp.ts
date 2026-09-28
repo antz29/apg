@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import fs from "node:fs"
 import path from "node:path"
-import { agentFsGlobs, fsScopeDecision, mainCheckoutRoot } from "../lib/apg.ts"
+import { agentFsGlobs, canonicalPath, fsScopeDecision, mainCheckoutRoot } from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -26,15 +26,20 @@ export default tool({
     // the caller's directory itself. Both endpoints still resolve against the
     // caller's directory (the stored argument contract); only the SCOPE frame is
     // main. A copy WRITES only at the destination, so that is what scope is
-    // decided for (the source is read, not written).
+    // decided for (the source is read, not written). Both endpoints are
+    // canonicalised (via `canonicalPath`) into the same symlink-resolved frame
+    // `mainCheckoutRoot` resolved the root in, so a symlinked `directory` and a
+    // symlink pointing into main are judged on their real target, not their
+    // textual spelling.
     const frame = await mainCheckoutRoot(context, directory)
     if (!frame) {
       return "Refused: could not resolve the main checkout root for the given directory (is it inside a git repository?) — nothing copied"
     }
     const granted = agentFsGlobs(context, frame.root, frame.root)
 
-    const src = path.isAbsolute(from) ? path.resolve(from) : path.resolve(directory, from)
-    const dst = path.isAbsolute(to) ? path.resolve(to) : path.resolve(directory, to)
+    const dir = canonicalPath(directory)
+    const src = canonicalPath(path.resolve(dir, from))
+    const dst = canonicalPath(path.resolve(dir, to))
     const decision = fsScopeDecision(frame.root, dst, granted, frame.project)
     if (!decision.allowed) return `Refused: destination ${dst} — ${decision.reason}`
 

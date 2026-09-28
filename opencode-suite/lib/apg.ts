@@ -122,6 +122,38 @@ export async function mainCheckoutRoot(
 }
 
 /**
+ * Canonicalises a filesystem path into the SAME symlink-resolved frame
+ * `mainCheckoutRoot` resolves its root in: the absolute path with every symlink
+ * on its EXISTING prefix followed to its real target. A path that does not
+ * exist yet cannot be `realpath`'d, so the deepest EXISTING ancestor is
+ * resolved and the remaining (non-existent) segments are re-appended lexically
+ * — a destination like `<worktree>/src/new.rs` stays comparable to the resolved
+ * frame, while a symlink anywhere on the existing prefix (a `directory` spelled
+ * through one, or a worktree-internal link pointing into the main checkout) is
+ * followed to its real target and judged on it. This is what keeps the fs
+ * tools' candidate and root comparisons in ONE frame; `fsScopeDecision` stays
+ * pure and I/O-free.
+ *
+ * Real I/O (fs), so it is covered by the opt-in suite e2e, never the pure unit
+ * tier.
+ */
+export function canonicalPath(p: string): string {
+  let abs = path.resolve(p)
+  const tail: string[] = []
+  while (true) {
+    try {
+      const real = realpathSync(abs)
+      return tail.length === 0 ? real : path.join(real, ...tail)
+    } catch {
+      const parent = path.dirname(abs)
+      if (parent === abs) return path.join(abs, ...tail)
+      tail.unshift(path.basename(abs))
+      abs = parent
+    }
+  }
+}
+
+/**
  * The stored↔absolute identity boundary, side-effect-free (no fs, no
  * subprocess, no `Bun.$`): given the caller's project directory and a path,
  * it returns the OTHER spelling of the same file.
@@ -164,7 +196,10 @@ export function resolveProjectPath(projectDir: string, value: string): string {
 // `apg/.worktrees/*/<glob>` — so the decision resolves both the grants and the
 // candidate against that one main root and structurally refuses any candidate
 // that resolves into the main checkout (outside every project worktree). The
-// main root is discovered by `mainCheckoutRoot` and handed in as an argument;
+// main root is discovered by `mainCheckoutRoot` and handed in as an argument,
+// and every candidate is canonicalised into that same frame by the
+// `canonicalPath` I/O helper (which follows symlinks, resolving the deepest
+// existing ancestor for a not-yet-existing destination) BEFORE the decision;
 // `fsScopeDecision` itself stays pure.
 
 /** The outcome of checking one candidate path against one acting agent's
@@ -254,8 +289,12 @@ const globMatch = (glob: string, relativePath: string): boolean =>
  * matches a glob), and — in main-anchored mode — must land in a project
  * worktree, not the main checkout (refused with `path resolves into the main
  * checkout` even when a root glob matches); its main-root-relative `/`-form
- * must then match at least one granted glob (`globMatched`). Symlinks are not
- * resolved; the check is on the lexical path the caller supplied.
+ * must then match at least one granted glob (`globMatched`). This function is
+ * PURE and resolves LEXICALLY only (no fs): callers canonicalise the frame root
+ * and each candidate with the `canonicalPath` I/O helper first, so both sides
+ * share ONE symlink-resolved frame — a `directory` spelled through a symlink and
+ * a worktree-internal symlink pointing into the main checkout are judged on
+ * their real target, never the caller's textual spelling.
  */
 export function fsScopeDecision(
   mainRoot: string,

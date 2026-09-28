@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import fs from "node:fs"
 import path from "node:path"
-import { agentFsGlobs, fsScopeDecision, mainCheckoutRoot } from "../lib/apg.ts"
+import { agentFsGlobs, canonicalPath, fsScopeDecision, mainCheckoutRoot } from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -30,13 +30,18 @@ export default tool({
     // the decision frame is resolved from the caller's directory but is NEVER
     // the caller's directory itself. Paths still resolve against the caller's
     // directory (the stored argument contract); only the SCOPE frame is main.
+    // Each candidate is then canonicalised (via `canonicalPath`) into that same
+    // symlink-resolved frame, so a `directory` spelled through a symlink and a
+    // worktree-internal symlink pointing into main are judged on their real
+    // target, not their textual spelling.
     const frame = await mainCheckoutRoot(context, directory)
     if (!frame) {
       return "Refused: could not resolve the main checkout root for the given directory (is it inside a git repository?) — nothing removed"
     }
     const granted = agentFsGlobs(context, frame.root, frame.root)
 
-    const resolved = paths.map((p) => (path.isAbsolute(p) ? path.resolve(p) : path.resolve(directory, p)))
+    const dir = canonicalPath(directory)
+    const resolved = paths.map((p) => canonicalPath(path.resolve(dir, p)))
     for (const abs of resolved) {
       const decision = fsScopeDecision(frame.root, abs, granted, frame.project)
       if (!decision.allowed) return `Refused: ${abs} — ${decision.reason}`

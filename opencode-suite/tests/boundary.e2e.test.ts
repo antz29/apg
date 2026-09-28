@@ -24,6 +24,7 @@ import {
   branchAddedRequirementNames,
   scopeProjectRequirements,
   fsScopeDecision,
+  canonicalPath,
   agentFsGlobs,
   mainCheckoutRoot,
   REQUIREMENT_FQN_PREFIX,
@@ -533,8 +534,9 @@ test.skipIf(!enabled)(
 // linked-worktree layout. The tool modules import `@opencode-ai/plugin` (which
 // this plugin-free suite does not install), so — like the `fsScopeDecision`
 // scenarios above — each scenario drives the SAME plugin-free sequence the tool
-// bodies run (`mainCheckoutRoot` → `agentFsGlobs` → `fsScopeDecision`) and
-// applies the corresponding real fs op gated on the decision. Pure fs/git, no
+// bodies run (`mainCheckoutRoot` → `agentFsGlobs` → `canonicalPath` →
+// `fsScopeDecision`) and applies the corresponding real fs op gated on the
+// decision. Pure fs/git, no
 // candidate `apg` binary, so these gate on the e2e opt-in alone. The whole repo
 // lives under the OS temp dir and is removed in `finally`
 // (`global.constraint.no-real-project-test`).
@@ -590,10 +592,10 @@ function scratchWorktreeRepo(): { base: string; main: string; worktree: string; 
 
 /// The plugin-free gate the fs tool bodies run: resolve the MAIN checkout frame
 /// from the caller's `directory`, read the acting agent's main-root-relative
-/// grants from that frame, then decide each candidate against it (absolute
-/// paths win; relative paths resolve against `directory`, mirroring the tool
-/// argument contract). Returns the resolved frame and one decision per
-/// candidate.
+/// grants from that frame, canonicalise each candidate into that same frame
+/// (`canonicalPath`, mirroring the tool bodies), then decide it. Absolute paths
+/// win; relative paths resolve against `directory`. Returns the resolved frame
+/// and one decision per candidate.
 async function fsGate(
   directory: string,
   candidates: string[],
@@ -613,8 +615,9 @@ async function fsGate(
   expect(frame).not.toBeNull()
   const { root, project } = frame as { root: string; project: string | null }
   const granted = agentFsGlobs(context, root, root)
+  const dir = canonicalPath(directory)
   const decisions = candidates.map((c) => {
-    const abs = path.isAbsolute(c) ? path.resolve(c) : path.resolve(directory, c)
+    const abs = canonicalPath(path.resolve(dir, c))
     const d = fsScopeDecision(root, abs, granted, project)
     return {
       abs,
@@ -785,6 +788,104 @@ test.skipIf(!enabled)(
         main,
       )
       expect(fromMain).toEqual({ root: main, project: null })
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+/// The same scratch repo as `scratchWorktreeRepo`, but the returned `main` and
+/// `worktree` roots are spelled THROUGH A SYMLINK (`<base>/alias -> <base>`)
+/// that has NOT been realpath'd — the macOS `/tmp`-style frame where
+/// `mainCheckoutRoot` resolves the root symlink-free but a candidate spelled
+/// from the caller's raw `directory` would not, unless the candidate is
+/// canonicalised too. `realMain` is the resolved root the tool must agree on;
+/// `base` (canonical) is for cleanup.
+function scratchSymlinkedWorktreeRepo(): {
+  base: string
+  realMain: string
+  main: string
+  worktree: string
+  project: string
+} {
+  const { base, main, project } = scratchWorktreeRepo()
+  const alias = path.join(base, "alias")
+  fs.symlinkSync(base, alias)
+  return {
+    base,
+    realMain: main,
+    main: path.join(alias, "repo"),
+    worktree: path.join(alias, "repo", "apg", ".worktrees", project),
+    project,
+  }
+}
+
+test.skipIf(!enabled)(
+  "e2e: a symlinked directory frame still allows a legitimate worktree write",
+  async () => {
+    const { base, realMain, worktree, project } = scratchSymlinkedWorktreeRepo()
+    try {
+      // The caller's frame passes THROUGH the symlink (`directory` is not
+      // realpath'd); `mainCheckoutRoot` resolves the REAL main root, and
+      // canonicalising the candidate puts it in that same frame — so the owned
+      // worktree write is allowed, not misread as a `..` boundary escape.
+      const wtFile = path.join(worktree, "src", "b.rs")
+      const gate = await fsGate(worktree, [wtFile])
+      expect(gate.root).toBe(realMain)
+      expect(gate.project).toBe(project)
+      const canonical = path.join(realMain, "apg", ".worktrees", project, "src", "b.rs")
+      expect(gate.decisions[0].abs).toBe(canonical)
+      expect(gate.decisions[0].allowed).toBe(true)
+      expect(gate.decisions[0].reason).toBe(null)
+      if (gate.decisions[0].allowed) fs.rmSync(gate.decisions[0].abs)
+      expect(existsSync(canonical)).toBe(false)
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+test.skipIf(!enabled)(
+  "e2e: an mv/cp destination through a worktree symlink into main is refused",
+  async () => {
+    const { base, main, worktree } = scratchWorktreeRepo()
+    try {
+      // A symlink INSIDE the worktree points at a main-checkout file, so the
+      // destination is LEXICALLY under the owned worktree glob
+      // (`apg/.worktrees/proj/src/*.rs`) while its real target is in main. A
+      // text-only check would allow it; canonicalising the destination follows
+      // the symlink into main and refuses it.
+      const mainFile = path.join(main, "src", "a.rs")
+      const mainBefore = fs.readFileSync(mainFile, "utf8")
+      const wtSource = path.join(worktree, "src", "b.rs")
+      const trap = path.join(worktree, "src", "trap.rs")
+      fs.symlinkSync(mainFile, trap)
+
+      // mv: the worktree source is allowed, the symlinked destination is refused
+      // because it canonicalises into the main checkout.
+      const mv = await fsGate(worktree, [wtSource, trap])
+      expect(mv.decisions[0].allowed).toBe(true)
+      expect(mv.decisions[1].allowed).toBe(false)
+      expect(mv.decisions[1].inBoundary).toBe(true)
+      expect(mv.decisions[1].globMatched).toBe(true)
+      expect(mv.decisions[1].reason).toBe("path resolves into the main checkout")
+      if (mv.decisions[0].allowed && mv.decisions[1].allowed) {
+        fs.renameSync(mv.decisions[0].abs, mv.decisions[1].abs)
+      }
+      // The gated op never ran: the symlink is intact and main's file is
+      // unchanged (a real rename would have replaced main's `a.rs`).
+      expect(fs.lstatSync(trap).isSymbolicLink()).toBe(true)
+      expect(fs.readFileSync(mainFile, "utf8")).toBe(mainBefore)
+      expect(existsSync(wtSource)).toBe(true)
+
+      // cp: the same destination is refused on the destination check.
+      const cp = await fsGate(worktree, [wtSource, trap])
+      expect(cp.decisions[1].allowed).toBe(false)
+      expect(cp.decisions[1].reason).toBe("path resolves into the main checkout")
+      if (cp.decisions[1].allowed) {
+        fs.cpSync(cp.decisions[0].abs, cp.decisions[1].abs, { recursive: true })
+      }
+      expect(fs.readFileSync(mainFile, "utf8")).toBe(mainBefore)
     } finally {
       fs.rmSync(base, { recursive: true, force: true })
     }
