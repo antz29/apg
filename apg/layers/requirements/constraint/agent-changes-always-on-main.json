@@ -17,6 +17,11 @@
       "kind": "details",
       "source": "requirements.note.git-file-write-options-reconciled",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.agent-builder-model-map-reconciliation",
+      "properties": {}
     }
   ]
 }

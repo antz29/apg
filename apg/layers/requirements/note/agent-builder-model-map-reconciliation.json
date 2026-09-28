@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "global.constraint.worktree-isolation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.constraint.agent-changes-always-on-main",
+      "properties": {}
     }
   ],
   "in": []
