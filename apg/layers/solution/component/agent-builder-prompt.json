@@ -66,6 +66,11 @@
       "kind": "details",
       "source": "requirements.note.git-file-write-options-reconciled",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.agent-model-map",
+      "properties": {}
     }
   ]
 }
