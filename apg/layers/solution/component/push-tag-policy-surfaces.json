@@ -24,6 +24,11 @@
       "kind": "implemented-by",
       "target": "tests/git_e2e.rs",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "tests/project_cmd_e2e.rs",
+      "properties": {}
     }
   ],
   "in": [
