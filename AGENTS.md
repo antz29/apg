@@ -105,7 +105,7 @@ internals:
    mutations, which refuse outside a project worktree — and does **not** forbid
    the one deliberate exception (step 7): the `agent-builder`'s
    `.opencode/agents/**` file edits and their commit on main. `git push`/`git
-   tag` remain human acts.
+   tag` remain human-approved acts.
 3. **Author the durable spec tiers** via `apg node add|rm <layer> <type>
    <name>` / `apg edge add|rm <kind> <from> <to>` into `apg/layers/` — one
    JSON file per node in the **six-layer tree** (requirements / domain /
@@ -128,17 +128,17 @@ internals:
    unguarded main rebuild, then **self-cleans** on that success path:
    the merged project's worktree is removed and its branch deleted (the
    default branch and the main checkout are never touched); push/tag remain
-   human acts. Both the gate and the merge run in the **installed** binary, so
-   the plan/spec must use that binary's FQNs — see *The installed binary is the
-   contract* below.
+   human-approved acts. Both the gate and the merge run in the **installed**
+   binary, so the plan/spec must use that binary's FQNs — see *The installed
+   binary is the contract* below.
 6. **Version gate + `apg init`.** `apg/config.json` carries the
    binary-managed `version` field; `apg scan`/`apg project start` **block**
    unless the layout and the binary share major.minor. **`apg init` is the
    upgrade act**: re-run it idempotently to write the current version, scaffold
    `apg/.worktrees/` + its `.gitignore` entry, and update the installed suite.
 7. **Code-writer agents are always built on main (the one deliberate main
-   write).** If implementation is blocked because the repo's `*-implementer` /
-   `implementation-phase-reviewer` agents are missing or outdated, the navigator
+   write).** If implementation is blocked because the repo's `*-implementer`
+   agents (or the optional `release-agent`) are missing or outdated, the navigator
    tasks the **`agent-builder` subagent on the MAIN checkout**; it
    scaffolds/updates `.opencode/agents/**` there and **commits on main**. That is
    the only place it can write: the agent-builder's sole write grant is
@@ -219,12 +219,13 @@ The project builds a single `apg` binary (package `apg`):
   `.gitignore` for `apg/.trans/` and `apg/.worktrees/` (added if
   missing, other lines untouched), and install (or update, where contents
   differ) the opencode apg tool suite into `~/.opencode/tools/` +
-  `~/.opencode/lib/` plus the **six distributed agents** — `codebase-navigator`,
-  `spec-writer`, `plan-writer`, `spec-review`, `plan-review`, `agent-builder` —
-  into `~/.opencode/agents/`. Project-specific implementer/reviewer agents are
-  installed into the project's `.opencode/agents/` by the **`agent-builder`**
-  agent, never by init. If the project's `.opencode/` holds files that duplicate
-  the installed suite (`~/.opencode/`), init prints a **loud warning** listing
+  `~/.opencode/lib/` plus the **seven distributed agents** — `codebase-navigator`,
+  `spec-writer`, `plan-writer`, `spec-review`, `plan-review`, `agent-builder`,
+  `implementation-phase-reviewer` — into `~/.opencode/agents/`. Project-specific
+  implementer/reviewer agents are installed into the project's
+  `.opencode/agents/` by the **`agent-builder`** agent, never by init. If the
+  project's `.opencode/` holds files that duplicate the installed suite
+  (`~/.opencode/`), init prints a **loud warning** listing
   them — it never deletes anything.
 - `apg scan [dir] [--language L[,L...]] [--exclude-path G]* [--module M]* [--no-build-scripts]
   [blacklist...]`
@@ -764,7 +765,7 @@ asserted by the binary.
   refuse otherwise. Feedback (and the plan itself) lives in the `.trans`
   mirrors and dies with the branch.
 - Query patterns: the spine `MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->(:Container)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn`; plan health via the suite tools (`apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
-- The six distributed agents (installed by `apg init`): `codebase-navigator`
+- The seven distributed agents (installed by `apg init`): `codebase-navigator`
   (orchestrates the flow — `apg project start` from main, per-branch DB
   build, coordinator-mediated feedback routing (dispatch one open item to its
   owning writer, take the writer's ACTIONED/WONT-FIX claim, run the shallow
@@ -775,8 +776,11 @@ asserted by the binary.
   mode, the plan-writer the tier-4 delta with structural/holistic gates),
   `spec-review` / `plan-review` (attach/resolve/reject feedback, **no authoring
   tools**; approval-only wont-fix — the coordinator actions the writer's
-  `--wont-fix` claim and only the reviewer makes it terminal), and
-  `agent-builder` (`mode: primary`, the only write grant
+  `--wont-fix` claim and only the reviewer makes it terminal),
+  `implementation-phase-reviewer` (the generic DISTRIBUTED phase reviewer — a
+  hidden subagent with read-only apg-suite + plan-read + review grants, **no
+  file writes**, never actions feedback; installed by `apg init`, not generated
+  per repo), and `agent-builder` (`mode: primary`, the only write grant
   `.opencode/agents/**`, scaffolds a repo's code-writer agents). Its agent work
   is **always done on the main checkout and committed there** — the one
   deliberate place main is written. When implementation is blocked because the
@@ -792,11 +796,16 @@ asserted by the binary.
   place": that rule governs the binary's *guarded* mutations — durable
   node/edge and transient plan/review mutations, which refuse outside a project
   worktree — and does not forbid these `.opencode/agents/**` edits and their
-  commit. `git push`/`git tag` remain human acts.
-  Repo-defined implementer / implementation-phase-reviewer agents are generated
-  by `agent-builder` (assertion-only `plan done`, task notes, branch commits;
-  phase review on branch scans + the final implementation review discovering
-  divergence — fix code or reconcile the spec).
+  commit. `git push`/`git tag` remain human-approved acts. `agent-builder`
+  generates the repo-defined `*-implementer` agents (assertion-only `plan done`,
+  task notes, branch commits) and, optionally, a per-repo `release-agent` — a
+  hidden subagent the navigator dispatches via `task` only after obtaining
+  explicit user consent; it is the ONLY agent granted `git push`/`git tag` (as
+  `ask`) and it writes the repo's release artefacts.
+  `implementation-phase-reviewer` is a DISTRIBUTED agent installed by
+  `apg init`, not generated per repo (its phase review on branch scans and the
+  final implementation review discovering divergence — fix code or reconcile the
+  spec — are repo-agnostic, hence distributed).
 - `agent-builder` scaffolds agents **into the repo it is run against**. When
   that repo is the apg repo itself, its `.opencode/agents/**` are consumer
   artifacts refreshed out-of-band by the maintainer with the **installed
