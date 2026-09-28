@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "push-tag-release-agent-carve-out",
+  "body": "Law (prose; assessed by review): the repo's recurring \"push/tag remain human acts\" rule is SCOPED, not repealed. It continues to bind every agent and every path EXCEPT the deliberately-invoked `release-agent`: that generated per-repo agent is granted `git push *` and `git tag *` as `allow`, and may run `scripts/release.sh` and then push/tag itself. Because its grant is autonomous once invoked, the human gate is the EXPLICIT USER CONSENT the `codebase-navigator` must obtain before dispatching it via the `task` tool — not a per-command prompt. Every OTHER generated agent keeps push/tag `ask` (human-approved).\n\nThe carve-out is an AGENT-policy statement only: the `apg` binary still never pushes or tags — its git2 `default-features = false` rationale (`Cargo.toml`, `src/git/mod.rs`) and its \"the git CLI is never shelled out to\" statements (`src/git/**`, `src/project_cmd/mod.rs`) remain TRUE and unchanged — and `scripts/release.sh` itself still never pushes. Removing the release-agent's push/tag `allow`, weakening the navigator's consent gate, or broadening `allow` to any other generated agent violates this law. Satisfaction is assessed by review.",
+  "properties": {
+    "attaches-to": "requirements.requirement.agent-builder-optional-release-agent"
+  },
+  "out": [],
+  "in": []
+}
