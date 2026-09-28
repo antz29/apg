@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "target": "solution.component.agent-roster-docs",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.push-tag-policy-surfaces",
+      "properties": {}
     }
   ],
   "in": [
