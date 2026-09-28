@@ -5,5 +5,11 @@
   "body": "The binary's distributed-agent embed + install + upgrade surface. In `rust.apg.install` (`src/install.rs`): the `AGENTS` table (lines 255-277) gains the `implementation-phase-reviewer.md` entry, `KNOWN_AGENT_FILES` (lines 282-289) gains its name, the \"six distributed agents\" doc comments become seven (lines 252-254, 279-281, 417), and `APG_UPGRADE_DOC` (lines 183-242) gains the reviewer-removal note. In `rust.apg.main` (`src/lib.rs`): the \"six distributed agents (`AGENTS`)\" doc comment (line 161) becomes seven. In `tests/main_e2e.rs`: `upgrade_doc_covers_version_field_gate_and_fix_steps` gains a reviewer-removal needle and `acceptance_node_edge_surface_is_transparent_and_pinned_in_help_tools_and_agents` gains the new prompt in its pinned list.\n\nDeliberately a NARROW owner distinct from the pre-existing `solution.component.agent-fs-install-registry` (which also anchors on `rust.apg.install`): a satisfied requirement's spine is coverage-checked, and every in-scope solution node's `implemented-by` FQN must be touched by a task, so reusing the fs-tools component would force a fake task over its untouched `rust.main_e2e.e2e.suite_installs_node_edge_project_tools_and_retires_spec_invariant` test. Overlapping component ownership of one file is established practice here (`codebase-navigator-prompt` and `navigator-prompt-guidance` already share `codebase-navigator.md`).",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
 }
