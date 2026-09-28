@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.reviewer-is-distributed-not-generated",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.reviewer-upgrade-removal-guide",
+      "properties": {}
     }
   ],
   "in": []
