@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "note",
+  "name": "fix-main-integration-scope-and-parent",
+  "body": "source: domain.entity.main-integration said \"the coordinator's only branch-state git mutation is rebasing\"; the entity had no parent group. inconsistency: (a) the framing read as a whole-system claim, yet agent-builder commits `.opencode/agents/**` on main and the optional release-agent pushes/tags; (b) orphan domain node. resolution: (a) body rescoped to the NAVIGATOR's raw git use only (rebase inside the worktree), naming the agent-builder commit and release-agent push/tag as separate carve-outs outside change-set integration; (b) added `contains` domain.group.agent-fs-operations -> domain.entity.main-integration, beside its sibling domain.entity.worktree-write-boundary — it is a boundary on where/how agents mutate repo state (the write-surface contract that group owns), whereas domain.group.agent-roster classifies distributed vs generated agents and does not model mutation surfaces. [autonomous] (feedback worktree-write-scope/feedback-1)",
+  "properties": {},
+  "out": [],
+  "in": []
+}
