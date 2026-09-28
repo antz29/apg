@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "ts.apg-opencode-suite.lib.apg.agentFsGlobs",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.agent-fs-write-operations",
+      "properties": {}
     }
   ],
   "in": []
