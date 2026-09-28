@@ -41,17 +41,24 @@ export default tool({
     const granted = agentFsGlobs(context, frame.root, frame.root)
 
     const dir = canonicalPath(directory)
-    const resolved = paths.map((p) => canonicalPath(path.resolve(dir, p)))
-    for (const abs of resolved) {
-      const decision = fsScopeDecision(frame.root, abs, granted, frame.project)
-      if (!decision.allowed) return `Refused: ${abs} — ${decision.reason}`
+    // SCOPE is decided on the FULLY resolved candidate (so a symlink pointing
+    // into main, or outside the grant, is refused); the destructive op targets
+    // the caller-NAMED path (final segment unresolved), so POSIX symlink
+    // semantics hold — `rm link` unlinks the link, never the file it points to.
+    const targets = paths.map((p) => {
+      const named = path.resolve(dir, p)
+      return { named, resolved: canonicalPath(named) }
+    })
+    for (const { resolved } of targets) {
+      const decision = fsScopeDecision(frame.root, resolved, granted, frame.project)
+      if (!decision.allowed) return `Refused: ${resolved} — ${decision.reason}`
     }
 
     try {
-      for (const abs of resolved) fs.rmSync(abs, { recursive: args.recursive ?? false })
+      for (const { named } of targets) fs.rmSync(named, { recursive: args.recursive ?? false })
     } catch (e) {
       return `Error: ${(e as Error).message}`
     }
-    return `Removed ${resolved.length} path(s):\n${resolved.join("\n")}`
+    return `Removed ${targets.length} path(s):\n${targets.map((t) => t.named).join("\n")}`
   },
 })

@@ -36,21 +36,27 @@ export default tool({
     const granted = agentFsGlobs(context, frame.root, frame.root)
 
     const dir = canonicalPath(directory)
-    const src = canonicalPath(path.resolve(dir, from))
-    const dst = canonicalPath(path.resolve(dir, to))
-    for (const [label, abs] of [
-      ["source", src],
-      ["destination", dst],
+    // SCOPE is decided on the FULLY resolved endpoints (a symlink pointing into
+    // main, or outside the grant, is refused); the rename acts on the
+    // caller-NAMED paths (final segment unresolved), so POSIX symlink semantics
+    // hold — renaming a link renames the link, never the file it points to.
+    const srcNamed = path.resolve(dir, from)
+    const dstNamed = path.resolve(dir, to)
+    const srcResolved = canonicalPath(srcNamed)
+    const dstResolved = canonicalPath(dstNamed)
+    for (const [label, resolved] of [
+      ["source", srcResolved],
+      ["destination", dstResolved],
     ] as const) {
-      const decision = fsScopeDecision(frame.root, abs, granted, frame.project)
-      if (!decision.allowed) return `Refused: ${label} ${abs} — ${decision.reason}`
+      const decision = fsScopeDecision(frame.root, resolved, granted, frame.project)
+      if (!decision.allowed) return `Refused: ${label} ${resolved} — ${decision.reason}`
     }
 
     try {
-      fs.renameSync(src, dst)
+      fs.renameSync(srcNamed, dstNamed)
     } catch (e) {
       return `Error: ${(e as Error).message}`
     }
-    return `Moved:\n${src}\n-> ${dst}`
+    return `Moved:\n${srcNamed}\n-> ${dstNamed}`
   },
 })

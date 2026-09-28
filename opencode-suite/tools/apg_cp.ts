@@ -38,16 +38,22 @@ export default tool({
     const granted = agentFsGlobs(context, frame.root, frame.root)
 
     const dir = canonicalPath(directory)
-    const src = canonicalPath(path.resolve(dir, from))
-    const dst = canonicalPath(path.resolve(dir, to))
-    const decision = fsScopeDecision(frame.root, dst, granted, frame.project)
-    if (!decision.allowed) return `Refused: destination ${dst} — ${decision.reason}`
+    // The destination WRITE is decided on the FULLY resolved path (a destination
+    // symlink pointing into the main checkout, or outside the grant, is refused
+    // before any write); the copy then acts on the caller-NAMED paths, so a
+    // destination symlink is dereferenced at most to the resolved path the scope
+    // check already allowed — never silently to one it refused.
+    const srcNamed = path.resolve(dir, from)
+    const dstNamed = path.resolve(dir, to)
+    const dstResolved = canonicalPath(dstNamed)
+    const decision = fsScopeDecision(frame.root, dstResolved, granted, frame.project)
+    if (!decision.allowed) return `Refused: destination ${dstResolved} — ${decision.reason}`
 
     try {
-      fs.cpSync(src, dst, { recursive: true })
+      fs.cpSync(srcNamed, dstNamed, { recursive: true })
     } catch (e) {
       return `Error: ${(e as Error).message}`
     }
-    return `Copied:\n${src}\n-> ${dst}`
+    return `Copied:\n${srcNamed}\n-> ${dstNamed}`
   },
 })

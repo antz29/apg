@@ -592,10 +592,11 @@ function scratchWorktreeRepo(): { base: string; main: string; worktree: string; 
 
 /// The plugin-free gate the fs tool bodies run: resolve the MAIN checkout frame
 /// from the caller's `directory`, read the acting agent's main-root-relative
-/// grants from that frame, canonicalise each candidate into that same frame
-/// (`canonicalPath`, mirroring the tool bodies), then decide it. Absolute paths
-/// win; relative paths resolve against `directory`. Returns the resolved frame
-/// and one decision per candidate.
+/// grants from that frame, then for each candidate decide the SCOPE on the fully
+/// canonicalised path (`canonicalPath`) while carrying the caller-NAMED path
+/// (`named`, final segment unresolved) the body would actually act on. Absolute
+/// paths win; relative paths resolve against `directory`. Returns the resolved
+/// frame and one `{ named, abs }` + decision per candidate.
 async function fsGate(
   directory: string,
   candidates: string[],
@@ -603,6 +604,7 @@ async function fsGate(
   root: string
   project: string | null
   decisions: {
+    named: string
     abs: string
     allowed: boolean
     reason: string | null
@@ -617,9 +619,11 @@ async function fsGate(
   const granted = agentFsGlobs(context, root, root)
   const dir = canonicalPath(directory)
   const decisions = candidates.map((c) => {
-    const abs = canonicalPath(path.resolve(dir, c))
+    const named = path.resolve(dir, c)
+    const abs = canonicalPath(named)
     const d = fsScopeDecision(root, abs, granted, project)
     return {
+      named,
       abs,
       allowed: d.allowed,
       reason: d.reason,
@@ -886,6 +890,60 @@ test.skipIf(!enabled)(
         fs.cpSync(cp.decisions[0].abs, cp.decisions[1].abs, { recursive: true })
       }
       expect(fs.readFileSync(mainFile, "utf8")).toBe(mainBefore)
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+// worktree-write-scope feedback-10: `canonicalPath` resolves the FINAL segment
+// too, and the buggy tools acted on that resolved path — so `rm`/`mv` of an
+// in-worktree symlink changed the file it POINTED AT and left the link behind.
+// The fix keeps the SCOPE decision on the fully resolved path (a link into main
+// is still refused — see the test above) while the destructive op targets the
+// caller-NAMED path, so POSIX symlink semantics hold: rm unlinks the link, mv
+// renames the link, and the target file is untouched.
+test.skipIf(!enabled)(
+  "e2e: rm/mv of an in-worktree symlink act on the NAMED link, not its target",
+  async () => {
+    const { base, worktree } = scratchWorktreeRepo()
+    try {
+      // `link -> target`, BOTH inside the owned worktree `src/*.rs` grant. The
+      // scope decision resolves the link to `target` (in-grant, allowed); the op
+      // target is the link itself, so the target file must survive untouched.
+      const target = path.join(worktree, "src", "a.rs")
+      const targetBefore = fs.readFileSync(target, "utf8")
+
+      // rm: removes ONLY the link.
+      const rmLink = path.join(worktree, "src", "rm-link.rs")
+      fs.symlinkSync(target, rmLink)
+      const rmGate = await fsGate(worktree, [rmLink])
+      expect(rmGate.decisions[0].allowed).toBe(true)
+      expect(rmGate.decisions[0].abs).toBe(target)
+      expect(rmGate.decisions[0].named).toBe(rmLink)
+      if (rmGate.decisions[0].allowed) fs.rmSync(rmGate.decisions[0].named)
+      expect(existsSync(rmLink)).toBe(false)
+      expect(existsSync(target)).toBe(true)
+      expect(fs.readFileSync(target, "utf8")).toBe(targetBefore)
+
+      // mv: renames ONLY the link (the renamed name is still a symlink to the
+      // same target); the target file is untouched.
+      const mvLink = path.join(worktree, "src", "mv-link.rs")
+      const mvTo = path.join(worktree, "src", "mv-renamed.rs")
+      fs.symlinkSync(target, mvLink)
+      const mvGate = await fsGate(worktree, [mvLink, mvTo])
+      expect(mvGate.decisions[0].allowed).toBe(true)
+      expect(mvGate.decisions[0].abs).toBe(target)
+      expect(mvGate.decisions[0].named).toBe(mvLink)
+      expect(mvGate.decisions[1].allowed).toBe(true)
+      if (mvGate.decisions[0].allowed && mvGate.decisions[1].allowed) {
+        fs.renameSync(mvGate.decisions[0].named, mvGate.decisions[1].named)
+      }
+      expect(existsSync(mvLink)).toBe(false)
+      expect(fs.lstatSync(mvTo).isSymbolicLink()).toBe(true)
+      expect(fs.readlinkSync(mvTo)).toBe(target)
+      expect(existsSync(target)).toBe(true)
+      expect(fs.readFileSync(target, "utf8")).toBe(targetBefore)
     } finally {
       fs.rmSync(base, { recursive: true, force: true })
     }
