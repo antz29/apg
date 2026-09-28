@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "reviewer-prompt-shape",
+  "body": "The distributed `implementation-phase-reviewer.md` is generic product source: `mode: subagent`, `hidden: true`, and NO `generated: true` (that marker is the agent-builder's). It carries no repo-specific prose. Its frontmatter grants exactly the read-only apg suite (`apg_query`, `apg_find_symbol`, `apg_modules`, `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`, `apg_unresolved`, `apg_hunk`), the plan read tools (`apg_plan`, `apg_plan_phases`, `apg_plan_tasks`), and `apg_review` / `apg_review_add` / `apg_review_resolve` / `apg_review_reject` + `apg_plan_complete`; it holds NO `question`, NO edit grant, NO scan, NO `apg_plan_done`/`apg_plan_undone`/`apg_plan_note`, NO spec/plan authoring (`apg_node`/`apg_edge`/`apg_plan_add`), and NO `apg_plan_render`. Its body states the positive read-guard rule (graph state is reached only through the apg tools; node and transient files are never read directly) and stop-and-report tool-failure prose. A scaffolded reviewer with an execution/scan/edit grant, or one carrying `generated: true`, is a violation. Satisfaction is assessed by review.",
+  "properties": {
+    "attaches-to": "solution.component.distributed-reviewer-prompt"
+  },
+  "out": [],
+  "in": []
+}
