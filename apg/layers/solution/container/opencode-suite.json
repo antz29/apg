@@ -51,6 +51,11 @@
       "kind": "contains",
       "target": "solution.component.codebase-navigator-prompt",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.agent-builder-prompt",
+      "properties": {}
     }
   ],
   "in": [
