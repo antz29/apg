@@ -44,6 +44,11 @@
       "kind": "details",
       "target": "requirements.constraint.agent-builder-model-map-scope",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.agent-model-map",
+      "properties": {}
     }
   ],
   "in": []

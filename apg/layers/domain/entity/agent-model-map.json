@@ -18,6 +18,11 @@
       "kind": "drives",
       "source": "requirements.requirement.agent-builder-model-map",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.agent-builder-model-map-reconciliation",
+      "properties": {}
     }
   ]
 }
