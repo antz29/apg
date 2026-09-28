@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "worktree-write-scope-owners",
+  "body": "Solution-tier reconciliation for `worktree-write-scope`. Source: \"extend narrow owners; add a test component if needed; consider AGENTS.md\". Inconsistency: `solution.component.repo-agent-guide` (file-tool guidance) and `solution.component.agent-roster-docs` (AGENTS.md + README.md) would pull unrelated concerns / an untouched README into coverage. Resolution: added narrow `solution.component.worktree-isolation-guide` (→ `AGENTS.md`) and `solution.component.worktree-boundary-tests` (→ `opencode-suite/tests/boundary.e2e.test.ts`); extended `agent-builder-prompt`, `agent-fs-permission-grants`, `agent-fs-tool-suite` (+ implemented-by `ts.apg-opencode-suite.lib.apg.fsScopeDecision`, `ts.apg-opencode-suite.lib.apg.agentFsGlobs`) and `codebase-navigator-prompt` bodies in place. No template-prose coherence test in `tests/main_e2e.rs` was added to the spec; the plan may add one under an existing component if it wants the prose pinned. [autonomous]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
