@@ -4,6 +4,12 @@
   "name": "bundled-requirement-decomposition",
   "body": "source: the brief bundles \"two requirements\" — R1 coordinator removal and R2 reviewer distributed. Resolution: R1 is authored as one atomic requirement. R2 is authored as the distribution requirement plus a distinct migration concern, `requirements.requirement.reviewer-upgrade-removal-guide`, because the upgrade guide's manual-removal instruction is a separately testable user-facing behaviour (`APG_UPGRADE_DOC` + the `upgrade_doc_covers_version_field_gate_and_fix_steps` needle) from the distribution mechanism (new file + `AGENTS` table + doc-roster updates). The migration requirement is parented under `requirements.user.apg-upgrader` rather than under R2 so the `contains` hierarchy stays a tree (a requirement with two parents would make it a DAG). [autonomous]",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.reviewer-is-distributed-not-generated",
+      "properties": {}
+    }
+  ],
   "in": []
 }
