@@ -59,6 +59,11 @@
       "kind": "details",
       "target": "domain.entity.worktree-write-boundary",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.main-integration",
+      "properties": {}
     }
   ],
   "in": []

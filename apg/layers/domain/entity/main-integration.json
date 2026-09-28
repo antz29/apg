@@ -23,6 +23,11 @@
       "kind": "drives",
       "source": "requirements.requirement.navigator-no-unguarded-main-git",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.worktree-write-scope-decisions",
+      "properties": {}
     }
   ]
 }
