@@ -98,14 +98,20 @@ internals:
    collision is a hard refuse.
 2. **Operate in-worktree.** Sessions and subagents run with **cwd inside the
    printed worktree path**. Suite-tool walk-up discovery finds the worktree's
-   **own** `apg/` (its layout + branch DB), so the tools work unchanged.
-   **Main is never a mutation place** — durable and transient mutations refuse
-   outside a project context. That rule is **scoped**: it governs the binary's
-   *guarded* mutations — durable `apg node`/`apg edge` and transient plan/review
-   mutations, which refuse outside a project worktree — and does **not** forbid
-   the one deliberate exception (step 7): the `agent-builder`'s
-   `.opencode/agents/**` file edits and their commit on main. `git push`/`git
-   tag` remain human-approved acts.
+   **own** `apg/` (its layout + branch DB), so the tools work unchanged. Every
+   code-writer — the core `implementer`, every `*-implementer`, every
+   `test-implementer` — writes **worktree-only**, and **main is never a mutation
+   place**: durable and transient mutations refuse outside a project context, and
+   the path-scoped fs tools refuse any path resolving into the main checkout
+   whatever `directory` is passed (see *Worktree isolation* below). That rule is
+   **scoped**: it governs the binary's *guarded* mutations — durable `apg
+   node`/`apg edge` and transient plan/review mutations, which refuse outside a
+   project worktree — and does **not** forbid the **two** deliberate agent
+   carve-outs (step 7): the `agent-builder`'s `.opencode/agents/**` edits and
+   their commit on main, and the optional `release-agent`'s per-repo release
+   artefacts on main. **These two carve-outs are the only places `git`-committed
+   work lands on main outside `apg project merge`.** `git push`/`git tag` remain
+   human-approved acts.
 3. **Author the durable spec tiers** via `apg node add|rm <layer> <type>
    <name>` / `apg edge add|rm <kind> <from> <to>` into `apg/layers/` — one
    JSON file per node in the **six-layer tree** (requirements / domain /
@@ -136,22 +142,66 @@ internals:
    unless the layout and the binary share major.minor. **`apg init` is the
    upgrade act**: re-run it idempotently to write the current version, scaffold
    `apg/.worktrees/` + its `.gitignore` entry, and update the installed suite.
-7. **Code-writer agents are always built on main (the one deliberate main
-   write).** If implementation is blocked because the repo's `*-implementer`
-   agents (or the optional `release-agent`) are missing or outdated, the navigator
-   tasks the **`agent-builder` subagent on the MAIN checkout**; it
-   scaffolds/updates `.opencode/agents/**` there and **commits on main**. That is
-   the only place it can write: the agent-builder's sole write grant is
-   `.opencode/agents/**`, opencode resolves it against the session workspace root
-   (the main checkout), and there is no `apg/.worktrees/*/.opencode/agents/**`
-   mirror — the running opencode session loads agents from the main checkout /
-   `~/.opencode/agents/`, so a created/updated agent can never live on the
-   project branch alone. The navigator then **rebases the project worktree onto
-   main**, **re-scans the worktree**, and the user **restarts opencode** (to load
-   the new/updated agents and their grants) and **reconnects** before
-   implementation continues. This is the one place `git`-committed work lands on
-   main outside a worktree; it does not weaken step 2's scoped rule, which still
-   governs every *guarded* binary mutation.
+7. **Code-writer agents are always built on main (one of the two deliberate
+   main-write carve-outs).** If implementation is blocked because the repo's
+   `*-implementer` agents (or the optional `release-agent`) are missing or
+   outdated, the navigator tasks the **`agent-builder` subagent on the MAIN
+   checkout**; it scaffolds/updates `.opencode/agents/**` there and **commits on
+   main**. That is its only write surface: the agent-builder's sole write grant
+   is `.opencode/agents/**`, opencode resolves it against the session workspace
+   root (the main checkout), and there is no
+   `apg/.worktrees/*/.opencode/agents/**` mirror — the running opencode session
+   loads agents from the main checkout / `~/.opencode/agents/`, so a created or
+   updated agent can never live on the project branch alone. (The other carve-out
+   is the optional `release-agent`'s per-repo release artefacts — see *Worktree
+   isolation* below.) The navigator then **rebases the project worktree onto
+   main** — `git rebase` run **inside the project worktree**, its only purpose —
+   **re-scans the worktree**, and the user **restarts opencode** (to load the
+   new/updated agents and their grants) and **reconnects** before implementation
+   continues. **Both carve-outs together are the only places `git`-committed work
+   lands on main outside `apg project merge`**; they do not weaken step 2's
+   scoped rule, which still governs every *guarded* binary mutation.
+
+### Worktree isolation (code-writer writes are worktree-only)
+
+This is the law `global.constraint.worktree-isolation`: every code change of a
+change-set is **worktree-local** — made inside the project worktree
+`<main>/apg/.worktrees/<project>/` on the project branch. The main checkout is
+**read-only** to every agent except the two carve-outs below, and main is
+integrated **only** by the binary act `apg project merge <name>`.
+
+- **Code-writer writes are worktree-only.** The core `implementer`, every
+  `*-implementer`, and every `test-implementer` are granted their edit globs and
+  their `apg_rm`/`apg_mv`/`apg_cp` globs **only** as `apg/.worktrees/*/<glob>`;
+  the root-relative `<glob>` form is never granted, and main-root paths are
+  explicitly denied. An agent whose grants include a root path could write main
+  — that is a broken scaffold. The path-scoped fs tools resolve the agent's
+  grants and every candidate in **one main-anchored frame** (the main-checkout
+  root) and self-enforce per-path scope from those worktree-rooted globs, so a
+  path that resolves into the main checkout is refused **whatever `directory`
+  the caller passes**. The tools do a plain filesystem operation — enforcement
+  lives in the tool, never in the permission layer's matching of its path
+  argument. **Reading main stays allowed.**
+- **Exactly two agent carve-outs write main.** (a) the `agent-builder`'s
+  `.opencode/agents/**` scaffold, committed on main
+  (`requirements.constraint.agent-changes-always-on-main`); (b) the optional
+  per-repo `release-agent`'s release artefacts on main — a **repo-specific**
+  write set the agent-builder derives by analysing the repo (release scripts,
+  workflows, formulae/manifests, version surfaces, …) and confirms through the
+  coordinator interview; it is **never a fixed, spec-hardcoded path list**. The
+  release-agent reaches its main paths through **`edit` grants only** —
+  `apg_rm`/`apg_mv`/`apg_cp` are worktree-only for **every** agent and always
+  refuse a main-resolving path — and its sole `git push`/`git tag` grant is
+  `ask`, behind the navigator's explicit-consent gate (it is the only agent that
+  holds them). These two carve-outs are the only places `git`-committed work
+  lands on main outside `apg project merge`.
+- **`apg project merge <name>` is the sole integration path into main** — a
+  binary act (verify gate → merge → unguarded main rebuild → self-clean), not an
+  agent action. The navigator holds **no** `git merge`, `git checkout`, or
+  `git switch` grant; it holds `git worktree list`, the read-only git verbs, and
+  `git rebase` — and `git rebase` is used for nothing but rebasing the project
+  worktree onto main, run **inside the project worktree** (never in the main
+  checkout).
 
 ### The installed binary is the contract — never self-host a change-set
 
@@ -787,37 +837,48 @@ asserted by the binary.
   file writes**, never actions feedback; installed by `apg init`, not generated
   per repo), and `agent-builder` (`mode: primary`, the only write grant
   `.opencode/agents/**`, scaffolds a repo's code-writer agents). Its agent work
-  is **always done on the main checkout and committed there** — the one
-  deliberate place main is written. When implementation is blocked because the
+  is **always done on the main checkout and committed there** — one of the two
+  deliberate main-write carve-outs. When implementation is blocked because the
   repo's code-writer agents are missing or outdated, the navigator tasks
   `agent-builder` on the main checkout; its `.opencode/agents/**` grant is
   resolved against the session workspace root (the main checkout) and no
   `apg/.worktrees/*/.opencode/agents/**` mirror exists, so a created/updated
   agent can never live on the project branch alone. It scaffolds/updates and
   **commits on main**; the navigator then **rebases the project worktree onto
-  main**, **re-scans the worktree**, and the user **restarts opencode** (to load
-  the new/updated agents and their grants) and **reconnects** before
-  implementation continues. This does **not** violate "main is never a mutation
-  place": that rule governs the binary's *guarded* mutations — durable
-  node/edge and transient plan/review mutations, which refuse outside a project
-  worktree — and does not forbid these `.opencode/agents/**` edits and their
-  commit. `git push`/`git tag` remain human-approved acts. `agent-builder`
-  generates the repo-defined `*-implementer` agents (assertion-only `plan done`,
-  task notes, branch commits) and, optionally, a per-repo `release-agent` — a
-  hidden subagent the navigator dispatches via `task` only after obtaining
-  explicit user consent; it is the ONLY agent granted `git push`/`git tag` (as
-  `ask`) and it writes the repo's release artefacts.
+  main** (`git rebase` run inside the project worktree, its only purpose),
+  **re-scans the worktree**, and the user **restarts opencode** (to load the
+  new/updated agents and their grants) and **reconnects** before implementation
+  continues. This does **not** violate "main is never a mutation place": that rule
+  governs the binary's *guarded* mutations — durable node/edge and transient
+  plan/review mutations, which refuse outside a project worktree — and does not
+  forbid these `.opencode/agents/**` edits and their commit, nor the optional
+  `release-agent`'s (the **other** carve-out) per-repo release artefacts. `git
+  push`/`git tag` remain human-approved acts. `agent-builder` generates the
+  repo-defined `*-implementer` agents (assertion-only `plan done`, task notes,
+  branch commits; every code-writer is **worktree-only**) and, optionally, a
+  per-repo `release-agent` — a hidden subagent the navigator dispatches via
+  `task` only after obtaining explicit user consent; it is the ONLY agent granted
+  `git push`/`git tag` (as `ask`), it writes the repo's release artefacts through
+  `edit` grants only (its per-repo main-write path set derived by the
+  agent-builder from repo analysis + coordinator interview — never a fixed list),
+  and the path-scoped fs tools `apg_rm`/`apg_mv`/`apg_cp` stay worktree-only for
+  it too.
   `implementation-phase-reviewer` is a DISTRIBUTED agent installed by
   `apg init`, not generated per repo (its phase review on branch scans and the
   final implementation review discovering divergence — fix code or reconcile the
   spec — are repo-agnostic, hence distributed).
 - `agent-builder` scaffolds agents **into the repo it is run against**. When
   that repo is the apg repo itself, its `.opencode/agents/**` are consumer
-  artifacts refreshed out-of-band by the maintainer with the **installed
-  (released)** binary — never as a task in a feature change-set, and never by
-  pointing a candidate build at the apg repo. A change-set that changes the
-  agent-builder template edits `opencode-suite/agents/**` (product source,
-  embedded via `include_str!`); it does not regenerate the repo's own agents.
+  artifacts refreshed out-of-band with the **installed (released)** binary —
+  never as a task in a feature change-set, and never by pointing a candidate
+  build at the apg repo. **The regenerate-after-RELEASE follow-up** is: cut the
+  release → install the released binary → re-run `apg init` (writes the current
+  version + suite) → **restart opencode** (to load the new/updated suite and
+  agents) → dispatch `agent-builder` **on the main checkout** to regenerate the
+  repo's own `.opencode/agents/**`. Regeneration follows a **release**, never an
+  `apg project merge`. A change-set that changes the agent-builder template
+  edits `opencode-suite/agents/**` (product source, embedded via `include_str!`);
+  it does not regenerate the repo's own agents.
 
 ### `Struct.code_type` / `Function.code_type`
 
