@@ -17,6 +17,7 @@ import {
   findSymbolRebaseColumns,
   scopeProjectRequirements,
   fsScopeDecision,
+  editAllowGlobs,
   REQUIREMENT_FQN_PREFIX,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
@@ -340,6 +341,97 @@ test("fsScopeDecision (main-anchored) refuses a .. or absolute escape even when 
   expect(dotdot.inBoundary).toBe(false)
   expect(dotdot.globMatched).toBe(false)
   expect(dotdot.reason).toBe("path escapes the project/worktree boundary")
+})
+
+// worktree-write-scope phase-04.task-10: the PURE last-matching-rule semantics
+// of `fsScopeDecision` over ORDERED `{ glob, allow }` rules (BOTH allow and
+// deny, in FILE ORDER). Still side-effect-free (no fs/git/process/db), so these
+// stay in the `bun test` unit tier. A bare string entry is the legacy ALLOW
+// rule, so the older cases above keep working.
+test("fsScopeDecision: a later deny overrides an earlier broad allow", () => {
+  // `**/*` grants everything; the later `secret/**` deny revokes that subtree.
+  // A path matching BOTH rules is refused because the LAST matching rule is the
+  // deny — the broad allow must not win just by appearing.
+  const rules = [
+    { glob: "**/*", allow: true },
+    { glob: "secret/**", allow: false },
+  ]
+  const denied = fsScopeDecision("/repo", "/repo/secret/x.rs", rules)
+  expect(denied.allowed).toBe(false)
+  expect(denied.globMatched).toBe(true)
+  expect(denied.reason).toBe("path is not within the acting agent's granted globs")
+  // A path the deny does not match stays granted by the earlier allow.
+  const granted = fsScopeDecision("/repo", "/repo/src/a.rs", rules)
+  expect(granted.allowed).toBe(true)
+  expect(granted.globMatched).toBe(true)
+  expect(granted.reason).toBe(null)
+})
+
+test("fsScopeDecision: a deny followed by a later allow is allowed (last match wins)", () => {
+  // The bug this pins: a naive "deny-anywhere-wins" implementation refuses
+  // `src/a.rs` because SOME deny rule matched. The deny is EARLIER than the
+  // allow, so the LAST matching rule (the allow) must win.
+  const rules = [
+    { glob: "**/*", allow: false },
+    { glob: "src/**/*.rs", allow: true },
+  ]
+  const d = fsScopeDecision("/repo", "/repo/src/a.rs", rules)
+  expect(d.allowed).toBe(true)
+  expect(d.globMatched).toBe(true)
+  expect(d.inBoundary).toBe(true)
+  expect(d.reason).toBe(null)
+})
+
+test("fsScopeDecision: a path matched by no rule is refused (deny-by-default)", () => {
+  // An empty scope refuses everything.
+  const empty = fsScopeDecision("/repo", "/repo/src/a.rs", [])
+  expect(empty.allowed).toBe(false)
+  expect(empty.globMatched).toBe(false)
+  expect(empty.reason).toBe("path is not within the acting agent's granted globs")
+  // A non-empty scope still refuses a path no rule mentions.
+  const rules = [
+    { glob: "**/*.rs", allow: true },
+    { glob: "build/**", allow: false },
+  ]
+  const unmatched = fsScopeDecision("/repo", "/repo/docs/readme.md", rules)
+  expect(unmatched.allowed).toBe(false)
+  expect(unmatched.globMatched).toBe(false)
+  expect(unmatched.reason).toBe("path is not within the acting agent's granted globs")
+})
+
+// The parser half: `editAllowGlobs` must keep BOTH allow and deny entries in
+// FILE ORDER — the ordered `{ glob, allow }` list's order and membership, not an
+// allow-only projection and not a reordered (allow-then-deny) group.
+test("editAllowGlobs keeps both allow and deny entries in file order", () => {
+  const body = [
+    "permission:",
+    "  edit:",
+    '    "src/**": allow',
+    '    "src/secret/**": deny',
+    '    "src/public/**": allow',
+  ].join("\n")
+  expect(editAllowGlobs(body)).toEqual([
+    { glob: "src/**", allow: true },
+    { glob: "src/secret/**", allow: false },
+    { glob: "src/public/**", allow: true },
+  ])
+})
+
+// A deny that appears FIRST must not be hoisted or dropped: order is precedence,
+// so the parser preserves it verbatim (and duplicates are kept, not deduped).
+test("editAllowGlobs preserves a leading deny and duplicate entries verbatim", () => {
+  const body = [
+    "permission:",
+    "  edit:",
+    '    "**/*": deny',
+    '    "src/**": allow',
+    '    "src/**": allow',
+  ].join("\n")
+  expect(editAllowGlobs(body)).toEqual([
+    { glob: "**/*", allow: false },
+    { glob: "src/**", allow: true },
+    { glob: "src/**", allow: true },
+  ])
 })
 
 
