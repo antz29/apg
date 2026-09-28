@@ -592,11 +592,16 @@ function scratchWorktreeRepo(): { base: string; main: string; worktree: string; 
 
 /// The plugin-free gate the fs tool bodies run: resolve the MAIN checkout frame
 /// from the caller's `directory`, read the acting agent's main-root-relative
-/// grants from that frame, then for each candidate decide the SCOPE on the fully
-/// canonicalised path (`canonicalPath`) while carrying the caller-NAMED path
-/// (`named`, final segment unresolved) the body would actually act on. Absolute
-/// paths win; relative paths resolve against `directory`. Returns the resolved
-/// frame and one `{ named, abs }` + decision per candidate.
+/// grants from that frame, then for each candidate decide the SCOPE on BOTH the
+/// caller-NAMED entry (`entry` — `canonicalPath(dirname(named))` + the basename
+/// as-is: the link's OWN location, what the op actually changes) AND the fully
+/// canonicalised path (`canonicalPath`, following the final symlink), while
+/// carrying the caller-NAMED path (`named`, final segment unresolved) the body
+/// would actually act on. `allowed` requires BOTH; `reason` is the first
+/// refusal (entry first, then resolved), so a main-located link into the
+/// worktree is refused on its entry. Absolute paths win; relative paths resolve
+/// against `directory`. Returns the resolved frame and one entry/decision set
+/// per candidate.
 async function fsGate(
   directory: string,
   candidates: string[],
@@ -605,7 +610,10 @@ async function fsGate(
   project: string | null
   decisions: {
     named: string
+    entry: string
     abs: string
+    entryAllowed: boolean
+    entryReason: string | null
     allowed: boolean
     reason: string | null
     globMatched: boolean
@@ -620,15 +628,20 @@ async function fsGate(
   const dir = canonicalPath(directory)
   const decisions = candidates.map((c) => {
     const named = path.resolve(dir, c)
+    const entry = path.join(canonicalPath(path.dirname(named)), path.basename(named))
     const abs = canonicalPath(named)
-    const d = fsScopeDecision(root, abs, granted, project)
+    const entryD = fsScopeDecision(root, entry, granted, project)
+    const resolvedD = fsScopeDecision(root, abs, granted, project)
     return {
       named,
+      entry,
       abs,
-      allowed: d.allowed,
-      reason: d.reason,
-      globMatched: d.globMatched,
-      inBoundary: d.inBoundary,
+      entryAllowed: entryD.allowed,
+      entryReason: entryD.reason,
+      allowed: entryD.allowed && resolvedD.allowed,
+      reason: entryD.allowed ? resolvedD.reason : entryD.reason,
+      globMatched: resolvedD.globMatched,
+      inBoundary: resolvedD.inBoundary,
     }
   })
   return { root, project, decisions }
@@ -943,6 +956,73 @@ test.skipIf(!enabled)(
       expect(fs.lstatSync(mvTo).isSymbolicLink()).toBe(true)
       expect(fs.readlinkSync(mvTo)).toBe(target)
       expect(existsSync(target)).toBe(true)
+      expect(fs.readFileSync(target, "utf8")).toBe(targetBefore)
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+// worktree-write-scope feedback-11: the feedback-10 fix acts on the caller-NAMED
+// path, so an op changes the link's OWN location — but only the RESOLVED target
+// was scope-checked. A symlink that LIVES in the main checkout and points INTO
+// the owned worktree (`<main>/link -> <worktree>/src/a.rs`) resolves in-grant
+// and would slip through: `rmSync` would delete the link in main and
+// `renameSync` would move the main-located link out of main, mutating the main
+// checkout (`global.constraint.worktree-isolation`). The fix checks the link's
+// own location too (`canonical parent + basename`) and refuses when EITHER it or
+// the resolved target is refused.
+test.skipIf(!enabled)(
+  "e2e: rm/mv of a MAIN-located symlink into the worktree is refused, link intact",
+  async () => {
+    const { base, main, worktree } = scratchWorktreeRepo()
+    try {
+      const target = path.join(worktree, "src", "a.rs")
+      const targetBefore = fs.readFileSync(target, "utf8")
+
+      // The link lives in the MAIN checkout; its target resolves into the owned
+      // worktree `src/*.rs` grant, so a resolved-only check would allow it.
+      const mainLink = path.join(main, "main-link.rs")
+      fs.symlinkSync(target, mainLink)
+
+      // rm: refused on the link's OWN location, so the main-located link
+      // survives and the worktree target is untouched.
+      const rmGate = await fsGate(worktree, [mainLink])
+      expect(rmGate.decisions[0].entryAllowed).toBe(false)
+      expect(rmGate.decisions[0].entryReason).toBe("path resolves into the main checkout")
+      expect(rmGate.decisions[0].allowed).toBe(false)
+      expect(rmGate.decisions[0].reason).toBe("path resolves into the main checkout")
+      if (rmGate.decisions[0].allowed) fs.rmSync(rmGate.decisions[0].named)
+      expect(fs.lstatSync(mainLink).isSymbolicLink()).toBe(true)
+      expect(fs.readlinkSync(mainLink)).toBe(target)
+      expect(existsSync(target)).toBe(true)
+
+      // mv: the main-located link must not be renamed into the worktree.
+      const mvTo = path.join(worktree, "src", "moved.rs")
+      const mvGate = await fsGate(worktree, [mainLink, mvTo])
+      expect(mvGate.decisions[0].entryAllowed).toBe(false)
+      expect(mvGate.decisions[0].allowed).toBe(false)
+      expect(mvGate.decisions[0].reason).toBe("path resolves into the main checkout")
+      if (mvGate.decisions[0].allowed && mvGate.decisions[1].allowed) {
+        fs.renameSync(mvGate.decisions[0].named, mvGate.decisions[1].named)
+      }
+      expect(fs.lstatSync(mainLink).isSymbolicLink()).toBe(true)
+      expect(fs.readlinkSync(mainLink)).toBe(target)
+      expect(existsSync(mvTo)).toBe(false)
+      expect(existsSync(target)).toBe(true)
+
+      // cp: the same main-located destination link is refused on its entry, so
+      // the copy never replaces the link in main.
+      const wtSource = path.join(worktree, "src", "b.rs")
+      const cpGate = await fsGate(worktree, [wtSource, mainLink])
+      expect(cpGate.decisions[1].entryAllowed).toBe(false)
+      expect(cpGate.decisions[1].allowed).toBe(false)
+      expect(cpGate.decisions[1].reason).toBe("path resolves into the main checkout")
+      if (cpGate.decisions[1].allowed) {
+        fs.cpSync(cpGate.decisions[0].named, cpGate.decisions[1].named, { recursive: true })
+      }
+      expect(fs.lstatSync(mainLink).isSymbolicLink()).toBe(true)
+      expect(fs.readlinkSync(mainLink)).toBe(target)
       expect(fs.readFileSync(target, "utf8")).toBe(targetBefore)
     } finally {
       fs.rmSync(base, { recursive: true, force: true })

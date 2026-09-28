@@ -36,20 +36,27 @@ export default tool({
     const granted = agentFsGlobs(context, frame.root, frame.root)
 
     const dir = canonicalPath(directory)
-    // SCOPE is decided on the FULLY resolved endpoints (a symlink pointing into
-    // main, or outside the grant, is refused); the rename acts on the
-    // caller-NAMED paths (final segment unresolved), so POSIX symlink semantics
-    // hold — renaming a link renames the link, never the file it points to.
+    // SCOPE is decided on BOTH the caller-NAMED entry (the directory entry the
+    // rename actually changes, `canonical parent + basename` — the link's OWN
+    // location) AND the FULLY resolved endpoint (following the final symlink),
+    // for BOTH source and destination. The resolved check refuses a symlink
+    // whose TARGET is outside the grant; the entry check refuses a symlink that
+    // LIVES outside the grant but points inside it — e.g. a main-checkout link
+    // into the owned worktree, whose rename would move the link out of main. The
+    // rename acts on the caller-NAMED paths, so POSIX symlink semantics hold —
+    // renaming a link renames the link, never the file it points to.
     const srcNamed = path.resolve(dir, from)
     const dstNamed = path.resolve(dir, to)
-    const srcResolved = canonicalPath(srcNamed)
-    const dstResolved = canonicalPath(dstNamed)
-    for (const [label, resolved] of [
-      ["source", srcResolved],
-      ["destination", dstResolved],
+    for (const [label, named] of [
+      ["source", srcNamed],
+      ["destination", dstNamed],
     ] as const) {
-      const decision = fsScopeDecision(frame.root, resolved, granted, frame.project)
-      if (!decision.allowed) return `Refused: ${label} ${resolved} — ${decision.reason}`
+      const entry = path.join(canonicalPath(path.dirname(named)), path.basename(named))
+      const entryDecision = fsScopeDecision(frame.root, entry, granted, frame.project)
+      if (!entryDecision.allowed) return `Refused: ${label} ${named} — ${entryDecision.reason}`
+      const resolved = canonicalPath(named)
+      const resolvedDecision = fsScopeDecision(frame.root, resolved, granted, frame.project)
+      if (!resolvedDecision.allowed) return `Refused: ${label} ${named} — ${resolvedDecision.reason}`
     }
 
     try {

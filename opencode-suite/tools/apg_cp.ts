@@ -38,16 +38,23 @@ export default tool({
     const granted = agentFsGlobs(context, frame.root, frame.root)
 
     const dir = canonicalPath(directory)
-    // The destination WRITE is decided on the FULLY resolved path (a destination
-    // symlink pointing into the main checkout, or outside the grant, is refused
-    // before any write); the copy then acts on the caller-NAMED paths, so a
-    // destination symlink is dereferenced at most to the resolved path the scope
-    // check already allowed — never silently to one it refused.
+    // The destination WRITE is decided on BOTH the caller-NAMED entry (the
+    // directory entry actually written, `canonical parent + basename` — the
+    // link's OWN location) AND the FULLY resolved path (following the final
+    // symlink). The resolved check refuses a destination symlink pointing into
+    // the main checkout; the entry check refuses a destination symlink that
+    // LIVES in the main checkout but points into the worktree, whose write would
+    // otherwise replace the link in main. The copy then acts on the caller-NAMED
+    // paths, so a destination symlink is dereferenced at most to the resolved
+    // path the scope check already allowed — never silently to one it refused.
     const srcNamed = path.resolve(dir, from)
     const dstNamed = path.resolve(dir, to)
+    const dstEntry = path.join(canonicalPath(path.dirname(dstNamed)), path.basename(dstNamed))
+    const entryDecision = fsScopeDecision(frame.root, dstEntry, granted, frame.project)
+    if (!entryDecision.allowed) return `Refused: destination ${dstNamed} — ${entryDecision.reason}`
     const dstResolved = canonicalPath(dstNamed)
-    const decision = fsScopeDecision(frame.root, dstResolved, granted, frame.project)
-    if (!decision.allowed) return `Refused: destination ${dstResolved} — ${decision.reason}`
+    const resolvedDecision = fsScopeDecision(frame.root, dstResolved, granted, frame.project)
+    if (!resolvedDecision.allowed) return `Refused: destination ${dstNamed} — ${resolvedDecision.reason}`
 
     try {
       fs.cpSync(srcNamed, dstNamed, { recursive: true })

@@ -41,17 +41,26 @@ export default tool({
     const granted = agentFsGlobs(context, frame.root, frame.root)
 
     const dir = canonicalPath(directory)
-    // SCOPE is decided on the FULLY resolved candidate (so a symlink pointing
-    // into main, or outside the grant, is refused); the destructive op targets
-    // the caller-NAMED path (final segment unresolved), so POSIX symlink
-    // semantics hold — `rm link` unlinks the link, never the file it points to.
+    // SCOPE is decided on BOTH the caller-NAMED entry (the directory entry the
+    // op actually changes, `canonical parent + basename` — the link's OWN
+    // location) AND the FULLY resolved candidate (following the final symlink).
+    // The resolved check refuses a link whose TARGET is outside the grant; the
+    // entry check refuses a link that LIVES outside the grant but points inside
+    // it — e.g. a main-checkout link into the owned worktree, which would
+    // otherwise be allowed (its target is in-grant) and delete the link's
+    // location in main. The destructive op still targets the caller-NAMED path,
+    // so POSIX symlink semantics hold — `rm link` unlinks the link, never the
+    // file it points to.
     const targets = paths.map((p) => {
       const named = path.resolve(dir, p)
-      return { named, resolved: canonicalPath(named) }
+      const entry = path.join(canonicalPath(path.dirname(named)), path.basename(named))
+      return { named, entry, resolved: canonicalPath(named) }
     })
-    for (const { resolved } of targets) {
-      const decision = fsScopeDecision(frame.root, resolved, granted, frame.project)
-      if (!decision.allowed) return `Refused: ${resolved} — ${decision.reason}`
+    for (const { named, entry, resolved } of targets) {
+      const entryDecision = fsScopeDecision(frame.root, entry, granted, frame.project)
+      if (!entryDecision.allowed) return `Refused: ${named} — ${entryDecision.reason}`
+      const resolvedDecision = fsScopeDecision(frame.root, resolved, granted, frame.project)
+      if (!resolvedDecision.allowed) return `Refused: ${named} — ${resolvedDecision.reason}`
     }
 
     try {
