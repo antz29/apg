@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "target": "solution.component.agent-fs-tool-suite",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.worktree-boundary-tests",
+      "properties": {}
     }
   ],
   "in": [
