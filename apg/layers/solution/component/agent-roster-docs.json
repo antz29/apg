@@ -31,6 +31,11 @@
       "kind": "details",
       "source": "solution.note.agent-roster-narrow-owners",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.release-agent-flow",
+      "properties": {}
     }
   ]
 }
