@@ -18,6 +18,11 @@
       "kind": "contains",
       "source": "requirements.stakeholder.agent-suite-maintainer",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.release-agent-amendment-decision",
+      "properties": {}
     }
   ]
 }
