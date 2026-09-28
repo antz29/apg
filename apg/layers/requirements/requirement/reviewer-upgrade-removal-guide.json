@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-builder-roster-cleanup"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.agent-file-migration",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
