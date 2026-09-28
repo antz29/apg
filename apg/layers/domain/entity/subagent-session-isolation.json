@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",

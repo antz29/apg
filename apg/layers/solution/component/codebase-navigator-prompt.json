@@ -41,6 +41,11 @@
       "kind": "realised-by",
       "source": "domain.entity.release-agent-flow",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.subagent-session-isolation",
+      "properties": {}
     }
   ]
 }
