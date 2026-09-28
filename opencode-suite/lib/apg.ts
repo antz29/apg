@@ -382,22 +382,21 @@ export function editAllowGlobs(frontmatterBody: string): { glob: string; allow: 
   return rules
 }
 
-/** Reads one agent config file and returns its `permission.edit` allow globs,
- *  or `null` when the file does not exist / cannot be read. */
-function readAgentEditGlobs(file: string): string[] | null {
+/**
+ * Reads one agent config file and returns its `permission.edit` rules — the
+ * ordered `{ glob, allow }` entries `editAllowGlobs` collects (BOTH allow and
+ * deny, in FILE ORDER, duplicates preserved) — or `null` when the file does not
+ * exist / cannot be read. A doc that is not fenced-frontmatter returns the
+ * fail-closed `[]`, as does a fenced doc with no `edit:` block (via
+ * `editAllowGlobs`), so a caller refuses every path rather than allowing one by
+ * default.
+ */
+function readAgentEditGlobs(file: string): { glob: string; allow: boolean }[] | null {
   if (!existsSync(file)) return null
   try {
     const fm = frontmatter(readFileSync(file, "utf8"))
     if (fm === null) return []
-    // Interim adaptation (worktree-write-scope phase-04.task-4): `editAllowGlobs`
-    // now returns the ordered allow+deny rule list. This reader's semantic
-    // change is owned by task-4.12, so map it back to the legacy allow-only,
-    // deduped glob list for now — `agentFsGlobs` and the fs tools are unchanged.
-    const allowOnly: string[] = []
-    for (const rule of editAllowGlobs(fm)) {
-      if (rule.allow && !allowOnly.includes(rule.glob)) allowOnly.push(rule.glob)
-    }
-    return allowOnly
+    return editAllowGlobs(fm)
   } catch {
     return null
   }
@@ -438,6 +437,15 @@ export function agentFsGlobs(
 ): string[] {
   const name = context.agent
   if (!name) return []
+  // Interim adaptation (worktree-write-scope phase-04.task-4.12): `readAgentEditGlobs`
+  // now returns the ordered allow+deny rule list. The `agentFsGlobs` semantic flip is
+  // owned by task-4.5, so map the rules back to the legacy allow-only, deduped glob
+  // list (in rule order) to keep `fsScopeDecision` and the fs tools unchanged.
+  const legacyGlobs = (rules: { glob: string; allow: boolean }[]): string[] => {
+    const out: string[] = []
+    for (const rule of rules) if (rule.allow && !out.includes(rule.glob)) out.push(rule.glob)
+    return out
+  }
   // A resolved main root is the whole search frame: the agent file lives on main
   // and its grants are written against that root. Without one, keep the legacy
   // caller-directory search so an existing 2-argument caller still works.
@@ -445,13 +453,13 @@ export function agentFsGlobs(
     (p): p is string => typeof p === "string" && p.length > 0,
   )
   for (const root of roots) {
-    const globs = readAgentEditGlobs(path.join(root, ".opencode", "agents", `${name}.md`))
-    if (globs !== null) return globs
+    const rules = readAgentEditGlobs(path.join(root, ".opencode", "agents", `${name}.md`))
+    if (rules !== null) return legacyGlobs(rules)
   }
   const home = process.env.HOME || homedir()
   if (home) {
-    const globs = readAgentEditGlobs(path.join(home, ".opencode", "agents", `${name}.md`))
-    if (globs !== null) return globs
+    const rules = readAgentEditGlobs(path.join(home, ".opencode", "agents", `${name}.md`))
+    if (rules !== null) return legacyGlobs(rules)
   }
   return []
 }
