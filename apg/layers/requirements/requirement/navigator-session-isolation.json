@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "navigator-session-isolation",
+  "body": "The distributed `codebase-navigator` prompt must bound subagent session reuse: every `task` dispatch is a fresh, ISOLATED subagent session (no `task_id`), one dispatch = one self-contained unit of work, and starting a new task is ALWAYS a new dispatch. The ONLY permitted resume is the tight hand-back loop within ONE dispatch: the subagent returns needing a navigator action (a scan, a quick verify, an `apg_review_action`), the navigator performs it, and resumes THAT SAME session only to finish the SAME task (e.g. mark it done via `apg_plan_done` + `apg_plan_note`), then ends it.\n\nAcceptance criteria (all observable in `opencode-suite/agents/codebase-navigator.md`, pinned by the coherence test):\n1. The prompt states each `task` dispatch is a fresh, isolated subagent session with no `task_id`; one dispatch = one self-contained unit of work; a new task is always a new dispatch.\n2. It states the one permitted resume — the same-dispatch hand-back loop (subagent returns needing a navigator action → the navigator performs it → resume that same session to finish the same task → end it).\n3. It states resumption is NEVER used to start a new/different task, NEVER used to resume a reviewer (each review round is a fresh dispatch), and is never carried across phases.\n4. It states the motivation: subagent context is finite; repeatedly resumed sessions accumulate context until they break; isolation is the design.\n5. The existing \"Resume the same session, only to mark done\" step (the Implementation-flow bullet) is retained and explicitly scoped to this bounded hand-back — not a general licence.\n6. The coherence e2e test `rust.main_e2e.e2e.coordinator_agent_carries_review_action_and_dispatch_prose` asserts the isolation prose so it cannot silently regress.\n\nScope/non-goals: the product-source prompt plus the test only; no binary behaviour change; no other `opencode-suite/agents/*` file is edited; the repo's own `.opencode/agents/**` are consumer artifacts and are never edited.",
+  "properties": {
+    "feature": "navigator-session-isolation"
+  },
+  "out": [],
+  "in": []
+}
