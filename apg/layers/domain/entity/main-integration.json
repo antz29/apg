@@ -38,6 +38,11 @@
       "kind": "details",
       "source": "domain.note.fix-main-integration-scope-and-parent",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.agent-builder-model-map-reconciliation",
+      "properties": {}
     }
   ]
 }

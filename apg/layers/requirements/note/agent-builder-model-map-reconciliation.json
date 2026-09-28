@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "domain.entity.agent-scaffold-flow",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.main-integration",
+      "properties": {}
     }
   ],
   "in": []
