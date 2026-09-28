@@ -197,7 +197,7 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
         "Verify gate passed for {project}: every planned node is realized, all feedback resolved, solution coverage holds."
     );
     println!(
-        "Merge: `apg project merge {project}` from the main checkout (verify gate → merge → main rebuild; push/tag remain human)."
+        "Merge: `apg project merge {project}` from the main checkout (verify gate → merge → main rebuild; push/tag remain human-approved acts)."
     );
     Ok(())
 }

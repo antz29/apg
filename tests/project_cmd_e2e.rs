@@ -309,7 +309,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         (
             "R6",
             "binary-plumbing",
-            "git2 crate with default-features = false (no https/ssh → no OpenSSL). The git CLI is never shelled out to; push/tag remain human acts. VI: cargo check and cargo test pass green with git2 default-features=false. Source: SPEC-apg-projects.md §2.3.",
+            "git2 crate with default-features = false (no https/ssh → no OpenSSL). The git CLI is never shelled out to; push/tag remain human-approved acts. VI: cargo check and cargo test pass green with git2 default-features=false. Source: SPEC-apg-projects.md §2.3.",
         ),
         (
             "R7",

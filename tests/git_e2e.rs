@@ -949,7 +949,7 @@ mod e2e {
 
     // ------------------------------------------------------------------
     // R6 VI: the git CLI is never shelled out to anywhere in the apg binary
-    // (git2, default-features = false; push/tag remain human acts).
+    // (git2, default-features = false; push/tag remain human-approved acts).
     // ------------------------------------------------------------------
 
     #[test]
@@ -969,7 +969,7 @@ mod e2e {
             let content = std::fs::read_to_string(&path).unwrap();
             assert!(
                 !content.contains("Command::new(\"git\")"),
-                "{} shells out to the git CLI (R6: git2 only; push/tag remain human acts)",
+                "{} shells out to the git CLI (R6: git2 only; push/tag remain human-approved acts)",
                 path.display()
             );
             checked += 1;

@@ -3,7 +3,7 @@
 //!
 //! Everything here is libgit2 (`git2`, `default-features = false` — no
 //! https/ssh, no OpenSSL). **The git CLI is never shelled out to** (R6);
-//! push/tag remain human acts.
+//! push/tag remain human-approved acts.
 //!
 //! The concerns are split into cohesive submodules — scan staleness
 //! ([`state`]), repo identity + membership ([`identity`]), auto-commit +

@@ -25,7 +25,7 @@
 //!   project's worktree at `<main>/apg/.worktrees/<name>` is removed and its
 //!   branch deleted (never the default branch). Binary-operated via git2
 //!   from the main checkout; the git CLI is never shelled out to (R6);
-//!   push/tag remain human acts.
+//!   push/tag remain human-approved acts.
 //!
 //! - `apg project delete <name>` — the explicit abandon act for projects
 //!   that are NOT merged. Every refusal names the actual state + one fix

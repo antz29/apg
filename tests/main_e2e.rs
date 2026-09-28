@@ -1949,12 +1949,12 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The read-guard prose holds for exactly the five prompts this change
+    /// The read-guard prose holds for exactly the six prompts this change
     /// touches: the four distributed agents rewritten by read-guard-prose
-    /// (spec-review/spec-writer/plan-writer/plan-review) plus agent-builder.md,
-    /// whose common-shape and step-6 verify text make every generated agent
-    /// inherit the rule. `codebase-navigator.md` is deliberately excluded (see
-    /// below).
+    /// (spec-review/spec-writer/plan-writer/plan-review), the newly distributed
+    /// implementation-phase-reviewer.md, and agent-builder.md, whose
+    /// common-shape and step-6 verify text make every generated agent inherit
+    /// the rule. `codebase-navigator.md` is deliberately excluded (see below).
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn installed_agent_prompts_state_file_access_read_guard() {
@@ -1967,6 +1967,7 @@ mod e2e {
             "spec-writer.md",
             "plan-writer.md",
             "plan-review.md",
+            "implementation-phase-reviewer.md",
             "agent-builder.md",
         ] {
             let content = AGENTS
@@ -1989,10 +1990,10 @@ mod e2e {
         }
 
         // `codebase-navigator.md` is excluded from the assertion above: it is a
-        // sixth entry in the embedded AGENTS set that neither phase edits (it
+        // seventh entry in the embedded AGENTS set that neither phase edits (it
         // already reaches graph state through the tools and never reads raw
         // files, per codebase-navigator.md's database section), so a literal
-        // whole-set guard would fail on an unchanged file. Only the five
+        // whole-set guard would fail on an unchanged file. Only the six
         // in-scope prompts are asserted.
 
         // The inheritance half inspects the agent-builder.md TEMPLATE text
@@ -2337,6 +2338,7 @@ mod e2e {
             "apg init",
             "major.minor",
             "apg-upgrade.md",
+            "implementation-phase-reviewer",
         ] {
             assert!(
                 APG_UPGRADE_DOC.contains(needle),
@@ -2725,7 +2727,13 @@ mod e2e {
         );
 
         // 3. The distributed agent prompts: the authoring prompts carry the
-        // exact command forms; the reviewer/builder prompts name the tools.
+        // exact command forms; the reviewer prompts name the authoring
+        // vocabulary they do NOT hold (spec-review and the distributed
+        // implementation-phase-reviewer). The `agent-builder` prompt no longer
+        // names those tools — task-1 relocated the reviewer section (and thus
+        // this vocabulary) out of the generated roster into the distributed
+        // reviewer prompt — so it is covered by the retired-surface loop below,
+        // not by a tool-name pin.
         let agent = |name: &str| -> &'static str {
             AGENTS
                 .iter()
@@ -2747,7 +2755,10 @@ mod e2e {
                 "`apg node add|update|rm` / `apg edge add|update|rm`",
             ),
             ("spec-review.md", "`apg_node`/`apg_edge`"),
-            ("agent-builder.md", "`apg_node`/`apg_edge`/`apg_plan_add`"),
+            (
+                "implementation-phase-reviewer.md",
+                "`apg_node`/`apg_edge`/`apg_plan_add`",
+            ),
         ];
         for (name, needle) in pinned {
             assert!(
