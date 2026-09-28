@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "src/git/mod.rs",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "src/project_cmd/mod.rs",
+      "properties": {}
     }
   ],
   "in": [
