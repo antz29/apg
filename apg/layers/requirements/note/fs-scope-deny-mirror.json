@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "requirements.requirement.agent-fs-write-operations",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.constraint.agent-fs-per-path-permission",
+      "properties": {}
     }
   ],
   "in": []
