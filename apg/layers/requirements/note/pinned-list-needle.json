@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "pinned-list-needle",
+  "body": "source: the brief says to \"extend `acceptance_node_edge_surface_is_transparent_and_pinned_in_help_tools_and_agents` (the pinned list) to include the new `implementation-phase-reviewer.md`\". Inconsistency: that test's pinned structure is a list of `(agent-name, needle)` PAIRS (`let pinned: &[(&str, &str)]`), and adding a bare name is not expressible — the new entry needs a needle the generic reviewer prompt actually carries. Resolution: the new pin's needle is the authoring-tool vocabulary the reviewer names as NOT held — the template's \"no spec/plan authoring (`apg_node`/`apg_edge`/`apg_plan_add`)\" line, which the de-repo'd generic body retains (mirroring the existing `(\"spec-review.md\", \"`apg_node`/`apg_edge`\")` and `(\"agent-builder.md\", \"`apg_node`/`apg_edge`/`apg_plan_add`\")` pins). The implementer chooses the exact substring; the generic template must carry that clause. Note the test's separate loop already scans EVERY embedded AGENTS entry for retired surfaces, so the new prompt is additionally covered there without a pin. [autonomous]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
