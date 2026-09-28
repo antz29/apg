@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "main-integration",
+  "body": "The integration of a change-set into main: the single, gated act by which a project branch's work reaches the main checkout — `apg project merge <name>` (verify gate → merge → main rebuild → self-clean). No agent integrates by raw git (merge/checkout/switch/worktree add-remove on main); the coordinator's only branch-state git mutation is rebasing the project worktree onto main, run inside the worktree.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
