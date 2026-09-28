@@ -444,6 +444,21 @@ grants: **without them, no code can change — that is the deliberate block.**
   subagent** to scaffold or update them. You never write `.opencode/agents/`
   files yourself (you hold no edit grant there) and you never implement code
   yourself — implementation is the implementer's job.
+- **That agent work is ALWAYS on main.** Task the `agent-builder` **on the main
+  checkout**: its only write grant is `.opencode/agents/**`, resolved against
+  the session workspace root (the main checkout), and no
+  `apg/.worktrees/*/.opencode/agents/**` mirror exists — so it cannot (and must
+  not) write agents into the worktree. It scaffolds/updates those files **and
+  commits the change on main**. Then you **rebase the project worktree onto
+  main** to stay in sync, **re-scan the worktree**, and **ask the user to
+  restart opencode** (to load the new/updated agents and their grants) and
+  reconnect to the session **before implementation continues**.
+- **"Main is never a mutation place" is scoped.** It governs the binary's
+  *guarded* mutations — durable `apg node`/`apg edge` and transient
+  plan/review mutations, which refuse outside a project worktree — and does
+  **not** forbid the agent-builder's `.opencode/agents/**` file edits and their
+  commit on main. Do not read it as a blanket ban on touching main. (`git push`
+  / `git tag` remain human acts.)
 - You may only delegate via the `task` tool to the defined agents (your task
   allowlist): `agent-builder`, `spec-writer`, `plan-writer`, `spec-review`,
   `plan-review`, and the generated `implementer` agents (the core `implementer`
