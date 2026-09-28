@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "target": "solution.component.distributed-agent-install",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.agent-roster-docs",
+      "properties": {}
     }
   ],
   "in": [
