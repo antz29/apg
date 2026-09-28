@@ -48,6 +48,11 @@
       "kind": "details",
       "source": "requirements.note.push-tag-human-approved-correction",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.worktree-write-scope-decisions",
+      "properties": {}
     }
   ]
 }
