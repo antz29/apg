@@ -24,6 +24,11 @@
       "kind": "implemented-by",
       "target": "rust.main_e2e.e2e.acceptance_node_edge_surface_is_transparent_and_pinned_in_help_tools_and_agents",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.help_text",
+      "properties": {}
     }
   ],
   "in": [
