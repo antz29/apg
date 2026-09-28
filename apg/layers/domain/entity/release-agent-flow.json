@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "release-agent-flow",
+  "body": "The optional, per-repo release path: a repo may have the `agent-builder` scaffold a generated `release-agent` — a hidden subagent with autonomous `git push`/`git tag` and write access to the repo's release artefacts (version files, formulae, changelog, …) — which the `codebase-navigator` tasks ONLY after capturing explicit user consent. The flow exists to make a repo's release repeatable by an agent while keeping the human gate at the single consent decision, not at every command: the release-agent is the deliberate carve-out from the recurring \"push/tag remain human acts\" law. The binary never pushes or tags (git2 only, `default-features = false`; the git CLI is never shelled out to) and `scripts/release.sh` never pushes — the agent may run the script and then push/tag itself.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
