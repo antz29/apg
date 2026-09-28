@@ -29,6 +29,11 @@
       "kind": "implemented-by",
       "target": "tests/project_cmd_e2e.rs",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.plan_cmd.verify.plan_verify_at",
+      "properties": {}
     }
   ],
   "in": [
