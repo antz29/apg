@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.navigator-task-cadence",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.agent-builder-main-flow",
+      "properties": {}
     }
   ],
   "in": []
