@@ -69,6 +69,11 @@
       "kind": "details",
       "target": "domain.constraint.worktree-only-write-scope",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "global.constraint.worktree-isolation",
+      "properties": {}
     }
   ],
   "in": []

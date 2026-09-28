@@ -5,5 +5,11 @@
   "body": "Law (prose; assessed by review): every code change of a change-set is WORKTREE-LOCAL — made inside the project worktree `<main>/apg/.worktrees/<project>/` on the project branch. The main checkout is READ-ONLY to every agent except the two named carve-outs, and is written only by:\n1. the binary act `apg project merge <name>` (verify gate → merge → main rebuild) — the sole integration path of a change-set into main;\n2. the `agent-builder`'s `.opencode/agents/**` scaffold, committed on main (`requirements.constraint.agent-changes-always-on-main`);\n3. the optional per-repo `release-agent`'s release artefacts on main — a REPO-SPECIFIC write set the agent-builder derives by analysing the repo and confirms through the coordinator interview (never a fixed, spec-hardcoded path list), plus its existing push/tag carve-out (sole `ask` grant, behind the navigator's explicit-consent gate).\nNo code-writer agent (the core `implementer`, every `*-implementer`, every `test-implementer`) and no other agent writes the main checkout, by edit grant, fs tool, or raw git. Reading main stays allowed.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "requirements.note.worktree-write-scope-decisions",
+      "properties": {}
+    }
+  ]
 }
