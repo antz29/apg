@@ -64,6 +64,11 @@
       "kind": "details",
       "target": "domain.entity.main-integration",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.constraint.worktree-only-write-scope",
+      "properties": {}
     }
   ],
   "in": []
