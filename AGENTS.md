@@ -100,7 +100,12 @@ internals:
    printed worktree path**. Suite-tool walk-up discovery finds the worktree's
    **own** `apg/` (its layout + branch DB), so the tools work unchanged.
    **Main is never a mutation place** — durable and transient mutations refuse
-   outside a project context.
+   outside a project context. That rule is **scoped**: it governs the binary's
+   *guarded* mutations — durable `apg node`/`apg edge` and transient plan/review
+   mutations, which refuse outside a project worktree — and does **not** forbid
+   the one deliberate exception (step 7): the `agent-builder`'s
+   `.opencode/agents/**` file edits and their commit on main. `git push`/`git
+   tag` remain human acts.
 3. **Author the durable spec tiers** via `apg node add|rm <layer> <type>
    <name>` / `apg edge add|rm <kind> <from> <to>` into `apg/layers/` — one
    JSON file per node in the **six-layer tree** (requirements / domain /
@@ -131,6 +136,22 @@ internals:
    unless the layout and the binary share major.minor. **`apg init` is the
    upgrade act**: re-run it idempotently to write the current version, scaffold
    `apg/.worktrees/` + its `.gitignore` entry, and update the installed suite.
+7. **Code-writer agents are always built on main (the one deliberate main
+   write).** If implementation is blocked because the repo's `*-implementer` /
+   `implementation-phase-reviewer` agents are missing or outdated, the navigator
+   tasks the **`agent-builder` subagent on the MAIN checkout**; it
+   scaffolds/updates `.opencode/agents/**` there and **commits on main**. That is
+   the only place it can write: the agent-builder's sole write grant is
+   `.opencode/agents/**`, opencode resolves it against the session workspace root
+   (the main checkout), and there is no `apg/.worktrees/*/.opencode/agents/**`
+   mirror — the running opencode session loads agents from the main checkout /
+   `~/.opencode/agents/`, so a created/updated agent can never live on the
+   project branch alone. The navigator then **rebases the project worktree onto
+   main**, **re-scans the worktree**, and the user **restarts opencode** (to load
+   the new/updated agents and their grants) and **reconnects** before
+   implementation continues. This is the one place `git`-committed work lands on
+   main outside a worktree; it does not weaken step 2's scoped rule, which still
+   governs every *guarded* binary mutation.
 
 ### The installed binary is the contract — never self-host a change-set
 
@@ -756,7 +777,22 @@ asserted by the binary.
   tools**; approval-only wont-fix — the coordinator actions the writer's
   `--wont-fix` claim and only the reviewer makes it terminal), and
   `agent-builder` (`mode: primary`, the only write grant
-  `.opencode/agents/**`, scaffolds a repo's code-writer agents).
+  `.opencode/agents/**`, scaffolds a repo's code-writer agents). Its agent work
+  is **always done on the main checkout and committed there** — the one
+  deliberate place main is written. When implementation is blocked because the
+  repo's code-writer agents are missing or outdated, the navigator tasks
+  `agent-builder` on the main checkout; its `.opencode/agents/**` grant is
+  resolved against the session workspace root (the main checkout) and no
+  `apg/.worktrees/*/.opencode/agents/**` mirror exists, so a created/updated
+  agent can never live on the project branch alone. It scaffolds/updates and
+  **commits on main**; the navigator then **rebases the project worktree onto
+  main**, **re-scans the worktree**, and the user **restarts opencode** (to load
+  the new/updated agents and their grants) and **reconnects** before
+  implementation continues. This does **not** violate "main is never a mutation
+  place": that rule governs the binary's *guarded* mutations — durable
+  node/edge and transient plan/review mutations, which refuse outside a project
+  worktree — and does not forbid these `.opencode/agents/**` edits and their
+  commit. `git push`/`git tag` remain human acts.
   Repo-defined implementer / implementation-phase-reviewer agents are generated
   by `agent-builder` (assertion-only `plan done`, task notes, branch commits;
   phase review on branch scans + the final implementation review discovering
