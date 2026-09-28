@@ -28,6 +28,11 @@
       "kind": "details",
       "source": "requirements.note.worktree-write-scope-decisions",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.fix-regeneration-timing-after-release",
+      "properties": {}
     }
   ]
 }
