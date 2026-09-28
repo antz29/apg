@@ -5,5 +5,11 @@
   "body": "The repo agent guide `AGENTS.md` as the surface that must state the worktree-isolation model: all code changes are worktree-local; code-writer grants are worktree-only (it currently describes root+mirror grants); main is written only by `apg project merge`, the agent-builder's `.opencode/agents/**` commit, and the optional release-agent's per-repo release artefacts; the navigator integrates main only via `apg project merge` and rebases only inside the worktree. Deliberately a NARROW owner distinct from `solution.component.repo-agent-guide` (anchored to the file-tool guidance) and `solution.component.agent-roster-docs` (which also spans README.md, untouched here), so verify coverage maps 1:1 to the edited file.\n\nimplemented-by: `AGENTS.md`.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
 }

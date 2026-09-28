@@ -126,6 +126,11 @@
       "kind": "contains",
       "target": "solution.component.navigator-scan-permission-coherence-test",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.worktree-isolation-guide",
+      "properties": {}
     }
   ],
   "in": [
