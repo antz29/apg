@@ -6,6 +6,17 @@
     "plan-review": { "model": "github-copilot/claude-opus-5.5" },
     "plan-writer": { "model": "opencode-go/deepseek-v4.1-flash" },
     "spec-review": { "model": "github-copilot/claude-opus-5.5" },
-    "spec-writer": { "model": "opencode-go/deepseek-v4.1-flash" }
+    "spec-writer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "build-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "cpp-frontend-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "csharp-frontend-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "docs-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "go-frontend-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "java-frontend-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "py-frontend-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "rust-frontend-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "structlib-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
+    "ts-frontend-implementer": { "model": "opencode-go/deepseek-v4.1-flash" }
   }
 }
