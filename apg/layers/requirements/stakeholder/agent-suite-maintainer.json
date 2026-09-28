@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.agent-builder-drops-optional-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.reviewer-is-distributed-not-generated",
+      "properties": {}
     }
   ],
   "in": []
