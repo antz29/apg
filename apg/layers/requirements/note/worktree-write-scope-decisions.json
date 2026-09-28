@@ -54,6 +54,11 @@
       "kind": "details",
       "target": "domain.entity.release-agent-flow",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.worktree-write-boundary",
+      "properties": {}
     }
   ],
   "in": []
