@@ -20,6 +20,11 @@
       "kind": "drives",
       "source": "requirements.requirement.code-writer-worktree-only-writes",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.worktree-write-scope-decisions",
+      "properties": {}
     }
   ]
 }

@@ -34,6 +34,11 @@
       "kind": "details",
       "target": "requirements.requirement.agent-fs-write-operations",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.value.permission-scope",
+      "properties": {}
     }
   ],
   "in": []
