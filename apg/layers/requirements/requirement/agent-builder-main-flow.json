@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-builder-main-flow"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.agent-scaffold-flow",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
