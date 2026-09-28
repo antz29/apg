@@ -7,5 +7,11 @@
     "attaches-to": "requirements.requirement.agent-builder-model-map"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "requirements.note.agent-builder-model-map-reconciliation",
+      "properties": {}
+    }
+  ]
 }
