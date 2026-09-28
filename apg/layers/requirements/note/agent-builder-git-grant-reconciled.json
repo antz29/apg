@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.agent-builder-main-flow",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.constraint.agent-changes-always-on-main",
+      "properties": {}
     }
   ],
   "in": []

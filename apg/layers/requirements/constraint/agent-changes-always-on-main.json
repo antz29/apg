@@ -7,5 +7,11 @@
     "attaches-to": "requirements.requirement.agent-builder-main-flow"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "requirements.note.agent-builder-git-grant-reconciled",
+      "properties": {}
+    }
+  ]
 }
