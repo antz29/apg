@@ -23,6 +23,11 @@
       "kind": "contains",
       "source": "requirements.user.code-writer-agent",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.worktree-write-scope-decisions",
+      "properties": {}
     }
   ]
 }
