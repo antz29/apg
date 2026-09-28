@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-builder-roster-cleanup"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.distributed-agent-set",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
