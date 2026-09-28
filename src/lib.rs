@@ -158,7 +158,7 @@ fn session_cmd(args: &[String]) -> anyhow::Result<()> {
 /// `scan`, `plan`, `review`, `project`, `node`, `edge`, `session`), prints help
 /// for `--help`/no args, and turns a returned error into a non-zero exit. The
 /// binary embeds the apg opencode suite — the tool set (`SUITE_TOOLS`) and the
-/// six distributed agents (`AGENTS`) delivered by `apg init` — whose prompts
+/// seven distributed agents (`AGENTS`) delivered by `apg init` — whose prompts
 /// carry the coordinator-mediated feedback cycle: the owning writer returns an
 /// ACTIONED/WONT-FIX claim and the coordinator performs the shallow
 /// claim-vs-change consistency check and then actions the item.

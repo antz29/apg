@@ -222,6 +222,14 @@ a repo never created by `apg init` has no versioned layout at all.
    first — `brew upgrade apg` (or the matching frontend formulae), the
    `install.sh` installer, or a newer release — then `apg init`, then re-run
    the blocked command.
+4. **The reviewer became a distributed agent.** When upgrading to the release
+   that first distributes `implementation-phase-reviewer.md` (0.18.0), a repo
+   that already carries its own repo-local
+   `.opencode/agents/implementation-phase-reviewer.md` will see `apg init`'s
+   duplicate-install warning. That warning is correct — `apg init` never
+   deletes anything — so **manually remove** the local
+   `.opencode/agents/implementation-phase-reviewer.md` (the installed copy in
+   `~/.opencode/agents/` now shadows it), then re-run `apg init`.
 
 ## Common issues
 
@@ -235,6 +243,12 @@ a repo never created by `apg init` has no versioned layout at all.
 - **Worktree scaffolding missing** — `apg init` scaffolds `apg/.worktrees/`
   and its `.gitignore` entry; `apg project start` also self-heals both when
   absent, so this resolves itself on the next start.
+- **`apg init` warns that `.opencode/agents/implementation-phase-reviewer.md`
+  duplicates the installed suite** — expected when upgrading to the release
+  that first distributes the reviewer (0.18.0): the local file is a leftover
+  repo-local copy that now shadows the installed one. `apg init` never deletes
+  anything, so **manually remove** the local
+  `.opencode/agents/implementation-phase-reviewer.md` and re-run `apg init`.
 - **Code_type rules look reformatted** — the JSON file is rewritten when the
   version changes; the rules' *content* is preserved (only whitespace/field
   order may normalize). Never re-add the version by hand afterwards — re-run
@@ -249,9 +263,10 @@ a repo never created by `apg init` has no versioned layout at all.
 const CODEBASE_NAVIGATOR_AGENT: &str =
     include_str!("../opencode-suite/agents/codebase-navigator.md");
 
-/// The six distributed agents that `apg init` installs into `~/.opencode/agents/`
-/// (SPEC R13/R15): the navigator plus the five spec/plan/review/builder agents,
-/// single-sourced from the repo's `opencode-suite/agents/`.
+/// The seven distributed agents that `apg init` installs into
+/// `~/.opencode/agents/` (SPEC R13/R15): the navigator plus the six
+/// spec/plan/review/builder agents — including the `implementation-phase-reviewer`
+/// — single-sourced from the repo's `opencode-suite/agents/`.
 pub const AGENTS: &[(&str, &str)] = &[
     ("codebase-navigator.md", CODEBASE_NAVIGATOR_AGENT),
     (
@@ -271,12 +286,16 @@ pub const AGENTS: &[(&str, &str)] = &[
         include_str!("../opencode-suite/agents/plan-review.md"),
     ),
     (
+        "implementation-phase-reviewer.md",
+        include_str!("../opencode-suite/agents/implementation-phase-reviewer.md"),
+    ),
+    (
         "agent-builder.md",
         include_str!("../opencode-suite/agents/agent-builder.md"),
     ),
 ];
 
-/// The six distributed agent filenames — the apg-owned names in
+/// The seven distributed agent filenames — the apg-owned names in
 /// `~/.opencode/agents/`. `apg init` prunes any of these that a newer release
 /// dropped from the suite (a user's own same-named agent is the accepted edge).
 const KNOWN_AGENT_FILES: &[&str] = &[
@@ -285,6 +304,7 @@ const KNOWN_AGENT_FILES: &[&str] = &[
     "plan-writer.md",
     "spec-review.md",
     "plan-review.md",
+    "implementation-phase-reviewer.md",
     "agent-builder.md",
 ];
 
@@ -414,7 +434,7 @@ pub fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
 }
 
 /// Installs (or updates) the apg suite into `opencode_dir`: every `SUITE_TOOLS`
-/// file, the shared lib, the upgrade guide, and the six distributed agents —
+/// file, the shared lib, the upgrade guide, and the seven distributed agents —
 /// each written only when missing or changed — then prunes stale apg-owned
 /// files. Returns `(files written/updated, files pruned)`. `cmd_init` calls it
 /// against `~/.opencode`; tests call it against a temp dir. The package.json
@@ -467,7 +487,7 @@ pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
 
 /// `apg init [dir]`: create the committed `apg/` layout (config.json carrying
 /// the binary-managed layout `version` + `.trans/` + the project-worktrees
-/// dir), install (or update) the opencode apg tool suite + the six
+/// dir), install (or update) the opencode apg tool suite + the seven
 /// distributed agents + the upgrade guide into `~/.opencode/`, scaffold the
 /// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
 /// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`
