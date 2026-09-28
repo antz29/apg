@@ -84,13 +84,14 @@ codebase-navigator delegates to you because the repo's code-writer agents are
 missing or outdated, you scaffold/update `.opencode/agents/**` **on main**,
 `git add` + `git commit` there, and report back.
 
-This is the **one place main IS written**, and it does not violate "main is never
-a mutation place": that rule is **scoped** to the binary's guarded mutations —
-durable `apg node`/`apg edge` and transient plan/review mutations, which refuse
-outside a project worktree — and never forbade your `.opencode/agents/**` file
-edits and their commit on main. `git push` and `git tag` remain human-approved
-acts (the only generated agent you ever grant them is the optional
-`release-agent`, as `ask`).
+This is **one of exactly two places main is written** — the other is the
+optional `release-agent`'s per-repo release artefacts (never any code-writer's)
+— and it does not violate "main is never a mutation place": that rule is
+**scoped** to the binary's guarded mutations — durable `apg node`/`apg edge` and
+transient plan/review mutations, which refuse outside a project worktree — and
+never forbade your `.opencode/agents/**` file edits and their commit on main.
+`git push` and `git tag` remain human-approved acts (the only generated agent
+you ever grant them is the optional `release-agent`, as `ask`).
 
 After you have committed on main, the navigator **rebases the project worktree
 onto main**, **re-scans the worktree**, and the user **restarts opencode** (to
@@ -143,23 +144,34 @@ implementation continues.
   the source/config globs; **test files denied** where tests live in separate
   files — `**/*_test.go`, `**/*.test.ts`, `**/test/**`). Where tests are inline
   (Rust `#[cfg(test)]`), a glob cannot separate them — the implementer owns
-  source and its inline tests.
+  source and its inline tests. Every edit glob is granted **worktree-rooted**
+  (`apg/.worktrees/*/src/**`, never a bare `src/**`), per the worktree-only rule
+  below.
 - **In-tree suite distribution**: when the repo ships the apg suite in-tree at
   `opencode-suite/` (the apg repository itself), the implementer's edit scope
-  also includes `opencode-suite/**`, worktree-mirrored as
-  `apg/.worktrees/*/opencode-suite/**` — the suite tools/lib/distributed-agent
-  templates are product source embedded in the binary via `include_str!`.
-  Never scaffold an `opencode-suite/**` deny for the implementer;
-  `.opencode/**` stays denied (the implementer never edits its own generated
-  agents).
-- **Worktree mirroring (MANDATORY)**: the agent works inside the project
-  worktree at `<main>/apg/.worktrees/<name>/`, and the permission engine
-  resolves edit globs relative to the session workspace root (the main
-  checkout). Therefore EVERY edit glob granted at the repo root MUST also be
-  granted under `apg/.worktrees/*/` — and every deny mirrored the same way
-  (`apg/.worktrees/*/src/golib/**` etc.). An agent whose grants only cover the
-  root paths cannot touch the worktree it operates in; that is a broken
-  scaffold (the 0.11.0 feedback-0-fix miss).
+  also includes the worktree-rooted `apg/.worktrees/*/opencode-suite/**` — the
+  suite tools/lib/distributed-agent templates are product source embedded in the
+  binary via `include_str!`. Never scaffold a bare `opencode-suite/**` allow
+  (the root-relative form is not granted); never scaffold an
+  `opencode-suite/**` deny for the implementer; `.opencode/**` stays denied (the
+  implementer never edits its own generated agents).
+- **Worktree-only grants (MANDATORY)**: the agent works inside the project
+  worktree at `<main>/apg/.worktrees/<name>/`, but opencode resolves edit globs
+  against the session workspace root (the main checkout), and the path-scoped fs
+  tools resolve every candidate in one **main-anchored** frame (the main
+  checkout root). Therefore EVERY allow a code-writer gets — every `edit` glob
+  and every `apg_rm`/`apg_mv`/`apg_cp` glob — is expressed **only** as
+  `apg/.worktrees/*/<glob>`; the root-relative `<glob>` form is NEVER granted,
+  and main-root paths are explicitly denied (allow `apg/.worktrees/*/src/**`,
+  deny `src/**`; deny a sibling's `apg/.worktrees/*/src/golib/**`). The fs tools
+  self-enforce per-path scope from those granted worktree-rooted globs, so any
+  main-checkout path is refused whatever `directory` the caller passes. An agent
+  whose grants include a root path would permit a main-checkout write — that is
+  a broken scaffold (the 0.11.0 feedback-0-fix miss). The ONLY main writers are
+  the agent-builder itself (`.opencode/agents/**`) and the optional
+  `release-agent` (its per-repo release artefacts); every code-writer — the core
+  `implementer`, every `<name>-implementer`, every `test-implementer` — is
+  worktree-only.
 - **Discovered work stops the implementer.** A change beyond the task's
   verb/target — a new unit, a different mechanism, a spec contradiction — is
   reported, not implemented: the coordinator routes it to the plan-writer (or
@@ -209,22 +221,30 @@ implementation continues.
   projection tool is navigator/coordinator-only.
 - **Filesystem scope tools — the implementer's `deletes`/`renames`/`moves`
   surface.** Grant `apg_rm`/`apg_mv`/`apg_cp` deny-by-default as a per-tool glob
-  map (`"*": deny`, then the implementer's owned-path globs and their
-  `apg/.worktrees/*/` mirrors — never a scalar `: allow`, never a blanket
-  `"*": allow`), and drop the `bash:` `rm` pattern they supersede (rules 6 and
-  10; `apg_mv`/`apg_cp` check BOTH the source and the destination). The tools
-  self-enforce per-path scope from those granted globs. This is a scoped-write
-  surface only — the read-only apg-suite list above stays read-only — and it
-  belongs to the implementer's grant shape, never the test-implementer's.
+  map (`"*": deny`, then the implementer's owned-path globs granted
+  **worktree-rooted** as `apg/.worktrees/*/<glob>` — never a root-relative
+  `<glob>`, never a scalar `: allow`, never a blanket `"*": allow`), and drop
+  the `bash:` `rm` pattern they supersede (rules 6 and 10; `apg_mv`/`apg_cp`
+  check BOTH the source and the destination). The tools resolve every candidate
+  in one **main-anchored** frame and self-enforce per-path scope from those
+  granted worktree-rooted globs, so a main-checkout path is refused whatever
+  `directory` the caller passes. This is a scoped-write surface only — the
+  read-only apg-suite list above stays read-only — and it belongs to the
+  implementer's grant shape, never the test-implementer's, and never a root
+  path.
 
 ### unit/int/e2e-test-implementer(s) (per detected tier, where a test tier is file-separable)
-- **Edit** scoped to the tier's test-file globs; **source denied**.
+- **Edit** scoped to the tier's test-file globs, granted **worktree-rooted** as
+  `apg/.worktrees/*/<test-glob>`; **source denied** (deny both the root `src/**`
+  and the bare root-relative test form — a test-implementer never gets a
+  root-relative allow).
 - Same grant shape as the implementer (the explicit read-only apg suite
   enumeration above, the plan read tools `apg_plan`/`apg_plan_phases`/
   `apg_plan_tasks`, `apg_plan_done`/`apg_plan_undone`, read-only `apg_review`,
   git add+commit, verified gates — **never `apg_plan_render`**), **including the
-  worktree mirroring**: every test glob also granted under `apg/.worktrees/*/`,
-  every deny mirrored. Like the implementer, it never actions Feedback — it
+  worktree-only rule**: every test glob is granted only as
+  `apg/.worktrees/*/<glob>`, and every deny is expressed worktree-rooted too —
+  no root-relative allow. Like the implementer, it never actions Feedback — it
   returns a claim and the coordinator actions the item.
 - Cross-denied against the implementer's globs.
 - **Skip a tier's test-implementer when the tier is not file-separable** (e.g.
@@ -296,7 +316,30 @@ implementation continues.
    grants are the narrow, explicit ones the role needs (implementer:
    `git add`/`git commit`, its verified build gates, and the path-scoped fs-tool
    grants `apg_rm`/`apg_mv`/`apg_cp` — never a bash `rm`/`mv`/`cp` pattern, so
-   `deletes`/`renames`/`moves` tasks run through the tools). **`git push` and
+   `deletes`/`renames`/`moves` tasks run through the tools). **Every path grant
+   a code-writer gets — `edit` globs and the `apg_rm`/`apg_mv`/`apg_cp` glob map
+   alike — is worktree-rooted (`apg/.worktrees/*/<glob>`): the root-relative
+   `<glob>` form is NEVER granted and main-root paths are explicitly denied
+   (rule 10).** A code-writer's `edit`/fs-tool block therefore looks like:
+
+   ```yaml
+   edit:
+     "*": deny
+     "apg/.worktrees/*/src/**": allow
+     "src/**": deny                # main checkout: code-writers never write here
+     "apg/.worktrees/*/src/golib/**": deny
+     "apg/.worktrees/*/opencode-suite/**": allow
+     "opencode-suite/**": deny      # main checkout: never
+   apg_rm:
+     "*": deny
+     "apg/.worktrees/*/src/**": allow
+   apg_mv: { "*": deny, "apg/.worktrees/*/src/**": allow }
+   apg_cp: { "*": deny, "apg/.worktrees/*/src/**": allow }
+   ```
+
+   **The ONLY main writers are the agent-builder itself (`.opencode/agents/**`)
+   and the optional `release-agent` (its per-repo release artefacts); every
+   code-writer is worktree-only.** **`git push` and
    `git tag` are human-approved acts; the ONLY generated agent scaffolded a
    push/tag grant is the optional `release-agent`, and only as `ask` — every
    other generated agent carries no push/tag grant at all.**
@@ -322,20 +365,29 @@ implementation continues.
    the optional `release-agent`).
 9. **Re-running updates idempotently.** Regenerating an agent rewrites it in
    place; never accumulate duplicates.
-10. **Worktree-mirrored edit grants.** The generated agents operate inside the
-    project worktree (`<main>/apg/.worktrees/<name>/`), but opencode resolves
-    edit globs against the session workspace root (the main checkout). Every
-    allow and every deny an agent gets for a repo-root path MUST be duplicated
-    under `apg/.worktrees/*/` (e.g. `src/*.rs` → also `apg/.worktrees/*/src/*.rs`;
-    `src/golib/**` deny → also `apg/.worktrees/*/src/golib/**` deny). An agent
-   whose grants cover only the main checkout cannot touch the worktree it must
-   mutate — the scaffold is broken. **Cwd-agnostic bash command patterns ONLY
-   are exempt** (they carry no path; the agents `cd` into the worktree): the
-   path-scoped fs-tool glob grants (`apg_rm`/`apg_mv`/`apg_cp`) are NOT exempt —
-   the tools self-enforce per-path scope from the acting agent's granted globs
-   (the `permission.edit` allow globs), which opencode resolves against the
-   session workspace root, so those grants ARE mirrored under
-   `apg/.worktrees/*/` exactly like edit globs.
+10. **Worktree-only edit grants.** The generated code-writers operate inside
+    the project worktree (`<main>/apg/.worktrees/<name>/`), but opencode
+    resolves edit globs against the session workspace root (the main checkout),
+    and the path-scoped fs tools resolve every candidate in one **main-anchored**
+    frame (the main checkout root). Therefore every path grant a code-writer
+    gets — every `edit` allow AND the `apg_rm`/`apg_mv`/`apg_cp` glob map — is
+    expressed **only** as `apg/.worktrees/*/<glob>`: the root-relative `<glob>`
+    form is never granted, and main-root paths are explicitly denied
+    (e.g. copy each owned `src/*.rs` to `apg/.worktrees/*/src/*.rs`, and deny
+    both `src/golib/**` and `apg/.worktrees/*/src/golib/**` for a sibling's
+    paths). An agent whose grants include a root-relative allow would permit a
+    main-checkout write, and a worktree path under a bare root glob would never
+    match — the scaffold is broken either way. **Cwd-agnostic bash command
+    patterns are the ONLY exemption from worktree-rooting** (they carry no path;
+    the agents `cd` into the worktree): the path-scoped fs-tool glob grants
+    (`apg_rm`/`apg_mv`/`apg_cp`) are NOT exempt — the tools self-enforce per-path
+    scope from the acting agent's granted globs (the `permission.edit` allow
+    globs), which opencode resolves against the session workspace root, so those
+    grants are worktree-rooted exactly like edit globs. The ONLY main writers are
+    the agent-builder itself (`.opencode/agents/**`) and the optional
+    `release-agent` (its per-repo release artefacts); every code-writer — the
+    core `implementer`, every `<name>-implementer`, every `test-implementer` —
+    is worktree-only.
 
 ## Workflow
 
@@ -373,7 +425,8 @@ implementation continues.
    - `mode: subagent`, `hidden: true`, `generated: true` — every generated
      agent, unconditionally.
    - Permission blocks per the style rules above: deny-by-default, exact
-     patterns, no chaining, cross-denied globs, verified gates, commit-only git.
+     patterns, no chaining, cross-denied, worktree-rooted globs, verified gates,
+     commit-only git.
    - The **common permission shape** every generated agent carries: read-guard
      on the graph-state paths, `question` dropped, stop-and-report tool-failure
      prose, and no-internals bodies.
@@ -383,8 +436,11 @@ implementation continues.
 6. **Register** each generated agent into `codebase-navigator.md`'s `task`
    allowlist (deny-all default, named allows).
 7. **Verify.** Re-read each generated file; confirm the permission blocks match
-   the detected layout and the coordinator's stated gates; confirm no allowed
-   pattern contains `&&`, `|`, `;`, `$()`, or redirection, and that no
+   the detected layout and the coordinator's stated gates; **confirm every
+   code-writer's path grants are worktree-only (rule 10) — every `edit` allow
+   and every `apg_rm`/`apg_mv`/`apg_cp` glob is `apg/.worktrees/*/<glob>`, with
+   no root-relative allow and main-root paths explicitly denied**; confirm no
+   allowed pattern contains `&&`, `|`, `;`, `$()`, or redirection, and that no
    graph-state read slips through a path-less reader — `git grep *` in
    particular (it reads tracked files, and `apg/layers/**` is tracked);
    confirm the common shape (read-guard denies on the graph-state paths, no
@@ -399,12 +455,16 @@ implementation continues.
    whose body claims broader read access than its grant**, regenerating it
    deny-first;
    confirm `generated: true` is present and the navigator allowlist covers
-   every generated agent. Confirm the **worktree mirroring** (rule 10): for
-   every edit allow/deny at the repo root, the matching `apg/.worktrees/*/`
-   entry exists — read the worktree path shape off `project_cmd.rs`
-   (`apg/.worktrees/<name>`) if unsure. When the repo ships the suite in-tree,
-   confirm the implementer's `opencode-suite/**` +
-   `apg/.worktrees/*/opencode-suite/**` allows are present (mirroring rule 10).
+   every generated agent. Confirm the **worktree-only rule** (rule 10) for every
+   code-writer: all its `edit` and `apg_rm`/`apg_mv`/`apg_cp` grants are
+   `apg/.worktrees/*/<glob>`, no root-relative `<glob>` allow exists, and the
+   main checkout's root paths are explicitly denied — read the worktree path
+   shape off `project_cmd.rs` (`apg/.worktrees/<name>`) if unsure. Confirm the
+   only main-writer grants are the agent-builder's own `.opencode/agents/**` and
+   the optional `release-agent`'s per-repo release paths. When the repo ships the
+   suite in-tree, confirm the implementer's worktree-rooted
+   `apg/.worktrees/*/opencode-suite/**` allow is present and that no bare
+   `opencode-suite/**` allow exists (worktree-only rule 10).
 
 ## What to report to the coordinator at the end
 
