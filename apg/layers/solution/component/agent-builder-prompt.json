@@ -56,6 +56,11 @@
       "kind": "details",
       "source": "solution.note.worktree-write-scope-owners",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.agent-builder-git-grant-reconciled",
+      "properties": {}
     }
   ]
 }
