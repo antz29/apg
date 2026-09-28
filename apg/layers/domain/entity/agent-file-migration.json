@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "agent-file-migration",
+  "body": "The reconciliation of a repo's local `.opencode/agents/**` files with a newer distributed suite. When an agent moves into the distributed set, a repo that already generated a same-named local file now holds a duplicate; `apg init` reports it loudly but never deletes anything, and the user must remove the local copy by hand. The migration is documented in the layout-upgrade guide (`~/.opencode/lib/apg-upgrade.md`), not enforced by deletion. It exists because the distribution boundary can move across releases while a repo's local files persist.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
