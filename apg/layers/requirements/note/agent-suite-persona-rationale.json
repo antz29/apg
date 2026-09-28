@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.stakeholder.agent-suite-maintainer",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.user.apg-upgrader",
+      "properties": {}
     }
   ],
   "in": []
