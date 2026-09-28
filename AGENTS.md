@@ -198,10 +198,14 @@ integrated **only** by the binary act `apg project merge <name>`.
 - **`apg project merge <name>` is the sole integration path into main** — a
   binary act (verify gate → merge → unguarded main rebuild → self-clean), not an
   agent action. The navigator holds **no** `git merge`, `git checkout`, or
-  `git switch` grant; it holds `git worktree list`, the read-only git verbs, and
-  `git rebase` — and `git rebase` is used for nothing but rebasing the project
-  worktree onto main, run **inside the project worktree** (never in the main
-  checkout).
+  `git switch` grant. Its granted git surface is exactly the read-only set
+  `git status`, `git diff`, `git log`, `git branch --show-current`, and
+  `git worktree list`, plus `git rebase` — a blanket `git branch` (whose `-f`/
+  `-D`/`-m` forms rewrite refs) is **not** granted, nor is any other
+  ref- or config-mutating verb. **`--output=<file>` is forbidden on every
+  granted git verb** — the navigator runs `git diff`/`git log` to stdout only.
+  `git rebase` is used for nothing but rebasing the project worktree onto main,
+  run **inside the project worktree** (never in the main checkout).
 
 ### The installed binary is the contract — never self-host a change-set
 
