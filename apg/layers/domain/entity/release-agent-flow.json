@@ -43,6 +43,11 @@
       "kind": "drives",
       "source": "requirements.requirement.push-tag-human-approved-release-only",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.push-tag-human-approved-correction",
+      "properties": {}
     }
   ]
 }

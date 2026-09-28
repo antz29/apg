@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "solution.component.push-tag-policy-surfaces",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.release-agent-flow",
+      "properties": {}
     }
   ],
   "in": []
