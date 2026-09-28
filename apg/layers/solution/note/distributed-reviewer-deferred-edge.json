@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "distributed-reviewer-deferred-edge",
+  "body": "source: the brief points the new reviewer file's owning component's `implemented-by` at `opencode-suite/agents/implementation-phase-reviewer.md`. Inconsistency: at spec time that FQN does not resolve — `opencode-suite/agents/` holds only the six existing prompts — and an `implemented-by` endpoint must be either real code or a planned FQN declared in the plan, so the edge cannot be authored now (the write would be refused). Resolution: `solution.component.distributed-reviewer-prompt` is authored WITHOUT an `implemented-by` edge to the new file; the edge is DEFERRED. The plan-writer must declare the file as a planned File node (`apg plan add <project> planned File opencode-suite/agents/implementation-phase-reviewer.md`) and the implementer `creates` it; after the plan exists, a short spec reconciliation adds `implemented-by solution.component.distributed-reviewer-prompt opencode-suite/agents/implementation-phase-reviewer.md`. Until then the component is implemented-by the read-guard coherence test only. [with user — the brief explicitly sequences plan-then-reconciliation]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
