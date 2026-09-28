@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "main-integration-via-merge-gate-only",
+  "body": "Law (prose; assessed by review): the navigator never holds a raw git grant that merges into, checks out, switches, or adds/removes worktrees on the main checkout; a change-set reaches main only through `apg project merge` and its verify gate. `git rebase` is used only inside the project worktree.",
+  "properties": {
+    "attaches-to": "requirements.requirement.navigator-no-unguarded-main-git"
+  },
+  "out": [],
+  "in": []
+}
