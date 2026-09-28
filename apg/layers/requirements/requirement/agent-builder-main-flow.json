@@ -23,6 +23,11 @@
       "kind": "details",
       "source": "requirements.note.agent-builder-main-flow-decision",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.agent-builder-prompt-narrow-owner",
+      "properties": {}
     }
   ]
 }
