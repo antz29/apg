@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "solution.component.distributed-agent-install",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.agent-roster-docs",
+      "properties": {}
     }
   ],
   "in": []

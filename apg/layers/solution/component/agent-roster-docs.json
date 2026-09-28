@@ -26,6 +26,11 @@
       "kind": "realised-by",
       "source": "domain.entity.distributed-agent-set",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.agent-roster-narrow-owners",
+      "properties": {}
     }
   ]
 }
