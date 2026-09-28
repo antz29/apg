@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "fix-regeneration-timing-after-release",
+  "body": "source: `requirements.requirement.code-writer-worktree-only-writes` (scope AC) and `requirements.note.worktree-write-scope-decisions` (6) said the repo's own `.opencode/agents/**` are regenerated \"after merge + `apg init` + opencode restart\". inconsistency: the corrected agent-builder template is product source embedded via `include_str!`, so it reaches `~/.opencode/agents/` only when a released binary containing it is installed and `apg init` is re-run (AGENTS.md \"the installed binary is the contract\"); merge alone does not deliver it. resolution: reworded both to: after this change is released → install the released binary → `apg init` → restart opencode → dispatch the agent-builder on main. Nothing else changed. Checked and needing no change (no merge-timing wording): `solution.note.worktree-write-scope-owners`, `global.constraint.worktree-isolation`, `solution.component.agent-builder-prompt`, the fs components, `global.note.fix-worktree-isolation-carve-out-count`, `domain.note.fix-main-integration-scope-and-parent`. [with user]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
