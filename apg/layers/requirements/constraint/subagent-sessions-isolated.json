@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "subagent-sessions-isolated",
+  "body": "Law (prose; assessed by review): a `codebase-navigator` `task` dispatch is a fresh, ISOLATED subagent session — the navigator must not carry a `task_id` into a new task, and one dispatch is one self-contained unit of work. The ONLY resume permitted is the within-dispatch hand-back: the subagent returns needing a navigator action (a scan, a quick verify, an `apg_review_action`), the navigator performs it, then resumes THAT SAME session only to finish the SAME task (the mark-done step, `apg_plan_done` + `apg_plan_note`) and ends it. Resumption must NEVER start a new/different task, must NEVER resume a reviewer (each review round is a fresh dispatch), and must never be carried across phases. The motivation is that subagent context is finite: a repeatedly resumed session accumulates context until it breaks, so isolation — not reuse — is the design. This binds the distributed `codebase-navigator` prompt (`opencode-suite/agents/codebase-navigator.md`); satisfaction is assessed by review, and the coherence test `rust.main_e2e.e2e.coordinator_agent_carries_review_action_and_dispatch_prose` pins the prose.",
+  "properties": {
+    "attaches-to": "requirements.requirement.navigator-session-isolation"
+  },
+  "out": [],
+  "in": []
+}
