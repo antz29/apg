@@ -33,6 +33,11 @@
       "kind": "contains",
       "source": "domain.group.agent-fs-operations",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "domain.note.fix-main-integration-scope-and-parent",
+      "properties": {}
     }
   ]
 }
