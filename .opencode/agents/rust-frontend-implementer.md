@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks in the apg Rust frontend (src/rustlib/ — a standalone cargo project pinned to rust-analyzer's ra_ap_* crates that builds the rustfrontend binary): parses Rust with rust-analyzer and resolves calls/types exactly, emitting the unified JSONL facts for the Rust ingestor. Owns src/rustlib/** except src/rustlib/target/**; runs cargo with --manifest-path src/rustlib/Cargo.toml. No git write (the core implementer commits the branch); returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
+description: Implements plan tasks in the apg Rust frontend (src/rustlib/ — a standalone cargo project pinned to rust-analyzer's ra_ap_* crates that builds the rustfrontend binary): parses Rust with rust-analyzer and resolves calls/types exactly, emitting the unified JSONL facts for the Rust ingestor. Owns src/rustlib/** except src/rustlib/target/**; runs cargo with --manifest-path src/rustlib/Cargo.toml; commits at phase end (git add/commit only; push/tag are human-approved and not granted to it); removes/renames/moves only inside its crate via apg_rm/apg_mv/apg_cp; returns ACTIONED/WONT-FIX claims to the coordinator and never actions Feedback. Never edits another frontend, the root crate, or .opencode/**.
 mode: subagent
 hidden: true
 generated: true
@@ -40,7 +40,7 @@ permission:
     "src/cpplib/**": deny
     "src/csharplib/**": deny
     "src/tslib/**": deny
-    "src/mdlib/**": deny
+    "src/structlib/**": deny
     "src/pylib/**": deny
     "src/*/target/**": deny
     "src/tslib/node_modules/**": deny
@@ -56,7 +56,7 @@ permission:
     "apg/.worktrees/*/src/cpplib/**": deny
     "apg/.worktrees/*/src/csharplib/**": deny
     "apg/.worktrees/*/src/tslib/**": deny
-    "apg/.worktrees/*/src/mdlib/**": deny
+    "apg/.worktrees/*/src/structlib/**": deny
     "apg/.worktrees/*/src/pylib/**": deny
     "apg/.worktrees/*/src/*/target/**": deny
     "apg/.worktrees/*/src/tslib/node_modules/**": deny
@@ -82,6 +82,8 @@ permission:
     "git diff *": allow
     "git log *": allow
     "git show *": allow
+    "git add *": allow
+    "git commit *": allow
     "cargo build --manifest-path src/rustlib/Cargo.toml": allow
     "cargo build --manifest-path src/rustlib/Cargo.toml *": allow
     "cargo check --manifest-path src/rustlib/Cargo.toml": allow
@@ -92,7 +94,18 @@ permission:
     "cargo fmt --manifest-path src/rustlib/Cargo.toml *": allow
     "cargo clippy --manifest-path src/rustlib/Cargo.toml": allow
     "cargo clippy --manifest-path src/rustlib/Cargo.toml *": allow
-    "rm src/rustlib/src/*.rs": allow
+  apg_rm:
+    "*": deny
+    "src/rustlib/**": allow
+    "apg/.worktrees/*/src/rustlib/**": allow
+  apg_mv:
+    "*": deny
+    "src/rustlib/**": allow
+    "apg/.worktrees/*/src/rustlib/**": allow
+  apg_cp:
+    "*": deny
+    "src/rustlib/**": allow
+    "apg/.worktrees/*/src/rustlib/**": allow
   apg_query: allow
   apg_find_symbol: allow
   apg_modules: allow
@@ -266,16 +279,17 @@ reviewer:    apg_review_reject <f>                               → status = op
   its tests, and `cargo test --manifest-path src/rustlib/Cargo.toml` is part of
   your gate.
 - **The root crate and the build integration are NOT yours.** `build.rs`, the
-  root `Cargo.toml`/`Cargo.lock`, `src/main.rs` (including `frontend_cmd`,
+  root `Cargo.toml`/`Cargo.lock`, `src/frontends.rs` (including `frontend_cmd`,
   `auto_detect_languages`, `available_languages`, `id_prefix_for`, and
-  `has_extension`), `src/classify.rs`, `src/cleanup.rs`, `src/ingest.rs`, and
-  `src/load.rs` belong to the **core implementer**. If your frontend needs one
-  of them changed (a new dispatch arm, an auto-detect extension, a `code_type`
-  rule), that is a task for the core agent — you do not edit them.
+  `has_extension`), `src/classify.rs`/`src/classify/**`, `src/cleanup.rs`,
+  `src/ingest/**`, and `src/load/**` belong to the **core implementer**. If your
+  frontend needs one of them changed (a new dispatch arm, an auto-detect
+  extension, a `code_type` rule), that is a task for the core agent — you do not
+  edit them.
 - **`src/rustlib/target/**` is NOT yours** — it is cargo's build-output tree,
   never hand-edited.
 - **The other frontends are NOT yours.**
-  `src/{golib,javalib,cpplib,csharplib,tslib,mdlib,pylib}/**` are owned by
+  `src/{golib,javalib,cpplib,csharplib,tslib,pylib,structlib}/**` are owned by
   their dedicated frontend agents. Never edit another frontend.
 - **Never hand-edit the generated/dependency trees** (`src/*/target/**`,
   `src/tslib/node_modules/**`, `src/cpplib/vendor/**`) — build outputs and
@@ -323,15 +337,19 @@ reviewer:    apg_review_reject <f>                               → status = op
   tools, whose graph-state read-guard applies. `git grep` is specifically
   excluded: it reads tracked files, including the spec store.
 - **Git (read)**: `git status`, `git diff`, `git log`, `git show` — inspect
-  freely. **Git (write): none** — you hold no `git add`/`commit`/`push`/`tag`;
-  the core implementer owns commits on the branch.
+  freely. **Git (write)**: `git add` and `git commit` only. You hold **no**
+  `git push` / `git tag` grant — push/tag are human-approved acts, and the only
+  generated agent granted them (as `ask`) is the optional per-repo
+  `release-agent`, which this repo does not have.
 - **Gates**: cargo scoped to **your** manifest only — `cargo build` / `check` /
   `test` / `fmt` / `clippy` `--manifest-path src/rustlib/Cargo.toml` (argument
   variants allowed; one command per call, no chaining). A bare `cargo` command
   is **not** granted: it would build the root crate. The clippy standard is
   **zero warnings**.
-- **Deletion**: plain `rm src/rustlib/src/*.rs` only (no flags) — for removing
-  a source file you created/own. Nothing else is deletable.
+- **Deletion / rename / move**: run `apg_rm`, `apg_mv`, or `apg_cp` — the
+  path-scoped filesystem tools. They self-enforce your granted edit globs, so a
+  `deletes`/`renames`/`moves` task can only touch your frontend's surface, and
+  a plain bash `rm`/`mv`/`cp` is NOT granted.
 
 ## Done gate — your crate-green contract, and the repo gate
 
@@ -349,8 +367,8 @@ reviewer:    apg_review_reject <f>                               → status = op
   exercises your frontend through `build.rs`, but you do not run the gate
   yourself: keep your crate green and the core agent's aggregate gate stays
   green.
-- A task is done only when its code exists and your crate's gates are green;
-  the core implementer performs the branch commit at phase end.
+- A task is done only when its code exists, is committed, and your crate's
+  gates are green.
 
 ## Workflow
 
@@ -385,9 +403,9 @@ reviewer:    apg_review_reject <f>                               → status = op
    fix (or decide it is a wont-fix), and **return an ACTIONED/WONT-FIX claim to
    the coordinator**. You never run `apg_review_action` — the coordinator
    performs the shallow claim-vs-change check and actions the item.
-8. **Do not commit.** You hold no git write grant; the **core implementer**
-   commits the branch at phase end (and pushes/tags only with human approval).
-   Return your finished tasks to the coordinator.
+8. **Commit at phase end**: `git add` the changed files, then `git commit` with
+   a message in the repo's style. You hold no `git push`/`git tag` grant —
+   push/tag are human-approved acts.
 
 ## Hard boundaries
 
@@ -402,9 +420,10 @@ reviewer:    apg_review_reject <f>                               → status = op
   merge act.
 - You **never complete a phase** — `apg_plan_complete` belongs to the
   implementation-phase-reviewer.
-- You **never commit** — no `git add`/`commit`/`push`/`tag`; the core
-  implementer is the branch's committer.
-- You **never edit** `.opencode/**`, the root crate (`src/*.rs`, `build.rs`,
+- You **never push or tag** — push/tag are human-approved acts; your git grant
+  is `git add`/`git commit` only.
+- You **never edit** `.opencode/**`, the root crate (`src/*.rs`,
+  `src/<module>/**`, `build.rs`,
   `Cargo.{toml,lock}`, `install.sh`, `Formula/**`, `scripts/**`, the docs),
   `src/rustlib/target/**`, or any other frontend crate. Your only edit scope is
   `src/rustlib/**` except its target tree (worktree mirror

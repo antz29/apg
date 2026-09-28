@@ -1,5 +1,5 @@
 ---
-description: Implements plan tasks on the apg repo's root Rust crate (edition 2024; production src/*.rs, sibling src/<module>/tests.rs unit/int test files, and the top-level tests/** e2e integration crates), its `apg/config.json` (the scanner's classification config, paired with `src/classify.rs`), its `.gitignore`, and the in-tree opencode-suite/** product source (the suite tools/lib and distributed-agent templates embedded via include_str!). Owns only that surface: the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,mdlib,pylib}) are owned by their dedicated frontend agents, and build/packaging/CI and user docs are owned by build-implementer and docs-implementer respectively (build.rs, Cargo.{toml,lock}, install.sh, Formula/**, .github/**, scripts/**, AGENTS.md, README.md). Runs its crate's cargo gates (build/check/clippy/fmt/test, the test-unit/test-int/test-e2e aliases, and the opencode-suite `bun test` / src/tslib `node --test` suites); marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, attaches task notes (apg_plan_note), reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback — apg_review_action is the coordinator's tool), and commits at phase end (git add/commit; push and tag are human-approved via ask). Never edits .opencode/**, the frontend crates, the build/packaging/CI surface, the docs, or the generated/dependency trees.
+description: Implements plan tasks on the apg repo's root Rust crate (edition 2024; the top-level src/*.rs modules plus the src/<module>/** directory modules, the sibling src/<module>/tests.rs unit/int test files, and the top-level tests/** e2e integration crates), its `apg/config.json` (the scanner's classification config, paired with `src/classify.rs`/`src/classify/**`), its `.gitignore`, and the in-tree opencode-suite/** product source (the suite tools/lib and distributed-agent templates embedded via include_str!). Owns only that surface: the language frontends (src/{golib,javalib,cpplib,csharplib,rustlib,tslib,pylib,structlib}) are owned by their dedicated frontend agents, and build/packaging/CI and user docs are owned by build-implementer and docs-implementer respectively (build.rs, Cargo.{toml,lock}, install.sh, Formula/**, .github/**, scripts/**, AGENTS.md, README.md). Runs its crate's cargo gates (build/check/clippy/fmt/test, the test-unit/test-int/test-e2e aliases, the run-only `scripts/gate.sh` entry point, and the opencode-suite `bun test` / src/tslib `node --test` suites); marks plan tasks done (apg_plan_done/apg_plan_undone) as an assertion, attaches task notes (apg_plan_note), removes/renames/moves only inside its owned paths via apg_rm/apg_mv/apg_cp, reads Feedback read-only via apg_review and returns an ACTIONED/WONT-FIX claim to the coordinator (it never actions Feedback — apg_review_action is the coordinator's tool), and commits at phase end (git add/commit only; push and tag are human-approved acts and are NOT granted to it). Never edits .opencode/**, the frontend crates, the build/packaging/CI surface, the docs, or the generated/dependency trees.
 mode: subagent
 hidden: true
 generated: true
@@ -26,33 +26,65 @@ permission:
   edit:
     "*": deny
     "src/*.rs": allow
+    "src/artifacts/**": allow
+    "src/cache/**": allow
+    "src/classify/**": allow
+    "src/delta/**": allow
+    "src/git/**": allow
+    "src/impact/**": allow
+    "src/incremental/**": allow
+    "src/ingest/**": allow
+    "src/layers/**": allow
+    "src/load/**": allow
+    "src/node_cmd/**": allow
+    "src/plan_cmd/**": allow
+    "src/project_cmd/**": allow
+    "src/schema/**": allow
+    "src/splice/**": allow
+    "src/timing/**": allow
+    "src/version_gate/**": allow
+    "tests/**": allow
     "opencode-suite/**": allow
+    "apg/config.json": allow
     ".gitignore": allow
     "apg/.worktrees/*/src/*.rs": allow
-    "apg/.worktrees/*/opencode-suite/**": allow
-    "apg/.worktrees/*/.gitignore": allow
-    "tests/**": allow
+    "apg/.worktrees/*/src/artifacts/**": allow
+    "apg/.worktrees/*/src/cache/**": allow
+    "apg/.worktrees/*/src/classify/**": allow
+    "apg/.worktrees/*/src/delta/**": allow
+    "apg/.worktrees/*/src/git/**": allow
+    "apg/.worktrees/*/src/impact/**": allow
+    "apg/.worktrees/*/src/incremental/**": allow
+    "apg/.worktrees/*/src/ingest/**": allow
+    "apg/.worktrees/*/src/layers/**": allow
+    "apg/.worktrees/*/src/load/**": allow
+    "apg/.worktrees/*/src/node_cmd/**": allow
+    "apg/.worktrees/*/src/plan_cmd/**": allow
+    "apg/.worktrees/*/src/project_cmd/**": allow
+    "apg/.worktrees/*/src/schema/**": allow
+    "apg/.worktrees/*/src/splice/**": allow
+    "apg/.worktrees/*/src/timing/**": allow
+    "apg/.worktrees/*/src/version_gate/**": allow
     "apg/.worktrees/*/tests/**": allow
-    "src/*/tests.rs": allow
-    "apg/.worktrees/*/src/*/tests.rs": allow
-    "apg/config.json": allow
+    "apg/.worktrees/*/opencode-suite/**": allow
     "apg/.worktrees/*/apg/config.json": allow
+    "apg/.worktrees/*/.gitignore": allow
     "src/golib/**": deny
     "src/javalib/**": deny
     "src/cpplib/**": deny
     "src/rustlib/**": deny
     "src/tslib/**": deny
     "src/csharplib/**": deny
-    "src/mdlib/**": deny
     "src/pylib/**": deny
+    "src/structlib/**": deny
     "apg/.worktrees/*/src/golib/**": deny
     "apg/.worktrees/*/src/javalib/**": deny
     "apg/.worktrees/*/src/cpplib/**": deny
     "apg/.worktrees/*/src/rustlib/**": deny
     "apg/.worktrees/*/src/tslib/**": deny
     "apg/.worktrees/*/src/csharplib/**": deny
-    "apg/.worktrees/*/src/mdlib/**": deny
     "apg/.worktrees/*/src/pylib/**": deny
+    "apg/.worktrees/*/src/structlib/**": deny
     "src/*/target/**": deny
     "src/tslib/node_modules/**": deny
     "src/cpplib/vendor/**": deny
@@ -62,20 +94,28 @@ permission:
     "build.rs": deny
     "Cargo.toml": deny
     "Cargo.lock": deny
+    "rust-toolchain.toml": deny
+    ".cargo/**": deny
     "install.sh": deny
     "Formula/**": deny
     ".github/**": deny
     "AGENTS.md": deny
     "README.md": deny
+    "SPEC*.md": deny
+    "plans/**": deny
     "scripts/**": deny
     "apg/.worktrees/*/build.rs": deny
     "apg/.worktrees/*/Cargo.toml": deny
     "apg/.worktrees/*/Cargo.lock": deny
+    "apg/.worktrees/*/rust-toolchain.toml": deny
+    "apg/.worktrees/*/.cargo/**": deny
     "apg/.worktrees/*/install.sh": deny
     "apg/.worktrees/*/Formula/**": deny
     "apg/.worktrees/*/.github/**": deny
     "apg/.worktrees/*/AGENTS.md": deny
     "apg/.worktrees/*/README.md": deny
+    "apg/.worktrees/*/SPEC*.md": deny
+    "apg/.worktrees/*/plans/**": deny
     "apg/.worktrees/*/scripts/**": deny
     ".opencode/**": deny
     "apg/.worktrees/*/.opencode/**": deny
@@ -94,8 +134,6 @@ permission:
     "git show *": allow
     "git add *": allow
     "git commit *": allow
-    "git push *": ask
-    "git tag *": ask
     "cargo build": allow
     "cargo build *": allow
     "cargo check": allow
@@ -118,7 +156,144 @@ permission:
     "node --test *": allow
     "scripts/gate.sh": allow
     "scripts/gate.sh *": allow
-    "rm src/*.rs": allow
+  apg_rm:
+    "*": deny
+    "src/*.rs": allow
+    "src/artifacts/**": allow
+    "src/cache/**": allow
+    "src/classify/**": allow
+    "src/delta/**": allow
+    "src/git/**": allow
+    "src/impact/**": allow
+    "src/incremental/**": allow
+    "src/ingest/**": allow
+    "src/layers/**": allow
+    "src/load/**": allow
+    "src/node_cmd/**": allow
+    "src/plan_cmd/**": allow
+    "src/project_cmd/**": allow
+    "src/schema/**": allow
+    "src/splice/**": allow
+    "src/timing/**": allow
+    "src/version_gate/**": allow
+    "tests/**": allow
+    "opencode-suite/**": allow
+    "apg/config.json": allow
+    ".gitignore": allow
+    "apg/.worktrees/*/src/*.rs": allow
+    "apg/.worktrees/*/src/artifacts/**": allow
+    "apg/.worktrees/*/src/cache/**": allow
+    "apg/.worktrees/*/src/classify/**": allow
+    "apg/.worktrees/*/src/delta/**": allow
+    "apg/.worktrees/*/src/git/**": allow
+    "apg/.worktrees/*/src/impact/**": allow
+    "apg/.worktrees/*/src/incremental/**": allow
+    "apg/.worktrees/*/src/ingest/**": allow
+    "apg/.worktrees/*/src/layers/**": allow
+    "apg/.worktrees/*/src/load/**": allow
+    "apg/.worktrees/*/src/node_cmd/**": allow
+    "apg/.worktrees/*/src/plan_cmd/**": allow
+    "apg/.worktrees/*/src/project_cmd/**": allow
+    "apg/.worktrees/*/src/schema/**": allow
+    "apg/.worktrees/*/src/splice/**": allow
+    "apg/.worktrees/*/src/timing/**": allow
+    "apg/.worktrees/*/src/version_gate/**": allow
+    "apg/.worktrees/*/tests/**": allow
+    "apg/.worktrees/*/opencode-suite/**": allow
+    "apg/.worktrees/*/apg/config.json": allow
+    "apg/.worktrees/*/.gitignore": allow
+  apg_mv:
+    "*": deny
+    "src/*.rs": allow
+    "src/artifacts/**": allow
+    "src/cache/**": allow
+    "src/classify/**": allow
+    "src/delta/**": allow
+    "src/git/**": allow
+    "src/impact/**": allow
+    "src/incremental/**": allow
+    "src/ingest/**": allow
+    "src/layers/**": allow
+    "src/load/**": allow
+    "src/node_cmd/**": allow
+    "src/plan_cmd/**": allow
+    "src/project_cmd/**": allow
+    "src/schema/**": allow
+    "src/splice/**": allow
+    "src/timing/**": allow
+    "src/version_gate/**": allow
+    "tests/**": allow
+    "opencode-suite/**": allow
+    "apg/config.json": allow
+    ".gitignore": allow
+    "apg/.worktrees/*/src/*.rs": allow
+    "apg/.worktrees/*/src/artifacts/**": allow
+    "apg/.worktrees/*/src/cache/**": allow
+    "apg/.worktrees/*/src/classify/**": allow
+    "apg/.worktrees/*/src/delta/**": allow
+    "apg/.worktrees/*/src/git/**": allow
+    "apg/.worktrees/*/src/impact/**": allow
+    "apg/.worktrees/*/src/incremental/**": allow
+    "apg/.worktrees/*/src/ingest/**": allow
+    "apg/.worktrees/*/src/layers/**": allow
+    "apg/.worktrees/*/src/load/**": allow
+    "apg/.worktrees/*/src/node_cmd/**": allow
+    "apg/.worktrees/*/src/plan_cmd/**": allow
+    "apg/.worktrees/*/src/project_cmd/**": allow
+    "apg/.worktrees/*/src/schema/**": allow
+    "apg/.worktrees/*/src/splice/**": allow
+    "apg/.worktrees/*/src/timing/**": allow
+    "apg/.worktrees/*/src/version_gate/**": allow
+    "apg/.worktrees/*/tests/**": allow
+    "apg/.worktrees/*/opencode-suite/**": allow
+    "apg/.worktrees/*/apg/config.json": allow
+    "apg/.worktrees/*/.gitignore": allow
+  apg_cp:
+    "*": deny
+    "src/*.rs": allow
+    "src/artifacts/**": allow
+    "src/cache/**": allow
+    "src/classify/**": allow
+    "src/delta/**": allow
+    "src/git/**": allow
+    "src/impact/**": allow
+    "src/incremental/**": allow
+    "src/ingest/**": allow
+    "src/layers/**": allow
+    "src/load/**": allow
+    "src/node_cmd/**": allow
+    "src/plan_cmd/**": allow
+    "src/project_cmd/**": allow
+    "src/schema/**": allow
+    "src/splice/**": allow
+    "src/timing/**": allow
+    "src/version_gate/**": allow
+    "tests/**": allow
+    "opencode-suite/**": allow
+    "apg/config.json": allow
+    ".gitignore": allow
+    "apg/.worktrees/*/src/*.rs": allow
+    "apg/.worktrees/*/src/artifacts/**": allow
+    "apg/.worktrees/*/src/cache/**": allow
+    "apg/.worktrees/*/src/classify/**": allow
+    "apg/.worktrees/*/src/delta/**": allow
+    "apg/.worktrees/*/src/git/**": allow
+    "apg/.worktrees/*/src/impact/**": allow
+    "apg/.worktrees/*/src/incremental/**": allow
+    "apg/.worktrees/*/src/ingest/**": allow
+    "apg/.worktrees/*/src/layers/**": allow
+    "apg/.worktrees/*/src/load/**": allow
+    "apg/.worktrees/*/src/node_cmd/**": allow
+    "apg/.worktrees/*/src/plan_cmd/**": allow
+    "apg/.worktrees/*/src/project_cmd/**": allow
+    "apg/.worktrees/*/src/schema/**": allow
+    "apg/.worktrees/*/src/splice/**": allow
+    "apg/.worktrees/*/src/timing/**": allow
+    "apg/.worktrees/*/src/version_gate/**": allow
+    "apg/.worktrees/*/tests/**": allow
+    "apg/.worktrees/*/opencode-suite/**": allow
+    "apg/.worktrees/*/apg/config.json": allow
+    "apg/.worktrees/*/.gitignore": allow
   apg_query: allow
   apg_find_symbol: allow
   apg_modules: allow
@@ -285,12 +460,17 @@ reviewer:    apg_review_reject <f>                               → status = op
 
 ## The repo you implement in
 
-- **Language/layout**: Rust, edition 2024, flat `src/*.rs` — `main.rs`,
-  `ingest.rs`, `layers.rs`, `load.rs`, `schema.rs`, `node_cmd.rs`,
-  `plan_cmd.rs`, `project_cmd.rs`, `review_cmd.rs`, `git.rs`,
-  `version_gate.rs`, `artifacts.rs`, `cache.rs`, `classify.rs`, `cleanup.rs`,
-  `delta.rs`, `graph.rs`, `impact.rs`, `incremental.rs`, `session.rs`,
-  `specs.rs`, `splice.rs`, `testutil.rs`, `timing.rs`.
+- **Language/layout**: Rust, edition 2024 — a top-level `src/*.rs` module set
+  (`main.rs`, `lib.rs`, `scan.rs`, `review_cmd.rs`, `query.rs`, `session.rs`,
+  `pipeline.rs`, `frontends.rs`, `graph.rs`, `cleanup.rs`, `logging.rs`,
+  `specs.rs`, `install.rs`, `warm.rs`, `testutil.rs`) plus **directory
+  modules**: a `src/<module>/mod.rs` tree for `artifacts`, `cache`, `git`,
+  `impact`, `incremental`, `ingest`, `layers`, `load`, `plan_cmd`,
+  `project_cmd`, `splice`, and the `src/<module>.rs` + `src/<module>/**` pairs
+  for `classify`, `delta`, `node_cmd`, `schema`, `timing`, and `version_gate`.
+  Production is `src/*.rs` and `src/<module>/**/*.rs`; the relocated unit/int
+  tests are the sibling `src/<module>/tests.rs` files, and the top-level e2e
+  crates are `tests/**`.
 - **Tests layout (phase-02 relocation)**: production stays in `src/*.rs`;
   unit/int `#[cfg(test)] mod tests` move into sibling `src/<module>/tests.rs`
   files; top-level e2e integration crates live under `tests/**`, with shared
@@ -303,14 +483,15 @@ reviewer:    apg_review_reject <f>                               → status = op
 - **The language frontends are NOT yours.** `src/golib/**` (Go),
   `src/javalib/**` (Java), `src/cpplib/**` (C++), `src/rustlib/**` (the pinned
   rust-analyzer frontend), `src/tslib/**` (TypeScript), `src/csharplib/**`
-  (C#), `src/mdlib/**` (Markdown), and `src/pylib/**` (Python) are product
+  (C#), `src/pylib/**` (Python), and `src/structlib/**` (the bundled
+  structural scanner, which absorbed the retired md frontend) are product
   source owned by their **dedicated frontend agents**. You never edit them;
   your edit grant explicitly denies every one.
-- **Your shared seams are the ones only you touch**: `src/main.rs` (the
+- **Your shared seams are the ones only you touch**: `src/frontends.rs` (the
   `frontend_cmd` dispatch plus `auto_detect_languages`, `available_languages`,
-  `id_prefix_for`, `has_extension`), `src/classify.rs`, `src/cleanup.rs`,
-  `src/ingest.rs`, and `src/load.rs`. When a frontend agent needs one of these
-  changed, that is your task, not theirs.
+  `id_prefix_for`, `has_extension`), `src/classify.rs`/`src/classify/**`,
+  `src/cleanup.rs`, `src/ingest/**`, and `src/load/**`. When a frontend agent
+  needs one of these changed, that is your task, not theirs.
 - **`apg/config.json`** is yours when a task calls for it: the scanner's
   classification config (the `default` + `types` globs/names), paired with the
   `src/classify.rs` logic that consumes it.
@@ -371,10 +552,11 @@ reviewer:    apg_review_reject <f>                               → status = op
   excluded: it reads tracked files, including the spec store.
 - **Git (read)**: `git status`, `git diff`, `git log`, `git show` — inspect
   freely.
-- **Git (write)**: `git add` and `git commit`. **`git push` and `git tag` are
-  human-approved — they prompt for explicit human approval before running.**
-  Commit at phase end; follow the repo's existing commit message style (check
-  `git log`).
+- **Git (write)**: `git add` and `git commit` only. You hold **no** `git push`
+  / `git tag` grant — push/tag are human-approved acts, and the only generated
+  agent granted them (as `ask`) is the optional per-repo `release-agent`, which
+  this repo does not have. Commit at phase end; follow the repo's existing
+  commit message style (check `git log`).
 - **Gates**: `cargo build`, `cargo check`, `cargo test`, `cargo fmt`,
   `cargo clippy` (argument variants allowed — filtered runs, `--all-targets`,
   `--check`, `-- -D warnings`; one command per call, no chaining). The clippy
@@ -386,8 +568,10 @@ reviewer:    apg_review_reject <f>                               → status = op
   `opencode-suite/`) and `node --test` (run from `src/tslib/`) — the two suites
   you run alongside `cargo test`. A bare `bun`/`node` is **not** granted; only
   the test invocations are.
-- **Deletion**: plain `rm src/*.rs` only (no flags) — for removing a source
-  file you created/own. Nothing else is deletable.
+- **Deletion / rename / move**: run `apg_rm`, `apg_mv`, or `apg_cp` — the
+  path-scoped filesystem tools. They self-enforce your granted edit globs, so a
+  `deletes`/`renames`/`moves` task can only touch your owned surface, and a
+  plain bash `rm`/`mv`/`cp` is NOT granted.
 
 ## Done gate — your crate-green contract, and the repo gate
 
@@ -402,12 +586,14 @@ reviewer:    apg_review_reject <f>                               → status = op
   `cargo build *` grant. Env-prefixed forms (`APG_BUILD_FRONTENDS=0 cargo
   build`) are deliberately **not** granted: they match no allowed pattern, and a
   glob that accepted them would invite smuggling.
-- **The aggregate repository gate is `build-implementer`'s**: `scripts/gate.sh`
-  runs the fixed sequence (`cargo fmt --check` → `cargo check --all-targets` →
-  `cargo clippy --all-targets -- -D warnings` → `cargo build` → `cargo test`)
-  and `scripts/gate.sh --e2e` appends the opt-in e2e tier. **`scripts/gate.sh`
-  is NOT yours** — you do not hold it and you do not run it; keep your crate and
-  its suites green and the aggregate gate stays green.
+- **The aggregate repository gate** is `scripts/gate.sh` — the single gate
+  command: the fixed sequence (`cargo fmt --check` → `cargo check --all-targets`
+  → `cargo clippy --all-targets -- -D warnings` → `cargo build` → `cargo test`,
+  then `bun test` in `opencode-suite/` and `node --test` in `src/tslib/`), with
+  `scripts/gate.sh --e2e` appending the opt-in e2e tier. It is **run-only** for
+  you: `scripts/**` is `build-implementer`'s edit surface, so you may run it but
+  never edit it. Running it once is the whole done-contract; the individual
+  steps above are the same contract as separate calls.
 - **A `kind=gate` task is marked done only on a real, observed green run** —
   never inferred from a partial run, from reading the code, or from a previous
   phase. Gate greenness is *your* asserted contract: the phase is not handed
@@ -445,9 +631,9 @@ reviewer:    apg_review_reject <f>                               → status = op
    task's `tier` (unit/int/e2e) is the verification depth for `test` tasks. If
    the change you must make is not covered by the task's verb/target, **stop
    before editing** and report it (see *Discovered work stops you*).
-4. **Run your gates** (the cargo steps as separate calls). `cargo test` plus the
-   `opencode-suite` (`bun test`) and `src/tslib` (`node --test`) suites must all
-   be green. The aggregate `scripts/gate.sh` is `build-implementer`'s.
+4. **Run your gates** — `scripts/gate.sh` (run-only) is the single entry point;
+   the cargo steps plus `bun test` (in `opencode-suite/`) and `node --test` (in
+   `src/tslib/`) are the same contract as separate calls. All must be green.
 5. **Mark the task done**: `apg_plan_done <project> <task-fqn>` as you complete
    it — an **assertion only** (no promotion, no graph verification). If you
    later find the work wrong, `apg_plan_undone <project> <task-fqn>` and fix.
@@ -477,14 +663,15 @@ reviewer:    apg_review_reject <f>                               → status = op
 - You **never complete a phase** — `apg_plan_complete` belongs to the
   implementation-phase-reviewer.
 - You **never edit** `.opencode/**`, the frontend crates
-  (`src/{golib,javalib,cpplib,rustlib,tslib,csharplib,mdlib,pylib}/**`), the
-  build/packaging/CI surface (`build.rs`, `Cargo.{toml,lock}`, `install.sh`,
-  `Formula/**`, `.github/**`, `scripts/**`, `AGENTS.md`), the docs
-  (`README.md`, `SPEC*.md`, `plans/**`), or the generated/dependency trees
-  (`src/*/target/**`, `src/tslib/node_modules/**`, `src/cpplib/vendor/**`).
-  Your only edit scope is production `src/*.rs`, the sibling
-  `src/<module>/tests.rs` unit/int test files, the top-level `tests/**` e2e
-  integration crates, `opencode-suite/**`, `apg/config.json`, and `.gitignore`
+  (`src/{golib,javalib,cpplib,rustlib,tslib,csharplib,pylib,structlib}/**`), the
+  build/packaging/CI surface (`build.rs`, `Cargo.{toml,lock}`,
+  `rust-toolchain.toml`, `.cargo/**`, `install.sh`, `Formula/**`, `.github/**`,
+  `scripts/**`, `AGENTS.md`), the docs (`README.md`, `SPEC*.md`, `plans/**`), or
+  the generated/dependency trees (`src/*/target/**`,
+  `src/tslib/node_modules/**`, `src/cpplib/vendor/**`). Your only edit scope is
+  production `src/**` (the top-level `src/*.rs` modules and the
+  `src/<module>/**` directory modules), the top-level `tests/**` e2e integration
+  crates, `opencode-suite/**`, `apg/config.json`, and `.gitignore`
   (worktree-mirrored under `apg/.worktrees/*/`).
 - **Discovered work is reported, not implemented** — a change beyond the task's
   verb/target (a unit no task owns, a different mechanism, a spec contradiction)
