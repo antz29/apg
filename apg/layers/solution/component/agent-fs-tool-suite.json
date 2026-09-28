@@ -56,6 +56,11 @@
       "kind": "realised-by",
       "source": "domain.group.agent-fs-operations",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.worktree-write-boundary",
+      "properties": {}
     }
   ]
 }
