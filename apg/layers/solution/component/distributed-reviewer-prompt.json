@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "source": "domain.entity.distributed-agent-set",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.distributed-reviewer-deferred-edge",
+      "properties": {}
     }
   ]
 }
