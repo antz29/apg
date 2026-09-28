@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "code-writer-scope-worktree-only",
+  "body": "Law (prose; assessed by review): a code-writer agent's write scope is the project worktree ONLY. Its edit grants and fs-tool path scope name `apg/.worktrees/*/<glob>` paths and never a repo-root (main-checkout) path; an fs-tool operation whose resolved path lies in the main checkout (outside every project worktree) is refused, and scope is decided with the granted globs and the candidate path resolved in one consistent frame. Main-write grants exist only for the carve-outs named in `global.constraint.worktree-isolation`.",
+  "properties": {
+    "attaches-to": "requirements.requirement.code-writer-worktree-only-writes"
+  },
+  "out": [],
+  "in": []
+}
