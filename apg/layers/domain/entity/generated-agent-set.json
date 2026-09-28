@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "generated-agent-set",
+  "body": "The repo-defined code-writer agents the `agent-builder` scaffolds into a project's `.opencode/agents/**` and commits on the main checkout: the core/root `implementer`, one `<name>-implementer` per detected subsystem (naming convention `<name>-implementer.md`), and tiered `test-implementer`s where a test tier is file-separable. Membership is decided by whether the agent needs the repo's own source paths, build gates, and edit grants. Two members the template wrongly listed are removed: the optional `coordinator` primary agent (offered but never generated here) does not belong, and the `implementation-phase-reviewer` no longer belongs either — it carries no repo-specific grant and is now distributed. Every remaining generated agent carries `generated: true` and `mode: subagent`.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
