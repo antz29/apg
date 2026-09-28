@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "requirements.constraint.code-writer-scope-worktree-only",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.constraint.main-integration-via-merge-gate-only",
+      "properties": {}
     }
   ],
   "in": []
