@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "stakeholder",
+  "name": "agent-suite-maintainer",
+  "body": "A person or agent who owns the DISTRIBUTION BOUNDARY of the apg opencode agent suite: which agents `apg init` installs into `~/.opencode/agents/` from `opencode-suite/agents/**`, and which each repo generates for itself with the `agent-builder`. Their interest is an honest boundary: no generated option the suite does not support (the dead optional `coordinator`), and no repo-agnostic agent regenerated per repo (the `implementation-phase-reviewer`). The boundary is product source — the distributed templates are embedded in the binary via `include_str!` — and the repo's own `.opencode/agents/**` are consumer artifacts that are never hand-edited to carry a boundary change.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
