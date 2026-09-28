@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "target": "solution.component.codebase-navigator-prompt",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.distributed-agent-install",
+      "properties": {}
     }
   ],
   "in": [
