@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "agent-builder-prompt-narrow-owner",
+  "body": "source: the proposal introduced a new narrow component owning exactly `opencode-suite/agents/agent-builder.md`. Verification found the file already has TWO owners: the broad `solution.component.navigator-prompt-guidance` (owns the two prompt files collectively, realised-by the unrelated `domain.entity.graph-first-navigation`) and `solution.component.agent-fs-permission-grants` (owns this file for the fs-tool grants, realised-by `domain.entity.agent-fs-operation`). Resolution: `solution.component.agent-builder-prompt` is a deliberate THIRD owner, created because a satisfied requirement's spine is coverage-checked (`rust.apg.plan_cmd.verify.coverage_check`) and the requirement's derived coverage must map 1:1 to the files it edits: the broad component spans both prompt files (so reaching it would resolve the requirement's coverage through the navigator prompt as well), and `agent-fs-permission-grants` is a different concern (the generated agents' fs-tool callability grants). Overlapping component ownership of one file is established practice here — `codebase-navigator-prompt` and `navigator-prompt-guidance` already share `codebase-navigator.md`. [autonomous]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
