@@ -257,10 +257,15 @@ implementation continues.
   Scaffold it **only if the project wants one**: it performs the repo's
   release, so its shape is repo-specific in a way the distributed suite agents
   are not. It fills the slot the removed optional `coordinator` vacated.
-- **Interview for it.** Ask for the repo's release artefacts (version files,
-  formulae, changelog, …) and its git remote/branch conventions, and grant
-  edit access to **exactly those** paths — deny-by-default, worktree-mirrored
-  (rule 10) like every other edit grant; never more.
+- **It writes the MAIN checkout** (the second of the two main-write
+  carve-outs), so its `edit` and `apg_rm`/`apg_mv`/`apg_cp` grants are
+  **main-checkout paths, not `apg/.worktrees/*` mirrors** — the worktree-only
+  rule (rule 10) governs code-writers, never the release-agent. Its main-write
+  path set is **derived per repo**: analyse the repo's release artefacts
+  (release scripts, workflows, formulae/manifests, version surfaces, …) to
+  propose a set, then interview the coordinator to confirm or amend it. Grant
+  edit access to **exactly those derived paths** — deny-by-default, never a
+  fixed list in this template, never more.
 - **Shape**: `mode: subagent`, `hidden: true`, `generated: true`, and **no
   `question`** — it routes questions through the coordinator. It never actions
   Feedback: like every generated agent it returns an ACTIONED/WONT-FIX claim
@@ -415,12 +420,16 @@ implementation continues.
    - Git conventions: implementers get `git add` + `git commit` only, and
      **no** push/tag grant. Push/tag are human-approved acts; the ONLY agent
      granted them is the optional `release-agent`, as `ask`. Ask whether the
-     project wants one, and if so interview its repo-specific release artefacts
-     (version files, formulae, changelog, …) and its remote/branch conventions.
+     project wants one; if so, **analyse the repo's release (release scripts,
+     workflows, formulae/manifests, version surfaces) to derive a proposed
+     main-checkout write set**, then interview the coordinator to confirm or
+     amend it (the set is repo-derived — never a fixed template list).
    - The writer agent's name style.
 4. **Plan the set.** Default: the approved roster from step 2, plus the optional
    `release-agent` when the project wants one. Present the plan to the
-   coordinator and get approval.
+   coordinator and get approval. **When a `release-agent` is in scope, list its
+   derived main-write path set explicitly in the plan and require the
+   coordinator's approval of that set before writing any release-agent file.**
 5. **Scaffold each agent** into `.opencode/agents/<name>.md`:
    - `mode: subagent`, `hidden: true`, `generated: true` — every generated
      agent, unconditionally.
