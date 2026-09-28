@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "worktree-write-boundary",
+  "body": "The write boundary between a change-set's project worktree and the main checkout: the rule set that makes every code-writer write land in `<main>/apg/.worktrees/<project>/` and never in main. It has two faces that must agree — the permission grants the agent-builder scaffolds for each generated code-writer (edit globs + fs-tool path scope, worktree-rooted), and the fs tools' own scope decision (grants and candidate in one frame; a main-resolving path refused). Main-writing roles are only the carve-outs of `global.constraint.worktree-isolation`.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
