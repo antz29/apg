@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "scan-authorization",
+  "body": "Scan authorization as a modelled concern: who or what authorizes an `apg_scan` invocation. The model delegates authorization to opencode's per-call tool permission rather than to prose in the agent prompt — the navigator's frontmatter grant `apg_scan: ask` makes opencode prompt the user each time the tool is called, and the user may select \"always allow\" to suppress subsequent prompts. The agent therefore holds no separate consent ritual and grants no implicit standing authorization (`allow`); it retains only the behavioural intent that a missing/stale graph is answered by running `apg_scan` (never by guessing) and that scans are never re-run silently.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
