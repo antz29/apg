@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.navigator-session-isolation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.subagent-session-isolation",
+      "properties": {}
     }
   ],
   "in": []
