@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "agent-suite-persona-rationale",
+  "body": "source: the brief says \"reuse or add a user/stakeholder as appropriate\" and points at existing users `requirements.user.navigator-agent` and `requirements.user.code-writer-agent`. Verification: neither existing user covers this change-set's interest — the navigator-agent's body is about the task cadence under the branch graph's staleness guard, and the code-writer-agent's is about filesystem grants. The existing stakeholders are likewise about source decomposition (`source-maintainer`), frontend toolchains (`frontend-maintainer`), the edge vocabulary (`spec-author`), and checkout-independent graphs (`multi-user-repo-team`); none owns the distributed-versus-generated agent-roster boundary. Resolution: add `requirements.stakeholder.agent-suite-maintainer` (the distribution boundary) and `requirements.user.apg-upgrader` (the person who must manually remove a now-duplicated local reviewer after `apg init`). [autonomous]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
