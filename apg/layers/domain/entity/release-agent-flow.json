@@ -33,6 +33,11 @@
       "kind": "drives",
       "source": "requirements.requirement.agent-builder-optional-release-agent",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.push-tag-human-approved-release-only",
+      "properties": {}
     }
   ]
 }
