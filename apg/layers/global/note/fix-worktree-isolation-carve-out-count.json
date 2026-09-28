@@ -4,6 +4,12 @@
   "name": "fix-worktree-isolation-carve-out-count",
   "body": "source: worktree-isolation said 'except the two named carve-outs' then listed three numbered writers of main; inconsistency: the `apg project merge` binary act is the gated integration path, not an agent carve-out; resolution: restated merge as a separate 'Integration path (a binary act, not an agent)' line and renumbered the TWO agent carve-outs (1 agent-builder `.opencode/agents/**` on main; 2 optional release-agent repo-specific release artefacts + push/tag sole `ask` grant behind the consent gate); remaining meaning unchanged (feedback-2) [with user]",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "global.constraint.worktree-isolation",
+      "properties": {}
+    }
+  ],
   "in": []
 }

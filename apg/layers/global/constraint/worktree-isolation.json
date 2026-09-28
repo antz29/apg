@@ -10,6 +10,11 @@
       "kind": "details",
       "source": "requirements.note.worktree-write-scope-decisions",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "global.note.fix-worktree-isolation-carve-out-count",
+      "properties": {}
     }
   ]
 }
