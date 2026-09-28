@@ -191,9 +191,9 @@ Sets up the project:
 - installs the **apg tool suite** into `~/.opencode/tools/` (query tools +
   `apg_scan` + the spec/plan/review suite, shared plumbing in `~/.opencode/lib/`)
   and writes `~/.opencode/package.json` + runs `npm install` if needed,
-- installs the **six distributed agents** into `~/.opencode/agents/`:
+- installs the **seven distributed agents** into `~/.opencode/agents/`:
   `codebase-navigator`, `spec-writer`, `plan-writer`, `spec-review`,
-  `plan-review`, and `agent-builder`.
+  `plan-review`, `agent-builder`, and `implementation-phase-reviewer`.
 
 The suite installs the first time and is then kept in sync (files are
 re-written only when their contents change), so running `apg init` again after
@@ -204,9 +204,12 @@ project's opencode session (not just this one). Project-specific implementer and
 reviewer agents are installed into the project's `.opencode/agents/` by the
 `agent-builder` agent, never by init. If the project's `.opencode/` holds files
 that duplicate the installed suite, `apg init` prints a loud warning listing
-them — it never deletes anything. The plugin and agents are auto-discovered by
-opencode. **Restart opencode** after running `apg init` so the tools and agents
-are available in chat.
+them — it never deletes anything. The `agent-builder` may also generate an
+optional per-repo `release-agent` — a hidden subagent the `codebase-navigator`
+dispatches only after explicit user consent, and the only agent granted
+push/tag (as `ask`). The plugin and agents are auto-discovered by opencode.
+**Restart opencode** after running `apg init` so the tools and agents are
+available in chat.
 
 ### 2. `apg scan [dir] [options]`
 
@@ -408,7 +411,7 @@ node), `modifies`/`deletes` (existing code), `renames`/`moves` (`--fqn` source
   planned node **realized** — a branch scan found real code at its FQN; all
   feedback resolved; derived solution coverage holds) and prints the merge
   handoff. `apg project merge <name>` (from the main checkout) then runs
-  verify → merge → unguarded main rebuild. Push/tag remain human.
+  verify → merge → unguarded main rebuild. Push/tag remain human-approved acts.
 
 ## Configuration
 
