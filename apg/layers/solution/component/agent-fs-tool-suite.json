@@ -29,6 +29,11 @@
       "kind": "implemented-by",
       "target": "ts.apg-opencode-suite.lib.apg.fsScopeDecision",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-opencode-suite.lib.apg.agentFsGlobs",
+      "properties": {}
     }
   ],
   "in": [
