@@ -1,11 +1,11 @@
 import { tool } from "@opencode-ai/plugin"
 import fs from "node:fs"
 import path from "node:path"
-import { agentFsGlobs, fsScopeDecision } from "../lib/apg.ts"
+import { agentFsGlobs, fsScopeDecision, mainCheckoutRoot } from "../lib/apg.ts"
 
 export default tool({
   description:
-    "Copy a filesystem path inside the acting agent's granted globs. Resolves BOTH source and destination against the caller's project `directory`, then SELF-ENFORCES scope: if EITHER path is not matched by the acting agent's granted globs, or escapes the project/worktree boundary, the copy is refused and the tree is untouched. Then a plain fs copy (no git).",
+    "Copy a filesystem path inside the acting agent's granted globs. Resolves the source and destination against the caller's project `directory`, then SELF-ENFORCES scope on the DESTINATION (the write target): if it is not matched by the acting agent's granted globs, resolves into the main checkout, or escapes the project/worktree boundary, the copy is refused and the tree is untouched. Then a plain fs copy (no git).",
   args: {
     directory: tool.schema
       .string()
@@ -17,18 +17,26 @@ export default tool({
   async execute(args, context) {
     const { from, to } = args
     if (!from || !to) return "Error: from and to are required"
-    const root = args.directory || context.directory
-    const granted = agentFsGlobs(context, root)
+    const directory = args.directory || context.directory
 
-    const src = path.isAbsolute(from) ? path.resolve(from) : path.resolve(root, from)
-    const dst = path.isAbsolute(to) ? path.resolve(to) : path.resolve(root, to)
-    for (const [label, abs] of [
-      ["source", src],
-      ["destination", dst],
-    ] as const) {
-      const decision = fsScopeDecision(root, abs, granted)
-      if (!decision.allowed) return `Refused: ${label} ${abs} — ${decision.reason}`
+    // The write boundary is anchored to the MAIN checkout, not the caller's
+    // `directory`: a worktree's grants live in the main checkout's agent file
+    // and are written against that root (`apg/.worktrees/<project>/<glob>`), so
+    // the decision frame is resolved from the caller's directory but is NEVER
+    // the caller's directory itself. Both endpoints still resolve against the
+    // caller's directory (the stored argument contract); only the SCOPE frame is
+    // main. A copy WRITES only at the destination, so that is what scope is
+    // decided for (the source is read, not written).
+    const frame = await mainCheckoutRoot(context, directory)
+    if (!frame) {
+      return "Refused: could not resolve the main checkout root for the given directory (is it inside a git repository?) — nothing copied"
     }
+    const granted = agentFsGlobs(context, frame.root, frame.root)
+
+    const src = path.isAbsolute(from) ? path.resolve(from) : path.resolve(directory, from)
+    const dst = path.isAbsolute(to) ? path.resolve(to) : path.resolve(directory, to)
+    const decision = fsScopeDecision(frame.root, dst, granted, frame.project)
+    if (!decision.allowed) return `Refused: destination ${dst} — ${decision.reason}`
 
     try {
       fs.cpSync(src, dst, { recursive: true })
