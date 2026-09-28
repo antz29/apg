@@ -4,7 +4,13 @@
   "name": "push-tag-policy-surfaces",
   "body": "The binary-doc and git-test surfaces that state the binary's push/tag policy and must carry the corrected law name \"human-approved acts\":\n\n- `Cargo.toml` — the git2 `default-features = false` comment (line 20).\n- `src/git/mod.rs` — the module doc's push/tag sentence (line 6).\n- `src/project_cmd/mod.rs` — the `apg project merge` doc's push/tag sentence (line 28).\n- `tests/git_e2e.rs` — the R6 comment (line 952) and the `no_git_cli_shellouts_remain_in_src` assertion message (line 972).\n- `tests/project_cmd_e2e.rs` — the R6 row's prose (line 312).\n\nDeliberately a NARROW owner: its `implemented-by` set is exactly the five files this change-set edits on the binary-doc side, so the verify gate's derived solution coverage (`rust.apg.plan_cmd.verify.coverage_check`) enforces exactly those FQNs and nothing else. It is `realised-by` `domain.entity.release-agent-flow` — the entity that carries the push/tag policy and the binary's git2-only statement — alongside the reused agent-policy components (`solution.component.agent-builder-prompt`, `solution.component.codebase-navigator-prompt`, `solution.component.agent-roster-docs`).\n\nReusing an existing component was rejected because every candidate anchors an `implemented-by` set that spans files this change-set does not edit: `solution.component.scan-driver` spans `rust.apg.scan.cmd_scan`, `rust.apg.delta.full_scan_reason`, the cache-key code, `rust.apg.frontends.should_spawn_language`, `rust.apg.project_cmd.start.project_start_at`, `rust.apg.splice` and the `rust.apg.project_cmd` module; `solution.component.identity-layer` spans `rust.apg.git`, `rust.apg.ingest` and `rust.apg.load`; `solution.component.project-start-seeder` and `solution.component.distributed-agent-install` anchor functions/tests in files this change-set leaves alone. A component whose `implemented-by` set spans an untouched file would force a fake task over it.\n\nimplemented-by: `Cargo.toml`, `src/git/mod.rs`, `src/project_cmd/mod.rs`, `tests/git_e2e.rs`, `tests/project_cmd_e2e.rs`.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "Cargo.toml",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
