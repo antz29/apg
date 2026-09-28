@@ -2145,13 +2145,16 @@ mod e2e {
         );
     }
 
-    /// The coordinator-mediated feedback cycle is embedded in the shipped
-    /// prose: the navigator holds the `apg_review_action` grant and carries the
-    /// dispatch protocol (dispatch one open item to its owning writer → receive
-    /// the single ACTIONED/WONT-FIX claim → shallow claim-vs-change check →
-    /// action or re-dispatch); the two reviewer prompts and the
-    /// `apg_review_action` tool point the action step at the coordinator, never
-    /// the writer.
+    /// The navigator's permission grants and dispatch/isolation protocol are
+    /// embedded in the shipped prose: the navigator holds the
+    /// `apg_review_action` grant and the user-gated `apg_scan: ask` grant (no
+    /// agent grants `apg_scan: allow`, and the removed in-prompt scan-consent
+    /// ritual must stay absent while the stale-graph refresh intent remains),
+    /// and carries the dispatch protocol (dispatch one open item to its owning
+    /// writer → receive the single ACTIONED/WONT-FIX claim → shallow
+    /// claim-vs-change check → action or re-dispatch); the two reviewer prompts
+    /// and the `apg_review_action` tool point the action step at the
+    /// coordinator, never the writer.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn coordinator_agent_carries_review_action_and_dispatch_prose() {
@@ -2185,6 +2188,47 @@ mod e2e {
             !navigator.contains("and actions Feedback"),
             "the navigator must no longer claim the implementer actions Feedback"
         );
+
+        // The scan-authorization model: the navigator's `apg_scan` grant moved
+        // from `allow` to `ask`, so opencode prompts the user before a scan and
+        // the old in-prompt consent ritual was removed. The stale-graph intent
+        // is retained — an out-of-date graph is refreshed by running
+        // `apg_scan`, whose now-`ask` permission is the user-facing gate.
+        assert!(
+            navigator.contains("apg_scan: ask"),
+            "the navigator prompt must grant `apg_scan: ask` so a scan is user-gated"
+        );
+        // The grant moved to `ask`; no agent in the embedded set may still
+        // claim `apg_scan: allow` (that would silently lift the user gate).
+        for (name, content) in AGENTS {
+            assert!(
+                !content.contains("apg_scan: allow"),
+                "{name} must not grant `apg_scan: allow` — the scan grant is `ask`"
+            );
+        }
+        // The removed consent ritual: the permission now lives in the
+        // frontmatter, so the prompt no longer asks the user for separate scan
+        // approval anywhere.
+        for needle in [
+            "ask the user first",
+            "get explicit approval before starting one",
+            "ask the user before running a scan",
+            "(after user approval)",
+            "Once approved",
+        ] {
+            assert!(
+                !navigator.contains(needle),
+                "the navigator prompt must no longer carry the removed scan-consent phrase `{needle}`"
+            );
+        }
+        // …while the stale-graph intent stays: the prompt still tells the agent
+        // to run `apg_scan`, whose `ask` permission is the user gate.
+        for needle in ["run `apg_scan`", "whose permission is `ask`"] {
+            assert!(
+                navigator.contains(needle),
+                "the navigator prompt must retain the stale-graph refresh intent `{needle}`"
+            );
+        }
 
         // Session isolation (the law): the navigator prompt bounds subagent
         // session reuse. These needles pin the requirement
