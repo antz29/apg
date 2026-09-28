@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.agent-roster",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.agent-builder-drops-optional-coordinator",
+      "properties": {}
     }
   ]
 }
