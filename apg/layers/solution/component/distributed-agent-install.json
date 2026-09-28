@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.install",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.main",
+      "properties": {}
     }
   ],
   "in": [
