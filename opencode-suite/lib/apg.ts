@@ -7,7 +7,7 @@
 // and Cypher string-literal escaping (so structured args can never break out
 // of or inject into a query).
 
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 
@@ -53,6 +53,70 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
       if (parent === dir) break
       dir = parent
     }
+  }
+  return null
+}
+
+/**
+ * The MAIN checkout root for a caller that may sit inside a linked project
+ * worktree, plus that worktree's project name.
+ *
+ * The suite runs with cwd inside `<main>/apg/.worktrees/<project>`, but the
+ * write boundary the fs tools enforce is anchored to the MAIN checkout — the
+ * repo root the worktree shares its `.git` with — so a tool must resolve
+ * `<main>` from whatever directory the caller passed, in ANY string form
+ * (relative, trailing slash, through a symlink). `root` is that main checkout;
+ * `project` is the linked worktree's name `<project>`, or `null` when the
+ * caller is in the main checkout itself.
+ *
+ * Resolution is canonical-first and path-first: the caller's directory is made
+ * absolute and symlink-resolved, then the documented
+ * `<main>/apg/.worktrees/<project>` layout (`apg project start`'s worktree
+ * home) decodes straight to `<main>` + `<project>`. When no such layout is
+ * present — the main checkout, or a worktree at another path — git's own layout
+ * decides: a linked worktree's git dir is `<main>/.git/worktrees/<project>`
+ * (whose grandparent is the main root), the main checkout's is `<main>/.git`.
+ * Returns `null` when nothing resolves (no git repository).
+ *
+ * Real I/O (fs + git), so it is covered by the opt-in suite e2e, never the
+ * side-effect-free unit tier; the PURE `fsScopeDecision` takes the resolved
+ * root as its frame and stays pure.
+ */
+export async function mainCheckoutRoot(
+  context: ToolContext,
+  directory?: string,
+): Promise<{ root: string; project: string | null } | null> {
+  const starts = directory ? [directory] : [context.directory, process.cwd(), context.worktree]
+  for (const s of starts) {
+    if (!s) continue
+    // Canonicalise so relative/trailing-slash/symlinked spellings of the same
+    // directory all resolve to the same frame.
+    let dir = path.resolve(s)
+    try {
+      dir = realpathSync(dir)
+    } catch {
+      // A non-existent path keeps its lexical form; git below fails closed.
+    }
+
+    // The documented layout: `<main>/apg/.worktrees/<project>` — the worktree
+    // root is the segment right after `.worktrees`.
+    const segs = dir.split(path.sep)
+    for (let i = 0; i + 2 < segs.length; i++) {
+      if (segs[i] === "apg" && segs[i + 1] === ".worktrees" && segs[i + 2]) {
+        return { root: segs.slice(0, i).join(path.sep) || path.sep, project: segs[i + 2] }
+      }
+    }
+
+    // Otherwise fall back to git: a linked worktree's git dir is
+    // `<main>/.git/worktrees/<project>`; the main checkout's is `<main>/.git`.
+    const out = await Bun.$`git rev-parse --git-dir`.cwd(dir).quiet().nothrow()
+    if (out.exitCode !== 0) continue
+    const gitDirRaw = out.stdout.toString().trim()
+    if (!gitDirRaw) continue
+    const gitDir = path.resolve(dir, gitDirRaw)
+    const linked = /^(.*)[/\\]worktrees[/\\]([^/\\]+)$/.exec(gitDir)
+    if (linked) return { root: path.dirname(linked[1]), project: linked[2] }
+    return { root: path.dirname(gitDir), project: null }
   }
   return null
 }
