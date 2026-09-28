@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "requirements.constraint.main-integration-via-merge-gate-only",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.codebase-navigator-prompt",
+      "properties": {}
     }
   ],
   "in": []
