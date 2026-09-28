@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "worktree-only-write-scope",
+  "body": "Law (prose; assessed by review): a code-writer's permission scope is worktree-rooted — no generated code-writer holds a write grant (edit glob or fs-tool path scope) that resolves to a main-checkout path. Distinct from `domain.constraint.fs-operation-scope-enforced` (the fs tools' runtime refusal): this law binds the GRANTS the agent-builder scaffolds, so main is unwritable through opencode's edit layer too.",
+  "properties": {
+    "attaches-to": "domain.value.permission-scope"
+  },
+  "out": [],
+  "in": []
+}
