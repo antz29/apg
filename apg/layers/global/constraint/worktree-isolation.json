@@ -15,6 +15,11 @@
       "kind": "details",
       "source": "global.note.fix-worktree-isolation-carve-out-count",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.agent-builder-model-map-reconciliation",
+      "properties": {}
     }
   ]
 }
