@@ -51,6 +51,11 @@
       "kind": "details",
       "source": "requirements.note.navigator-session-isolation-decision",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.scan-authorization",
+      "properties": {}
     }
   ]
 }
