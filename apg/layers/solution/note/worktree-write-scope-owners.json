@@ -29,6 +29,11 @@
       "kind": "details",
       "target": "solution.component.worktree-boundary-tests",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.worktree-isolation-guide",
+      "properties": {}
     }
   ],
   "in": []
