@@ -39,6 +39,11 @@
       "kind": "details",
       "target": "domain.value.permission-scope",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.constraint.fs-operation-scope-enforced",
+      "properties": {}
     }
   ],
   "in": []
