@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "duplicate-install-warning-preserved",
+  "body": "Distributing `implementation-phase-reviewer` must not weaken `apg init`'s duplicate-install warning: when a repo's `.opencode/` holds a file that duplicates the installed suite — now including `implementation-phase-reviewer.md` — `apg init` still prints the loud warning listing it and still deletes nothing. The upgrade guide (`APG_UPGRADE_DOC`) documents the manual removal of the now-duplicated local reviewer. Suppressing the warning for this file, or auto-deleting it, is a violation. Satisfaction is assessed by review.",
+  "properties": {
+    "attaches-to": "solution.component.distributed-agent-install"
+  },
+  "out": [],
+  "in": []
+}
