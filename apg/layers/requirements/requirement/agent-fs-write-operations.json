@@ -33,6 +33,11 @@
       "kind": "details",
       "source": "requirements.note.agent-fs-tools-decisions",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.worktree-write-scope-decisions",
+      "properties": {}
     }
   ]
 }
