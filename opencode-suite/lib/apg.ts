@@ -358,19 +358,40 @@ function readAgentEditGlobs(file: string): string[] | null {
  * tool context carries) to its granted path globs. There is no permission field
  * on the tool context, so the grants are read from the agent's config file —
  * markdown with a fenced YAML frontmatter whose `permission.edit` block lists
- * the agent's path grants. The project agent file
- * (`<dir>/.opencode/agents/<agent>.md`) wins over the globally-installed one
+ * the agent's path grants.
+ *
+ * An agent's config is authored on the MAIN checkout (agents are created and
+ * committed there; there is no per-worktree `.opencode/agents` mirror), so the
+ * main checkout root is the authoritative frame. A caller resolves it with
+ * `mainCheckoutRoot(context, directory)` and passes `frame.root` as `mainRoot`:
+ * the config is then read from `<mainRoot>/.opencode/agents/<agent>.md` and the
+ * caller's `directory` is NOT consulted, so the resolved grants are identical
+ * for every spelling of that directory (relative, trailing slash, symlink). The
+ * grants are returned VERBATIM — already main-root-relative, the worktree-rooted
+ * `apg/.worktrees/<project>/<glob>` forms `fsScopeDecision` matches against in
+ * its main-anchored mode; the reader never rewrites them.
+ *
+ * With no `mainRoot` the legacy search is kept so an existing caller is
+ * unaffected: the caller's own directories (`directory`, `context.directory`,
+ * `context.worktree`), then the globally-installed suite
  * (`~/.opencode/agents/<agent>.md`, where `apg init` installs the distributed
- * suite). Returns `[]` when no agent name is present or no config resolves, so
+ * agents). Returns `[]` when no agent name is present or no config resolves, so
  * a caller refuses every path rather than allowing one by default.
  *
  * Real file I/O, so it is covered by the opt-in suite e2e, never the pure unit
  * tier. It stays plugin-free: the name is a structural field, not a plugin type.
  */
-export function agentFsGlobs(context: ToolContext, directory?: string): string[] {
+export function agentFsGlobs(
+  context: ToolContext,
+  directory?: string,
+  mainRoot?: string | null,
+): string[] {
   const name = context.agent
   if (!name) return []
-  const roots = [directory, context.directory, context.worktree].filter(
+  // A resolved main root is the whole search frame: the agent file lives on main
+  // and its grants are written against that root. Without one, keep the legacy
+  // caller-directory search so an existing 2-argument caller still works.
+  const roots = (mainRoot ? [mainRoot] : [directory, context.directory, context.worktree]).filter(
     (p): p is string => typeof p === "string" && p.length > 0,
   )
   for (const root of roots) {
