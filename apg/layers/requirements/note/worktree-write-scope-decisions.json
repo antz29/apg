@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "requirements.constraint.main-integration-via-merge-gate-only",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.constraint.agent-fs-per-path-permission",
+      "properties": {}
     }
   ],
   "in": []
