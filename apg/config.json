@@ -2,7 +2,6 @@
   "default": "src",
   "types": [
     {
-      "name": "test",
       "globs": [
         "tests/**",
         "**/tests/**",
@@ -13,8 +12,9 @@
         "**/*Test.java",
         "**/*Tests.java",
         "**/*_test.rs"
-      ]
+      ],
+      "name": "test"
     }
   ],
-  "version": "0.17.0"
+  "version": "0.18.0"
 }
