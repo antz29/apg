@@ -121,6 +121,11 @@
       "kind": "contains",
       "target": "solution.component.navigator-isolation-coherence-test",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.navigator-scan-permission-coherence-test",
+      "properties": {}
     }
   ],
   "in": [

@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "source": "domain.entity.scan-authorization",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
     }
   ]
 }
