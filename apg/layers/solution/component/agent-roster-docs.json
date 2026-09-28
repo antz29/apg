@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "agent-roster-docs",
+  "body": "The roster/upgrade documentation surfaces: `AGENTS.md` and `README.md`. Both must state the distributed set as SEVEN agents including `implementation-phase-reviewer` (AGENTS.md lines 222 and 767; README.md line 194), and AGENTS.md must stop listing `implementation-phase-reviewer` among the agents the `agent-builder` generates (line 141 in step 7, and lines 796-799) — only `*-implementer` agents are generated.\n\nDeliberately a NARROW owner distinct from the pre-existing `solution.component.repo-agent-guide` (also `AGENTS.md`) and `solution.component.frontend-dependency-docs` (`README.md` + `AGENTS.md`): those components are anchored to other concerns (the file-tool guidance; the frontend dependency contract), and reusing `frontend-dependency-docs` would pull its frontend-contract concern into this spine. This component is the repo guide plus the user README, not the `opencode-suite/` distribution itself.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
