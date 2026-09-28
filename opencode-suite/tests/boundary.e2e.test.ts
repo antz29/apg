@@ -449,7 +449,7 @@ function scratchAgentDir(
 }
 
 test.skipIf(!enabled)(
-  "e2e: agentFsGlobs reads the project agent's permission.edit allow globs, excluding deny",
+  "e2e: agentFsGlobs reads the project agent's permission.edit rules in file order (allow AND deny)",
   () => {
     const agent = "scoped-agent"
     const file = [
@@ -471,20 +471,34 @@ test.skipIf(!enabled)(
     const prevHome = process.env.HOME
     process.env.HOME = home
     try {
-      const globs = agentFsGlobs({ agent, directory: repo, worktree: repo }, repo)
-      // Only the ALLOW globs, in file order; the deny entries are not grants.
-      expect(globs).toEqual(["src/*.rs", "opencode-suite/**"])
-      expect(globs).not.toContain("secret/**")
-      expect(globs).not.toContain("*")
+      const rules = agentFsGlobs({ agent, directory: repo, worktree: repo }, repo)
+      // BOTH allow AND deny entries survive, in FILE ORDER — the ordered
+      // `{glob, allow}` rules the last-match decision consumes. A parser that
+      // dropped the deny entries (the old allow-only projection) fails here.
+      expect(rules).toEqual([
+        { glob: "*", allow: false },
+        { glob: "src/*.rs", allow: true },
+        { glob: "opencode-suite/**", allow: true },
+        { glob: "secret/**", allow: false },
+      ])
+      expect(rules.map((r) => r.glob)).not.toContain("build/**")
 
-      // The read result actually feeds scope enforcement: an allow glob passes,
-      // a deny-only path and a non-granted path are refused.
-      expect(fsScopeDecision(repo, path.join(repo, "src", "a.rs"), globs).allowed).toBe(true)
-      expect(fsScopeDecision(repo, path.join(repo, "opencode-suite", "x.ts"), globs).allowed).toBe(
+      // The read result feeds scope enforcement with LAST-MATCH-WINS semantics:
+      // an allow glob passes, an explicit deny revokes, and a path matched by no
+      // rule is refused (deny-by-default).
+      expect(fsScopeDecision(repo, path.join(repo, "src", "a.rs"), rules).allowed).toBe(true)
+      expect(fsScopeDecision(repo, path.join(repo, "opencode-suite", "x.ts"), rules).allowed).toBe(
         true,
       )
-      expect(fsScopeDecision(repo, path.join(repo, "secret", "k.txt"), globs).allowed).toBe(false)
-      expect(fsScopeDecision(repo, path.join(repo, "build", "x.rs"), globs).allowed).toBe(false)
+      // `secret/**` is an EXPLICIT deny, so the path is refused BY THE DENY rule
+      // (a rule matched, and it was a deny) — not merely un-granted.
+      const secret = fsScopeDecision(repo, path.join(repo, "secret", "k.txt"), rules)
+      expect(secret.allowed).toBe(false)
+      expect(secret.globMatched).toBe(true)
+      // No rule matches `build/x.rs` at all: refused by default.
+      const unmatched = fsScopeDecision(repo, path.join(repo, "build", "x.rs"), rules)
+      expect(unmatched.allowed).toBe(false)
+      expect(unmatched.globMatched).toBe(false)
     } finally {
       if (prevHome === undefined) delete process.env.HOME
       else process.env.HOME = prevHome
@@ -520,7 +534,7 @@ test.skipIf(!enabled)(
       )
       expect(
         agentFsGlobs({ agent: "global-agent", directory: repo, worktree: repo }, repo),
-      ).toEqual(["lib/*.ts"])
+      ).toEqual([{ glob: "lib/*.ts", allow: true }])
     } finally {
       if (prevHome === undefined) delete process.env.HOME
       else process.env.HOME = prevHome
@@ -605,6 +619,7 @@ function scratchWorktreeRepo(): { base: string; main: string; worktree: string; 
 async function fsGate(
   directory: string,
   candidates: string[],
+  agent: string = WORKTREE_AGENT,
 ): Promise<{
   root: string
   project: string | null
@@ -620,7 +635,7 @@ async function fsGate(
     inBoundary: boolean
   }[]
 }> {
-  const context: ToolContext = { agent: WORKTREE_AGENT, directory, worktree: directory }
+  const context: ToolContext = { agent, directory, worktree: directory }
   const frame = await mainCheckoutRoot(context, directory)
   expect(frame).not.toBeNull()
   const { root, project } = frame as { root: string; project: string | null }
@@ -957,6 +972,127 @@ test.skipIf(!enabled)(
       expect(fs.readlinkSync(mvTo)).toBe(target)
       expect(existsSync(target)).toBe(true)
       expect(fs.readFileSync(target, "utf8")).toBe(targetBefore)
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+// worktree-write-scope phase-04.task-11: the agents' `permission.edit` scope is
+// an ORDERED rule list — an ALLOW entry grants, a DENY revokes, and the LAST
+// matching entry wins, with a path matched by no entry refused by default. A
+// deny-anywhere-wins (or allow-only) implementation gets the first case below
+// wrong, and a deny-anywhere-wins implementation additionally gets the
+// re-granted file wrong. This exercises the same plugin-free sequence the
+// `apg_rm`/`apg_mv`/`apg_cp` bodies run (`mainCheckoutRoot` → `agentFsGlobs` →
+// `canonicalPath` → `fsScopeDecision`) and applies the corresponding real fs op
+// gated on the decision, against a scratch /tmp git repo
+// (`global.constraint.no-real-project-test`).
+
+/// The acting agent whose edit rules carry a broad worktree ALLOW, a LATER deny
+/// over a subtree, and a still-later re-grant for one file.
+const DENY_AGENT = "worktree-deny-impl"
+
+/// A scratch project repo laid out exactly like `scratchWorktreeRepo`, plus an
+/// agent (`DENY_AGENT`) whose edit rules are ordered
+/// `allow(apg/.worktrees/*/src/**)` → `deny(.../src/secret/**)` →
+/// `allow(.../src/secret/ok.rs)`, and a `src/secret/` tree under the worktree:
+/// `secret/k.rs` is revoked by the later deny, `secret/ok.rs` is re-granted by
+/// the even-later allow.
+function scratchDenyWorktreeRepo(): {
+  base: string
+  main: string
+  worktree: string
+  project: string
+} {
+  const repo = scratchWorktreeRepo()
+  fs.writeFileSync(
+    path.join(repo.main, ".opencode", "agents", `${DENY_AGENT}.md`),
+    [
+      "---",
+      "description: scratch worktree code-writer with a later deny",
+      "permission:",
+      '  "*": deny',
+      "  edit:",
+      // A broad ALLOW over the whole owned worktree...
+      '    "apg/.worktrees/*/src/**": allow',
+      // ...REVOKED for this subtree by a LATER deny (the last match wins)...
+      '    "apg/.worktrees/*/src/secret/**": deny',
+      // ...and RE-GRANTED for one file by an even later allow.
+      '    "apg/.worktrees/*/src/secret/ok.rs": allow',
+      "---",
+      "",
+    ].join("\n"),
+  )
+  fs.mkdirSync(path.join(repo.worktree, "src", "secret"), { recursive: true })
+  fs.writeFileSync(path.join(repo.worktree, "src", "secret", "k.rs"), "fn k() {}\n")
+  fs.writeFileSync(path.join(repo.worktree, "src", "secret", "ok.rs"), "fn ok() {}\n")
+  return repo
+}
+
+test.skipIf(!enabled)(
+  "e2e: a later deny revokes an earlier broad allow for rm/mv/cp, a later allow re-grants",
+  async () => {
+    const { base, main, worktree, project } = scratchDenyWorktreeRepo()
+    try {
+      const allowedFile = path.join(worktree, "src", "a.rs")
+      const deniedDir = path.join(worktree, "src", "secret")
+      const deniedFile = path.join(deniedDir, "k.rs")
+      const regrantedFile = path.join(deniedDir, "ok.rs")
+
+      // The broad ALLOW matches all three; ONLY the ordered last-match decision
+      // distinguishes them: the later DENY revokes `secret/**`, the still-later
+      // ALLOW re-grants `secret/ok.rs`.
+      const gate = await fsGate(worktree, [allowedFile, deniedFile, regrantedFile], DENY_AGENT)
+      expect(gate.root).toBe(main)
+      expect(gate.project).toBe(project)
+      expect(gate.decisions[0].allowed).toBe(true)
+      expect(gate.decisions[1].allowed).toBe(false)
+      // A rule DID match the denied path and it was a deny (not "no match") —
+      // the earlier broad allow was revoked by the later deny.
+      expect(gate.decisions[1].globMatched).toBe(true)
+      expect(gate.decisions[1].reason).toBe("path is not within the acting agent's granted globs")
+      // A later ALLOW after the deny re-grants, so deny-anywhere-wins fails here.
+      expect(gate.decisions[2].allowed).toBe(true)
+
+      // rm: the denied file's real op is skipped — the tree is untouched.
+      if (gate.decisions[1].allowed) fs.rmSync(gate.decisions[1].named)
+      expect(existsSync(deniedFile)).toBe(true)
+
+      // mv: an in-grant source into the denied subtree is refused on the
+      // DESTINATION, so the move never runs.
+      const mvDest = path.join(deniedDir, "moved.rs")
+      const mvGate = await fsGate(worktree, [allowedFile, mvDest], DENY_AGENT)
+      expect(mvGate.decisions[0].allowed).toBe(true)
+      expect(mvGate.decisions[1].allowed).toBe(false)
+      expect(mvGate.decisions[1].globMatched).toBe(true)
+      if (mvGate.decisions[0].allowed && mvGate.decisions[1].allowed) {
+        fs.renameSync(mvGate.decisions[0].named, mvGate.decisions[1].named)
+      }
+      expect(existsSync(allowedFile)).toBe(true)
+      expect(existsSync(mvDest)).toBe(false)
+
+      // cp: the same denied destination is refused, so nothing is written.
+      const cpGate = await fsGate(worktree, [allowedFile, mvDest], DENY_AGENT)
+      expect(cpGate.decisions[1].allowed).toBe(false)
+      expect(cpGate.decisions[1].globMatched).toBe(true)
+      if (cpGate.decisions[1].allowed) {
+        fs.cpSync(cpGate.decisions[0].named, cpGate.decisions[1].named, { recursive: true })
+      }
+      expect(existsSync(mvDest)).toBe(false)
+
+      // The gate is live (not refusing everything): the re-granted file is
+      // allowed and the real rm runs.
+      const okGate = await fsGate(worktree, [regrantedFile], DENY_AGENT)
+      expect(okGate.decisions[0].allowed).toBe(true)
+      if (okGate.decisions[0].allowed) fs.rmSync(okGate.decisions[0].named)
+      expect(existsSync(regrantedFile)).toBe(false)
+      // And an in-grant file with no later deny is likewise allowed.
+      const plainFile = path.join(worktree, "src", "b.rs")
+      const plainGate = await fsGate(worktree, [plainFile], DENY_AGENT)
+      expect(plainGate.decisions[0].allowed).toBe(true)
+      if (plainGate.decisions[0].allowed) fs.rmSync(plainGate.decisions[0].named)
+      expect(existsSync(plainFile)).toBe(false)
     } finally {
       fs.rmSync(base, { recursive: true, force: true })
     }
