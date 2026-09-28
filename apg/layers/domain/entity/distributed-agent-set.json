@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "distributed-agent-set",
+  "body": "The agents `apg init` installs into `~/.opencode/agents/` from `opencode-suite/agents/**`, embedded into the binary via `include_str!` and single-sourced from the repo. Today: `codebase-navigator`, `spec-writer`, `plan-writer`, `spec-review`, `plan-review`, `agent-builder` — and, after this change, `implementation-phase-reviewer`, so the set grows six to seven. Membership is decided by repo-agnosticism: a distributed agent carries no repo-specific build grant and does not need the repo's paths, gates, or edit scopes. Distributed agents do NOT carry the agent-builder's `generated: true` marker (that marker distinguishes agent-builder output from the distributed core). The `implementation-phase-reviewer` moves here from the generated set.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
