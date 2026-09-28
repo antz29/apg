@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.worktree-write-boundary",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.permission-scope",
+      "properties": {}
     }
   ],
   "in": [
