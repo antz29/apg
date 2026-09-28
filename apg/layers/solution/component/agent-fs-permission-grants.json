@@ -31,6 +31,11 @@
       "kind": "realised-by",
       "source": "domain.entity.worktree-write-boundary",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.worktree-write-scope-owners",
+      "properties": {}
     }
   ]
 }
