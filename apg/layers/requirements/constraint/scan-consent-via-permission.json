@@ -7,5 +7,11 @@
     "attaches-to": "requirements.requirement.navigator-scan-permission"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "requirements.note.navigator-scan-permission-decision",
+      "properties": {}
+    }
+  ]
 }

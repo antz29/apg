@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "solution.component.codebase-navigator-prompt",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.constraint.scan-consent-via-permission",
+      "properties": {}
     }
   ],
   "in": []
