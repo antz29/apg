@@ -5,5 +5,11 @@
   "body": "The distributed `agent-builder` agent template `opencode-suite/agents/agent-builder.md` (product source embedded via `include_str!` and installed by `apg init` into `~/.opencode/agents/`) must maintain the repo's `opencode.json` agent→model map, in addition to scaffolding/updating `.opencode/agents/**`. `opencode.json` is a MAIN-checkout file holding per-agent `agent.<name>.model` entries; populating it rides the SAME agent-builder carve-out as `.opencode/agents/**` (see `global.constraint.worktree-isolation` and `requirements.constraint.agent-changes-always-on-main`) — it is a second write path under that one carve-out, not a new third carve-out.\n\nRequired behaviour:\n- INTERVIEW: when scaffolding/updating agents, the agent-builder asks the coordinator/user (one question at a time; multiple-choice preferred) whether they want specific model mappings for the agents it scaffolds AND for the distributed suite agents, and it records the chosen `agent.<name>.model` values.\n- WRITE/MERGE: it creates or updates `opencode.json` at the repo root, adding/updating ONLY the `agent.<name>.model` entries the interview produced. The write MERGES: every other key and every existing entry survives unless the interview changes it — no clobbering of unrelated config.\n- EXCLUSION: `codebase-navigator` carries NO model mapping; the interview must not offer it and the merge must not write an `agent.codebase-navigator.model` key.\n\nAcceptance criteria:\n- The template instructs the agent-builder to create/update the repo-root `opencode.json` alongside `.opencode/agents/**`, on the main checkout.\n- The template carries an interview step that asks for `agent.<name>.model` preferences for the agents it scaffolds and the distributed suite agents, and records the answers.\n- A write MERGES: existing `opencode.json` entries and unrelated keys are preserved unless the interview changes them.\n- `codebase-navigator` is explicitly excluded from model mapping.\n- Scope is the one product-source file `opencode-suite/agents/agent-builder.md`; the repo's own `.opencode/agents/**` and this repo's existing `opencode.json` are consumer artifacts not edited by this change-set; no binary change.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
 }
