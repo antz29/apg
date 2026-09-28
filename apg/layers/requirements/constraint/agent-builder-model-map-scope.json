@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "agent-builder-model-map-scope",
+  "body": "Law (prose; assessed by review): the repo's `opencode.json` agent→model map is part of the agent-builder's MAIN-write carve-out, alongside `.opencode/agents/**` — a second write path under the SAME carve-out (`global.constraint.worktree-isolation` still counts exactly TWO agent carve-outs). The map is maintained NON-DESTRUCTIVELY: a write adds/updates only the `agent.<name>.model` entries the interview produced and preserves every other key and every existing entry unless the interview changes it. `codebase-navigator` is EXCLUDED — no `agent.codebase-navigator.model` entry may be written. The agent-builder's only git mutation stays `git add`/`git commit`; push/tag remain the optional release-agent's sole `ask` grant.",
+  "properties": {
+    "attaches-to": "requirements.requirement.agent-builder-model-map"
+  },
+  "out": [],
+  "in": []
+}
