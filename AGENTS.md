@@ -277,7 +277,7 @@ The project builds a single `apg` binary (package `apg`):
 
 `apg init` also installs the **apg opencode tool suite** into the user-level
 `~/.opencode/` (single-sourced from this repo's `opencode-suite/`, embedded in
-`src/main.rs` via `include_str!`): `apg_scan`, `apg_query`, plus curated
+`src/install.rs` via `include_str!`): `apg_scan`, `apg_query`, plus curated
 abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
@@ -529,15 +529,20 @@ Forward release (the `scripts/release.sh <version>` helper automates steps 4–5
    `Cargo.toml`/`Cargo.lock`/`README.md` from disk and are therefore **e2e**, so
    the guard runs under `cargo test-e2e` (`cargo test e2e:: -- --ignored`)
    — a stale `RELEASE_VERSION` literal ships the release HEAD red unless the e2e
-   tier is run. Build first because the cross-process tests spawn
+   tier is run (the const lives in `tests/main_e2e.rs`). Build first because the
+   cross-process tests spawn
    `target/<profile>/apg` (`src/testutil.rs`), which `cargo test` alone does not
    rebuild: a stale artifact makes the session/lock tests fail against an old CLI
    with misleading errors.
-2. **Bump the version** in `Cargo.toml`, `Cargo.lock`, **and** `src/main.rs`'s
-   `RELEASE_VERSION` literal (`version = "X.Y.Z"`).
+2. **Bump the version** in `Cargo.toml`, `Cargo.lock`, the `RELEASE_VERSION`
+   const in `tests/main_e2e.rs`, and README.md's `apg X.Y.x` / `--version X.Y.x`
+   pins — the four surfaces the release-version guard tests read
+   (`env!("CARGO_PKG_VERSION")` ties Cargo.toml to the const). Once the new
+   binary is installed, re-run `apg init` so the repo's own `apg/config.json`
+   layout `version` shares its major.minor (the version gate blocks otherwise).
 3. **Commit the release content** (the version bump + whatever ships in it).
    This commit is the **release HEAD**.
-4. **Repoint all 7 formulae** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
+4. **Repoint all 8 formulae (the base `scanner` plus the seven per-language)** (`Formula/scanner.rb`, `apg-go`, `apg-java`,
    `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`):
    `tag:` → `vX.Y.Z`,
    `revision:` → the release-HEAD SHA, `root_url` →
