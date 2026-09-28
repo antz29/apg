@@ -44,6 +44,11 @@
       "kind": "details",
       "target": "domain.constraint.fs-operation-scope-enforced",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "requirements.requirement.agent-builder-optional-release-agent",
+      "properties": {}
     }
   ],
   "in": []
