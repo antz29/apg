@@ -4,6 +4,12 @@
   "name": "agent-roster-narrow-owners",
   "body": "source: the brief lists existing components that own the edited files and asks whether to reuse them. Verification / inconsistency: the edited files already have multiple owners and the existing component bodies narrate earlier change-sets, so blanket reuse would couple this change-set's coverage to unrelated surfaces. Resolution: (1) REUSE `solution.component.agent-builder-prompt` (`opencode-suite/agents/agent-builder.md`) and `solution.component.codebase-navigator-prompt` (`opencode-suite/agents/codebase-navigator.md`) — both are already 1:1 to their one file, so no extra task is forced; their prior bodies are left as-is and this note records the reuse. (2) Create narrow NEW components for the new reviewer file (`distributed-reviewer-prompt`), the install/embed/upgrade surface (`distributed-agent-install`), and the roster docs (`agent-roster-docs`). (3) `distributed-agent-install` deliberately overlaps `solution.component.agent-fs-install-registry` on `rust.apg.install`: coverage is per-solution-node and every in-scope node's `implemented-by` FQN must be touched by a task, and the fs-tools component is also implemented-by the unrelated `rust.main_e2e.e2e.suite_installs_node_edge_project_tools_and_retires_spec_invariant`, so reusing it would force a fake task over that untouched test. Overlapping component ownership of one file is established practice (`codebase-navigator-prompt` and `navigator-prompt-guidance` share `codebase-navigator.md`). [autonomous]",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.component.distributed-agent-install",
+      "properties": {}
+    }
+  ],
   "in": []
 }
