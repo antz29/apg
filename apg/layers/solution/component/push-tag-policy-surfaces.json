@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "src/project_cmd/mod.rs",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "tests/git_e2e.rs",
+      "properties": {}
     }
   ],
   "in": [
