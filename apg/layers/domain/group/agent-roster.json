@@ -17,6 +17,11 @@
       "kind": "contains",
       "target": "domain.entity.distributed-agent-set",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.agent-file-migration",
+      "properties": {}
     }
   ],
   "in": []
