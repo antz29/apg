@@ -72,10 +72,7 @@ permission:
     "git diff *": allow
     "git log *": allow
     "git branch *": allow
-    "git worktree *": allow
-    "git switch *": allow
-    "git checkout *": allow
-    "git merge *": allow
+    "git worktree list *": allow
     "git rebase *": allow
 ---
 
