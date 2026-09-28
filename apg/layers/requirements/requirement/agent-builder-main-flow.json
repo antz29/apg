@@ -33,6 +33,11 @@
       "kind": "details",
       "source": "requirements.note.agent-builder-git-grant-reconciled",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.git-file-write-options-reconciled",
+      "properties": {}
     }
   ]
 }
