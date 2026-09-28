@@ -244,4 +244,102 @@ test("fsScopeDecision: `*` does not cross /, `**` does, `**/` matches zero dirs"
   expect(fsScopeDecision("/repo", "/repo/a.rs", ["**/*.rs"]).allowed).toBe(true)
 })
 
+// worktree-write-scope phase-01.task-7: the PURE main-anchored decision. When
+// the caller supplies `project` (a worktree name, or `null` from the main
+// checkout) `fsScopeDecision` resolves grants and candidate against the MAIN
+// root and structurally refuses any candidate that lands in the main checkout —
+// a root glob may match and `allowed` still stays false. Still side-effect-free
+// (no fs/git/process), so it lives in the `bun test` unit tier.
+test("fsScopeDecision (main-anchored) refuses a main-checkout path even when a root glob matches", () => {
+  const d = fsScopeDecision(
+    "/main",
+    "/main/opencode-suite/lib/apg.test.ts",
+    ["opencode-suite/lib/apg.test.ts"],
+    "proj",
+  )
+  expect(d.allowed).toBe(false)
+  expect(d.inBoundary).toBe(true)
+  // The root glob DOES match — the refusal is the worktree rule, not the glob.
+  expect(d.globMatched).toBe(true)
+  expect(d.reason).toBe("path resolves into the main checkout")
+  // A `null` project (the caller is in the main checkout) refuses the same way.
+  const fromMain = fsScopeDecision(
+    "/main",
+    "/main/src/a.rs",
+    ["src/*.rs"],
+    null,
+  )
+  expect(fromMain.globMatched).toBe(true)
+  expect(fromMain.allowed).toBe(false)
+  expect(fromMain.reason).toBe("path resolves into the main checkout")
+})
+
+test("fsScopeDecision (main-anchored) allows a worktree path under an owned apg/.worktrees/*/<glob> grant", () => {
+  const d = fsScopeDecision(
+    "/main",
+    "/main/apg/.worktrees/proj/opencode-suite/lib/apg.test.ts",
+    ["apg/.worktrees/*/opencode-suite/**/*.ts"],
+    "proj",
+  )
+  expect(d.allowed).toBe(true)
+  expect(d.inBoundary).toBe(true)
+  expect(d.globMatched).toBe(true)
+  expect(d.reason).toBe(null)
+  expect(d.relativePath).toBe(
+    "apg/.worktrees/proj/opencode-suite/lib/apg.test.ts",
+  )
+  // A `null` project accepts ANY project worktree that matches a granted glob.
+  const anyWorktree = fsScopeDecision(
+    "/main",
+    "/main/apg/.worktrees/proj/opencode-suite/lib/apg.test.ts",
+    ["apg/.worktrees/*/opencode-suite/**/*.ts"],
+    null,
+  )
+  expect(anyWorktree.allowed).toBe(true)
+  expect(anyWorktree.reason).toBe(null)
+})
+
+test("fsScopeDecision (main-anchored) refuses an unowned worktree path", () => {
+  // A sibling project's worktree is not under THIS project's worktree.
+  const sibling = fsScopeDecision(
+    "/main",
+    "/main/apg/.worktrees/other/opencode-suite/lib/apg.test.ts",
+    ["apg/.worktrees/proj/opencode-suite/**"],
+    "proj",
+  )
+  expect(sibling.allowed).toBe(false)
+  expect(sibling.inBoundary).toBe(true)
+  expect(sibling.reason).toBe("path resolves into the main checkout")
+  // Inside the owned worktree but outside the granted globs: refused for the
+  // glob, not the worktree rule.
+  const unownedGlob = fsScopeDecision(
+    "/main",
+    "/main/apg/.worktrees/proj/src/a.rs",
+    ["apg/.worktrees/proj/opencode-suite/**"],
+    "proj",
+  )
+  expect(unownedGlob.allowed).toBe(false)
+  expect(unownedGlob.globMatched).toBe(false)
+  expect(unownedGlob.reason).toBe(
+    "path is not within the acting agent's granted globs",
+  )
+})
+
+test("fsScopeDecision (main-anchored) refuses a .. or absolute escape even when a glob would match", () => {
+  const absolute = fsScopeDecision("/main", "/etc/passwd", ["**/*"], "proj")
+  expect(absolute.allowed).toBe(false)
+  expect(absolute.inBoundary).toBe(false)
+  expect(absolute.reason).toBe("path escapes the project/worktree boundary")
+  const dotdot = fsScopeDecision(
+    "/main",
+    "/main/apg/.worktrees/proj/../../../../etc/passwd",
+    ["apg/.worktrees/*/**"],
+    "proj",
+  )
+  expect(dotdot.allowed).toBe(false)
+  expect(dotdot.inBoundary).toBe(false)
+  expect(dotdot.globMatched).toBe(false)
+  expect(dotdot.reason).toBe("path escapes the project/worktree boundary")
+})
+
 
