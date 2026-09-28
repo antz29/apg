@@ -49,6 +49,11 @@
       "kind": "details",
       "target": "domain.entity.agent-model-map",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.worktree-isolation-guide",
+      "properties": {}
     }
   ],
   "in": []
