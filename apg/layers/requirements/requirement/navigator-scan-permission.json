@@ -7,5 +7,11 @@
     "feature": "navigator-scan-permission"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.user.navigator-agent",
+      "properties": {}
+    }
+  ]
 }
