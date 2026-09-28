@@ -24,6 +24,11 @@
       "kind": "details",
       "target": "solution.component.agent-builder-prompt",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.agent-scaffold-flow",
+      "properties": {}
     }
   ],
   "in": []
