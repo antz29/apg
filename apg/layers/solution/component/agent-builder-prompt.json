@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "source": "domain.entity.agent-scaffold-flow",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.agent-builder-main-flow-decision",
+      "properties": {}
     }
   ]
 }
