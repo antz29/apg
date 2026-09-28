@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-permissions"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.main-integration",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
