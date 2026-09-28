@@ -85,7 +85,8 @@ missing or outdated, you scaffold/update `.opencode/agents/**` **on main**,
 `git add` + `git commit` there, and report back.
 
 This is **one of exactly two places main is written** — the other is the
-optional `release-agent`'s per-repo release artefacts (never any code-writer's)
+optional `release-agent`'s per-repo release artefacts, reached through its
+`edit` grants only, never the path-scoped fs tools (and never any code-writer's)
 — and it does not violate "main is never a mutation place": that rule is
 **scoped** to the binary's guarded mutations — durable `apg node`/`apg edge` and
 transient plan/review mutations, which refuse outside a project worktree — and
@@ -169,9 +170,11 @@ implementation continues.
   whose grants include a root path would permit a main-checkout write — that is
   a broken scaffold (the 0.11.0 feedback-0-fix miss). The ONLY main writers are
   the agent-builder itself (`.opencode/agents/**`) and the optional
-  `release-agent` (its per-repo release artefacts); every code-writer — the core
-  `implementer`, every `<name>-implementer`, every `test-implementer` — is
-  worktree-only.
+  `release-agent` (its per-repo release artefacts) — and the release-agent
+  writes its main paths through `edit` only: `apg_rm`/`apg_mv`/`apg_cp` are
+  worktree-only for **every** agent, the release-agent included, and always
+  refuse a main-resolving path. Every code-writer — the core `implementer`,
+  every `<name>-implementer`, every `test-implementer` — is worktree-only.
 - **Discovered work stops the implementer.** A change beyond the task's
   verb/target — a new unit, a different mechanism, a spec contradiction — is
   reported, not implemented: the coordinator routes it to the plan-writer (or
@@ -228,10 +231,11 @@ implementation continues.
   check BOTH the source and the destination). The tools resolve every candidate
   in one **main-anchored** frame and self-enforce per-path scope from those
   granted worktree-rooted globs, so a main-checkout path is refused whatever
-  `directory` the caller passes. This is a scoped-write surface only — the
-  read-only apg-suite list above stays read-only — and it belongs to the
-  implementer's grant shape, never the test-implementer's, and never a root
-  path.
+  `directory` the caller passes — for **every** agent, the optional
+  `release-agent` included (whose main access is `edit`-only). This is a
+  scoped-write surface only — the read-only apg-suite list above stays
+  read-only — and it belongs to the implementer's grant shape, never the
+  test-implementer's, and never a root path.
 
 ### unit/int/e2e-test-implementer(s) (per detected tier, where a test tier is file-separable)
 - **Edit** scoped to the tier's test-file globs, granted **worktree-rooted** as
@@ -258,13 +262,18 @@ implementation continues.
   release, so its shape is repo-specific in a way the distributed suite agents
   are not. It fills the slot the removed optional `coordinator` vacated.
 - **It writes the MAIN checkout** (the second of the two main-write
-  carve-outs), so its `edit` and `apg_rm`/`apg_mv`/`apg_cp` grants are
+  carve-outs), through its **`edit` grants ONLY**. Its `edit` globs name
   **main-checkout paths, not `apg/.worktrees/*` mirrors** — the worktree-only
-  rule (rule 10) governs code-writers, never the release-agent. Its main-write
+  rule (rule 10) governs code-writers, never the release-agent. It carries **no
+  `apg_rm`/`apg_mv`/`apg_cp` grant at all**: those path-scoped fs tools are
+  worktree-only, resolving every candidate in the main-anchored frame and
+  refusing any path that resolves into the main checkout (rule 10, and the
+  `fs-operation-scope-enforced` law) — so an fs-tool grant naming a main path
+  could never be honoured, and writing one is a broken scaffold. Its main-write
   path set is **derived per repo**: analyse the repo's release artefacts
   (release scripts, workflows, formulae/manifests, version surfaces, …) to
   propose a set, then interview the coordinator to confirm or amend it. Grant
-  edit access to **exactly those derived paths** — deny-by-default, never a
+  `edit` access to **exactly those derived paths** — deny-by-default, never a
   fixed list in this template, never more.
 - **Shape**: `mode: subagent`, `hidden: true`, `generated: true`, and **no
   `question`** — it routes questions through the coordinator. It never actions
@@ -343,8 +352,9 @@ implementation continues.
    ```
 
    **The ONLY main writers are the agent-builder itself (`.opencode/agents/**`)
-   and the optional `release-agent` (its per-repo release artefacts); every
-   code-writer is worktree-only.** **`git push` and
+   and the optional `release-agent` (its per-repo release artefacts, via `edit`
+   grants only — the fs tools `apg_rm`/`apg_mv`/`apg_cp` are worktree-only for
+   every agent); every code-writer is worktree-only.** **`git push` and
    `git tag` are human-approved acts; the ONLY generated agent scaffolded a
    push/tag grant is the optional `release-agent`, and only as `ask` — every
    other generated agent carries no push/tag grant at all.**
@@ -388,7 +398,9 @@ implementation continues.
     (`apg_rm`/`apg_mv`/`apg_cp`) are NOT exempt — the tools self-enforce per-path
     scope from the acting agent's granted globs (the `permission.edit` allow
     globs), which opencode resolves against the session workspace root, so those
-    grants are worktree-rooted exactly like edit globs. The ONLY main writers are
+    grants are worktree-rooted exactly like edit globs, and a main-resolving path
+    is refused for every agent — the optional `release-agent` included, whose
+    main access is `edit`-only. The ONLY main writers are
     the agent-builder itself (`.opencode/agents/**`) and the optional
     `release-agent` (its per-repo release artefacts); every code-writer — the
     core `implementer`, every `<name>-implementer`, every `test-implementer` —
@@ -470,7 +482,10 @@ implementation continues.
    main checkout's root paths are explicitly denied — read the worktree path
    shape off `project_cmd.rs` (`apg/.worktrees/<name>`) if unsure. Confirm the
    only main-writer grants are the agent-builder's own `.opencode/agents/**` and
-   the optional `release-agent`'s per-repo release paths. When the repo ships the
+   the optional `release-agent`'s per-repo release paths, **and that those
+   release paths are `edit` grants only** — no `apg_rm`/`apg_mv`/`apg_cp` grant
+   names a main-checkout path for any agent (the fs tools are worktree-only).
+   When the repo ships the
    suite in-tree, confirm the implementer's worktree-rooted
    `apg/.worktrees/*/opencode-suite/**` allow is present and that no bare
    `opencode-suite/**` allow exists (worktree-only rule 10).
