@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.main_e2e.e2e.upgrade_doc_covers_version_field_gate_and_fix_steps",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.main_e2e.e2e.acceptance_node_edge_surface_is_transparent_and_pinned_in_help_tools_and_agents",
+      "properties": {}
     }
   ],
   "in": [
