@@ -25,7 +25,7 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "src/structlib/**": allow
+    "src/structlib/**": deny
     "apg/.worktrees/*/src/structlib/**": allow
     "src/structlib/target/**": deny
     "apg/.worktrees/*/src/structlib/target/**": deny
@@ -63,9 +63,9 @@ permission:
     "apg/.worktrees/*/src/cpplib/vendor/**": deny
     ".opencode/**": deny
     "apg/.worktrees/*/.opencode/**": deny
-    "src/structlib/Cargo.toml": allow
-    "src/structlib/Cargo.lock": allow
-    "src/structlib/build.rs": allow
+    "src/structlib/Cargo.toml": deny
+    "src/structlib/Cargo.lock": deny
+    "src/structlib/build.rs": deny
     "apg/.worktrees/*/src/structlib/Cargo.toml": allow
     "apg/.worktrees/*/src/structlib/Cargo.lock": allow
     "apg/.worktrees/*/src/structlib/build.rs": allow
@@ -96,15 +96,15 @@ permission:
     "cargo clippy --manifest-path src/structlib/Cargo.toml *": allow
   apg_rm:
     "*": deny
-    "src/structlib/**": allow
+    "src/structlib/**": deny
     "apg/.worktrees/*/src/structlib/**": allow
   apg_mv:
     "*": deny
-    "src/structlib/**": allow
+    "src/structlib/**": deny
     "apg/.worktrees/*/src/structlib/**": allow
   apg_cp:
     "*": deny
-    "src/structlib/**": allow
+    "src/structlib/**": deny
     "apg/.worktrees/*/src/structlib/**": allow
   apg_query: allow
   apg_find_symbol: allow

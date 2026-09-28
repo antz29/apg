@@ -25,7 +25,7 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "src/rustlib/**": allow
+    "src/rustlib/**": deny
     "apg/.worktrees/*/src/rustlib/**": allow
     "src/rustlib/target/**": deny
     "apg/.worktrees/*/src/rustlib/target/**": deny
@@ -63,9 +63,9 @@ permission:
     "apg/.worktrees/*/src/cpplib/vendor/**": deny
     ".opencode/**": deny
     "apg/.worktrees/*/.opencode/**": deny
-    "src/rustlib/Cargo.toml": allow
-    "src/rustlib/Cargo.lock": allow
-    "src/rustlib/build.rs": allow
+    "src/rustlib/Cargo.toml": deny
+    "src/rustlib/Cargo.lock": deny
+    "src/rustlib/build.rs": deny
     "apg/.worktrees/*/src/rustlib/Cargo.toml": allow
     "apg/.worktrees/*/src/rustlib/Cargo.lock": allow
     "apg/.worktrees/*/src/rustlib/build.rs": allow
@@ -96,15 +96,15 @@ permission:
     "cargo clippy --manifest-path src/rustlib/Cargo.toml *": allow
   apg_rm:
     "*": deny
-    "src/rustlib/**": allow
+    "src/rustlib/**": deny
     "apg/.worktrees/*/src/rustlib/**": allow
   apg_mv:
     "*": deny
-    "src/rustlib/**": allow
+    "src/rustlib/**": deny
     "apg/.worktrees/*/src/rustlib/**": allow
   apg_cp:
     "*": deny
-    "src/rustlib/**": allow
+    "src/rustlib/**": deny
     "apg/.worktrees/*/src/rustlib/**": allow
   apg_query: allow
   apg_find_symbol: allow

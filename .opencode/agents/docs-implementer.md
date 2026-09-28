@@ -25,7 +25,7 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "README.md": allow
+    "README.md": deny
     "apg/.worktrees/*/README.md": allow
     "src/**": deny
     "build.rs": deny
@@ -72,15 +72,15 @@ permission:
     "git commit *": allow
   apg_rm:
     "*": deny
-    "README.md": allow
+    "README.md": deny
     "apg/.worktrees/*/README.md": allow
   apg_mv:
     "*": deny
-    "README.md": allow
+    "README.md": deny
     "apg/.worktrees/*/README.md": allow
   apg_cp:
     "*": deny
-    "README.md": allow
+    "README.md": deny
     "apg/.worktrees/*/README.md": allow
   apg_query: allow
   apg_find_symbol: allow

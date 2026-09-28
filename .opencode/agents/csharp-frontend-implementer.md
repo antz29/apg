@@ -25,7 +25,7 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "src/csharplib/**": allow
+    "src/csharplib/**": deny
     "apg/.worktrees/*/src/csharplib/**": allow
     "src/csharplib/bin/**": deny
     "src/csharplib/obj/**": deny
@@ -88,15 +88,15 @@ permission:
     "dotnet *": allow
   apg_rm:
     "*": deny
-    "src/csharplib/**": allow
+    "src/csharplib/**": deny
     "apg/.worktrees/*/src/csharplib/**": allow
   apg_mv:
     "*": deny
-    "src/csharplib/**": allow
+    "src/csharplib/**": deny
     "apg/.worktrees/*/src/csharplib/**": allow
   apg_cp:
     "*": deny
-    "src/csharplib/**": allow
+    "src/csharplib/**": deny
     "apg/.worktrees/*/src/csharplib/**": allow
   apg_query: allow
   apg_find_symbol: allow

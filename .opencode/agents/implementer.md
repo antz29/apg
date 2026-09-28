@@ -25,28 +25,11 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "src/*.rs": allow
-    "src/artifacts/**": allow
-    "src/cache/**": allow
-    "src/classify/**": allow
-    "src/delta/**": allow
-    "src/git/**": allow
-    "src/impact/**": allow
-    "src/incremental/**": allow
-    "src/ingest/**": allow
-    "src/layers/**": allow
-    "src/load/**": allow
-    "src/node_cmd/**": allow
-    "src/plan_cmd/**": allow
-    "src/project_cmd/**": allow
-    "src/schema/**": allow
-    "src/splice/**": allow
-    "src/timing/**": allow
-    "src/version_gate/**": allow
-    "tests/**": allow
-    "opencode-suite/**": allow
-    "apg/config.json": allow
-    ".gitignore": allow
+    "src/**": deny
+    "tests/**": deny
+    "opencode-suite/**": deny
+    "apg/config.json": deny
+    ".gitignore": deny
     "apg/.worktrees/*/src/*.rs": allow
     "apg/.worktrees/*/src/artifacts/**": allow
     "apg/.worktrees/*/src/cache/**": allow
@@ -158,28 +141,11 @@ permission:
     "scripts/gate.sh *": allow
   apg_rm:
     "*": deny
-    "src/*.rs": allow
-    "src/artifacts/**": allow
-    "src/cache/**": allow
-    "src/classify/**": allow
-    "src/delta/**": allow
-    "src/git/**": allow
-    "src/impact/**": allow
-    "src/incremental/**": allow
-    "src/ingest/**": allow
-    "src/layers/**": allow
-    "src/load/**": allow
-    "src/node_cmd/**": allow
-    "src/plan_cmd/**": allow
-    "src/project_cmd/**": allow
-    "src/schema/**": allow
-    "src/splice/**": allow
-    "src/timing/**": allow
-    "src/version_gate/**": allow
-    "tests/**": allow
-    "opencode-suite/**": allow
-    "apg/config.json": allow
-    ".gitignore": allow
+    "src/**": deny
+    "tests/**": deny
+    "opencode-suite/**": deny
+    "apg/config.json": deny
+    ".gitignore": deny
     "apg/.worktrees/*/src/*.rs": allow
     "apg/.worktrees/*/src/artifacts/**": allow
     "apg/.worktrees/*/src/cache/**": allow
@@ -204,28 +170,11 @@ permission:
     "apg/.worktrees/*/.gitignore": allow
   apg_mv:
     "*": deny
-    "src/*.rs": allow
-    "src/artifacts/**": allow
-    "src/cache/**": allow
-    "src/classify/**": allow
-    "src/delta/**": allow
-    "src/git/**": allow
-    "src/impact/**": allow
-    "src/incremental/**": allow
-    "src/ingest/**": allow
-    "src/layers/**": allow
-    "src/load/**": allow
-    "src/node_cmd/**": allow
-    "src/plan_cmd/**": allow
-    "src/project_cmd/**": allow
-    "src/schema/**": allow
-    "src/splice/**": allow
-    "src/timing/**": allow
-    "src/version_gate/**": allow
-    "tests/**": allow
-    "opencode-suite/**": allow
-    "apg/config.json": allow
-    ".gitignore": allow
+    "src/**": deny
+    "tests/**": deny
+    "opencode-suite/**": deny
+    "apg/config.json": deny
+    ".gitignore": deny
     "apg/.worktrees/*/src/*.rs": allow
     "apg/.worktrees/*/src/artifacts/**": allow
     "apg/.worktrees/*/src/cache/**": allow
@@ -250,28 +199,11 @@ permission:
     "apg/.worktrees/*/.gitignore": allow
   apg_cp:
     "*": deny
-    "src/*.rs": allow
-    "src/artifacts/**": allow
-    "src/cache/**": allow
-    "src/classify/**": allow
-    "src/delta/**": allow
-    "src/git/**": allow
-    "src/impact/**": allow
-    "src/incremental/**": allow
-    "src/ingest/**": allow
-    "src/layers/**": allow
-    "src/load/**": allow
-    "src/node_cmd/**": allow
-    "src/plan_cmd/**": allow
-    "src/project_cmd/**": allow
-    "src/schema/**": allow
-    "src/splice/**": allow
-    "src/timing/**": allow
-    "src/version_gate/**": allow
-    "tests/**": allow
-    "opencode-suite/**": allow
-    "apg/config.json": allow
-    ".gitignore": allow
+    "src/**": deny
+    "tests/**": deny
+    "opencode-suite/**": deny
+    "apg/config.json": deny
+    ".gitignore": deny
     "apg/.worktrees/*/src/*.rs": allow
     "apg/.worktrees/*/src/artifacts/**": allow
     "apg/.worktrees/*/src/cache/**": allow

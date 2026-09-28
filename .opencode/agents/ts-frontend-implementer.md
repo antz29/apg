@@ -25,7 +25,7 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "src/tslib/**": allow
+    "src/tslib/**": deny
     "apg/.worktrees/*/src/tslib/**": allow
     "src/tslib/node_modules/**": deny
     "apg/.worktrees/*/src/tslib/node_modules/**": deny
@@ -84,15 +84,15 @@ permission:
     "npx tsc *": allow
   apg_rm:
     "*": deny
-    "src/tslib/**": allow
+    "src/tslib/**": deny
     "apg/.worktrees/*/src/tslib/**": allow
   apg_mv:
     "*": deny
-    "src/tslib/**": allow
+    "src/tslib/**": deny
     "apg/.worktrees/*/src/tslib/**": allow
   apg_cp:
     "*": deny
-    "src/tslib/**": allow
+    "src/tslib/**": deny
     "apg/.worktrees/*/src/tslib/**": allow
   apg_query: allow
   apg_find_symbol: allow

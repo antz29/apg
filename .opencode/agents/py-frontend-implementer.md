@@ -25,7 +25,7 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "src/pylib/**": allow
+    "src/pylib/**": deny
     "apg/.worktrees/*/src/pylib/**": allow
     "src/pylib/target/**": deny
     "apg/.worktrees/*/src/pylib/target/**": deny
@@ -63,9 +63,9 @@ permission:
     "apg/.worktrees/*/src/cpplib/vendor/**": deny
     ".opencode/**": deny
     "apg/.worktrees/*/.opencode/**": deny
-    "src/pylib/Cargo.toml": allow
-    "src/pylib/Cargo.lock": allow
-    "src/pylib/build.rs": allow
+    "src/pylib/Cargo.toml": deny
+    "src/pylib/Cargo.lock": deny
+    "src/pylib/build.rs": deny
     "apg/.worktrees/*/src/pylib/Cargo.toml": allow
     "apg/.worktrees/*/src/pylib/Cargo.lock": allow
     "apg/.worktrees/*/src/pylib/build.rs": allow
@@ -96,15 +96,15 @@ permission:
     "cargo clippy --manifest-path src/pylib/Cargo.toml *": allow
   apg_rm:
     "*": deny
-    "src/pylib/**": allow
+    "src/pylib/**": deny
     "apg/.worktrees/*/src/pylib/**": allow
   apg_mv:
     "*": deny
-    "src/pylib/**": allow
+    "src/pylib/**": deny
     "apg/.worktrees/*/src/pylib/**": allow
   apg_cp:
     "*": deny
-    "src/pylib/**": allow
+    "src/pylib/**": deny
     "apg/.worktrees/*/src/pylib/**": allow
   apg_query: allow
   apg_find_symbol: allow

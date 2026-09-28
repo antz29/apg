@@ -25,16 +25,16 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "scripts/**": allow
-    "build.rs": allow
-    "Cargo.toml": allow
-    "Cargo.lock": allow
-    "rust-toolchain.toml": allow
-    ".cargo/config.toml": allow
-    "install.sh": allow
-    "Formula/**": allow
-    ".github/**": allow
-    "AGENTS.md": allow
+    "scripts/**": deny
+    "build.rs": deny
+    "Cargo.toml": deny
+    "Cargo.lock": deny
+    "rust-toolchain.toml": deny
+    ".cargo/config.toml": deny
+    "install.sh": deny
+    "Formula/**": deny
+    ".github/**": deny
+    "AGENTS.md": deny
     "apg/.worktrees/*/scripts/**": allow
     "apg/.worktrees/*/build.rs": allow
     "apg/.worktrees/*/Cargo.toml": allow
@@ -120,16 +120,16 @@ permission:
     "cargo test --manifest-path src/structlib/Cargo.toml *": allow
   apg_rm:
     "*": deny
-    "scripts/**": allow
-    "build.rs": allow
-    "Cargo.toml": allow
-    "Cargo.lock": allow
-    "rust-toolchain.toml": allow
-    ".cargo/config.toml": allow
-    "install.sh": allow
-    "Formula/**": allow
-    ".github/**": allow
-    "AGENTS.md": allow
+    "scripts/**": deny
+    "build.rs": deny
+    "Cargo.toml": deny
+    "Cargo.lock": deny
+    "rust-toolchain.toml": deny
+    ".cargo/config.toml": deny
+    "install.sh": deny
+    "Formula/**": deny
+    ".github/**": deny
+    "AGENTS.md": deny
     "apg/.worktrees/*/scripts/**": allow
     "apg/.worktrees/*/build.rs": allow
     "apg/.worktrees/*/Cargo.toml": allow
@@ -142,16 +142,16 @@ permission:
     "apg/.worktrees/*/AGENTS.md": allow
   apg_mv:
     "*": deny
-    "scripts/**": allow
-    "build.rs": allow
-    "Cargo.toml": allow
-    "Cargo.lock": allow
-    "rust-toolchain.toml": allow
-    ".cargo/config.toml": allow
-    "install.sh": allow
-    "Formula/**": allow
-    ".github/**": allow
-    "AGENTS.md": allow
+    "scripts/**": deny
+    "build.rs": deny
+    "Cargo.toml": deny
+    "Cargo.lock": deny
+    "rust-toolchain.toml": deny
+    ".cargo/config.toml": deny
+    "install.sh": deny
+    "Formula/**": deny
+    ".github/**": deny
+    "AGENTS.md": deny
     "apg/.worktrees/*/scripts/**": allow
     "apg/.worktrees/*/build.rs": allow
     "apg/.worktrees/*/Cargo.toml": allow
@@ -164,16 +164,16 @@ permission:
     "apg/.worktrees/*/AGENTS.md": allow
   apg_cp:
     "*": deny
-    "scripts/**": allow
-    "build.rs": allow
-    "Cargo.toml": allow
-    "Cargo.lock": allow
-    "rust-toolchain.toml": allow
-    ".cargo/config.toml": allow
-    "install.sh": allow
-    "Formula/**": allow
-    ".github/**": allow
-    "AGENTS.md": allow
+    "scripts/**": deny
+    "build.rs": deny
+    "Cargo.toml": deny
+    "Cargo.lock": deny
+    "rust-toolchain.toml": deny
+    ".cargo/config.toml": deny
+    "install.sh": deny
+    "Formula/**": deny
+    ".github/**": deny
+    "AGENTS.md": deny
     "apg/.worktrees/*/scripts/**": allow
     "apg/.worktrees/*/build.rs": allow
     "apg/.worktrees/*/Cargo.toml": allow

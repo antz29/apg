@@ -25,7 +25,7 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "src/cpplib/**": allow
+    "src/cpplib/**": deny
     "apg/.worktrees/*/src/cpplib/**": allow
     "src/cpplib/vendor/**": deny
     "apg/.worktrees/*/src/cpplib/vendor/**": deny
@@ -82,15 +82,15 @@ permission:
     "gcc *": allow
   apg_rm:
     "*": deny
-    "src/cpplib/**": allow
+    "src/cpplib/**": deny
     "apg/.worktrees/*/src/cpplib/**": allow
   apg_mv:
     "*": deny
-    "src/cpplib/**": allow
+    "src/cpplib/**": deny
     "apg/.worktrees/*/src/cpplib/**": allow
   apg_cp:
     "*": deny
-    "src/cpplib/**": allow
+    "src/cpplib/**": deny
     "apg/.worktrees/*/src/cpplib/**": allow
   apg_query: allow
   apg_find_symbol: allow

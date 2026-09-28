@@ -25,7 +25,7 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "src/javalib/**": allow
+    "src/javalib/**": deny
     "apg/.worktrees/*/src/javalib/**": allow
     "build.rs": deny
     "Cargo.toml": deny
@@ -82,15 +82,15 @@ permission:
     "java *": allow
   apg_rm:
     "*": deny
-    "src/javalib/**": allow
+    "src/javalib/**": deny
     "apg/.worktrees/*/src/javalib/**": allow
   apg_mv:
     "*": deny
-    "src/javalib/**": allow
+    "src/javalib/**": deny
     "apg/.worktrees/*/src/javalib/**": allow
   apg_cp:
     "*": deny
-    "src/javalib/**": allow
+    "src/javalib/**": deny
     "apg/.worktrees/*/src/javalib/**": allow
   apg_query: allow
   apg_find_symbol: allow

@@ -25,7 +25,7 @@ permission:
     "apg/.worktrees/*/apg/layers/**": deny
   edit:
     "*": deny
-    "src/golib/**": allow
+    "src/golib/**": deny
     "apg/.worktrees/*/src/golib/**": allow
     "build.rs": deny
     "Cargo.toml": deny
@@ -88,15 +88,15 @@ permission:
     "gofmt *": allow
   apg_rm:
     "*": deny
-    "src/golib/**": allow
+    "src/golib/**": deny
     "apg/.worktrees/*/src/golib/**": allow
   apg_mv:
     "*": deny
-    "src/golib/**": allow
+    "src/golib/**": deny
     "apg/.worktrees/*/src/golib/**": allow
   apg_cp:
     "*": deny
-    "src/golib/**": allow
+    "src/golib/**": deny
     "apg/.worktrees/*/src/golib/**": allow
   apg_query: allow
   apg_find_symbol: allow
