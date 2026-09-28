@@ -116,6 +116,11 @@
       "kind": "contains",
       "target": "solution.component.push-tag-policy-surfaces",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.navigator-isolation-coherence-test",
+      "properties": {}
     }
   ],
   "in": [
