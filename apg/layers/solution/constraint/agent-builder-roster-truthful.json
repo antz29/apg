@@ -1,0 +1,11 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "agent-builder-roster-truthful",
+  "body": "`opencode-suite/agents/agent-builder.md` must name exactly the agent roster the suite supports. It must NOT offer or generate an optional `coordinator` primary agent (no roster mention, no `### coordinator (optional)` section, no \"whether a coordinator is wanted\" interview bullet, no primary-mode scaffold branch, no coordinator example in the register step), and it must NOT generate `implementation-phase-reviewer` (that agent is distributed by `apg init`). Its generated set is implementers only: the core/root `implementer`, per-subsystem `<name>-implementer`s, and tiered `test-implementer`s where a test tier is file-separable. Every generated agent is scaffolded `mode: subagent` with `generated: true`. The word \"coordinator\" used for the codebase-navigator's ROLE in the feedback-routing/cadence prose is retained — this law forbids only the optional generated AGENT. Satisfaction is assessed by review.",
+  "properties": {
+    "attaches-to": "solution.component.agent-builder-prompt"
+  },
+  "out": [],
+  "in": []
+}
