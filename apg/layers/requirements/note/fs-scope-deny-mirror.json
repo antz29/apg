@@ -44,6 +44,11 @@
       "kind": "details",
       "target": "domain.value.permission-scope",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.agent-fs-permission-grants",
+      "properties": {}
     }
   ],
   "in": []

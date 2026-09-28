@@ -36,6 +36,11 @@
       "kind": "details",
       "source": "solution.note.worktree-write-scope-owners",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.fs-scope-deny-mirror",
+      "properties": {}
     }
   ]
 }
