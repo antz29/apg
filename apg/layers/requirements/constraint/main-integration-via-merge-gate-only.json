@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "main-integration-via-merge-gate-only",
-  "body": "Law (prose; assessed by review): the navigator never holds a raw git grant that merges into, checks out, switches, or adds/removes worktrees on the main checkout; a change-set reaches main only through `apg project merge` and its verify gate. `git rebase` is used only inside the project worktree.",
+  "body": "Law (prose; assessed by review): the navigator never holds a raw git grant that can rewrite a branch ref (create, force-move, delete, or rename), merge into, check out, switch, or add/remove worktrees on the main checkout. Its grant set is exactly `git status *`, `git diff *`, `git log *`, `git branch --show-current`, `git worktree list *`, and `git rebase *`. In particular a blanket `git branch *` violates this law: `git branch -f main <sha>` force-moves main's ref past the verify gate, and `git branch -D` / `git branch -m` delete or rename refs. A change-set reaches main only through `apg project merge` and its verify gate. `git rebase` is used only inside the project worktree.",
   "properties": {
     "attaches-to": "requirements.requirement.navigator-no-unguarded-main-git"
   },
