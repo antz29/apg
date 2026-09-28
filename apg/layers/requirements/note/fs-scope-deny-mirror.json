@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "ts.apg-opencode-suite.lib.apg.fsScopeDecision",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "ts.apg-opencode-suite.lib.apg.agentFsGlobs",
+      "properties": {}
     }
   ],
   "in": []
