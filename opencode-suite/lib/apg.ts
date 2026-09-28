@@ -353,31 +353,33 @@ function indentOf(line: string): number {
 }
 
 /**
- * The `permission.edit` ALLOW globs from an agent's frontmatter `permission`
- * block — the agent's write scope. Extracts the `edit:` mapping (a line whose
- * only content is `edit:` under `permission:`) and collects each child entry
- * spelled `"<glob>": allow` (quoted or bare key). Deny entries are skipped: the
- * returned list is the positive grant set `fsScopeDecision` consumes. Returns
- * `null`/`[]` only after the caller has read a file that carries no `edit:`
- * block.
+ * The `permission.edit` rules from an agent's frontmatter `permission` block —
+ * the agent's write scope. Extracts the `edit:` mapping (a line whose only
+ * content is `edit:` under `permission:`) and collects EVERY child entry
+ * spelled `"<glob>": allow` or `"<glob>": deny` (quoted or bare key) IN FILE
+ * ORDER, as ordered `{ glob, allow }` entries. Both kinds survive — allow
+ * entries grant, deny entries revoke, and their order is the precedence a
+ * last-matching-rule decision applies (a later entry overrides an earlier one,
+ * so duplicates are preserved, not deduped). Returns `[]` (fail-closed) when
+ * the body carries no `edit:` block.
  */
-function editAllowGlobs(frontmatterBody: string): string[] {
+export function editAllowGlobs(frontmatterBody: string): { glob: string; allow: boolean }[] {
   const lines = frontmatterBody.split("\n")
   const start = lines.findIndex((l) => /^\s+edit:\s*$/.test(l))
   if (start < 0) return []
   const baseIndent = indentOf(lines[start])
-  const globs: string[] = []
+  const rules: { glob: string; allow: boolean }[] = []
   for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i]
     if (line.trim() === "") continue
     if (indentOf(line) <= baseIndent) break
     const m = /^\s+(?:"([^"]+)"|'([^']+)'|(\S+?)):\s*(allow|deny)\s*$/.exec(line)
-    if (m && m[4] === "allow") {
+    if (m) {
       const glob = m[1] ?? m[2] ?? m[3]
-      if (!globs.includes(glob)) globs.push(glob)
+      rules.push({ glob, allow: m[4] === "allow" })
     }
   }
-  return globs
+  return rules
 }
 
 /** Reads one agent config file and returns its `permission.edit` allow globs,
@@ -386,7 +388,16 @@ function readAgentEditGlobs(file: string): string[] | null {
   if (!existsSync(file)) return null
   try {
     const fm = frontmatter(readFileSync(file, "utf8"))
-    return fm === null ? [] : editAllowGlobs(fm)
+    if (fm === null) return []
+    // Interim adaptation (worktree-write-scope phase-04.task-4): `editAllowGlobs`
+    // now returns the ordered allow+deny rule list. This reader's semantic
+    // change is owned by task-4.12, so map it back to the legacy allow-only,
+    // deduped glob list for now — `agentFsGlobs` and the fs tools are unchanged.
+    const allowOnly: string[] = []
+    for (const rule of editAllowGlobs(fm)) {
+      if (rule.allow && !allowOnly.includes(rule.glob)) allowOnly.push(rule.glob)
+    }
+    return allowOnly
   } catch {
     return null
   }
