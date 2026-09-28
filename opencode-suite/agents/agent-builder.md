@@ -35,8 +35,9 @@ permission:
     "cd *": allow
     "git status *": allow
     "git log *": allow
-    "git branch *": allow
-    "git remote *": allow
+    "git branch --show-current": allow
+    "git remote -v": allow
+    "git remote show *": allow
     "git ls-files *": allow
     "git add *": allow
     "git commit *": allow
@@ -165,8 +166,12 @@ implementation continues.
   `apg/.worktrees/*/<glob>`; the root-relative `<glob>` form is NEVER granted,
   and main-root paths are explicitly denied (allow `apg/.worktrees/*/src/**`,
   deny `src/**`; deny a sibling's `apg/.worktrees/*/src/golib/**`). The fs tools
-  self-enforce per-path scope from those granted worktree-rooted globs, so any
-  main-checkout path is refused whatever `directory` the caller passes. An agent
+  self-enforce path scope from the **effective allow+deny** rule list — an ALLOW
+  entry grants, a DENY entry revokes, the **last matching entry wins**, and a
+  path matched by no entry is refused (deny-by-default) — resolved in one
+  main-anchored frame, so any main-checkout path is refused whatever `directory`
+  the caller passes and rule 6's sibling cross-denial is honoured by the fs tools
+  too (a sibling's `deny` entry revokes, not only in the `edit` half). An agent
   whose grants include a root path would permit a main-checkout write — that is
   a broken scaffold (the 0.11.0 feedback-0-fix miss). The ONLY main writers are
   the agent-builder itself (`.opencode/agents/**`) and the optional
@@ -229,8 +234,10 @@ implementation continues.
   `<glob>`, never a scalar `: allow`, never a blanket `"*": allow`), and drop
   the `bash:` `rm` pattern they supersede (rules 6 and 10; `apg_mv`/`apg_cp`
   check BOTH the source and the destination). The tools resolve every candidate
-  in one **main-anchored** frame and self-enforce per-path scope from those
-  granted worktree-rooted globs, so a main-checkout path is refused whatever
+  in one **main-anchored** frame and self-enforce path scope from the agent's
+  **effective allow+deny** rule list (an ALLOW entry grants, a DENY entry
+  revokes, the **last matching entry wins**, and a path matched by no entry is
+  refused — deny-by-default), so a main-checkout path is refused whatever
   `directory` the caller passes — for **every** agent, the optional
   `release-agent` included (whose main access is `edit`-only). This is a
   scoped-write surface only — the read-only apg-suite list above stays
@@ -300,13 +307,19 @@ implementation continues.
    no tests. The agents you generate may write elsewhere; you do not.
 2. **You never build and never run tests — and your only git mutation is
    `git add` + `git commit`.** You read (files, git history, the code graph) to
-   detect the stack and gates; you never execute a build. Read-only
-   `git status/log/branch/remote/ls-files` are allowed, alongside `git add` and
-   `git commit` — the code-writer agents you scaffold are committed on the
-   **main checkout** (your only write grant is `.opencode/agents/**`, resolved
-   against the session workspace root, and there is no worktree mirror of it).
-   `git push` and `git tag` remain **human-approved acts** and are never yours
-   to run.
+   detect the stack and gates; you never execute a build. Your read-only git
+   grants are the exact patterns `git status *`, `git log *`, `git ls-files *`,
+   `git branch --show-current`, `git remote -v`, and `git remote show *` —
+   alongside the write grants `git add` and `git commit`. The blanket
+   `git branch *` and `git remote *` are deliberately **NOT** granted: the
+   former admits ref-writing forms (`-f`/`-D`/`-m` rewrite refs) and the latter
+   admits config-mutating subcommands (`add`/`remove`/`set-url`). **`--output=<file>`
+   is FORBIDDEN on every granted git verb** — read history to stdout only, never
+   pass `--output=<file>` (or any other output-redirect form). The code-writer
+   agents you scaffold are committed on the **main checkout** (your only write
+   grant is `.opencode/agents/**`, resolved against the session workspace root,
+   and there is no worktree mirror of it). `git push` and `git tag` remain
+   **human-approved acts** and are never yours to run.
 3. **No build gates from memory.** A gate you can't verify is not a gate — ask
    via the coordinator for the exact commands (lint, typecheck, test, build)
    before embedding them in an agent's permission block.
@@ -395,10 +408,14 @@ implementation continues.
     match — the scaffold is broken either way. **Cwd-agnostic bash command
     patterns are the ONLY exemption from worktree-rooting** (they carry no path;
     the agents `cd` into the worktree): the path-scoped fs-tool glob grants
-    (`apg_rm`/`apg_mv`/`apg_cp`) are NOT exempt — the tools self-enforce per-path
-    scope from the acting agent's granted globs (the `permission.edit` allow
-    globs), which opencode resolves against the session workspace root, so those
-    grants are worktree-rooted exactly like edit globs, and a main-resolving path
+    (`apg_rm`/`apg_mv`/`apg_cp`) are NOT exempt — the tools self-enforce path
+    scope from the acting agent's **effective allow+deny** rule list: an ALLOW
+    entry grants, a DENY entry revokes, the **last matching entry wins**, and a
+    path matched by no entry is refused (deny-by-default). That list is the
+    agent's granted globs (BOTH the allow and the deny entries), which opencode
+    resolves against the session workspace root, so those grants are
+    worktree-rooted exactly like edit globs, rule 6's sibling cross-denial is
+    honoured by the fs tools too, and a main-resolving path
     is refused for every agent — the optional `release-agent` included, whose
     main access is `edit`-only. The ONLY main writers are
     the agent-builder itself (`.opencode/agents/**`) and the optional
