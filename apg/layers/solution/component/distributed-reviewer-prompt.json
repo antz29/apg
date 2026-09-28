@@ -5,5 +5,11 @@
   "body": "The NEW distributed `implementation-phase-reviewer` agent prompt file `opencode-suite/agents/implementation-phase-reviewer.md` (product source embedded into the `apg` binary via `include_str!` in `rust.apg.install`'s `AGENTS` table and installed by `apg init` into `~/.opencode/agents/`), de-repo'd from the repo's own consumer artifact `.opencode/agents/implementation-phase-reviewer.md` (read for the grant shape and body; that consumer copy is never edited). Frontmatter `mode: subagent`, `hidden: true`, NO `generated: true`; the grants are the read-only apg suite, the plan read tools, and `apg_review`/`apg_review_add`/`apg_review_resolve`/`apg_review_reject` + `apg_plan_complete`, with no `question`, no edit, no scan, no done/undone/note, no authoring, no `apg_plan_render`; the body carries the positive read-guard rule and stop-and-report.\n\nDeliberately a NARROW owner: the new file needs its own component, and the broad `solution.component.navigator-prompt-guidance` spans the two existing prompt files and is realised-by the unrelated `domain.entity.graph-first-navigation`. It is product source in `solution.container.opencode-suite`; the repo's own `.opencode/agents/**` are consumer artifacts and are never edited.\n\nimplemented-by: the edge to the new file is DEFERRED — `opencode-suite/agents/implementation-phase-reviewer.md` does not resolve in the branch graph (the directory holds only the six existing prompts) until the plan declares it as a planned File node and the implementer creates it. Until that reconciliation, this component is implemented-by the read-guard coherence test `rust.main_e2e.e2e.installed_agent_prompts_state_file_access_read_guard`; see `solution.note.distributed-reviewer-deferred-edge`.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    }
+  ]
 }

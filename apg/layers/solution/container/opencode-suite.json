@@ -56,6 +56,11 @@
       "kind": "contains",
       "target": "solution.component.agent-builder-prompt",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.distributed-reviewer-prompt",
+      "properties": {}
     }
   ],
   "in": [
