@@ -4,7 +4,13 @@
   "name": "navigator-isolation-coherence-test",
   "body": "The coherence e2e test that pins the navigator's session-isolation prose so it cannot silently regress. It EXTENDS the existing test `rust.main_e2e.e2e.coordinator_agent_carries_review_action_and_dispatch_prose` (`tests/main_e2e.rs`, which already asserts the coordinator dispatch-protocol needles) with isolation needles over the embedded `codebase-navigator.md` prompt: each dispatch is a fresh/isolated session with no `task_id`, one dispatch = one self-contained unit of work, the only permitted resume is the same-dispatch hand-back to finish the same task, and resumption is never for a new task and never for a reviewer. The test is `code_type = 'test'` and lives in the root crate's `tests/main_e2e.rs`.\n\nDeliberately a NARROW owner, distinct from `solution.component.codebase-navigator-prompt` (which owns the prompt file 1:1 and is implemented-by `opencode-suite/agents/codebase-navigator.md`): a satisfied requirement's spine is coverage-checked (`rust.apg.plan_cmd.verify.coverage_check`), and the two changed surfaces (the prompt and the test) are different files, so each gets its own component and no component's implemented-by set spans an untouched file. Reusing the prompt component here would falsify its \"implemented-by is exactly the prompt file\" claim and couple the test to the existing cadence requirement. It sits under `solution.container.scanner-cli` (the root-crate test surface, where the sibling test-bearing component `solution.component.distributed-agent-install` also lives).\n\nimplemented-by: `rust.main_e2e.e2e.coordinator_agent_carries_review_action_and_dispatch_prose` (resolves in the branch graph, `tests/main_e2e.rs:2148-2222`, `code_type = 'test'`). No planned Implementation node is needed — the test edit is a `modifies` over an existing FQN.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.main_e2e.e2e.coordinator_agent_carries_review_action_and_dispatch_prose",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
