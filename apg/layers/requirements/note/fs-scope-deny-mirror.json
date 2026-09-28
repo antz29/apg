@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "ts.apg-opencode-suite.lib.apg.editAllowGlobs",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "ts.apg-opencode-suite.lib.apg.fsScopeDecision",
+      "properties": {}
     }
   ],
   "in": []
