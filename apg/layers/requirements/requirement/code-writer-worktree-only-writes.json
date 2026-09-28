@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-permissions"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.worktree-write-boundary",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
