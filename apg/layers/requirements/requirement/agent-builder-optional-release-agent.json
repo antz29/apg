@@ -7,5 +7,11 @@
     "feature": "agent-builder-roster-cleanup"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.stakeholder.agent-suite-maintainer",
+      "properties": {}
+    }
+  ]
 }
