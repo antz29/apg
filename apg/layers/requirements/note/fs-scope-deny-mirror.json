@@ -34,6 +34,11 @@
       "kind": "details",
       "target": "requirements.requirement.code-writer-worktree-only-writes",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.constraint.fs-operation-scope-enforced",
+      "properties": {}
     }
   ],
   "in": []
