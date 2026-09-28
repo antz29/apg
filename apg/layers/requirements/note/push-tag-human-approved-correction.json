@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "requirements.constraint.push-tag-release-agent-carve-out",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.constraint.agent-builder-roster-truthful",
+      "properties": {}
     }
   ],
   "in": []
