@@ -158,20 +158,31 @@ export function resolveProjectPath(projectDir: string, value: string): string {
 // the opt-in suite e2e. This module stays PLUGIN-FREE — the acting agent name
 // arrives as a plain string on the tool context, so nothing here imports
 // `@opencode-ai/plugin` at runtime.
+//
+// MAIN-ANCHORED FRAME: the granted globs are written against the session
+// workspace root (the MAIN checkout) — a code-writer's grants are
+// `apg/.worktrees/*/<glob>` — so the decision resolves both the grants and the
+// candidate against that one main root and structurally refuses any candidate
+// that resolves into the main checkout (outside every project worktree). The
+// main root is discovered by `mainCheckoutRoot` and handed in as an argument;
+// `fsScopeDecision` itself stays pure.
 
 /** The outcome of checking one candidate path against one acting agent's
- *  grants. `allowed` is the conjunction of the two independent tests the fs
- *  tools enforce: `globMatched` (the path is inside the agent's granted globs)
- *  and `inBoundary` (the path does not escape the caller's project/worktree
- *  root). `reason` is the human-readable refusal, or `null` when allowed. */
+ *  grants. `allowed` requires the resolved path to stay inside the frame root
+ *  (`inBoundary`: no `..`/absolute escape), to land in a project worktree
+ *  rather than the main checkout in main-anchored mode, and to match a granted
+ *  glob (`globMatched`). `reason` is the human-readable refusal, or `null` when
+ *  allowed. */
 export interface FsScopeDecision {
   allowed: boolean
-  /** `candidate`, resolved and expressed relative to `projectRoot` in `/`-form
-   *  (the spelling the granted globs match). */
+  /** `candidate`, resolved and expressed relative to the frame root (the main
+   *  checkout root in main-anchored mode) in `/`-form — the spelling the
+   *  granted globs match. */
   relativePath: string
-  /** True when `relativePath` matched at least one granted glob. */
+  /** True when `relativePath` matched at least one granted glob. A main-checkout
+   *  path can match a root glob yet still be refused by the worktree rule. */
   globMatched: boolean
-  /** True when the resolved path stays inside `projectRoot` (no `..`/absolute
+  /** True when the resolved path stays inside the frame root (no `..`/absolute
    *  escape). */
   inBoundary: boolean
   /** Why the path was refused, or `null` when `allowed`. */
@@ -222,37 +233,66 @@ const globMatch = (glob: string, relativePath: string): boolean =>
  * for the side-effect-free `bun test` unit tier, and the direct, plugin-free
  * target of the opt-in suite e2e (`opencode-suite/tests/boundary.e2e.test.ts`).
  *
- * - `projectRoot` — the caller's project/worktree directory; `candidatePath`
- *   (absolute, or relative to `projectRoot`) is resolved against it.
+ * - `mainRoot` — the frame root; `candidatePath` (absolute, or relative to it)
+ *   is resolved against it. In main-anchored mode this is the MAIN checkout
+ *   root (discovered by `mainCheckoutRoot`), the same root opencode resolves an
+ *   agent's path-scoped grants against, so a worktree-rooted grant matches
+ *   exactly the worktree path it names.
  * - `grantedGlobs` — the acting agent's granted path globs (its write scope,
  *   read from its permission block by `agentFsGlobs`); a literal argument here
  *   so the decision never depends on the plugin context.
+ * - `project` — the acting worktree's project name `<p>` (or `null` when the
+ *   caller is in the main checkout). Passing it puts the decision in
+ *   MAIN-ANCHORED mode: the candidate must resolve under
+ *   `<mainRoot>/apg/.worktrees/<p>/` (a `null` project accepts any project
+ *   worktree), so a path that resolves into the main checkout is refused
+ *   structurally — independent of the globs. Omitting it keeps the legacy
+ *   single-root decision for a pure, non-worktree caller.
  *
  * Two INDEPENDENT tests, both required: the resolved path must stay inside
- * `projectRoot` (`inBoundary` — a `..`/absolute escape is refused even when it
- * matches a glob), and its `projectRoot`-relative `/`-form must match at least
- * one granted glob (`globMatched`). Symlinks are not resolved; the check is on
- * the lexical path the caller supplied.
+ * `mainRoot` (`inBoundary` — a `..`/absolute escape is refused even when it
+ * matches a glob), and — in main-anchored mode — must land in a project
+ * worktree, not the main checkout (refused with `path resolves into the main
+ * checkout` even when a root glob matches); its main-root-relative `/`-form
+ * must then match at least one granted glob (`globMatched`). Symlinks are not
+ * resolved; the check is on the lexical path the caller supplied.
  */
 export function fsScopeDecision(
-  projectRoot: string,
+  mainRoot: string,
   candidatePath: string,
   grantedGlobs: readonly string[],
+  project?: string | null,
 ): FsScopeDecision {
-  const rootAbs = path.resolve(projectRoot)
+  const rootAbs = path.resolve(mainRoot)
   const candidateAbs = path.isAbsolute(candidatePath)
     ? path.resolve(candidatePath)
     : path.resolve(rootAbs, candidatePath)
   const rel = path.relative(rootAbs, candidateAbs)
   const inBoundary = rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))
   const relativePath = rel.split(path.sep).join("/")
+
+  // Main-anchored mode is active whenever the caller supplies `project`
+  // (a worktree name, or `null` from the main checkout); `undefined` keeps the
+  // legacy single-root decision. A write must land in a project worktree —
+  // never the main checkout — so the structural worktree test runs before the
+  // glob test and cannot be satisfied away by a root glob.
+  const mainAnchored = project !== undefined
+  const worktreePrefix = project ? `apg/.worktrees/${project}/` : null
+  const inWorktree = !mainAnchored
+    ? true
+    : worktreePrefix !== null
+      ? relativePath.startsWith(worktreePrefix)
+      : /^apg\/\.worktrees\/[^/]+\//.test(relativePath)
+
   const globMatched = inBoundary && grantedGlobs.some((g) => globMatch(g, relativePath))
-  const allowed = inBoundary && globMatched
+  const allowed = inBoundary && inWorktree && globMatched
   const reason = allowed
     ? null
     : !inBoundary
       ? "path escapes the project/worktree boundary"
-      : "path is not within the acting agent's granted globs"
+      : !inWorktree
+        ? "path resolves into the main checkout"
+        : "path is not within the acting agent's granted globs"
   return { allowed, relativePath, globMatched, inBoundary, reason }
 }
 
