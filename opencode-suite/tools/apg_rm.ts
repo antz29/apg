@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 import fs from "node:fs"
 import path from "node:path"
-import { agentFsGlobs, fsScopeDecision } from "../lib/apg.ts"
+import { agentFsGlobs, fsScopeDecision, mainCheckoutRoot } from "../lib/apg.ts"
 
 export default tool({
   description:
@@ -22,12 +22,23 @@ export default tool({
   async execute(args, context) {
     const paths = args.paths ?? []
     if (paths.length === 0) return "Error: at least one path is required"
-    const root = args.directory || context.directory
-    const granted = agentFsGlobs(context, root)
+    const directory = args.directory || context.directory
 
-    const resolved = paths.map((p) => (path.isAbsolute(p) ? path.resolve(p) : path.resolve(root, p)))
+    // The write boundary is anchored to the MAIN checkout, not the caller's
+    // `directory`: a worktree's grants live in the main checkout's agent file
+    // and are written against that root (`apg/.worktrees/<project>/<glob>`), so
+    // the decision frame is resolved from the caller's directory but is NEVER
+    // the caller's directory itself. Paths still resolve against the caller's
+    // directory (the stored argument contract); only the SCOPE frame is main.
+    const frame = await mainCheckoutRoot(context, directory)
+    if (!frame) {
+      return "Refused: could not resolve the main checkout root for the given directory (is it inside a git repository?) — nothing removed"
+    }
+    const granted = agentFsGlobs(context, frame.root, frame.root)
+
+    const resolved = paths.map((p) => (path.isAbsolute(p) ? path.resolve(p) : path.resolve(directory, p)))
     for (const abs of resolved) {
-      const decision = fsScopeDecision(root, abs, granted)
+      const decision = fsScopeDecision(frame.root, abs, granted, frame.project)
       if (!decision.allowed) return `Refused: ${abs} — ${decision.reason}`
     }
 
