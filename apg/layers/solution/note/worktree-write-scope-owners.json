@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "solution.component.agent-fs-tool-suite",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.codebase-navigator-prompt",
+      "properties": {}
     }
   ],
   "in": []
