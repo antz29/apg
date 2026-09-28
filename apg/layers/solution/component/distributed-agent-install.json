@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.main",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.main_e2e.e2e.upgrade_doc_covers_version_field_gate_and_fix_steps",
+      "properties": {}
     }
   ],
   "in": [
