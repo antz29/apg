@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "source": "domain.entity.worktree-write-boundary",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.main-integration",
+      "properties": {}
     }
   ]
 }
