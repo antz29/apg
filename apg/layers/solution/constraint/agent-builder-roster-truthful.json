@@ -7,5 +7,11 @@
     "attaches-to": "solution.component.agent-builder-prompt"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "requirements.note.release-agent-amendment-decision",
+      "properties": {}
+    }
+  ]
 }
