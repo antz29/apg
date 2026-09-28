@@ -214,8 +214,9 @@ export interface FsScopeDecision {
    *  checkout root in main-anchored mode) in `/`-form — the spelling the
    *  granted globs match. */
   relativePath: string
-  /** True when `relativePath` matched at least one granted glob. A main-checkout
-   *  path can match a root glob yet still be refused by the worktree rule. */
+  /** True when `relativePath` matched at least one rule (allow or deny). A
+   *  main-checkout path can match a root rule yet still be refused by the
+   *  worktree rule. */
   globMatched: boolean
   /** True when the resolved path stays inside the frame root (no `..`/absolute
    *  escape). */
@@ -287,13 +288,16 @@ const globMatch = (glob: string, relativePath: string): boolean =>
  *   structurally — independent of the globs. Omitting it keeps the legacy
  *   single-root decision for a pure, non-worktree caller.
  *
- * Two INDEPENDENT tests, both required: the resolved path must stay inside
- * `mainRoot` (`inBoundary` — a `..`/absolute escape is refused even when it
- * matches a glob), and — in main-anchored mode — must land in a project
+ * Two INDEPENDENT structural tests, both required: the resolved path must stay
+ * inside `mainRoot` (`inBoundary` — a `..`/absolute escape is refused even when
+ * a rule would match), and — in main-anchored mode — must land in a project
  * worktree, not the main checkout (refused with `path resolves into the main
- * checkout` even when a root glob matches); its main-root-relative `/`-form
- * must then match at least one granted glob (`globMatched`). This function is
- * PURE and resolves LEXICALLY only (no fs): callers canonicalise the frame root
+ * checkout` even when a root rule matches). The rule decision then runs over
+ * the main-root-relative `/`-form: the LAST matching rule wins — an ALLOW entry
+ * grants, a DENY entry revokes, and a path matched by NO entry is refused
+ * (deny-by-default). `globMatched` reports whether ANY rule matched (allow or
+ * deny). This function is PURE and resolves LEXICALLY only (no fs): callers
+ * canonicalise the frame root
  * and each candidate with the `canonicalPath` I/O helper first, so both sides
  * share ONE symlink-resolved frame — a `directory` spelled through a symlink and
  * a worktree-internal symlink pointing into the main checkout are judged on
@@ -326,19 +330,20 @@ export function fsScopeDecision(
       ? relativePath.startsWith(worktreePrefix)
       : /^apg\/\.worktrees\/[^/]+\//.test(relativePath)
 
-  // Interim (worktree-write-scope phase-04.task-4.5): `agentFsGlobs` now returns
-  // the ordered `{ glob, allow }` rules. The last-matching-rule semantics (a deny
-  // revokes, no match refuses) land in task-4.6, so for now derive the legacy
-  // allow-only glob set these tests and the fs tools already exercise — a bare
-  // string entry is a legacy allow glob; an object entry grants only when
-  // `allow`. Threading the rules through here keeps the decision and the tools
-  // behaviour-unchanged while the rule list replaces the allow-only list.
-  const grantedGlobs = grantedRules.flatMap((rule) =>
-    typeof rule === "string" ? [rule] : rule.allow ? [rule.glob] : [],
+  // Normalise the ordered rules: a bare string is a legacy ALLOW rule (the
+  // pre-flip callers and the allow-only unit tests), while an object carries its
+  // own `allow`/`deny`. The decision is the LAST MATCHING rule — an ALLOW entry
+  // grants, a DENY entry revokes, and a path matched by NO entry is refused
+  // (deny-by-default). Order is precedence, so duplicates are preserved.
+  const rules = grantedRules.map((rule) =>
+    typeof rule === "string" ? { glob: rule, allow: true } : rule,
   )
-
-  const globMatched = inBoundary && grantedGlobs.some((g) => globMatch(g, relativePath))
-  const allowed = inBoundary && inWorktree && globMatched
+  // `globMatched` is the legacy "did any rule match" flag the tests read; the
+  // ALLOW/DENY verdict is which rule matched LAST.
+  const matching = inBoundary ? rules.filter((r) => globMatch(r.glob, relativePath)) : []
+  const globMatched = matching.length > 0
+  const lastMatch = matching[matching.length - 1]
+  const allowed = inBoundary && inWorktree && lastMatch?.allow === true
   const reason = allowed
     ? null
     : !inBoundary
