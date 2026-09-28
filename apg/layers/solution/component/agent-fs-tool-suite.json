@@ -24,6 +24,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_cp.ts",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-opencode-suite.lib.apg.fsScopeDecision",
+      "properties": {}
     }
   ],
   "in": [
