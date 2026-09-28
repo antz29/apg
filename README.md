@@ -175,7 +175,7 @@ apg --help
 In your project directory:
 
 ```sh
-apg init    # creates apg/ (committed config + gitignored .trans/), installs the opencode apg tool suite + six agents
+apg init    # creates apg/ (committed config + gitignored .trans/), installs the opencode apg tool suite + seven agents
 apg scan    # scans the project, writes apg/.trans/db.lbug and apg/.trans/graph.jsonl
 apg query "MATCH (m:Module) RETURN m.fqn LIMIT 10"
 ```
