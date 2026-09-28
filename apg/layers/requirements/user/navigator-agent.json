@@ -24,6 +24,11 @@
       "kind": "contains",
       "target": "requirements.requirement.navigator-scan-permission",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.navigator-no-unguarded-main-git",
+      "properties": {}
     }
   ],
   "in": []
