@@ -61,6 +61,11 @@
       "kind": "details",
       "source": "requirements.note.navigator-scan-permission-decision",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.main-integration",
+      "properties": {}
     }
   ]
 }
