@@ -23,6 +23,11 @@
       "kind": "details",
       "source": "requirements.note.bundled-requirement-decomposition",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.pinned-list-needle",
+      "properties": {}
     }
   ]
 }
