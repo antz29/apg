@@ -111,6 +111,11 @@
       "kind": "contains",
       "target": "solution.component.agent-roster-docs",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.push-tag-policy-surfaces",
+      "properties": {}
     }
   ],
   "in": [
