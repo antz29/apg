@@ -25,6 +25,7 @@ import {
   scopeProjectRequirements,
   fsScopeDecision,
   agentFsGlobs,
+  mainCheckoutRoot,
   REQUIREMENT_FQN_PREFIX,
   csvToRows,
   type ToolContext,
@@ -522,6 +523,269 @@ test.skipIf(!enabled)(
     } finally {
       if (prevHome === undefined) delete process.env.HOME
       else process.env.HOME = prevHome
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+// worktree-write-scope phase-01.task-8: the fs tools' MAIN-ANCHORED scope gate
+// against a REAL scratch git repo in the documented `<main>/apg/.worktrees/<p>`
+// linked-worktree layout. The tool modules import `@opencode-ai/plugin` (which
+// this plugin-free suite does not install), so — like the `fsScopeDecision`
+// scenarios above — each scenario drives the SAME plugin-free sequence the tool
+// bodies run (`mainCheckoutRoot` → `agentFsGlobs` → `fsScopeDecision`) and
+// applies the corresponding real fs op gated on the decision. Pure fs/git, no
+// candidate `apg` binary, so these gate on the e2e opt-in alone. The whole repo
+// lives under the OS temp dir and is removed in `finally`
+// (`global.constraint.no-real-project-test`).
+
+const WORKTREE_AGENT = "worktree-impl"
+
+/// A scratch git repo laid out as an apg project: the MAIN checkout carries the
+/// acting agent's file — grants written against the main root as
+/// `apg/.worktrees/*/<glob>` (plus a root `src/*.rs` grant the structural rule
+/// must override) — and a `src/` tree; a LINKED worktree sits at the documented
+/// `<main>/apg/.worktrees/<project>` path. The base is realpath'd so
+/// `mainCheckoutRoot`'s canonical main root and the candidate paths share one
+/// frame (macOS `os.tmpdir()` sits behind a symlink).
+function scratchWorktreeRepo(): { base: string; main: string; worktree: string; project: string } {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-wtscope-")))
+  const main = path.join(base, "repo")
+  const project = "proj"
+  fs.mkdirSync(path.join(main, "src"), { recursive: true })
+  fs.mkdirSync(path.join(main, ".opencode", "agents"), { recursive: true })
+  fs.writeFileSync(path.join(main, "src", "a.rs"), "fn a() {}\n")
+  fs.writeFileSync(path.join(main, "src", "b.rs"), "fn b() {}\n")
+  fs.writeFileSync(
+    path.join(main, ".opencode", "agents", `${WORKTREE_AGENT}.md`),
+    [
+      "---",
+      "description: scratch worktree code-writer",
+      "permission:",
+      '  "*": deny',
+      "  edit:",
+      '    "*": deny',
+      // A root grant that matches the main checkout's own `src/*.rs`; the
+      // structural worktree rule refuses that path regardless.
+      '    "src/*.rs": allow',
+      // The real code-writer grant: worktree-rooted, main-root-relative.
+      '    "apg/.worktrees/*/src/*.rs": allow',
+      "---",
+      "",
+    ].join("\n"),
+  )
+  const run = (cmd: string[], cwd: string = main) =>
+    Bun.spawnSync({ cmd, cwd, stdout: "pipe", stderr: "pipe" })
+  run(["git", "init", "-q", "-b", "main"])
+  run(["git", "config", "user.email", "apg@localhost"])
+  run(["git", "config", "user.name", "apg"])
+  run(["git", "add", "-A"])
+  run(["git", "commit", "-q", "-m", "init"])
+  // The project worktree at the documented path — the real apg topology.
+  const worktree = path.join(main, "apg", ".worktrees", project)
+  const add = run(["git", "worktree", "add", "-q", "-b", "feature", worktree])
+  if (add.exitCode !== 0) throw new Error(`git worktree add failed: ${add.stderr.toString()}`)
+  return { base, main, worktree, project }
+}
+
+/// The plugin-free gate the fs tool bodies run: resolve the MAIN checkout frame
+/// from the caller's `directory`, read the acting agent's main-root-relative
+/// grants from that frame, then decide each candidate against it (absolute
+/// paths win; relative paths resolve against `directory`, mirroring the tool
+/// argument contract). Returns the resolved frame and one decision per
+/// candidate.
+async function fsGate(
+  directory: string,
+  candidates: string[],
+): Promise<{
+  root: string
+  project: string | null
+  decisions: {
+    abs: string
+    allowed: boolean
+    reason: string | null
+    globMatched: boolean
+    inBoundary: boolean
+  }[]
+}> {
+  const context: ToolContext = { agent: WORKTREE_AGENT, directory, worktree: directory }
+  const frame = await mainCheckoutRoot(context, directory)
+  expect(frame).not.toBeNull()
+  const { root, project } = frame as { root: string; project: string | null }
+  const granted = agentFsGlobs(context, root, root)
+  const decisions = candidates.map((c) => {
+    const abs = path.isAbsolute(c) ? path.resolve(c) : path.resolve(directory, c)
+    const d = fsScopeDecision(root, abs, granted, project)
+    return {
+      abs,
+      allowed: d.allowed,
+      reason: d.reason,
+      globMatched: d.globMatched,
+      inBoundary: d.inBoundary,
+    }
+  })
+  return { root, project, decisions }
+}
+
+test.skipIf(!enabled)(
+  "e2e: apg_rm's main-root frame refuses a main-checkout path whatever directory, and removes under an owned worktree grant",
+  async () => {
+    const { base, main, worktree, project } = scratchWorktreeRepo()
+    try {
+      const mainFile = path.join(main, "src", "a.rs")
+      // directory=main AND directory=worktree: a main-checkout path is refused
+      // structurally — the root `src/*.rs` grant matches, yet it stays denied —
+      // and the gated unlink never runs.
+      for (const directory of [main, worktree]) {
+        const gate = await fsGate(directory, [mainFile])
+        expect(gate.root).toBe(main)
+        expect(gate.project).toBe(directory === worktree ? project : null)
+        const d = gate.decisions[0]
+        expect(d.allowed).toBe(false)
+        expect(d.inBoundary).toBe(true)
+        expect(d.globMatched).toBe(true)
+        expect(d.reason).toBe("path resolves into the main checkout")
+        if (d.allowed) fs.rmSync(d.abs)
+        expect(existsSync(mainFile)).toBe(true)
+      }
+
+      // A `..` escape is refused (boundary), even under the owned worktree
+      // globs.
+      const escaped = await fsGate(worktree, [`${worktree}/../../../../escape.txt`])
+      expect(escaped.decisions[0].allowed).toBe(false)
+      expect(escaped.decisions[0].inBoundary).toBe(false)
+      expect(escaped.decisions[0].reason).toContain("boundary")
+      if (escaped.decisions[0].allowed) fs.rmSync(escaped.decisions[0].abs)
+
+      // Under the owned worktree grant the rm is allowed (real unlink).
+      const wtFile = path.join(worktree, "src", "b.rs")
+      const ok = await fsGate(worktree, [wtFile])
+      expect(ok.decisions[0].allowed).toBe(true)
+      expect(ok.decisions[0].reason).toBe(null)
+      if (ok.decisions[0].allowed) fs.rmSync(ok.decisions[0].abs)
+      expect(existsSync(wtFile)).toBe(false)
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+test.skipIf(!enabled)(
+  "e2e: apg_mv's main-root frame refuses either endpoint in main whatever directory, and moves both under an owned worktree grant",
+  async () => {
+    const { base, main, worktree, project } = scratchWorktreeRepo()
+    try {
+      const mainFile = path.join(main, "src", "a.rs")
+      const wtFile = path.join(worktree, "src", "b.rs")
+      for (const directory of [main, worktree]) {
+        // Source in the main checkout: refused.
+        const srcMain = await fsGate(directory, [mainFile, path.join(worktree, "src", "a-moved.rs")])
+        expect(srcMain.root).toBe(main)
+        expect(srcMain.project).toBe(directory === worktree ? project : null)
+        expect(srcMain.decisions[0].allowed).toBe(false)
+        expect(srcMain.decisions[0].reason).toBe("path resolves into the main checkout")
+
+        // Destination in the main checkout: refused too — BOTH endpoints are
+        // checked, so a permissive source cannot smuggle a write into main.
+        const dstMain = await fsGate(directory, [wtFile, mainFile])
+        expect(dstMain.decisions[0].allowed).toBe(true)
+        expect(dstMain.decisions[1].allowed).toBe(false)
+        expect(dstMain.decisions[1].reason).toBe("path resolves into the main checkout")
+        if (dstMain.decisions[0].allowed && dstMain.decisions[1].allowed) {
+          fs.renameSync(dstMain.decisions[0].abs, dstMain.decisions[1].abs)
+        }
+        expect(existsSync(wtFile)).toBe(true)
+        expect(existsSync(mainFile)).toBe(true)
+      }
+
+      // A `..` destination escape is refused (boundary).
+      const escaped = await fsGate(worktree, [wtFile, `${worktree}/../../../../escape.rs`])
+      expect(escaped.decisions[1].allowed).toBe(false)
+      expect(escaped.decisions[1].inBoundary).toBe(false)
+      expect(escaped.decisions[1].reason).toContain("boundary")
+
+      // Both endpoints under the owned worktree grant: the move happens.
+      const to = path.join(worktree, "src", "b-moved.rs")
+      const ok = await fsGate(worktree, [wtFile, to])
+      expect(ok.decisions[0].allowed).toBe(true)
+      expect(ok.decisions[1].allowed).toBe(true)
+      if (ok.decisions[0].allowed && ok.decisions[1].allowed) {
+        fs.renameSync(ok.decisions[0].abs, ok.decisions[1].abs)
+      }
+      expect(existsSync(to)).toBe(true)
+      expect(existsSync(wtFile)).toBe(false)
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+test.skipIf(!enabled)(
+  "e2e: apg_cp's main-root frame refuses a main-checkout destination whatever directory, and copies under an owned worktree grant",
+  async () => {
+    const { base, main, worktree, project } = scratchWorktreeRepo()
+    try {
+      const wtSource = path.join(worktree, "src", "a.rs")
+      const mainDest = path.join(main, "src", "a-copied.rs")
+      for (const directory of [main, worktree]) {
+        // A copy WRITES only at the destination, so only that is decided: a
+        // source in the worktree cannot copy INTO the main checkout.
+        const gate = await fsGate(directory, [wtSource, mainDest])
+        expect(gate.root).toBe(main)
+        expect(gate.project).toBe(directory === worktree ? project : null)
+        expect(gate.decisions[1].allowed).toBe(false)
+        expect(gate.decisions[1].inBoundary).toBe(true)
+        expect(gate.decisions[1].reason).toBe("path resolves into the main checkout")
+        if (gate.decisions[1].allowed) {
+          fs.cpSync(gate.decisions[0].abs, gate.decisions[1].abs, { recursive: true })
+        }
+        expect(existsSync(mainDest)).toBe(false)
+        expect(existsSync(wtSource)).toBe(true)
+      }
+
+      // A `..` destination escape is refused (boundary).
+      const escaped = await fsGate(worktree, [wtSource, `${worktree}/../../../../escape.rs`])
+      expect(escaped.decisions[1].allowed).toBe(false)
+      expect(escaped.decisions[1].inBoundary).toBe(false)
+      expect(escaped.decisions[1].reason).toContain("boundary")
+
+      // Destination under the owned worktree grant: the copy happens.
+      const wtDest = path.join(worktree, "src", "a-copy.rs")
+      const ok = await fsGate(worktree, [wtSource, wtDest])
+      expect(ok.decisions[1].allowed).toBe(true)
+      expect(ok.decisions[1].reason).toBe(null)
+      if (ok.decisions[1].allowed) {
+        fs.cpSync(ok.decisions[0].abs, ok.decisions[1].abs, { recursive: true })
+      }
+      expect(existsSync(wtDest)).toBe(true)
+      expect(existsSync(wtSource)).toBe(true)
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+)
+
+test.skipIf(!enabled)(
+  "e2e: mainCheckoutRoot resolves the main checkout root and project name from inside the worktree",
+  async () => {
+    const { base, main, worktree, project } = scratchWorktreeRepo()
+    try {
+      // From the worktree root and a nested dir, the documented
+      // `<main>/apg/.worktrees/<project>` layout decodes to the MAIN checkout.
+      for (const dir of [worktree, path.join(worktree, "src")]) {
+        const frame = await mainCheckoutRoot(
+          { agent: WORKTREE_AGENT, directory: dir, worktree: dir },
+          dir,
+        )
+        expect(frame).toEqual({ root: main, project })
+      }
+      // From the main checkout the root is the same and there is no project.
+      const fromMain = await mainCheckoutRoot(
+        { agent: WORKTREE_AGENT, directory: main, worktree: main },
+        main,
+      )
+      expect(fromMain).toEqual({ root: main, project: null })
+    } finally {
       fs.rmSync(base, { recursive: true, force: true })
     }
   },
