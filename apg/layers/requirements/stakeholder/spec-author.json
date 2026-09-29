@@ -9,6 +9,11 @@
       "kind": "contains",
       "target": "requirements.requirement.details-target-set-consistency",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.durable-spec-states-what-is",
+      "properties": {}
     }
   ],
   "in": []
