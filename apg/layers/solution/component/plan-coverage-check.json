@@ -4,7 +4,13 @@
   "name": "plan-coverage-check",
   "body": "The plan-verify derived-coverage stage: computing the change-set's durable-spec delta from the branch's merge-base and requiring exactly that delta's `implemented-by` code FQNs to be touched by a plan task. Anchored on `rust.apg.plan_cmd.verify.coverage_check` (the pure scope decision, a function of the delta and the plan tasks), `rust.apg.plan_cmd.verify.solution_nodes_added_on_branch` (the existing branch-delta computation, expected to be replaced by a merge-base durable-spec-delta unit the plan-writer declares as a planned node), and `rust.apg.plan_cmd.verify.plan_verify_at` (the wiring that supplies the delta and calls coverage). A narrow owner: it is the component the plan-coverage requirement's spine reaches, so the verify gate's derived solution coverage enforces exactly this change-set's coverage code.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.plan_cmd.verify.coverage_check",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
