@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "user",
+  "name": "reviewer",
+  "body": "A reviewer reads a project's review feedback and brings each item to a terminal decision. Reviewers resolve or reject an item's claim; they are distinct from the writer whose work the item reviews and from the coordinator who actions the item.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
