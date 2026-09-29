@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "agent-main-write-surface",
+  "body": "The `agent-builder`'s main-write surface as a single coherent notion: the set of MAIN-checkout paths the agent-builder owns and commits under carve-out 1 of `global.constraint.worktree-isolation` — the `.opencode/agents/**` agent-definition scaffold, the `opencode.json` agent→model map (`domain.entity.agent-model-map`), and the repo-root `AGENTS.md` (`domain.entity.repo-agent-guide-surface`). It exists as an entity because it is what any OTHER prompt that narrates the agent-builder — notably the navigator prompt — must account for accurately; the authoritative enumeration lives in the agent-builder's own definition (`opencode-suite/agents/agent-builder.md`), and a narrator that restates a stale subset misleads.\n\nDistinct from `domain.entity.agent-scaffold-flow` (the on-main create/update lifecycle that USES the surface), `domain.entity.agent-model-map` (the model mapping for one of its paths), and `domain.entity.repo-agent-guide-surface` (the hygiene CONTRACT binding the guide): this entity is the whole surface as a referenced whole — the three paths together. It is realised by `solution.component.navigator-agent-builder-surface` (the navigator prompt's account of it).",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
