@@ -609,4 +609,87 @@ mod unit {
         assert!(report.gaps.is_empty(), "{report:?}");
         assert!(report.no_claims.is_empty(), "{report:?}");
     }
+
+    /// A removed target's Feedback record and its `Reviews` reference survive
+    /// the cascade (a review item is closed by a reviewer, never dropped by the
+    /// removal of the node it reviews), while a Note whose only `Details`
+    /// attachment was the removed node is still garbage-collected.
+    #[test]
+    fn cascade_remove_retains_feedback_and_gc_notes() {
+        let removed = "foo/plan.phase-01.task-1".to_string();
+        let mut records = vec![
+            Record::Task {
+                fqn: removed.clone(),
+                title: "T1".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "pending".into(),
+                verb: "creates".into(),
+                target: String::new(),
+                new_fqn: String::new(),
+            },
+            Record::Feedback {
+                fqn: "foo/feedback-1".into(),
+                body: "needs work".into(),
+                status: "open".into(),
+                disposition: String::new(),
+            },
+            Record::Reviews {
+                from: "foo/feedback-1".into(),
+                to: removed.clone(),
+            },
+            // A Note attached only to the removed task -> orphaned.
+            Record::Note {
+                fqn: "foo/plan.note-1".into(),
+                body: "orphan".into(),
+                kind: String::new(),
+            },
+            Record::Details {
+                from: "foo/plan.note-1".into(),
+                to: removed.clone(),
+            },
+            // A Note attached to a surviving record -> kept.
+            Record::Note {
+                fqn: "foo/plan.note-2".into(),
+                body: "keep".into(),
+                kind: String::new(),
+            },
+            Record::Details {
+                from: "foo/plan.note-2".into(),
+                to: "foo/plan.phase-01".into(),
+            },
+        ];
+        cascade_remove(&mut records, std::slice::from_ref(&removed));
+
+        // The task is gone...
+        assert!(
+            !records
+                .iter()
+                .any(|r| matches!(r, Record::Task { fqn, .. } if fqn == &removed)),
+            "{records:?}"
+        );
+        // ...but the Feedback record and its Reviews reference remain.
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Feedback { fqn, .. } if fqn == "foo/feedback-1"
+        )));
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Reviews { from, to }
+                if from == "foo/feedback-1" && to == &removed
+        )));
+        // The orphaned Note (and its Details edge) is GC'd; the attached one
+        // survives with its edge intact.
+        assert!(
+            !records
+                .iter()
+                .any(|r| matches!(r, Record::Note { fqn, .. } if fqn == "foo/plan.note-1")),
+            "{records:?}"
+        );
+        assert!(records.iter().any(|r| matches!(
+            r,
+            Record::Details { from, to }
+                if from == "foo/plan.note-2" && to == "foo/plan.phase-01"
+        )));
+    }
 }

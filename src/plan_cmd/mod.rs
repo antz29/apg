@@ -44,7 +44,7 @@ pub(crate) use status::{plan_complete, plan_done, plan_note, plan_undone};
 pub(crate) use verify::{plan_verify, spec_has_requirement};
 
 #[cfg(test)]
-pub(crate) use authoring::{link_phase_edges, push_gate, validate_task_kind_tier};
+pub(crate) use authoring::{cascade_remove, link_phase_edges, push_gate, validate_task_kind_tier};
 #[cfg(test)]
 pub(crate) use render::render_phase_tasks;
 #[cfg(test)]
