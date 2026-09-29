@@ -20,6 +20,11 @@
       "kind": "realised-by",
       "source": "domain.entity.feedback-item",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.feedback-lifecycle",
+      "properties": {}
     }
   ]
 }
