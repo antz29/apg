@@ -26,11 +26,6 @@
       "kind": "drives",
       "source": "requirements.requirement.review-list-shows-orphaned-feedback",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.reviewer-resolves-orphaned-feedback",
-      "properties": {}
     }
   ]
 }

@@ -23,11 +23,6 @@
       "properties": {}
     },
     {
-      "kind": "contains",
-      "target": "requirements.requirement.reviewer-resolves-orphaned-feedback",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "target": "domain.group.review-integrity",
       "properties": {}
