@@ -18,6 +18,11 @@
       "kind": "drives",
       "source": "requirements.requirement.node-rm-warns-on-outstanding-feedback",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.review-integrity",
+      "properties": {}
     }
   ]
 }

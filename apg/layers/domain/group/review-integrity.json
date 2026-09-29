@@ -51,6 +51,11 @@
       "kind": "realised-by",
       "target": "solution.component.feedback-projection",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.removal-feedback-notice",
+      "properties": {}
     }
   ],
   "in": [
