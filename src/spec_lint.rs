@@ -14,6 +14,11 @@
 //! `apg node add` / `apg node update` write hooks all consume it. The linter is
 //! read-only — it never writes.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
+use crate::layers::NodeFile;
+
 /// The advisory message [`wording_warning`] returns for likely-flagged
 /// tier-1-3 wording — the single source of truth both the lint and the
 /// `apg node add` / `apg node update` write hooks print.
@@ -43,4 +48,151 @@ pub fn wording_warning(body: &str) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// The whole-durable-spec deterministic check. Returns `(errors, advisories)`:
+/// the blocking rule/delta-gate violations first, the non-blocking tier-1-3
+/// wording advisories second. Read-only — it reads the durable node files, the
+/// merge-base git tree, and the transient plan store, and never writes.
+///
+/// Errors (blocking — `cmd_spec` reports them and exits non-zero):
+/// - **R2** — a constraint's layer is its scope and it names no node, so a
+///   constraint carrying `attaches-to` is a violation
+///   (`global.constraint.spec-constraint-scope`);
+/// - **R3** — a node holds at most one note (two notes detailing one target);
+/// - **R4** — each note's `details` edge names exactly one non-note node;
+/// - **the delta gates** — every `implemented-by` claim the change-set delta
+///   adds, re-points, or removes is touched by a plan task, and every
+///   requirement the delta adds or changes is `Satisfies`'d by a plan phase.
+///   Both arms reuse phase 1's `plan_cmd::change_set_spec_delta` /
+///   `plan_cmd::coverage_check` — never a reimplementation.
+///
+/// Advisories (non-blocking, R1/R5): [`wording_warning`] over every tier-1-3
+/// node body except a constraint (a negative rule legitimately lives in a
+/// layer-scoped constraint), plus the delta's claim-less solution nodes. The
+/// plan records are read from every `apg/.trans/plans/*.jsonl` file, so the
+/// requirement-Satisfies gate sees this branch's phase `Satisfies` set.
+pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+    let nodes = crate::layers::read_existing_nodes(apg_root)?;
+    let mut errors: Vec<String> = Vec::new();
+    let mut advisories: Vec<String> = Vec::new();
+
+    let fqn_of =
+        |n: &NodeFile| crate::layers::fqn(crate::layers::layer_of(&n.layer), &n.node_type, &n.name);
+    let note_fqns: BTreeSet<String> = nodes
+        .iter()
+        .filter(|n| n.node_type == "note")
+        .map(&fqn_of)
+        .collect();
+
+    // R2 — every constraint's scope is its layer; a constraint names no node,
+    // so the off-model `attaches-to` property is a violation.
+    for n in &nodes {
+        if n.node_type == "constraint" && n.properties.contains_key(crate::layers::PROP_ATTACHES_TO)
+        {
+            errors.push(format!(
+                "R2: constraint `{}` declares `{}` — a constraint's layer is its scope and it names no node",
+                fqn_of(n),
+                crate::layers::PROP_ATTACHES_TO
+            ));
+        }
+    }
+
+    // R3 — a node holds at most one note: count the notes detailing each target
+    // (a note's `details` out-edge) and report every target with two or more.
+    let mut notes_per_target: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for n in &nodes {
+        if n.node_type != "note" {
+            continue;
+        }
+        let note = fqn_of(n);
+        for oe in &n.out {
+            if oe.kind == "details" {
+                notes_per_target
+                    .entry(oe.target.clone())
+                    .or_default()
+                    .push(note.clone());
+            }
+        }
+    }
+    for (target, notes) in &notes_per_target {
+        if notes.len() > 1 {
+            errors.push(format!(
+                "R3: node `{target}` holds {} notes ({}) — a node holds at most one note",
+                notes.len(),
+                notes.join(", ")
+            ));
+        }
+    }
+
+    // R4 — each note's `details` edge names exactly one non-note node.
+    for n in &nodes {
+        if n.node_type != "note" {
+            continue;
+        }
+        let note = fqn_of(n);
+        let details: Vec<&str> = n
+            .out
+            .iter()
+            .filter(|e| e.kind == "details")
+            .map(|e| e.target.as_str())
+            .collect();
+        if details.len() != 1 {
+            errors.push(format!(
+                "R4: note `{note}` has {} `details` edge(s) — a note's details edge names exactly one node",
+                details.len()
+            ));
+            continue;
+        }
+        let target = details[0];
+        let names_a_note = note_fqns.contains(target)
+            || crate::layers::parse_fqn(target)
+                .map(|(_, node_type, _)| node_type == "note")
+                .unwrap_or(false);
+        if names_a_note {
+            errors.push(format!(
+                "R4: note `{note}` details another note (`{target}`) — a note's details edge names exactly one non-note node"
+            ));
+        }
+    }
+
+    // Advisories — tier-1-3 bodies a reviewer is likely to reject (R1/R5). A
+    // negative rule lives legitimately in a layer-scoped constraint, so a
+    // constraint body is exempt.
+    for n in &nodes {
+        let is_tier_node = matches!(n.layer.as_str(), "requirements" | "domain" | "solution");
+        if is_tier_node
+            && n.node_type != "constraint"
+            && let Some(msg) = wording_warning(&n.body)
+        {
+            advisories.push(format!("{}: {msg}", fqn_of(n)));
+        }
+    }
+
+    // Delta gates — reuse phase 1's merge-base delta and requirement-Satisfies
+    // check; the plan records supply the phase `Satisfies` set.
+    let delta = crate::plan_cmd::change_set_spec_delta(apg_root)?;
+    let mut plan_records: Vec<crate::schema::Record> = Vec::new();
+    for path in crate::specs::plan_files(apg_root) {
+        plan_records.extend(crate::specs::read_jsonl(&path)?);
+    }
+    let coverage = crate::plan_cmd::coverage_check(&plan_records, &delta);
+    for gap in &coverage.gaps {
+        errors.push(format!(
+            "delta gate: solution node `{}` implemented-by `{}` is touched by no plan task",
+            gap.solution, gap.fqn
+        ));
+    }
+    for req in &coverage.requirement_gaps {
+        errors.push(format!(
+            "delta gate: requirement `{req}` (added or changed by this change-set) is `Satisfies`'d by no plan phase"
+        ));
+    }
+    for fqn in &coverage.no_claims {
+        advisories.push(format!(
+            "solution node `{fqn}` has no implemented-by edge (exempt — no code claims it)"
+        ));
+    }
+
+    Ok((errors, advisories))
 }
