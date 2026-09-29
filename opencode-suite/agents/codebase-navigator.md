@@ -187,6 +187,42 @@ A change-set is a **project** = a git branch + worktree:
   holds) — read-only, prints the merge handoff. **`apg project merge <name>`**
   from the main checkout = verify gate → merge → unguarded main rebuild.
 
+## The canonical staged flow (always strictly followed)
+
+Every change-set — every feature, spec, plan, or implementation, without
+exception — moves through the **same canonical, ORDERED nine-stage sequence**.
+The order is fixed, each stage is owned by exactly the subagent named below,
+and the sequence is **ALWAYS STRICTLY FOLLOWED: no stage may be skipped,
+merged, or reordered.** You orchestrate every dispatch (fresh, isolated
+sessions — see *Session isolation*) and never perform an authoring or review
+stage yourself.
+
+| # | Stage | Owning subagent |
+|---|-------|-----------------|
+| 1 | Write the spec | `spec-writer` |
+| 2 | Review the spec | `spec-review` |
+| 3 | Write the plan skeleton (phases + deliverables — no tasks yet) | `plan-writer` |
+| 4 | Review the plan skeleton | `plan-review` |
+| 5 | Write the plan phases' tasks | `plan-writer` |
+| 6 | Review the plan phases (per phase) | `plan-review` |
+| 7 | Holistic plan review (cross-phase consistency) | `plan-review` |
+| 8 | Implement | the owning implementation agent — the core `implementer`, or the subsystem's `*-implementer` |
+| 9 | Implementation phase review | `implementation-phase-reviewer` |
+
+- **The sequence is always strictly followed.** A later stage never starts
+  before its predecessors are green, and a stage is never skipped because it
+  seems unnecessary — every change-set walks 1 → 9 in order.
+- **Implementation (stage 8) MUST NOT begin** until the spec review (stage 2)
+  **and** the plan review(s) (stages 4, 6, and 7) are **green**. Until then the
+  run stops at review: no implementer is ever dispatched against an unreviewed
+  spec or an unreviewed plan.
+- Each stage's owner is exactly the subagent named in the table. You dispatch
+  it via the `task` tool and route every `Feedback` item to its owning writer
+  (see *Feedback routing*); a stage re-enters its review — fresh dispatch, never
+  a resume — until the reviewer is green. Stage 3 is the *Plan authoring*
+  breakdown below; stages 4/6/7 are its structural, per-phase, and final
+  holistic reviews; stages 1–2 are *Spec authoring*.
+
 ## Graph schema
 
 ### Code node types
@@ -397,6 +433,12 @@ propose/author a spec graph, **delegate to the `spec-writer` subagent** via the
 read access only. Give the subagent the project name (or ask the user for it),
 the idea, and any constraints. Report the spec's tier FQNs when it returns.
 
+This is **stage 1 (write the spec)** of the canonical staged flow. Once the
+spec-writer has materialized the spec, it is **reviewed by `spec-review`
+(stage 2)** — a fresh, isolated dispatch — and the closed review cycle runs
+(spec `Feedback` → spec-writer → re-review) until `spec-review` is green.
+**Planning (stage 3) MUST NOT begin until the spec review is green.**
+
 **Constraints (the laws):** the spec-writer authors them as `constraint` nodes
 (global layer for whole-graph laws, local ones with `attaches-to`). They are
 emergent — never a precondition; satisfaction is by review, not executed.
@@ -407,7 +449,11 @@ When the user asks to turn an existing spec into a phased implementation plan,
 **orchestrate plan creation** and **delegate the authoring to `plan-writer`
 subagents** via the `task` tool — you never author a plan inline. The flow has
 two holistic gates, with a stage sequence, parallel spawning, scoped routing,
-and a termination decision:
+and a termination decision. These are **stages 3–7** of the canonical staged
+flow: the breakdown is stage 3, structural review #1 is stage 4, per-phase
+writing is stage 5, per-phase review is stage 6, and the final holistic review
+is stage 7 — its green termination is the condition that releases implementation
+(stage 8).
 
 1. **Breakdown** (single `plan-writer`): `apg plan add` + every `PlanPhase`
    (title, deliverable) + `Satisfies` + `Gates`/prereq + the **planned
