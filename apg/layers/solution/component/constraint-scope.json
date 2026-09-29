@@ -5,5 +5,11 @@
   "body": "The write-surface enforcement of the constraint-scope law: `rust.apg.layers.validate.eval_constraint`, reached by both the write path `rust.apg.layers.write.validate_change` and the scan path `rust.apg.layers.tree.ingest_tree`, refuses an `attaches-to` property on a new constraint, so a constraint's layer is its only scope. `apg spec lint` reports every constraint that already carries one.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.spec-lint",
+      "properties": {}
+    }
+  ]
 }
