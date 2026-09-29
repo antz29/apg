@@ -1592,4 +1592,135 @@ mod e2e {
         testutil::remove(&repo);
         testutil::remove(&repo_b);
     }
+
+    /// Phase-02 task-7 (E2E): `apg node rm` on a node reviewed by an
+    /// outstanding item WARNS (stderr) naming each open/actioned Feedback and
+    /// its status, then removes the node anyway. The record set is
+    /// authoritative: the Feedback records and their reviewed-target references
+    /// survive in the requirements mirror, so `apg review list` still reports
+    /// both items marked `(removed target)`. A node whose items are all
+    /// `resolved`, and a node with no items, remove silently.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn node_rm_warns_on_outstanding_feedback_and_keeps_the_record() {
+        let (_wt_apg, repo, wt) = mutation_fixture("node-rm-warn");
+
+        // Run the real CLI, asserting success (dumping stderr on failure).
+        let run = |args: &[&str]| -> std::process::Output {
+            let out = spawn_apg(args, &wt);
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        // --- Outstanding feedback (one open, one actioned) → warn + proceed ---
+        run(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "gone",
+            "--body",
+            "x",
+        ]);
+        run(&[
+            "review",
+            "add",
+            "requirements.requirement.gone",
+            "--body",
+            "open item",
+            "--project",
+            "foo",
+        ]);
+        run(&[
+            "review",
+            "add",
+            "requirements.requirement.gone",
+            "--body",
+            "actioned item",
+            "--project",
+            "foo",
+        ]);
+        run(&["review", "action", "foo/feedback-2", "--fix"]);
+
+        let removed = run(&["node", "rm", "requirements", "requirement", "gone"]);
+        let stderr = String::from_utf8_lossy(&removed.stderr);
+        assert!(
+            stderr.contains("apg: warning: removing"),
+            "the removal must warn about outstanding feedback: {stderr}"
+        );
+        assert!(
+            stderr.contains("requirements.requirement.gone"),
+            "the warning must name the removed FQN: {stderr}"
+        );
+        assert!(
+            stderr.contains("foo/feedback-1 (open)"),
+            "the warning must name the open item and its status: {stderr}"
+        );
+        assert!(
+            stderr.contains("foo/feedback-2 (actioned)"),
+            "the warning must name the actioned item and its status: {stderr}"
+        );
+
+        // The records survive the target's removal and still list, marked.
+        let listed = run(&["review", "list"]);
+        let out = String::from_utf8(listed.stdout).unwrap();
+        assert!(
+            out.lines()
+                .any(|l| l == "foo/feedback-1,open,,requirements.requirement.gone (removed target)"),
+            "the open item must survive and list against its removed target: {out}"
+        );
+        assert!(
+            out.lines().any(|l| l
+                == "foo/feedback-2,actioned,fixed,requirements.requirement.gone (removed target)"),
+            "the actioned item must survive and list against its removed target: {out}"
+        );
+
+        // --- All resolved → no warning, removal still succeeds ---
+        run(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "calm",
+            "--body",
+            "x",
+        ]);
+        run(&[
+            "review",
+            "add",
+            "requirements.requirement.calm",
+            "--body",
+            "resolve me",
+            "--project",
+            "foo",
+        ]);
+        run(&["review", "resolve", "foo/feedback-3"]);
+        let removed = run(&["node", "rm", "requirements", "requirement", "calm"]);
+        assert!(
+            !String::from_utf8_lossy(&removed.stderr).contains("apg: warning: removing"),
+            "all-resolved feedback must not warn"
+        );
+
+        // --- No feedback → no warning, removal still succeeds ---
+        run(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "bare",
+            "--body",
+            "x",
+        ]);
+        let removed = run(&["node", "rm", "requirements", "requirement", "bare"]);
+        assert!(
+            !String::from_utf8_lossy(&removed.stderr).contains("apg: warning: removing"),
+            "an unreviewed node must not warn"
+        );
+
+        testutil::remove(&repo);
+    }
 }
