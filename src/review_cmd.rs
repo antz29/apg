@@ -370,27 +370,75 @@ pub fn set_feedback_at(
     Ok(())
 }
 
-/// `apg review list [<target-fqn>]` — list feedback with status.
+/// `apg review list [<target-fqn>]` — list every Feedback in the current
+/// project's **authoritative transient record set**, by status (global
+/// constraint `feedback-persists-until-reviewed`).
+///
+/// The record set — `.trans/plans/<project>.jsonl` (the plan store) plus the
+/// five `.trans/<tier>/<project>.jsonl` tier mirrors ([`specs::
+/// project_transient_files`]) — carries every Feedback item and its
+/// reviewed-target reference, and holds them until a reviewer closes the item.
+/// A project's review state is branch-local, so the current worktree's branch
+/// is the project whose set this reads.
+///
+/// The branch DB's `Feedback`/`Reviews` projection is only a derived
+/// read-model: it keeps a Reviews edge while the reviewed target resolves and
+/// drops it once the target is gone, so a graph query would lose an orphaned
+/// item. Reading the records keeps it visible; a target absent from the layer
+/// store and the code graph (absent from the DB projection) is marked
+/// `(removed target)` in the reviewed-target column.
+///
+/// The output stays the CSV the suite's `apg_review` tool consumes — the same
+/// four columns: `f.fqn,f.status,f.disposition,n.fqn`.
 fn review_list(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let apg_root = require_apg_root()?;
-    let db = artifacts::ArtifactDb::open(&apg_root)?;
-    let target = p.positional.first();
-    let mut q = "MATCH (f:Feedback)-[:Reviews]->(n) RETURN f.fqn, f.status, f.disposition, n.fqn"
-        .to_string();
-    if let Some(t) = target {
-        q = format!(
-            "MATCH (f:Feedback)-[:Reviews]->(n) WHERE n.fqn = {} RETURN f.fqn, f.status, f.disposition, n.fqn",
-            artifacts::lit(t)
-        );
+    let filter = p.positional.first();
+
+    let project = crate::git::repo_identity(&apg_root)?
+        .branch
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "cannot resolve the current project — `apg review list` reads branch-local review state; run it inside a project worktree"
+            )
+        })?;
+
+    let mut records: Vec<Record> = Vec::new();
+    for f in specs::project_transient_files(&apg_root, &project) {
+        if f.exists() {
+            records.extend(specs::read_jsonl(&f)?);
+        }
     }
-    let conn = db.conn()?;
-    let result = conn.query(&q)?;
-    let names = result.get_column_names();
-    println!("{}", names.join(","));
-    for row in result {
-        let cells: Vec<String> = row.iter().map(|v| v.to_string()).collect();
-        println!("{}", cells.join(","));
+
+    let db = artifacts::ArtifactDb::open(&apg_root)?;
+    println!("f.fqn,f.status,f.disposition,n.fqn");
+    for r in &records {
+        let Record::Feedback {
+            fqn,
+            status,
+            disposition,
+            ..
+        } = r
+        else {
+            continue;
+        };
+        // Both halves of the relationship live in the record set: the Feedback
+        // record and the `Reviews` edge carrying its reviewed target.
+        let Some(target) = records.iter().find_map(|e| match e {
+            Record::Reviews { from, to } if from == fqn => Some(to.as_str()),
+            _ => None,
+        }) else {
+            continue;
+        };
+        if filter.is_some_and(|t| t.as_str() != target) {
+            continue;
+        }
+        let shown = if db.node_label(target).is_none() {
+            format!("{target} (removed target)")
+        } else {
+            target.to_string()
+        };
+        println!("{fqn},{status},{disposition},{shown}");
     }
     Ok(())
 }
