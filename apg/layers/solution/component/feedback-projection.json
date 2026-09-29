@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.ingest.finalize_graph",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.artifacts.db.ArtifactDb.merge_edge",
+      "properties": {}
     }
   ],
   "in": [
