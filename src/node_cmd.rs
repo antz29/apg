@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::artifacts::{ParsedArgs, acquire_spec_lock, parse_args};
 use crate::layers::{self, InEdge, Layer, NodeFile, OutEdge, fqn};
+use crate::schema::Record;
 use crate::session;
 use crate::specs;
 
@@ -216,6 +217,49 @@ fn node_rm_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     }
     let layer = resolve_layer(&pos[0])?;
     let f = fqn(layer, &pos[1], &pos[2]);
+
+    // Warn (stderr) about each open/actioned Feedback that reviews the node,
+    // then PROCEED: a removed node's Feedback records and their Reviews edges
+    // survive in the project's transient record set, so the writer's claim and
+    // the reviewer's resolve-or-reject still proceed. `node rm` takes no
+    // project argument, so the project is the current worktree's branch —
+    // resolved exactly as `review list` does. Best-effort: the write's own
+    // project-context guard still governs.
+    if let Ok(identity) = crate::git::repo_identity(apg_root)
+        && let Some(project) = identity.branch.as_deref()
+    {
+        let mut records: Vec<Record> = Vec::new();
+        for file in specs::project_transient_files(apg_root, project) {
+            if file.exists() {
+                records.extend(specs::read_jsonl(&file)?);
+            }
+        }
+        let mut items: Vec<String> = Vec::new();
+        for r in &records {
+            let Record::Feedback {
+                fqn: item, status, ..
+            } = r
+            else {
+                continue;
+            };
+            if status != "open" && status != "actioned" {
+                continue;
+            }
+            if records
+                .iter()
+                .any(|e| matches!(e, Record::Reviews { from, to } if from == item && to == &f))
+            {
+                items.push(format!("{item} ({status})"));
+            }
+        }
+        items.sort();
+        if !items.is_empty() {
+            eprintln!(
+                "apg: warning: removing `{f}` — it is reviewed by unresolved feedback: {}",
+                items.join(", ")
+            );
+        }
+    }
 
     let mut deletes = vec![layers::node_file_path(apg_root, layer, &pos[1], &pos[2])];
     let mut writes: Vec<NodeFile> = Vec::new();
