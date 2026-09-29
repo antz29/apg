@@ -146,6 +146,11 @@
       "kind": "contains",
       "target": "solution.component.review-command-surface",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.verify-feedback-stage",
+      "properties": {}
     }
   ],
   "in": [
