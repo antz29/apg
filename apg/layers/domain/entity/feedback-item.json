@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "target": "solution.component.verify-feedback-stage",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.review-record-retention",
+      "properties": {}
     }
   ],
   "in": [
