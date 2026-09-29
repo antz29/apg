@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "unresolved-feedback-blocks-verify",
+  "body": "The plan verify gate treats every Feedback item in the project's review set by its status alone: an item whose status is open or actioned blocks the gate, and the gate names the item.",
+  "properties": {
+    "feature": "review-integrity"
+  },
+  "out": [],
+  "in": []
+}
