@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "target": "solution.component.plan-coverage-check",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.plan-review-verdict",
+      "properties": {}
     }
   ],
   "in": [
