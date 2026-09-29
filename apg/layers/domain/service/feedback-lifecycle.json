@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "service",
+  "name": "feedback-lifecycle",
+  "body": "The feedback lifecycle carries one Feedback item from attachment, through the writer's claim and the coordinator's action, to the reviewer's resolve or reject, and it reaches a terminal decision for an item whose reviewed target no longer resolves.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
