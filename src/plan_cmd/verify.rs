@@ -1,5 +1,6 @@
 //! The `apg plan verify` coherence gate: planned-node realization, resolved
-//! feedback, and spine-scoped derived solution coverage.
+//! feedback, and change-set durable-spec delta coverage (the merge-base
+//! `implemented-by` delta plus the requirement-Satisfies gate).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -16,10 +17,12 @@ use super::{load_plan, require_apg_root};
 /// - every planned Implementation node is realized in the code graph (a
 ///   planned node with no real code at its FQN blocks verify);
 /// - every phase and the whole-plan review are green (all `Feedback` resolved);
-/// - spine-scoped derived solution coverage holds (SPEC §5): every solution
-///   node reached from a satisfied requirement, plus every solution node added
-///   on this branch, has its `implemented-by` FQN touched by a plan task
-///   ([`coverage_check`]);
+/// - change-set durable-spec delta coverage holds (SPEC §5, requirement
+///   `plan-coverage-scoped-to-change-set-delta`): scoped to the branch's
+///   merge-base delta against the repo's default branch, every `implemented-by`
+///   claim the delta adds, re-points, or removes has its code FQN touched by a
+///   plan task, and every requirement the delta adds or changes is
+///   `Satisfies`'d by a plan phase ([`coverage_check`]);
 /// - the human gate has passed (the navigator's summary; outside the CLI).
 ///
 /// The gate is all this command checks — it performs NO merge and NO graph
@@ -63,9 +66,11 @@ pub(crate) fn realization_candidates(fqn: &str) -> Vec<String> {
 
 /// Core of `plan verify` — the coherence gate. Returns the merge handoff
 /// message on green, or errors listing every blocker (unrealized planned
-/// nodes, unresolved feedback, coverage gaps). Guarded: refuses outside the
-/// project context and against a stale branch DB (a verdict is only
-/// meaningful against the branch's graph — R5).
+/// nodes, unresolved feedback, and the change-set delta's coverage gaps —
+/// uncovered `implemented-by` claims and `Satisfies`-less added-or-changed
+/// requirements). Guarded: refuses outside the project context and against a
+/// stale branch DB (a verdict is only meaningful against the branch's graph —
+/// R5).
 pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     crate::git::require_membership(apg_root, project)?;
     if crate::git::is_stale(apg_root) {
@@ -209,8 +214,9 @@ pub struct CoverageGap {
     pub fqn: String,
 }
 
-/// The derived-coverage verdict (SPEC §5): whether every in-scope solution
-/// node's `implemented-by` FQN is touched by at least one plan task.
+/// The change-set delta coverage verdict (SPEC §5): the delta's uncovered
+/// `implemented-by` claims, its claim-less solution-node warning, and its
+/// added-or-changed requirements no plan phase `Satisfies`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoverageReport {
     /// The uncovered `implemented-by` FQNs with their owning solution node —

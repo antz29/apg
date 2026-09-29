@@ -9,12 +9,16 @@
 //! `renames`/`moves`, SPEC §5) with the target FQN(s) recorded on the task
 //! itself. Nothing advances automatically with `plan done`/`plan complete` —
 //! those are assertion + milestone only; a branch scan **replaces realized
-//! planned nodes**. The plan survives until the apply act, whose coherence gate (every
-//! planned node realized, all feedback resolved, derived solution coverage
-//! holds — SPEC §5: every solution node reached from a satisfied requirement,
-//! plus every solution node added on this branch, has its `implemented-by` FQN
-//! touched by a plan task) precedes the merge + rebuild of `main`'s graph
-//! (PlanCompletion-SPEC.md).
+//! planned nodes**. The plan survives until the apply act, whose coherence gate
+//! (every planned node realized, all feedback resolved, and the change-set
+//! durable-spec delta covered — SPEC §5, requirement
+//! `plan-coverage-scoped-to-change-set-delta`: scoped to the branch's
+//! merge-base delta against the repo's default branch, so every
+//! `implemented-by` claim the delta adds, re-points, or removes is touched by a
+//! plan task and every requirement the delta adds or changes is `Satisfies`'d
+//! by a plan phase; an unchanged pre-existing claim is exempt, and a solution
+//! node with no `implemented-by` edge is a warning, never a blocker) precedes
+//! the merge + rebuild of `main`'s graph (PlanCompletion-SPEC.md).
 //!
 //! The cohesive groups live in submodules — the plan envelope ([`envelope`]),
 //! the add/update/rm authoring surface ([`authoring`]), the status/milestone
