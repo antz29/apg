@@ -1058,7 +1058,7 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (transient mirrors/db.lbug/git); run via cargo test-e2e"]
     fn review_list_marks_orphaned_target_and_closes_by_fqn() {
-        let (_apg_root, repo, wt) = fixture("orphan");
+        let (apg_root, repo, wt) = fixture("orphan");
 
         // Add the durable node through the real CLI (auto-committed on the
         // branch, projected into the branch DB).
@@ -1168,6 +1168,34 @@ mod e2e {
                 .any(|l| l
                     == "foo/feedback-1,resolved,rejected,requirements.requirement.gone (removed target)"),
             "resolving by FQN must close the orphaned item: {out}"
+        );
+
+        // A Feedback record with no `Reviews` reference at all is still
+        // reported — the transient record set is authoritative — with an
+        // explicit `(no target)` marker in the target column, never skipped.
+        let mirror = apg_root
+            .join(specs::TRANS)
+            .join("requirements")
+            .join("foo.jsonl");
+        let mut recs = specs::read_jsonl(&mirror).unwrap();
+        recs.push(Record::Feedback {
+            fqn: "foo/feedback-2".to_string(),
+            body: "no target".to_string(),
+            status: "open".to_string(),
+            disposition: String::new(),
+        });
+        artifacts::write_jsonl_and_reingest(&apg_root, &mirror, "foo", &recs).unwrap();
+
+        let listed = spawn_apg(&["review", "list"], &wt);
+        assert!(
+            listed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let out = String::from_utf8(listed.stdout).unwrap();
+        assert!(
+            out.lines().any(|l| l == "foo/feedback-2,open,,(no target)"),
+            "a Feedback with no Reviews reference must be listed with a (no target) marker: {out}"
         );
 
         testutil::remove(&repo);

@@ -386,7 +386,9 @@ pub fn set_feedback_at(
 /// drops it once the target is gone, so a graph query would lose an orphaned
 /// item. Reading the records keeps it visible; a target absent from the layer
 /// store and the code graph (absent from the DB projection) is marked
-/// `(removed target)` in the reviewed-target column.
+/// `(removed target)` in the reviewed-target column, and an item carrying no
+/// `Reviews` reference at all is marked `(no target)` — every record is
+/// reported, never skipped.
 ///
 /// The output stays the CSV the suite's `apg_review` tool consumes — the same
 /// four columns: `f.fqn,f.status,f.disposition,n.fqn`.
@@ -423,20 +425,24 @@ fn review_list(args: &[String]) -> anyhow::Result<()> {
             continue;
         };
         // Both halves of the relationship live in the record set: the Feedback
-        // record and the `Reviews` edge carrying its reviewed target.
-        let Some(target) = records.iter().find_map(|e| match e {
+        // record and the `Reviews` edge carrying its reviewed target. A record
+        // with no `Reviews` edge is still reported — the transient set is
+        // authoritative (global constraint
+        // `feedback-persists-until-reviewed`) — with `(no target)` in the
+        // target column so the four-column CSV shape is preserved.
+        let target = records.iter().find_map(|e| match e {
             Record::Reviews { from, to } if from == fqn => Some(to.as_str()),
             _ => None,
-        }) else {
-            continue;
-        };
-        if filter.is_some_and(|t| t.as_str() != target) {
+        });
+        if filter.is_some_and(|t| Some(t.as_str()) != target) {
             continue;
         }
-        let shown = if db.node_label(target).is_none() {
-            format!("{target} (removed target)")
-        } else {
-            target.to_string()
+        let shown = match target {
+            None => "(no target)".to_string(),
+            Some(target) if db.node_label(target).is_none() => {
+                format!("{target} (removed target)")
+            }
+            Some(target) => target.to_string(),
         };
         println!("{fqn},{status},{disposition},{shown}");
     }
