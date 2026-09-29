@@ -153,6 +153,12 @@ pub const SUITE_TOOLS: &[(&str, &str)] = &[
         "apg_plan_verify.ts",
         include_str!("../opencode-suite/tools/apg_plan_verify.ts"),
     ),
+    // Deterministic durable-spec lint (apg spec lint), the read-only pre-pass
+    // the plan-review and spec-review passes run before their semantic review.
+    (
+        "apg_spec_lint.ts",
+        include_str!("../opencode-suite/tools/apg_spec_lint.ts"),
+    ),
     // Filesystem scope tools.
     (
         "apg_rm.ts",
