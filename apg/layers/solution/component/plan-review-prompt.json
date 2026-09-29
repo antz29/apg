@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "plan-review-prompt",
+  "body": "The plan-review agent prompt `opencode-suite/agents/plan-review.md` (product source embedded into the `apg` binary via `include_str!` and installed by `apg init` into `~/.opencode/agents/`). It carries the plan-review agent's two-pass review of the plan against the change-set delta: (1) DETERMINISTIC coverage verification — run the binary's delta coverage check (`apg plan verify` / its coverage verdict) instead of eyeballing the graph, and treat any reported gap as blocking feedback; and (2) a SEMANTIC per-node review with a less-code bias (`deletes` > `modifies` > `creates`, fewer planned nodes), where removing a solution node / `implemented-by` edge normally yields a `deletes` task for the code it pointed at, and a keep/modify must be justified in a task note.\n\nDeliberately a NARROW owner (implemented-by exactly this one file), distinct from `solution.component.plan-coverage-check` (the binary's coverage stage) and from the navigator/reviewer prompt components, so `rust.apg.plan_cmd.verify.coverage_check` maps coverage 1:1 to the edited file. Product source in `solution.container.opencode-suite`; the repo's own `.opencode/agents/**` are consumer artifacts never edited by a change-set. No planned Implementation node is needed — the prompt is a real scanned File node (`opencode-suite/agents/plan-review.md`), so the edit is a `modifies` over an existing FQN.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
