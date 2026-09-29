@@ -31,6 +31,11 @@
       "kind": "realised-by",
       "target": "solution.component.feedback-mirror-store",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.review-record-retention",
+      "properties": {}
     }
   ],
   "in": [
