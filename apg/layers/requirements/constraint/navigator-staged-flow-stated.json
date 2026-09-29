@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "navigator-staged-flow-stated",
+  "body": "Law (prose; assessed by review): the distributed `codebase-navigator` prompt must state the canonical 9-stage change-set lifecycle IN ORDER, name each stage's owning subagent, and state that the process is strictly followed — no stage is skipped and implementation does not begin until the spec review and the plan review(s) are green.\n\nThe ordered stages and owners: (1) write spec by `spec-writer`; (2) review spec by `spec-review`; (3) write plan skeleton by `plan-writer`; (4) review plan skeleton by `plan-review`; (5) write plan phases/tasks by `plan-writer`; (6) review plan phases by `plan-review`; (7) holistic plan review by `plan-review`; (8) implement by the owning `implementer`/`*-implementer`; (9) implementation phase review by `implementation-phase-reviewer`.\n\nA prompt that states the stages out of order, omits a stage, omits a stage's owning subagent, or leaves implementation ungated on the green spec and plan reviews violates this law. This binds the product-source prompt `opencode-suite/agents/codebase-navigator.md`; satisfaction is assessed by review.",
+  "properties": {
+    "attaches-to": "requirements.requirement.navigator-staged-flow"
+  },
+  "out": [],
+  "in": []
+}
