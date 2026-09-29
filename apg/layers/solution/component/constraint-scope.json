@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "constraint-scope",
-  "body": "`attaches-to` is not part of the model. `rust.apg.layers.write.validate_change` refuses any `attaches-to` on a new constraint, and any added or changed `attaches-to` value whatever its target; an unchanged existing `attaches-to` value passes, so existing constraints stay authorable. `rust.apg.layers.validate.eval_constraint` is the shared structural check (name, layer/type, uniqueness) that both the write path and the scan path call. The scan path `rust.apg.layers.tree.ingest_tree` loads existing constraints carrying an `attaches-to`, and `apg spec lint` reports them.",
+  "body": "Constraints are layer-scoped. `rust.apg.layers.validate.eval_constraint` is the shared structural check (name, layer/type, uniqueness) that the write path and the scan path both call; it establishes a constraint's layer as its scope. `rust.apg.layers.write.validate_change` accepts a constraint written with its scope in its layer, and accepts an existing constraint's `attaches-to` value as it stands in the spec. The scan path `rust.apg.layers.tree.ingest_tree` loads every constraint, and `apg spec lint` reports each constraint that carries an `attaches-to`.",
   "properties": {},
   "out": [
     {
