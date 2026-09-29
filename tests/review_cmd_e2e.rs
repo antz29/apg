@@ -1047,13 +1047,14 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-6 (E2E): after a durable node reviewed by an item is
+    /// Phase-02 tasks 6 & 8 (E2E): after a durable node reviewed by an item is
     /// removed, the item stays visible to `apg review list` — the transient
     /// record set is authoritative, so the Feedback and its reviewed-target
     /// reference survive in the requirements mirror even though the DB
     /// projection drops the node and its `Reviews` edge. The list marks the
     /// absent target with the exact `<target> (removed target)` cell, and the
-    /// item still closes through the same `apg review resolve <fqn>` surface.
+    /// item still closes through the same `apg review reject|resolve <fqn>`
+    /// surfaces as any other.
     #[test]
     #[ignore = "e2e tier: real I/O (transient mirrors/db.lbug/git); run via cargo test-e2e"]
     fn review_list_marks_orphaned_target_and_closes_by_fqn() {
@@ -1125,8 +1126,30 @@ mod e2e {
             "the orphaned item must be listed with its removed-target marker: {out}"
         );
 
-        // It still closes through the same resolve-by-FQN surface, and the
-        // marker persists after the item turns terminal.
+        // It still closes through the same reject/resolve-by-FQN surfaces as
+        // any other item: reject is non-terminal (`open`, disposition
+        // `rejected`) and the removed-target marker persists.
+        let rejected = spawn_apg(&["review", "reject", "foo/feedback-1"], &wt);
+        assert!(
+            rejected.status.success(),
+            "{}",
+            String::from_utf8_lossy(&rejected.stderr)
+        );
+        let listed = spawn_apg(&["review", "list"], &wt);
+        assert!(
+            listed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let out = String::from_utf8(listed.stdout).unwrap();
+        assert!(
+            out.lines().any(|l| l
+                == "foo/feedback-1,open,rejected,requirements.requirement.gone (removed target)"),
+            "rejecting by FQN must reach the orphaned item: {out}"
+        );
+
+        // Resolve turns it terminal (`resolved`), preserving the rejected
+        // disposition, and the marker persists.
         let resolved = spawn_apg(&["review", "resolve", "foo/feedback-1"], &wt);
         assert!(
             resolved.status.success(),
@@ -1143,7 +1166,7 @@ mod e2e {
         assert!(
             out.lines()
                 .any(|l| l
-                    == "foo/feedback-1,resolved,,requirements.requirement.gone (removed target)"),
+                    == "foo/feedback-1,resolved,rejected,requirements.requirement.gone (removed target)"),
             "resolving by FQN must close the orphaned item: {out}"
         );
 
