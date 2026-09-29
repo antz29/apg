@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "navigator-agent-builder-surface-coherence",
+  "body": "Law (prose; assessed by review): the distributed `codebase-navigator` prompt (`opencode-suite/agents/codebase-navigator.md`) must not restate or under-describe the `agent-builder`'s main-write surface. It must (1) REFERENCE the agent-builder's own definition (`opencode-suite/agents/agent-builder.md`) as the authoritative enumeration — the navigator carries no subset that can go stale; (2) state what the navigator operationally needs — on missing or outdated code-writer agents it tasks the `agent-builder` on the MAIN checkout, the agent-builder commits there, then the navigator rebases the project worktree onto main, re-scans, and the user restarts opencode and reconnects before implementation continues; and (3) state that the maintenance covers all THREE carve-out-1 paths — the `.opencode/agents/**` scaffold, the `opencode.json` agent→model map, and the repo-root `AGENTS.md` hygiene — not `.opencode/agents/**` alone. It retains the optional consented `release-agent` as the other agent carve-out and the \"\"never mutate main\"\" scoping to the binary's guarded node/edge/plan/review mutations.\n\nA prompt that says or implies the agent-builder's only write grant/surface is `.opencode/agents/**`, or that enumerates a subset of the three carve-out-1 paths as if complete, violates this law.",
+  "properties": {
+    "attaches-to": "requirements.requirement.navigator-agent-builder-surface-coherence"
+  },
+  "out": [],
+  "in": []
+}
