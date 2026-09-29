@@ -4,6 +4,12 @@
   "name": "phase-reviewer-coverage-rule-reconciliation",
   "body": "Reconciliation (coverage-spec-delta): widen the change-set boundary to the distributed phase reviewer prompt's coverage-rule statement [with coordinator].\n\nSOURCE STATEMENT. `requirements.constraint.plan-coverage-change-boundary` named only `opencode-suite/agents/plan-review.md` as the agent-side reconciliation target for the coverage rule.\n\nINCONSISTENCY. `opencode-suite/agents/implementation-phase-reviewer.md` states the SAME now-stale spine-scoped rule in its review procedure: \"The plan's coverage rule: every solution node's `implemented-by` FQN must be touched by at least one plan task.\" (~lines 294-296). Once `apg plan verify`'s coverage stage is the merge-base delta rule (`domain.entity.plan-coverage`), \"every solution node\" is wrong — only the change-set's delta (added/changed/removed `implemented-by` claims and added/removed solution nodes) is in scope, and unchanged pre-existing nodes are exempt. Left unedited, the distributed reviewer would coach the superseded rule. The prompt is a graphed `docs` File node (`opencode-suite/agents/implementation-phase-reviewer.md`) already owned by `solution.component.distributed-reviewer-prompt`.\n\nRESOLUTION. Widened `requirements.constraint.plan-coverage-change-boundary` clause (b) to name `opencode-suite/agents/implementation-phase-reviewer.md`, scoped to the coverage-rule statement ONLY — no other change to that agent (both prompts are `include_str!` product source). This is the same coverage-rule reconciliation as `opencode-suite/agents/plan-review.md` (recorded in `requirements.note.plan-review-agent-reconciliation`). No requirement/domain/solution node was added, re-pointed, or retired: the file's existing `implemented-by` owner is pre-existing and its claim is unchanged, so under the delta rule this edit is a `modifies` over already-resolving docs code that the boundary constraint directs the plan to schedule — it creates no new coverage obligation. [with coordinator]",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.constraint.plan-coverage-change-boundary",
+      "properties": {}
+    }
+  ],
   "in": []
 }
