@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "spec-lint",
+  "body": "The deterministic spec-integrity check: `apg spec lint` in the binary and the `apg_spec_lint` suite tool run the same checks over the whole durable spec and report violations as errors — R2 (no constraint carries `attaches-to`), R3 (a node has at most one note), R4 (every note's `details` edge names exactly one node, never another note), and the change-set delta gates (the added/changed requirements and `implemented-by` claims are covered). The same check flags likely-forbidden wording in a tier-node body — negation words, future-tense words, and time-relative words — as a non-blocking warning, and the write surface on `apg node add` / `apg node update` raises the same warning. Existing violations are reported and stay for a later dogfooding change-set; write-time structural refusals apply to new writes.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
