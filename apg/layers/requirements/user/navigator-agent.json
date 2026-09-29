@@ -39,6 +39,11 @@
       "kind": "contains",
       "target": "requirements.requirement.navigator-staged-flow",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.agent-builder-agents-md-hygiene",
+      "properties": {}
     }
   ],
   "in": []
