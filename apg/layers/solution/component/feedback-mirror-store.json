@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.specs.transient_feedback_path",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.specs.project_transient_files",
+      "properties": {}
     }
   ],
   "in": [
