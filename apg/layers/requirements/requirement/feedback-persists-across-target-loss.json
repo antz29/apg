@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "feedback-persists-across-target-loss",
+  "body": "A project's review set holds a Feedback item from the moment a reviewer attaches it until a reviewer resolves or rejects it; the item's record and its reviewed-target reference survive the removal or rewrite of the reviewed node.",
+  "properties": {
+    "feature": "review-integrity"
+  },
+  "out": [],
+  "in": []
+}
