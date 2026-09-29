@@ -2,7 +2,7 @@
   "layer": "global",
   "type": "constraint",
   "name": "feedback-persists-until-reviewed",
-  "body": "A Feedback record in a project's transient review set remains in that set until a reviewer resolves or rejects it; removing a reviewed target leaves the record and its target reference intact.",
+  "body": "A Feedback record in a project's transient review set remains in that set until a reviewer resolves or rejects it; removing a reviewed target leaves the record and its target reference intact. Every surface that reads the set — `apg review list` and the plan verify gate — reports every record from that set by its status, independent of whether its reviewed target resolves.",
   "properties": {},
   "out": [],
   "in": []
