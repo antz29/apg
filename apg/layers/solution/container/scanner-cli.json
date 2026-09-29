@@ -151,6 +151,11 @@
       "kind": "contains",
       "target": "solution.component.verify-feedback-stage",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.feedback-projection",
+      "properties": {}
     }
   ],
   "in": [
