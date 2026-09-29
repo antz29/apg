@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "domain.value.change-set-spec-delta",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.plan-coverage-check",
+      "properties": {}
     }
   ],
   "in": [
