@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.review_cmd.review_list",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.review_cmd.apply_review_add",
+      "properties": {}
     }
   ],
   "in": [
