@@ -7,11 +7,12 @@ use crate::testutil::{nf, task_rec};
 mod unit {
     use super::*;
 
-    /// Mechanical bridge to the new pure `coverage_check(records, &SpecDelta)`
-    /// signature: derive a delta from the phase-06 solution-node fixture —
-    /// every solution node's `implemented-by` target becomes an added claim,
-    /// and a solution node with no claim becomes a `no_claims` entry. Phase 2
-    /// owns the semantic rewrite of these tests onto explicit deltas.
+    /// The whole-branch-delta fixture adapter: with no pre-existing spec the
+    /// branch spec IS the delta (law clause 5), so every solution node's
+    /// `implemented-by` target is an ADDED claim and a solution node with no
+    /// claim becomes a `no_claims` entry. The explicit added/removed/re-pointed
+    /// deltas are exercised by the delta unit tests below; the merge-base git
+    /// compare by the e2e tier.
     fn delta_from_solution_nodes(nodes: &[crate::layers::NodeFile]) -> SpecDelta {
         let mut added_claims: BTreeSet<(String, String)> = BTreeSet::new();
         let mut no_claims: BTreeSet<String> = BTreeSet::new();
@@ -265,14 +266,21 @@ mod unit {
         push_gate("foo/plan.phase-01", "foo/plan.phase-04", &records).unwrap();
     }
 
+    /// Pure semantics of the delta-scoped coverage decision. With no
+    /// pre-existing spec the whole branch spec is the delta, so every
+    /// solution node's `implemented-by` target is an ADDED claim and every
+    /// claim-less solution node a `no_claims` warning. Pins exact-FQN touch
+    /// matching, verb-agnostic touches (a `deletes` touches what it deletes; a
+    /// `renames`/`moves` `new_fqn` covers the destination; a `creates` covers a
+    /// still-planned FQN), target-less tasks touching nothing, and non-solution
+    /// nodes (person, solution notes) ignored.
     #[test]
     fn coverage_check_reports_gaps_no_claims_and_verb_agnostic_touches() {
         // Pure semantics: exact-FQN touch matching, verb-agnostic (a deletes
         // task touches what it deletes), a renames/moves new_fqn covering the
         // destination, a creates covering a planned FQN, empty-target tasks
         // touching nothing, and non-solution nodes (person, solution notes)
-        // ignored. The solution nodes are branch-added; the delta is supplied
-        // directly here (the git compare is exercised by the int test).
+        // ignored. The merge-base git compare is exercised by the e2e tier.
         let records = vec![
             Record::Plan {
                 fqn: "foo/plan".to_string(),
@@ -341,51 +349,49 @@ mod unit {
                 parent: String::new(),
             },
         ];
-        let node = |t: &str, n: &str, refs: &[&str]| crate::layers::NodeFile {
-            layer: "solution".to_string(),
-            node_type: t.to_string(),
-            name: n.to_string(),
-            body: String::new(),
-            properties: std::collections::BTreeMap::new(),
-            out: refs
-                .iter()
-                .map(|r| crate::layers::OutEdge {
-                    kind: "implemented-by".to_string(),
-                    target: r.to_string(),
-                    properties: std::collections::BTreeMap::new(),
-                })
-                .collect(),
-            in_edges: Vec::new(),
-        };
         let nodes = vec![
-            node(
+            nf(
+                "solution",
                 "system",
                 "payments",
-                &["github.com/x/y.Store", "github.com/x/y.Gateway"],
+                &[
+                    ("implemented-by", "github.com/x/y.Store"),
+                    ("implemented-by", "github.com/x/y.Gateway"),
+                ],
             ),
-            node("container", "api", &["github.com/x/y.Store2"]),
+            nf(
+                "solution",
+                "container",
+                "api",
+                &[("implemented-by", "github.com/x/y.Store2")],
+            ),
             // An untouched implemented-by FQN -> the gap.
-            node("component", "reporting", &["github.com/x/y.Reporting"]),
+            nf(
+                "solution",
+                "component",
+                "reporting",
+                &[("implemented-by", "github.com/x/y.Reporting")],
+            ),
             // No implemented-by edge -> exempt, reported as a warning.
-            node("component", "checkout", &[]),
+            nf("solution", "component", "checkout", &[]),
             // Not a solution kind -> ignored entirely.
-            node("person", "ops", &["github.com/x/y.Store"]),
-            crate::layers::NodeFile {
-                layer: "solution".to_string(),
-                node_type: "note".to_string(),
-                name: "design-note".to_string(),
-                body: String::new(),
-                properties: std::collections::BTreeMap::new(),
-                out: vec![crate::layers::OutEdge {
-                    kind: "implemented-by".to_string(),
-                    target: "github.com/x/y.Store".to_string(),
-                    properties: std::collections::BTreeMap::new(),
-                }],
-                in_edges: Vec::new(),
-            },
+            nf(
+                "solution",
+                "person",
+                "ops",
+                &[("implemented-by", "github.com/x/y.Store")],
+            ),
+            nf(
+                "solution",
+                "note",
+                "design-note",
+                &[("implemented-by", "github.com/x/y.Store")],
+            ),
         ];
-        // The delta is derived from the fixture nodes (the git compare is
-        // exercised by `change_set_spec_delta`).
+        // The fixture models the whole-branch delta (no pre-existing spec):
+        // every solution claim is an added claim, the claim-less node a
+        // `no_claims` warning (the merge-base compare is exercised by the e2e
+        // tier).
         let delta = delta_from_solution_nodes(&nodes);
         let report = coverage_check(&records, &delta);
         // Only the reporting component's FQN is untouched: Store is touched
@@ -402,9 +408,9 @@ mod unit {
     }
 
     /// The coverage gate is language-root agnostic: task targets / rename
-    /// destinations may be language-rooted while the solution nodes'
-    /// `implemented-by` targets are bare (and the reverse) — the identities
-    /// match, so there are NO gaps either way.
+    /// destinations may be language-rooted while the delta's `implemented-by`
+    /// FQNs are bare (and the reverse) — the identities match, so there are NO
+    /// gaps either way.
     #[test]
     fn coverage_identity_tolerates_language_root_on_both_sides() {
         let task = |fqn: &str, verb: &str, target: &str, new_fqn: &str| Record::Task {
@@ -417,23 +423,7 @@ mod unit {
             target: target.to_string(),
             new_fqn: new_fqn.to_string(),
         };
-        let node = |name: &str, refs: &[&str]| crate::layers::NodeFile {
-            layer: "solution".to_string(),
-            node_type: "system".to_string(),
-            name: name.to_string(),
-            body: String::new(),
-            properties: std::collections::BTreeMap::new(),
-            out: refs
-                .iter()
-                .map(|r| crate::layers::OutEdge {
-                    kind: "implemented-by".to_string(),
-                    target: r.to_string(),
-                    properties: std::collections::BTreeMap::new(),
-                })
-                .collect(),
-            in_edges: Vec::new(),
-        };
-        // Rooted task targets, BARE implemented-by targets.
+        // Rooted task targets, BARE delta claims.
         let rooted_tasks = vec![
             task("foo/plan.phase-01.task-1", "modifies", "rust.apg.cache", ""),
             task(
@@ -443,18 +433,24 @@ mod unit {
                 "rust.apg.new_mod",
             ),
         ];
-        let bare_refs = vec![
-            node("alpha", &["apg.cache"]),
-            node("beta", &["apg.new_mod"]),
-        ];
-        let report = coverage_check(&rooted_tasks, &delta_from_solution_nodes(&bare_refs));
+        let bare_delta = SpecDelta {
+            added_claims: vec![
+                ("solution.system.alpha".to_string(), "apg.cache".to_string()),
+                (
+                    "solution.system.beta".to_string(),
+                    "apg.new_mod".to_string(),
+                ),
+            ],
+            ..Default::default()
+        };
+        let report = coverage_check(&rooted_tasks, &bare_delta);
         assert!(
             report.gaps.is_empty(),
             "rooted task targets must cover bare implemented-by targets: {:?}",
             report.gaps
         );
 
-        // BARE task targets, ROOTED implemented-by targets (the reverse).
+        // BARE task targets, ROOTED delta claims (the reverse).
         let bare_tasks = vec![
             task("foo/plan.phase-01.task-1", "modifies", "apg.cache", ""),
             task(
@@ -464,16 +460,191 @@ mod unit {
                 "apg.new_mod",
             ),
         ];
-        let rooted_refs = vec![
-            node("alpha", &["rust.apg.cache"]),
-            node("beta", &["rust.apg.new_mod"]),
-        ];
-        let report = coverage_check(&bare_tasks, &delta_from_solution_nodes(&rooted_refs));
+        let rooted_delta = SpecDelta {
+            added_claims: vec![
+                (
+                    "solution.system.alpha".to_string(),
+                    "rust.apg.cache".to_string(),
+                ),
+                (
+                    "solution.system.beta".to_string(),
+                    "rust.apg.new_mod".to_string(),
+                ),
+            ],
+            ..Default::default()
+        };
+        let report = coverage_check(&bare_tasks, &rooted_delta);
         assert!(
             report.gaps.is_empty(),
             "bare task targets must cover rooted implemented-by targets: {:?}",
             report.gaps
         );
+    }
+
+    /// A delta's ADDED, RE-POINTED/CHANGED and REMOVED `implemented-by`
+    /// claims each oblige their code FQN to be touched — verb- and
+    /// status-agnostic, with a `renames`/`moves` destination (`new_fqn`)
+    /// counting, so a removed edge (or a removed solution node) yields a
+    /// `deletes`/`modifies` obligation. The same pure decision applies the
+    /// requirement-Satisfies gate: every requirement the delta adds or changes
+    /// must be `Satisfies`'d by a phase, the gap named by the requirement FQN.
+    #[test]
+    fn coverage_delta_requires_added_changed_and_removed_claims() {
+        // A re-pointed edge contributes BOTH ends: the NEW target as an added
+        // claim and the OLD target as a removed claim. `service`/`component`
+        // are both solution kinds; the two requirements are delta-added and
+        // delta-changed respectively (both land in `changed_requirements`).
+        let delta = SpecDelta {
+            added_claims: vec![(
+                "solution.component.repointed".to_string(),
+                "github.com/x/y.New".to_string(),
+            )],
+            removed_claims: vec![(
+                "solution.component.removed".to_string(),
+                "github.com/x/y.Old".to_string(),
+            )],
+            changed_requirements: vec![
+                "requirements.requirement.added-req".to_string(),
+                "requirements.requirement.changed-req".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        // Nothing touches either claim and no phase Satisfies either
+        // requirement -> both claims are gaps and both requirements are
+        // requirement gaps, each named by its FQN.
+        let report = coverage_check(&[], &delta);
+        assert_eq!(
+            report.gaps,
+            vec![
+                CoverageGap {
+                    solution: "solution.component.removed".to_string(),
+                    fqn: "github.com/x/y.Old".to_string(),
+                },
+                CoverageGap {
+                    solution: "solution.component.repointed".to_string(),
+                    fqn: "github.com/x/y.New".to_string(),
+                },
+            ]
+        );
+        assert_eq!(
+            report.requirement_gaps,
+            vec![
+                "requirements.requirement.added-req".to_string(),
+                "requirements.requirement.changed-req".to_string(),
+            ]
+        );
+
+        // A `renames` destination covers the added claim; a `deletes` covers
+        // the removed claim (verb-agnostic); one `Satisfies` per changed
+        // requirement clears the requirement gate.
+        let records = vec![
+            task_rec("renames", "github.com/x/y.Unrelated", "github.com/x/y.New"),
+            task_rec("deletes", "github.com/x/y.Old", ""),
+            Record::Satisfies {
+                from: "foo/plan.phase-01".to_string(),
+                to: "requirements.requirement.added-req".to_string(),
+            },
+            Record::Satisfies {
+                from: "foo/plan.phase-01".to_string(),
+                to: "requirements.requirement.changed-req".to_string(),
+            },
+        ];
+        let report = coverage_check(&records, &delta);
+        assert!(report.gaps.is_empty(), "{report:?}");
+        assert!(report.requirement_gaps.is_empty(), "{report:?}");
+
+        // The requirement gate is per-FQN: Satisfies'ing only one leaves the
+        // other a gap, independent of the (now-covered) claims.
+        let records = vec![
+            task_rec("renames", "github.com/x/y.Unrelated", "github.com/x/y.New"),
+            task_rec("deletes", "github.com/x/y.Old", ""),
+            Record::Satisfies {
+                from: "foo/plan.phase-01".to_string(),
+                to: "requirements.requirement.added-req".to_string(),
+            },
+        ];
+        let report = coverage_check(&records, &delta);
+        assert!(report.gaps.is_empty(), "{report:?}");
+        assert_eq!(
+            report.requirement_gaps,
+            vec!["requirements.requirement.changed-req".to_string()]
+        );
+    }
+
+    /// Coverage is scoped to the merge-base delta, never to spine
+    /// reachability: `coverage_check` does not walk the Requirement `Drives`
+    /// Domain `RealisedBy` Solution `ImplementedBy` code spine, and the phase
+    /// `Satisfies` set never widens the implemented-by obligation set — it
+    /// ONLY discharges the delta's added-or-changed requirements. A delta
+    /// claim reached by no spine is still required; an unchanged pre-existing
+    /// claim is exempt however the spine runs.
+    #[test]
+    fn coverage_delta_exempts_unchanged_nodes_and_ignores_spine() {
+        // `r` is a delta requirement (the Satisfies-gate input); the sole
+        // claim is an added delta claim reached by no spine.
+        let delta = SpecDelta {
+            added_claims: vec![(
+                "solution.component.delta".to_string(),
+                "github.com/x/y.Delta".to_string(),
+            )],
+            changed_requirements: vec!["requirements.requirement.r".to_string()],
+            ..Default::default()
+        };
+
+        // A phase Satisfies `r` (whose spine could reach an UNCHANGED
+        // pre-existing claim) and the only task touches an unrelated FQN: the
+        // delta claim is STILL a gap — scope is the delta, not the spine — and
+        // the Satisfies never imposes an obligation on any unchanged code.
+        let records = vec![
+            task_rec("modifies", "github.com/x/y.Unrelated", ""),
+            Record::Satisfies {
+                from: "foo/plan.phase-01".to_string(),
+                to: "requirements.requirement.r".to_string(),
+            },
+        ];
+        let report = coverage_check(&records, &delta);
+        assert_eq!(
+            report.gaps,
+            vec![CoverageGap {
+                solution: "solution.component.delta".to_string(),
+                fqn: "github.com/x/y.Delta".to_string(),
+            }]
+        );
+        // `r` is Satisfies'd so the requirement gate is clear; no unchanged
+        // pre-existing code appears (it is not in the delta at all).
+        assert!(
+            report
+                .gaps
+                .iter()
+                .all(|g| g.fqn != "github.com/x/y.Unchanged"),
+            "unchanged pre-existing code must never be a gap: {report:?}"
+        );
+        assert!(report.requirement_gaps.is_empty(), "{report:?}");
+
+        // Touching the delta claim clears the claim gap, and dropping the
+        // Satisfies (keeping the touch) makes ONLY the requirement a gap —
+        // Satisfies discharges requirements, never implemented-by claims.
+        let records = vec![task_rec("modifies", "github.com/x/y.Delta", "")];
+        let report = coverage_check(&records, &delta);
+        assert!(report.gaps.is_empty(), "{report:?}");
+        assert_eq!(
+            report.requirement_gaps,
+            vec!["requirements.requirement.r".to_string()]
+        );
+
+        // Delta claim touched AND requirement Satisfies'd -> the delta decision
+        // is fully clear.
+        let records = vec![
+            task_rec("modifies", "github.com/x/y.Delta", ""),
+            Record::Satisfies {
+                from: "foo/plan.phase-01".to_string(),
+                to: "requirements.requirement.r".to_string(),
+            },
+        ];
+        let report = coverage_check(&records, &delta);
+        assert!(report.gaps.is_empty(), "{report:?}");
+        assert!(report.requirement_gaps.is_empty(), "{report:?}");
     }
 
     /// `realization_candidates` (pure) offers the authored FQN, its identity,
