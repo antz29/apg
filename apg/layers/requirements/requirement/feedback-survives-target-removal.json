@@ -31,6 +31,11 @@
       "kind": "drives",
       "target": "domain.group.review-integrity",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.node-rm-warns-on-outstanding-feedback",
+      "properties": {}
     }
   ],
   "in": [
