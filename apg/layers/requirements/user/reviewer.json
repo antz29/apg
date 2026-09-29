@@ -4,6 +4,12 @@
   "name": "reviewer",
   "body": "A reviewer reads a project's review feedback and brings each item to a terminal decision. Reviewers resolve or reject an item's claim; they are distinct from the writer whose work the item reviews and from the coordinator who actions the item.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.feedback-survives-target-removal",
+      "properties": {}
+    }
+  ],
   "in": []
 }
