@@ -35,8 +35,9 @@ use super::validate_assembled_rules;
 ///   `scanned_code` (the code FQNs the just-run scan produced) and `planned`
 ///   (the plan's planned-node FQNs, from `.trans`): resolves → real; planned →
 ///   pending (not an error); gone from both → spec-drift error.
-/// - [`eval_constraint`] on every `constraint` node (structure + reference
-///   validation; satisfaction is review-only, R14).
+/// - [`eval_constraint`] on every `constraint` node (structure validation
+///   only — name allowlist, type-in-layer, uniqueness; satisfaction is
+///   review-only, R14).
 ///
 /// The FQN of each node is derived from its **path** (`fqn(layer, type,
 /// name)`), never read — the file name IS the identity, and the file's own

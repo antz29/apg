@@ -1101,32 +1101,12 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// R14: a constraint whose `attaches-to` reference is unresolvable FAILS
-    /// the scan — a constraint is never a non-thing, and the reference is
-    /// checked at every scan over the assembled graph.
-    #[test]
-    #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
-    fn scan_fails_on_constraint_with_unresolvable_reference() {
-        let repo = scan_repo("scan-constraint-ref");
-        // A local constraint attaching to a node that does not exist.
-        let mut c = node("requirements", "constraint", "law");
-        c.properties.insert(
-            PROP_ATTACHES_TO.to_string(),
-            "domain.entity.ghost".to_string(),
-        );
-        write_tree(&repo.apg_root(), &[c]);
-
-        let err = testutil::scan_checkout(&repo.root).unwrap_err();
-        let msg = format!("{err:#}");
-        assert!(msg.contains("domain.entity.ghost"), "{msg}");
-        assert!(msg.contains("never a non-thing"), "{msg}");
-        testutil::remove(&repo);
-    }
-
-    /// R14: prose satisfaction is never executed — a constraint whose body
-    /// LOOKS like an expression (and is contradictory) still ingests when its
-    /// references resolve; the scan validates structure + references only, no
-    /// expression parsing, no evaluation.
+    /// Prose satisfaction is never executed, and the scan no longer validates a
+    /// constraint's `attaches-to` reference: `eval_constraint` is structure-only
+    /// (name allowlist, type-in-layer, uniqueness), so a constraint whose body
+    /// LOOKS like an expression (and is contradictory), and whose `attaches-to`
+    /// is even UNRESOLVABLE, still ingests. Satisfaction is assessed by review
+    /// only (R14).
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_never_evaluates_constraint_prose() {
@@ -1137,7 +1117,7 @@ mod e2e {
         let mut c = node("requirements", "constraint", "law");
         c.properties.insert(
             PROP_ATTACHES_TO.to_string(),
-            "domain.entity.customer".to_string(),
+            "domain.entity.ghost".to_string(),
         );
         c.body = "count(entities) == 0 AND count(entities) > 0".to_string();
         write_tree(&repo.apg_root(), &[ent, c]);

@@ -645,12 +645,12 @@ pub const PROP_ATTACHES_TO: &str = "attaches-to";
 
 /// Validate a proposed `constraint` node at write time (SPEC §3.1): constraints
 /// are **prose** ("X must hold") over things that **exist**. The binary
-/// validates only a constraint's *structure* and *references* — never whether
-/// the prose actually holds. **Satisfaction is assessed by review**
-/// (non-deterministic), never executed: there is no constraint-expression
-/// language in this change-set, and this function takes no prose input at all
-/// (the prose `body` is the node-file schema's top-level `body`, stored
-/// verbatim and read by a reviewer — not by the binary).
+/// validates only a constraint's *structure* — never whether the prose actually
+/// holds. **Satisfaction is assessed by review** (non-deterministic), never
+/// executed: there is no constraint-expression language in this change-set, and
+/// this function takes no prose input at all (the prose `body` is the node-file
+/// schema's top-level `body`, stored verbatim and read by a reviewer — not by
+/// the binary).
 ///
 /// Structure (reuses [`validate_node`]'s shared node rules — a `constraint`
 /// carries no `kind`/`attribute`/`root`): the name matches the allowlist, the
@@ -658,19 +658,15 @@ pub const PROP_ATTACHES_TO: &str = "attaches-to";
 /// host `constraint`; plans does not, so a plans-layer constraint is refused),
 /// and the name is unique per (layer, type).
 ///
-/// References (the "never a non-thing" rule): a **local** constraint
-/// (requirements/domain/solution) *may* name the one tier-1–3 node it
-/// constrains via [`PROP_ATTACHES_TO`] — that FQN must parse and resolve
-/// against `existing` (the caller-supplied (layer, type, name) universe), or
-/// the write is refused. A **global** constraint ([`Layer::Global`]) guards the
-/// whole graph and must not declare an attachment — one is refused, not
-/// ignored (naming one thing contradicts whole-graph scope).
+/// A constraint's *scope* is declared by its **layer** (R2): a `global`
+/// constraint binds the whole durable spec, a `<tier>` constraint binds that
+/// tier. A present [`PROP_ATTACHES_TO`] property is not part of this structure
+/// check — the write surface's off-model `attaches-to` refusal lives in
+/// `write::validate_change`, and satisfaction is review-only (R14).
 ///
 /// `existing` is the current identity universe, exactly as in [`validate_node`]:
 /// every node that already exists (or is co-proposed in the change) — *not* the
 /// constraint being validated.
-// (Unused until ingest_tree, phase-3 task-15, consults it.)
-#[allow(dead_code)]
 pub fn eval_constraint(
     layer: Layer,
     name: &str,
@@ -678,40 +674,9 @@ pub fn eval_constraint(
     existing: &BTreeSet<(Layer, String, String)>,
 ) -> anyhow::Result<()> {
     // Structure: reuse the shared node rules — name allowlist, type-in-layer,
-    // uniqueness. A `constraint` takes no kind/attribute/root.
-    validate_node(layer, "constraint", name, properties, existing)?;
-
-    // References: only an `attaches-to` property is interpreted (there is no
-    // expression language — the prose body is never an input here).
-    let Some(target) = properties.get(PROP_ATTACHES_TO) else {
-        return Ok(());
-    };
-
-    // A global constraint guards the whole graph — an attachment is refused.
-    if layer == Layer::Global {
-        anyhow::bail!(
-            "global constraint `{name}` must not declare `{PROP_ATTACHES_TO}` — a global constraint guards the whole graph"
-        );
-    }
-
-    // A local constraint attaches to a tier-1–3 node. The target must parse as
-    // an authored-node FQN, live in a tier-1–3 layer, and resolve — never a
-    // non-thing.
-    let (target_layer, target_type, target_name) = parse_fqn(target.as_str())?;
-    if !matches!(
-        target_layer,
-        Layer::Requirements | Layer::Domain | Layer::Solution
-    ) {
-        anyhow::bail!(
-            "constraint `{name}` attaches to `{target}`, which is not a tier-1–3 node — local constraints attach to requirements/domain/solution"
-        );
-    }
-    if !existing.contains(&(target_layer, target_type, target_name)) {
-        anyhow::bail!(
-            "constraint `{name}` attaches to `{target}`, which does not exist — a constraint declares what must hold about something that EXISTS (never a non-thing)"
-        );
-    }
-    Ok(())
+    // uniqueness. A `constraint` takes no kind/attribute/root, and neither the
+    // prose body nor any `attaches-to` property is an input here (R14).
+    validate_node(layer, "constraint", name, properties, existing)
 }
 
 // ---------------------------------------------------------------------------
