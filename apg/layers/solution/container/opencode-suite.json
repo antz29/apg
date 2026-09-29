@@ -81,6 +81,11 @@
       "kind": "contains",
       "target": "solution.component.plan-review-prompt",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.spec-principles-prompts",
+      "properties": {}
     }
   ],
   "in": [
