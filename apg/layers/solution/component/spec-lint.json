@@ -34,6 +34,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.spec_lint.wording_warning",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_spec_lint.ts",
+      "properties": {}
     }
   ],
   "in": [
