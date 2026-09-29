@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "review-status",
+  "body": "Review status is the lifecycle state of a Feedback item: open (attached), actioned (the coordinator recorded the writer's claim), or resolved (the reviewer's terminal acceptance). Every status other than resolved leaves the item outstanding.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
