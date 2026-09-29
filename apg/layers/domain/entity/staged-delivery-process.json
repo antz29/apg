@@ -18,6 +18,11 @@
       "kind": "drives",
       "source": "requirements.requirement.navigator-staged-flow",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.navigator-staged-flow-decision",
+      "properties": {}
     }
   ]
 }

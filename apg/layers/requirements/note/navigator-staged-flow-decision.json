@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "requirements.constraint.navigator-staged-flow-stated",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.staged-delivery-process",
+      "properties": {}
     }
   ],
   "in": []
