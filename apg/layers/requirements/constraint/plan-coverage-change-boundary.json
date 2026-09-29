@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "plan-coverage-change-boundary",
+  "body": "Scope boundary (prose; assessed by review): this change-set changes ONLY the plan-verify derived-coverage scope computation and the tests that pin it. It does not change the planned-node realization gate, the feedback-resolution gate, the durable node/edge write surface, the suite tools (`apg_plan_*` — including `apg_plan_phases`'s own project/requirement scoping), or `apg plan verify`'s CLI/exit surface; the coverage refusal keeps naming the owning solution node and the uncovered code FQN.",
+  "properties": {
+    "attaches-to": "requirements.requirement.plan-coverage-scoped-to-change-set-delta"
+  },
+  "out": [],
+  "in": []
+}
