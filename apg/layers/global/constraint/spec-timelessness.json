@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "spec-timelessness",
+  "body": "R1 and R5, stated as their prohibitions. A tier-1-3 node states what is, in the present tense: it carries no future-tense or obligation wording (`will`, `must`, `should`, `would`) and no negative rule (`never`, `not`, `no`, `without`); a negative rule lives in a layer-scoped constraint (`global.constraint.spec-constraint-scope`). The spec carries no history, no rejected alternative, no change-log, and no decision or provenance note, and no time-relative wording (`today`, `now`, `currently`, `no longer`, `was`, `previously`); a statement that ages is deleted or rewritten as what is, never annotated.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
