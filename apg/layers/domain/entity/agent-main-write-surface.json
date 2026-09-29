@@ -6,7 +6,13 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.navigator-agent-builder-surface",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",
