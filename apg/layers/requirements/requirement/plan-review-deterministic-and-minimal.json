@@ -7,5 +7,11 @@
     "feature": "plan-coverage"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.user.plan-review-agent",
+      "properties": {}
+    }
+  ]
 }

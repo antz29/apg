@@ -4,6 +4,12 @@
   "name": "plan-review-agent",
   "body": "The distributed `plan-review` agent (product source `opencode-suite/agents/plan-review.md`, embedded into the `apg` binary via `include_str!` and installed by `apg init` into `~/.opencode/agents/`). It reviews a project's plan against the spec — the plan skeleton, each phase, the assembled plan, and per-phase implementation — through the `apg_review_*` tools, holding no plan authoring and no file writes. Its interest is a prompt whose review is both authoritative and economical: coverage decided by the binary's delta coverage check rather than by eyeballing the graph, and every plan node judged against what the change-set's spec delta actually requires — biased toward the smallest plan that does the job.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.plan-review-deterministic-and-minimal",
+      "properties": {}
+    }
+  ],
   "in": []
 }
