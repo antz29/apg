@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "spec-principles-prompts",
-  "body": "The distributed agent prompt files that carry the spec-principles: the writer prompts `opencode-suite/agents/spec-writer.md`, `plan-writer.md`, and `codebase-navigator.md`, and the reviewer prompts `spec-review.md`, `plan-review.md`, and `implementation-phase-reviewer.md`. All six are product source embedded into the `apg` binary via `include_str!` and installed by `apg init` into `~/.opencode/agents/`; the repo's own `.opencode/agents/**` are consumer artifacts and are never edited. A prompt-only surface: it seeds no global constraint, changes no binary code, and adds no lint.",
+  "body": "The distributed agent prompt files that carry the spec rules R1–R5: the writer prompts `opencode-suite/agents/spec-writer.md`, `plan-writer.md`, and `codebase-navigator.md`, and the reviewer prompts `spec-review.md`, `plan-review.md`, and `implementation-phase-reviewer.md`. All six are product source embedded into the `apg` binary via `include_str!` and installed by `apg init` into `~/.opencode/agents/`; the repo's own `.opencode/agents/**` are consumer artifacts and are never edited. The prompt surface carries the rules; the deterministic enforcement is the separate `solution.component.spec-lint` (the `apg spec lint` subcommand and its suite tool).",
   "properties": {},
   "out": [
     {
