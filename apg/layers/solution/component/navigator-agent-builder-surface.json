@@ -4,7 +4,13 @@
   "name": "navigator-agent-builder-surface",
   "body": "The distributed `codebase-navigator` agent prompt file `opencode-suite/agents/codebase-navigator.md` (product source embedded via `include_str!` and installed by `apg init` into `~/.opencode/agents/`) as the surface that must accurately account for the `agent-builder`'s main-write surface WITHOUT restating it. It carries: the reference to the agent-builder's own definition (`opencode-suite/agents/agent-builder.md`) as the authoritative enumeration; the navigator-operational delegation (task `agent-builder` on the MAIN checkout → it commits there → rebase the project worktree onto main → re-scan → the user restarts opencode and reconnects); and the surface-coverage statement (`the `.opencode/agents/**` scaffold, the `opencode.json` agent→model map, and the repo-root `AGENTS.md` hygiene — all three carve-out-1 paths). The three spots this change-set corrects: the project-flow carve-outs paragraph (lines 176-181, names only `.opencode/agents/**`), the \"\"Codebase agents\"\" bullet (lines 508-512, \"\"its only write grant is `.opencode/agents/**`\"\"), and the scoped \"\"Main is never a mutation place\"\" bullet (lines 524-529, names only the `.opencode/agents/**` edits).\n\nDeliberately a NARROW owner, distinct from `solution.component.codebase-navigator-prompt` (the existing narrow owner carrying the per-task cadence, session-isolation, scan-authorization and git-grant prose) and from `solution.component.navigator-prompt-guidance` (which spans BOTH prompt files and would pull `opencode-suite/agents/agent-builder.md` into coverage): its `implemented-by` set is exactly `opencode-suite/agents/codebase-navigator.md`, the one file this requirement edits, so `rust.apg.plan_cmd.verify.coverage_check` maps derived solution coverage 1:1 to that file and pulls in no untouched code. Multiple components may share one code target — the precedent is `solution.component.navigator-staged-flow-prompt` and `solution.component.codebase-navigator-prompt` both owning this file. Product source in `solution.container.opencode-suite`; the repo's own `.opencode/agents/**` are consumer artifacts never edited by a change-set.\n\nimplemented-by: `opencode-suite/agents/codebase-navigator.md`.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/codebase-navigator.md",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "realised-by",
