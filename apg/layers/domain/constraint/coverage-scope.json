@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "coverage-scope",
+  "body": "Coverage is exactly the merge-base delta of the durable spec. Its base is the merge-base of the project branch with the default branch, so a commit on the default branch after that merge-base lies outside the change-set; spine reachability and `Satisfies` do not widen coverage beyond the delta. A `no_claims` warning is advisory and never blocks verify. Coverage is read from the binary's verdict — the per-FQN entries of `apg plan verify`'s `coverage incomplete:` clause — and is not recomputed by inspection.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
