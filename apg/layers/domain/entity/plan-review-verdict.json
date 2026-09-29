@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "plan-review-verdict",
+  "body": "The plan-review agent's verdict on a plan against the change-set delta, in two passes. (a) A DETERMINISTIC coverage verdict: the binary's derived-coverage check (`apg plan verify`, the `domain.entity.plan-coverage` rule) decides which solution nodes' `implemented-by` claims are in scope, and a reported gap is blocking — the agent reproduces the binary's verdict rather than recomputing coverage by inspection. (b) A SEMANTIC verdict on each plan node: whether it does the right thing for the delta, biased toward less code — `deletes` over `modifies`, `modifies` over `creates`, fewer planned nodes — where removing a solution node or an `implemented-by` edge almost always calls for a `deletes` task over the code it pointed at, and any keep/modify instead of that delete must carry a task-note justification.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
