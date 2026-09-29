@@ -29,6 +29,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/agents/plan-review.md",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/implementation-phase-reviewer.md",
+      "properties": {}
     }
   ],
   "in": [
