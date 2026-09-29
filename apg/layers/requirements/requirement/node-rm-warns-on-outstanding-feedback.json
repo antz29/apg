@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "node-rm-warns-on-outstanding-feedback",
+  "body": "`apg node rm` reports each outstanding Feedback item that reviews the node it removes — naming the item and its status — and then removes the node. The removal leaves every such item's record and reviewed-target reference intact, so the writer's claim and the reviewer's resolve-or-reject decision proceed exactly as when the target still resolves. This serves the common case where removing the node is itself the fix the Feedback asks for.\n\nAcceptance criteria:\n- Removing a node that an open or actioned Feedback item reviews prints a warning naming each such item, and the node removal completes.\n- Removing a node whose Feedback items are all resolved completes silently.\n- After the removal, `apg review list` still reports each affected item with its reviewed-target reference.\n- The command succeeds; the writer's claim and the reviewer's decision proceed as for a target that still resolves.",
+  "properties": {
+    "feature": "review-integrity"
+  },
+  "out": [],
+  "in": []
+}
