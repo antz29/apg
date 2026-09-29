@@ -196,3 +196,33 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
 
     Ok((errors, advisories))
 }
+
+/// `apg spec lint` — the argv handler for the `spec` subcommand. The only valid
+/// subcommand is `lint`: resolve the layout root, run [`lint`], print the
+/// non-blocking advisories and then the blocking errors to stderr, and exit
+/// non-zero (via the returned error) when any error is found; a clean spec
+/// prints a one-line summary to stdout. Any other subcommand is a usage error.
+/// `pub` so the CLI dispatch in `main` wires it (`rust.apg.main`).
+pub fn cmd_spec(args: &[String]) -> anyhow::Result<()> {
+    match args.first().map(String::as_str) {
+        Some("lint") => {
+            let apg_root = crate::plan_cmd::require_apg_root()?;
+            let (errors, advisories) = lint(&apg_root)?;
+            for advisory in &advisories {
+                eprintln!("apg: warning: {advisory}");
+            }
+            if errors.is_empty() {
+                println!(
+                    "spec lint: no violations ({} advisory warning(s))",
+                    advisories.len()
+                );
+                return Ok(());
+            }
+            for error in &errors {
+                eprintln!("apg: spec lint: {error}");
+            }
+            anyhow::bail!("spec lint found {} violation(s)", errors.len());
+        }
+        other => anyhow::bail!("usage: apg spec lint (got `{}`)", other.unwrap_or("<none>")),
+    }
+}
