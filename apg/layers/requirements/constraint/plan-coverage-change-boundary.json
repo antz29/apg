@@ -10,11 +10,6 @@
   "in": [
     {
       "kind": "details",
-      "source": "requirements.note.plan-review-agent-reconciliation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "source": "requirements.note.phase-reviewer-coverage-rule-reconciliation",
       "properties": {}
     }

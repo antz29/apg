@@ -21,11 +21,6 @@
       "kind": "realised-by",
       "source": "domain.entity.plan-review-verdict",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.plan-review-agent-reconciliation",
-      "properties": {}
     }
   ]
 }
