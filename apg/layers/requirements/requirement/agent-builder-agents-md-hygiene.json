@@ -6,7 +6,13 @@
   "properties": {
     "feature": "agent-builder-agents-md"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.repo-agent-guide-surface",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
