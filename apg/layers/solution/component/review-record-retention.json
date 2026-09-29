@@ -5,5 +5,11 @@
   "body": "Review-record retention keeps a Feedback record in its transient file until a reviewer closes it: a status update rewrites the record in place, and a removed reviewed target leaves the record in place with its target reference.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
 }
