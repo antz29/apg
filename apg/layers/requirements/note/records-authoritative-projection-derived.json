@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "records-authoritative-projection-derived",
+  "body": "Records and projection relate asymmetrically, and this is what IS rather than what was once broken. The transient `.trans/<tier>/<project>.jsonl` (and `.trans/plans/<project>.jsonl`) record set is authoritative: it carries every Feedback item and its reviewed-target reference, and it holds them until a reviewer closes the item. The branch DB's `Feedback`/`Reviews` projection is derived — a full scan and a durable write-through merge the record set into `db.lbug`, and the projection keeps a `Reviews` edge while the reviewed target resolves. A completeness question is therefore always answered from the record set: `apg review list` and the plan verify gate read it by status, so an item whose target is absent from the layer store and the code graph still appears and still counts.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
