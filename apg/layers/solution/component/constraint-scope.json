@@ -13,11 +13,6 @@
   ],
   "in": [
     {
-      "kind": "realised-by",
-      "source": "domain.entity.spec-lint",
-      "properties": {}
-    },
-    {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
       "properties": {}
