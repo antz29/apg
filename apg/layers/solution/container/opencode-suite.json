@@ -66,6 +66,11 @@
       "kind": "contains",
       "target": "solution.component.worktree-boundary-tests",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.navigator-staged-flow-prompt",
+      "properties": {}
     }
   ],
   "in": [
