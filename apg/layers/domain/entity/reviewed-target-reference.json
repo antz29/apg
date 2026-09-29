@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.feedback-projection",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.review-command-surface",
+      "properties": {}
     }
   ],
   "in": [
