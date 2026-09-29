@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "change-set-spec-delta",
-  "body": "The diff of the durable spec (`apg/layers/**`) between the merge-base of the project branch with the repo's default branch and the branch tip, expressed as added, removed, or re-pointed `implemented-by` code FQNs, added/removed solution nodes, and added or changed requirements. With no pre-existing spec, the whole branch spec is the delta. It is what the plan must describe; it deliberately uses the merge-base (not the default-branch tip) so another project's later commits on main are not pulled into this change-set. It is the durable-spec analogue of the plan's transient task list.",
+  "body": "The diff of the durable spec (`apg/layers/**`) between the merge-base of the project branch with the repo's default branch and the branch tip, expressed as added, removed, or re-pointed `implemented-by` code FQNs, added or removed solution nodes, and added or changed requirements. Its base is the merge-base of the project branch with the default branch. When the default branch carries no spec, the whole branch spec is the delta. It is the durable-spec analogue of the plan's transient task list.",
   "properties": {},
   "out": [],
   "in": [
