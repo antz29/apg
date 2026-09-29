@@ -49,6 +49,11 @@
       "kind": "contains",
       "target": "requirements.requirement.navigator-agent-builder-surface-coherence",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.plan-coverage-scoped-to-change-set-delta",
+      "properties": {}
     }
   ],
   "in": []
