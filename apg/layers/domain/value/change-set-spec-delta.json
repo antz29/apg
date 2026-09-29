@@ -5,5 +5,11 @@
   "body": "The diff of the durable spec (`apg/layers/**`) between the merge-base of the project branch with the repo's default branch and the branch tip, expressed as changed `implemented-by` edges (added, removed, or re-pointed code FQNs) plus added/removed solution nodes. With no pre-existing spec, the whole branch spec is the delta. It is what the plan must describe; it deliberately uses the merge-base (not the default-branch tip) so another project's later commits on main are not pulled into this change-set. It is the durable-spec analogue of the plan's transient task list.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.plan-verification",
+      "properties": {}
+    }
+  ]
 }
