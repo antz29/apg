@@ -38,11 +38,6 @@
       "kind": "contains",
       "source": "requirements.user.reviewer",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.review-record-loss-mechanism",
-      "properties": {}
     }
   ]
 }
