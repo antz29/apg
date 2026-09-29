@@ -50,6 +50,26 @@ pub fn wording_warning(body: &str) -> Option<&'static str> {
     }
 }
 
+/// The shared tier-1-3 wording-advisory selection: a node in a tier-1-3 layer
+/// (`requirements`/`domain`/`solution`) that is not a constraint — a negative
+/// rule legitimately lives in a layer-scoped constraint (R2) — and whose body
+/// carries likely-flagged wording. [`lint`] and the `apg node add` /
+/// `apg node update` write hooks both consume this, so their advisory sets
+/// agree by construction. `pub(crate)` — the write surface's single source of
+/// truth for the selection, never a public unit.
+pub(crate) fn tier_body_warning(
+    layer_dir: &str,
+    node_type: &str,
+    body: &str,
+) -> Option<&'static str> {
+    let is_tier = matches!(layer_dir, "requirements" | "domain" | "solution");
+    if is_tier && node_type != "constraint" {
+        wording_warning(body)
+    } else {
+        None
+    }
+}
+
 /// The whole-durable-spec deterministic check. Returns `(errors, advisories)`:
 /// the blocking rule/delta-gate violations first, the non-blocking tier-1-3
 /// wording advisories second. Read-only — it reads the durable node files, the
@@ -156,15 +176,11 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
         }
     }
 
-    // Advisories — tier-1-3 bodies a reviewer is likely to reject (R1/R5). A
-    // negative rule lives legitimately in a layer-scoped constraint, so a
-    // constraint body is exempt.
+    // Advisories — tier-1-3 bodies a reviewer is likely to reject (R1/R5). The
+    // shared [`tier_body_warning`] selection exempts a constraint: a negative
+    // rule lives legitimately in a layer-scoped constraint.
     for n in &nodes {
-        let is_tier_node = matches!(n.layer.as_str(), "requirements" | "domain" | "solution");
-        if is_tier_node
-            && n.node_type != "constraint"
-            && let Some(msg) = wording_warning(&n.body)
-        {
+        if let Some(msg) = tier_body_warning(&n.layer, &n.node_type, &n.body) {
             advisories.push(format!("{}: {msg}", fqn_of(n)));
         }
     }

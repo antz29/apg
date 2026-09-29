@@ -170,6 +170,14 @@ fn node_add_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
         out: Vec::new(),
         in_edges: Vec::new(),
     };
+    // Advisory-only wording warning (R1/R5): a proposed tier-1-3 body carrying
+    // likely-flagged wording prints the shared advisory, but the write proceeds
+    // unchanged — the author decides. The selection mirrors `apg spec lint`
+    // ([`crate::spec_lint::tier_body_warning`]), so a constraint is exempt
+    // (a negative rule lives legitimately in a layer-scoped constraint, R2).
+    if let Some(msg) = crate::spec_lint::tier_body_warning(layer.layer_dir(), &pos[1], &node.body) {
+        eprintln!("apg: warning: {f}: {msg}");
+    }
     Ok(Change {
         writes: vec![node],
         deletes: Vec::new(),
