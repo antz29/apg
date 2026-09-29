@@ -127,6 +127,10 @@ fn plan_records(with_feedback: bool) -> Vec<Record> {
             from: "foo/plan".into(),
             to: "foo/plan.phase-01".into(),
         },
+        Record::Satisfies {
+            from: "foo/plan.phase-01".into(),
+            to: "requirements.requirement.timer".into(),
+        },
         Record::Task {
             fqn: "foo/plan.phase-01.task-1".into(),
             title: "T".into(),
