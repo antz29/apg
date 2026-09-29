@@ -6,7 +6,13 @@
   "properties": {
     "feature": "spec-principles"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.spec-lint",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
