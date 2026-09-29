@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.requirement.plan-review-deterministic-and-minimal",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "domain.entity.plan-review-verdict",
+      "properties": {}
     }
   ],
   "in": []
