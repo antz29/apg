@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "spec-authoring",
+  "body": "The authoring discipline of the durable spec: the content contract every distributed spec-writing/planning agent applies when it authors a spec node, and every reviewing agent applies when it reviews one. Its concern is that a spec node states the target reality — what is, or what needs to become true — and never a history of what changed, what was decided against, or how a divergence was reconciled.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [],
+  "in": []
+}
