@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "feedback-survives-target-removal",
+  "body": "A project's review state records every Feedback item attached during the project, and each item reaches a reviewer's terminal decision through `apg review list` and the plan verify gate regardless of what happens to the node the item reviews.",
+  "properties": {
+    "feature": "review-integrity"
+  },
+  "out": [],
+  "in": []
+}
