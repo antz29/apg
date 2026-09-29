@@ -15,7 +15,7 @@ use std::process::Command;
 /// the `[package] version` line on every release: the assertions below fail
 /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
 /// advertised release), so a bump commit cannot silently skip it.
-const RELEASE_VERSION: &str = "0.19.0";
+const RELEASE_VERSION: &str = "0.19.1";
 
 /// The `version = "..."` declared directly under a Cargo.toml `[package]`
 /// header.
