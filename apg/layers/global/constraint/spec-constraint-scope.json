@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "spec-constraint-scope",
+  "body": "A constraint is prose (\"X must hold\"), and its layer is its scope: a `global.constraint.*` binds the whole durable spec for every APG instance, and a `<tier>.constraint.*` (requirements/domain/solution/implementation) binds that tier. A constraint names no single node — `attaches-to` is not part of the model. The write surface refuses an `attaches-to` property on a new constraint, and `apg spec lint` reports every constraint that carries one. Structure and references hold deterministically at write time; satisfaction of the prose holds by review.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
