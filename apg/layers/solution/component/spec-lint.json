@@ -24,6 +24,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.spec_lint.cmd_spec",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.spec_lint.lint",
+      "properties": {}
     }
   ],
   "in": [
