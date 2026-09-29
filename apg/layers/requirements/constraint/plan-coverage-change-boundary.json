@@ -7,11 +7,5 @@
     "attaches-to": "requirements.requirement.plan-coverage-scoped-to-change-set-delta"
   },
   "out": [],
-  "in": [
-    {
-      "kind": "details",
-      "source": "requirements.note.phase-reviewer-coverage-rule-reconciliation",
-      "properties": {}
-    }
-  ]
+  "in": []
 }
