@@ -14,6 +14,11 @@
       "kind": "details",
       "target": "domain.entity.plan-review-verdict",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.plan-review-prompt",
+      "properties": {}
     }
   ],
   "in": []
