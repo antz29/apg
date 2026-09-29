@@ -29,6 +29,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.spec_lint.lint",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.spec_lint.wording_warning",
+      "properties": {}
     }
   ],
   "in": [
