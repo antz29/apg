@@ -76,6 +76,11 @@
       "kind": "contains",
       "target": "solution.component.agent-builder-agents-md-hygiene",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.plan-review-prompt",
+      "properties": {}
     }
   ],
   "in": [
