@@ -18,11 +18,6 @@
       "kind": "contains",
       "source": "requirements.requirement.feedback-survives-target-removal",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.node-rm-warn-not-block-decision",
-      "properties": {}
     }
   ]
 }
