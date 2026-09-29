@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "spec-authoring",
-  "body": "The authoring discipline of the durable spec: the content contract every distributed spec-writing/planning agent applies when it authors a spec node, and every reviewing agent applies when it reviews one. Its concern is that a spec node states the target reality — what is, or what needs to become true — in a positive, present-tense definition, that a node carries at most one note deepening what is, and that a deterministic linter (`apg spec lint` / `apg_spec_lint`) checks the R2/R3/R4 shape and the change-set delta gates across the whole durable spec, reporting violations as errors while the write surface warns on likely-forbidden wording.",
+  "body": "The authoring discipline of the durable spec: the content contract every distributed spec-writing/planning agent applies when it authors a spec node, and every reviewing agent applies when it reviews one. Its concern is that a spec node states the target reality in a positive, present-tense definition, that a node carries at most one note deepening what is, and that a deterministic linter (`apg spec lint` / `apg_spec_lint`) checks the R2/R3/R4 shape and the change-set delta gates across the whole durable spec, reporting violations as errors while the write surface warns on likely-forbidden wording.",
   "properties": {
     "attribute": "supporting"
   },
