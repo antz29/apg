@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.plan_cmd.verify.solution_nodes_added_on_branch",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.plan_cmd.verify.plan_verify_at",
       "properties": {}
     }
