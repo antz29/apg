@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "domain.entity.staged-delivery-process",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "solution.component.navigator-staged-flow-prompt",
+      "properties": {}
     }
   ],
   "in": []
