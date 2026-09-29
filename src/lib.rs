@@ -103,6 +103,10 @@ USAGE:
                               refuses unsafe states, never the default branch)
   apg review <sub> …          Writer↔reviewer feedback cycle:
                               add/action/resolve/reject/list
+  apg spec <sub> …            Deterministic, read-only durable-spec lint:
+                              lint — report the R2/R3/R4 rule violations and
+                              the change-set delta gates as errors, plus the
+                              non-blocking tier-1-3 wording advisories
   apg node <sub> …            Durable node-file model mutations:
                               add/update/rm (type-as-argument, writes apg/layers;
                               the name is identity and is never updatable)
@@ -156,7 +160,8 @@ fn session_cmd(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// The `apg` entry point: dispatches the CLI subcommands (`init`, `query`,
-/// `scan`, `plan`, `review`, `project`, `node`, `edge`, `session`), prints help
+/// `scan`, `plan`, `review`, `spec`, `project`, `node`, `edge`, `session`),
+/// prints help
 /// for `--help`/no args, and turns a returned error into a non-zero exit. The
 /// binary embeds the apg opencode suite — the tool set (`SUITE_TOOLS`) and the
 /// seven distributed agents (`AGENTS`) delivered by `apg init` — whose prompts
@@ -175,6 +180,7 @@ pub fn main() {
         "scan" => cmd_scan(&raw[2..]),
         "plan" => plan_cmd::cmd_plan(&raw[2..]),
         "review" => review_cmd::cmd_review(&raw[2..]),
+        "spec" => spec_lint::cmd_spec(&raw[2..]),
         "project" => project_cmd::cmd_project(&raw[2..]),
         "node" => node_cmd::cmd_node(&raw[2..]),
         "edge" => node_cmd::cmd_edge(&raw[2..]),
