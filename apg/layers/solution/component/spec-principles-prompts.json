@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/agents/codebase-navigator.md",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/spec-review.md",
+      "properties": {}
     }
   ],
   "in": [
