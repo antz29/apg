@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "constraint-scope",
-  "body": "The constraint-scope law, enforced on the write surface and carried on the scan surface: `rust.apg.layers.write.validate_change` refuses a new or changed constraint `attaches-to` whose target is absent or in the wrong layer, while `rust.apg.layers.validate.eval_constraint` is the shared structural check both the write path and the scan path call. The scan path `rust.apg.layers.tree.ingest_tree` loads an existing constraint carrying an `attaches-to`, and `apg spec lint` reports it.",
+  "body": "`attaches-to` is not part of the model. `rust.apg.layers.write.validate_change` refuses any `attaches-to` on a new constraint, and any added or changed `attaches-to` value whatever its target; an unchanged existing `attaches-to` value passes, so existing constraints stay authorable. `rust.apg.layers.validate.eval_constraint` is the shared structural check (name, layer/type, uniqueness) that both the write path and the scan path call. The scan path `rust.apg.layers.tree.ingest_tree` loads existing constraints carrying an `attaches-to`, and `apg spec lint` reports them.",
   "properties": {},
   "out": [
     {
