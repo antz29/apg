@@ -509,25 +509,32 @@ pub(crate) fn plan_rm(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// Shared remove cascade: drop every node record at `fqns` plus every incident
-/// edge ([`artifacts::remove_node`]), then garbage-collect any `Feedback`/`Note`
-/// record left with no remaining incident `Reviews`/`Details` edge — so no edge
-/// points at a removed record and no orphan Feedback/Note survives. Pure: the
-/// caller rewrites the store exactly once ([`persist_rm`]), so all the cascade
-/// work is in memory and any failure before that single write leaves the
-/// on-disk plan untouched (plan-rm-atomic).
-fn cascade_remove(records: &mut Vec<Record>, fqns: &[String]) {
+/// edge ([`artifacts::remove_node`]), then garbage-collect any `Note` record
+/// left with no remaining `Details` edge. `Feedback` is the deliberate
+/// exception: its record — and the `Reviews` edge naming what it reviewed —
+/// outlives the removed target, because a review item is closed by a reviewer,
+/// never dropped by the removal of the node it reviews
+/// (feedback-persists-across-target-loss). Pure: the caller rewrites the store
+/// exactly once ([`persist_rm`]), so all the cascade work is in memory and any
+/// failure before that single write leaves the on-disk plan untouched
+/// (plan-rm-atomic).
+pub(crate) fn cascade_remove(records: &mut Vec<Record>, fqns: &[String]) {
+    // `artifacts::remove_node` strips EVERY edge incident to a removed node —
+    // including the `Reviews` edge whose `to` is that node. Capture those
+    // references first and re-install them after the strip, so an orphaned
+    // Feedback still names the target it reviews.
+    let removed: BTreeSet<&str> = fqns.iter().map(String::as_str).collect();
+    let retained_reviews: Vec<Record> = records
+        .iter()
+        .filter(|r| matches!(r, Record::Reviews { to, .. } if removed.contains(to.as_str())))
+        .cloned()
+        .collect();
     for fqn in fqns {
         artifacts::remove_node(records, fqn);
     }
-    // A Feedback/Note whose only attachment was a removed node is an orphan:
-    // its Reviews/Details edge is gone, so the record must go too.
-    let reviewed: BTreeSet<String> = records
-        .iter()
-        .filter_map(|r| match r {
-            Record::Reviews { from, .. } => Some(from.clone()),
-            _ => None,
-        })
-        .collect();
+    records.extend(retained_reviews);
+    // A Note whose only attachment was a removed node is an orphan: its
+    // Details edge is gone, so the record must go too.
     let detailed: BTreeSet<String> = records
         .iter()
         .filter_map(|r| match r {
@@ -535,11 +542,7 @@ fn cascade_remove(records: &mut Vec<Record>, fqns: &[String]) {
             _ => None,
         })
         .collect();
-    records.retain(|r| match r {
-        Record::Feedback { fqn, .. } => reviewed.contains(fqn.as_str()),
-        Record::Note { fqn, .. } => detailed.contains(fqn.as_str()),
-        _ => true,
-    });
+    records.retain(|r| !matches!(r, Record::Note { fqn, .. } if !detailed.contains(fqn.as_str())));
 }
 
 /// Commit one rm: a single whole-record write-through of `records`. An emptied
@@ -561,9 +564,10 @@ fn persist_rm(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Res
 /// Core of the plan-level `rm` (`apg plan rm <project>`): refuse while the plan
 /// still carries any phase/task/planned node (naming every dependent and the
 /// `--force` escape); `--force` cascades the WHOLE plan — the Plan record,
-/// every phase, task and planned node, every dependent Feedback/Note, and all
-/// their incident Contains/Gates/Satisfies/Reviews/Details edges — in one
-/// in-memory pass. The emptied store is deleted ([`persist_rm`]), so a
+/// every phase, task and planned node, every incident edge, and every Note
+/// orphaned by the removal — in one in-memory pass. Feedback records (and their
+/// `Reviews` edges) survive deliberately ([`cascade_remove`]). The emptied
+/// store is deleted ([`persist_rm`]), so a
 /// following `apg plan add <project>` recreates it. An absent plan is an error
 /// and the stored file is left untouched (nothing is written before the whole
 /// cascade is computed).
@@ -601,9 +605,10 @@ pub fn plan_rm_at(apg_root: &Path, project: &str, force: bool) -> anyhow::Result
 
 /// Core of the `rm phase` arm: refuse while the phase still has any task
 /// (naming the task and the `--force` escape). BOTH paths cascade the phase plus
-/// every incident edge and the dependent Feedback/Note records; the `--force`
-/// path also removes the phase's tasks. A phase whose only dependents are
-/// Feedback/Note is removable WITHOUT `--force`. An absent phase is an error.
+/// every incident edge and every Note orphaned by the removal (its Feedback
+/// records survive, [`cascade_remove`]); the `--force` path also removes the
+/// phase's tasks. A phase whose only dependents are Feedback/Note is removable
+/// WITHOUT `--force`. An absent phase is an error.
 pub fn plan_rm_phase_at(apg_root: &Path, project: &str, n: u32, force: bool) -> anyhow::Result<()> {
     let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
@@ -637,10 +642,10 @@ pub fn plan_rm_phase_at(apg_root: &Path, project: &str, n: u32, force: bool) -> 
 }
 
 /// Core of the `rm task` arm: refuse when the task is `done` or has ANY
-/// incident Feedback (naming the status/Feedback and the `--force` escape — a
-/// removed task would otherwise strand its resolved Feedback mirror); `--force`
-/// cascades the task, its Contains edge, its incident Notes/Reviews edges and
-/// any Feedback/Note left orphaned. An absent task is an error.
+/// incident Feedback (naming the status/Feedback and the `--force` escape);
+/// `--force` cascades the task, its Contains edge, and any Note orphaned by the
+/// removal, while its Feedback records (and their `Reviews` edges) survive
+/// deliberately ([`cascade_remove`]). An absent task is an error.
 pub fn plan_rm_task_at(
     apg_root: &Path,
     project: &str,
