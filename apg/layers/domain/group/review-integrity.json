@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "review-integrity",
+  "body": "The review-integrity group is the branch-local review state of a change-set: the Feedback items a project carries, the targets they reference, the status lifecycle, and the process that drives each item to a terminal decision.",
+  "properties": {
+    "attribute": "core"
+  },
+  "out": [],
+  "in": []
+}
