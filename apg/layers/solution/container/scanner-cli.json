@@ -156,6 +156,11 @@
       "kind": "contains",
       "target": "solution.component.feedback-projection",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.node-removal-feedback-notice",
+      "properties": {}
     }
   ],
   "in": [
