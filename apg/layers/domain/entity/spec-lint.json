@@ -12,6 +12,11 @@
       "kind": "drives",
       "source": "requirements.requirement.deterministic-spec-lint",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.spec-authoring",
+      "properties": {}
     }
   ]
 }

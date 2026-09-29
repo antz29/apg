@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.spec-principles-prompts",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.spec-lint",
+      "properties": {}
     }
   ],
   "in": [
