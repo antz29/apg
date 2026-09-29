@@ -71,6 +71,11 @@
       "kind": "contains",
       "target": "solution.component.navigator-staged-flow-prompt",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.agent-builder-agents-md-hygiene",
+      "properties": {}
     }
   ],
   "in": [

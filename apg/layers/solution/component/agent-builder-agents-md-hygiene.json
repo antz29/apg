@@ -21,6 +21,11 @@
       "kind": "details",
       "source": "requirements.note.agent-builder-agents-md-hygiene",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
     }
   ]
 }
