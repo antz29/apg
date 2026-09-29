@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.review-integrity",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.feedback-persists-across-target-loss",
+      "properties": {}
     }
   ]
 }
