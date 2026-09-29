@@ -5,5 +5,11 @@
   "body": "The staged-flow guidance in the distributed `codebase-navigator` agent prompt file `opencode-suite/agents/codebase-navigator.md` (product source embedded via `include_str!` and installed by `apg init` into `~/.opencode/agents/`): the STRICT, canonical, ordered end-to-end change-set lifecycle the navigator must state and follow — write spec (`spec-writer`) → review spec (`spec-review`) → write plan skeleton (`plan-writer`) → review plan skeleton (`plan-review`) → write plan phases/tasks (`plan-writer`) → review plan phases (`plan-review`) → holistic plan review (`plan-review`) → implement (owning `implementer`/`*-implementer`) → implementation phase review (`implementation-phase-reviewer`) — together with the no-skip invariant and the gated-implementation invariant (implementation does not begin until the spec and the plan are reviewed green).\n\nDeliberately a NARROW owner: its `implemented-by` set is exactly `opencode-suite/agents/codebase-navigator.md`, the one file this change-set edits, so `rust.apg.plan_cmd.verify.coverage_check` maps derived solution coverage 1:1 to that file and pulls in no untouched code. Distinct from the broad `solution.component.navigator-prompt-guidance` (implemented-by BOTH the navigator and agent-builder prompts) and from `solution.component.codebase-navigator-prompt` (the existing narrow owner that carries the per-task cadence, session-isolation, scan-authorization and git-grant prose). Two components may share one code target — the precedent is `solution.component.navigator-isolation-coherence-test` and `solution.component.navigator-scan-permission-coherence-test` both owning `rust.main_e2e.e2e.coordinator_agent_carries_review_action_and_dispatch_prose`. Product source in `solution.container.opencode-suite`; the repo's own `.opencode/agents/**` are consumer artifacts never edited by a change-set.\n\nimplemented-by: `opencode-suite/agents/codebase-navigator.md`.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.staged-delivery-process",
+      "properties": {}
+    }
+  ]
 }
