@@ -141,6 +141,11 @@
       "kind": "contains",
       "target": "solution.component.review-record-retention",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.review-command-surface",
+      "properties": {}
     }
   ],
   "in": [
