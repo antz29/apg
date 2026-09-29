@@ -18,5 +18,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.plan-coverage-scoped-to-change-set-delta",
+      "properties": {}
+    }
+  ]
 }
