@@ -31,6 +31,7 @@ pub mod review_cmd;
 pub mod scan;
 pub mod schema;
 pub mod session;
+pub mod spec_lint;
 pub mod specs;
 pub mod splice;
 pub mod testutil;
