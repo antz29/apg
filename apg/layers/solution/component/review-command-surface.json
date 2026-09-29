@@ -25,6 +25,11 @@
       "kind": "realised-by",
       "source": "domain.entity.reviewed-target-reference",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.feedback-lifecycle",
+      "properties": {}
     }
   ]
 }
