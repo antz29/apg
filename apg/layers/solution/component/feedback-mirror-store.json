@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.specs.project_transient_files",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.review_cmd.write_transient_feedback",
+      "properties": {}
     }
   ],
   "in": [
