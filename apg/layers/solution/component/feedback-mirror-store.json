@@ -5,5 +5,11 @@
   "body": "The feedback mirror store is the gitignored `.trans/plans/<project>.jsonl` and `.trans/<tier>/<project>.jsonl` file set that holds a project's Feedback records and their Reviews target references, together with the enumerators that resolve a project's six transient files and the writer that appends a new record pair.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
 }

@@ -131,6 +131,11 @@
       "kind": "contains",
       "target": "solution.component.worktree-isolation-guide",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.feedback-mirror-store",
+      "properties": {}
     }
   ],
   "in": [
