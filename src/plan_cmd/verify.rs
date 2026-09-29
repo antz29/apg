@@ -227,6 +227,43 @@ pub struct CoverageReport {
     pub no_claims: Vec<String>,
 }
 
+/// The merge-base durable-spec delta the pure coverage decision consumes: the
+/// branch's `apg/layers/**` against the merge-base with the repo's default
+/// branch. It is the obligation set [`coverage_check`] reads, and the carrier
+/// phase 0's linter reuses as the one source of truth for the delta gates.
+/// Pure data — the impure git diff stays in the caller (`change_set_spec_delta`)
+/// so the coverage decision itself stays a pure fn.
+///
+/// The law: `requirements.requirement.plan-coverage-scoped-to-change-set-delta`
+/// (clauses 2-3, 6 and 7) and `domain.entity.plan-coverage`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SpecDelta {
+    /// The delta's ADDED or RE-POINTED `implemented-by` claims, each an
+    /// `(owning solution node FQN, code FQN)` pair (law clause 2): every added
+    /// or changed edge obliges its code FQN to be touched by a plan task
+    /// (verb- and status-agnostic, compared by language-agnostic code identity
+    /// so `rust.apg.x` ≡ `apg.x`).
+    pub added_claims: Vec<(String, String)>,
+    /// The delta's REMOVED `implemented-by` claims, each an
+    /// `(owning solution node FQN, code FQN)` pair (law clause 3): a removed
+    /// edge — or a removed solution node carrying one — obliges a
+    /// `deletes`/`modifies` task over its code FQN. Kept distinct from
+    /// [`Self::added_claims`] so a RE-POINTED edge keeps BOTH the old and the
+    /// new code FQN in scope.
+    pub removed_claims: Vec<(String, String)>,
+    /// The in-scope solution node FQNs (`solution.system.<name>` /
+    /// `solution.container.<name>` / `solution.component.<name>`) declaring NO
+    /// `implemented-by` edge — the `no_claims` warning (law clause 6), never a
+    /// blocker: with no claim there is no FQN to touch.
+    pub no_claims: Vec<String>,
+    /// The delta's ADDED-or-CHANGED requirement FQNs
+    /// (`requirements.requirement.<name>`) the requirement-Satisfies gate
+    /// checks against the phase `Satisfies` set (law clause 7): a requirement
+    /// the delta adds or changes must be `Satisfies`'d by at least one plan
+    /// phase, the refusal naming the requirement FQN.
+    pub changed_requirements: Vec<String>,
+}
+
 /// The **branch delta** — the solution-layer node FQNs present on the current
 /// branch but NOT on the repo's default branch. The default branch is read
 /// from the public [`crate::git::repo_identity`] (`default_branch`); the
