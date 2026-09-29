@@ -4,7 +4,13 @@
   "name": "feedback-projection",
   "body": "The feedback projection is the branch DB's Feedback and Reviews projection: a full scan and a durable write-through each merge the project's transient record set into `db.lbug`, recording every Feedback node and each reviewed-target reference it resolves.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.finalize_graph",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
