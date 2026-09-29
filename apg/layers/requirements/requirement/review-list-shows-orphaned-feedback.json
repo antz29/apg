@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.reviewed-target-reference",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.service.feedback-lifecycle",
+      "properties": {}
     }
   ],
   "in": [
