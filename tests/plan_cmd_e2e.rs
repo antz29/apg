@@ -2837,6 +2837,212 @@ mod e2e {
     }
 
     // ------------------------------------------------------------------
+    // Merge-base delta coverage: the base is merge-base(branch, default) —
+    // never the default tip — and a removed edge/node or a re-pointed edge is
+    // scoped by the REAL git diff against that base.
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn coverage_uses_merge_base_not_the_default_tip() {
+        // The delta base is merge-base(branch, default), NOT the default tip:
+        // a durable-spec commit that lands on the default branch AFTER the
+        // project branch is cut is not pulled into this change-set's scope. The
+        // post-cut `main`-only solution node is absent from the branch AND from
+        // the merge-base, so its claim forces no task — a default-TIP base
+        // would treat it as a REMOVED claim and refuse.
+        let repo = Repo::new("verify-merge-base");
+        // A baseline node on `main` BEFORE the branch is cut (part of the
+        // merge-base, unchanged on the branch -> exempt).
+        repo.write(
+            "apg/layers/solution/component/base.json",
+            &serde_json::to_string_pretty(&nf(
+                "solution",
+                "component",
+                "base",
+                &[("implemented-by", "github.com/x/y.Base")],
+            ))
+            .unwrap(),
+        );
+        repo.commit_all("author the baseline solution node");
+        let wt = repo.start_project("foo");
+        db_at(&wt);
+        let apg_root = wt.join(specs::LAYOUT);
+
+        // A post-cut commit on the DEFAULT branch: `main` now carries a
+        // solution node the branch does NOT have.
+        repo.write(
+            "apg/layers/solution/component/main-only.json",
+            &serde_json::to_string_pretty(&nf(
+                "solution",
+                "component",
+                "main-only",
+                &[("implemented-by", "github.com/x/y.MainOnly")],
+            ))
+            .unwrap(),
+        );
+        repo.commit_all("advance main after the branch cut");
+
+        // The branch carries one node whose claim IS touched, so the delta is
+        // non-empty and verify is not passing on a vacuous empty delta.
+        write_solution_node(
+            &apg_root,
+            "component",
+            "branch",
+            &["github.com/x/y.Branch"],
+        );
+        let sha = wt_commit_paths(
+            &wt,
+            &["apg/layers/solution/component/branch.json"],
+            "author the branch solution node",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        let mut records = bare_plan();
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        records.push(task_rec("modifies", "github.com/x/y.Branch", ""));
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+
+        // The branch claim is covered and the post-cut `main`-only node is NOT
+        // in the merge-base delta -> green.
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
+
+        // Sanity: drop the branch touch -> ONLY the branch claim is a gap; the
+        // `main`-only node is never named, proving the base is the merge-base.
+        let records = bare_plan();
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("solution.component.branch"), "{msg}");
+        assert!(msg.contains("github.com/x/y.Branch"), "{msg}");
+        assert!(!msg.contains("main-only"), "{msg}");
+        assert!(!msg.contains("github.com/x/y.MainOnly"), "{msg}");
+
+        testutil::remove(&repo);
+    }
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn coverage_removed_implemented_by_edge_requires_a_task() {
+        // The REAL merge-base git diff drives the delta: one test covers all
+        // three shapes — (a) a REMOVED implemented-by edge, (b) a REMOVED
+        // solution node (its node file deleted on the branch — a distinct diff
+        // path from removing one edge), and (c) a RE-POINTED implemented-by
+        // edge on a node that existed on `main` (so BOTH the old and the new
+        // code FQN are in scope). Each refuses (naming the owning solution node
+        // and the lost FQN) when no task touches it, and passes with a task.
+        let repo = Repo::new("verify-removed-claim");
+        // Author the three baseline nodes on `main` BEFORE the branch is cut.
+        let base = |node_type: &str, name: &str, code: &str| {
+            repo.write(
+                &format!("apg/layers/solution/{node_type}/{name}.json"),
+                &serde_json::to_string_pretty(&nf(
+                    "solution",
+                    node_type,
+                    name,
+                    &[("implemented-by", code)],
+                ))
+                .unwrap(),
+            );
+        };
+        base("component", "edge-removed", "github.com/x/y.EdgeCode");
+        base("component", "node-removed", "github.com/x/y.NodeCode");
+        base("component", "repointed", "github.com/x/y.OldCode");
+        repo.commit_all("author the baseline solution nodes");
+        let wt = repo.start_project("foo");
+        db_at(&wt);
+        let apg_root = wt.join(specs::LAYOUT);
+
+        // (a) remove the edge (keep the node); (b) delete the node file;
+        // (c) re-point the edge to a new code FQN.
+        write_solution_node(&apg_root, "component", "edge-removed", &[]);
+        std::fs::remove_file(apg::layers::node_file_path(
+            &apg_root,
+            apg::layers::Layer::Solution,
+            "component",
+            "node-removed",
+        ))
+        .unwrap();
+        write_solution_node(
+            &apg_root,
+            "component",
+            "repointed",
+            &["github.com/x/y.NewCode"],
+        );
+        let sha = wt_commit_paths(
+            &wt,
+            &[
+                "apg/layers/solution/component/edge-removed.json",
+                "apg/layers/solution/component/node-removed.json",
+                "apg/layers/solution/component/repointed.json",
+            ],
+            "remove an edge, remove a node, re-point an edge",
+        );
+        testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
+
+        // No task -> every removed/added claim is a gap; assert each lost FQN
+        // and its owning solution node is named.
+        let records = bare_plan();
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("coverage incomplete"), "{msg}");
+        for (solution, code) in [
+            (
+                "solution.component.edge-removed",
+                "github.com/x/y.EdgeCode",
+            ),
+            (
+                "solution.component.node-removed",
+                "github.com/x/y.NodeCode",
+            ),
+            ("solution.component.repointed", "github.com/x/y.OldCode"),
+            ("solution.component.repointed", "github.com/x/y.NewCode"),
+        ] {
+            assert!(msg.contains(solution), "{solution} not named in: {msg}");
+            assert!(msg.contains(code), "{code} not named in: {msg}");
+        }
+
+        // A `renames` task covering BOTH re-pointed ends (source `OldCode`,
+        // destination `NewCode`) plus `deletes` tasks over the two removed
+        // claims -> green.
+        let mut records = bare_plan();
+        for (task, verb, target, new_fqn) in [
+            ("task-1", "deletes", "github.com/x/y.EdgeCode", ""),
+            ("task-2", "deletes", "github.com/x/y.NodeCode", ""),
+            (
+                "task-3",
+                "renames",
+                "github.com/x/y.OldCode",
+                "github.com/x/y.NewCode",
+            ),
+        ] {
+            let fqn = format!("foo/plan.phase-01.{task}");
+            records.push(Record::Contains {
+                from: "foo/plan.phase-01".to_string(),
+                to: fqn.clone(),
+            });
+            records.push(Record::Task {
+                fqn,
+                title: "T".to_string(),
+                kind: "source".to_string(),
+                tier: String::new(),
+                status: "pending".to_string(),
+                verb: verb.to_string(),
+                target: target.to_string(),
+                new_fqn: new_fqn.to_string(),
+            });
+        }
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
+
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
     // task-5 (coverage tests): the task-text audit gaps — the green path
     // across MULTIPLE solution nodes, both halves of a renames/moves pair as
     // touches, and a refusal that names ONLY the uncovered node.
