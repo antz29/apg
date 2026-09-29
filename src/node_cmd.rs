@@ -208,10 +208,21 @@ fn node_update_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change
         &parse_properties(&p),
         &parse_unset_properties(&p),
     )?;
+    let f = fqn(layer, &pos[1], &pos[2]);
+    // Advisory-only wording warning (R1/R5): when the supplied `--body` carries
+    // likely-flagged wording, print the shared advisory but let the update
+    // proceed unchanged — the author decides. Only `--body` carries wording, so
+    // an update with no body is silent; the selection mirrors `apg spec lint`
+    // ([`crate::spec_lint::tier_body_warning`]).
+    if let Some(b) = body.as_deref()
+        && let Some(msg) = crate::spec_lint::tier_body_warning(layer.layer_dir(), &pos[1], b)
+    {
+        eprintln!("apg: warning: {f}: {msg}");
+    }
     Ok(Change {
         writes: vec![updated],
         deletes: Vec::new(),
-        message: format!("Updated node {}", fqn(layer, &pos[1], &pos[2])),
+        message: format!("Updated node {f}"),
     })
 }
 
