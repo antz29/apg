@@ -4,7 +4,13 @@
   "name": "verify-feedback-stage",
   "body": "The verify feedback stage reads a project's transient review files and counts every Feedback record by status, refusing the plan verify gate on any record whose status is not resolved.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.plan_cmd.verify.plan_verify_at",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
