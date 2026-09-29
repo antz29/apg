@@ -161,6 +161,11 @@
       "kind": "contains",
       "target": "solution.component.node-removal-feedback-notice",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.plan-coverage-check",
+      "properties": {}
     }
   ],
   "in": [
