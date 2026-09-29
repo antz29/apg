@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.layers.validate.eval_constraint",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.layers.write.validate_change",
+      "properties": {}
     }
   ],
   "in": [
