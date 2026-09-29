@@ -4585,15 +4585,21 @@ mod e2e {
             );
             assert_no_orphans(&recs);
 
-            // The forced task cascade removes the task + its orphan feedback.
+            // The forced task cascade removes the task; its Feedback record
+            // and its Reviews reference survive deliberately (a review item is
+            // closed by a reviewer, never dropped by target removal).
             cmd_plan(&av(&["rm", "foo", "task", "1", "1", "--force"])).unwrap();
             let recs = specs::read_jsonl(&plan_path).unwrap();
             assert!(!recs.iter().any(|r| matches!(r, Record::Task { .. })));
             assert!(
-                !recs
-                    .iter()
+                recs.iter()
                     .any(|r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-1")),
-                "the task's feedback must not survive as an orphan"
+                "the task's feedback survives its target's removal"
+            );
+            assert!(
+                recs.iter().any(|r| matches!(r, Record::Reviews { from, to }
+                    if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1")),
+                "the retained feedback keeps its Reviews reference"
             );
             assert_no_orphans(&recs);
 
@@ -4606,17 +4612,26 @@ mod e2e {
                     .any(|r| matches!(r, Record::PlanPhase { .. }))
             );
 
-            // `rm foo --force` deletes the emptied store; a following rm is a hard
-            // error and a following `plan add` recreates the plan.
+            // `rm foo --force` cascades every plan-family record but leaves the
+            // store in place while the retained Feedback survives — a store
+            // with surviving feedback must not be deleted.
             cmd_plan(&av(&["rm", "foo", "--force"])).unwrap();
-            assert!(!plan_path.exists(), "the emptied store must be deleted");
-            let err = cmd_plan(&av(&["rm", "foo", "--force"])).unwrap_err();
             assert!(
-                err.to_string().contains("no plan for project `foo`"),
-                "{err}"
+                plan_path.exists(),
+                "a store with surviving feedback must not be deleted"
             );
-            cmd_plan(&av(&["add", "foo"])).unwrap();
-            assert!(plan_path.exists(), "rm→add round-trips");
+            let recs = specs::read_jsonl(&plan_path).unwrap();
+            assert!(
+                recs.iter()
+                    .any(|r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-1")),
+                "the task's feedback survives the plan cascade"
+            );
+            assert!(
+                recs.iter().any(|r| matches!(r, Record::Reviews { from, to }
+                    if from == "foo/feedback-1" && to == "foo/plan.phase-01.task-1")),
+                "the retained feedback keeps its Reviews reference"
+            );
+            assert_no_orphans(&recs);
         });
 
         testutil::remove(&repo);
