@@ -378,23 +378,25 @@ is **no `apg/.worktrees/*/AGENTS.md` mirror** and **no broader glob**.
   change-set flow, the worktree-only law, the coordinator-mediated feedback
   cycle, plan/spec ownership, and the push/tag human-approval law. Where it
   contradicts a rule, correct the `AGENTS.md` prose to match.
-- **must NOT duplicate the canonical change-set process**, which is owned
-  SOLELY by the `codebase-navigator` prompt. Where `AGENTS.md` restates that
-  process, **remove the duplicated prose or repoint it at the navigator as its
-  owner** — `AGENTS.md` references the navigator; it never re-specifies the
-  process.
+- **must carry NOTHING about the canonical change-set flow** — not a duplicate,
+  not a summary, and **not even a reference or pointer** to the
+  `codebase-navigator` prompt, which solely owns the flow. Where `AGENTS.md`
+  carries any flow content, **the agent-builder AUDITS the file and REMOVES that
+  content**: it never ADDS a reference/pointer to the navigator and never
+  restates the flow.
 
 This rule binds **every** apg project. A repo-specific arrangement — for example,
 the apg repository itself giving its local `build-implementer` an `AGENTS.md`
 edit touch — is a local convention and does NOT relax it.
 
 **Only when present.** Act only when the repo already has an `AGENTS.md`: never
-manufacture one merely to point at the change-set process. If none exists, write
+manufacture one merely to carry change-set flow content. If none exists, write
 nothing here.
 
 **Non-destructive.** Preserve ALL repo-specific `AGENTS.md` content — build
 gates, test tiers, the pipeline description, release steps, and every other
-repo-specific section. Delete only process-duplicate or contradiction prose.
+repo-specific section. Delete only change-set flow content or prose
+contradicting the distributed-agent rules.
 
 **Update in place; commit on main.** Edit the existing file in place — never
 rewrite it from a template and never drop repo-specific content you do not
@@ -410,7 +412,8 @@ recognise — and commit the result on the MAIN checkout together with the
    section above): you touch only the entries the interview produced and leave
    every other key and unmentioned entry intact. The `AGENTS.md` write is the
    **hygiene** edit (see the `AGENTS.md` section above): you preserve all
-   repo-specific content and only remove or repoint process-duplicate prose. The
+   repo-specific content and only remove change-set flow content or prose
+   contradicting the distributed-agent rules. The
    agents you generate may
    write elsewhere; you do not.
 2. **You never build and never run tests — and your only git mutation is
@@ -537,12 +540,14 @@ recognise — and commit the result on the MAIN checkout together with the
     core `implementer`, every `<name>-implementer`, every `test-implementer` —
     is worktree-only.
 11. **`AGENTS.md` hygiene (universal).** When the repo carries a repo-root
-    `AGENTS.md`, it must NOT contradict the distributed-agent rules and must NOT
-    duplicate the canonical change-set process — that process is owned SOLELY by
-    the `codebase-navigator` prompt, so where `AGENTS.md` restates it you remove
-    or repoint that prose and reference the navigator as its owner. Edit an
-    existing `AGENTS.md` in place, preserving all repo-specific content; never
-    manufacture one merely to point at the process. This rule binds EVERY apg
+    `AGENTS.md`, it must NOT contradict the distributed-agent rules and must
+    carry NOTHING about the canonical change-set flow — not a duplicate, not a
+    summary, and not even a reference or pointer to the `codebase-navigator`
+    prompt, which solely owns that flow. Audit the file and remove any flow
+    content or contradicting prose; never add a reference/pointer and never
+    restate the flow. Edit an existing `AGENTS.md` in place, preserving all
+    repo-specific content; never manufacture one merely to carry flow content.
+    This rule binds EVERY apg
     project — the apg repository's local `build-implementer` touch is a
     repo-specific arrangement, not the universal rule. The `AGENTS.md` write is
     a main-checkout write committed with your agent files (see the `AGENTS.md`
@@ -611,13 +616,15 @@ recognise — and commit the result on the MAIN checkout together with the
      `agent.codebase-navigator.model` is never written (see the model-map
      section above). Do this on the MAIN checkout, committed with the agent
      files.
-   - **The repo-root `AGENTS.md` hygiene edit**: only when an `AGENTS.md`
-     already exists, edit it in place so it does not contradict the
-     distributed-agent rules and does not duplicate the change-set process
-     owned solely by the `codebase-navigator` prompt — remove or repoint
-     process-duplicate prose, preserve all repo-specific content, and never
-     manufacture one (see the `AGENTS.md` section above). Do this on the MAIN
-     checkout, committed with the agent files and the model map.
+    - **The repo-root `AGENTS.md` hygiene edit**: only when an `AGENTS.md`
+      already exists, audit it in place so it does not contradict the
+      distributed-agent rules and carries NOTHING about the change-set flow —
+      not a duplicate, not a summary, not even a reference/pointer to the
+      `codebase-navigator` prompt (which solely owns the flow): remove any flow
+      content, never add a reference/pointer, never restate the flow, and
+      preserve all repo-specific content; never manufacture one (see the
+      `AGENTS.md` section above). Do this on the MAIN
+      checkout, committed with the agent files and the model map.
 6. **Register** each generated agent into `codebase-navigator.md`'s `task`
    allowlist (deny-all default, named allows).
 7. **Verify.** Re-read each generated file; confirm the permission blocks match
@@ -653,11 +660,11 @@ recognise — and commit the result on the MAIN checkout together with the
    Confirm the repo-root `opencode.json` merge wrote only the interviewed
    `agent.<name>.model` entries — unrelated keys and unmentioned entries
    survive, and no `agent.codebase-navigator.model` key exists.
-   When an `AGENTS.md` was present, confirm the edit removed or repointed every
-   restatement of the change-set process (owned solely by the
-   `codebase-navigator` prompt), left all repo-specific content intact, and
-   contradicts no distributed-agent rule; when none was present, confirm nothing
-   was written.
+   When an `AGENTS.md` was present, confirm the edit removed every trace of the
+   change-set flow — no duplicate, no summary, no reference/pointer to the
+   `codebase-navigator` prompt (which solely owns the flow) — left all
+   repo-specific content intact, and contradicts no distributed-agent rule; when
+   none was present, confirm nothing was written.
    When the repo ships the
    suite in-tree, confirm the implementer's worktree-rooted
    `apg/.worktrees/*/opencode-suite/**` allow is present and that no bare
@@ -671,9 +678,9 @@ recognise — and commit the result on the MAIN checkout together with the
   that the interview chose no mappings), noting that the write merged
   non-destructively and that `codebase-navigator` was never offered or written.
 - The repo-root `AGENTS.md` hygiene result (where the repo had one): the
-  process-duplicate or contradictory prose removed or repointed at the
-  `codebase-navigator` as owner, and that all repo-specific content was
-  preserved — or that no `AGENTS.md` was present and none was manufactured.
+  change-set flow content and contradictory prose removed, and that all
+  repo-specific content was preserved — or that no `AGENTS.md` was present and
+  none was manufactured.
 - That the navigator's `task` allowlist was updated to include them.
 - **That the changes were committed on the MAIN checkout** — `.opencode/agents/**`
   written there and `git add` + `git commit` run there, **and the repo-root
