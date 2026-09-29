@@ -3787,11 +3787,14 @@ mod e2e {
     }
 
     /// Unit: `--force` cascades leave no orphan records — no task without its
-    /// phase, no edge to a removed plan/phase/task/planned/Feedback/Note; a
+    /// phase, no edge to a removed plan/phase/task/planned record or Note; a
     /// phase whose only dependents are Feedback/Note is removable WITHOUT
-    /// `--force` (its Reviews/Details edges and the dependent Feedback/Note
-    /// records go with it); a plan `--force` cascade removes the plan-level
-    /// Feedback/Note records and deletes the emptied store.
+    /// `--force` (its details edge and an orphaned Note go with it, while a
+    /// `Feedback` record and its `Reviews` reference survive the removal of the
+    /// node it reviews — a review item is closed by a reviewer, never dropped
+    /// by target removal, so `feedback-persists-across-target-loss`). A plan
+    /// `--force` cascade removes every plan-family record but leaves the store
+    /// file in place while surviving Feedback exists.
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn plan_rm_cascades_leave_no_orphan_records() {
@@ -3803,7 +3806,8 @@ mod e2e {
                 title: "P".to_string(),
                 strategy: String::new(),
             },
-            // Plan-level (structural) feedback: removed only by the plan rm.
+            // Plan-level (structural) feedback: its Reviews target is removed
+            // only by the plan rm.
             Record::Feedback {
                 fqn: "foo/feedback-plan".to_string(),
                 body: "structural".to_string(),
@@ -3868,7 +3872,8 @@ mod e2e {
                 from: "github.com/x/y".to_string(),
                 to: "github.com/x/y.Store".to_string(),
             },
-            // Task-level feedback: removed by the task cascade.
+            // Task-level feedback: its Reviews target is removed by the task
+            // cascade; the record survives either way.
             Record::Feedback {
                 fqn: "foo/feedback-task".to_string(),
                 body: "task issue".to_string(),
@@ -3879,7 +3884,8 @@ mod e2e {
                 from: "foo/feedback-task".to_string(),
                 to: "foo/plan.phase-01.task-1".to_string(),
             },
-            // Phase-level feedback + a task note: both removed by a phase rm.
+            // Phase-level feedback + a task note: the phase rm GC's the
+            // orphaned Note while the Feedback record survives.
             Record::Feedback {
                 fqn: "foo/feedback-1".to_string(),
                 body: "phase issue".to_string(),
@@ -3918,7 +3924,8 @@ mod e2e {
         assert_no_orphans(&recs);
 
         // The feedback-bearing task refuses without --force; --force removes
-        // the task, its phase Contains edge and the now-orphaned task feedback.
+        // the task and its phase Contains edge, while the task's Feedback
+        // record and its Reviews reference survive.
         assert!(plan_rm_task_at(&apg_root, "foo", 1, 1, false).is_err());
         plan_rm_task_at(&apg_root, "foo", 1, 1, true).unwrap();
         let recs = specs::read_jsonl(&path).unwrap();
@@ -3927,15 +3934,20 @@ mod e2e {
             "no task may survive its phase's task cascade"
         );
         assert!(
-            !recs
-                .iter()
+            recs.iter()
                 .any(|r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-task")),
-            "the task's feedback must not survive as an orphan"
+            "the task's feedback survives its target's removal"
+        );
+        assert!(
+            recs.iter().any(|r| matches!(r, Record::Reviews { from, to }
+                if from == "foo/feedback-task" && to == "foo/plan.phase-01.task-1")),
+            "the retained feedback keeps its Reviews reference"
         );
         assert_no_orphans(&recs);
 
         // A phase whose only dependents are Feedback/Note is removable WITHOUT
-        // --force: its incident edges and the dependent records go with it.
+        // --force: its incident edges go with it, the dependent Feedback
+        // survives (with its Reviews reference), and the orphaned Note is GC'd.
         plan_rm_phase_at(&apg_root, "foo", 1, false).unwrap();
         let recs = specs::read_jsonl(&path).unwrap();
         assert!(
@@ -3944,14 +3956,20 @@ mod e2e {
                 .any(|r| matches!(r, Record::PlanPhase { fqn, .. } if fqn == "foo/plan.phase-01"))
         );
         assert!(
-            !recs
-                .iter()
-                .any(|r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-1"))
+            recs.iter()
+                .any(|r| matches!(r, Record::Feedback { fqn, .. } if fqn == "foo/feedback-1")),
+            "the phase's feedback survives its target's removal"
+        );
+        assert!(
+            recs.iter().any(|r| matches!(r, Record::Reviews { from, to }
+                if from == "foo/feedback-1" && to == "foo/plan.phase-01")),
+            "the retained feedback keeps its Reviews reference"
         );
         assert!(
             !recs
                 .iter()
-                .any(|r| matches!(r, Record::Note { fqn, .. } if fqn == "foo/plan.note-1"))
+                .any(|r| matches!(r, Record::Note { fqn, .. } if fqn == "foo/plan.note-1")),
+            "an orphaned Note is garbage-collected"
         );
         assert!(
             !recs
@@ -3964,14 +3982,38 @@ mod e2e {
         // The plan still carries phase-02, so a plain plan rm refuses...
         assert!(plan_rm_at(&apg_root, "foo", false).is_err());
 
-        // ...and a plan --force cascade removes the plan-level Feedback too and
-        // deletes the emptied store (an empty file would block `plan add`).
+        // ...and a plan --force cascade removes every plan-family record while
+        // the plan-level Feedback (and each already-orphaned Feedback) survives
+        // — so the store is not emptied and the file is left in place.
         plan_rm_at(&apg_root, "foo", true).unwrap();
-        assert!(!path.exists(), "an emptied plan store must be deleted");
         assert!(
-            plan_rm_at(&apg_root, "foo", true).is_err(),
-            "rm of the now-absent plan is a hard error"
+            path.exists(),
+            "a store with surviving feedback must not be deleted"
         );
+        let recs = specs::read_jsonl(&path).unwrap();
+        assert!(
+            !recs.iter().any(|r| matches!(
+                r,
+                Record::Plan { .. }
+                    | Record::PlanPhase { .. }
+                    | Record::Task { .. }
+                    | Record::PlannedNode { .. }
+            )),
+            "the whole-plan cascade removes every plan-family record"
+        );
+        for fqn in ["foo/feedback-plan", "foo/feedback-task", "foo/feedback-1"] {
+            assert!(
+                recs.iter()
+                    .any(|r| matches!(r, Record::Feedback { fqn: f, .. } if f == fqn)),
+                "feedback `{fqn}` survives the plan cascade"
+            );
+            assert!(
+                recs.iter()
+                    .any(|r| matches!(r, Record::Reviews { from, .. } if from == fqn)),
+                "feedback `{fqn}` keeps its Reviews reference"
+            );
+        }
+        assert_no_orphans(&recs);
 
         testutil::remove(&repo);
     }
