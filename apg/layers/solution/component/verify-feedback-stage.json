@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "verify-feedback-stage",
+  "body": "The verify feedback stage reads a project's transient review files and counts every Feedback record by status, refusing the plan verify gate on any record whose status is not resolved.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
