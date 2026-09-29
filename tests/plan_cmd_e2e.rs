@@ -2639,11 +2639,12 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn coverage_exempts_solution_node_without_implemented_by_edge() {
-        // A BRANCH-ADDED solution node with NO implemented-by edge stays
+        // A branch-delta solution node with NO implemented-by edge stays
         // exempt — the rule is over the node's implemented-by FQNs, and with
-        // none there is nothing to touch (nothing blocks). The gap is surfaced
-        // as a warning (no code claims the node), never a blocker: the
-        // no-claims list is part of the report.
+        // none there is nothing to touch. The gap is surfaced as a `no_claims`
+        // warning (no code claims the node), never a blocker: verify PASSES.
+        // (The report content is pinned by the task-4/task-10/task-11 unit
+        // tests.)
         let (apg_root, repo, wt) = fixture("coverage-no-claim");
         write_solution_node(&apg_root, "system", "payments", &[]);
         let sha = wt_commit_paths(
@@ -2657,20 +2658,6 @@ mod e2e {
         specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
 
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
-
-        let delta = SpecDelta {
-            no_claims: vec!["solution.system.payments".to_string()],
-            ..Default::default()
-        };
-        let report = coverage_check(&records, &delta);
-        assert_eq!(report.no_claims, vec!["solution.system.payments"]);
-        assert!(report.gaps.is_empty());
-
-        // The same node, absent from the delta, is ignored entirely (the
-        // pre-existing exemption).
-        let report = coverage_check(&records, &SpecDelta::default());
-        assert!(report.no_claims.is_empty(), "{report:?}");
-        assert!(report.gaps.is_empty(), "{report:?}");
 
         testutil::remove(&repo);
     }
@@ -2818,12 +2805,11 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn coverage_holds_across_multiple_solution_nodes() {
-        // The bridge is complete only when EVERY in-scope solution node's
-        // implemented-by FQNs are touched — this is the green end-to-end path
-        // through plan_verify_at across MULTIPLE branch-added solution nodes
-        // (two containers; one real FQN, one still-absent FQN), not just
-        // several FQNs on a single node. Verify returns its green verdict and
-        // the derived report agrees: no gaps, no no-claims warnings.
+        // The green end-to-end path through plan_verify_at across MULTIPLE
+        // branch-delta solution nodes (two containers; one real FQN, one
+        // still-absent FQN), not just several FQNs on a single node: verify
+        // returns its green verdict. (The derived report content — no gaps,
+        // no no-claims warnings — is pinned by the unit coverage tests.)
         let (apg_root, repo, wt) = fixture("coverage-multi-ok");
         write_solution_node(&apg_root, "container", "api", &["github.com/x/y.Gateway"]);
         write_solution_node(
@@ -2873,25 +2859,9 @@ mod e2e {
         });
         specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
 
-        // Every in-scope solution node's every implemented-by FQN is touched
-        // -> green.
+        // Every branch-delta solution node's every implemented-by FQN is
+        // touched -> green.
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
-        let delta = SpecDelta {
-            added_claims: vec![
-                (
-                    "solution.container.api".to_string(),
-                    "github.com/x/y.Gateway".to_string(),
-                ),
-                (
-                    "solution.component.checkout".to_string(),
-                    "github.com/x/y.Store".to_string(),
-                ),
-            ],
-            ..Default::default()
-        };
-        let report = coverage_check(&records, &delta);
-        assert!(report.gaps.is_empty(), "{report:?}");
-        assert!(report.no_claims.is_empty(), "{report:?}");
 
         testutil::remove(&repo);
     }
