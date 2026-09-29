@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "reviewer-resolves-orphaned-feedback",
+  "body": "A reviewer resolves or rejects a Feedback item whose reviewed target no longer resolves, by the same commands that close any other item.",
+  "properties": {
+    "feature": "review-integrity"
+  },
+  "out": [],
+  "in": []
+}
