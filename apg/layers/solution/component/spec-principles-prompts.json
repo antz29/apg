@@ -10,6 +10,11 @@
       "kind": "realised-by",
       "source": "domain.entity.spec-truth",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.spec-authoring",
+      "properties": {}
     }
   ]
 }
