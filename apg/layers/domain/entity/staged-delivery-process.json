@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "staged-delivery-process",
+  "body": "The ordered, gated lifecycle a change-set follows end to end in the distributed `codebase-navigator` agent's process: write spec (`spec-writer`) → review spec (`spec-review`) → write plan skeleton (`plan-writer`) → review plan skeleton (`plan-review`) → write plan phases/tasks (`plan-writer`) → review plan phases (`plan-review`) → holistic plan review (`plan-review`) → implement (the owning `implementer`/`*-implementer`) → implementation phase review (`implementation-phase-reviewer`). Each stage has exactly one owning subagent, the stages are ordered, no stage is skipped, and implementation does not begin until the spec and the plan are reviewed green.\n\nDistinct from `domain.entity.task-execution-cadence` (the per-task commit → scan → mark-done ordering that survives the branch graph's staleness guard) and `domain.entity.subagent-session-isolation` (fresh isolated dispatches and the one permitted resume): this entity is the MACRO lifecycle of a change-set, the ordered gated process the navigator's prompt states and follows.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
