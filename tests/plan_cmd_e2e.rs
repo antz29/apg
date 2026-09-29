@@ -279,7 +279,9 @@ fn plan_fields(apg_root: &Path) -> (String, String) {
 
 /// No `Feedback`/`Note` record is orphaned (each still has its
 /// `Reviews`/`Details` edge) and no plan-family edge points at a record
-/// that no longer exists.
+/// that no longer exists — except a retained `Feedback`'s `Reviews` target,
+/// which `cascade_remove` keeps by design even when the reviewed plan-family
+/// record is removed (a deliberately reviewed-target reference).
 fn assert_no_orphans(records: &[Record]) {
     let node_fqns: BTreeSet<&str> = records.iter().filter_map(artifacts::node_fqn).collect();
     for r in records {
@@ -300,7 +302,14 @@ fn assert_no_orphans(records: &[Record]) {
             );
         }
         if let Some((from, to)) = artifacts::edge_endpoints(r) {
-            for endpoint in [from, to] {
+            // A retained Feedback keeps its Reviews edge, so a Reviews target
+            // may name a removed plan-family record; every other endpoint
+            // must still resolve.
+            let reviewed_target_may_dangle = matches!(r, Record::Reviews { .. });
+            for (endpoint, may_dangle) in [(from, false), (to, reviewed_target_may_dangle)] {
+                if may_dangle {
+                    continue;
+                }
                 // Durable requirement FQNs are not in the transient plan
                 // store; every plan-family endpoint must resolve.
                 if endpoint.starts_with("foo/plan") || endpoint.starts_with("foo/feedback-") {
