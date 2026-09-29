@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.feedback-persists-across-target-loss",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.unresolved-feedback-blocks-verify",
+      "properties": {}
     }
   ],
   "in": [
