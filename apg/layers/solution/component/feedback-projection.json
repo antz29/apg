@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.artifacts.db.ArtifactDb.merge_edge",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.layers.write.append_transient_records",
+      "properties": {}
     }
   ],
   "in": [
