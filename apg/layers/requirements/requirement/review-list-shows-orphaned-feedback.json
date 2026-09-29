@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "review-list-shows-orphaned-feedback",
-  "body": "`apg review list` reports every Feedback item in the project's review set with its status, disposition, and reviewed-target FQN, and marks an item whose reviewed target no longer resolves as reviewing a removed target.",
+  "body": "`apg review list` reports every Feedback item in the project's review set with its status, disposition, and reviewed-target FQN, and marks an item whose reviewed target is absent from the layer store and the code graph as reviewing a removed target.",
   "properties": {
     "feature": "review-integrity"
   },
