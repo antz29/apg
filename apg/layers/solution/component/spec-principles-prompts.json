@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "opencode-suite/agents/spec-writer.md",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/plan-writer.md",
+      "properties": {}
     }
   ],
   "in": [
