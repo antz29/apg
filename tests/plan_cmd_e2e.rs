@@ -3100,7 +3100,10 @@ mod e2e {
     /// project's tier mirror (here a durable-node review in
     /// `.trans/requirements/foo.jsonl`) blocks verify and is named, while the
     /// milestone-only `plan complete` stays phase-scoped (it reads only the
-    /// plan store).
+    /// plan store). A plan-family item whose reviewed target is force-cascaded
+    /// away survives in the transient store and keeps blocking while open or
+    /// actioned — verify reads the record files, not the reviewed target — and
+    /// clears only when a reviewer resolves it.
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn plan_verify_gates_feedback_in_tier_mirrors() {
@@ -3204,6 +3207,59 @@ mod e2e {
         assert!(
             plan_verify_at(&apg_root, "foo").is_ok(),
             "verify must pass once every tier-mirror Feedback is resolved"
+        );
+
+        // A plan-family review item survives its reviewed target's forced
+        // removal, and verify — which reads the transient record files, not the
+        // reviewed target — keeps blocking while the orphaned item is open or
+        // actioned, naming it by FQN (`feedback-persists-across-target-loss`).
+        let mut recs = specs::read_jsonl(&path).unwrap();
+        recs.push(Record::Feedback {
+            fqn: "foo/feedback-orphan".to_string(),
+            body: "plan issue".to_string(),
+            status: "open".to_string(),
+            disposition: String::new(),
+        });
+        recs.push(Record::Reviews {
+            from: "foo/feedback-orphan".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        specs::write_jsonl(&path, &recs).unwrap();
+
+        // The forced task cascade removes the reviewed task; the Feedback and
+        // its Reviews reference survive.
+        plan_rm_task_at(&apg_root, "foo", 1, 1, true).unwrap();
+        let recs = specs::read_jsonl(&path).unwrap();
+        assert!(
+            !recs.iter().any(|r| matches!(r, Record::Task { .. })),
+            "the reviewed task must be gone"
+        );
+        assert!(
+            recs.iter().any(|r| matches!(
+                r,
+                Record::Feedback { fqn, .. } if fqn == "foo/feedback-orphan"
+            )),
+            "the orphaned feedback must survive its target's removal"
+        );
+
+        // Open or actioned, with the target absent → still blocks, named by FQN.
+        for status in ["open", "actioned"] {
+            apg::review_cmd::set_feedback_at(&apg_root, "foo/feedback-orphan", "foo", status, None)
+                .unwrap();
+            let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+            assert!(
+                err.to_string().contains("unresolved review feedback"),
+                "{err}"
+            );
+            assert!(err.to_string().contains("foo/feedback-orphan"), "{err}");
+        }
+
+        // Only a reviewer's resolution clears it → verify passes.
+        apg::review_cmd::set_feedback_at(&apg_root, "foo/feedback-orphan", "foo", "resolved", None)
+            .unwrap();
+        assert!(
+            plan_verify_at(&apg_root, "foo").is_ok(),
+            "verify must pass once the orphaned item is resolved"
         );
 
         testutil::remove(&repo);
