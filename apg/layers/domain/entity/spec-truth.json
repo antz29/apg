@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "spec-truth",
-  "body": "The target-truth content of a durable spec statement: what is, or what needs to become true. A superseded statement is updated or removed, never annotated; a `note` deepens the understanding of what is and never records what was. Materializing a source spec or reconciling to an implementation rewrites the nodes to the present truth and leaves no provenance trail — git history, not the spec, describes what was.",
+  "body": "The target-truth content of a durable spec statement: what is, or what needs to become true. A replaced statement is updated or removed, never annotated; a `note` deepens the understanding of what is and never records the past or another note — a `note` details only the non-note node or code it deepens, and the binary refuses a `Note`→`Note` `details` edge at write time. Materializing a source spec or reconciling to an implementation rewrites the nodes to the present truth and leaves no provenance trail — git history, not the spec, describes the past.",
   "properties": {
     "kind": "entity"
   },
