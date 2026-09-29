@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.feedback-persists-across-target-loss",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.review-list-shows-orphaned-feedback",
+      "properties": {}
     }
   ]
 }
