@@ -6,7 +6,13 @@
   "properties": {
     "attribute": "supporting"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.spec-truth",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "drives",

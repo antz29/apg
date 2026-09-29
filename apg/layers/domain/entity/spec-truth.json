@@ -12,6 +12,11 @@
       "kind": "drives",
       "source": "requirements.requirement.durable-spec-states-what-is",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.spec-authoring",
+      "properties": {}
     }
   ]
 }
