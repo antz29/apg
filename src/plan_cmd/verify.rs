@@ -137,35 +137,26 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
         ));
     }
 
-    // 3. Spine-scoped derived solution coverage (SPEC §5, requirement
-    // coverage-spine-scoped): coverage is scoped to the plan's OWN spine plus
-    // this branch's delta. For every requirement a phase `Satisfies`, walk
-    // Requirement `Drives` Domain `RealisedBy` Solution and require each
-    // reached solution node's `implemented-by` FQNs to be touched by a plan
-    // task; PLUS every solution node added on this branch (the default-branch
-    // delta). Pre-existing nodes unreachable from a satisfied requirement are
-    // exempt — a prior project's implemented nodes force no fake `modifies`
-    // tasks. Task targets come from the transient plan records (note-26: the
-    // DB's Task table is static — the plan JSONL is the source of truth), the
-    // solution nodes from the durable layers store. The suggestion names the
+    // 3. Change-set durable-spec delta coverage (SPEC §5, requirement
+    // plan-coverage-scoped-to-change-set-delta): the MERGE-BASE delta against
+    // the default branch scopes the coverage decision. Every `implemented-by`
+    // claim the delta adds, re-points, or removes must be touched by a plan
+    // task, and every requirement the delta adds or changes must be
+    // `Satisfies`'d by a plan phase ([`coverage_check`]). The delta is the one
+    // impure read (the merge-base git diff); the coverage decision itself is
+    // pure — a pre-existing unchanged claim is exempt, and the Requirement
+    // `Drives` Domain `RealisedBy` Solution spine is never walked. Task targets
+    // come from the transient plan records (note-26: the DB's Task table is
+    // static — the plan JSONL is the source of truth). The suggestion names the
     // verb the uncovered FQN's status calls for: a `modifies` over code that
     // already resolves, a `creates` over a planned or still-absent FQN.
-    let nodes = crate::layers::read_existing_nodes(apg_root)?;
-    let satisfied: BTreeSet<String> = records
-        .iter()
-        .filter_map(|r| match r {
-            Record::Satisfies { to, .. } => Some(to.clone()),
-            _ => None,
-        })
-        .collect();
-    let branch_added = solution_nodes_added_on_branch(apg_root, &nodes)?;
-    let coverage = coverage_check(&records, &nodes, &satisfied, &branch_added);
-    if !coverage.gaps.is_empty() {
-        let (scanned, planned) = artifacts::code_universes(apg_root)?;
-        let mut lines: Vec<String> = coverage
-            .gaps
-            .iter()
-            .map(|g| {
+    let delta = change_set_spec_delta(apg_root)?;
+    let coverage = coverage_check(&records, &delta);
+    if !coverage.gaps.is_empty() || !coverage.requirement_gaps.is_empty() {
+        let mut lines: Vec<String> = Vec::new();
+        if !coverage.gaps.is_empty() {
+            let (scanned, planned) = artifacts::code_universes(apg_root)?;
+            lines.extend(coverage.gaps.iter().map(|g| {
                 let verb = match crate::layers::classify_code_ref(&g.fqn, &scanned, &planned) {
                     crate::layers::CodeRefStatus::Real => "modifies",
                     _ => "creates",
@@ -174,8 +165,13 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
                     "solution node `{}` implemented-by `{}` is touched by no plan task (add one with `--verb {verb} --fqn {}`)",
                     g.solution, g.fqn, g.fqn
                 )
-            })
-            .collect();
+            }));
+        }
+        for req in &coverage.requirement_gaps {
+            lines.push(format!(
+                "requirement `{req}` (added or changed by this change-set) is `Satisfies`'d by no plan phase (add `--satisfies {req}` to a phase)"
+            ));
+        }
         if !coverage.no_claims.is_empty() {
             lines.push(format!(
                 "solution nodes with no implemented-by edge (exempt — nothing to touch, but no code claims them): {}",
@@ -225,6 +221,11 @@ pub struct CoverageReport {
     /// surfaced as a warning so the bridge gap ("no code claims this node")
     /// stays visible.
     pub no_claims: Vec<String>,
+    /// The delta's ADDED-or-CHANGED requirement FQNs
+    /// (`requirements.requirement.<name>`) that NO plan phase `Satisfies` —
+    /// non-empty iff the requirement-Satisfies gate fails (the coherence gate
+    /// refuses, naming each uncovered requirement FQN).
+    pub requirement_gaps: Vec<String>,
 }
 
 /// The merge-base durable-spec delta the pure coverage decision consumes: the
@@ -262,65 +263,6 @@ pub struct SpecDelta {
     /// the delta adds or changes must be `Satisfies`'d by at least one plan
     /// phase, the refusal naming the requirement FQN.
     pub changed_requirements: Vec<String>,
-}
-
-/// The **branch delta** — the solution-layer node FQNs present on the current
-/// branch but NOT on the repo's default branch. The default branch is read
-/// from the public [`crate::git::repo_identity`] (`default_branch`); the
-/// private `origin_default_branch` helper is never consulted here.
-///
-/// This is the one impure piece of the coverage rule (it opens the repo's
-/// object database); it returns a plain FQN set the pure [`coverage_check`]
-/// consumes. When no default branch resolves (a detached/unborn main
-/// checkout), the delta is empty and coverage falls back to spine
-/// reachability alone.
-fn solution_nodes_added_on_branch(
-    apg_root: &Path,
-    nodes: &[crate::layers::NodeFile],
-) -> anyhow::Result<BTreeSet<String>> {
-    let identity = crate::git::repo_identity(apg_root)?;
-    let Some(default) = identity.default_branch.as_deref() else {
-        return Ok(BTreeSet::new());
-    };
-    // The default branch lives in the main checkout's ref store (shared with
-    // every linked worktree), so resolve it from `main_root`.
-    let repo = git2::Repository::open(&identity.main_root)?;
-    let default_ref = repo
-        .find_reference(&format!("refs/heads/{default}"))
-        .or_else(|_| repo.find_reference(&format!("refs/remotes/origin/{default}")))
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "cannot compute the branch delta: default branch `{default}` is not a local ref"
-            )
-        })?;
-    let default_tree = default_ref.peel_to_commit()?.tree()?;
-    // The repo-relative layout dir (`apg`), so the layer files resolve inside
-    // the default branch's tree. Canonicalized on both sides so a symlinked
-    // temp dir does not produce a spurious prefix mismatch.
-    let layout = std::fs::canonicalize(apg_root)
-        .ok()
-        .and_then(|p| {
-            p.strip_prefix(&identity.checkout_root)
-                .ok()
-                .map(Path::to_path_buf)
-        })
-        .unwrap_or_else(|| PathBuf::from(specs::LAYOUT));
-    let mut added = BTreeSet::new();
-    for n in nodes.iter().filter(|n| n.layer == "solution") {
-        let rel = layout
-            .join(crate::layers::LAYERS_DIR)
-            .join(&n.layer)
-            .join(&n.node_type)
-            .join(format!("{}.json", n.name));
-        if default_tree.get_path(&rel).is_err() {
-            added.insert(crate::layers::fqn(
-                crate::layers::Layer::Solution,
-                &n.node_type,
-                &n.name,
-            ));
-        }
-    }
-    Ok(added)
 }
 
 /// Compute the **merge-base durable-spec delta** the coverage decision scopes
@@ -536,43 +478,37 @@ pub fn change_set_spec_delta(apg_root: &Path) -> anyhow::Result<SpecDelta> {
     })
 }
 
-/// Spine-scoped derived solution coverage (SPEC §5, requirement
-/// coverage-spine-scoped). The solution nodes in scope are:
+/// Change-set delta coverage (SPEC §5, requirement
+/// plan-coverage-scoped-to-change-set-delta). Pure — no I/O: the caller
+/// supplies the transient plan records (note-26: the
+/// `.trans/plans/<project>.jsonl`, not the DB's static Task table, is the task
+/// source of truth) and the merge-base durable-spec [`SpecDelta`].
 ///
-/// 1. every solution node reached from a satisfied requirement (`satisfied`,
-///    a PlanPhase's `Satisfies` targets) through the spine — Requirement
-///    `Drives` Domain, Domain `RealisedBy` Solution; and
-/// 2. every solution node added on this branch (`branch_added`, the
-///    default-branch delta [`solution_nodes_added_on_branch`] computes).
+/// Two obligations, both scoped to the delta:
 ///
-/// Each in-scope solution node's `implemented-by` code FQNs must be touched
-/// by at least one plan task. A pre-existing solution node unreachable from a
-/// satisfied requirement is EXEMPT — it belongs to an earlier project's spine
-/// and must not force a fake `modifies` task.
+/// 1. **Implemented-by claims** — every `implemented-by` claim the delta adds,
+///    re-points, or removes (a removed edge, or a removed solution node
+///    carrying one) obliges its code FQN to be touched by at least one plan
+///    task. A task touches an FQN when its verb's subject equals it: `target`
+///    for every verb, plus `new_fqn` for a renames/moves pair (the destination
+///    FQN the code lands at). Coverage is verb-agnostic and status-agnostic: a
+///    `creates` over a still-planned FQN counts exactly like a `modifies` over
+///    real code, and a renames/moves destination counts. FQNs are compared by
+///    language-agnostic identity, so `rust.apg.x` ≡ `apg.x`. This walk never
+///    follows the Requirement `Drives` Domain `RealisedBy` Solution spine —
+///    ONLY the merge-base delta's claims widen scope; an unchanged pre-existing
+///    claim is exempt.
 ///
-/// A task touches an FQN when its verb's subject equals it: `target` for
-/// every verb, plus `new_fqn` for a renames/moves pair (the destination FQN
-/// the code lands at). Coverage is verb-agnostic and status-agnostic: a
-/// `creates` over a still-planned FQN counts exactly like a `modifies` over
-/// real code — the task's claim is what coverage measures, and the
-/// realization gate separately ensures the code actually lands.
+/// 2. **Requirement-Satisfies gate** — every requirement the delta adds or
+///    changes must be `Satisfies`'d by at least one plan phase (the phase
+///    `Satisfies` set is read from the plan records' `Record::Satisfies -> to`
+///    edges). An uncovered requirement is a
+///    [`CoverageReport::requirement_gaps`] entry, named by its FQN.
 ///
-/// A solution node with NO `implemented-by` edge is exempt — the rule is over
-/// the node's implemented-by FQNs, and with none there is nothing to touch —
-/// but it is reported in [`CoverageReport::no_claims`] (a warning, never a
-/// blocker), whether it is spine-reached or branch-added.
-///
-/// Pure — no I/O. The caller supplies the transient plan records (note-26:
-/// the `.trans/plans/<project>.jsonl`, not the DB's static Task table, is the
-/// task source of truth), the durable node files
-/// ([`crate::layers::read_existing_nodes`]), the satisfied requirement FQNs,
-/// and the branch-added solution FQNs.
-pub fn coverage_check(
-    records: &[Record],
-    nodes: &[crate::layers::NodeFile],
-    satisfied: &BTreeSet<String>,
-    branch_added: &BTreeSet<String>,
-) -> CoverageReport {
+/// A delta solution node declaring NO `implemented-by` edge is exempt — with
+/// no FQN there is nothing to touch — but is reported in
+/// [`CoverageReport::no_claims`] (a warning, never a blocker).
+pub fn coverage_check(records: &[Record], delta: &SpecDelta) -> CoverageReport {
     // Language-agnostic identity (commit 7a6ed03e + `code_identity`): the durable
     // plan may name a rooted FQN (`rust.apg.cache`) while the solution node's
     // `implemented-by` target is bare (`apg.cache`), or vice versa — compare
@@ -595,77 +531,52 @@ pub fn coverage_check(
         }
     }
 
-    // Resolve every loaded node by its derived FQN so the spine walk can
-    // follow `out` edges between node files.
-    let mut by_fqn: std::collections::BTreeMap<String, &crate::layers::NodeFile> =
-        std::collections::BTreeMap::new();
-    for n in nodes {
-        let Some(layer) = crate::layers::Layer::ALL
-            .iter()
-            .find(|l| l.layer_dir() == n.layer)
-            .copied()
-        else {
-            continue;
-        };
-        let fqn = crate::layers::fqn(layer, &n.node_type, &n.name);
-        by_fqn.insert(fqn, n);
-    }
+    // The requirement-Satisfies gate set: every requirement a phase
+    // `Satisfies` (`Record::Satisfies -> to`).
+    let satisfied: BTreeSet<&str> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Satisfies { to, .. } => Some(to.as_str()),
+            _ => None,
+        })
+        .collect();
 
-    // The spine: from each satisfied requirement follow Drives to its domain
-    // node(s), then RealisedBy to the solution node(s) they are realised by.
-    let mut required: BTreeSet<String> = BTreeSet::new();
-    for req in satisfied {
-        let Some(req_node) = by_fqn.get(req) else {
-            continue;
-        };
-        for d in req_node.out.iter().filter(|e| e.kind == "drives") {
-            let Some(domain) = by_fqn.get(&d.target) else {
-                continue;
-            };
-            for rb in domain.out.iter().filter(|e| e.kind == "realised-by") {
-                required.insert(rb.target.clone());
-            }
-        }
-    }
-    required.extend(branch_added.iter().cloned());
-
+    // Arm (a): every changed/new/removed implemented-by claim's code FQN must
+    // be touched by a plan task. A re-pointed edge contributes BOTH its old
+    // (removed_claims) and new (added_claims) FQN.
     let mut gaps: Vec<CoverageGap> = Vec::new();
-    let mut no_claims: Vec<String> = Vec::new();
-    for n in nodes {
-        if n.layer != "solution"
-            || !["system", "container", "component"].contains(&n.node_type.as_str())
-        {
-            continue;
-        }
-        let solution = crate::layers::fqn(crate::layers::Layer::Solution, &n.node_type, &n.name);
-        if !required.contains(&solution) {
-            // A pre-existing solution node outside this plan's spine (and not
-            // added on this branch) is exempt.
-            continue;
-        }
-        let refs: Vec<&str> = n
-            .out
-            .iter()
-            .filter(|oe| oe.kind == "implemented-by")
-            .map(|oe| oe.target.as_str())
-            .collect();
-        if refs.is_empty() {
-            no_claims.push(solution);
-            continue;
-        }
-        for fqn in refs {
-            if !touched.contains(crate::layers::code_identity(fqn)) {
-                gaps.push(CoverageGap {
-                    solution: solution.clone(),
-                    fqn: fqn.to_string(),
-                });
-            }
+    for (solution, fqn) in delta.added_claims.iter().chain(delta.removed_claims.iter()) {
+        if !touched.contains(crate::layers::code_identity(fqn)) {
+            gaps.push(CoverageGap {
+                solution: solution.clone(),
+                fqn: fqn.clone(),
+            });
         }
     }
     // Deterministic order for the verdict and the tests.
     gaps.sort_by(|a, b| (&a.solution, &a.fqn).cmp(&(&b.solution, &b.fqn)));
+    gaps.dedup();
+
+    // Arm (b): every delta-added-or-changed requirement must be Satisfies'd by
+    // a phase; the refusal names the uncovered requirement FQN.
+    let mut requirement_gaps: Vec<String> = delta
+        .changed_requirements
+        .iter()
+        .filter(|req| !satisfied.contains(req.as_str()))
+        .cloned()
+        .collect();
+    requirement_gaps.sort();
+    requirement_gaps.dedup();
+
+    let mut no_claims = delta.no_claims.clone();
     no_claims.sort();
-    CoverageReport { gaps, no_claims }
+    no_claims.dedup();
+
+    CoverageReport {
+        gaps,
+        no_claims,
+        requirement_gaps,
+    }
 }
 
 /// Whether the layers store has a requirement with this FQN

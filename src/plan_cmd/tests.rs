@@ -7,6 +7,43 @@ use crate::testutil::{nf, task_rec};
 mod unit {
     use super::*;
 
+    /// Mechanical bridge to the new pure `coverage_check(records, &SpecDelta)`
+    /// signature: derive a delta from the phase-06 solution-node fixture —
+    /// every solution node's `implemented-by` target becomes an added claim,
+    /// and a solution node with no claim becomes a `no_claims` entry. Phase 2
+    /// owns the semantic rewrite of these tests onto explicit deltas.
+    fn delta_from_solution_nodes(nodes: &[crate::layers::NodeFile]) -> SpecDelta {
+        let mut added_claims: BTreeSet<(String, String)> = BTreeSet::new();
+        let mut no_claims: BTreeSet<String> = BTreeSet::new();
+        for n in nodes {
+            if n.layer != "solution"
+                || !["system", "container", "component"].contains(&n.node_type.as_str())
+            {
+                continue;
+            }
+            let fqn = crate::layers::fqn(crate::layers::Layer::Solution, &n.node_type, &n.name);
+            let claims: Vec<&str> = n
+                .out
+                .iter()
+                .filter(|e| e.kind == "implemented-by")
+                .map(|e| e.target.as_str())
+                .collect();
+            if claims.is_empty() {
+                no_claims.insert(fqn);
+            } else {
+                for c in claims {
+                    added_claims.insert((fqn.clone(), c.to_string()));
+                }
+            }
+        }
+        SpecDelta {
+            added_claims: added_claims.into_iter().collect(),
+            removed_claims: Vec::new(),
+            no_claims: no_claims.into_iter().collect(),
+            changed_requirements: Vec::new(),
+        }
+    }
+
     #[test]
     fn link_phase_edges_keeps_all_satisfies_and_preserves_other_phases() {
         // Regression: the removal ran inside the loop (only the last edge
@@ -347,18 +384,10 @@ mod unit {
                 in_edges: Vec::new(),
             },
         ];
-        // The nodes are branch-added (the pure test supplies the delta
-        // directly — the git half is exercised by the int test).
-        let branch_added: BTreeSet<String> = [
-            "solution.system.payments",
-            "solution.container.api",
-            "solution.component.reporting",
-            "solution.component.checkout",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
+        // The delta is derived from the fixture nodes (the git compare is
+        // exercised by `change_set_spec_delta`).
+        let delta = delta_from_solution_nodes(&nodes);
+        let report = coverage_check(&records, &delta);
         // Only the reporting component's FQN is untouched: Store is touched
         // (modifies AND deletes — verb-agnostic), Gateway by the creates,
         // Store2 by the rename's new_fqn.
@@ -404,11 +433,6 @@ mod unit {
                 .collect(),
             in_edges: Vec::new(),
         };
-        let branch_added: BTreeSet<String> = ["solution.system.alpha", "solution.system.beta"]
-            .into_iter()
-            .map(str::to_string)
-            .collect();
-
         // Rooted task targets, BARE implemented-by targets.
         let rooted_tasks = vec![
             task("foo/plan.phase-01.task-1", "modifies", "rust.apg.cache", ""),
@@ -423,7 +447,7 @@ mod unit {
             node("alpha", &["apg.cache"]),
             node("beta", &["apg.new_mod"]),
         ];
-        let report = coverage_check(&rooted_tasks, &bare_refs, &BTreeSet::new(), &branch_added);
+        let report = coverage_check(&rooted_tasks, &delta_from_solution_nodes(&bare_refs));
         assert!(
             report.gaps.is_empty(),
             "rooted task targets must cover bare implemented-by targets: {:?}",
@@ -444,7 +468,7 @@ mod unit {
             node("alpha", &["rust.apg.cache"]),
             node("beta", &["rust.apg.new_mod"]),
         ];
-        let report = coverage_check(&bare_tasks, &rooted_refs, &BTreeSet::new(), &branch_added);
+        let report = coverage_check(&bare_tasks, &delta_from_solution_nodes(&rooted_refs));
         assert!(
             report.gaps.is_empty(),
             "bare task targets must cover rooted implemented-by targets: {:?}",
@@ -482,46 +506,22 @@ mod unit {
         // Requirement Drives Domain RealisedBy Solution are required; an
         // unrelated (non-branch-added) solution node is ignored — even an
         // untouched implemented-by FQN on it yields no gap.
-        let nodes = vec![
-            nf(
-                "requirements",
-                "requirement",
-                "cr",
-                &[("drives", "domain.entity.plan-record")],
-            ),
-            nf(
-                "domain",
-                "entity",
-                "plan-record",
-                &[("realised-by", "solution.component.reached")],
-            ),
-            nf(
-                "solution",
-                "component",
-                "reached",
-                &[("implemented-by", "github.com/x/y.Store")],
-            ),
-            nf(
-                "solution",
-                "component",
-                "unrelated",
-                &[("implemented-by", "github.com/x/y.Untouched")],
-            ),
-        ];
-        let satisfied: BTreeSet<String> = ["requirements.requirement.cr".to_string()]
-            .into_iter()
-            .collect();
+        let delta = SpecDelta {
+            added_claims: vec![(
+                "solution.component.reached".to_string(),
+                "github.com/x/y.Store".to_string(),
+            )],
+            ..Default::default()
+        };
 
-        // The reached node's FQN is touched -> no gap; the unrelated node's
-        // untouched FQN is never considered.
+        // The delta claim's FQN is touched -> no gap.
         let records = vec![task_rec("modifies", "github.com/x/y.Store", "")];
-        let report = coverage_check(&records, &nodes, &satisfied, &BTreeSet::new());
+        let report = coverage_check(&records, &delta);
         assert!(report.gaps.is_empty(), "{report:?}");
 
-        // Leave the reached node's FQN untouched -> exactly that gap (the
-        // unrelated node stays out of scope).
+        // Leave the delta claim's FQN untouched -> exactly that gap.
         let records = vec![task_rec("creates", "github.com/x/y.Other", "")];
-        let report = coverage_check(&records, &nodes, &satisfied, &BTreeSet::new());
+        let report = coverage_check(&records, &delta);
         assert_eq!(
             report.gaps,
             vec![CoverageGap {
@@ -546,24 +546,19 @@ mod unit {
             ),
             nf("solution", "component", "plan-store-atomic-rewrite", &[]),
         ];
-        let branch_added: BTreeSet<String> = [
-            "solution.component.added".to_string(),
-            "solution.component.plan-store-atomic-rewrite".to_string(),
-        ]
-        .into_iter()
-        .collect();
+        let delta = delta_from_solution_nodes(&nodes);
 
         let records = vec![task_rec("modifies", "github.com/x/y.Store", "")];
-        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
+        let report = coverage_check(&records, &delta);
         assert!(report.gaps.is_empty(), "{report:?}");
         assert_eq!(
             report.no_claims,
             vec!["solution.component.plan-store-atomic-rewrite"]
         );
 
-        // The branch-added node's FQN untouched -> a gap even with no spine.
+        // The delta node's FQN untouched -> a gap.
         let records = vec![task_rec("creates", "github.com/x/y.Other", "")];
-        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
+        let report = coverage_check(&records, &delta);
         assert_eq!(
             report.gaps,
             vec![CoverageGap {
@@ -578,34 +573,8 @@ mod unit {
         // The merged worktree-cleanup nodes are pre-existing (present on the
         // default branch) and unreachable from any satisfied requirement, so
         // they yield no gaps and force no fake modifies tasks.
-        let nodes = vec![
-            nf(
-                "solution",
-                "component",
-                "project-delete",
-                &[("implemented-by", "apg.project_cmd.delete_project")],
-            ),
-            nf(
-                "solution",
-                "component",
-                "project-dispatch",
-                &[("implemented-by", "apg.project_cmd.cmd_project")],
-            ),
-            nf(
-                "solution",
-                "component",
-                "project-merge",
-                &[("implemented-by", "apg.project_cmd.project_merge_at")],
-            ),
-            nf(
-                "solution",
-                "container",
-                "project-command",
-                &[("implemented-by", "apg.project_cmd.cmd_project")],
-            ),
-        ];
         let records = vec![task_rec("creates", "github.com/x/y.Gateway", "")];
-        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &BTreeSet::new());
+        let report = coverage_check(&records, &SpecDelta::default());
         assert!(report.gaps.is_empty(), "{report:?}");
         assert!(report.no_claims.is_empty(), "{report:?}");
     }

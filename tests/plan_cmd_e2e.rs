@@ -2658,17 +2658,17 @@ mod e2e {
 
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
-        let nodes = apg::layers::read_existing_nodes(&apg_root).unwrap();
-        let branch_added: BTreeSet<String> = ["solution.system.payments".to_string()]
-            .into_iter()
-            .collect();
-        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
+        let delta = SpecDelta {
+            no_claims: vec!["solution.system.payments".to_string()],
+            ..Default::default()
+        };
+        let report = coverage_check(&records, &delta);
         assert_eq!(report.no_claims, vec!["solution.system.payments"]);
         assert!(report.gaps.is_empty());
 
-        // The same node, neither branch-added nor spine-reached, is ignored
-        // entirely (the pre-existing exemption).
-        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &BTreeSet::new());
+        // The same node, absent from the delta, is ignored entirely (the
+        // pre-existing exemption).
+        let report = coverage_check(&records, &SpecDelta::default());
         assert!(report.no_claims.is_empty(), "{report:?}");
         assert!(report.gaps.is_empty(), "{report:?}");
 
@@ -2876,13 +2876,20 @@ mod e2e {
         // Every in-scope solution node's every implemented-by FQN is touched
         // -> green.
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
-        let nodes = apg::layers::read_existing_nodes(&apg_root).unwrap();
-        let branch_added: BTreeSet<String> =
-            ["solution.container.api", "solution.component.checkout"]
-                .into_iter()
-                .map(str::to_string)
-                .collect();
-        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
+        let delta = SpecDelta {
+            added_claims: vec![
+                (
+                    "solution.container.api".to_string(),
+                    "github.com/x/y.Gateway".to_string(),
+                ),
+                (
+                    "solution.component.checkout".to_string(),
+                    "github.com/x/y.Store".to_string(),
+                ),
+            ],
+            ..Default::default()
+        };
+        let report = coverage_check(&records, &delta);
         assert!(report.gaps.is_empty(), "{report:?}");
         assert!(report.no_claims.is_empty(), "{report:?}");
 
@@ -2991,13 +2998,20 @@ mod e2e {
         specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
 
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
-        let nodes = apg::layers::read_existing_nodes(&apg_root).unwrap();
-        let branch_added: BTreeSet<String> =
-            ["solution.system.payments", "solution.component.checkout"]
-                .into_iter()
-                .map(str::to_string)
-                .collect();
-        let report = coverage_check(&records, &nodes, &BTreeSet::new(), &branch_added);
+        let delta = SpecDelta {
+            added_claims: vec![
+                (
+                    "solution.system.payments".to_string(),
+                    "github.com/x/y.Store".to_string(),
+                ),
+                (
+                    "solution.component.checkout".to_string(),
+                    "github.com/x/y.Store2".to_string(),
+                ),
+            ],
+            ..Default::default()
+        };
+        let report = coverage_check(&records, &delta);
         assert!(report.gaps.is_empty(), "{report:?}");
 
         testutil::remove(&repo);
