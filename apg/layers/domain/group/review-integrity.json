@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "domain.entity.feedback-item",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.reviewed-target-reference",
+      "properties": {}
     }
   ],
   "in": []
