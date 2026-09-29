@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "node-rm-warn-not-block-decision",
+  "body": "Decision (with the user): `apg node rm` warns and proceeds when the node it removes is reviewed by outstanding Feedback. Removing the node is frequently the fix a Feedback item asks for (e.g. \"this node is unnecessary\"), so refusing the removal would defeat the item. The warning names the outstanding items; the record and its reviewed-target reference persist; the writer claims the fix; and the reviewer resolves or rejects it.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
