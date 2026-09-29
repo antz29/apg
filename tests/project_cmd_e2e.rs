@@ -767,6 +767,12 @@ fn apg_projects_plan_records(project: &str) -> Vec<Record> {
             to: "requirements.requirement.r20".to_string(),
         },
     ];
+    for i in 1..=19 {
+        r.push(Record::Satisfies {
+            from: format!("{project}/plan.phase-01"),
+            to: format!("requirements.requirement.r{i}"),
+        });
+    }
     for (i, code) in IMPL_FQNS.iter().enumerate() {
         let task = format!("{project}/plan.phase-01.task-{}", i + 1);
         r.push(Record::Task {
