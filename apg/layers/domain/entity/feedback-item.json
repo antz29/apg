@@ -16,6 +16,11 @@
       "kind": "realised-by",
       "target": "solution.component.review-command-surface",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.verify-feedback-stage",
+      "properties": {}
     }
   ],
   "in": [
