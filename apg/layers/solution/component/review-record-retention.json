@@ -4,7 +4,13 @@
   "name": "review-record-retention",
   "body": "Review-record retention keeps a Feedback record in its transient file until a reviewer closes it: a status update rewrites the record in place, and a removed reviewed target leaves the record in place with its target reference.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.plan_cmd.authoring.cascade_remove",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
