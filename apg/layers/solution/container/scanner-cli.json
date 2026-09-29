@@ -166,6 +166,11 @@
       "kind": "contains",
       "target": "solution.component.plan-coverage-check",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.spec-lint",
+      "properties": {}
     }
   ],
   "in": [
