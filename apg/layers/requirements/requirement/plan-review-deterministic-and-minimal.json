@@ -18,6 +18,11 @@
       "kind": "contains",
       "source": "requirements.user.plan-review-agent",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.plan-review-agent-reconciliation",
+      "properties": {}
     }
   ]
 }
