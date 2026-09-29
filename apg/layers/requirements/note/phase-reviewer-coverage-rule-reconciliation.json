@@ -9,6 +9,11 @@
       "kind": "details",
       "target": "requirements.constraint.plan-coverage-change-boundary",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "opencode-suite/agents/implementation-phase-reviewer.md",
+      "properties": {}
     }
   ],
   "in": []
