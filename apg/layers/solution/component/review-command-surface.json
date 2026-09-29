@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "review-command-surface",
+  "body": "The review command surface is `apg review add|action|resolve|reject|list`: it appends items, updates status, and reports a project's full review set with each item's status, disposition, and reviewed-target FQN, marking items whose target no longer resolves.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
