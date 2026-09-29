@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.group.plan-verification",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.plan-coverage",
+      "properties": {}
     }
   ],
   "in": [
