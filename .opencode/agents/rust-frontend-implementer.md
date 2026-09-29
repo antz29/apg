@@ -340,7 +340,7 @@ reviewer:    apg_review_reject <f>                               → status = op
   freely. **Git (write)**: `git add` and `git commit` only. You hold **no**
   `git push` / `git tag` grant — push/tag are human-approved acts, and the only
   generated agent granted them (as `ask`) is the optional per-repo
-  `release-agent`, which this repo does not have.
+  `release-agent` (dispatched only with explicit user consent).
 - **Gates**: cargo scoped to **your** manifest only — `cargo build` / `check` /
   `test` / `fmt` / `clippy` `--manifest-path src/rustlib/Cargo.toml` (argument
   variants allowed; one command per call, no chaining). A bare `cargo` command

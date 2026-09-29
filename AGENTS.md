@@ -81,133 +81,7 @@ Scanner (per language) → Rust ingestor → `apg/.trans/db.lbug` + `apg/.trans/
   line `engine-strict` admits — matching the pins in
   `.github/workflows/release.yml`.
 
-## Project flow (the verified pattern)
-
-A change-set is a **project** = a git branch + its worktree. The verified
-pattern — visible to the next feature's agents without reading the suite
-internals:
-
-1. **Start from main.** The navigator runs `apg project start <name>` from the
-   **main checkout** (never inside a worktree). The binary branches off the
-   repo's default branch, creates the worktree at `<main>/apg/.worktrees/<name>`,
-   and seeds the branch DB by copying the main checkout's `apg/.trans` scan
-   verbatim (worktree + branch + branch DB in one command, no frontend scan).
-   Start refuses when the main checkout's scan is stale or missing for main's
-   HEAD, so run `apg scan` in the main checkout first. Then it **prints
-   the worktree path**. Idempotent only inside that same project; every
-   collision is a hard refuse.
-2. **Operate in-worktree.** Sessions and subagents run with **cwd inside the
-   printed worktree path**. Suite-tool walk-up discovery finds the worktree's
-   **own** `apg/` (its layout + branch DB), so the tools work unchanged. Every
-   code-writer — the core `implementer`, every `*-implementer`, every
-   `test-implementer` — writes **worktree-only**, and **main is never a mutation
-   place**: durable and transient mutations refuse outside a project context, and
-   the path-scoped fs tools refuse any path resolving into the main checkout
-   whatever `directory` is passed (see *Worktree isolation* below). That rule is
-   **scoped**: it governs the binary's *guarded* mutations — durable `apg
-   node`/`apg edge` and transient plan/review mutations, which refuse outside a
-   project worktree — and does **not** forbid the **two** deliberate agent
-   carve-outs (step 7): the `agent-builder`'s `.opencode/agents/**` edits and
-   their commit on main, and the optional `release-agent`'s per-repo release
-   artefacts on main. **These two carve-outs are the only places `git`-committed
-   work lands on main outside `apg project merge`.** `git push`/`git tag` remain
-   human-approved acts.
-3. **Author the durable spec tiers** via `apg node add|rm <layer> <type>
-   <name>` / `apg edge add|rm <kind> <from> <to>` into `apg/layers/` — one
-   JSON file per node in the **six-layer tree** (requirements / domain /
-   solution / implementation / global durably; plans transient). FQN =
-   `<layer>.<type>.<name>`, the **file name IS the identity**, no project
-   prefix. Node files carry paired `out`/`in` edges (both endpoint files,
-   validated at scan); constraints are **prose** — structure/references are
-   checked at write time, satisfaction is by review. One logical mutation
-   writes all affected files and **auto-commits once** on the project branch.
-4. **Plan and review are transient**: `apg/.trans/plans/<project>.jsonl` plus
-   the `.trans/<tier>/<project>.jsonl` feedback mirrors — never committed,
-   they die with the branch (the node files persist). A plan task names its
-   verb + target: `creates` (a planned node), `modifies`/`deletes` (code that
-   must already resolve), `renames`/`moves` (`--fqn` source + `--to`
-   destination).
-5. **Verify, then merge.** `apg plan verify <project>` is the pre-merge
-   coherence gate — every planned node realized, all feedback resolved,
-   derived solution coverage holds — and prints the merge handoff.
-   `apg project merge <name>` from the main checkout runs verify → merge →
-   unguarded main rebuild, then **self-cleans** on that success path:
-   the merged project's worktree is removed and its branch deleted (the
-   default branch and the main checkout are never touched); push/tag remain
-   human-approved acts. Both the gate and the merge run in the **installed**
-   binary, so the plan/spec must use that binary's FQNs — see *The installed
-   binary is the contract* below.
-6. **Version gate + `apg init`.** `apg/config.json` carries the
-   binary-managed `version` field; `apg scan`/`apg project start` **block**
-   unless the layout and the binary share major.minor. **`apg init` is the
-   upgrade act**: re-run it idempotently to write the current version, scaffold
-   `apg/.worktrees/` + its `.gitignore` entry, and update the installed suite.
-7. **Code-writer agents are always built on main (one of the two deliberate
-   main-write carve-outs).** If implementation is blocked because the repo's
-   `*-implementer` agents (or the optional `release-agent`) are missing or
-   outdated, the navigator tasks the **`agent-builder` subagent on the MAIN
-   checkout**; it scaffolds/updates `.opencode/agents/**` there and **commits on
-   main**. That is its only write surface: the agent-builder's sole write grant
-   is `.opencode/agents/**`, opencode resolves it against the session workspace
-   root (the main checkout), and there is no
-   `apg/.worktrees/*/.opencode/agents/**` mirror — the running opencode session
-   loads agents from the main checkout / `~/.opencode/agents/`, so a created or
-   updated agent can never live on the project branch alone. (The other carve-out
-   is the optional `release-agent`'s per-repo release artefacts — see *Worktree
-   isolation* below.) The navigator then **rebases the project worktree onto
-   main** — `git rebase` run **inside the project worktree**, its only purpose —
-   **re-scans the worktree**, and the user **restarts opencode** (to load the
-   new/updated agents and their grants) and **reconnects** before implementation
-   continues. **Both carve-outs together are the only places `git`-committed work
-   lands on main outside `apg project merge`**; they do not weaken step 2's
-   scoped rule, which still governs every *guarded* binary mutation.
-
-### Worktree isolation (code-writer writes are worktree-only)
-
-This is the law `global.constraint.worktree-isolation`: every code change of a
-change-set is **worktree-local** — made inside the project worktree
-`<main>/apg/.worktrees/<project>/` on the project branch. The main checkout is
-**read-only** to every agent except the two carve-outs below, and main is
-integrated **only** by the binary act `apg project merge <name>`.
-
-- **Code-writer writes are worktree-only.** The core `implementer`, every
-  `*-implementer`, and every `test-implementer` are granted their edit globs and
-  their `apg_rm`/`apg_mv`/`apg_cp` globs **only** as `apg/.worktrees/*/<glob>`;
-  the root-relative `<glob>` form is never granted, and main-root paths are
-  explicitly denied. An agent whose grants include a root path could write main
-  — that is a broken scaffold. The path-scoped fs tools resolve the agent's
-  grants and every candidate in **one main-anchored frame** (the main-checkout
-  root) and self-enforce per-path scope from those worktree-rooted globs, so a
-  path that resolves into the main checkout is refused **whatever `directory`
-  the caller passes**. The tools do a plain filesystem operation — enforcement
-  lives in the tool, never in the permission layer's matching of its path
-  argument. **Reading main stays allowed.**
-- **Exactly two agent carve-outs write main.** (a) the `agent-builder`'s
-  `.opencode/agents/**` scaffold, committed on main
-  (`requirements.constraint.agent-changes-always-on-main`); (b) the optional
-  per-repo `release-agent`'s release artefacts on main — a **repo-specific**
-  write set the agent-builder derives by analysing the repo (release scripts,
-  workflows, formulae/manifests, version surfaces, …) and confirms through the
-  coordinator interview; it is **never a fixed, spec-hardcoded path list**. The
-  release-agent reaches its main paths through **`edit` grants only** —
-  `apg_rm`/`apg_mv`/`apg_cp` are worktree-only for **every** agent and always
-  refuse a main-resolving path — and its sole `git push`/`git tag` grant is
-  `ask`, behind the navigator's explicit-consent gate (it is the only agent that
-  holds them). These two carve-outs are the only places `git`-committed work
-  lands on main outside `apg project merge`.
-- **`apg project merge <name>` is the sole integration path into main** — a
-  binary act (verify gate → merge → unguarded main rebuild → self-clean), not an
-  agent action. The navigator holds **no** `git merge`, `git checkout`, or
-  `git switch` grant. Its granted git surface is exactly the read-only set
-  `git status`, `git diff`, `git log`, `git branch --show-current`, and
-  `git worktree list`, plus `git rebase` — a blanket `git branch` (whose `-f`/
-  `-D`/`-m` forms rewrite refs) is **not** granted, nor is any other
-  ref- or config-mutating verb. **`--output=<file>` is forbidden on every
-  granted git verb** — the navigator runs `git diff`/`git log` to stdout only.
-  `git rebase` is used for nothing but rebasing the project worktree onto main,
-  run **inside the project worktree** (never in the main checkout).
-
-### The installed binary is the contract — never self-host a change-set
+## The installed binary is the contract — never self-host a change-set
 
 `apg plan verify` and `apg project merge` are executed by the **installed** `apg`
 binary. That binary is fixed, and its checks are **exact-match** against the graph
@@ -260,9 +134,6 @@ is planned before it is implemented.**
 - Corollary: `creates` is only authorable while the FQN is absent from the scanned
   graph. Landing the code first forfeits it — the back-fill is then a `modifies`
   task plus a note saying so, which is strictly worse.
-
-The suite agents (`codebase-navigator`, `spec-writer`, `plan-writer`,
-`spec-review`, `plan-review`, `agent-builder`) hold the operational detail.
 
 ### CLI
 
@@ -487,7 +358,7 @@ in-tree project.
 This is the **parent-cannot-depend-on-the-child** rule: the change-set is
 finalised with the installed binary, so nothing it must read — plan targets,
 planned nodes, `implemented-by` targets — may be written in a future binary's
-FQN rendering. See *The installed binary is the contract* in the project flow.
+FQN rendering. See *The installed binary is the contract* above.
 
 1. **Build the candidate.** `cargo build` produces `target/debug/apg` and
    stages the frontends to `target/debug/frontends`, so the binary finds them
@@ -526,8 +397,7 @@ FQN rendering. See *The installed binary is the contract* in the project flow.
    (`apg scan` / `apg project start`) **blocks unless layout and binary share
    major.minor**, so re-run `apg init` after a version bump.
 
-4. **Exercise the lifecycle** exactly as the flow section describes — the
-   scratch repo is a real project:
+4. **Exercise the lifecycle** — the scratch repo is a real project:
 
    ```sh
    "$BIN" scan .                             # main must have a current scan: start copies it
@@ -824,53 +694,6 @@ asserted by the binary.
   refuse otherwise. Feedback (and the plan itself) lives in the `.trans`
   mirrors and dies with the branch.
 - Query patterns: the spine `MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->(:Container)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn`; plan health via the suite tools (`apg_plan`, `apg_plan_phases`, `apg_plan_tasks`, `apg_review`).
-- The seven distributed agents (installed by `apg init`): `codebase-navigator`
-  (orchestrates the flow — `apg project start` from main, per-branch DB
-  build, coordinator-mediated feedback routing (dispatch one open item to its
-  owning writer, take the writer's ACTIONED/WONT-FIX claim, run the shallow
-  claim-vs-change check, then action it), human-gate summary, and the merge act
-  (verify gate → merge → rebuild) on approval), `spec-writer` / `plan-writer`
-  (author through the `apg_node`/`apg_edge`/`apg_plan_*` tools, **no file
-  writes**; the spec-writer authors the layer tiers + spine + reconciliation
-  mode, the plan-writer the tier-4 delta with structural/holistic gates),
-  `spec-review` / `plan-review` (attach/resolve/reject feedback, **no authoring
-  tools**; approval-only wont-fix — the coordinator actions the writer's
-  `--wont-fix` claim and only the reviewer makes it terminal),
-  `implementation-phase-reviewer` (the generic DISTRIBUTED phase reviewer — a
-  hidden subagent with read-only apg-suite + plan-read + review grants, **no
-  file writes**, never actions feedback; installed by `apg init`, not generated
-  per repo), and `agent-builder` (`mode: primary`, the only write grant
-  `.opencode/agents/**`, scaffolds a repo's code-writer agents). Its agent work
-  is **always done on the main checkout and committed there** — one of the two
-  deliberate main-write carve-outs. When implementation is blocked because the
-  repo's code-writer agents are missing or outdated, the navigator tasks
-  `agent-builder` on the main checkout; its `.opencode/agents/**` grant is
-  resolved against the session workspace root (the main checkout) and no
-  `apg/.worktrees/*/.opencode/agents/**` mirror exists, so a created/updated
-  agent can never live on the project branch alone. It scaffolds/updates and
-  **commits on main**; the navigator then **rebases the project worktree onto
-  main** (`git rebase` run inside the project worktree, its only purpose),
-  **re-scans the worktree**, and the user **restarts opencode** (to load the
-  new/updated agents and their grants) and **reconnects** before implementation
-  continues. This does **not** violate "main is never a mutation place": that rule
-  governs the binary's *guarded* mutations — durable node/edge and transient
-  plan/review mutations, which refuse outside a project worktree — and does not
-  forbid these `.opencode/agents/**` edits and their commit, nor the optional
-  `release-agent`'s (the **other** carve-out) per-repo release artefacts. `git
-  push`/`git tag` remain human-approved acts. `agent-builder` generates the
-  repo-defined `*-implementer` agents (assertion-only `plan done`, task notes,
-  branch commits; every code-writer is **worktree-only**) and, optionally, a
-  per-repo `release-agent` — a hidden subagent the navigator dispatches via
-  `task` only after obtaining explicit user consent; it is the ONLY agent granted
-  `git push`/`git tag` (as `ask`), it writes the repo's release artefacts through
-  `edit` grants only (its per-repo main-write path set derived by the
-  agent-builder from repo analysis + coordinator interview — never a fixed list),
-  and the path-scoped fs tools `apg_rm`/`apg_mv`/`apg_cp` stay worktree-only for
-  it too.
-  `implementation-phase-reviewer` is a DISTRIBUTED agent installed by
-  `apg init`, not generated per repo (its phase review on branch scans and the
-  final implementation review discovering divergence — fix code or reconcile the
-  spec — are repo-agnostic, hence distributed).
 - `agent-builder` scaffolds agents **into the repo it is run against**. When
   that repo is the apg repo itself, its `.opencode/agents/**` are consumer
   artifacts refreshed out-of-band with the **installed (released)** binary —

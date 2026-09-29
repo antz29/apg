@@ -486,8 +486,8 @@ reviewer:    apg_review_reject <f>                               → status = op
   freely.
 - **Git (write)**: `git add` and `git commit` only. You hold **no** `git push`
   / `git tag` grant — push/tag are human-approved acts, and the only generated
-  agent granted them (as `ask`) is the optional per-repo `release-agent`, which
-  this repo does not have. Commit at phase end; follow the repo's existing
+  agent granted them (as `ask`) is the optional per-repo `release-agent`
+  (this repo's `release-agent`, dispatched only with explicit user consent). Commit at phase end; follow the repo's existing
   commit message style (check `git log`).
 - **Gates**: `cargo build`, `cargo check`, `cargo test`, `cargo fmt`,
   `cargo clippy` (argument variants allowed — filtered runs, `--all-targets`,
