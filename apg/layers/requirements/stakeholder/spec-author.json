@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "stakeholder",
   "name": "spec-author",
-  "body": "A person or agent with an interest in the durable spec's coherence: they author spec nodes and edges through `apg node add` / `apg edge add` (from inside a project worktree) and read them back through `apg_query`. They rely on one invariant — a single canonical edge vocabulary shared by the write surface and the graph projection. Every edge the write surface accepts is visible in the graph, and a pair the projection deliberately excludes is refused at write time with an actionable error — never accepted and then silently dropped. Their interest is that the two agree on that one vocabulary.",
+  "body": "A person or agent with an interest in the durable spec's coherence: they author spec nodes and edges through `apg node add` / `apg edge add` (from inside a project worktree) and read them back through `apg_query`. Their interest is that the write surface and the graph projection share one edge vocabulary, and every edge the write surface accepts appears in the graph projection.",
   "properties": {},
   "out": [
     {
