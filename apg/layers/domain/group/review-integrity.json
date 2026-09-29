@@ -36,6 +36,11 @@
       "kind": "realised-by",
       "target": "solution.component.review-record-retention",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.review-command-surface",
+      "properties": {}
     }
   ],
   "in": [
