@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "note-details-shape",
+  "body": "A note's `details` edge names exactly one target — its subject, a tier node or a code FQN — and that target is never another note; a `Note`-to-`Note` `details` pair is refused at write time and omitted from the projection.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
