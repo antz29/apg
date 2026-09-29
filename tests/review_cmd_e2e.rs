@@ -7,7 +7,7 @@ use apg::load;
 use apg::review_cmd::*;
 use apg::schema::Record;
 use apg::specs;
-use apg::testutil::{self, Repo};
+use apg::testutil::{self, Repo, spawn_apg};
 use common::with_cwd;
 use lbug::{Connection, Database};
 use std::path::{Path, PathBuf};
@@ -1042,6 +1042,109 @@ mod e2e {
         assert!(
             repo.is_clean(),
             "the mirror is gitignored — tree stays clean"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-02 task-6 (E2E): after a durable node reviewed by an item is
+    /// removed, the item stays visible to `apg review list` — the transient
+    /// record set is authoritative, so the Feedback and its reviewed-target
+    /// reference survive in the requirements mirror even though the DB
+    /// projection drops the node and its `Reviews` edge. The list marks the
+    /// absent target with the exact `<target> (removed target)` cell, and the
+    /// item still closes through the same `apg review resolve <fqn>` surface.
+    #[test]
+    #[ignore = "e2e tier: real I/O (transient mirrors/db.lbug/git); run via cargo test-e2e"]
+    fn review_list_marks_orphaned_target_and_closes_by_fqn() {
+        let (_apg_root, repo, wt) = fixture("orphan");
+
+        // Add the durable node through the real CLI (auto-committed on the
+        // branch, projected into the branch DB).
+        let added = spawn_apg(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "gone",
+                "--body",
+                "x",
+            ],
+            &wt,
+        );
+        assert!(
+            added.status.success(),
+            "{}",
+            String::from_utf8_lossy(&added.stderr)
+        );
+
+        // Review it while it exists: both halves land in the requirements
+        // mirror and the Reviews edge resolves in the DB.
+        let reviewed = spawn_apg(
+            &[
+                "review",
+                "add",
+                "requirements.requirement.gone",
+                "--body",
+                "orphan me",
+                "--project",
+                "foo",
+            ],
+            &wt,
+        );
+        assert!(
+            reviewed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&reviewed.stderr)
+        );
+
+        // Remove the reviewed node: the record set survives in `.trans`, but
+        // the DB projection drops the node — and the dangling Reviews edge
+        // with it.
+        let removed = spawn_apg(&["node", "rm", "requirements", "requirement", "gone"], &wt);
+        assert!(
+            removed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&removed.stderr)
+        );
+
+        // The record set is authoritative: the orphan is still listed, with the
+        // exact marker cell for its now-absent target.
+        let listed = spawn_apg(&["review", "list"], &wt);
+        assert!(
+            listed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let out = String::from_utf8(listed.stdout).unwrap();
+        assert!(
+            out.lines().any(
+                |l| l == "foo/feedback-1,open,,requirements.requirement.gone (removed target)"
+            ),
+            "the orphaned item must be listed with its removed-target marker: {out}"
+        );
+
+        // It still closes through the same resolve-by-FQN surface, and the
+        // marker persists after the item turns terminal.
+        let resolved = spawn_apg(&["review", "resolve", "foo/feedback-1"], &wt);
+        assert!(
+            resolved.status.success(),
+            "{}",
+            String::from_utf8_lossy(&resolved.stderr)
+        );
+        let listed = spawn_apg(&["review", "list"], &wt);
+        assert!(
+            listed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&listed.stderr)
+        );
+        let out = String::from_utf8(listed.stdout).unwrap();
+        assert!(
+            out.lines()
+                .any(|l| l
+                    == "foo/feedback-1,resolved,,requirements.requirement.gone (removed target)"),
+            "resolving by FQN must close the orphaned item: {out}"
         );
 
         testutil::remove(&repo);
