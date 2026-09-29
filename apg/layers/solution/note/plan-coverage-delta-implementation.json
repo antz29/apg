@@ -4,6 +4,12 @@
   "name": "plan-coverage-delta-implementation",
   "body": "Implementation handoff for `solution.component.plan-coverage-check`.\n\nThe delta computation is expected to move from `rust.apg.plan_cmd.verify.solution_nodes_added_on_branch` (which today reads the DEFAULT-BRANCH-TIP tree) to a merge-base durable-spec-delta unit under `src/plan_cmd/verify.rs` (or a new `src/git` merge-base helper). That new unit is a PLANNED node declared by the plan-writer — not authored here. When it lands, this component's `implemented-by` edge on `solution_nodes_added_on_branch` must be RE-POINTED to the realized FQN (and the old edge removed), per the planned-node realization flow; until then the edge records the current anchor. `rust.apg.plan_cmd.verify.coverage_check` becomes a pure function of the delta set (plus the plan tasks) and stays the scope decision; `rust.apg.plan_cmd.verify.plan_verify_at` supplies the delta and no longer computes spine reachability from `Satisfies`.\n\nTEST TIERS (per `global.constraint.test-tier-boundaries`): the scope decision (delta + plan tasks → required/touched FQN sets) is pure and belongs to the unit tier (`rust.apg.plan_cmd.tests.unit.coverage_*`); the merge-base git diff is real I/O (git2), hence e2e (`rust.plan_cmd_e2e.e2e.*`, plus `rust.plan_cmd_e2e.e2e.plan_verify_at_supplies_spine_and_branch_delta`), exercised against scratch `/tmp` repos per `global.constraint.no-real-project-test`.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.component.plan-coverage-check",
+      "properties": {}
+    }
+  ],
   "in": []
 }
