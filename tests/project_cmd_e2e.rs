@@ -2068,6 +2068,10 @@ mod e2e {
                     from: "test/plan".to_string(),
                     to: "test/plan.phase-01".to_string(),
                 },
+                Record::Satisfies {
+                    from: "test/plan.phase-01".to_string(),
+                    to: "requirements.requirement.timer".to_string(),
+                },
             ],
         )
         .unwrap();
