@@ -2664,18 +2664,21 @@ mod e2e {
 
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
-    fn plan_verify_at_supplies_spine_and_branch_delta() {
-        // plan_verify_at computes the satisfied-requirement set from the
-        // plan's Satisfies edges and the branch delta against the repo's
-        // default branch (the public repo_identity default_branch). A
-        // pre-existing unreachable node (committed on `main` BEFORE the
-        // project branch) forces no gap; the reached + branch-added nodes'
-        // implemented-by FQNs must be touched.
+    fn plan_verify_at_ignores_spine_and_supplies_merge_base_delta() {
+        // plan_verify_at computes the MERGE-BASE delta against the repo's
+        // default branch and hands it to coverage_check. It does NOT walk the
+        // Requirement Drives Domain RealisedBy Solution spine and does NOT read
+        // the phase Satisfies set for implemented-by coverage: an UNCHANGED
+        // pre-existing claim (committed on `main` BEFORE the branch) is exempt
+        // and forces no gap, while the branch's changed claim must be touched.
+        // The Satisfies set is used ONLY by the requirement-Satisfies gate: a
+        // branch-added requirement with no Satisfies'ing phase refuses, naming
+        // the requirement FQN, and passes once a phase Satisfies it.
         let repo = Repo::new("verify-spine");
         // The pre-existing worktree-cleanup nodes: present on `main` before the
-        // branch is cut, so they are not part of the branch delta and — being
-        // unreachable from the plan's satisfied requirement — must force no
-        // gap and no fake `modifies` task.
+        // branch is cut, so they are UNCHANGED and outside the merge-base delta
+        // — even though a branch requirement's (ignored) spine never reaches
+        // them, they must force no gap and no fake `modifies` task.
         for (node_type, name, code) in [
             (
                 "component",
@@ -2714,7 +2717,10 @@ mod e2e {
         db_at(&wt);
         let apg_root = wt.join(specs::LAYOUT);
 
-        // The branch's spine + branch-added solution nodes.
+        // The branch's requirement (the Satisfies-gate input), an entity it
+        // drives (the spine is IGNORED by coverage), and two branch-added
+        // solution nodes: one with a claim (required), one with no claim (a
+        // `no_claims` warning, never a blocker).
         write_node_file(
             &apg_root,
             "requirements",
@@ -2751,8 +2757,9 @@ mod e2e {
         );
         testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
 
-        // Green: the reached/branch-added FQN is touched; the pre-existing
-        // unreachable node and the no-claim node force no gap.
+        // Green: the branch-added claim is touched and the branch-added
+        // requirement is Satisfies'd; the pre-existing unchanged claims are
+        // exempt.
         let mut records = bare_plan();
         records.push(Record::Satisfies {
             from: "foo/plan.phase-01".to_string(),
@@ -2766,9 +2773,9 @@ mod e2e {
         specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
-        // Refusal: drop the touching task -> the reached node's FQN is a gap,
-        // named with its solution node; the pre-existing node is still not
-        // named (no false gap).
+        // Claim refusal: drop the touching task (keep the Satisfies) -> the
+        // branch-changed claim is a gap, named with its solution node; the
+        // unchanged pre-existing nodes are still not named (no false gap).
         let mut records = bare_plan();
         records.push(Record::Satisfies {
             from: "foo/plan.phase-01".to_string(),
@@ -2783,7 +2790,7 @@ mod e2e {
             "{msg}"
         );
         assert!(msg.contains("github.com/x/y.Store"), "{msg}");
-        // None of the pre-existing unreachable worktree-cleanup nodes is named.
+        // None of the pre-existing unchanged worktree-cleanup nodes is named.
         for name in [
             "project-delete",
             "project-dispatch",
@@ -2792,6 +2799,39 @@ mod e2e {
         ] {
             assert!(!msg.contains(name), "{name} named in: {msg}");
         }
+
+        // Requirement-Satisfies gate: restore the touching task but DROP the
+        // Satisfies -> verify refuses, naming the branch-added requirement FQN;
+        // the now-covered claim is NOT named (the two gates are distinct).
+        let mut records = bare_plan();
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        records.push(task_rec("modifies", "github.com/x/y.Store", ""));
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        let err = plan_verify_at(&apg_root, "foo").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("coverage incomplete"), "{msg}");
+        assert!(msg.contains("requirements.requirement.cr"), "{msg}");
+        assert!(
+            !msg.contains("solution.component.coverage-spine-validation"),
+            "{msg}"
+        );
+
+        // Adding the Satisfies back resolves the requirement gate -> green.
+        let mut records = bare_plan();
+        records.push(Record::Satisfies {
+            from: "foo/plan.phase-01".to_string(),
+            to: "requirements.requirement.cr".to_string(),
+        });
+        records.push(Record::Contains {
+            from: "foo/plan.phase-01".to_string(),
+            to: "foo/plan.phase-01.task-1".to_string(),
+        });
+        records.push(task_rec("modifies", "github.com/x/y.Store", ""));
+        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
         testutil::remove(&repo);
     }
