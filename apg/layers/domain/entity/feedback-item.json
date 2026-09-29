@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "feedback-item",
+  "body": "A Feedback item is a single review remark attached to a project: its FQN (`<project>/feedback-<n>`), its body, and its status. The item lives in the project's transient review set independent of whether its reviewed target exists.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
