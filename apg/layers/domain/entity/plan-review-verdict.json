@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.plan-verification",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.plan-review-deterministic-and-minimal",
+      "properties": {}
     }
   ]
 }
