@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "plan-coverage-check",
-  "body": "The plan-verify derived-coverage stage: computing the change-set's durable-spec delta from the branch's merge-base and requiring exactly that delta's `implemented-by` code FQNs to be touched by a plan task. Anchored on `rust.apg.plan_cmd.verify.coverage_check` (the pure scope decision, a function of the delta and the plan tasks), `rust.apg.plan_cmd.verify.change_set_spec_delta` (the merge-base durable-spec-delta computation), and `rust.apg.plan_cmd.verify.plan_verify_at` (the wiring that supplies the delta and calls coverage). It owns the verify gate's derived-coverage decision — the set of `implemented-by` code FQNs a plan must touch — and is the solution node the plan-coverage requirement's spine reaches.",
+  "body": "The plan-verify derived-coverage stage: computing the change-set's durable-spec delta from the branch's merge-base and requiring exactly that delta's `implemented-by` code FQNs to be touched by a plan task, plus the requirement-satisfies gate that requires every requirement added or changed in the same delta to be `Satisfies`'d by a plan phase. Anchored on `rust.apg.plan_cmd.verify.coverage_check` (the pure scope decision, a function of the delta and the plan tasks), `rust.apg.plan_cmd.verify.change_set_spec_delta` (the merge-base durable-spec-delta computation), and `rust.apg.plan_cmd.verify.plan_verify_at` (the wiring that supplies the delta and calls coverage). It owns the verify gate's derived-coverage decision — the set of `implemented-by` code FQNs a plan must touch and the set of delta requirements a phase must satisfy — and is the solution node the plan-coverage requirement's spine reaches.",
   "properties": {},
   "out": [
     {
