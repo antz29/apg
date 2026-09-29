@@ -566,11 +566,12 @@ fn persist_rm(apg_root: &Path, project: &str, records: &[Record]) -> anyhow::Res
 /// `--force` escape); `--force` cascades the WHOLE plan — the Plan record,
 /// every phase, task and planned node, every incident edge, and every Note
 /// orphaned by the removal — in one in-memory pass. Feedback records (and their
-/// `Reviews` edges) survive deliberately ([`cascade_remove`]). The emptied
-/// store is deleted ([`persist_rm`]), so a
-/// following `apg plan add <project>` recreates it. An absent plan is an error
-/// and the stored file is left untouched (nothing is written before the whole
-/// cascade is computed).
+/// `Reviews` edges) survive deliberately ([`cascade_remove`]), so
+/// [`persist_rm`] deletes the store only when the cascade left it empty: a
+/// store kept alive by surviving Feedback persists, and a later `apg plan add
+/// <project>` refuses on the existing file. An absent plan is an error and the
+/// stored file is left untouched (nothing is written before the whole cascade
+/// is computed).
 pub fn plan_rm_at(apg_root: &Path, project: &str, force: bool) -> anyhow::Result<()> {
     let _lock = artifacts::acquire_spec_lock(apg_root)?;
     let mut records = load_plan(apg_root, project)?;
