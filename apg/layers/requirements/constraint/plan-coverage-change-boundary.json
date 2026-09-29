@@ -1,9 +1,0 @@
-{
-  "layer": "requirements",
-  "type": "constraint",
-  "name": "plan-coverage-change-boundary",
-  "body": "Scope law (prose; assessed by review) for the coverage-spec-delta change-set. Its surfaces are:\n\n(a) the plan-verify delta gates — the merge-base durable-spec delta decides what is in scope: every added/changed/removed `implemented-by` claim's code FQN is touched by a plan task, and every requirement added or changed in the delta is `Satisfies`'d by a plan phase;\n\n(b) the agent-prompt coverage rule — `opencode-suite/agents/plan-review.md` verifies coverage deterministically from the binary's delta coverage verdict and then reviews each plan node semantically with a less-code bias; `opencode-suite/agents/implementation-phase-reviewer.md` carries the delta coverage rule in its coverage statement;\n\n(c) the spec-rules surfaces — the R1–R5 WRITER RULES in `opencode-suite/agents/spec-writer.md`, `plan-writer.md`, `codebase-navigator.md` and the REVIEWER RULES in `opencode-suite/agents/spec-review.md`, `plan-review.md`, `implementation-phase-reviewer.md`; the `apg spec lint` binary subcommand and its `apg_spec_lint` suite tool; the non-blocking wording warning on `apg node add` / `apg node update`; and the R2 constraint-scope refusal on the write surface.\n\nAll six prompts are product source (`solution.constraint.suite-is-product-source`), embedded via `include_str!` and installed by `apg init`; the repo's own `.opencode/agents/**` are consumer artifacts.\n\nThe planned-node realization gate, the feedback-resolution gate, and `apg plan verify`'s exit surface stay as they are: the coverage refusal names the owning solution node and the uncovered code FQN, and the requirement-satisfies refusal names the uncovered requirement FQN. `apg spec lint` reports the existing node-attached constraints and leaves them in place; clearing them is a separate dogfooding change-set.",
-  "properties": {},
-  "out": [],
-  "in": []
-}
