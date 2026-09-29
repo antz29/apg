@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "spec-truth",
+  "body": "The target-truth content of a durable spec statement: what is, or what needs to become true. A superseded statement is updated or removed, never annotated; a `note` deepens the understanding of what is and never records what was. Materializing a source spec or reconciling to an implementation rewrites the nodes to the present truth and leaves no provenance trail — git history, not the spec, describes what was.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
