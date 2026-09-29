@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "feedback-persists-until-reviewed",
+  "body": "A Feedback record in a project's transient review set remains in that set until a reviewer resolves or rejects it; removing a reviewed target leaves the record and its target reference intact.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
