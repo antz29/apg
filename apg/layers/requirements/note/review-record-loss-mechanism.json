@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "review-record-loss-mechanism",
+  "body": "source: the change-set brief reports that removing a durable node a Feedback item Reviews makes the item vanish from `apg review list` and from the verify gate's feedback-resolution check, so an actioned-but-unresolved item can be bypassed. inconsistency: two loss mechanisms exist. (1) Durable target — the `Feedback` node and its `.trans/<tier>/<project>.jsonl` record survive, but the `Reviews` edge is dropped: `ingest::finalize_graph` retains a Reviews edge only when both endpoints exist, and `ArtifactDb::merge_edge` skips the MERGE when the target label does not resolve, so `review_list`'s `MATCH (f:Feedback)-[:Reviews]->(n)` inner join filters the item out while the file-based `plan_verify_at` feedback stage still counts it. (2) Plan-family target — `plan_cmd::authoring::cascade_remove` (behind `apg plan rm --force`) garbage-collects any Feedback record whose only Reviews edge was removed, deleting the record from the plan store, so the file-based verify stage loses it too. resolution: the spec makes the transient review record set authoritative — the record persists until reviewed, the list reports it with a removed-target mark, and the verify stage counts by status alone [autonomous].",
+  "properties": {},
+  "out": [],
+  "in": []
+}
