@@ -19,6 +19,11 @@
       "kind": "details",
       "target": "solution.component.agent-builder-agents-md-hygiene",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "global.constraint.worktree-isolation",
+      "properties": {}
     }
   ],
   "in": []

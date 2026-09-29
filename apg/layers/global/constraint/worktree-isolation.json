@@ -20,6 +20,11 @@
       "kind": "details",
       "source": "requirements.note.agent-builder-model-map-reconciliation",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.agent-builder-agents-md-hygiene",
+      "properties": {}
     }
   ]
 }
