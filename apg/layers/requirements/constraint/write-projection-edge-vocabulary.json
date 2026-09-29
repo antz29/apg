@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "write-projection-edge-vocabulary",
+  "body": "For the durable authored edge kinds, the write surface and the graph projection share one vocabulary: an edge pair the projection excludes is refused at write time, never accepted and then silently dropped.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
