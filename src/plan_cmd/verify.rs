@@ -1,7 +1,7 @@
 //! The `apg plan verify` coherence gate: planned-node realization, resolved
 //! feedback, and spine-scoped derived solution coverage.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::artifacts::{self, parse_args};
@@ -321,6 +321,219 @@ fn solution_nodes_added_on_branch(
         }
     }
     Ok(added)
+}
+
+/// Compute the **merge-base durable-spec delta** the coverage decision scopes
+/// itself to: the branch's `apg/layers/**` node files against the merge-base
+/// of the branch tip with the repo's default branch
+/// (`requirements.requirement.plan-coverage-scoped-to-change-set-delta`
+/// clauses 2-3/5/6, `domain.entity.plan-coverage`). This is the impure half of
+/// the coverage rule — it opens the repo's object database and reads the base
+/// tree — yielding the pure-data [`SpecDelta`] the pure [`coverage_check`]
+/// consumes (and phase 0's linter reuses).
+///
+/// The delta carries:
+///
+/// - [`SpecDelta::added_claims`] — the `implemented-by` targets a solution node
+///   gains (an added or re-pointed edge), each an
+///   `(owning solution FQN, code FQN)` pair (clause 2);
+/// - [`SpecDelta::removed_claims`] — the targets it loses (a removed edge, a
+///   re-pointed edge's OLD target, or every target of a solution node removed
+///   on the branch) (clause 3). A re-pointed edge therefore keeps BOTH the old
+///   and the new code FQN in scope;
+/// - [`SpecDelta::no_claims`] — solution nodes the delta adds or changes that
+///   declare NO `implemented-by` edge (clause 6); and
+/// - [`SpecDelta::changed_requirements`] — requirement FQNs the delta adds or
+///   changes (clause 7's requirement-Satisfies gate input).
+///
+/// **Degenerate fail-safe (clause 5):** when no default branch resolves, the
+/// default ref or the branch tip is unavailable, or the merge-base tree
+/// carries no parseable durable spec (`<layout>/layers/**/*.json` is absent or
+/// empty), the WHOLE branch spec is the delta — every branch claim is added,
+/// every branch requirement changed, every claim-less branch solution node a
+/// `no_claims` entry. It never returns a silently-empty delta, which would
+/// silently pass coverage: an empty base collapses to the same code path as a
+/// branch diffed against nothing. Every vector is sorted (claims by
+/// `(solution, code)`; `no_claims`/`changed_requirements` plain), so the
+/// verdict and tests are deterministic.
+pub fn change_set_spec_delta(apg_root: &Path) -> anyhow::Result<SpecDelta> {
+    let identity = crate::git::repo_identity(apg_root)?;
+    let branch_nodes = crate::layers::read_existing_nodes(apg_root)?;
+
+    // The merge-base tree's durable node files. `None` ⇒ the base is absent
+    // (no default branch, no ref, no merge-base, or no parseable spec there),
+    // which collapses to the whole-branch delta below.
+    let base_nodes: Option<Vec<crate::layers::NodeFile>> = (|| {
+        let default = identity.default_branch.as_deref()?;
+        // Refs are shared across linked worktrees, so the main-root repo
+        // resolves both the default and the project branch by name.
+        let repo = git2::Repository::open(&identity.main_root).ok()?;
+        let default_commit = repo
+            .find_reference(&format!("refs/heads/{default}"))
+            .or_else(|_| repo.find_reference(&format!("refs/remotes/origin/{default}")))
+            .ok()?
+            .peel_to_commit()
+            .ok()?;
+        let checkout_repo = git2::Repository::open(&identity.checkout_root).ok();
+        let branch_commit = match identity.branch.as_deref() {
+            Some(branch) => repo
+                .find_reference(&format!("refs/heads/{branch}"))
+                .ok()?
+                .peel_to_commit()
+                .ok()?,
+            None => checkout_repo.as_ref()?.head().ok()?.peel_to_commit().ok()?,
+        };
+        let base_oid = repo
+            .merge_base(branch_commit.id(), default_commit.id())
+            .ok()?;
+        let base_tree = repo.find_commit(base_oid).ok()?.tree().ok()?;
+
+        // The repo-relative layout dir (`apg`) — exactly how the node files
+        // are addressed inside the base tree.
+        let layout = std::fs::canonicalize(apg_root)
+            .ok()
+            .and_then(|p| {
+                p.strip_prefix(&identity.checkout_root)
+                    .ok()
+                    .map(Path::to_path_buf)
+            })
+            .unwrap_or_else(|| PathBuf::from(specs::LAYOUT));
+        let prefix = format!("{}/{}/", layout.display(), crate::layers::LAYERS_DIR);
+
+        let mut out: Vec<crate::layers::NodeFile> = Vec::new();
+        base_tree
+            .walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+                if entry.kind() != Some(git2::ObjectType::Blob) {
+                    return 0;
+                }
+                let name = entry.name().unwrap_or_default();
+                let path = format!("{root}{name}");
+                if !name.ends_with(".json") || !path.starts_with(&prefix) {
+                    return 0;
+                }
+                if let Ok(blob) = repo.find_blob(entry.id())
+                    && let Ok(node) =
+                        serde_json::from_slice::<crate::layers::NodeFile>(blob.content())
+                {
+                    out.push(node);
+                }
+                0
+            })
+            .ok()?;
+        if out.is_empty() { None } else { Some(out) }
+    })();
+
+    // Solution nodes = the three C4 kinds; a claim is an `implemented-by` out
+    // edge whose target is the code FQN.
+    let is_solution = |n: &crate::layers::NodeFile| {
+        n.layer == "solution"
+            && matches!(n.node_type.as_str(), "system" | "container" | "component")
+    };
+    let is_requirement =
+        |n: &crate::layers::NodeFile| n.layer == "requirements" && n.node_type == "requirement";
+    let claims = |n: &crate::layers::NodeFile| -> BTreeSet<String> {
+        n.out
+            .iter()
+            .filter(|e| e.kind == "implemented-by")
+            .map(|e| e.target.clone())
+            .collect()
+    };
+
+    let base = base_nodes.as_deref().unwrap_or(&[]);
+    let mut base_solutions: BTreeMap<String, &crate::layers::NodeFile> = BTreeMap::new();
+    let mut base_requirements: BTreeMap<String, &crate::layers::NodeFile> = BTreeMap::new();
+    for n in base {
+        if is_solution(n) {
+            base_solutions.insert(
+                crate::layers::fqn(crate::layers::Layer::Solution, &n.node_type, &n.name),
+                n,
+            );
+        }
+        if is_requirement(n) {
+            base_requirements.insert(
+                crate::layers::fqn(crate::layers::Layer::Requirements, &n.node_type, &n.name),
+                n,
+            );
+        }
+    }
+    let mut branch_solutions: BTreeMap<String, &crate::layers::NodeFile> = BTreeMap::new();
+    let mut branch_requirements: BTreeMap<String, &crate::layers::NodeFile> = BTreeMap::new();
+    for n in &branch_nodes {
+        if is_solution(n) {
+            branch_solutions.insert(
+                crate::layers::fqn(crate::layers::Layer::Solution, &n.node_type, &n.name),
+                n,
+            );
+        }
+        if is_requirement(n) {
+            branch_requirements.insert(
+                crate::layers::fqn(crate::layers::Layer::Requirements, &n.node_type, &n.name),
+                n,
+            );
+        }
+    }
+
+    let mut added_claims: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut removed_claims: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut no_claims: BTreeSet<String> = BTreeSet::new();
+    let mut changed_requirements: BTreeSet<String> = BTreeSet::new();
+
+    // Set-difference each solution node's claims across the base. An empty
+    // base (the degenerate case) makes every branch target an added claim and
+    // every branch requirement changed — the whole-branch delta.
+    let all_solutions: BTreeSet<&String> = base_solutions
+        .keys()
+        .chain(branch_solutions.keys())
+        .collect();
+    for solution in all_solutions {
+        let base_targets = base_solutions
+            .get(solution)
+            .copied()
+            .map(claims)
+            .unwrap_or_default();
+        let branch_targets = branch_solutions
+            .get(solution)
+            .copied()
+            .map(claims)
+            .unwrap_or_default();
+        for code in branch_targets.difference(&base_targets) {
+            added_claims.insert((solution.clone(), code.clone()));
+        }
+        for code in base_targets.difference(&branch_targets) {
+            removed_claims.insert((solution.clone(), code.clone()));
+        }
+    }
+
+    // No-claim warning (clause 6): only solution nodes the delta ADDED or
+    // CHANGED, declaring no `implemented-by` edge.
+    for (solution, node) in &branch_solutions {
+        let changed = base_solutions
+            .get(solution)
+            .copied()
+            .is_none_or(|b| b != *node);
+        if changed && claims(node).is_empty() {
+            no_claims.insert(solution.clone());
+        }
+    }
+
+    // Requirement-Satisfies gate input (clause 7): requirements the delta added
+    // or changed (their node file differs at — or is absent from — the base).
+    for (requirement, node) in &branch_requirements {
+        let changed = base_requirements
+            .get(requirement)
+            .copied()
+            .is_none_or(|b| b != *node);
+        if changed {
+            changed_requirements.insert(requirement.clone());
+        }
+    }
+
+    Ok(SpecDelta {
+        added_claims: added_claims.into_iter().collect(),
+        removed_claims: removed_claims.into_iter().collect(),
+        no_claims: no_claims.into_iter().collect(),
+        changed_requirements: changed_requirements.into_iter().collect(),
+    })
 }
 
 /// Spine-scoped derived solution coverage (SPEC §5, requirement
