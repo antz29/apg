@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "reviewed-target-reference",
+  "body": "A reviewed-target reference is the FQN a Feedback item names as the thing it reviews. The reference is review data in its own right: it stays recorded when the target is absent from the layer store and the code graph, marking the item as reviewing a removed target.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
