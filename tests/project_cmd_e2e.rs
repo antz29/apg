@@ -403,7 +403,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
             "constraint",
             "ac-start-one-command",
             "R1 AC (§2.1): one `apg project start <name>` command yields the worktree + branch + branch DB — the branch DB exists after start.",
-            &[(layers::PROP_ATTACHES_TO, "requirements.requirement.r1")],
+            &[],
         ),
     );
     tier_push(
@@ -414,7 +414,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
             "constraint",
             "ac-refusals-name-fix",
             "R2 AC (§2.1): every hard-refusal case exits 1 with a fix line on stderr naming the actual state and the command that fixes it.",
-            &[(layers::PROP_ATTACHES_TO, "requirements.requirement.r2")],
+            &[],
         ),
     );
     tier_push(
@@ -425,7 +425,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
             "constraint",
             "ac-membership-names-half",
             "R3 AC (§2.2): a refused mutation's error names which membership half failed (branch half vs worktree half) plus one actionable fix line.",
-            &[(layers::PROP_ATTACHES_TO, "requirements.requirement.r3")],
+            &[],
         ),
     );
     tier_push(
@@ -550,13 +550,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         tier_push(
             &mut nodes,
             &mut idx,
-            nf(
-                "domain",
-                "constraint",
-                name,
-                body,
-                &[(layers::PROP_ATTACHES_TO, "domain.group.change-sets")],
-            ),
+            nf("domain", "constraint", name, body, &[]),
         );
     }
 

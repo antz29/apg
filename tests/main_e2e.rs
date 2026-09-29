@@ -1847,6 +1847,7 @@ mod e2e {
             "apg_rm.ts",
             "apg_mv.ts",
             "apg_cp.ts",
+            "apg_spec_lint.ts",
         ] {
             let p = dir.join("tools").join(name);
             assert!(p.exists(), "{name} must install");
@@ -1879,12 +1880,15 @@ mod e2e {
             "apg_rm.ts",
             "apg_mv.ts",
             "apg_cp.ts",
+            "apg_spec_lint.ts",
         ] {
             assert!(names.contains(&name), "SUITE_TOOLS embeds {name}");
         }
         assert!(
-            names.iter().all(|n| !n.starts_with("apg_spec")),
-            "no apg_spec tools remain in SUITE_TOOLS"
+            !names.contains(&"apg_spec.ts")
+                && !names.contains(&"apg_spec_add.ts")
+                && !names.contains(&"apg_spec_requirements.ts"),
+            "no retired apg_spec tools remain in SUITE_TOOLS"
         );
         assert!(
             !names.contains(&"apg_invariants.ts") && !names.contains(&"apg_invariant_add.ts"),

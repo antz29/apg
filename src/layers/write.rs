@@ -15,7 +15,8 @@ use super::code_refs::validate_code_refs;
 use super::node_file::{NodeFile, fqn};
 use super::tree::ingest_tree;
 use super::validate::{
-    check_edge_pairing, eval_constraint, parse_fqn, valid_name, validate_edges, validate_node,
+    PROP_ATTACHES_TO, check_edge_pairing, eval_constraint, parse_fqn, valid_name, validate_edges,
+    validate_node,
 };
 use super::{layer_of, validate_assembled_rules};
 
@@ -238,9 +239,10 @@ fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, St
 /// (existing nodes minus deleted/overwritten, plus the writes) satisfies the
 /// property-aware §3.3 rules ([`validate_assembled_rules`]: acyclic
 /// contains/depends-on trees; `Entity (kind: event)` publishes/subscribes
-/// targets) and [`check_edge_pairing`], every written constraint's
-/// `attaches-to` reference resolves against the post-mutation universe
-/// ([`eval_constraint`], R14), and — when the `graph.jsonl` export exists —
+/// targets) and [`check_edge_pairing`], every written constraint passes
+/// [`eval_constraint`]'s structure rules and, because a constraint's scope is
+/// its layer (R2), declares no new/changed `attaches-to` reference, and — when
+/// the `graph.jsonl` export exists —
 /// every assembled `implemented-by` target is Real or Pending against the
 /// exported scanned graph ([`validate_code_refs`]; a Drift target aborts before
 /// the write). Validation never opens `db.lbug`. Pure read — no write.
@@ -254,6 +256,18 @@ pub fn validate_change(
         let f = fqn(layer_of(&n.layer), &n.node_type, &n.name);
         existing.insert(f, n);
     }
+
+    // Snapshot every existing constraint's `attaches-to` value BEFORE the
+    // retain below drops written/deleted FQNs: after it, a written constraint
+    // looks absent and has no prior node file to compare its `attaches-to`
+    // against. The write-surface refusal (below) tells a NEW constraint — or a
+    // rewrite that CHANGES the value — from a rewrite that leaves an existing
+    // `attaches-to` value unchanged.
+    let prior_attaches_to: BTreeMap<String, Option<String>> = existing
+        .iter()
+        .filter(|(_, n)| n.node_type == "constraint")
+        .map(|(f, n)| (f.clone(), n.properties.get(PROP_ATTACHES_TO).cloned()))
+        .collect();
 
     // Remove the deleted files and the overwritten files from the current set.
     let mut deleted_fqns: BTreeSet<String> = BTreeSet::new();
@@ -329,11 +343,13 @@ pub fn validate_change(
         validate_code_refs(&refs, &scanned, &planned)?;
     }
 
-    // Constraint reference validation (R14): a written constraint's
-    // `attaches-to` must resolve against the post-mutation universe — a
-    // non-thing reference is refused BEFORE anything is written. (Without
-    // this, the files would land and the step-5 re-merge would fail
-    // afterwards, leaving a committed partial mutation.)
+    // Constraint validation (R14 / R2): [`eval_constraint`] owns the structural
+    // rules (name allowlist, type-in-layer, uniqueness), and the off-model
+    // `attaches-to` property is refused HERE — a constraint's scope is its
+    // layer, so a NEW constraint (or one whose `attaches-to` value CHANGES) may
+    // not declare it. A rewrite that leaves an existing constraint's
+    // `attaches-to` value unchanged passes, so the tree's attached constraints
+    // stay authorable. Refused BEFORE anything is written.
     for n in writes {
         if n.node_type != "constraint" {
             continue;
@@ -342,6 +358,20 @@ pub fn validate_change(
         let mut own_universe = universe.clone();
         own_universe.remove(&(layer, n.node_type.clone(), n.name.clone()));
         eval_constraint(layer, &n.name, &n.properties, &own_universe)?;
+
+        // The write-surface `attaches-to` refusal: refuse iff the written
+        // constraint carries an `attaches-to` AND (its FQN is absent from the
+        // pre-mutation snapshot — a NEW constraint — OR its value differs from
+        // the snapshot's).
+        if let Some(attaches_to) = n.properties.get(PROP_ATTACHES_TO) {
+            let key = fqn(layer, &n.node_type, &n.name);
+            match prior_attaches_to.get(&key) {
+                Some(prior) if prior.as_deref() == Some(attaches_to.as_str()) => {}
+                _ => anyhow::bail!(
+                    "constraint `{key}` declares `{PROP_ATTACHES_TO}` ({attaches_to}) — a constraint's scope is its layer (R2), so a new or changed `attaches-to` is refused; author the constraint in the tier it binds"
+                ),
+            }
+        }
     }
 
     // Pairwise symmetry over the assembled post-mutation set.

@@ -498,9 +498,9 @@ mod e2e {
 
     /// A failed multi-file mutation leaves NO partial state: the complete
     /// change is validated before anything is written, so an invalid second
-    /// endpoint (allowlist-violating name, dangling authored edge, or a
-    /// constraint with an unresolvable `attaches-to`) writes nothing — the
-    /// pre-existing files stay byte-identical and no new file lands.
+    /// endpoint (allowlist-violating name, dangling authored edge, or a NEW
+    /// constraint carrying an `attaches-to`) writes nothing — the pre-existing
+    /// files stay byte-identical and no new file lands.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn failed_multi_file_mutation_leaves_no_partial_state() {
@@ -552,9 +552,10 @@ mod e2e {
         assert!(!victim_path.exists());
         assert_eq!(std::fs::read_to_string(&existing_path).unwrap(), before);
 
-        // (c) A constraint whose attaches-to does not resolve — refused at
-        // write time (R14), before anything lands; the positive control
-        // (resolving attachment) writes and re-merges.
+        // (c) A NEW constraint carrying an `attaches-to` — regardless of
+        // resolution — is refused at write time (R2: a constraint's scope is
+        // its layer), before anything lands; the positive control is a NEW
+        // tier-scoped constraint with NO `attaches-to`.
         let mut c = node("requirements", "constraint", "law");
         c.properties.insert(
             layers::PROP_ATTACHES_TO.to_string(),
@@ -562,21 +563,18 @@ mod e2e {
         );
         let err = layers::write_project(&wt_apg, &[c], &[]).unwrap_err();
         let msg = format!("{err:#}");
-        assert!(msg.contains("never a non-thing"), "{msg}");
+        assert!(msg.contains("attaches-to"), "{msg}");
         let law_path = layers::node_file_path(&wt_apg, Layer::Requirements, "constraint", "law");
         assert!(
             !law_path.exists(),
             "a refused constraint write must not land a file"
         );
         assert_eq!(std::fs::read_to_string(&existing_path).unwrap(), before);
-        let mut c = node("requirements", "constraint", "law");
-        c.properties.insert(
-            layers::PROP_ATTACHES_TO.to_string(),
-            "requirements.requirement.existing".to_string(),
-        );
+        // A NEW constraint WITHOUT `attaches-to` is well-formed and re-merges.
+        let c = node("domain", "constraint", "law");
         layers::write_project(&wt_apg, &[c], &[]).unwrap();
         let db = ArtifactDb::open(&wt_apg).unwrap();
-        assert!(db.has_node("requirements.constraint.law"));
+        assert!(db.has_node("domain.constraint.law"));
 
         // The store still pairs cleanly throughout.
         layers::check_edge_pairing(&layers::read_existing_nodes(&wt_apg).unwrap()).unwrap();
