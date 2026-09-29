@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.layers.write.append_transient_records",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.layers.write.write_project_with",
+      "properties": {}
     }
   ],
   "in": [
