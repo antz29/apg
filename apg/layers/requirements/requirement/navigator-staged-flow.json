@@ -18,6 +18,11 @@
       "kind": "contains",
       "source": "requirements.user.navigator-agent",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.navigator-staged-flow-decision",
+      "properties": {}
     }
   ]
 }
