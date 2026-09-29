@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "plan-coverage",
-  "body": "The coverage rule of the plan-verify gate: for every solution node whose `implemented-by` claim changed between the branch's merge-base and the branch tip, each affected code FQN must be touched by a plan task; unchanged pre-existing claims impose no obligation however the spine reaches them. Coverage is verb-agnostic, counts a `renames`/`moves` destination, and compares code FQNs by language-agnostic identity. An in-scope solution node with no `implemented-by` edge is a warning (`no_claims`), never a blocker.",
+  "body": "The coverage rule of the plan-verify gate: for every solution node whose `implemented-by` claim changed between the branch's merge-base and the branch tip, each affected code FQN must be touched by a plan task; unchanged pre-existing claims impose no obligation however the spine reaches them. The same delta scopes the requirement gate: every requirement added or changed in the delta is `Satisfies`'d by at least one plan phase. Coverage is verb-agnostic, counts a `renames`/`moves` destination, and compares code FQNs by language-agnostic identity. An in-scope solution node with no `implemented-by` edge is a warning (`no_claims`), never a blocker.",
   "properties": {
     "kind": "entity"
   },
