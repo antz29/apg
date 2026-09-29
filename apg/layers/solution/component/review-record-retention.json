@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.plan_cmd.authoring.cascade_remove",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.review_cmd.set_feedback_at",
+      "properties": {}
     }
   ],
   "in": [
