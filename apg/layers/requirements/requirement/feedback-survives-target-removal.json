@@ -6,7 +6,13 @@
   "properties": {
     "feature": "review-integrity"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.feedback-persists-across-target-loss",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
