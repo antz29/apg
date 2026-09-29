@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "node-removal-feedback-notice",
+  "body": "The node-removal feedback notice is the `apg node rm` warning step: it selects the project's Feedback items whose reviewed target is the node being removed and whose status is open or actioned, reports them, and lets the removal proceed with each record and its reviewed-target reference intact.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
