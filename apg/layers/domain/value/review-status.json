@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "review-status",
-  "body": "Review status is the lifecycle state of a Feedback item: open (attached), actioned (the coordinator recorded the writer's claim), or resolved (the reviewer's terminal acceptance). Every status other than resolved leaves the item outstanding.",
+  "body": "Review status is the lifecycle state of a Feedback item: open (attached), actioned (the coordinator recorded the writer's claim), or resolved (the reviewer's terminal acceptance). Open and actioned are the outstanding statuses; resolved is terminal.",
   "properties": {},
   "out": [],
   "in": [
