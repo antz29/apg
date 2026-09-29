@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "domain.entity.spec-lint",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.constraint-scope",
+      "properties": {}
     }
   ],
   "in": [
