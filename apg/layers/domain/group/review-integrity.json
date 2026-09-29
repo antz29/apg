@@ -46,6 +46,11 @@
       "kind": "realised-by",
       "target": "solution.component.verify-feedback-stage",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.feedback-projection",
+      "properties": {}
     }
   ],
   "in": [
