@@ -2460,10 +2460,14 @@ mod e2e {
     }
 
     // ------------------------------------------------------------------
-    // coverage_check: derived solution coverage in plan verify — every
-    // in-scope solution node's implemented-by FQN (reached from a satisfied
-    // requirement, or added on this branch) must be touched by at least one
-    // plan task (SPEC §5); the coherence gate refuses when it does not.
+    // Change-set delta coverage in plan verify: only the merge-base durable-
+    // spec delta's `implemented-by` claims (added, re-pointed/changed or
+    // removed) must be touched by at least one plan task (SPEC §5); an
+    // unchanged pre-existing claim is exempt. These fixture tests author NO
+    // pre-existing spec, so the whole branch spec IS the delta — the
+    // traceability for the law's clause 5 ("no pre-existing spec degenerates
+    // correctly: the whole spec is the delta",
+    // requirements.requirement.plan-coverage-scoped-to-change-set-delta).
     // ------------------------------------------------------------------
 
     #[test]
@@ -2472,10 +2476,10 @@ mod e2e {
         // One solution node whose implemented-by FQNs are a real scanned
         // Struct (covered by a modifies task) and an absent FQN (covered by a
         // creates task — the planned-node case: a creates over a still-absent
-        // FQN counts exactly like a modifies over real code). The node is
-        // ADDED ON THIS BRANCH, so it is in scope even though no satisfied
-        // requirement reaches it; there is no cumulative-store assumption —
-        // a pre-existing unreachable node would be exempt (task-7's int test).
+        // FQN counts exactly like a modifies over real code). The fixture has
+        // NO pre-existing spec, so the whole branch spec is the delta (law
+        // clause 5): the node is an ADDED claim, in scope; an unchanged
+        // pre-existing claim would instead be exempt.
         let (apg_root, repo, wt) = fixture("coverage-ok");
         write_solution_node(
             &apg_root,
@@ -2627,9 +2631,10 @@ mod e2e {
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn coverage_trivially_holds_with_no_solution_nodes() {
-        // No solution-layer node files at all — nothing is spine-reached and
-        // the branch delta is empty, so coverage is a no-op and verify passes
-        // on the other gates alone.
+        // No solution-layer node files at all — the branch delta is empty, so
+        // coverage is a no-op and verify passes on the other gates alone. (The
+        // fixture has no pre-existing spec, so the whole branch spec — here
+        // empty — is the delta.)
         let (apg_root, repo, _wt) = fixture("coverage-empty");
         let _path = write_plan(&apg_root);
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
