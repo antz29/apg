@@ -9,6 +9,11 @@
       "kind": "realised-by",
       "target": "solution.component.cli-session-routing",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.cli-session-caller-guidance",
+      "properties": {}
     }
   ],
   "in": [
