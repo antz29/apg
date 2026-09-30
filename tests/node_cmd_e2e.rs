@@ -1330,17 +1330,33 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-16: the session amortizes ONE DB open across N routed
-    /// mutations (the observable open counter is materially fewer than N), AND
-    /// every mutation is visible to a separate routed reader as it returns —
-    /// there is no end-of-session flush.
+    /// Phase-01 task-17: the session amortizes ONE DB open across N routed
+    /// durable mutations (the observable open counter is materially fewer than
+    /// N), every mutation is visible to a separate routed reader as soon as it
+    /// returns (the session projects it into the live `db.lbug` at admission —
+    /// there is no end-of-session flush), and the whole run stays BUFFERED —
+    /// no node file, no commit — until `apg session save`, the single
+    /// durability point. After save the buffered set is durable (every node
+    /// file written in exactly one commit) and the buffer is cleared (a second
+    /// save is a no-op); the session stays live throughout and ends cleanly.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn live_session_amortizes_the_db_open_and_keeps_every_mutation_visible() {
         const N: usize = 6;
-        let (_wt_apg, repo, wt) = mutation_fixture("session-amortize");
+        let (wt_apg, repo, wt) = mutation_fixture("session-amortize");
         let home = repo.root.join("home");
         let session = testutil::start_session_process(&wt, &home);
+
+        // Baseline: the buffered run below must not move git until save.
+        let before_commits = testutil::commit_count(&wt);
+        let before_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
 
         for i in 0..N {
             let name = format!("amort-{i}");
@@ -1360,7 +1376,8 @@ mod e2e {
                 String::from_utf8_lossy(&add.stderr)
             );
 
-            // A SEPARATE routed reader sees the mutation as soon as it returns.
+            // A SEPARATE routed reader sees the mutation as soon as it returns
+            // (projected at admission — no end-of-session flush).
             let query = format!(
                 "MATCH (n:Requirement {{fqn: 'requirements.requirement.{name}'}}) RETURN count(n)"
             );
@@ -1376,11 +1393,90 @@ mod e2e {
                     .last()
                     .map(str::trim),
                 Some("1"),
-                "mutation {i} must be visible immediately (no end-of-session flush)"
+                "mutation {i} must be visible immediately (projected at admission)"
             );
         }
 
+        // Buffered, not durable: no node file was written and git is unmoved.
+        for i in 0..N {
+            let name = format!("amort-{i}");
+            assert!(
+                !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", &name)
+                    .exists(),
+                "a buffered mutation must not write `{name}` before save"
+            );
+        }
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered mutation must not create a commit before save"
+        );
+        assert_eq!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string(),
+            before_head,
+            "git history must stay at the last saved state until save"
+        );
+
+        // The single durability point: one save flushes the whole buffer.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+        for i in 0..N {
+            let name = format!("amort-{i}");
+            assert!(
+                layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", &name).exists(),
+                "save must write the `{name}` node file"
+            );
+        }
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the whole buffered set must land in exactly one commit"
+        );
+
+        // The buffer is cleared: a second save over it makes no new commit.
+        let resave = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            resave.status.success(),
+            "{}",
+            String::from_utf8_lossy(&resave.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "a save over the cleared buffer must make no commit"
+        );
+
+        // The session stayed live through save …
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "session save must not end the live session"
+        );
+
+        // … and ends cleanly.
         let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        // ONE amortized DB open across N mutations: the observable open marker
+        // fires materially fewer than N times.
         let stderr = String::from_utf8_lossy(&out.stderr);
         let opens = stderr.matches(apg::session::DB_OPEN_MARKER).count();
         assert!(opens >= 1, "the session must open the DB: {stderr}");
