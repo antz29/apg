@@ -174,11 +174,11 @@ The project builds a single `apg` binary (package `apg`):
   file under `apg/layers/` (the file name is the identity; `add` refuses an
   existing FQN, `update` merges body/properties and is edge-preserving — the
   name is immutable); `edge add|update|rm <kind> <from> <to>` writes **both**
-  endpoint files in one atomic, auto-committed mutation (the out half in the
-  source's file, the matching in half in the target's; `add` refuses a
-  duplicate, `update` is properties-only). Guarded — refuses outside a project
-  worktree. **Durable `node`/`edge` mutations require a live session** — see
-  *Sessions: caller-owned durable mutation* below.
+  endpoint files as one mutation (the out half in the source's file, the
+  matching in half in the target's; `add` refuses a duplicate, `update` is
+  properties-only). Guarded — refuses outside a project worktree. **Durable
+  `node`/`edge` mutations require a live session and are not committed until
+  `apg session save`** — see *Sessions: caller-owned durable mutation* below.
 - `apg session <sub> …` — the session-scoped single-writer coordinator that owns
   the worktree's `apg/.trans/db.lbug`: `start` launches it (foreground),
   `save` — make the buffered node-file set durable (one atomic write + commit);
@@ -681,7 +681,8 @@ Type conversions in Go (`[]byte(x)`, `protoimpl.Pointer(x)`, `(*T)(nil)`) are ro
 The **durable spec** is a node-file store, not a JSONL: one file per node under
 `apg/layers/`, authored via `apg node add|rm` / `apg edge add|rm` (never by
 editing files by hand — the binary validates the schema, the pairings, and the
-references, and auto-commits each mutation). FQN = **`<layer>.<type>.<name>`**,
+references; each mutation is admitted into the session's write-back buffer and
+is not committed until `apg session save`). FQN = **`<layer>.<type>.<name>`**,
 no project prefix, no `spec.<id>` vocabulary; the **file name IS the identity**
 and the node-file's `layer`/`type`/`name` fields must match the path. Both
 halves of every edge live in the node files (out in the source's file, the
