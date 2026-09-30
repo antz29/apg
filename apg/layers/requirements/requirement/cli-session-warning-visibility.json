@@ -14,11 +14,6 @@
     },
     {
       "kind": "drives",
-      "target": "domain.entity.spec-lint",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
       "target": "domain.entity.removal-feedback-notice",
       "properties": {}
     },

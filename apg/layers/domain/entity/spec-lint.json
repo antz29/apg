@@ -23,11 +23,6 @@
       "kind": "contains",
       "source": "domain.group.spec-authoring",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-warning-visibility",
-      "properties": {}
     }
   ]
 }
