@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "cli-session-coordinator",
+  "body": "The session coordinator: the live server that owns the worktree's `apg/.trans/db.lbug` and the extended `apg/.trans/specs.lock` for its life, binds the session socket, admits durable node/edge mutations in receive order, projects each into the live index, holds the pending node-file writes and deletes, and flushes them at a save as one atomic write plus one commit.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
