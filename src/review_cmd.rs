@@ -201,8 +201,9 @@ fn feedback_tier(target: &str, project: &str) -> Layer {
 /// plan-family targets, `apg/.trans/<tier>/<project>.jsonl` for the five
 /// tier mirrors. Both halves of the relationship — the `Feedback` record AND
 /// the `Reviews` edge — live in `.trans`; never in committed node files,
-/// never in `apg/specs/` or `apg/notes/` (and `.trans` is gitignored, so the
-/// write-through never auto-commits). Returns the mirror path written.
+/// never in `apg/specs/` or `apg/notes/` (and `.trans` is gitignored and
+/// transient, so the mirror write never commits — `apg session save` flushes
+/// only `apg/layers/**`, never review state). Returns the mirror path written.
 ///
 /// **Commit-then-project** (phase-05 task-15): the mirror write lands FIRST
 /// (via `write_jsonl_and_reingest`) and the exact projection delta is applied
