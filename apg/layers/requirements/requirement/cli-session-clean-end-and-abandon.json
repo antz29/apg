@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cli-session-clean-end-and-abandon",
+  "body": "`apg session end` completes on a clean buffer: it releases the database, the lock, and the socket. With a dirty buffer it reports the pending changes and stays live. `apg session abort` discards the buffer; with pending changes it releases the session and runs a full scan that rebuilds `db.lbug` from `apg/layers/**`.\n\nACCEPTANCE:\n- `apg session end` over a clean buffer releases the database handle, the flock, and the socket, and a later command sees the session absent.\n- `apg session end` over a dirty buffer reports the pending changes, releases nothing, and the session stays live.\n- `apg session abort` over a dirty run discards every buffered change, releases the session, and a full scan rebuilds `db.lbug` from the on-disk node files so the discarded projections are absent from the index.",
+  "properties": {
+    "feature": "cli-session-substrate"
+  },
+  "out": [],
+  "in": []
+}
