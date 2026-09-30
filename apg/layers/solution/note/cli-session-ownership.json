@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "cli-session-ownership",
-  "body": "The coordinator owns, for the session's life, the worktree database handle, the extended `apg/.trans/specs.lock`, and the session socket, and it is the single writer of the buffered node files and the live index. The save flush and the scan_meta re-anchor live in the durability component; the scan/query/merge guards live in the lifecycle-guards component; the advisory transport lives in the warning-propagation component. The coordinator routes to each and holds the socket and lock itself.",
+  "body": "The coordinator owns, for the session's life, the worktree database handle, the extended `apg/.trans/specs.lock`, and the session socket, and it is the single writer of the buffered node files and the live index. The save flush and the scan_meta re-anchor live in the durability component; the scan and merge guards live in the lifecycle-guards component; the read routing lives in the routing component; the advisory transport lives in the warning-propagation component. The coordinator routes to each and holds the socket and lock itself.",
   "properties": {},
   "out": [
     {
