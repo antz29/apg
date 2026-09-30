@@ -6,7 +6,13 @@
   "properties": {
     "feature": "cli-session-substrate"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cli-session-required-for-durable-mutations",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
