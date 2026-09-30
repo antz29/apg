@@ -154,4 +154,101 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// `apg node add` and `apg node update` on a tier node whose `--body`
+    /// carries negation/future/time-relative wording emit the shared advisory
+    /// (naming the re-phrase option) and still SUCCEED — the writer decides.
+    /// Plain present-tense wording is silent. Covers the write-surface hooks
+    /// `rust.apg.node_cmd.node_add_change` / `node_update_change`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
+    fn node_add_and_update_emit_advisory_wording_warning() {
+        let (apg_root, repo, wt) = wt_fixture("advisory");
+        let path =
+            apg::layers::node_file_path(&apg_root, apg::layers::Layer::Domain, "value", "demo-val");
+
+        // `node add`: time-relative wording (`was`) emits the advisory AND
+        // still succeeds — advisory, never a refusal.
+        let out = testutil::spawn_apg(
+            &[
+                "node",
+                "add",
+                "domain",
+                "value",
+                "demo-val",
+                "--body",
+                "The old flow was synchronous.",
+            ],
+            &wt,
+        );
+        assert!(
+            out.status.success(),
+            "the advisory must not block the add: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(apg::spec_lint::WORDING_ADVISORY),
+            "node add must emit the advisory:\n{stderr}"
+        );
+        assert!(
+            path.exists(),
+            "the flagged-but-advisory write must still land its node file"
+        );
+
+        // `node update`: future-tense wording (`will`) emits the advisory AND
+        // still succeeds; the body is stored.
+        let out = testutil::spawn_apg(
+            &[
+                "node",
+                "update",
+                "domain",
+                "value",
+                "demo-val",
+                "--body",
+                "The service will retry the request.",
+            ],
+            &wt,
+        );
+        assert!(
+            out.status.success(),
+            "the advisory must not block the update: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(apg::spec_lint::WORDING_ADVISORY),
+            "node update must emit the advisory:\n{stderr}"
+        );
+        let back =
+            apg::layers::read_node_file(&apg_root, apg::layers::Layer::Domain, "value", "demo-val")
+                .unwrap();
+        assert_eq!(back.body, "The service will retry the request.");
+
+        // Plain present-tense wording is silent.
+        let out = testutil::spawn_apg(
+            &[
+                "node",
+                "update",
+                "domain",
+                "value",
+                "demo-val",
+                "--body",
+                "The service stores the record.",
+            ],
+            &wt,
+        );
+        assert!(
+            out.status.success(),
+            "a plain update must succeed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains(apg::spec_lint::WORDING_ADVISORY),
+            "plain present-tense wording must be silent:\n{stderr}"
+        );
+
+        testutil::remove(&repo);
+    }
 }
