@@ -7,8 +7,9 @@
 // and Cypher string-literal escaping (so structured args can never break out
 // of or inject into a query).
 
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs"
-import { homedir } from "node:os"
+import { closeSync, existsSync, openSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs"
+import net from "node:net"
+import { homedir, tmpdir } from "node:os"
 import path from "node:path"
 
 export interface ToolContext {
@@ -926,4 +927,164 @@ export async function branchAddedRequirementNames(
   const added = new Set<string>()
   for (const name of names) if (!present.has(name)) added.add(name)
   return added
+}
+
+// ── Detached session start (apg_session) ───────────────────────────────────
+//
+// `apg session start` is a BLOCKING foreground server: it takes the worktree's
+// `apg/.trans/db.lbug` and the extended `specs.lock` flock for its whole life
+// and serves routed mutations/reads over a Unix socket until `apg session end`
+// (or `abort`) arrives. A suite tool cannot block on it, so
+// `startDetachedSession` spawns it with detached stdio, waits until its socket
+// answers live, and returns while the coordinator keeps running — the caller
+// (the `apg_session` tool) then routes further `apg node`/`apg edge`/`apg
+// query` calls through it.
+//
+// The socket is NOT re-derived here: a deeply nested worktree path exceeds the
+// OS `SUN_LEN`, so the binary falls back to a deterministic `/tmp` short path
+// the suite cannot reproduce, and it REPORTS whichever path it bound
+// ("apg session: listening on <path>", the same line every client-side resolver
+// keys off). This helper captures that line from a stderr log.
+
+/** The `apg session start` stderr prefix naming the socket it bound. */
+const SESSION_LISTENING_PREFIX = "listening on "
+
+/** A unit enum variant serializes as a bare quoted string on the session wire
+ *  (serde's externally-tagged form), so the liveness probe is a `"Ping"` line
+ *  whose `"Pong"` reply means a live coordinator. */
+const SESSION_PING = '"Ping"'
+const SESSION_PONG = '"Pong"'
+
+/** A live, detached `apg session start` coordinator. */
+export interface DetachedSession {
+  /** The project root — the checkout containing `apg/`. */
+  root: string
+  /** The Unix socket the live coordinator serves (absolute). */
+  socket: string
+  /** The detached coordinator's process id (diagnostics). */
+  pid: number
+}
+
+/** Tunables for `startDetachedSession`. */
+export interface StartSessionOptions {
+  /** How long to wait for the socket to answer live. Default 15000ms. */
+  timeoutMs?: number
+  /** Delay between liveness probes. Default 50ms. */
+  pollMs?: number
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * True when a live coordinator answers a `Ping` at `socket` within `timeoutMs`.
+ * Mirrors the binary's `session::live_session_at`: a stale socket file with no
+ * listener behind it fails the connect, so only a genuinely live session reports
+ * true. Real I/O (a Unix-socket connection), so it is covered by the opt-in
+ * suite e2e, never the side-effect-free unit tier.
+ */
+export function sessionLiveAt(socket: string, timeoutMs = 2000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const conn = net.connect(socket)
+    let settled = false
+    const finish = (live: boolean) => {
+      if (settled) return
+      settled = true
+      conn.destroy()
+      resolve(live)
+    }
+    conn.setTimeout(timeoutMs, () => finish(false))
+    conn.on("error", () => finish(false))
+    conn.on("connect", () => conn.write(`${SESSION_PING}\n`))
+    conn.on("data", (chunk) => {
+      if (chunk.toString().includes(SESSION_PONG)) finish(true)
+    })
+  })
+}
+
+/**
+ * Starts `apg session start` DETACHED for the caller's project and returns once
+ * its socket answers live — the detached coordinator keeps running (it owns the
+ * worktree DB and the extended flock) while this call returns immediately after
+ * the liveness handshake.
+ *
+ * The INSTALLED binary is used, via the suite's normal `apgBinary()` resolution
+ * (`APG_BINARY` override, else `apg` on `PATH`): the helper never builds or
+ * points at a change-set. The opt-in suite e2e points `APG_BINARY` at a
+ * candidate build the same way every other suite helper does.
+ *
+ * Returns a `DetachedSession` on success, or an error STRING on failure —
+ * mirroring the lib's string-or-data subprocess contract (`runCli`): no DB
+ * found (`NO_DB_ERROR`), a `start` that exited early (a second session already
+ * owns the worktree, a bad layout, …), or a socket that never answered live
+ * within the timeout. A timeout kills the half-started process. The captured
+ * `start` output is carried in the returned error for diagnosis.
+ */
+export async function startDetachedSession(
+  context: ToolContext,
+  directory?: string,
+  options?: StartSessionOptions,
+): Promise<DetachedSession | string> {
+  const root = findApgRoot(context, directory)
+  if (!root) return NO_DB_ERROR
+  const timeoutMs = options?.timeoutMs ?? 15000
+  const pollMs = options?.pollMs ?? 50
+
+  // Detached stdio: the child outlives the tool call, so it never shares a pipe
+  // this process would have to keep draining. Its stderr goes to a unique temp
+  // log we can read the bound-socket line from; stdout and stdin are ignored.
+  const logFile = path.join(
+    tmpdir(),
+    `apg-session-start-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
+  )
+  const fd = openSync(logFile, "w")
+  let proc: ReturnType<typeof Bun.spawn>
+  try {
+    proc = Bun.spawn([apgBinary(), "session", "start"], {
+      cwd: root,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: fd,
+    })
+  } catch (e) {
+    closeSync(fd)
+    rmSync(logFile, { force: true })
+    return `apg session start failed to spawn: ${e instanceof Error ? e.message : String(e)}`
+  }
+  closeSync(fd)
+  proc.unref()
+
+  const log = (): string => {
+    try {
+      return readFileSync(logFile, "utf8")
+    } catch {
+      return ""
+    }
+  }
+
+  try {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const line = log()
+        .split("\n")
+        .find((l) => l.includes(SESSION_LISTENING_PREFIX))
+      if (line) {
+        const socket = line
+          .slice(line.indexOf(SESSION_LISTENING_PREFIX) + SESSION_LISTENING_PREFIX.length)
+          .trim()
+        if (socket && (await sessionLiveAt(socket))) {
+          return { root, socket, pid: proc.pid }
+        }
+      }
+      // A start that exited early (already-live refusal, bad layout, …) never
+      // binds a socket: report its output instead of waiting out the deadline.
+      if (proc.exitCode !== null) {
+        return `apg session start failed (exit ${proc.exitCode}):\n${log().trim()}`
+      }
+      await sleep(pollMs)
+    }
+    proc.kill()
+    return `apg session start did not become live within ${timeoutMs}ms:\n${log().trim()}`
+  } finally {
+    rmSync(logFile, { force: true })
+  }
 }
