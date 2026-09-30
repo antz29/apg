@@ -1691,25 +1691,36 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-13 (e2e): genuine cross-process read-your-writes. A spawned
-    /// `apg node add requirements requirement foo` returns, then a NEW `apg
-    /// query` process (a separate binary) resolves `foo` — no re-scan, no
-    /// explicit flush, no session-end step. An in-process re-open does not prove
-    /// it.
+    /// Phase-01 task-18 (e2e): genuine cross-process read-your-writes under the
+    /// buffered session contract. A routed `apg node add` is admitted into the
+    /// live session's write-back buffer and projected into the session-held
+    /// `db.lbug`; a SEPARATE `apg query` process (a different binary) routed
+    /// through the socket observes it as soon as the add returns — while the
+    /// mutation is still UNSAVED (no node file, no commit). After `apg session
+    /// save` makes the buffer durable and the session ends cleanly, a fresh
+    /// query process with NO live session opens `db.lbug` directly and reads the
+    /// same saved state.
     ///
-    /// Both variants are asserted explicitly:
-    /// (a) **no live session** ⇒ the new query process opens `db.lbug` directly
-    /// (the direct-path read-your-writes);
-    /// (b) **live session** ⇒ it routes through the socket
-    /// (read-access-during-session).
+    /// Both halves are asserted explicitly:
+    /// (a) **live session** ⇒ the new query process routes through the socket
+    /// and sees the still-unsaved mutation (read-your-writes through the
+    /// session);
+    /// (b) **no live session** (after save + end) ⇒ the new query process reads
+    /// the last saved state directly from `db.lbug`, never opening a session.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn read_your_writes_cross_process_direct_and_session() {
-        let (_wt_apg, repo, wt) = mutation_fixture("read-your-writes");
+        let (wt_apg, repo, wt) = mutation_fixture("read-your-writes");
         let home = repo.root.join("home");
 
-        // (a) No live session: the direct path projects write-through, and a
-        // NEW query process reads it from a direct db.lbug open.
+        // (a) A live session admits the mutation into its write-back buffer and
+        // projects it into the session-held DB; it is NOT yet durable.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "variant (a) must run with a live session"
+        );
+        let before_commits = testutil::commit_count(&wt);
         let add = testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "foo"])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
@@ -1719,20 +1730,25 @@ mod e2e {
             "{}",
             String::from_utf8_lossy(&add.stderr)
         );
+
+        // Still buffered: no node file written, no commit made.
         assert!(
-            !apg::session::live_session(&wt.join(specs::LAYOUT)),
-            "variant (a) must run with no live session"
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "foo").exists(),
+            "a buffered add must not write a node file before save"
         );
-        let q = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
-            ],
-            &wt,
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered add must not create a commit before save"
         );
+
+        // A SEPARATE query process routes through the live session and sees the
+        // mutation before save/end — read-your-writes through the session.
+        let query = "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)";
+        let q = testutil::spawn_apg(&["query", query], &wt);
         assert!(
             q.status.success(),
-            "direct query: {}",
+            "routed query: {}",
             String::from_utf8_lossy(&q.stderr)
         );
         assert_eq!(
@@ -1741,33 +1757,43 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "a NEW process must read the mutation without a scan/flush"
+            "a NEW process must read the routed mutation before save/end"
         );
 
-        // (b) Live session: the same add is routed, and a NEW query process
-        // routes through the socket to the session-held DB.
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(apg::session::live_session(&wt.join(specs::LAYOUT)));
-        let add2 =
-            testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "bar"])
-                .cwd(&wt)
-                .env("HOME", home.to_str().unwrap())
-                .output();
+        // (b) `apg session save` is the durability point; then the session ends
+        // cleanly, leaving NO live session for the direct read.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
-            add2.status.success(),
+            save.status.success(),
             "{}",
-            String::from_utf8_lossy(&add2.stderr)
+            String::from_utf8_lossy(&save.stderr)
         );
-        let q2 = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.bar'}) RETURN count(n)",
-            ],
-            &wt,
+        assert!(
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "foo").exists(),
+            "save must write the buffered node file"
         );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "variant (b) must run with no live session"
+        );
+
+        // With no live session the DB is directly openable, and a fresh query
+        // process opens `db.lbug` directly (no session) and reads the last
+        // saved state.
+        assert!(
+            ArtifactDb::open(&wt_apg).is_ok(),
+            "with no live session the DB must be directly openable"
+        );
+        let q2 = testutil::spawn_apg(&["query", query], &wt);
         assert!(
             q2.status.success(),
-            "routed query: {}",
+            "direct query: {}",
             String::from_utf8_lossy(&q2.stderr)
         );
         assert_eq!(
@@ -1776,15 +1802,9 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "a NEW process must read the routed mutation before session end"
+            "with no live session a NEW process must read the saved state directly"
         );
 
-        let out = end_session(&wt, session);
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
         testutil::remove(&repo);
     }
 
