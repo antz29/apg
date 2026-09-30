@@ -450,48 +450,54 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Phase-03 task-17: a routed mutation is written THROUGH — the durable
-    /// write lands with exactly one commit and its projection delta is applied
-    /// synchronously, so a mutation that reported success is already queryable
-    /// by a separate routed reader, before session end. Nothing is buffered
-    /// and there is no end-of-session flush.
+    /// Phase-01 task-19: a routed durable write through a live session is
+    /// projected into the session-held `db.lbug` IMMEDIATELY — a separate
+    /// routed reader sees the mutation before any save — but it is BUFFERED,
+    /// not durable. `apg/layers/**` stays untouched and no commit lands until
+    /// `apg session save`. Save is the single durability point: it writes the
+    /// buffered node file(s) and lands exactly ONE commit, then clears the
+    /// buffer (a second save over the now-clean buffer creates no commit). The
+    /// session stays live throughout and ends cleanly.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn session_routed_write_is_committed_once_and_immediately_projected() {
-        let (wt_apg, repo, wt) = project_fixture("session-write-through");
+        let (wt_apg, repo, wt) = project_fixture("session-routed-buffer");
         let home = repo.root.join("home");
         let session = testutil::start_session_process(&wt, &home);
 
         let before = testutil::commit_count(&wt);
-        let add = testutil::ApgCommand::new(&[
-            "node",
-            "add",
-            "requirements",
-            "requirement",
-            "writethrough",
-        ])
-        .cwd(&wt)
-        .env("HOME", home.to_str().unwrap())
-        .output();
+
+        // The routed mutation is admitted into the live session's write-back
+        // buffer and projected into the session-held DB — but it is NOT durable
+        // yet: the node file is absent and no commit landed.
+        let add =
+            testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "buffered"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
         assert!(
             add.status.success(),
             "{}",
             String::from_utf8_lossy(&add.stderr)
         );
-
-        // (a) Exactly one commit for the one logical mutation.
+        let node_file =
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "buffered");
+        assert!(
+            !node_file.exists(),
+            "a routed write must be buffered, not written to apg/layers/** before save"
+        );
         assert_eq!(
             testutil::commit_count(&wt),
-            before + 1,
-            "one logical mutation → one commit"
+            before,
+            "a buffered routed write must not commit before save"
         );
 
-        // (b) The projection delta was applied synchronously: a NEW routed
-        // reader (separate process) sees it BEFORE the session ends.
+        // (a) Immediately projected: a NEW routed reader (separate process)
+        // sees the still-unsaved mutation BEFORE save/end.
         let q = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.writethrough'}) RETURN count(n)",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.buffered'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -506,15 +512,46 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "the mutation must be queryable immediately, not at session end"
+            "the routed write must be queryable immediately, before save"
         );
 
-        // (c) The durable node file is the system of record.
+        // (b) The single durability point: save writes the buffered node file
+        // and lands exactly ONE commit.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
-            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "writethrough")
-                .exists()
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert!(
+            node_file.exists(),
+            "save must write the buffered node file to apg/layers/**"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before + 1,
+            "the whole buffered set must land in exactly one commit"
         );
 
+        // The buffer is cleared: a second save over the now-clean buffer is a
+        // no-op — no further commit.
+        let resave = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            resave.status.success(),
+            "{}",
+            String::from_utf8_lossy(&resave.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before + 1,
+            "a save over the cleared buffer must make no commit"
+        );
+
+        // The session stayed live through save, then ends cleanly.
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "session save must not end the live session"
+        );
         let end = testutil::spawn_apg(&["session", "end"], &wt);
         assert!(
             end.status.success(),
