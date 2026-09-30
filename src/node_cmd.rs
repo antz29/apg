@@ -126,7 +126,7 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
     match (kind, sub) {
         ("node", "add") => node_add_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("node", "update") => node_update_change(apg_root, rest, &layers::LayersOverlay::new()),
-        ("node", "rm") => node_rm_change(apg_root, rest),
+        ("node", "rm") => node_rm_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("edge", "add") => edge_add_change(apg_root, rest),
         ("edge", "update") => edge_update_change(apg_root, rest),
         ("edge", "rm") => edge_rm_change(apg_root, rest),
@@ -241,7 +241,11 @@ fn node_update_change(
 
 /// `apg node rm <layer> <type> <name>` — remove the node file and rewrite every
 /// file that references it (drop the incident edges), one atomic mutation.
-fn node_rm_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
+fn node_rm_change(
+    apg_root: &Path,
+    args: &[String],
+    overlay: &layers::LayersOverlay,
+) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -295,7 +299,12 @@ fn node_rm_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
 
     let mut deletes = vec![layers::node_file_path(apg_root, layer, &pos[1], &pos[2])];
     let mut writes: Vec<NodeFile> = Vec::new();
-    for node in layers::read_existing_nodes(apg_root)? {
+    // Rewrite incident edges over the EFFECTIVE node set (phase-00 task-10): the
+    // on-disk nodes with the overlay folded in, so a removal sees and drops the
+    // edges a node staged earlier in the same unsaved run — not just the edges
+    // present on disk. Delete-marked identities are already absent from the base.
+    let base = layers::read_existing_nodes(apg_root)?;
+    for node in overlay.apply_to_base(&base) {
         let node_fqn = fqn(resolve_layer(&node.layer)?, &node.node_type, &node.name);
         if node_fqn == f {
             continue; // the deleted node itself — dropped, not rewritten.
