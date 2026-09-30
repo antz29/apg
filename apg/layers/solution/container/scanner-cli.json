@@ -196,6 +196,11 @@
       "kind": "contains",
       "target": "solution.component.cli-session-lifecycle-guards",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cli-session-warning-propagation",
+      "properties": {}
     }
   ],
   "in": [

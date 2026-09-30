@@ -5,5 +5,11 @@
   "body": "The write-time advisory transport on the session path: the mutation builders raise the node add/update wording advisory and the node rm outstanding-feedback warning, and the session reply carries them back to the caller. `rust.apg.node_cmd.node_add_change`, `rust.apg.node_cmd.node_update_change`, and `rust.apg.node_cmd.node_rm_change` build the change and surface the advisory; `rust.apg.session.Coordinator.handle_mutation` carries the advisories in the reply so the caller prints them on stderr at the mutation, and the write proceeds.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
 }
