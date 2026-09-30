@@ -1804,4 +1804,216 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-01 task-12: the live session's write-back buffer COMPOSES across
+    /// mutations — a later routed mutation is built over the cumulative buffered
+    /// state, not just the on-disk store. With a live session, an add followed
+    /// by an UPDATE of the just-added node (over its buffered base) and then an
+    /// edge whose target was only ever buffered must all succeed; a routed read
+    /// observes the cumulative result (the updated body and the A→B edge).
+    ///
+    /// Throughout, `apg/layers/**` and the git history stay at the LAST SAVED
+    /// state: after an initial save establishes the baseline, none of the later
+    /// buffered mutations writes a node file or creates a commit — that is the
+    /// single durability point of `apg session save`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn write_back_buffer_composes_across_mutations() {
+        let (wt_apg, repo, wt) = mutation_fixture("write-back-compose");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        // Establish the LAST SAVED state: one buffered node flushed by `save`,
+        // so the baseline the later mutations must NOT disturb is non-empty.
+        let saved = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "saved",
+            "--body",
+            "baseline",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            saved.status.success(),
+            "{}",
+            String::from_utf8_lossy(&saved.stderr)
+        );
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let saved_commits = testutil::commit_count(&wt);
+        let saved_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        let saved_store = layers::read_existing_nodes(&wt_apg).unwrap();
+        assert!(
+            saved_store.iter().any(|n| n.name == "saved"),
+            "the baseline save must have written the `saved` node file"
+        );
+
+        // A routed sequence where the LATER mutations MUST compose over earlier
+        // buffered ones: add A, UPDATE A over its buffered base, add B, then an
+        // edge A→B whose target exists only in the buffer.
+        let run = |args: &[&str], expected: &str| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                expected,
+                "apg {args:?}"
+            );
+        };
+        run(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "a",
+                "--body",
+                "first",
+            ],
+            "Added node requirements.requirement.a",
+        );
+        // An update that does NOT compose over the buffered add would refuse
+        // "node `requirements.requirement.a` does not exist".
+        run(
+            &[
+                "node",
+                "update",
+                "requirements",
+                "requirement",
+                "a",
+                "--body",
+                "second",
+            ],
+            "Updated node requirements.requirement.a",
+        );
+        run(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "b",
+                "--body",
+                "third",
+            ],
+            "Added node requirements.requirement.b",
+        );
+        // The target `b` was only ever buffered — the edge composes.
+        run(
+            &[
+                "edge",
+                "add",
+                "depends-on",
+                "requirements.requirement.a",
+                "requirements.requirement.b",
+            ],
+            "Added edge depends-on requirements.requirement.a -> requirements.requirement.b",
+        );
+
+        // A routed read observes the CUMULATIVE buffered state: A carries the
+        // updated body and the A→B edge exists.
+        let body = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.a'}) RETURN n.body",
+            ],
+            &wt,
+        );
+        assert!(
+            body.status.success(),
+            "routed body read: {}",
+            String::from_utf8_lossy(&body.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&body.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("second"),
+            "the routed read must see the update composed over the buffered add"
+        );
+        let edge = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (:Requirement {fqn: 'requirements.requirement.a'})-[:DependsOn]->(b) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert!(
+            edge.status.success(),
+            "routed edge read: {}",
+            String::from_utf8_lossy(&edge.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&edge.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the routed read must see the edge whose target was only buffered"
+        );
+
+        // `apg/layers/**` and git stay at the LAST SAVED state: no node file for
+        // the buffered A/B, the saved store byte-identical, no new commit.
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "a").exists(),
+            "a buffered add must not write a node file before save"
+        );
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "b").exists(),
+            "a buffered add must not write a node file before save"
+        );
+        assert_eq!(
+            layers::read_existing_nodes(&wt_apg).unwrap(),
+            saved_store,
+            "the durable store must stay at the last saved state until save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            saved_commits,
+            "a buffered mutation must not create a commit before save"
+        );
+        assert_eq!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string(),
+            saved_head,
+            "git history must stay at the last saved state until save"
+        );
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        testutil::remove(&repo);
+    }
 }
