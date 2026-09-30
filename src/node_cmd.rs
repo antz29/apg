@@ -127,7 +127,7 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
         ("node", "add") => node_add_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("node", "update") => node_update_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("node", "rm") => node_rm_change(apg_root, rest, &layers::LayersOverlay::new()),
-        ("edge", "add") => edge_add_change(apg_root, rest),
+        ("edge", "add") => edge_add_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("edge", "update") => edge_update_change(apg_root, rest),
         ("edge", "rm") => edge_rm_change(apg_root, rest),
         (_, other) => anyhow::bail!("unknown apg {kind} subcommand: {other}"),
@@ -355,7 +355,18 @@ fn read_endpoint(
 /// source's file and the matching in-edge to the target's file (both halves).
 /// Refuses a duplicate `(kind, from, to)` on the source's out-half (the edge is
 /// identified by that triple; re-adding duplicates both halves).
-fn edge_add_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
+///
+/// Both endpoints resolve through `overlay` (phase-00 task-11): the source
+/// out-half is read from the staged content first (so an endpoint created or
+/// modified earlier in the same unsaved run composes), a staged delete marker
+/// reads as absent, and an unstaged identity falls through to the on-disk file.
+/// The duplicate-triple refusal is evaluated on the resolved (buffered)
+/// out-half.
+fn edge_add_change(
+    apg_root: &Path,
+    args: &[String],
+    overlay: &layers::LayersOverlay,
+) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -370,8 +381,18 @@ fn edge_add_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     // This source-file read-push-write RMW (and the target in-half write below)
     // runs inside the whole-durable-sequence flock held by `cmd_edge` (the
     // single acquisition site) — no internal acquire, so no double-lock and the
-    // shared endpoint file is never read outside the serialization scope.
-    let mut source = layers::read_node_file(apg_root, src_layer, &src_type, &src_name)?;
+    // shared endpoint file is never read outside the serialization scope. The
+    // read resolves through `overlay`, so a source staged earlier in the same
+    // unsaved run is the base; a staged delete (or an absent file) refuses
+    // exactly as the direct disk read did.
+    let mut source = overlay
+        .read(apg_root, src_layer, &src_type, &src_name)?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no node file at {}",
+                layers::node_file_path(apg_root, src_layer, &src_type, &src_name).display()
+            )
+        })?;
     layers::refuse_if_present(
         source
             .out
@@ -388,7 +409,7 @@ fn edge_add_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     });
 
     let mut writes = vec![source];
-    if let Some(mut target) = read_endpoint(apg_root, &layers::LayersOverlay::new(), to)? {
+    if let Some(mut target) = read_endpoint(apg_root, overlay, to)? {
         target.in_edges.push(InEdge {
             kind: kind.to_string(),
             source: from.to_string(),
@@ -516,7 +537,10 @@ pub fn node_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
 }
 
 pub fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
-    apply_change(apg_root, edge_add_change(apg_root, args)?)
+    apply_change(
+        apg_root,
+        edge_add_change(apg_root, args, &layers::LayersOverlay::new())?,
+    )
 }
 
 pub fn edge_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
