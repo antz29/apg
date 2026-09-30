@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.cli-session-caller-controlled-durability",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cli-session-clean-end-and-abandon",
+      "properties": {}
     }
   ],
   "in": [
