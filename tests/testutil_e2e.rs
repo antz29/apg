@@ -17,8 +17,8 @@ use apg::testutil::*;
 mod e2e {
     use super::*;
 
-    /// Phase-02 task-13 (cli-session-crash-recovery): the killed-session
-    /// contract at the testutil level, both halves.
+    /// Phase-02 task-13 (cli-session-crash-recovery) + task-24: the
+    /// killed-session contract at the testutil level, all three triggers.
     ///
     /// A live `apg session start` owns `db.lbug` and BUFFERS its durable
     /// mutations; `apg session save` is the single durability point (the node
@@ -37,8 +37,12 @@ mod e2e {
     ///     file is not on disk) is thrown away by the same rebuild: the
     ///     recovered DB serves ONLY the last-saved state, and the durable node
     ///     files, commits and HEAD stay put.
+    /// (3) The SAME discard+rebuild is triggered by `apg session save` (NOT
+    ///     `session start`) against the stale socket: the save must reclaim the
+    ///     socket AND repair the derived DB rather than merely deleting the
+    ///     socket and stranding the phantom projection for the next reader.
     ///
-    /// The stale socket is reclaimed in both halves. The phase-01 assertions
+    /// The stale socket is reclaimed in all three. The phase-01 assertions
     /// that still hold — no partial file, no `db.lbug` holder, socket reclaim —
     /// are kept.
     #[test]
@@ -309,6 +313,154 @@ mod e2e {
         assert!(
             stderr3.contains("reclaimed stale socket"),
             "the next start must reclaim the stale socket: {stderr3}"
+        );
+
+        // --- (3) DIRTY RUN + `apg session save` (NOT `start`): the save
+        // trigger must reclaim AND repair, not silently delete. ---------------
+        let session = start_session_process(&wt, &home);
+
+        // One routed mutation is admitted into the live session's write-back
+        // buffer and projected into the held index — a routed read sees it,
+        // but it never reaches `apg/layers/**` before a save.
+        let add = ApgCommand::new(&["node", "add", "requirements", "requirement", "phantom"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        let routed = spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.phantom'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            routed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&routed.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the live session's index must carry the buffered projection"
+        );
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "phantom")
+                .exists(),
+            "a buffered add must not write a node file before save"
+        );
+
+        // Baseline for the durable-state assertions: commits, HEAD, and the
+        // whole on-disk node-file store.
+        let before_commits = commit_count(&wt);
+        let before_head = head_sha(&wt);
+        let before_store = layers::read_existing_nodes(&wt_apg).unwrap();
+
+        // SIGKILL — deliberately NOT a graceful `end`. The unsaved buffer dies
+        // with the process while its phantom projection stays in `db.lbug`.
+        let pid = session.child.id() as i32;
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            !out.status.success(),
+            "the session was killed, not ended cleanly"
+        );
+        let socket = apg::session::socket_path(&wt_apg);
+        assert!(socket.exists(), "SIGKILL leaves the stale socket behind");
+        assert!(
+            !apg::session::live_session_at(&socket),
+            "the socket is present but unreachable — the unclean-exit signal"
+        );
+
+        // The stale index it opens still carries the phantom projection, so the
+        // save-triggered rebuild below is a real discard.
+        {
+            let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+            assert!(
+                db.has_node("requirements.requirement.saved"),
+                "the stale index must carry the last-saved node"
+            );
+            assert!(
+                db.has_node("requirements.requirement.phantom"),
+                "the stale index must carry the phantom buffered projection"
+            );
+        }
+
+        // `apg session save` (NOT `session start`) against the stale socket: it
+        // must reclaim the socket AND discard+rebuild the derived DB from
+        // `apg/layers/**`, reporting the reclaimed stale socket — a bare
+        // `remove_file(socket)` would strand the phantom projection with no
+        // later socket for the crash-detection guard to trip on.
+        let save = spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "no live session to save (reclaimed stale socket)",
+            "the save over a stale socket must report the reclaim, not a silent delete"
+        );
+        assert!(
+            !socket.exists(),
+            "the save trigger must reclaim the stale socket file"
+        );
+
+        // The rebuilt index serves only the last-saved durable state: the
+        // phantom is gone, the saved node survives.
+        let q = spawn_apg(
+            &["query", "MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn"],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "the post-save read failed: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&q.stdout);
+        let rows: Vec<&str> = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(
+            rows,
+            vec!["n.fqn", "requirements.requirement.saved"],
+            "the save-triggered rebuild must serve only the last-saved state"
+        );
+        assert!(
+            !stdout.contains("phantom"),
+            "the save-triggered rebuild must never serve the phantom projection"
+        );
+
+        // The durable store, commits and HEAD stay at their last-saved state.
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "phantom")
+                .exists(),
+            "the discarded buffer must never write a node file"
+        );
+        assert_eq!(
+            layers::read_existing_nodes(&wt_apg).unwrap(),
+            before_store,
+            "the discarded buffer must leave apg/layers/** at its last-saved state"
+        );
+        assert_eq!(
+            commit_count(&wt),
+            before_commits,
+            "a discarded buffer creates no commit"
+        );
+        assert_eq!(
+            head_sha(&wt),
+            before_head,
+            "a discarded buffer must not move HEAD"
         );
 
         remove(&repo);
