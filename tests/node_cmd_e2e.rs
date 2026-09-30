@@ -1016,116 +1016,204 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-7 task-2 (E2E, top-level dispatch): `apg node update` is
-    /// edge-preserving and MERGEs body/properties (only an explicit
-    /// `--unset-property` drops a key); `apg edge update` rewrites BOTH the
-    /// source out-half and the target in-half to the same MERGEd map; `apg
-    /// edge add` refuses a duplicate `(kind, from, to)`.
+    /// Phase-01 task-30 (rewritten from the phase-02 direct-path taxonomy):
+    /// under mandatory-session admission the extended whole-durable-sequence
+    /// flock and the DB open belong to a **live session**, not to a direct
+    /// `cmd_node`/`cmd_edge` path.
     ///
-    /// Phase-01 task-2 (ROOT-CAUSE characterization) — updated by phase-02 for
-    /// the fixed tree: the node/edge funnel now takes the **extended**
-    /// whole-durable-sequence flock at the `cmd_node`/`cmd_edge` dispatch
-    /// entry, and its DB opens are exclusively the read-write projection class
-    /// (validation never opens the DB; the staleness re-anchor is
-    /// graph.jsonl-only).
+    /// What still holds, and is asserted below:
     ///
-    /// - The fix: `cmd_node`/`cmd_edge` acquire
-    ///   `apg.artifacts.acquire_spec_lock` once at dispatch, **before any
-    ///   node-file read**, and hold it across validate → write → the one-commit-
-    ///   per-mutation git commit → the projection. The lock file
-    ///   `apg/.trans/specs.lock` is created and observed below; it is released
-    ///   when the command returns (the guard drops), so a later spawned process
-    ///   can acquire it (step 5).
-    /// - Read-only class: `apg query` opens with
-    ///   `SystemConfig::default().read_only(true)` (`main.rs:963`).
-    /// - Read-write class: `ArtifactDb::open` (default config), now reached
-    ///   ONLY by the post-commit projection apply (`reingest_layers`) —
-    ///   validation resolves code FQNs from `graph.jsonl` via
-    ///   `code_universes_from_export` (no DB), and `git::reanchor_scan_meta`
-    ///   no longer opens `db.lbug`.
-    /// - WHICH fails: a second read-write open of the same DB **fails** across
-    ///   processes (`Could not set lock on file … Resource temporarily
-    ///   unavailable`); the read-only `apg query` **coexists** with a live
-    ///   read-write handle (it is not the failing class).
+    /// - The extended `apg/.trans/specs.lock` flock is taken by the SESSION
+    ///   (`Coordinator::start` → `acquire_spec_lock`) and held for the session's
+    ///   life, so the lock file exists while the session is live (and does not
+    ///   exist before a session — no direct command takes it any more).
+    /// - With NO live session, a durable `node`/`edge` mutation REFUSES and names
+    ///   `apg session start` (the direct path is gone).
+    /// - A routed durable mutation forwards to the session and is admitted into
+    ///   the write-back buffer; it does NOT open `db.lbug` itself.
+    /// - The read-write DB class is exclusive: while the session holds the DB, a
+    ///   second read-write opener fails on the lbug file lock
+    ///   (`Could not set lock on file …`).
+    /// - The read-only class coexists: a routed `apg query` succeeds while the
+    ///   session holds the read-write handle.
+    ///
+    /// Dropped from the old direct-path taxonomy (no longer a real system
+    /// property under the session contract): the assertion that a direct `apg
+    /// node add` **fails** on the lbug lock while a read-write handle is held —
+    /// `cmd_node`/`cmd_edge` no longer open the DB at all (they forward to the
+    /// session), and with no session they refuse before any DB open. The control
+    /// step ("the same mutation succeeds once the handle is released") is
+    /// likewise dropped: there is no direct mutation left; after `session end` a
+    /// direct read-write open succeeds instead, and a durable mutation still
+    /// refuses (mandatory session).
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn node_edge_entry_takes_extended_spec_lock_and_db_open_taxonomy() {
         let (wt_apg, repo, wt) = mutation_fixture("lock-taxonomy");
-
-        // (1) The fix: the node/edge entry acquires the extended
-        // whole-durable-sequence flock, so the lock file `acquire_spec_lock`
-        // creates exists — and each command releases it on return.
-        with_cwd(&wt, || {
-            cmd_node(&av(&["add", "requirements", "requirement", "gap-a"]))
-        })
-        .unwrap();
-        with_cwd(&wt, || {
-            cmd_node(&av(&["add", "requirements", "requirement", "gap-b"]))
-        })
-        .unwrap();
-        with_cwd(&wt, || {
-            cmd_edge(&av(&[
-                "add",
-                "depends-on",
-                "requirements.requirement.gap-a",
-                "requirements.requirement.gap-b",
-            ]))
-        })
-        .unwrap();
+        let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
         let spec_lock = wt_apg.join(specs::TRANS).join("specs.lock");
+
+        // (1) No live session: a durable mutation refuses, naming the fix. The
+        // direct path (which used to take the extended flock itself) is gone, so
+        // no command has created the lock file.
+        let refused = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "no-session",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
         assert!(
-            spec_lock.exists(),
-            "the node/edge entry must acquire the extended specs.lock flock: {} missing",
+            !refused.status.success(),
+            "a durable node add must refuse without a live session"
+        );
+        let refused_stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            refused_stderr.contains("apg session start"),
+            "the refusal must name `apg session start`: {refused_stderr}"
+        );
+        assert!(
+            !spec_lock.exists(),
+            "no direct command may take the extended flock: {} must not exist before a session",
             spec_lock.display()
         );
 
-        // (2) Read-only baseline: `apg query` succeeds with no writer.
-        let baseline = spawn_apg(&["query", "MATCH (n:Requirement) RETURN count(n)"], &wt);
+        // (2) The live session — not the direct command — holds the extended
+        // whole-durable-sequence flock for its life, so `acquire_spec_lock`'s
+        // lock file exists.
+        let session = testutil::start_session_process(&wt, &home);
         assert!(
-            baseline.status.success(),
-            "apg query (read-only) must succeed with no concurrent writer: {}",
-            String::from_utf8_lossy(&baseline.stderr)
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+        assert!(
+            spec_lock.exists(),
+            "the live session must hold the extended specs.lock flock: {} missing",
+            spec_lock.display()
         );
 
-        // (3) Read-write class is exclusive cross-process: with a read-write
-        // `ArtifactDb` held, a second read-write opener (the node/edge path's
-        // DB open) fails outright — this is the class the burst loses on.
-        let held = ArtifactDb::open(&wt_apg).unwrap();
-        let loser = spawn_apg(
-            &["node", "add", "requirements", "requirement", "rw-loser"],
-            &wt,
-        );
+        // (3) Durable node/edge mutations route through the live session (they
+        // never open db.lbug themselves) and are admitted into the write-back
+        // buffer: they succeed, and nothing is durable before save.
+        for name in ["gap-a", "gap-b"] {
+            let out =
+                testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", name])
+                    .cwd(&wt)
+                    .env("HOME", home.to_str().unwrap())
+                    .output();
+            assert!(
+                out.status.success(),
+                "routed node add {name}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                format!("Added node requirements.requirement.{name}")
+            );
+            assert!(
+                !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                "a buffered add must not write `{name}` before save"
+            );
+        }
+        let edge = testutil::ApgCommand::new(&[
+            "edge",
+            "add",
+            "depends-on",
+            "requirements.requirement.gap-a",
+            "requirements.requirement.gap-b",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
         assert!(
-            !loser.status.success(),
-            "a second read-write DB opener must fail while one is held"
-        );
-        let loser_stderr = String::from_utf8_lossy(&loser.stderr);
-        assert!(
-            loser_stderr.contains("Could not set lock on file"),
-            "the read-write loser must fail on the lbug file lock: {loser_stderr}"
+            edge.status.success(),
+            "routed edge add: {}",
+            String::from_utf8_lossy(&edge.stderr)
         );
 
-        // (4) Read-only class coexists: `apg query` still succeeds while the
-        // read-write handle is held — the read-only opener is NOT the failing
-        // class in the pre-fix taxonomy.
+        // (4) Read-write DB class is exclusive while the session owns the DB: a
+        // second read-write opener fails on the lbug file lock. (The old direct
+        // `apg node add` loser is dropped — the routed entry never opens the DB.)
+        let loser = ArtifactDb::open(&wt_apg);
+        assert!(
+            loser.is_err(),
+            "a second read-write DB opener must fail while the session owns the DB"
+        );
+        let loser_err = format!("{}", loser.err().expect("the second open must fail"));
+        assert!(
+            loser_err.contains("Could not set lock on file"),
+            "the read-write loser must fail on the lbug file lock: {loser_err}"
+        );
+
+        // Read-only class coexists: a routed `apg query` succeeds while the
+        // session holds the read-write handle.
         let ro = spawn_apg(&["query", "MATCH (n:Requirement) RETURN count(n)"], &wt);
         assert!(
             ro.status.success(),
-            "read-only apg query must coexist with a live read-write handle: {}",
+            "read-only apg query must coexist with the session's read-write handle: {}",
             String::from_utf8_lossy(&ro.stderr)
         );
-        drop(held);
 
-        // (5) Control: once the read-write handle is released, the same
-        // mutation succeeds.
-        let winner = spawn_apg(
-            &["node", "add", "requirements", "requirement", "rw-winner"],
-            &wt,
-        );
+        // (5) The single durability point: `apg session save` flushes the
+        // buffered mutations; only then is the durable state asserted.
+        let save = spawn_apg(&["session", "save"], &wt);
         assert!(
-            winner.status.success(),
-            "the mutation must succeed once the read-write handle is released: {}",
-            String::from_utf8_lossy(&winner.stderr)
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+        for name in ["gap-a", "gap-b"] {
+            assert!(
+                layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                "save must write the `{name}` node file"
+            );
+        }
+        let a =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "gap-a").unwrap();
+        assert_eq!(a.out.len(), 1, "gap-a's out-half must be durable");
+        assert_eq!(a.out[0].target, "requirements.requirement.gap-b");
+        let b =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "gap-b").unwrap();
+        assert_eq!(b.in_edges.len(), 1, "gap-b's in-half must be durable");
+        assert_eq!(b.in_edges[0].source, "requirements.requirement.gap-a");
+
+        // (6) After the session ends the read-write DB is free again, but a
+        // durable mutation still refuses (mandatory session).
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let reopened = ArtifactDb::open(&wt_apg);
+        assert!(
+            reopened.is_ok(),
+            "a read-write open must succeed once the session released the DB: {:?}",
+            reopened.err()
+        );
+        drop(reopened);
+
+        let post = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "post-session",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            !post.status.success(),
+            "a durable node add must still refuse with no live session"
         );
 
         testutil::remove(&repo);
