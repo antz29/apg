@@ -6,7 +6,7 @@
 //! push/tag remain human-approved acts.
 //!
 //! The concerns are split into cohesive submodules — scan staleness
-//! ([`state`]), repo identity + membership ([`identity`]), auto-commit +
+//! ([`state`]), repo identity + membership ([`identity`]), commit +
 //! scan_meta re-anchor ([`commit`]), and timestamps ([`time`]) — all
 //! re-exported here so `crate::git::<name>` keeps resolving at the original
 //! paths:
@@ -27,12 +27,15 @@
 //!    contains the walked-up `apg/` — is verified cheaply in
 //!    [`repo_identity`], erroring on divergence (R7).
 //!
-//! 3. **Auto-commit + scan_meta re-anchor** (R8): after a graph mutation the
-//!    funnel commits the touched file on the project branch via git2 — one
-//!    commit per mutation, single-file diffs — and re-anchors the recorded
-//!    scan_meta to the new state so consecutive mutations do not each demand
-//!    a rescan. Plan mutations never commit: `apg/.trans` is gitignored and
-//!    transient by design.
+//! 3. **Commit + scan_meta re-anchor** (R8): the git2 commit helper and the
+//!    scan_meta re-anchor. The helper stages a caller-supplied change set and
+//!    makes one commit on the project branch (single-file diffs for a
+//!    single-file set); durable `apg node`/`apg edge` mutations are buffered
+//!    by the live session and reach it once, at `apg session save`, not per
+//!    mutation. The re-anchor then rewrites the recorded scan_meta to the new
+//!    state so consecutive mutations do not each demand a rescan. Plan
+//!    mutations never commit: `apg/.trans` is gitignored and transient by
+//!    design.
 //!
 //! 4. **Lifecycle self-cleanup** (merge self-cleanup / delete subcommand):
 //!    [`remove_worktree`] + [`delete_branch`] — the shared git2 primitives
