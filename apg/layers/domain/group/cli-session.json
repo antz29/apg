@@ -74,6 +74,11 @@
       "kind": "details",
       "source": "domain.note.cli-session-boundary",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.cli-session-crash-recovery",
+      "properties": {}
     }
   ]
 }

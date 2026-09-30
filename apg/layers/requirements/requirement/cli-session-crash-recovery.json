@@ -16,6 +16,11 @@
       "kind": "drives",
       "target": "domain.entity.cli-session-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.cli-session",
+      "properties": {}
     }
   ],
   "in": [
