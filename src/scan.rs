@@ -152,12 +152,13 @@ pub(crate) fn cmd_scan(args: &[String]) -> anyhow::Result<()> {
     // apg-frontend.log all land there (the committed `apg/` data — config,
     // specs, notes — stays in the root).
     let apg_root = find_or_create_apg_root(&project_dir);
-    // Lifecycle exclusivity (phase-03): a scan replaces `db.lbug` (it unlinks
-    // and rebuilds it), which would silently diverge the graph a live session
-    // holds open. Refuse BEFORE any of that work — the session must end first.
+    // Lifecycle exclusivity: a scan replaces `db.lbug` (it unlinks and rebuilds
+    // it), which would silently diverge the graph a live session holds open.
+    // Refuse BEFORE any of that work — the caller must save the buffered state
+    // (`apg session save`) and end the session (`apg session end`) first.
     if session::live_session(&apg_root) {
         anyhow::bail!(
-            "refused: a live `apg session` owns {} — end it first (`apg session end` inside the project worktree) before scanning",
+            "refused: a live `apg session` owns {} — save its buffered changes and end it first (`apg session save`, then `apg session end`, inside the project worktree) before scanning",
             apg_root.join(specs::TRANS).join("db.lbug").display()
         );
     }
