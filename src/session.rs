@@ -706,12 +706,11 @@ impl Coordinator {
     /// `socket_path` surface.
     pub(crate) fn handle_mutation(&mut self, kind: &str, args: &[String]) -> Reply {
         match self.apply_mutation(kind, args) {
-            // Task-2 wires the mutation's write-time warnings into the reply;
-            // for now the carrier is present but empty.
-            Ok(output) => Reply::Ok {
-                output,
-                warnings: Vec::new(),
-            },
+            // The change's write-time warnings ride alongside the output so the
+            // client can print them; they never block the write (the change was
+            // already admitted), and a replayed client id returns the cached
+            // reply with the same warnings.
+            Ok((output, warnings)) => Reply::Ok { output, warnings },
             Err(e) => Reply::Err {
                 message: format!("{e:#}"),
             },
@@ -743,7 +742,15 @@ impl Coordinator {
     ///
     /// `self.db` may be `None` when no `db.lbug` exists yet: the change is
     /// still built, validated, and buffered, and the projection is skipped.
-    fn apply_mutation(&mut self, kind: &str, args: &[String]) -> anyhow::Result<String> {
+    ///
+    /// Returns the change's human message and its write-time warnings, so the
+    /// caller can carry the warnings into the reply without them ever blocking
+    /// the write.
+    fn apply_mutation(
+        &mut self,
+        kind: &str,
+        args: &[String],
+    ) -> anyhow::Result<(String, Vec<String>)> {
         // (1) The cumulative buffered state as an overlay.
         let overlay = self.overlay_from_buffer()?;
 
@@ -824,7 +831,7 @@ impl Coordinator {
             }
         }
 
-        Ok(change.message)
+        Ok((change.message, change.warnings))
     }
 
     /// Build the cumulative buffered state as a [`layers::LayersOverlay`]: each
