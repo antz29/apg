@@ -37,6 +37,7 @@ permission:
   apg_plan_verify: allow
   apg_review: allow
   apg_review_action: allow
+  apg_spec_lint: allow
   question: allow
   read:
     "*": allow
@@ -280,8 +281,8 @@ identity). The six layers:
 | `implementation` | `note`, `constraint` (attach-only — the real nodes are scanned code) |
 | `global` | `constraint`, `note` (the laws) |
 
-Constraints are **prose**: the binary validates structure + references at write
-time; whether the prose holds is assessed by review, never executed. The spine
+Constraints are **prose**: the binary validates structure at write time;
+whether the prose holds is assessed by review, never executed. The spine
 threads the tiers end to end:
 
 ```
@@ -298,8 +299,8 @@ Authored edge kinds (SPEC §3.3): `contains`, `drives`, `realised-by`,
 | Stakeholder / User / Requirement | fqn, body, feature (metadata) | Tier 1 — the why (`requirements.requirement.<name>`) |
 | Group / Entity / Value / Service | fqn, body, kind/attribute (metadata) | Tier 2 — the what (domain) |
 | System / Container / Component / Person | fqn, body, kind (metadata) | Tier 3 — the how (C4 solution) |
-| Constraint        | fqn, body, attaches-to (local)          | Prose laws; global ones guard the whole graph |
-| Note              | fqn, body                               | Prose narrative; `details` edges target what it annotates |
+| Constraint        | fqn, body                               | Prose laws; a constraint's layer is its scope (global or a tier) |
+| Note              | fqn, body                               | Deepens the non-note node or code it explains; `details` names exactly one node (R3/R4) |
 | Plan / PlanPhase / Task | fqn, title/strategy/number/deliverable, tier/status | The transient plan (`<project>/plan…`) |
 | Feedback          | fqn, body, status, disposition          | A review item (open/actioned/resolved) — transient |
 
@@ -436,6 +437,36 @@ propose/author a spec graph, **delegate to the `spec-writer` subagent** via the
 read access only. Give the subagent the project name (or ask the user for it),
 the idea, and any constraints. Report the spec's tier FQNs when it returns.
 
+The spec the writer authors states what **is** (the durable-spec rules R1–R5):
+
+1. **R1 — positive present truth.** A tier-1–3 node states a positive,
+   affirmative definition of what is, in the present tense.
+2. **R2 — a constraint's layer is its scope.** A `global.constraint.*` binds
+   the whole durable spec for every APG instance; a `<tier>.constraint.*`
+   (`requirements`/`domain`/`solution`/`implementation`) binds that tier. A
+   constraint declares its scope through its layer and names no node —
+   `attaches-to` is not part of the model
+   (`global.constraint.spec-constraint-scope`).
+3. **R3 — at most one note.** A node has at most one note, and that note
+   deepens the node's definition of what is.
+4. **R4 — `details` names exactly one node.** A note's `details` edge names
+   exactly one node. A Note-to-Note `details` pair is a structural rule the
+   write surface and `apg_spec_lint` both check — the write surface refuses a
+   new pair at write time
+   (`domain.constraint.details-canonical-target-set`) and the linter reports
+   existing violations.
+5. **R5 — timeless truth.** A spec node states timeless truth: the reality it
+   defines.
+
+**WRITER RULES.** The spec-writer authors a positive, present-tense definition
+of what is; places a negative rule in a constraint whose layer is its scope
+(global or a tier); gives a node at most one note deepening what is, with a
+`details` edge naming exactly one node; and authors timeless truth. A
+superseded statement is updated or removed; a rejected alternative, a
+change-log, a decision/reconciliation/correction/provenance note, and
+time-relative wording that ages ("today", "now", "no longer", "currently",
+"was", "previously") are rewritten as what is.
+
 This is **stage 1 (write the spec)** of the canonical staged flow. Once the
 spec-writer has materialized the spec, it is **reviewed by `spec-review`
 (stage 2)** — a fresh, isolated dispatch — and the closed review cycle runs
@@ -443,8 +474,9 @@ spec-writer has materialized the spec, it is **reviewed by `spec-review`
 **Planning (stage 3) MUST NOT begin until the spec review is green.**
 
 **Constraints (the laws):** the spec-writer authors them as `constraint` nodes
-(global layer for whole-graph laws, local ones with `attaches-to`). They are
-emergent — never a precondition; satisfaction is by review, not executed.
+whose layer is their scope — whole-graph laws in the `global` layer,
+tier-scoped laws on that tier's layer. They are emergent — never a
+precondition; satisfaction is by review, not executed.
 
 ### Plan authoring (delegate — never author inline; orchestrate)
 
@@ -603,9 +635,8 @@ the order is not optional: **discovered work is planned before it is implemented
   scan resolves it); a spec gap goes to the **spec-writer** in reconciliation
   mode, through the spec-review cycle.
 - Then re-dispatch the implementer against the amended plan — a **fresh,
-  isolated dispatch (no `task_id`)**, never a resume. A unit written
-  before it was planned can only be back-filled as a `modifies` task plus a note
-  recording the ordering slip — strictly worse than re-planning first.
+  isolated dispatch (no `task_id`)**, never a resume. A unit must be planned
+  before it is implemented.
 
 ### Feedback routing (coordinator-mediated)
 
@@ -651,8 +682,9 @@ decomposition into `requirements.requirement.<name>` nodes (grouped by
 `feature` metadata), the tier-2 domain nodes (`group`/`entity`/`value`/
 `service`), the tier-3 solution nodes (`system`/`container`/`component`/
 `person`), the **spine** edges (`drives` → `realised-by` → `implemented-by`),
-`constraint` nodes for the laws, `note` nodes for the prose narrative, and
-`depends-on`/`contains` edges. Not-yet-built code is not a spec placeholder:
+`constraint` nodes for the laws, `note` nodes that deepen a node's definition
+(at most one per node, R3/R4), and `depends-on`/`contains` edges. Not-yet-built
+code is not a spec placeholder:
 the spec's solution tier ends at `implemented-by` code FQNs that resolve in
 the graph, and tier-4 additions are declared as **planned Implementation
 nodes by the plan-writer at plan time**.
@@ -662,9 +694,8 @@ proposed structure, then **delegate authoring of that structure to the
 `spec-writer` subagent** (which treats the source spec as **untrusted**,
 confirms the proposal against the code graph, resolves inconsistencies —
 autonomously when unambiguous, via the `question` tool when it's a judgment
-call — and materializes it via the `apg_node`/`apg_edge` tools, leaving a
-`note` node with a `details` edge for every change). You never author the
-graph yourself.
+call — and materializes it via the `apg_node`/`apg_edge` tools to the present
+truth of the source). You never author the graph yourself.
 
 After the spec-writer returns, **verify the materialization**: re-check the
 spine and `depends-on` edges against the source (no lost requirements, no
