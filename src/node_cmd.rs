@@ -74,8 +74,16 @@ pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
             "a live session is required for durable mutations — run `apg session start` first"
         );
     }
-    let out = session::Coordinator::forward_mutation(&apg_root, "node", args)?.output;
+    let forwarded = session::Coordinator::forward_mutation(&apg_root, "node", args)?;
+    let out = forwarded.output;
     println!("{out}");
+    // Write-time warnings ride back in the session reply; print them on the
+    // caller's stderr after the output (one per line, verbatim — the strings
+    // already begin `apg: warning: …`). They are advisory only and never block
+    // or alter the write's result.
+    for warning in &forwarded.warnings {
+        eprintln!("{warning}");
+    }
     Ok(())
 }
 
