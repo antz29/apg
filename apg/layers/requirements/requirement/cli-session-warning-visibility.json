@@ -26,6 +26,11 @@
       "kind": "depends-on",
       "target": "requirements.requirement.deterministic-spec-lint",
       "properties": {}
+    },
+    {
+      "kind": "depends-on",
+      "target": "requirements.requirement.node-rm-warns-on-outstanding-feedback",
+      "properties": {}
     }
   ],
   "in": [
