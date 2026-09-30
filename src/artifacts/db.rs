@@ -75,14 +75,16 @@ impl Drop for SpecLockGuard {
 /// Acquires the exclusive cross-process lock that serializes a whole durable
 /// sequence on the project: the **extended** spec/plan/review write lock.
 ///
-/// The direct `apg node` / `apg edge` path takes it exactly once at the
-/// `cmd_node`/`cmd_edge` dispatch entry, before any node-file read, and holds
-/// it across validate → write → the one-commit-per-mutation git commit → the
-/// write-through projection. That single flock is what serializes the three
-/// contended locks a parallel burst hits: the node-file read-modify-write, git's
-/// `.git/index.lock` (inside `git::commit_files`), and the read-write `db.lbug`
-/// projection apply. The plan/review JSONL funnel takes the same lock, so the
-/// direct path and the phase-03 session coordinator are mutually exclusive.
+/// A live session takes it exactly once at `Coordinator::start`, before any
+/// node-file read, and holds it for the session's whole life — across every
+/// admitted mutation's buffered write plus the single commit at `apg session
+/// save` and its projection. The direct plan/review authoring paths (and the
+/// JSONL funnel they write through) take the same lock for their own sequence.
+/// That single flock is what serializes the three contended locks a parallel
+/// burst hits: the node-file read-modify-write, git's `.git/index.lock` (inside
+/// `git::commit_files`), and the read-write `db.lbug` projection apply. Because
+/// the session holds it for its life, it and any direct writer are mutually
+/// exclusive.
 ///
 /// Reentrant within the process: a nested acquire returns a guard that shares
 /// the already-held fd (incrementing the depth), so a command that acquires
@@ -138,15 +140,21 @@ pub fn acquire_spec_lock(apg_root: &Path) -> anyhow::Result<SpecLockGuard> {
 ///    the membership guard anyway).
 ///
 /// **Auto-commit** (R8): after the durable write lands (and before the
-/// projection), a durable target (anything outside the gitignored `apg/.trans/`)
-/// is committed on the project branch via git2 — one commit per mutation,
-/// single-file diffs — and the staleness gate's recorded `scan_meta` is
+/// projection), a durable target this funnel serves (anything outside the
+/// gitignored `apg/.trans/`) is committed on the project branch via git2,
+/// single-file diffs, and the staleness gate's recorded `scan_meta` is
 /// re-anchored to the new state (DB and tree in sync by construction;
-/// consecutive mutations do not each demand a rescan). Plan mutations never
-/// commit: `apg/.trans` is gitignored and transient by design. An auto-commit
-/// failure degrades to a warning on stderr: the mutation already landed, and
-/// the staleness gate will demand a scan before the next one (the same
-/// degradation as a hand-committed change).
+/// consecutive mutations do not each demand a rescan). Transient `.trans`
+/// writes never commit: `apg/.trans` is gitignored and transient by design.
+/// An auto-commit failure degrades to a warning on stderr: the mutation already
+/// landed, and the staleness gate will demand a scan before the next one (the
+/// same degradation as a hand-committed change).
+///
+/// Durable `apg node` / `apg edge` mutations do NOT pass through this funnel:
+/// the live session admits them into its write-back buffer and projects each at
+/// admission, and the whole buffered set becomes durable in exactly ONE commit
+/// at `apg session save`. This funnel's per-write commit is therefore not the
+/// durable-mutation contract.
 ///
 /// **Commit-then-project** (phase-05 tasks 3/12): the durable/transient file
 /// write and its commit land FIRST — the system-of-record durability point —
