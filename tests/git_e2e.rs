@@ -853,13 +853,19 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-5 (acceptance): one logical node/edge mutation produces
-    /// exactly ONE commit, and that commit stages durable files only — never
+    /// Phase-01 task-25 (acceptance, rewritten for the write-back buffer): with
+    /// a live session, a run of durable node/edge mutations is STAGED into the
+    /// session's write-back buffer with NO commit — `apg/layers/**` stays at the
+    /// last saved state and git history is untouched. Exactly ONE
+    /// `apg session save` then produces exactly ONE durable commit for the whole
+    /// buffered set, and that commit stages durable files only — never
     /// `apg/.trans` (the gitignored transient store).
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
     fn acceptance_one_logical_mutation_is_exactly_one_durable_commit() {
-        let (repo, wt, _wt_apg) = testutil::project_with_db("accept-one-commit");
+        use apg::layers::{self, Layer};
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("accept-one-commit");
         let home = repo.root.join("home");
         std::fs::create_dir_all(&home).unwrap();
         let run = |args: &[&str]| {
@@ -890,24 +896,16 @@ mod e2e {
                 .collect()
         };
 
+        // A live session owns the durable mutation surface.
+        let session = testutil::start_session_process(&wt, &home);
         let base = testutil::commit_count(&wt);
 
-        // Logical mutation 1 + 2: each `apg node add` is exactly one commit.
+        // Logical mutations 1 + 2: each routed `apg node add` is admitted into
+        // the buffer — nothing durable lands.
         run(&["node", "add", "requirements", "requirement", "one-a"]);
-        assert_eq!(
-            testutil::commit_count(&wt),
-            base + 1,
-            "node add one-a must be exactly one commit"
-        );
         run(&["node", "add", "requirements", "requirement", "one-b"]);
-        assert_eq!(
-            testutil::commit_count(&wt),
-            base + 2,
-            "node add one-b must be exactly one commit"
-        );
-
-        // Logical mutation 3: the edge add rewrites BOTH endpoint files in ONE
-        // commit whose diff is the two durable layer files.
+        // Logical mutation 3: the edge add rewrites BOTH endpoint files in the
+        // buffer.
         run(&[
             "edge",
             "add",
@@ -915,34 +913,70 @@ mod e2e {
             "requirements.requirement.one-a",
             "requirements.requirement.one-b",
         ]);
+
+        // NO commit (and no node file) lands while the mutations are buffered:
+        // `apg/layers/**` and git stay at the last saved state.
         assert_eq!(
             testutil::commit_count(&wt),
-            base + 3,
-            "the edge add must be exactly one commit"
+            base,
+            "a live session's buffered mutations must make no commit before save"
         );
-        let edge_paths = head_diff_paths();
-        assert_eq!(
-            edge_paths.len(),
-            2,
-            "the edge commit stages both endpoint files: {edge_paths:?}"
-        );
-        for p in &edge_paths {
-            assert!(p.starts_with("apg/layers/"), "durable only: {p}");
-            assert!(!p.starts_with("apg/.trans/"), "never .trans: {p}");
+        for name in ["one-a", "one-b"] {
+            assert!(
+                !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                "a buffered add must not write the `{name}` node file before save"
+            );
         }
 
-        // Logical mutation 4: `node rm` rewrites the referring file and deletes
-        // the node in ONE commit, still durable-only.
-        run(&["node", "rm", "requirements", "requirement", "one-b"]);
+        // The single durability point: ONE save flushes the whole buffered set
+        // in exactly ONE durable commit.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
         assert_eq!(
             testutil::commit_count(&wt),
-            base + 4,
-            "node rm must be exactly one commit"
+            base + 1,
+            "one save must produce exactly one durable commit for the whole buffered set"
         );
-        for p in head_diff_paths() {
+        let save_paths = head_diff_paths();
+        assert!(
+            !save_paths.is_empty(),
+            "the save commit must stage the durable files"
+        );
+        for p in &save_paths {
             assert!(p.starts_with("apg/layers/"), "durable only: {p}");
             assert!(!p.starts_with("apg/.trans/"), "never .trans: {p}");
         }
+        // Both buffered node files — the two halves of the edge — land in the
+        // one save commit.
+        for name in ["one-a", "one-b"] {
+            let needle = format!("apg/layers/requirements/requirement/{name}.json");
+            assert!(
+                save_paths.iter().any(|p| p == &needle),
+                "the save commit must stage {needle}: {save_paths:?}"
+            );
+        }
+
+        // The session stayed live through save and ends cleanly.
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "session save must not end the live session"
+        );
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
 
         testutil::remove(&repo);
     }
