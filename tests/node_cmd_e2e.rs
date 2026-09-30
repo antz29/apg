@@ -2667,11 +2667,36 @@ mod e2e {
             "git history must stay at the last saved state until save"
         );
 
-        let out = end_session(&wt, session);
+        // End WITHOUT a dirty end: `apg session end` now refuses to release a
+        // session whose buffer is non-empty (phase-02 task-3). Discard the
+        // buffered set with `apg session abort` instead — the test's intent is
+        // that these later mutations never become durable (the only save is the
+        // baseline above), so abort leaves `apg/layers/**` and git exactly at
+        // the last saved state. The abort releases the session and the serve
+        // loop returns, so the child exits cleanly.
+        let abort = testutil::spawn_apg(&["session", "abort"], &wt);
+        assert!(
+            abort.status.success(),
+            "{}",
+            String::from_utf8_lossy(&abort.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&abort.stdout).trim(),
+            "Session aborted"
+        );
+        let out = session.child.wait_with_output().unwrap();
         assert!(
             out.status.success(),
             "{}",
             String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("apg session: aborted"),
+            "the coordinator must report the abort"
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "abort must release the session"
         );
         testutil::remove(&repo);
     }
