@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "write-time-advisory",
+  "body": "The write-time advisory event: an advisory raised at a durable mutation's admission — the node add/update wording advisory or the node rm outstanding-feedback warning — carried in the session reply and printed on the caller's stderr at the mutation. The advisory leaves the write intact.",
+  "properties": {
+    "kind": "event"
+  },
+  "out": [],
+  "in": []
+}
