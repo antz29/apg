@@ -39,6 +39,11 @@
       "kind": "drives",
       "source": "requirements.requirement.cli-session-substrate",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.cli-session-required-for-durable-mutations",
+      "properties": {}
     }
   ]
 }

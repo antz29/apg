@@ -6,7 +6,13 @@
   "properties": {
     "feature": "cli-session-substrate"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.group.cli-session",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
