@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.session",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.session_cmd",
+      "properties": {}
     }
   ],
   "in": [
