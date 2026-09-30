@@ -181,6 +181,11 @@
       "kind": "contains",
       "target": "solution.component.cli-session-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cli-session-durability",
+      "properties": {}
     }
   ],
   "in": [
