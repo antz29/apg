@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cli-session-warning-visibility",
+  "body": "A durable mutation's write-time advisories reach the caller on the session path: the node add/update wording advisory and the node rm outstanding-feedback warning travel in the session reply and print on the caller's stderr at the mutation, and they leave the write intact. The advisory and the warning are non-blocking.\n\nACCEPTANCE:\n- A node add or update whose body carries likely-flagged tier wording returns the wording advisory in the session reply, the caller prints it on stderr, and the mutation completes.\n- A node rm that removes a node with open or actioned Feedback returns the outstanding-feedback warning naming each item in the session reply, the caller prints it on stderr, and the removal completes.\n- Each advisory leaves the mutation's result intact and blocks no write.",
+  "properties": {
+    "feature": "cli-session-substrate"
+  },
+  "out": [],
+  "in": []
+}
