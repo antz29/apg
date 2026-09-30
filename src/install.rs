@@ -92,6 +92,12 @@ pub const SUITE_TOOLS: &[(&str, &str)] = &[
         "apg_project.ts",
         include_str!("../opencode-suite/tools/apg_project.ts"),
     ),
+    // Live session lifecycle: spawn `apg session start` detached, poll until
+    // live, then return while the session keeps running.
+    (
+        "apg_session.ts",
+        include_str!("../opencode-suite/tools/apg_session.ts"),
+    ),
     // Plan/review suite.
     (
         "apg_review.ts",
