@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.layers.write",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.commit.reanchor_scan_meta",
+      "properties": {}
     }
   ],
   "in": [
