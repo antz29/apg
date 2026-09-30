@@ -2948,14 +2948,20 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-05 task-11 (e2e): metadata mutations require NO code re-scan.
-    /// Durable `node add`/`node rm` and `edge add`/`edge rm`; transient `plan`
-    /// add/rm (task/planned) and `review` add/action/resolve — each observed by
-    /// a NEW `apg query` process. The "no scan invoked" evidence is concrete:
-    /// `db.lbug`'s inode never changes (a scan unlinks and recreates it), the
-    /// scan's `scanned_at` scan-meta is never restamped (a scan writes a new
-    /// timestamp; the mutation re-anchor preserves it), and the scan pipeline's
-    /// `apg-frontend.log` is never recreated.
+    /// Phase-05 task-11 / phase-01 mandatory-session rewrite (e2e): metadata
+    /// mutations require NO code re-scan. A live `apg session start` process
+    /// owns the DB and the single-writer lock, so the durable `node add`/`node
+    /// rm` and `edge add`/`edge rm` are admitted into its write-back buffer and
+    /// projected into the held `db.lbug` AT ADMISSION — a NEW routed `apg query`
+    /// process observes each one immediately (read-your-writes) with NO save and
+    /// no scan; `apg session save` is then the single durability point. The
+    /// transient `plan` add/rm (task/planned) and `review` add/action/resolve
+    /// take the same extended flock, so they run once the session has ended and
+    /// are likewise observed by a NEW `apg query` process. The "no scan invoked"
+    /// evidence is concrete: `db.lbug`'s inode never changes (a scan unlinks and
+    /// recreates it), the scan's `scanned_at` scan-meta is never restamped (a
+    /// scan writes a new timestamp; the mutation re-anchor preserves it), and
+    /// the scan pipeline's `apg-frontend.log` is never recreated.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn metadata_mutations_are_immediately_queryable_without_a_scan() {
@@ -2966,6 +2972,7 @@ mod e2e {
 
         let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
         let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
+        let log_path = wt_apg.join(specs::TRANS).join("apg-frontend.log");
         let inode_before = std::fs::metadata(&db_path).unwrap().ino();
         let scanned_at = |graph: &Path| -> String {
             let text = std::fs::read_to_string(graph).unwrap();
@@ -2982,7 +2989,7 @@ mod e2e {
         let scan_meta_before = scanned_at(&graph_path);
         // A scan would recreate this; a metadata mutation never enters the scan
         // pipeline.
-        let _ = std::fs::remove_file(wt_apg.join(specs::TRANS).join("apg-frontend.log"));
+        let _ = std::fs::remove_file(&log_path);
 
         let mutate = |args: &[&str]| {
             let out = testutil::ApgCommand::new(args)
@@ -3009,7 +3016,19 @@ mod e2e {
                 .unwrap_or_default()
         };
 
-        // --- durable node add/rm + edge add/rm ---
+        // (0) Durable mutations are mandatory-session: one live `apg session
+        // start` process owns the DB and its single-writer lock, so the durable
+        // writes below are admitted into its write-back buffer (not written to
+        // disk) and projected into the held `db.lbug` at admission — a NEW
+        // routed `apg query` observes each one with no save and no scan.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the durable mutations must run under a live session"
+        );
+        let before_commits = testutil::commit_count(&wt);
+
+        // --- durable node add/rm + edge add/rm (admitted into the session) ---
         mutate(&["node", "add", "requirements", "requirement", "r1"]);
         assert_eq!(
             query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
@@ -3051,8 +3070,114 @@ mod e2e {
             query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
             "0"
         );
+        // A durable target for the review section below (saved by this session:
+        // the transient plan/review mutations take the same extended flock as
+        // the live session, so they run only after it has ended).
+        mutate(&["node", "add", "requirements", "requirement", "reviewed"]);
+        assert_eq!(
+            query(
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.reviewed'}) RETURN count(n)"
+            ),
+            "1"
+        );
 
-        // --- transient plan: phase/task/planned add + rm ---
+        // The writes stay BUFFERED: no node file has landed and no commit has
+        // been made — `apg session save` is the one durability point.
+        for name in ["r1", "r2", "reviewed"] {
+            assert!(
+                !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", name)
+                    .exists(),
+                "`{name}` must stay buffered until save"
+            );
+        }
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered mutation must not create a commit before save"
+        );
+
+        // --- no re-scan while the session is live: projection inode, scan_meta,
+        // and the scan log are untouched ---
+        assert_eq!(
+            std::fs::metadata(&db_path).unwrap().ino(),
+            inode_before,
+            "db.lbug must never be re-created by a metadata mutation"
+        );
+        assert_eq!(
+            scanned_at(&graph_path),
+            scan_meta_before,
+            "a metadata mutation must never restamp the scan_meta (no scan ran)"
+        );
+        assert!(
+            !log_path.exists(),
+            "a metadata mutation must not enter the scan pipeline"
+        );
+
+        // --- `apg session save` is the single durability point: the whole
+        // buffered set lands as node files in exactly one commit ---
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+        assert!(
+            layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "r2")
+                .exists(),
+            "save must land the buffered `r2` node file"
+        );
+        assert!(
+            layers::node_file_path(
+                &wt_apg,
+                layers::Layer::Requirements,
+                "requirement",
+                "reviewed"
+            )
+            .exists(),
+            "save must land the buffered `reviewed` node file"
+        );
+        assert!(
+            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "r1")
+                .exists(),
+            "the buffered `rm r1` must land (no node file)"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the whole buffered set must land in exactly one commit"
+        );
+
+        // --- end the session cleanly; a fresh query then reads the saved state
+        // directly ---
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let sout = session.child.wait_with_output().unwrap();
+        assert!(
+            sout.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sout.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must be ended"
+        );
+        assert_eq!(
+            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(n)"),
+            "1",
+            "after session end the direct reader sees the saved durable state"
+        );
+
+        // --- transient plan: phase/task/planned add + rm (no live session:
+        // these take the same extended flock, so they run once it has ended;
+        // each is still immediately queryable without a scan) ---
         mutate(&["plan", "add", "foo", "--title", "F", "--strategy", "S"]);
         assert_eq!(
             query("MATCH (p:Plan {fqn: 'foo/plan'}) RETURN count(p)"),
@@ -3118,8 +3243,8 @@ mod e2e {
             "0"
         );
 
-        // --- transient review: add/action/resolve ---
-        mutate(&["node", "add", "requirements", "requirement", "reviewed"]);
+        // --- transient review: add/action/resolve (the target `reviewed` is the
+        // durable requirement the live session saved above) ---
         mutate(&[
             "review",
             "add",
@@ -3156,7 +3281,7 @@ mod e2e {
             "a metadata mutation must never restamp the scan_meta (no scan ran)"
         );
         assert!(
-            !wt_apg.join(specs::TRANS).join("apg-frontend.log").exists(),
+            !log_path.exists(),
             "a metadata mutation must not enter the scan pipeline"
         );
 
