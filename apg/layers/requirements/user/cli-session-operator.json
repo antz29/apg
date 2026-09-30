@@ -4,6 +4,12 @@
   "name": "cli-session-operator",
   "body": "The operator of a durable-spec authoring session in a project worktree: a navigator agent or a maintainer who opens one CLI session, issues a series of durable node/edge mutations through it, chooses the moment the accumulated change becomes durable, and then ends or abandons the session. They drive the session through `apg session start|save|end|abort` and the `apg_session` suite tool. Their interest is a run of spec edits that lands as a single durable commit, and an abandoned run that leaves the durable spec and the derived index at their last saved state.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cli-session-substrate",
+      "properties": {}
+    }
+  ],
   "in": []
 }
