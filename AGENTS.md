@@ -177,7 +177,13 @@ The project builds a single `apg` binary (package `apg`):
   endpoint files in one atomic, auto-committed mutation (the out half in the
   source's file, the matching in half in the target's; `add` refuses a
   duplicate, `update` is properties-only). Guarded — refuses outside a project
-  worktree.
+  worktree. **Durable `node`/`edge` mutations require a live session** — see
+  *Sessions: caller-owned durable mutation* below.
+- `apg session <sub> …` — the session-scoped single-writer coordinator that owns
+  the worktree's `apg/.trans/db.lbug`: `start` launches it (foreground),
+  `save` — make the buffered node-file set durable (one atomic write + commit);
+  `abort` — discard the buffered set and release the session; `end` — release
+  the DB/socket and exit (refuses while the buffer is dirty).
 - `apg plan <sub> …` — the phased execution plan (transient, serialized to
   `apg/.trans/plans/<project>.jsonl`, branch-local): `add`
   (`add <project>` creates the plan, refusing when it exists; then
@@ -208,7 +214,9 @@ abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_methods`, `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`,
 `apg_unresolved`, `apg_hunk` — and the project/spec/plan/review suite:
 `apg_project` (start/verify/merge), `apg_node` / `apg_edge` (durable
-node-file add/update/rm mutations), `apg_plan_add` (the plan add/update/rm
+node-file add/update/rm mutations), `apg_session` (start a detached live
+session for the mandatory-session durable-mutation workflow), `apg_plan_add`
+(the plan add/update/rm
 authoring surface), `apg_plan` (+ phases/tasks/verify/done/undone/note/complete/
 render), `apg_review` (+ add/action/resolve/reject), and the path-scoped
 filesystem tools `apg_rm` / `apg_mv` / `apg_cp` (remove/move/copy that
@@ -216,7 +224,7 @@ self-enforce the acting agent's granted path scope and the project/worktree
 boundary).
 Shared plumbing
 lives in `~/.opencode/lib/apg.ts`
-(root discovery, `apg query`/`apg project`/`apg node`/`apg edge`/`apg plan`/`apg review` subprocess,
+(root discovery, `apg query`/`apg project`/`apg node`/`apg edge`/`apg session`/`apg plan`/`apg review` subprocess,
 Cypher literal escaping). All suite
 tools take an optional `codeType` (default: all code); exact-FQN tools hint
 when a lookup comes up empty (overloads carry `(params)` suffixes).
@@ -234,6 +242,46 @@ builds individual packages (`apg-linux-*.tar.gz`, `apg-<lang>-linux-*.tar.gz`)
 plus `sha256sums.txt` per tag.
 In the repo itself, run it via `cargo run -- scan <dir>` or
 `target/debug/apg scan <dir>`.
+
+#### Sessions: caller-owned durable mutation
+
+Durable `apg node` / `apg edge` mutations are **mandatory-session**: there is no
+direct write path. With no live session the command refuses (*a live session is
+required for durable mutations — run `apg session start` first*). A session is
+**caller-owned** — the caller starts it, saves it, and ends (or aborts) it;
+nothing auto-manages its lifecycle, and a failed forward is a hard error (the
+client never silently falls back to a direct write mid-flight, which could
+double-apply a mutation that already landed).
+
+- **`apg session start`** — launch the session-scoped single-writer coordinator.
+  It runs in the **foreground** and owns the worktree's `apg/.trans/db.lbug`
+  **exclusively** (holding the extended `specs.lock` flock) for its whole life,
+  serving routed mutations and routed `apg query` reads over a Unix socket
+  (`apg/.trans/session.sock`, or a deterministic short `/tmp` path when the
+  worktree path exceeds the platform's Unix-socket `SUN_LEN`). Exactly one
+  session may own a worktree DB — a second `start` is refused — and `apg scan` /
+  `apg project merge` are refused while a session is live.
+- **Write-back buffer.** Each routed mutation is admitted into an in-memory
+  buffer of node-file writes/deletes whose exact projection delta is applied
+  synchronously **at admission**, so a routed read (`apg query` through the
+  session) sees the buffered intention immediately — but `apg/layers/**` and git
+  stay at the last saved state. Forwarded mutations carry an at-most-once client
+  id, so a replay never double-applies.
+- **`apg session save`** — the **single durability point**: make the whole
+  buffered node-file set durable in **one atomic write + one git commit**, then
+  clear the buffer. Nothing the session buffered is committed until `save`.
+- **`apg session end`** — signal the live session to release the DB/socket and
+  exit. It **refuses while the buffer is dirty** (run `apg session save` to make
+  the buffer durable, or `apg session abort` to discard it); every projection
+  delta was applied at admission, so `end` performs no flush.
+- **`apg session abort`** — discard the buffered node-file set and release the
+  session; nothing buffered becomes durable.
+
+The **`apg_session`** suite tool wraps `start`: because `apg session start` is a
+blocking foreground process, the tool spawns it **detached**, waits until its
+socket answers live, and returns the session's root/socket/pid while it keeps
+running; the caller then drives `apg session save` and `apg session end` (or
+`abort`).
 
 ## Test tiers & the tier-separable harness
 
