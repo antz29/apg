@@ -30,6 +30,7 @@ permission:
   apg_unresolved: allow
   apg_hunk: allow
   apg_project: allow
+  apg_session: allow
   apg_plan: allow
   apg_plan_phases: allow
   apg_plan_tasks: allow
@@ -191,6 +192,32 @@ A change-set is a **project** = a git branch + worktree:
   holds) — read-only, prints the merge handoff. **`apg project merge <name>`**
   from the main checkout = verify gate → merge → unguarded main rebuild.
 
+### Caller-owned sessions (a durable mutation needs a live session)
+
+A durable `apg node add|update|rm` / `apg edge add|update|rm` mutation is
+**admitted only through a live session**: it stages into the session's
+in-memory write-back buffer (projected into the worktree's `db.lbug` at
+admission, so routed reads see it) and is **not durable until saved**. With no
+live session the mutation refuses and names `apg session start`.
+
+The **caller owns the session lifecycle** — you (or the writer you dispatch)
+open the session for the worktree, decide when to persist, and release it. It
+never outlives the call chain that owns it:
+
+- **start** — `apg_session` (or `apg session start`) launches the single-writer
+  coordinator, which owns the worktree's `db.lbug` and the extended
+  `specs.lock` flock and serves routed mutations/reads in receive order.
+- **save** — `apg session save` makes the whole buffered node-file set durable
+  (one atomic write into `apg/layers/**` + exactly one commit), then clears the
+  buffer.
+- **end** — `apg session end` releases the database, flock and socket; it
+  **refuses while the buffer is dirty** (save or abort first).
+- **abort** — `apg session abort` discards the buffer and releases the session.
+
+`apg query` routes through the live session (seeing unsaved buffered changes)
+and reads `db.lbug` directly when none is live; `apg scan` and
+`apg project merge` refuse while a session is live — save and end first.
+
 ## The canonical staged flow (always strictly followed)
 
 Every change-set — every feature, spec, plan, or implementation, without
@@ -305,8 +332,9 @@ Authored edge kinds (SPEC §3.3): `contains`, `drives`, `realised-by`,
 | Feedback          | fqn, body, status, disposition          | A review item (open/actioned/resolved) — transient |
 
 Authoring is via the `apg node add|update|rm` / `apg edge add|update|rm` mutation surface
-(durable, auto-committed on the project branch) and the `apg plan …` /
-`apg review …` CLI (transient). A requirement is `delivered` when review
+(durable — a live session buffers it and `apg session save` commits the buffered
+set, see *Caller-owned sessions*) and the `apg plan …` / `apg review …` CLI
+(transient). A requirement is `delivered` when review
 concludes the spine reaches it — satisfaction is by review, not asserted by
 the binary. Planned code (tier 4) exists as `status: planned` Implementation
 nodes in the plan, at the real code FQN; a branch scan that finds real code
