@@ -277,6 +277,89 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Phase-01 task-11: a durable `node`/`edge` mutation with NO live session
+    /// REFUSES and names `apg session start` — durable mutations are
+    /// mandatory-session (the direct path is gone), so the CLI must tell the
+    /// caller how to open one rather than silently writing to disk. A refused
+    /// mutation leaves the durable store (`apg/layers/**`) and the git history
+    /// untouched: no node file written, no `apg/layers` directory created, and
+    /// no commit.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn durable_mutation_requires_a_live_session() {
+        let (wt_apg, repo, wt) = node_store_fixture("session-required");
+        let home = repo.root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let layers_dir = wt_apg.join(layers::LAYERS_DIR);
+        let before_commits = testutil::commit_count(&wt);
+        assert!(
+            !layers_dir.exists(),
+            "fixture must start with no apg/layers store"
+        );
+
+        // `apg node add …` with no live session: refuses, naming the fix.
+        let node_add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "no-session",
+            "--body",
+            "must not land",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            !node_add.status.success(),
+            "a durable node add must refuse without a live session"
+        );
+        let node_stderr = String::from_utf8_lossy(&node_add.stderr);
+        assert!(
+            node_stderr.contains("apg session start"),
+            "the node refusal must name `apg session start`: {node_stderr}"
+        );
+
+        // `apg edge add …` with no live session: refuses the same way.
+        let edge_add = testutil::ApgCommand::new(&[
+            "edge",
+            "add",
+            "depends-on",
+            "requirements.requirement.a",
+            "requirements.requirement.b",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            !edge_add.status.success(),
+            "a durable edge add must refuse without a live session"
+        );
+        let edge_stderr = String::from_utf8_lossy(&edge_add.stderr);
+        assert!(
+            edge_stderr.contains("apg session start"),
+            "the edge refusal must name `apg session start`: {edge_stderr}"
+        );
+
+        // The durable store and git history are UNCHANGED: no node file
+        // written, no `apg/layers` directory created, no commit.
+        assert!(
+            !layers_dir.exists(),
+            "a refused mutation must not create apg/layers"
+        );
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "no-session")
+                .exists(),
+            "a refused node add must not write a node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a refused mutation must not create a commit"
+        );
+        testutil::remove(&repo);
+    }
+
     /// `apg node add` (the command shape through `layers::write_project`)
     /// lands ONE file per node at `<layer>/<type>/<name>.json` — the file
     /// name IS the identity, the FQN is derived `<layer>.<type>.<name>` —
