@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.cli-session-write-back-buffer",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cli-session-caller-controlled-durability",
+      "properties": {}
     }
   ],
   "in": [
