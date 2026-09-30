@@ -4,6 +4,12 @@
   "name": "cli-session-warning-transport",
   "body": "A write-time advisory is raised inside the mutation builder when the change is built — the node add/update wording advisory from the shared wording classifier, or the node rm outstanding-feedback notice naming each open or actioned Feedback item. On the session path the advisory travels in the session reply alongside the change output; the caller prints it on its stderr at the mutation and the write completes. The advisory informs the author and leaves the write result unchanged.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "requirements.requirement.cli-session-warning-visibility",
+      "properties": {}
+    }
+  ],
   "in": []
 }

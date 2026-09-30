@@ -38,6 +38,11 @@
       "kind": "contains",
       "source": "requirements.requirement.cli-session-substrate",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.cli-session-warning-transport",
+      "properties": {}
     }
   ]
 }
