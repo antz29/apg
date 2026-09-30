@@ -3533,4 +3533,121 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-03 task-11: a durable `apg node add` routed through a live session
+    /// returns its write-time wording advisory in the session reply, and the
+    /// caller prints it on ITS OWN stderr at the mutation (`apg: warning: …`)
+    /// while the write's result is left intact — the add succeeds, prints its
+    /// success message, buffers, and lands on save. A routed mutation whose
+    /// `--body` carries no likely-flagged wording prints NO warning, so the
+    /// advisory is body-driven rather than unconditional. Covers the
+    /// routed-warning carrier of `rust.apg.session.Coordinator.handle_mutation`
+    /// and its print in `rust.apg.node_cmd.cmd_node`.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn routed_warning_reaches_the_client() {
+        let (wt_apg, repo, wt) = node_store_fixture("routed-warning");
+        let home = repo.root.join("home");
+        let path = layers::node_file_path(&wt_apg, Layer::Domain, "value", "demo-val");
+
+        // Durable mutations are mandatory-session: one live `apg session start`
+        // owns the DB AND the write-back buffer, so the `node` writes below are
+        // forwarded to it and staged (NON-durable until `apg session save`).
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the durable mutation must run under a live session"
+        );
+
+        let run = |args: &[&str]| -> std::process::Output {
+            testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output()
+        };
+
+        // A routed `node add` whose body carries time-relative wording (`was`)
+        // produces the write-time advisory. The write SUCCEEDS (the advisory
+        // never blocks it), its success message is printed, and the advisory
+        // reaches the CALLER's stderr, naming the mutated node FQN.
+        let out = run(&[
+            "node",
+            "add",
+            "domain",
+            "value",
+            "demo-val",
+            "--body",
+            "The old flow was synchronous.",
+        ]);
+        assert!(
+            out.status.success(),
+            "the advisory must not block the routed add: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "Added node domain.value.demo-val",
+            "the write's result must be intact"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("apg: warning: domain.value.demo-val:"),
+            "the warning must name the mutated node on the caller's stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains(apg::spec_lint::WORDING_ADVISORY),
+            "the wording advisory must reach the caller's stderr: {stderr}"
+        );
+
+        // A routed `node update` whose supplied `--body` carries no
+        // likely-flagged wording emits NO warning — the advisory is
+        // body-driven, not unconditional — and still succeeds.
+        let out = run(&[
+            "node",
+            "update",
+            "domain",
+            "value",
+            "demo-val",
+            "--body",
+            "The service stores the record.",
+        ]);
+        assert!(
+            out.status.success(),
+            "a plain routed update must succeed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("apg: warning:"),
+            "plain wording must not print a warning: {stderr}"
+        );
+
+        // The write's result is intact: the buffered state is durable on save
+        // and carries the plain body (not the flagged one).
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "session save: {}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert!(
+            path.exists(),
+            "the flagged-but-advisory add must still land its node file"
+        );
+        let back = layers::read_node_file(&wt_apg, Layer::Domain, "value", "demo-val").unwrap();
+        assert_eq!(back.body, "The service stores the record.");
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must be ended cleanly"
+        );
+
+        testutil::remove(&repo);
+    }
 }
