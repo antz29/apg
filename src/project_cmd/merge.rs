@@ -101,12 +101,14 @@ pub fn project_merge_at(
     // (R5). `plan_verify_at` also refuses when the branch DB is stale (a
     // verdict is only meaningful against a fresh branch graph).
     let wt_apg = wt_dir.join(specs::LAYOUT);
-    // Lifecycle exclusivity (phase-03): a live session owns the branch DB, so
-    // merging (which removes the worktree/branch on success) must not race it.
-    // Refuse BEFORE the merge/rebuild replaces any projected DB.
+    // Lifecycle exclusivity: a live session owns the branch DB, so merging
+    // (which removes the worktree/branch on success) must not race it. Refuse
+    // BEFORE the merge/rebuild replaces any projected DB — the caller must save
+    // the buffered state (`apg session save`) and end the session
+    // (`apg session end`) first.
     if crate::session::live_session(&wt_apg) {
         anyhow::bail!(
-            "refused: a live `apg session` owns the branch DB at {} — end it first (`apg session end` inside the project worktree) before merging",
+            "refused: a live `apg session` owns the branch DB at {} — save its buffered changes and end it first (`apg session save`, then `apg session end`, inside the project worktree) before merging",
             wt_apg.join(specs::TRANS).join("db.lbug").display()
         );
     }
