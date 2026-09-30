@@ -233,3 +233,169 @@ pub fn update_node_file(
     node.properties = merge_properties(&node.properties, set, unset);
     Ok(node)
 }
+
+// ---------------------------------------------------------------------------
+// The in-memory node-file overlay (phase-00 task-1)
+// ---------------------------------------------------------------------------
+
+/// The identity of one node file: `(layer, node_type, name)`. The file name IS
+/// the identity, so the FQN is derived from it ([`fqn`]), never stored. The key
+/// is [`Layer`] (not its dir string) so the FQN rendering reuses [`fqn`]
+/// directly.
+pub type NodeIdentity = (Layer, String, String);
+
+/// The staged state of one node-file identity: `Some(node)` is a staged write
+/// (the identity's new full content), `None` is a delete marker (the identity's
+/// file is to be removed).
+pub type StagedNode = Option<NodeFile>;
+
+/// An **in-memory overlay** of staged node-file writes and deletes over the
+/// on-disk `apg/layers/**` tree (phase-00 task-1) — the seam the session's
+/// write-back buffer and `build_change_over` compose on.
+///
+/// The map keys by node identity `(layer, node_type, name)` and keeps only the
+/// last staged state for an identity: a staged write ([`stage_write`](Self::stage_write))
+/// or a delete marker ([`stage_delete`](Self::stage_delete)). Reads resolve
+/// **staged content before falling back to disk**: a staged write shadows the
+/// disk file, a delete marker means the identity is absent even when its file
+/// still exists on disk, and an unstaged identity falls through to
+/// [`read_node_file`]/[`node_file_path`]. Pure map logic over those disk
+/// helpers — it never writes.
+///
+/// [`apply_to_base`](Self::apply_to_base) folds the overlay over a base node
+/// list (the disk store) to yield the cumulative **effective** node set: staged
+/// writes replace (or add), delete markers drop, and unstaged disk nodes are
+/// kept. [`touched_fqns`](Self::touched_fqns) names every staged identity as
+/// its `<layer>.<type>.<name>` FQN — the projection's delete set.
+#[derive(Debug, Clone, Default)]
+pub struct LayersOverlay {
+    /// The staged state per identity: `Some` = write, `None` = delete marker.
+    /// Only the last state for an identity survives (the map keys by identity).
+    staged: BTreeMap<NodeIdentity, StagedNode>,
+}
+
+impl LayersOverlay {
+    /// An empty overlay — every identity resolves to disk.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// An overlay over an existing staged map (the session builds one from its
+    /// write-back buffer).
+    pub fn from_map(staged: BTreeMap<NodeIdentity, StagedNode>) -> Self {
+        Self { staged }
+    }
+
+    /// Stage one identity's state (a write `Some(node)` or a delete marker
+    /// `None`), replacing any earlier staged state for that identity.
+    pub fn insert(&mut self, identity: NodeIdentity, staged: StagedNode) {
+        self.staged.insert(identity, staged);
+    }
+
+    /// Stage a full node-file write. The identity is the node's own
+    /// `layer`/`type`/`name`, so the staged content and the map key agree by
+    /// construction. Errors on an unknown layer (a programming error — the
+    /// catalog is closed).
+    pub fn stage_write(&mut self, node: NodeFile) -> anyhow::Result<()> {
+        let layer = Layer::ALL
+            .iter()
+            .find(|l| l.layer_dir() == node.layer)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("unknown layer `{}`", node.layer))?;
+        let identity = (layer, node.node_type.clone(), node.name.clone());
+        self.staged.insert(identity, Some(node));
+        Ok(())
+    }
+
+    /// Stage a delete marker for an identity — it resolves as absent even while
+    /// its file still exists on disk.
+    pub fn stage_delete(&mut self, layer: Layer, node_type: &str, name: &str) {
+        self.staged
+            .insert((layer, node_type.to_string(), name.to_string()), None);
+    }
+
+    /// Resolve an identity: the staged write if present, `None` if the identity
+    /// is a staged delete, else the disk file via [`read_node_file`] (`None`
+    /// when no file exists). A malformed on-disk file still errors.
+    pub fn read(
+        &self,
+        apg_root: &Path,
+        layer: Layer,
+        node_type: &str,
+        name: &str,
+    ) -> anyhow::Result<Option<NodeFile>> {
+        let identity = (layer, node_type.to_string(), name.to_string());
+        match self.staged.get(&identity) {
+            Some(Some(node)) => Ok(Some(node.clone())),
+            Some(None) => Ok(None),
+            None => {
+                if node_file_path(apg_root, layer, node_type, name).exists() {
+                    read_node_file(apg_root, layer, node_type, name).map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    /// Whether an identity exists: a staged write is present, a staged delete is
+    /// absent, and an unstaged identity falls through to the disk file's
+    /// present-ness ([`node_file_path`]).
+    pub fn exists(&self, apg_root: &Path, layer: Layer, node_type: &str, name: &str) -> bool {
+        let identity = (layer, node_type.to_string(), name.to_string());
+        match self.staged.get(&identity) {
+            Some(Some(_)) => true,
+            Some(None) => false,
+            None => node_file_path(apg_root, layer, node_type, name).exists(),
+        }
+    }
+
+    /// Fold the overlay over a base node list (the disk store) into the
+    /// cumulative **effective** node set: staged writes replace the matching
+    /// base node (or add one absent from the base), delete markers drop the
+    /// matching base node, and every unstaged base node is kept. A base node
+    /// whose `layer` is unknown is kept verbatim (it can never match a staged
+    /// [`Layer`] key). Deterministic: the base's order is preserved and new
+    /// staged writes are appended in identity order.
+    pub fn apply_to_base(&self, base: &[NodeFile]) -> Vec<NodeFile> {
+        let mut effective: Vec<NodeFile> = Vec::with_capacity(base.len());
+        let mut seen: BTreeSet<NodeIdentity> = BTreeSet::new();
+        for node in base {
+            let identity = Layer::ALL
+                .iter()
+                .find(|l| l.layer_dir() == node.layer)
+                .copied()
+                .map(|layer| (layer, node.node_type.clone(), node.name.clone()));
+            let Some(identity) = identity else {
+                effective.push(node.clone());
+                continue;
+            };
+            seen.insert(identity.clone());
+            match self.staged.get(&identity) {
+                Some(None) => {} // delete marker — drop the disk node
+                Some(Some(staged)) => effective.push(staged.clone()), // staged write wins
+                None => effective.push(node.clone()), // unstaged — keep the disk node
+            }
+        }
+        // Staged writes for identities absent from the base are additions.
+        for (identity, staged) in &self.staged {
+            if seen.contains(identity) {
+                continue;
+            }
+            if let Some(node) = staged {
+                effective.push(node.clone());
+            }
+        }
+        effective
+    }
+
+    /// Every staged identity (writes **and** delete markers) rendered as its
+    /// `<layer>.<type>.<name>` FQN — the projection's touched/delete set. Sorted
+    /// and deduplicated by the underlying [`BTreeMap`]/[`BTreeSet`].
+    pub fn touched_fqns(&self) -> BTreeSet<String> {
+        self.staged
+            .keys()
+            .map(|(layer, node_type, name)| fqn(*layer, node_type, name))
+            .collect()
+    }
+}
