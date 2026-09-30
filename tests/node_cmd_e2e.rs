@@ -2887,4 +2887,178 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-02 task-9: under the buffered session contract, `apg session end`
+    /// REFUSES to release a session whose write-back buffer holds admitted but
+    /// unsaved changes — it reports the pending change(s) and stays LIVE (a
+    /// routed read keeps working, `live_session` stays true). `apg session
+    /// abort` then DISCARDS the buffer without ever making it durable: no node
+    /// file, no commit, the durable `apg/layers/**` store byte-identical to its
+    /// last saved state, and the session released (socket gone, no live
+    /// session). Over the dirty run the abort also forces a full rebuild of the
+    /// derived index from the durable node files.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn end_refuses_on_a_dirty_buffer_and_abort_discards() {
+        let (wt_apg, repo, wt) = mutation_fixture("dirty-end-abort");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+
+        // Baseline: the LAST SAVED state the abort must leave untouched.
+        let before_commits = testutil::commit_count(&wt);
+        let before_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        let before_store = layers::read_existing_nodes(&wt_apg).unwrap();
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "pending")
+                .exists(),
+            "the buffered name must not exist before the mutation"
+        );
+
+        // A routed durable mutation is admitted into the live session's
+        // write-back buffer: still no node file, no commit.
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "pending",
+            "--body",
+            "buffered",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+
+        // `apg session end` over the dirty buffer REFUSES: non-zero, reports
+        // each pending change, and releases nothing.
+        let end = testutil::ApgCommand::new(&["session", "end"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !end.status.success(),
+            "session end must refuse a dirty buffer"
+        );
+        let end_err = String::from_utf8_lossy(&end.stderr);
+        assert!(
+            end_err.contains("session end refused"),
+            "end must report the refusal: {end_err}"
+        );
+        assert!(
+            end_err.contains("1 pending change(s)"),
+            "end must report the pending-change count: {end_err}"
+        );
+        assert!(
+            end_err.contains("write requirements.requirement.pending"),
+            "end must name each pending change: {end_err}"
+        );
+
+        // The refusal released nothing: the session stays LIVE and a routed
+        // read still works against the session-held DB.
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "a refused end must not release the session"
+        );
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.pending'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "routed read after a refused end: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the still-live session must serve the buffered change"
+        );
+
+        // `apg session abort` discards the buffer and releases the session
+        // (over the dirty run it also forces the full index rebuild).
+        let abort = testutil::ApgCommand::new(&["session", "abort"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            abort.status.success(),
+            "{}",
+            String::from_utf8_lossy(&abort.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&abort.stdout).trim(),
+            "Session aborted"
+        );
+
+        // The serve loop returned after abort: the process exits cleanly.
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("apg session: aborted"),
+            "the coordinator must report the abort"
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "abort must release the session"
+        );
+
+        // The buffer was discarded: the buffered change never landed in
+        // `apg/layers/**`, no commit was made, and the durable store is
+        // byte-identical to its last saved state.
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "pending")
+                .exists(),
+            "an aborted buffered add must never write a node file"
+        );
+        assert_eq!(
+            layers::read_existing_nodes(&wt_apg).unwrap(),
+            before_store,
+            "abort must leave the durable store at the last saved state"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "abort must not create a commit"
+        );
+        assert_eq!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string(),
+            before_head,
+            "abort must not move HEAD"
+        );
+
+        testutil::remove(&repo);
+    }
 }
