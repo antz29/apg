@@ -116,6 +116,11 @@ pub(crate) enum Request {
     /// A routed read: the Cypher text (already `;`-terminated) plus the output
     /// format. Served against the session-held `db.lbug`.
     Query { query: String, json: bool },
+    /// The client asks the coordinator to make the whole buffered set durable:
+    /// flush the buffered node-file writes/deletes, make exactly one commit,
+    /// re-anchor `scan_meta`, then clear the buffer — the protocol counterpart
+    /// of [`Coordinator::save`].
+    Save,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -473,6 +478,17 @@ impl Coordinator {
                     }
                     Request::Query { query, json } => {
                         let reply = self.handle_query(&query, json);
+                        write_msg(&mut stream, &reply)?;
+                    }
+                    Request::Save => {
+                        let reply = match self.save() {
+                            Ok(()) => Reply::Ok {
+                                output: "Session saved".to_string(),
+                            },
+                            Err(e) => Reply::Err {
+                                message: format!("{e:#}"),
+                            },
+                        };
                         write_msg(&mut stream, &reply)?;
                     }
                     Request::Mutate {
