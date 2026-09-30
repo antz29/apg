@@ -179,6 +179,13 @@ pub(crate) fn run_pipeline(
     // code) rather than seeding the splice from the phantom rows. A live
     // session answers `Ping` (refused above) and an absent socket is the
     // ordinary case — the reuse fast path is unchanged for both.
+    //
+    // Equivalently, a present-but-unreachable socket IS the `db.lbug`-reuse
+    // (splice-seed) fast path being disabled: `force_full_load` short-circuits
+    // the `try_splice_build` reuse branch below (which would otherwise seed the
+    // new DB from the previous `db.lbug` via `input.reuse`) and
+    // `discard_derived_index(".")` removes the index plus its `.wal`/`.shm`
+    // sidecars, so no stale seed survives to poison the rebuild.
     let stale_socket = apg_root.as_ref().and_then(|root| {
         let socket = session::socket_path(root);
         (socket.exists() && !session::live_session_at(&socket)).then_some(socket)
