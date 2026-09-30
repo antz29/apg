@@ -360,26 +360,72 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// `apg node add` (the command shape through `layers::write_project`)
-    /// lands ONE file per node at `<layer>/<type>/<name>.json` — the file
-    /// name IS the identity, the FQN is derived `<layer>.<type>.<name>` —
-    /// visible in the branch DB after the re-merge, auto-committed on the
-    /// project branch, and never creating the legacy `apg/specs/`/`apg/notes/`
-    /// paths.
+    /// `apg node add` through a live session lands ONE file per node at
+    /// `<layer>/<type>/<name>.json` at the session's single durability point
+    /// (`apg session save`) — the file name IS the identity, the FQN is
+    /// derived `<layer>.<type>.<name>`, visible in the branch DB, committed on
+    /// the project branch, and never creating the legacy
+    /// `apg/specs/`/`apg/notes/` paths.
+    ///
+    /// The durable add is ADMITTED into the session's write-back buffer (no
+    /// `apg/layers/**` file, no commit), and only `apg session save` flushes
+    /// it — one atomic node-file write plus one commit — the state the
+    /// on-disk identity and branch-DB assertions below pin.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn node_add_lands_one_file_per_node_with_identity_and_branch_db_visibility() {
         let (wt_apg, repo, wt) = mutation_fixture("node-add");
-        // `apg node add requirements requirement timer`.
-        let nf = node("requirements", "requirement", "timer");
-        layers::write_project(&wt_apg, &[nf], &[]).unwrap();
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
 
-        // One file per node at the derived path; the file name is the identity.
+        // `apg node add requirements requirement timer` — admitted into the
+        // write-back buffer, so nothing is durable yet.
+        let add =
+            testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "timer"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&add.stdout).trim(),
+            "Added node requirements.requirement.timer"
+        );
+
+        // The file name is the identity, and the add BUFFERS: no node file
+        // appears before save (the durability point below).
         let path = wt_apg
             .join(layers::LAYERS_DIR)
             .join("requirements")
             .join("requirement")
             .join("timer.json");
+        assert!(
+            !path.exists(),
+            "a buffered add must not write {} before save",
+            path.display()
+        );
+
+        // The single durability point: `apg session save` flushes the buffer
+        // with one atomic node-file write plus one commit.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+
+        // One file per node at the derived path; the file name is the identity.
         assert!(path.exists(), "{} must exist", path.display());
         let back =
             layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "timer").unwrap();
@@ -389,10 +435,28 @@ mod e2e {
             "requirements.requirement.timer"
         );
 
-        // Visible in the branch DB (the mutation re-merged the layers tree).
-        let db = ArtifactDb::open(&wt_apg).unwrap();
-        assert!(db.has_node("requirements.requirement.timer"));
-        drop(db);
+        // Visible in the branch DB: a routed read sees the saved node while
+        // the session is still live.
+        let q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.timer'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "routed query: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the saved node must be visible in the branch DB"
+        );
 
         // Never touches the legacy durable paths.
         assert!(
@@ -414,6 +478,18 @@ mod e2e {
                 .is_ok(),
             "the node file must be committed on the project branch"
         );
+
+        // The branch `db.lbug` reflects the saved node once the session ends.
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        assert!(db.has_node("requirements.requirement.timer"));
+        drop(db);
+
         testutil::remove(&repo);
     }
 
