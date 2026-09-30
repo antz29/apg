@@ -283,13 +283,17 @@ fn node_rm_change(
     let layer = resolve_layer(&pos[0])?;
     let f = fqn(layer, &pos[1], &pos[2]);
 
-    // Warn (stderr) about each open/actioned Feedback that reviews the node,
-    // then PROCEED: a removed node's Feedback records and their Reviews edges
-    // survive in the project's transient record set, so the writer's claim and
-    // the reviewer's resolve-or-reject still proceed. `node rm` takes no
-    // project argument, so the project is the current worktree's branch —
-    // resolved exactly as `review list` does. Best-effort: the write's own
-    // project-context guard still governs.
+    // Carry a warning about each open/actioned Feedback that reviews the node in
+    // the returned [`Change`] (rather than printing it here), then PROCEED: a
+    // removed node's Feedback records and their Reviews edges survive in the
+    // project's transient record set, so the writer's claim and the reviewer's
+    // resolve-or-reject still proceed. `node rm` takes no project argument, so
+    // the project is the current worktree's branch — resolved exactly as
+    // `review list` does. Best-effort: the write's own project-context guard
+    // still governs. Carrying it (rather than printing here) lets a routed
+    // mutation return it in the session reply, and the caller (cmd_node) prints
+    // it on its own stderr while the removal completes.
+    let mut warnings = Vec::new();
     if let Ok(identity) = crate::git::repo_identity(apg_root)
         && let Some(project) = identity.branch.as_deref()
     {
@@ -319,10 +323,10 @@ fn node_rm_change(
         }
         items.sort();
         if !items.is_empty() {
-            eprintln!(
+            warnings.push(format!(
                 "apg: warning: removing `{f}` — it is reviewed by unresolved feedback: {}",
                 items.join(", ")
-            );
+            ));
         }
     }
 
@@ -367,7 +371,7 @@ fn node_rm_change(
     Ok(Change {
         writes,
         deletes,
-        warnings: Vec::new(),
+        warnings,
         message: format!("Removed node {f}"),
     })
 }
