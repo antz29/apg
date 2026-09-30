@@ -197,6 +197,28 @@ pub fn live_session(apg_root: &Path) -> bool {
     live_session_at(&socket_path(apg_root))
 }
 
+/// Fully discards a `.trans` directory's derived index: the query database
+/// (`db.lbug`) **and its `.wal`/`.shm` sidecars** (the suffixes
+/// [`crate::splice::publish`] asserts on), plus the `graph.jsonl` export.
+/// Best-effort — an absent artifact is not an error.
+///
+/// Removing only `db.lbug` is not enough: a `db.lbug.wal` left behind by an
+/// unclean exit makes the next `Database::new("db.lbug")` panic with a
+/// database-id mismatch, so the sidecars must go too. This is the ONE discard
+/// used by every forced-rebuild path ([`Coordinator::force_full_scan`] and
+/// `run_pipeline`'s stale-socket guard and full-load branch).
+///
+/// The node files under `apg/layers/**` are the system of record and are never
+/// touched here; the caller rebuilds the index from them (plus a fresh scan of
+/// the code).
+// (Unused until its callers are wired, phase-02 tasks 21/22.)
+#[allow(dead_code)]
+pub(crate) fn discard_derived_index(trans_dir: &Path) {
+    for name in ["db.lbug", "db.lbug.wal", "db.lbug.shm", "graph.jsonl"] {
+        let _ = std::fs::remove_file(trans_dir.join(name));
+    }
+}
+
 /// Send one request and read its reply, connecting fresh each time.
 fn send_request(socket: &Path, request: &Request) -> anyhow::Result<Reply> {
     let mut stream = UnixStream::connect(socket).map_err(|e| {
