@@ -251,4 +251,146 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// The write-surface `attaches-to` refusal (`rust.apg.layers.write.validate_change`):
+    /// a NEW constraint carrying `attaches-to` is REFUSED with no node file
+    /// left behind; an EXISTING attached constraint stays authorable (`node
+    /// update` of its body and `edge add details <note> <constraint>` targeting
+    /// it both succeed, because its `attaches-to` value is unchanged); and a NEW
+    /// constraint WITHOUT `attaches-to` (a plain tier-scoped
+    /// `domain.constraint.*`) SUCCEEDS and lands its file.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
+    fn new_constraint_attaches_to_is_refused() {
+        let (apg_root, repo, wt) = wt_fixture("attaches");
+
+        // Seed an EXISTING attached constraint RAW and commit it: the write
+        // surface refuses a NEW attached constraint, so the legacy one predates
+        // the mutation under test.
+        let mut legacy = testutil::node("requirements", "constraint", "legacy");
+        legacy.properties.insert(
+            apg::layers::PROP_ATTACHES_TO.to_string(),
+            "domain.value.thing".to_string(),
+        );
+        apg::layers::write_node(&apg_root, &legacy).unwrap();
+        wt_commit(
+            &wt,
+            &["apg/layers/requirements/constraint/legacy.json"],
+            "seed the legacy attached constraint",
+        );
+
+        // A NEW constraint carrying `attaches-to` is REFUSED — no file lands.
+        let fresh_path = apg::layers::node_file_path(
+            &apg_root,
+            apg::layers::Layer::Requirements,
+            "constraint",
+            "fresh",
+        );
+        let out = testutil::spawn_apg(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "constraint",
+                "fresh",
+                "--property",
+                "attaches-to=domain.value.thing",
+            ],
+            &wt,
+        );
+        assert!(
+            !out.status.success(),
+            "a NEW attached constraint must be refused"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("attaches-to"),
+            "the refusal must name `attaches-to`:\n{stderr}"
+        );
+        assert!(
+            !fresh_path.exists(),
+            "a refused constraint write must leave no node file behind"
+        );
+
+        // An EXISTING attached constraint stays authorable: `node update` of its
+        // body (attaches-to unchanged) SUCCEEDS.
+        let out = testutil::spawn_apg(
+            &[
+                "node",
+                "update",
+                "requirements",
+                "constraint",
+                "legacy",
+                "--body",
+                "The rule holds.",
+            ],
+            &wt,
+        );
+        assert!(
+            out.status.success(),
+            "an existing attached constraint must stay updatable: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let back = apg::layers::read_node_file(
+            &apg_root,
+            apg::layers::Layer::Requirements,
+            "constraint",
+            "legacy",
+        )
+        .unwrap();
+        assert_eq!(
+            back.properties
+                .get(apg::layers::PROP_ATTACHES_TO)
+                .map(String::as_str),
+            Some("domain.value.thing"),
+            "the update must preserve the existing `attaches-to`"
+        );
+        assert_eq!(back.body, "The rule holds.");
+
+        // `edge add details <note> <constraint>` targeting it also SUCCEEDS: the
+        // constraint's in-half write carries its unchanged `attaches-to`.
+        assert!(
+            testutil::spawn_apg(&["node", "add", "requirements", "note", "audit"], &wt)
+                .status
+                .success(),
+            "the details source note must be authorable"
+        );
+        let out = testutil::spawn_apg(
+            &[
+                "edge",
+                "add",
+                "details",
+                "requirements.note.audit",
+                "requirements.constraint.legacy",
+            ],
+            &wt,
+        );
+        assert!(
+            out.status.success(),
+            "edge add details to an existing attached constraint must succeed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        // The positive case: a NEW constraint WITHOUT `attaches-to` SUCCEEDS —
+        // the refusal targets only a newly-added attached constraint, never
+        // every new constraint.
+        let law_path = apg::layers::node_file_path(
+            &apg_root,
+            apg::layers::Layer::Domain,
+            "constraint",
+            "law",
+        );
+        let out = testutil::spawn_apg(&["node", "add", "domain", "constraint", "law"], &wt);
+        assert!(
+            out.status.success(),
+            "a plain tier-scoped constraint must be authorable: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            law_path.exists(),
+            "the plain constraint's node file must land"
+        );
+
+        testutil::remove(&repo);
+    }
 }
