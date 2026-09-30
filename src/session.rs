@@ -124,6 +124,12 @@ pub(crate) enum Request {
     /// re-anchor `scan_meta`, then clear the buffer — the protocol counterpart
     /// of [`Coordinator::save`].
     Save,
+    /// Client-initiated abort: discard the whole buffered set and abandon the
+    /// session without making it durable — the protocol counterpart of the
+    /// phase-02 abort lifecycle (discard the buffer, release the session, force
+    /// a full scan when the run was dirty). Declared here so the wire protocol
+    /// carries the request; the server arm is wired with that lifecycle.
+    Abort,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -493,6 +499,18 @@ impl Coordinator {
                             },
                         };
                         write_msg(&mut stream, &reply)?;
+                    }
+                    Request::Abort => {
+                        // Declared in phase-02 task-1; the abort lifecycle
+                        // (discard the buffer, release the session, force a full
+                        // scan over a dirty run) lands in task-2/task-3. This
+                        // arm replies cleanly and touches no session state.
+                        write_msg(
+                            &mut stream,
+                            &Reply::Err {
+                                message: "session abort is not implemented yet".to_string(),
+                            },
+                        )?;
                     }
                     Request::Mutate {
                         client_id,
