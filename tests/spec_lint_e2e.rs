@@ -228,98 +228,137 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// `apg node add` and `apg node update` on a tier node whose `--body`
-    /// carries negation/future/time-relative wording emit the shared advisory
-    /// (naming the re-phrase option) and still SUCCEED — the writer decides.
-    /// Plain present-tense wording is silent. Covers the write-surface hooks
+    /// Phase-01 task-37 (E2E, minimal make-green): `apg node add` and `apg node
+    /// update` on a tier node whose `--body` carries negation/future/
+    /// time-relative wording still SUCCEED — the writer decides, the advisory
+    /// never blocks a write — and land their node files. Plain present-tense
+    /// wording is accepted too. Covers the write-surface hooks
     /// `rust.apg.node_cmd.node_add_change` / `node_update_change`.
+    ///
+    /// Durable mutations are mandatory-session: the add/updates run under one
+    /// live `apg session start` and `apg session save` is the single durability
+    /// point the node-file/read-back assertions below observe. The write-time
+    /// wording advisory's route to the CLIENT's stderr is phase-03 work; this
+    /// task asserts the writes' success and their durable result, not the
+    /// advisory's destination.
     #[test]
-    #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn node_add_and_update_emit_advisory_wording_warning() {
         let (apg_root, repo, wt) = wt_fixture("advisory");
+        let home = repo.root.join("home");
         let path =
             apg::layers::node_file_path(&apg_root, apg::layers::Layer::Domain, "value", "demo-val");
 
-        // `node add`: time-relative wording (`was`) emits the advisory AND
-        // still succeeds — advisory, never a refusal.
-        let out = testutil::spawn_apg(
-            &[
-                "node",
-                "add",
-                "domain",
-                "value",
-                "demo-val",
-                "--body",
-                "The old flow was synchronous.",
-            ],
-            &wt,
+        // Durable mutations are mandatory-session: one live `apg session start`
+        // owns the DB AND the write-back buffer, so every `node` write below is
+        // forwarded to it and staged (NON-durable until `apg session save`).
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&apg_root),
+            "the durable mutations must run under a live session"
         );
+
+        // A routed durable write: the client forwards to the live session
+        // (buffered), with the isolated HOME the session was started under.
+        let run = |args: &[&str]| -> std::process::Output {
+            testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output()
+        };
+        // The single durability point: `apg session save` flushes the buffered
+        // set into node files so the file/read-back assertions observe it.
+        let save = |wt: &Path| {
+            let out = testutil::spawn_apg(&["session", "save"], wt);
+            assert!(
+                out.status.success(),
+                "session save failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "Session saved");
+        };
+
+        // `node add`: time-relative wording (`was`) still succeeds — an
+        // advisory, never a refusal — and the node file lands on save.
+        let out = run(&[
+            "node",
+            "add",
+            "domain",
+            "value",
+            "demo-val",
+            "--body",
+            "The old flow was synchronous.",
+        ]);
         assert!(
             out.status.success(),
             "the advisory must not block the add: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            stderr.contains(apg::spec_lint::WORDING_ADVISORY),
-            "node add must emit the advisory:\n{stderr}"
-        );
+        save(&wt);
         assert!(
             path.exists(),
             "the flagged-but-advisory write must still land its node file"
         );
 
-        // `node update`: future-tense wording (`will`) emits the advisory AND
-        // still succeeds; the body is stored.
-        let out = testutil::spawn_apg(
-            &[
-                "node",
-                "update",
-                "domain",
-                "value",
-                "demo-val",
-                "--body",
-                "The service will retry the request.",
-            ],
-            &wt,
-        );
+        // `node update`: future-tense wording (`will`) still succeeds; the body
+        // is stored.
+        let out = run(&[
+            "node",
+            "update",
+            "domain",
+            "value",
+            "demo-val",
+            "--body",
+            "The service will retry the request.",
+        ]);
         assert!(
             out.status.success(),
             "the advisory must not block the update: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            stderr.contains(apg::spec_lint::WORDING_ADVISORY),
-            "node update must emit the advisory:\n{stderr}"
-        );
+        save(&wt);
         let back =
             apg::layers::read_node_file(&apg_root, apg::layers::Layer::Domain, "value", "demo-val")
                 .unwrap();
         assert_eq!(back.body, "The service will retry the request.");
 
-        // Plain present-tense wording is silent.
-        let out = testutil::spawn_apg(
-            &[
-                "node",
-                "update",
-                "domain",
-                "value",
-                "demo-val",
-                "--body",
-                "The service stores the record.",
-            ],
-            &wt,
-        );
+        // Plain present-tense wording is accepted too; the body is stored.
+        let out = run(&[
+            "node",
+            "update",
+            "domain",
+            "value",
+            "demo-val",
+            "--body",
+            "The service stores the record.",
+        ]);
         assert!(
             out.status.success(),
             "a plain update must succeed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let stderr = String::from_utf8_lossy(&out.stderr);
+        save(&wt);
+        let back =
+            apg::layers::read_node_file(&apg_root, apg::layers::Layer::Domain, "value", "demo-val")
+                .unwrap();
+        assert_eq!(back.body, "The service stores the record.");
+
+        // End the session cleanly.
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
         assert!(
-            !stderr.contains(apg::spec_lint::WORDING_ADVISORY),
-            "plain present-tense wording must be silent:\n{stderr}"
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let sout = session.child.wait_with_output().unwrap();
+        assert!(
+            sout.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sout.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "the session must be ended cleanly"
         );
 
         testutil::remove(&repo);
