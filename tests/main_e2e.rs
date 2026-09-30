@@ -2913,7 +2913,10 @@ mod e2e {
     /// Phase-04 task-4 (acceptance): the `apg node` / `apg edge` command
     /// surface is transparent — the SAME literal forms the CLI documents appear
     /// in `help_text`, the node/edge suite tools, and the distributed agent
-    /// prompts.
+    /// prompts. Phase-04 task-10 extends the same pinning to the session
+    /// surface: `help_text` documents start|save|end|abort, the `apg_session`
+    /// suite tool is embedded, and the navigator/agent-builder/spec-writer
+    /// prompts carry the caller-owned-session guidance.
     ///
     /// The expected strings are PINNED here as literals, not read back from the
     /// consts: a test that compares `AGENTS`/`SUITE_TOOLS` to themselves is a
@@ -2929,6 +2932,14 @@ mod e2e {
             "Durable node-file model mutations:",
             "add/update/rm (type-as-argument, writes apg/layers;",
             "add/update/rm (kind/from/to;",
+            // Phase-04 task-4 documented the session surface: the help block
+            // names the coordinator and each of start/save/abort/end.
+            "apg session <sub> …",
+            "Session-scoped single-writer coordinator",
+            "start — own db.lbug exclusively",
+            "save — make the buffered node-file set durable",
+            "abort — discard the buffered node-file set and",
+            "end — signal the live session to release the",
         ] {
             assert!(
                 help.contains(needle),
@@ -2952,6 +2963,15 @@ mod e2e {
             tool("apg_edge.ts").contains("apg edge add|update|rm <kind> <from> <to>"),
             "apg_edge.ts must carry the pinned edge command form"
         );
+        // Phase-04 task-1 added the apg_session tool; it is embedded (and thus
+        // installed by `apg init`) and carries the pinned session command forms.
+        let session_tool = tool("apg_session.ts");
+        for needle in ["apg session save", "apg session end", "apg session abort"] {
+            assert!(
+                session_tool.contains(needle),
+                "apg_session.ts must carry the pinned session form {needle:?}"
+            );
+        }
 
         // 3. The distributed agent prompts: the authoring prompts carry the
         // exact command forms; the reviewer prompts name the authoring
@@ -2985,6 +3005,33 @@ mod e2e {
             (
                 "implementation-phase-reviewer.md",
                 "`apg_node`/`apg_edge`/`apg_plan_add`",
+            ),
+            // Phase-04 tasks 5/6/14 added caller-owned-session guidance to the
+            // three authoring prompts: each carries the heading and the
+            // mandatory-admission refusal wording.
+            (
+                "spec-writer.md",
+                "### Caller-owned sessions (a durable mutation needs a live session)",
+            ),
+            (
+                "codebase-navigator.md",
+                "### Caller-owned sessions (a durable mutation needs a live session)",
+            ),
+            (
+                "agent-builder.md",
+                "### Caller-owned sessions (a durable mutation needs a live session)",
+            ),
+            (
+                "spec-writer.md",
+                "live session the mutation refuses and names `apg session start`.",
+            ),
+            (
+                "codebase-navigator.md",
+                "live session the mutation refuses and names `apg session start`.",
+            ),
+            (
+                "agent-builder.md",
+                "live session the mutation refuses and names `apg session start`.",
             ),
         ];
         for (name, needle) in pinned {
