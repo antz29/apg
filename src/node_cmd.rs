@@ -119,19 +119,7 @@ pub struct Change {
 /// Build the complete change for one `node`/`edge` mutation (the shared
 /// read-modify-write the direct command and the session coordinator both run).
 pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Result<Change> {
-    let Some(sub) = args.first().map(|s| s.as_str()) else {
-        anyhow::bail!("usage: apg {kind} <add|update|rm> …");
-    };
-    let rest = &args[1..];
-    match (kind, sub) {
-        ("node", "add") => node_add_change(apg_root, rest, &layers::LayersOverlay::new()),
-        ("node", "update") => node_update_change(apg_root, rest, &layers::LayersOverlay::new()),
-        ("node", "rm") => node_rm_change(apg_root, rest, &layers::LayersOverlay::new()),
-        ("edge", "add") => edge_add_change(apg_root, rest, &layers::LayersOverlay::new()),
-        ("edge", "update") => edge_update_change(apg_root, rest, &layers::LayersOverlay::new()),
-        ("edge", "rm") => edge_rm_change(apg_root, rest, &layers::LayersOverlay::new()),
-        (_, other) => anyhow::bail!("unknown apg {kind} subcommand: {other}"),
-    }
+    build_change_over(apg_root, kind, args, &layers::LayersOverlay::new())
 }
 
 /// Buffer-aware twin of [`build_change`]: the same dispatch, but each arm
