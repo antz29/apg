@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.write-time-advisory",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.spec-lint",
+      "properties": {}
     }
   ],
   "in": [
