@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cli-session-write-back-buffer",
+  "body": "A live session buffers each admitted durable mutation as its node-file writes and deletes held in memory, and projects the change into the live `db.lbug` at admission. The on-disk node files and git history stay at their last saved state until a `save`, and each later mutation is built against the cumulative buffered state.\n\nACCEPTANCE:\n- A sequence of accepted mutations leaves the on-disk `apg/layers/**` files and git history at their previous state, while a read routed through the session observes every buffered change.\n- A mutation that updates or removes a node introduced earlier in the same unsaved run applies over the buffered state of that node.",
+  "properties": {
+    "feature": "cli-session-substrate"
+  },
+  "out": [],
+  "in": []
+}
