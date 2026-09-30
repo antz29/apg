@@ -3256,4 +3256,121 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-02 task-11: `apg scan` and `apg project merge` are exclusive with
+    /// a live session — each REFUSES while the session owns the worktree DB,
+    /// naming the fix (`apg session save`, then `apg session end`). Once the
+    /// session is saved and ended, the exclusivity gate is gone: `apg scan`
+    /// RUNS (the unchanged tree hits the freshness fast path and the scan
+    /// succeeds without a frontend spawn), and the merge path is no longer
+    /// refused by the session gate (it proceeds past exclusivity to the
+    /// fixture's unrelated missing-plan refusal). No refusal, save, end or
+    /// post-end scan creates a commit.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn scan_and_merge_run_after_save_then_end() {
+        let (wt_apg, repo, wt) = mutation_fixture("scan-merge-session-exclusive");
+        let home = repo.root.join("home");
+        let before_commits = testutil::commit_count(&wt);
+
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+
+        // (a) While the session is live, `apg scan` refuses and names both the
+        // fix commands (`apg session save`, `apg session end`).
+        let scan = testutil::ApgCommand::new(&["scan", wt.to_str().unwrap()])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(!scan.status.success(), "scan must refuse a live session");
+        let scan_err = String::from_utf8_lossy(&scan.stderr);
+        assert!(
+            scan_err.contains("a live `apg session`"),
+            "scan must name the live session: {scan_err}"
+        );
+        assert!(
+            scan_err.contains("apg session save") && scan_err.contains("apg session end"),
+            "scan must name `apg session save`/`apg session end`: {scan_err}"
+        );
+
+        // (b) While the session is live, `apg project merge` refuses the same
+        // way (from the clean main checkout).
+        let merge = testutil::ApgCommand::new(&["project", "merge", "foo"])
+            .cwd(&repo.root)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(!merge.status.success(), "merge must refuse a live session");
+        let merge_err = String::from_utf8_lossy(&merge.stderr);
+        assert!(
+            merge_err.contains("a live `apg session`"),
+            "merge must name the live session: {merge_err}"
+        );
+        assert!(
+            merge_err.contains("apg session save") && merge_err.contains("apg session end"),
+            "merge must name `apg session save`/`apg session end`: {merge_err}"
+        );
+
+        // A refused scan/merge writes nothing durable.
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a refused scan/merge must not create a commit"
+        );
+
+        // (c) `apg session save` (clean buffer — a no-op) then `apg session
+        // end` releases the exclusivity gate.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "session save: {}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "session end must release the session"
+        );
+
+        // (d) With the session gone, `apg scan` RUNS: the unchanged tree hits
+        // the content-identity freshness fast path and the scan succeeds (no
+        // frontend spawn, and no commit).
+        let scan_after = testutil::ApgCommand::new(&["scan", wt.to_str().unwrap()])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            scan_after.status.success(),
+            "scan must run after save+end: {}",
+            String::from_utf8_lossy(&scan_after.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a post-end scan must not create a commit"
+        );
+
+        // (e) The merge path is no longer blocked by the session gate: it
+        // proceeds past exclusivity to the fixture's unrelated missing-plan
+        // refusal (a full merge needs a plan/branch graph and is covered by
+        // the merge/plan e2e crates).
+        let merge_after = testutil::ApgCommand::new(&["project", "merge", "foo"])
+            .cwd(&repo.root)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !String::from_utf8_lossy(&merge_after.stderr).contains("a live `apg session`"),
+            "merge must not be blocked by the session gate after end: {}",
+            String::from_utf8_lossy(&merge_after.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
 }
