@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cli-session-required-for-durable-mutations",
+  "body": "A durable `apg node` or `apg edge` mutation runs only through a live session that holds the worktree database. The session admits the mutation, and with the session absent the command reports that a session is required and names `apg session start` as the way to open one.\n\nACCEPTANCE:\n- With a live session, `apg node add|update|rm` and `apg edge add|update|rm` are accepted and their effect is visible through a routed read.\n- With the session absent, each durable mutation command reports that a session is required and names `apg session start`; the durable spec and git history stay unchanged.",
+  "properties": {
+    "feature": "cli-session-substrate"
+  },
+  "out": [],
+  "in": []
+}
