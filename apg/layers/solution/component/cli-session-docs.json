@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "AGENTS.md",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.help_text",
+      "properties": {}
     }
   ],
   "in": [
