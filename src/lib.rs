@@ -114,12 +114,19 @@ USAGE:
                               add/update/rm (kind/from/to; update is
                               properties-only)
   apg session <sub> …         Session-scoped single-writer coordinator
-                              (apg/.trans/session.sock):
+                              (apg/.trans/session.sock); a durable apg
+                              node/edge mutation requires a live session:
                               start — own db.lbug exclusively, perform routed
                               node/edge mutations and serve routed reads in
-                              receive order (write-through, no buffered flush);
+                              receive order, buffering the node-file set
+                              until save;
+                              save — make the buffered node-file set durable
+                              (one atomic write + commit) and clear the buffer;
+                              abort — discard the buffered node-file set and
+                              release the session;
                               end — signal the live session to release the
-                              DB/socket and exit
+                              DB/socket and exit (refuses while the buffer is
+                              dirty — save or abort first)
   apg --version               Print version
   apg --help                  Show this help
 
