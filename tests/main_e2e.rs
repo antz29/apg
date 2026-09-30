@@ -2553,24 +2553,72 @@ mod e2e {
     }
 
     /// Phase-7 task-1 (E2E, top-level dispatch): the strict-mutation surface's
-    /// refusal sweep. Every create arm — `node add`, `edge add`, `plan add`
-    /// (the plan itself), and `plan add phase|task|planned` — refuses an
-    /// existing entity (non-zero, error naming the `update`/`rm` follow-up, no
-    /// store change); `rm` on an absent entity is non-zero, never a silent
-    /// no-op.
+    /// refusal sweep, under mandatory-session. Every create arm — `node add`,
+    /// `edge add`, `plan add` (the plan itself), and `plan add
+    /// phase|task|planned` — refuses an existing entity (non-zero, error naming
+    /// the `update`/`rm` follow-up, no store change); `rm` on an absent plan
+    /// entity is non-zero, never a silent no-op.
+    ///
+    /// The durable `node`/`edge` arms run inside a live `apg session start`
+    /// process: the top-level `cmd_node`/`cmd_edge` dispatch forwards each
+    /// mutation to the coordinator, which stages it in its write-back buffer
+    /// (projected at admission, NON-durable until `apg session save`). A refused
+    /// re-add changes nothing; an accepted `rm` of an existing node proceeds
+    /// into the buffer (and a rm of a never-existing node is admitted as a
+    /// buffered no-op, not the direct path's fs-delete refusal); `save` is the
+    /// single durability point (asserted), and the session ends cleanly before
+    /// the transient `plan` arms (which take the same extended flock).
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn strict_surface_top_level_dispatch_refuses_existing_and_absent_rm() {
         let (apg_root, repo, wt) = strict_surface_fixture("dispatch-refusal");
+        let home = repo.root.join("home");
+        let before_commits = testutil::commit_count(&wt);
+
+        // A routed read helper: while the session is live the DB is owned by
+        // the coordinator, so a direct open is out of contract — reads go
+        // through a separate `apg query` process routed to the session.
+        let query = |q: &str| -> String {
+            let out = testutil::spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "{q}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .last()
+                .map(|l| l.trim().to_string())
+                .unwrap_or_default()
+        };
+
+        // Durable mutations are mandatory-session: open one. The top-level
+        // `cmd_node`/`cmd_edge` dispatch below forwards each durable write to
+        // it, which stages the change in its write-back buffer (projected into
+        // the held DB at admission, NON-durable until `apg session save`).
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&apg_root),
+            "the durable arms must run under a live session"
+        );
 
         // --- node add refuses an existing FQN (naming update/rm) ---
         with_cwd(&wt, || {
             node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"]))
         })
         .unwrap();
+        // The admitted write is visible to a routed read at admission but stays
+        // buffered: no node file lands until `apg session save`.
         let r1_path =
             layers::node_file_path(&apg_root, layers::Layer::Requirements, "requirement", "r1");
-        let r1_before = std::fs::read_to_string(&r1_path).unwrap();
+        assert!(
+            !r1_path.exists(),
+            "an admitted node must stay buffered until save"
+        );
+        assert_eq!(
+            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
+            "1"
+        );
         let err = with_cwd(&wt, || {
             node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"])).unwrap_err()
         });
@@ -2578,10 +2626,11 @@ mod e2e {
         assert!(msg.contains("already exists"), "{msg}");
         assert!(msg.contains("apg node update"), "{msg}");
         assert!(msg.contains("apg node rm"), "{msg}");
+        // A refused re-add writes nothing and changes no buffered state.
+        assert!(!r1_path.exists(), "a refused re-add must write nothing");
         assert_eq!(
-            std::fs::read_to_string(&r1_path).unwrap(),
-            r1_before,
-            "a refused re-add must write nothing"
+            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
+            "1"
         );
 
         // --- edge add refuses a duplicate (kind, from, to) ---
@@ -2596,31 +2645,88 @@ mod e2e {
             "requirements.requirement.r2",
         ]);
         with_cwd(&wt, || node_cmd::cmd_edge(&edge)).unwrap();
-        let r1_after_edge = std::fs::read_to_string(&r1_path).unwrap();
         let err = with_cwd(&wt, || node_cmd::cmd_edge(&edge).unwrap_err());
         let msg = err.to_string();
         assert!(msg.contains("already exists"), "{msg}");
         assert!(msg.contains("apg edge update"), "{msg}");
         assert!(msg.contains("apg edge rm"), "{msg}");
+        // The duplicate added neither a second out-half nor an in-half.
         assert_eq!(
-            std::fs::read_to_string(&r1_path).unwrap(),
-            r1_after_edge,
-            "a refused duplicate must not add a second out-half"
+            query(
+                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->(:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)"
+            ),
+            "1"
+        );
+
+        // --- rm of an EXISTING node proceeds into the buffer ---
+        // (An absent-node rm is NOT refused under mandatory admission: the
+        // coordinator admits the delete as a buffered intention, and an
+        // identity that never existed nets to nothing. The strict surface's
+        // absent-rm refusals are the plan-store ones asserted below.)
+        with_cwd(&wt, || {
+            node_cmd::cmd_node(&argv(&["rm", "requirements", "requirement", "r1"]))
+        })
+        .unwrap();
+        assert_eq!(
+            query("MATCH (n:Requirement {fqn: 'requirements.requirement.r1'}) RETURN count(n)"),
+            "0",
+            "the buffered rm must be visible to a routed read"
+        );
+        assert!(!r1_path.exists(), "a buffered rm must not touch disk");
+
+        // --- `apg session save` is the single durability point: the buffered
+        // set (r2 written, r1 added-then-removed) lands in exactly one commit ---
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+        assert!(
+            !r1_path.exists(),
+            "the buffered `rm r1` must land (no node file)"
+        );
+        let r2_path =
+            layers::node_file_path(&apg_root, layers::Layer::Requirements, "requirement", "r2");
+        assert!(
+            r2_path.exists(),
+            "save must land the buffered `r2` node file"
         );
         let r2 =
             layers::read_node_file(&apg_root, layers::Layer::Requirements, "requirement", "r2")
                 .unwrap();
+        assert!(
+            r2.in_edges.is_empty(),
+            "the saved `rm r1` must drop r2's incident in-half"
+        );
         assert_eq!(
-            r2.in_edges.len(),
-            1,
-            "the duplicate must not add an in-half"
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the whole buffered set must land in exactly one commit"
         );
 
-        // --- rm on an absent node is non-zero (never a silent no-op) ---
-        let err = with_cwd(&wt, || {
-            node_cmd::cmd_node(&argv(&["rm", "requirements", "requirement", "ghost"])).unwrap_err()
-        });
-        assert!(!err.to_string().is_empty(), "{err}");
+        // End the session cleanly; the transient plan arms below take the same
+        // extended flock, so they run once it has ended.
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let sout = session.child.wait_with_output().unwrap();
+        assert!(
+            sout.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sout.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "the session must be ended before the transient plan arms"
+        );
 
         // --- plan add refuses an existing plan, naming update/rm ---
         with_cwd(&wt, || plan_cmd::cmd_plan(&argv(&["add", "foo"]))).unwrap();
