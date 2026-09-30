@@ -242,3 +242,6 @@ pub fn cmd_spec(args: &[String]) -> anyhow::Result<()> {
         other => anyhow::bail!("usage: apg spec lint (got `{}`)", other.unwrap_or("<none>")),
     }
 }
+
+#[cfg(test)]
+mod tests;
