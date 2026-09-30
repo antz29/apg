@@ -195,17 +195,21 @@ fn node_add_change(
         in_edges: Vec::new(),
     };
     // Advisory-only wording warning (R1/R5): a proposed tier-1-3 body carrying
-    // likely-flagged wording prints the shared advisory, but the write proceeds
-    // unchanged — the author decides. The selection mirrors `apg spec lint`
-    // ([`crate::spec_lint::tier_body_warning`]), so a constraint is exempt
-    // (a negative rule lives legitimately in a layer-scoped constraint, R2).
+    // likely-flagged wording rides in the returned [`Change`], but the write
+    // proceeds unchanged — the author decides. The selection mirrors
+    // `apg spec lint` ([`crate::spec_lint::tier_body_warning`]), so a
+    // constraint is exempt (a negative rule lives legitimately in a
+    // layer-scoped constraint, R2). Carrying it (rather than printing here)
+    // lets a routed mutation return it in the session reply, and the caller
+    // (cmd_node) prints it on its own stderr while the add completes.
+    let mut warnings = Vec::new();
     if let Some(msg) = crate::spec_lint::tier_body_warning(layer.layer_dir(), &pos[1], &node.body) {
-        eprintln!("apg: warning: {f}: {msg}");
+        warnings.push(format!("apg: warning: {f}: {msg}"));
     }
     Ok(Change {
         writes: vec![node],
         deletes: Vec::new(),
-        warnings: Vec::new(),
+        warnings,
         message: format!("Added node {f}"),
     })
 }
