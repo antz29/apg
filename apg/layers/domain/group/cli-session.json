@@ -37,6 +37,11 @@
       "kind": "realised-by",
       "target": "solution.component.cli-session-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.cli-session-routing",
+      "properties": {}
     }
   ],
   "in": [
