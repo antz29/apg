@@ -42,16 +42,21 @@ mod e2e {
     /// constraint carrying `attaches-to`), R3 (two notes detailing one node),
     /// R4 (a note whose `details` names no node), a delta-added requirement no
     /// phase `Satisfies` (named by requirement FQN), and a delta-added
-    /// `implemented-by` claim no plan task touches. The read-only lint leaves
-    /// the durable graph authorable.
+    /// `implemented-by` claim no plan task touches.
+    ///
+    /// Every durable `node`/`edge` write is routed through one live
+    /// `apg session start` and staged in its write-back buffer; `apg session
+    /// save` is the single durability point the lint below observes. The
+    /// read-only lint leaves the durable graph authorable.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn spec_lint_reports_r2_r3_r4_and_delta_gate_violations() {
         let (apg_root, repo, wt) = wt_fixture("report");
+        let home = repo.root.join("home");
 
         // Real scanned code: the branch gets a current `db.lbug`/`graph.jsonl`
         // and the solution node's `implemented-by` target (`go.fixture.mod.Store`)
-        // resolves against the scanned universe.
+        // resolves against the scanned universe at session admission.
         wt_write(
             &wt,
             "code/seed.scan.jsonl",
@@ -60,8 +65,10 @@ mod e2e {
         wt_commit(&wt, &["code/seed.scan.jsonl"], "seed code");
 
         // R2 — a constraint carrying the off-model `attaches-to` property. It is
-        // written RAW (the write surface refuses a NEW attached constraint; that
-        // refusal is pinned by `new_constraint_attaches_to_is_refused`).
+        // written RAW as a pre-existing fixture: the write surface refuses a NEW
+        // attached constraint (that refusal is pinned by
+        // `new_constraint_attaches_to_is_refused`), so it cannot be routed
+        // through the session.
         let mut bad_scope = testutil::node("requirements", "constraint", "bad-scope");
         bad_scope.properties.insert(
             apg::layers::PROP_ATTACHES_TO.to_string(),
@@ -69,41 +76,77 @@ mod e2e {
         );
         apg::layers::write_node(&apg_root, &bad_scope).unwrap();
 
+        // Build the real branch DB/graph.jsonl over the authored tree (the R2
+        // fixture), so the delta claim's code target resolves at admission.
+        testutil::scan_checkout(&wt).unwrap();
+
+        // Durable mutations are mandatory-session: one live `apg session start`
+        // owns the DB AND the write-back buffer, so every `node`/`edge` write
+        // below is forwarded to it and staged (NON-durable until `apg session
+        // save`).
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&apg_root),
+            "the durable mutations must run under a live session"
+        );
+
+        // A routed durable write: the client forwards to the live session
+        // (buffered), with the isolated HOME the session was started under.
+        let run = |args: &[&str]| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "{args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
         // R3 — two notes both detailing the same non-note node (paired halves).
-        let mut thing = testutil::node("domain", "value", "thing");
+        run(&["node", "add", "domain", "value", "thing"]);
         for name in ["first", "second"] {
-            let mut note = testutil::node("requirements", "note", name);
-            note.out
-                .push(testutil::out_edge("details", "domain.value.thing"));
-            apg::layers::write_node(&apg_root, &note).unwrap();
-            thing.in_edges.push(testutil::in_edge(
+            run(&["node", "add", "requirements", "note", name]);
+            let from = format!("requirements.note.{name}");
+            run(&[
+                "edge",
+                "add",
                 "details",
-                &format!("requirements.note.{name}"),
-            ));
+                from.as_str(),
+                "domain.value.thing",
+            ]);
         }
-        apg::layers::write_node(&apg_root, &thing).unwrap();
 
         // R4 — a note whose `details` names no node (zero out-edges).
-        apg::layers::write_node(&apg_root, &testutil::node("requirements", "note", "orphan"))
-            .unwrap();
+        run(&["node", "add", "requirements", "note", "orphan"]);
 
         // Delta gates — with no plan store the whole branch spec is the
         // merge-base delta (an empty base degenerates to the branch spec): this
         // requirement is delta-added with no `Satisfies`'ing phase, and this
         // solution node's claim is delta-added with no touching task.
-        apg::layers::write_node(
-            &apg_root,
-            &testutil::node("requirements", "requirement", "uncovered"),
-        )
-        .unwrap();
-        let mut claim = testutil::node("solution", "system", "claim");
-        claim
-            .out
-            .push(testutil::out_edge("implemented-by", "go.fixture.mod.Store"));
-        apg::layers::write_node(&apg_root, &claim).unwrap();
+        run(&["node", "add", "requirements", "requirement", "uncovered"]);
+        run(&["node", "add", "solution", "system", "claim"]);
+        run(&[
+            "edge",
+            "add",
+            "implemented-by",
+            "solution.system.claim",
+            "go.fixture.mod.Store",
+        ]);
 
-        // Build the real branch DB/graph.jsonl over the authored tree.
-        testutil::scan_checkout(&wt).unwrap();
+        // The single durability point: `apg session save` flushes the buffered
+        // violation set into node files, so the read-only lint observes them.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
 
         // The read-only evidence: capture the constraint file's bytes.
         let bad_scope_path = apg::layers::node_file_path(
@@ -144,12 +187,42 @@ mod e2e {
             before,
             "apg spec lint is read-only — it must not rewrite node files"
         );
-        // ...and the graph stays authorable afterwards.
-        let added = testutil::spawn_apg(&["node", "add", "requirements", "user", "auditor"], &wt);
+
+        // ...and the graph stays authorable afterwards: the durable add is
+        // routed through the still-live session and saved, then the session
+        // ends cleanly.
+        let added = testutil::ApgCommand::new(&["node", "add", "requirements", "user", "auditor"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
         assert!(
             added.status.success(),
             "the durable graph must stay authorable after lint: {}",
             String::from_utf8_lossy(&added.stderr)
+        );
+        let resave = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            resave.status.success(),
+            "{}",
+            String::from_utf8_lossy(&resave.stderr)
+        );
+
+        // End the session cleanly.
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let sout = session.child.wait_with_output().unwrap();
+        assert!(
+            sout.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sout.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "the session must be ended cleanly"
         );
 
         testutil::remove(&repo);
