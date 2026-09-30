@@ -986,12 +986,20 @@ export function sessionLiveAt(socket: string, timeoutMs = 2000): Promise<boolean
   return new Promise((resolve) => {
     const conn = net.connect(socket)
     let settled = false
+    // A hard, socket-event-independent deadline. In Bun a `net.connect` to a
+    // removed/nonexistent Unix socket path can leave the connection unsettled
+    // (neither `connect` nor `error` fires), so `conn.setTimeout` alone is not a
+    // guarantee. This timer always fires and `finish` clears it, so the promise
+    // resolves within `timeoutMs` no matter what the socket does.
+    let hardTimer: ReturnType<typeof setTimeout>
     const finish = (live: boolean) => {
       if (settled) return
       settled = true
+      clearTimeout(hardTimer)
       conn.destroy()
       resolve(live)
     }
+    hardTimer = setTimeout(() => finish(false), timeoutMs)
     conn.setTimeout(timeoutMs, () => finish(false))
     conn.on("error", () => finish(false))
     conn.on("connect", () => conn.write(`${SESSION_PING}\n`))
@@ -1071,8 +1079,15 @@ export async function startDetachedSession(
         const socket = line
           .slice(line.indexOf(SESSION_LISTENING_PREFIX) + SESSION_LISTENING_PREFIX.length)
           .trim()
-        if (socket && (await sessionLiveAt(socket))) {
-          return { root, socket, pid: proc.pid }
+        if (socket) {
+          // Bound the probe by what remains of the overall deadline so the
+          // loop can never overshoot it, even if a single liveness probe is
+          // slow to settle.
+          const remaining = deadline - Date.now()
+          if (remaining <= 0) break
+          if (await sessionLiveAt(socket, remaining)) {
+            return { root, socket, pid: proc.pid }
+          }
         }
       }
       // A start that exited early (already-live refusal, bad layout, …) never
