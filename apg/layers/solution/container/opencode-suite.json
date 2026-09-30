@@ -86,6 +86,11 @@
       "kind": "contains",
       "target": "solution.component.spec-principles-prompts",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cli-session-suite-tool",
+      "properties": {}
     }
   ],
   "in": [

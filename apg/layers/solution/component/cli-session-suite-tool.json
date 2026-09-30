@@ -5,5 +5,11 @@
   "body": "The session suite tool: the opencode tool that opens a background session, defined in `opencode-suite/lib/apg.ts` and served by the new `opencode-suite/tools/apg_session.ts`. It spawns `apg session start` detached and waits until the session socket answers, then returns; the binary keeps `apg session start`'s blocking foreground contract.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    }
+  ]
 }
