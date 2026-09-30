@@ -5,5 +5,11 @@
   "body": "The session routing surface: the durable `apg node` / `apg edge` commands and `apg query` as the callers that route through a live session. `rust.apg.node_cmd.cmd_node` and `rust.apg.node_cmd.cmd_edge` send a mutation to the session and print the reply; `rust.apg.query.cmd_query` routes a read through the session when one is live and opens the database directly otherwise.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
 }

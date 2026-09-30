@@ -186,6 +186,11 @@
       "kind": "contains",
       "target": "solution.component.cli-session-durability",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cli-session-routing",
+      "properties": {}
     }
   ],
   "in": [
