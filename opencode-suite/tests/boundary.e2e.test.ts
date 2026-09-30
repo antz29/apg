@@ -29,6 +29,10 @@ import {
   mainCheckoutRoot,
   REQUIREMENT_FQN_PREFIX,
   csvToRows,
+  startDetachedSession,
+  sessionLiveAt,
+  NO_DB_ERROR,
+  type DetachedSession,
   type ToolContext,
 } from "../lib/apg.ts"
 
@@ -1164,6 +1168,156 @@ test.skipIf(!enabled)(
       fs.rmSync(base, { recursive: true, force: true })
     }
   },
+)
+
+// apg-sessions phase-04.task-12: the `apg_session` suite tool. Its body is the
+// plugin-free `startDetachedSession` helper (the tool wraps it and appends a
+// status message), so — like the fs-tool scenarios above — this drives the SAME
+// sequence the tool runs: spawn `apg session start` DETACHED, wait for its
+// socket to answer live, and return while the coordinator keeps running. A
+// durable `apg node` mutation then routes through the live session (buffered
+// until `apg session save`, which flushes it in one commit), and `apg session
+// end` releases the session. A second detached start while one is live, and a
+// root with no `db.lbug`, both fail cleanly rather than blocking or throwing.
+// Real I/O (scratch /tmp git repo, a scanned db.lbug, a detached process, a Unix
+// socket, git commits), so opt-in suite e2e against a candidate binary
+// (`global.constraint.no-real-project-test`).
+test.skipIf(!enabled || !binary)(
+  "e2e: apg_session starts a detached live session, routes a mutation, saves, and ends; no db fails cleanly",
+  async () => {
+    const bin = binary as string
+    const previousBinary = process.env.APG_BINARY
+    const previousHome = process.env.HOME
+    process.env.APG_BINARY = bin
+
+    const repo = scratchRepo()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-home-"))
+    // Keep `apg init` hermetic: pre-create the plugin dir so it never shells
+    // out to npm, and redirect HOME so the detached session never reads a real
+    // `~/.opencode` (`global.constraint.no-real-project-test`).
+    fs.mkdirSync(path.join(home, ".opencode", "node_modules", "@opencode-ai", "plugin"), {
+      recursive: true,
+    })
+    process.env.HOME = home
+
+    const run = (args: string[]) =>
+      Bun.spawnSync({ cmd: [bin, ...args], cwd: repo, stdout: "pipe", stderr: "pipe" })
+
+    let live: DetachedSession | null = null
+    try {
+      expect(run(["init", "."]).exitCode).toBe(0)
+      // Commit the scaffold (the documented scratch flow) so the session's own
+      // save commit lands on a clean tracked tree.
+      const git = (args: string[]) =>
+        Bun.spawnSync({ cmd: ["git", ...args], cwd: repo, stdout: "pipe", stderr: "pipe" })
+      git(["add", "-A"])
+      git(["commit", "-q", "-m", "apg init"])
+
+      const scan = run(["scan", "."])
+      if (scan.exitCode !== 0) throw new Error(`scan failed: ${scan.stderr.toString()}`)
+
+      const context: ToolContext = { directory: repo, worktree: repo }
+
+      // The tool's plugin-free core: detached `apg session start`, returning
+      // once the socket answers live while the coordinator keeps running.
+      const started = await startDetachedSession(context, repo, { timeoutMs: 30000 })
+      expect(typeof started).not.toBe("string")
+      live = started as DetachedSession
+      expect(live.root).toBe(repo)
+      expect(existsSync(live.socket)).toBe(true)
+      expect(await sessionLiveAt(live.socket)).toBe(true)
+
+      // A routed durable mutation is admitted while the session is live, and
+      // stays buffered (no node file on disk) until save.
+      const nodeFile = path.join(
+        repo,
+        "apg",
+        "layers",
+        "requirements",
+        "requirement",
+        "session-node.json",
+      )
+      const added = run([
+        "node",
+        "add",
+        "requirements",
+        "requirement",
+        "session-node",
+        "--body",
+        "routed",
+      ])
+      expect(added.exitCode).toBe(0)
+      expect(added.stdout.toString().trim()).toBe(
+        "Added node requirements.requirement.session-node",
+      )
+      expect(existsSync(nodeFile)).toBe(false)
+
+      // A SECOND detached start while one is live fails cleanly: `apg session
+      // start` exits early (one session per worktree DB), so no socket ever
+      // appears and the helper reports an error string instead of blocking.
+      const second = await startDetachedSession(context, repo, { timeoutMs: 30000 })
+      expect(typeof second).toBe("string")
+      expect(second as string).toContain("apg session start failed")
+
+      // `apg session save` flushes the whole buffer in one commit …
+      const save = run(["session", "save"])
+      expect(save.exitCode).toBe(0)
+      expect(save.stdout.toString().trim()).toBe("Session saved")
+      expect(existsSync(nodeFile)).toBe(true)
+
+      // … and `apg session end` releases the live session.
+      const ended = run(["session", "end"])
+      expect(ended.exitCode).toBe(0)
+      expect(ended.stdout.toString().trim()).toBe("Session ended")
+      // The session is released: its socket is reclaimed. (Poll briefly: the
+      // coordinator removes the socket just after replying, and `sessionLiveAt`
+      // is for a socket file that EXISTS with no listener — connecting to a
+      // removed path does not settle, so assert on the file itself.)
+      const gone = Date.now() + 10000
+      while (existsSync(live.socket) && Date.now() < gone) {
+        await new Promise((r) => setTimeout(r, 50))
+      }
+      expect(existsSync(live.socket)).toBe(false)
+      live = null
+
+      // Failure path: a root with no `db.lbug` (a bare dir, then an `apg/.trans`
+      // with no db) fails cleanly with the shared NO_DB_ERROR — the socket can
+      // never appear, and nothing is spawned or thrown.
+      const noDb = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-nodb-"))
+      try {
+        const bare = path.join(noDb, "bare")
+        fs.mkdirSync(bare, { recursive: true })
+        expect(await startDetachedSession({ directory: bare, worktree: bare }, bare)).toBe(
+          NO_DB_ERROR,
+        )
+        const badRoot = path.join(noDb, "bad")
+        fs.mkdirSync(path.join(badRoot, "apg", ".trans"), { recursive: true })
+        expect(await startDetachedSession({ directory: badRoot, worktree: badRoot }, badRoot)).toBe(
+          NO_DB_ERROR,
+        )
+      } finally {
+        fs.rmSync(noDb, { recursive: true, force: true })
+      }
+    } finally {
+      // Best-effort teardown: end a still-live session (or kill it if the end
+      // never reaches it) so no detached coordinator outlives the test.
+      try {
+        run(["session", "end"])
+      } catch {}
+      if (live) {
+        try {
+          process.kill(live.pid)
+        } catch {}
+      }
+      if (previousBinary === undefined) delete process.env.APG_BINARY
+      else process.env.APG_BINARY = previousBinary
+      if (previousHome === undefined) delete process.env.HOME
+      else process.env.HOME = previousHome
+      fs.rmSync(path.dirname(repo), { recursive: true, force: true })
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  },
+  60000,
 )
 
 
