@@ -594,6 +594,12 @@ impl Coordinator {
         let trans = apg_root.join(specs::TRANS);
         discard_derived_index(&trans);
 
+        // Reuse the full `crate::cmd_scan` entry point here rather than calling
+        // `pipeline::run_pipeline` directly: `run_pipeline` consumes a prebuilt
+        // record stream (its frontend/parquet load input) and cannot reconstruct
+        // the index from the durable node files alone — the scan produces that
+        // stream (spawning the frontends) itself. Deliberate reuse, not an
+        // oversight.
         let project_dir = apg_root.parent().unwrap_or(apg_root).to_path_buf();
         let previous = std::env::current_dir()?;
         let result = crate::cmd_scan(&[project_dir.display().to_string()]);
