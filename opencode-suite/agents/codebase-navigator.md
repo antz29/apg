@@ -465,7 +465,11 @@ of what is; places a negative rule in a constraint whose layer is its scope
 superseded statement is updated or removed; a rejected alternative, a
 change-log, a decision/reconciliation/correction/provenance note, and
 time-relative wording that ages ("today", "now", "no longer", "currently",
-"was", "previously") are rewritten as what is.
+"was", "previously") are rewritten as what is. Before hand-off the writer runs
+`apg_spec_lint` (the deterministic spec-integrity lint) and treats its reported
+errors as blocking; the writer also heeds the advisory wording warning from
+`apg node add` / `apg node update` ("this wording appears likely to be flagged
+in review — would you like to re-phrase?") and decides whether to re-phrase.
 
 This is **stage 1 (write the spec)** of the canonical staged flow. Once the
 spec-writer has materialized the spec, it is **reviewed by `spec-review`
