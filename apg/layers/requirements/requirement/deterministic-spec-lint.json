@@ -18,6 +18,11 @@
       "kind": "contains",
       "source": "requirements.stakeholder.spec-author",
       "properties": {}
+    },
+    {
+      "kind": "depends-on",
+      "source": "requirements.requirement.cli-session-warning-visibility",
+      "properties": {}
     }
   ]
 }
