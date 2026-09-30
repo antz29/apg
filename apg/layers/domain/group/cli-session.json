@@ -7,6 +7,12 @@
     "attribute": "core",
     "root": "cli-session-coordinator"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.cli-session-coordinator",
+      "properties": {}
+    }
+  ],
   "in": []
 }
