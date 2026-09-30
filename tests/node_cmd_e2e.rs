@@ -1487,10 +1487,12 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-20: a forwarded mutation carries a client id and is applied
-    /// AT MOST ONCE — replaying the same id returns the cached reply with no
-    /// second commit — and a forward that cannot reach the coordinator ERRORS
-    /// rather than silently falling back to the direct path.
+    /// Phase-01 task-22: a forwarded mutation carries an explicit client id and
+    /// is applied AT MOST ONCE — replaying the same id returns the cached reply
+    /// with no second apply (the buffered state is unchanged) — and nothing it
+    /// buffers is durable until `apg session save` lands it in exactly ONE
+    /// commit. A forward that cannot reach the coordinator ERRORS rather than
+    /// silently falling back to the direct path.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn forwarded_mutations_apply_at_most_once_and_never_fall_back() {
@@ -1498,30 +1500,88 @@ mod e2e {
         let home = repo.root.join("home");
         let session = testutil::start_session_process(&wt, &home);
 
+        let before_commits = testutil::commit_count(&wt);
+
+        // Forward a node add with an explicit client id. It is admitted into the
+        // write-back buffer (and projected into the live DB), but is NOT durable:
+        // no node file is on disk and no commit is made.
         let args = av(&["add", "requirements", "requirement", "once"]);
         let first = session_forward_node(&wt_apg, "dup-1", &args);
         assert_eq!(first, "Added node requirements.requirement.once");
-        let before = testutil::commit_count(&wt);
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "once").exists(),
+            "a buffered forward must not write the node file before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered forward must not create a commit before save"
+        );
 
-        // Replay the SAME client id: cached reply, no re-apply.
+        // Replay the SAME client id: the coordinator returns the cached reply
+        // and NEVER re-applies. A re-apply of the strict add would refuse (the
+        // node already exists in the buffer), so the cached reply is the
+        // at-most-once evidence; the buffered state is unchanged.
         let replay = session_forward_node(&wt_apg, "dup-1", &args);
         assert_eq!(replay, first, "a replayed id must return the cached reply");
         assert_eq!(
             testutil::commit_count(&wt),
-            before,
+            before_commits,
             "a replay must not create a second commit"
         );
-        assert_eq!(
-            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "once")
-                .unwrap()
-                .name,
-            "once"
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "once").exists(),
+            "a replay must not write anything to the durable store"
         );
 
-        // End the session. A forward now ERRORS — no direct-path fallback — and
-        // nothing lands locally.
-        let _ = apg::session::Coordinator::signal_end(&wt_apg);
-        let out = session.child.wait_with_output().unwrap();
+        // The buffered mutation is observable through a routed read, and exactly
+        // once — the replay added no second copy to the live projection.
+        let count = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.once'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            count.status.success(),
+            "routed read: {}",
+            String::from_utf8_lossy(&count.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&count.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the replayed mutation must be present exactly once"
+        );
+
+        // `apg session save` is the single durability point: the one buffered
+        // forward lands as the node file plus exactly ONE commit.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+        assert!(
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "once").exists(),
+            "save must write the forwarded node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the buffered forward must land in exactly one commit"
+        );
+
+        // End the session cleanly. A forward now ERRORS — no direct-path
+        // fallback — and nothing lands locally.
+        let out = end_session(&wt, session);
         assert!(
             out.status.success(),
             "{}",
@@ -1542,6 +1602,11 @@ mod e2e {
         assert!(
             !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "ghost").exists(),
             "a failed forward must not fall back to the direct path"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "a failed forward must not create a commit"
         );
 
         testutil::remove(&repo);
