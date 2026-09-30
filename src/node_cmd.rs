@@ -125,7 +125,7 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
     let rest = &args[1..];
     match (kind, sub) {
         ("node", "add") => node_add_change(apg_root, rest, &layers::LayersOverlay::new()),
-        ("node", "update") => node_update_change(apg_root, rest),
+        ("node", "update") => node_update_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("node", "rm") => node_rm_change(apg_root, rest),
         ("edge", "add") => edge_add_change(apg_root, rest),
         ("edge", "update") => edge_update_change(apg_root, rest),
@@ -193,7 +193,11 @@ fn node_add_change(
 /// [--unset-property k]*` — body/properties only, edge-preserving: the
 /// identity (`layer`/`type`/`name`) and every out/in edge are immutable;
 /// properties MERGE with an explicit unset. Refuses an absent node.
-fn node_update_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
+fn node_update_change(
+    apg_root: &Path,
+    args: &[String],
+    overlay: &layers::LayersOverlay,
+) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -202,17 +206,22 @@ fn node_update_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change
         );
     }
     let layer = resolve_layer(&pos[0])?;
-    let body = p.get("body");
-    let updated = layers::update_node_file(
-        apg_root,
-        layer,
-        &pos[1],
-        &pos[2],
-        body.as_deref(),
-        &parse_properties(&p),
-        &parse_unset_properties(&p),
-    )?;
     let f = fqn(layer, &pos[1], &pos[2]);
+    let body = p.get("body");
+    // Resolve the node's existence and base content through the overlay
+    // (phase-00 task-9): a node written earlier in the same unsaved run is the
+    // base (its buffered content and edges are kept), a staged delete marker
+    // means it is absent, and an unstaged identity falls back to the on-disk
+    // file. This mirrors `layers::update_node_file`'s refusal and its
+    // edge-preserving body/properties merge, over the resolved base rather than
+    // a fresh disk read.
+    let Some(mut updated) = overlay.read(apg_root, layer, &pos[1], &pos[2])? else {
+        anyhow::bail!("node `{f}` does not exist — use `apg node add` to create it");
+    };
+    if let Some(body) = body.as_deref() {
+        updated.body = body.to_string();
+    }
+    updated.properties = edit_properties(&updated.properties, &p);
     // Advisory-only wording warning (R1/R5): when the supplied `--body` carries
     // likely-flagged wording, print the shared advisory but let the update
     // proceed unchanged — the author decides. Only `--body` carries wording, so
@@ -485,7 +494,10 @@ pub fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
 }
 
 pub fn node_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
-    apply_change(apg_root, node_update_change(apg_root, args)?)
+    apply_change(
+        apg_root,
+        node_update_change(apg_root, args, &layers::LayersOverlay::new())?,
+    )
 }
 
 pub fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
