@@ -7,5 +7,11 @@
     "kind": "event"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.cli-session",
+      "properties": {}
+    }
+  ]
 }
