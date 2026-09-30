@@ -18,6 +18,31 @@ mod unit {
             help.contains("single-writer coordinator"),
             "the session block documents the coordinator"
         );
+        // phase-04 task-11: the session block pins all four lifecycle entries —
+        // start, save, abort, end — so the save/abort additions travel with the
+        // pre-existing start/end documentation.
+        let session_block = help
+            .lines()
+            .skip_while(|l| !l.contains("apg session <sub>"))
+            .take_while(|l| !l.contains("apg --version"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            session_block.contains("start — own db.lbug exclusively"),
+            "the session block documents `start`: {session_block}"
+        );
+        assert!(
+            session_block.contains("save — make the buffered node-file set durable"),
+            "the session block documents `save`: {session_block}"
+        );
+        assert!(
+            session_block.contains("abort — discard the buffered node-file set"),
+            "the session block documents `abort`: {session_block}"
+        );
+        assert!(
+            session_block.contains("end — signal the live session"),
+            "the session block documents `end`: {session_block}"
+        );
         assert!(help.contains("apg plan <sub>"), "plan block present");
         assert!(
             help.contains("add/update/rm/done/undone/note/complete/render/verify"),
