@@ -6,19 +6,24 @@ use super::identity::repo_rel;
 use super::state::{GitState, canonical_allow_missing, discover_repo, graph_jsonl_path};
 
 // ---------------------------------------------------------------------------
-// Auto-commit (R8): one commit per mutation, single-file diffs; the stale
-// gate's recorded scan_meta is re-anchored after each auto-commit so DB and
-// tree stay in sync by construction.
+// Durable-commit helpers (R8): stage a caller-supplied change set and make
+// exactly one commit — the shared one-commit primitive underlying the JSONL
+// funnel's single-file `auto_commit` and the session save flush — then
+// re-anchor the stale gate's recorded scan_meta so DB and tree stay in sync by
+// construction. Durable `apg node`/`apg edge` mutations are NOT committed per
+// mutation: they are buffered and commit ONCE at `apg session save`.
 // ---------------------------------------------------------------------------
 
-/// Commits all `writes` (created/modified paths) and `deletes` (removed
-/// paths) in one commit on the current branch of the checkout containing
-/// `apg_root` with a caller-supplied message (git2 only — the git CLI is never
-/// shelled out to). The multi-file generalization of [`commit_file`]: writes
-/// are staged with `index.add_path`, deletes with `index.remove_path`
-/// (`add_path` stats the file and cannot stage a deletion — a removed path
-/// fails with a libgit2 `NotFound`), the trees are compared, and a single
-/// commit is created when anything changed.
+/// The shared one-commit primitive: commits all `writes` (created/modified
+/// paths) and `deletes` (removed paths) in one commit on the current branch of
+/// the checkout containing `apg_root` with a caller-supplied message (git2 only
+/// — the git CLI is never shelled out to). The multi-file generalization of
+/// [`commit_file`]: writes are staged with `index.add_path` and deletes with
+/// `index.remove_path` (`add_path` stats the file and cannot stage a deletion —
+/// a removed path fails with a libgit2 `NotFound`), the trees are compared, and
+/// a single commit is created when anything changed. The session save flush
+/// reaches it through `layers::write::write_through_with_deletes`; the JSONL
+/// funnel reaches the single-file path through [`auto_commit`].
 ///
 /// The index write (`repo.index()` / `index.write()`, i.e. `.git/index.lock`)
 /// is **already inside the caller's extended whole-durable-sequence flock**:
@@ -117,8 +122,11 @@ pub fn graph_mutation_message(apg_root: &Path, paths: &[&Path]) -> String {
     format!("apg: graph mutation ({})", rels.join(", "))
 }
 
-/// `commit_file` with the standard graph-mutation message — the funnel's
-/// one-commit-per-mutation commit (R8).
+/// `commit_file` with the standard graph-mutation message — the JSONL
+/// funnel's commit for a durable (non-`.trans`) write
+/// ([`write_jsonl_and_reingest`](crate::artifacts::write_jsonl_and_reingest)).
+/// This is not the durable node/edge mutation path: a durable `apg node`/
+/// `apg edge` mutation is buffered and commits once at `apg session save`.
 pub fn auto_commit(apg_root: &Path, path: &Path) -> anyhow::Result<Option<String>> {
     commit_file(apg_root, path, &graph_mutation_message(apg_root, &[path]))
 }
@@ -132,12 +140,13 @@ pub fn in_repo(apg_root: &Path) -> bool {
     discover_repo(apg_root).is_ok()
 }
 
-/// Re-anchors the staleness gate's recorded scan_meta after an auto-commit:
-/// rewrites the `scan_meta` control record on line 1 of `graph.jsonl` (the
-/// record `is_stale` compares against). The code graph itself is untouched —
-/// an auto-commit carries exactly the mutated node/JSONL content, so the scan's
-/// code content is still exactly what the projection holds (R8: DB and tree in
-/// sync by construction).
+/// Re-anchors the staleness gate's recorded scan_meta after a durable commit
+/// (the JSONL funnel's per-write commit, or the session save flush): rewrites
+/// the `scan_meta` control record on line 1 of `graph.jsonl` (the record
+/// `is_stale` compares against). The code graph itself is untouched — the
+/// commit carries exactly the mutated node/JSONL content, so the scan's code
+/// content is still exactly what the projection holds (R8: DB and tree in sync
+/// by construction).
 ///
 /// `graph.jsonl` is the SOLE code-identity and freshness source (phase-02
 /// decoupling): this NEVER opens `db.lbug` read-write, so no exclusive DB open
@@ -163,7 +172,7 @@ pub fn reanchor_scan_meta(apg_root: &Path, state: &GitState) -> anyhow::Result<(
         git_clean: state.sha.as_ref().map(|_| state.clean),
         // The content-identity key of the post-mutation state, so the
         // re-anchored record keeps the fast-path's rule intact (the mutation's
-        // auto-commit moved HEAD; the new state's key matches the new tree).
+        // commit moved HEAD; the new state's key matches the new tree).
         content_key: state.content_key.clone(),
         scanned_at,
     })?;
