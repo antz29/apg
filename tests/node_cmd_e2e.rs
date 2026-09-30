@@ -2307,22 +2307,20 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-36 (E2E, minimal make-green): `apg node rm` on a node
-    /// reviewed by an outstanding item proceeds, and the Feedback records
-    /// survive — the record set is authoritative, so the Feedback records and
-    /// their reviewed-target references persist in the requirements mirror and
-    /// `apg review list` still reports both items marked `(removed target)`. A
-    /// node whose items are all `resolved`, and a node with no items, remove
-    /// cleanly too.
+    /// Phase-03 task-13: `apg node rm` on a node reviewed by outstanding
+    /// (open/actioned) Feedback PROCEEDS — the writer decides — and the
+    /// write-time warning naming each unresolved item
+    /// (`apg: warning: removing `<fqn>` — it is reviewed by unresolved
+    /// feedback: …`) rides the session reply and reaches the CLIENT's stderr
+    /// while the removal completes. The Feedback records are authoritative and
+    /// survive the target's removal; `apg review list` still reports both items
+    /// marked `(removed target)`. A node whose items are all `resolved`, and a
+    /// node with no items, remove cleanly with NO warning.
     ///
     /// Durable mutations are mandatory-session, so every node add/rm runs under
     /// a live `apg session start` with `apg session save` as the single
     /// durability point; the transient `apg review …` writes take the same
     /// extended flock as a live session, so they run only between sessions.
-    /// The write-time warning that names the outstanding feedback rides the
-    /// session reply and reaches the CLIENT's stderr — that routing is
-    /// phase-03 work; this task asserts the removal's success and the
-    /// surviving records, not the warning's destination.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn node_rm_warns_on_outstanding_feedback_and_keeps_the_record() {
@@ -2401,7 +2399,26 @@ mod e2e {
         ]);
         run(&["review", "action", "foo/feedback-2", "--fix"]);
 
-        mutate(&["node", "rm", "requirements", "requirement", "gone"]);
+        // The routed warning names each unresolved item on the CLIENT's stderr,
+        // while the removal completes (mutate already asserts success).
+        let rm = mutate(&["node", "rm", "requirements", "requirement", "gone"]);
+        let stderr = String::from_utf8_lossy(&rm.stderr);
+        assert!(
+            stderr.contains("apg: warning: removing `requirements.requirement.gone`"),
+            "the warning must name the removed node on the client's stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains("it is reviewed by unresolved feedback:"),
+            "the warning must announce the unresolved feedback: {stderr}"
+        );
+        assert!(
+            stderr.contains("foo/feedback-1 (open)"),
+            "the warning must name the open item: {stderr}"
+        );
+        assert!(
+            stderr.contains("foo/feedback-2 (actioned)"),
+            "the warning must name the actioned item: {stderr}"
+        );
         assert!(
             !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "gone").exists(),
             "the removed node must not survive as a node file after save"
@@ -2441,7 +2458,13 @@ mod e2e {
             "foo",
         ]);
         run(&["review", "resolve", "foo/feedback-3"]);
-        mutate(&["node", "rm", "requirements", "requirement", "calm"]);
+        // An all-resolved node removes without the outstanding-feedback warning.
+        let rm = mutate(&["node", "rm", "requirements", "requirement", "calm"]);
+        let stderr = String::from_utf8_lossy(&rm.stderr);
+        assert!(
+            !stderr.contains("apg: warning:"),
+            "an all-resolved node must remove without a warning: {stderr}"
+        );
         assert!(
             !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "calm").exists(),
             "the all-resolved node's removal must land"
@@ -2457,7 +2480,13 @@ mod e2e {
             "--body",
             "x",
         ]);
-        mutate(&["node", "rm", "requirements", "requirement", "bare"]);
+        // An unreviewed node removes without a warning too.
+        let rm = mutate(&["node", "rm", "requirements", "requirement", "bare"]);
+        let stderr = String::from_utf8_lossy(&rm.stderr);
+        assert!(
+            !stderr.contains("apg: warning:"),
+            "an unreviewed node must remove without a warning: {stderr}"
+        );
         assert!(
             !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "bare").exists(),
             "the unreviewed node's removal must land"
