@@ -252,17 +252,25 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// The write-surface `attaches-to` refusal (`rust.apg.layers.write.validate_change`):
-    /// a NEW constraint carrying `attaches-to` is REFUSED with no node file
-    /// left behind; an EXISTING attached constraint stays authorable (`node
-    /// update` of its body and `edge add details <note> <constraint>` targeting
-    /// it both succeed, because its `attaches-to` value is unchanged); and a NEW
-    /// constraint WITHOUT `attaches-to` (a plain tier-scoped
-    /// `domain.constraint.*`) SUCCEEDS and lands its file.
+    /// The write-surface `attaches-to` refusal (`rust.apg.layers.write.validate_change`),
+    /// exercised under mandatory-session: a NEW constraint carrying
+    /// `attaches-to` is REFUSED by the session coordinator's admission
+    /// validation with no node file left behind; an EXISTING attached
+    /// constraint stays authorable (`node update` of its body and `edge add
+    /// details <note> <constraint>` targeting it both succeed, because its
+    /// `attaches-to` value is unchanged); and a NEW constraint WITHOUT
+    /// `attaches-to` (a plain tier-scoped `domain.constraint.*`) SUCCEEDS and
+    /// lands its file.
+    ///
+    /// Every durable `node`/`edge` write is routed through one live
+    /// `apg session start` and staged in its write-back buffer; `apg session
+    /// save` is the single durability point the file/read-back assertions below
+    /// observe.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
     fn new_constraint_attaches_to_is_refused() {
         let (apg_root, repo, wt) = wt_fixture("attaches");
+        let home = repo.root.join("home");
 
         // Seed an EXISTING attached constraint RAW and commit it: the write
         // surface refuses a NEW attached constraint, so the legacy one predates
@@ -279,25 +287,42 @@ mod e2e {
             "seed the legacy attached constraint",
         );
 
-        // A NEW constraint carrying `attaches-to` is REFUSED — no file lands.
+        // Durable mutations are mandatory-session: one live `apg session start`
+        // owns the DB AND the write-back buffer, so every `node`/`edge` write
+        // below is forwarded to it and staged (NON-durable until `apg session
+        // save`).
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&apg_root),
+            "the durable mutations must run under a live session"
+        );
+
+        // A routed durable write: the client forwards to the live session
+        // (buffered), with the isolated HOME the session was started under.
+        let run = |args: &[&str]| -> std::process::Output {
+            testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output()
+        };
+
+        // A NEW constraint carrying `attaches-to` is REFUSED at admission — no
+        // buffered write, so no file can ever land.
         let fresh_path = apg::layers::node_file_path(
             &apg_root,
             apg::layers::Layer::Requirements,
             "constraint",
             "fresh",
         );
-        let out = testutil::spawn_apg(
-            &[
-                "node",
-                "add",
-                "requirements",
-                "constraint",
-                "fresh",
-                "--property",
-                "attaches-to=domain.value.thing",
-            ],
-            &wt,
-        );
+        let out = run(&[
+            "node",
+            "add",
+            "requirements",
+            "constraint",
+            "fresh",
+            "--property",
+            "attaches-to=domain.value.thing",
+        ]);
         assert!(
             !out.status.success(),
             "a NEW attached constraint must be refused"
@@ -313,23 +338,76 @@ mod e2e {
         );
 
         // An EXISTING attached constraint stays authorable: `node update` of its
-        // body (attaches-to unchanged) SUCCEEDS.
-        let out = testutil::spawn_apg(
-            &[
-                "node",
-                "update",
-                "requirements",
-                "constraint",
-                "legacy",
-                "--body",
-                "The rule holds.",
-            ],
-            &wt,
-        );
+        // body (attaches-to unchanged) is ADMITTED into the buffer.
+        let out = run(&[
+            "node",
+            "update",
+            "requirements",
+            "constraint",
+            "legacy",
+            "--body",
+            "The rule holds.",
+        ]);
         assert!(
             out.status.success(),
             "an existing attached constraint must stay updatable: {}",
             String::from_utf8_lossy(&out.stderr)
+        );
+
+        // `edge add details <note> <constraint>` targeting it also SUCCEEDS: the
+        // constraint's in-half write carries its unchanged `attaches-to`. The
+        // edge's note endpoint is added earlier in the same unsaved run, so the
+        // admission resolves it against the cumulative buffered state.
+        let out = run(&["node", "add", "requirements", "note", "audit"]);
+        assert!(
+            out.status.success(),
+            "the details source note must be authorable: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let out = run(&[
+            "edge",
+            "add",
+            "details",
+            "requirements.note.audit",
+            "requirements.constraint.legacy",
+        ]);
+        assert!(
+            out.status.success(),
+            "edge add details to an existing attached constraint must succeed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        // The positive case: a NEW constraint WITHOUT `attaches-to` is ADMITTED
+        // — the refusal targets only a newly-added attached constraint, never
+        // every new constraint.
+        let law_path =
+            apg::layers::node_file_path(&apg_root, apg::layers::Layer::Domain, "constraint", "law");
+        let out = run(&["node", "add", "domain", "constraint", "law"]);
+        assert!(
+            out.status.success(),
+            "a plain tier-scoped constraint must be authorable: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        // The single durability point: `apg session save` flushes the buffered
+        // set (the legacy update, the note, the edge halves, the plain law)
+        // into node files in one commit.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+
+        // Durable result: the refused write left no file, while the legacy
+        // update (its `attaches-to` preserved) and the plain constraint landed.
+        assert!(
+            !fresh_path.exists(),
+            "a refused constraint write must leave no node file behind after save"
         );
         let back = apg::layers::read_node_file(
             &apg_root,
@@ -346,45 +424,27 @@ mod e2e {
             "the update must preserve the existing `attaches-to`"
         );
         assert_eq!(back.body, "The rule holds.");
-
-        // `edge add details <note> <constraint>` targeting it also SUCCEEDS: the
-        // constraint's in-half write carries its unchanged `attaches-to`.
-        assert!(
-            testutil::spawn_apg(&["node", "add", "requirements", "note", "audit"], &wt)
-                .status
-                .success(),
-            "the details source note must be authorable"
-        );
-        let out = testutil::spawn_apg(
-            &[
-                "edge",
-                "add",
-                "details",
-                "requirements.note.audit",
-                "requirements.constraint.legacy",
-            ],
-            &wt,
-        );
-        assert!(
-            out.status.success(),
-            "edge add details to an existing attached constraint must succeed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-
-        // The positive case: a NEW constraint WITHOUT `attaches-to` SUCCEEDS —
-        // the refusal targets only a newly-added attached constraint, never
-        // every new constraint.
-        let law_path =
-            apg::layers::node_file_path(&apg_root, apg::layers::Layer::Domain, "constraint", "law");
-        let out = testutil::spawn_apg(&["node", "add", "domain", "constraint", "law"], &wt);
-        assert!(
-            out.status.success(),
-            "a plain tier-scoped constraint must be authorable: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
         assert!(
             law_path.exists(),
             "the plain constraint's node file must land"
+        );
+
+        // End the session cleanly.
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let sout = session.child.wait_with_output().unwrap();
+        assert!(
+            sout.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sout.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "the session must be ended cleanly"
         );
 
         testutil::remove(&repo);
