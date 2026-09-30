@@ -236,10 +236,10 @@ reviewer:    apg_review_reject <f>                              → status = ope
 - The **spine** is strictly sequential: `Stakeholder ⊃ Requirement —Drives→
   Domain —RealisedBy→ Solution —SpecImplementedBy→ code`. (`implemented-by` is
   the authored edge kind; `SpecImplementedBy` is the DB rel-table name.)
-- **Constraints are prose** — the binary validates structure/references at
-  write time; whether the prose holds is assessed by review. Local constraints
-  carry an `attaches_to` property (the one tier-1–3 node they constrain) and
-  are the acceptance criteria you check against.
+- **Constraints are prose** — the binary validates structure at write time;
+  whether the prose holds is assessed by review. A constraint's layer is its
+  scope (global or a tier: R2) and it names no node; constraints are the
+  acceptance criteria you check against.
 - **Verification items are the plan's test tier** (`unit`/`int`/`e2e`) — they
   are not graph content. A task's `kind` is its owning role
   (`source`/`test`/`gate`/`docs`); `tier` is meaningful only for `kind = test`.
@@ -264,15 +264,46 @@ Useful query patterns (via `apg_query`):
 MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn, r.body;
 -- the spine from a requirement to code
 MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:SpecImplementedBy]->(c) RETURN r.fqn, d.fqn, s.fqn, c.fqn;
--- local constraints (acceptance criteria) on a node
-MATCH (c:Constraint) WHERE c.attaches_to = 'requirements.requirement.place-order' RETURN c.fqn, c.body;
--- notes annotating a node
+-- tier-scoped constraints (acceptance criteria) on the requirement tier
+MATCH (c:Constraint) WHERE c.fqn STARTS WITH 'requirements.constraint.' RETURN c.fqn, c.body;
+-- the node's note (at most one, R3/R4)
 MATCH (n:Note)-[:Details]->(x) WHERE x.fqn = '<fqn>' RETURN n.fqn, n.body;
 -- open feedback on a target
 MATCH (f:Feedback)-[:Reviews]->(n) WHERE n.fqn = '<target-fqn>' RETURN f.fqn, f.status, f.disposition, f.body;
 -- is a node real code or still planned?
 MATCH (fn:Function {fqn: '<fqn>'}) RETURN fn.path, fn.start_line, fn.end_line, fn.code_type, fn.status;
 ```
+
+## The durable-spec rules (R1–R5)
+
+The deterministic pre-pass above runs `apg_spec_lint` first (phase 3's grant
+and procedure): treat its R2/R3/R4 errors on changed nodes as **blocking**.
+Then every phase review and the final implementation review examine **every
+changed spec node** semantically against the rules:
+
+1. **R1 — positive present truth.** A tier-1–3 node states a positive,
+   affirmative definition of what is, in the present tense.
+2. **R2 — a constraint's layer is its scope.** A `global.constraint.*` binds
+   the whole durable spec for every APG instance; a `<tier>.constraint.*`
+   (`requirements`/`domain`/`solution`/`implementation`) binds that tier. A
+   constraint declares its scope through its layer and names no node —
+   `attaches-to` is not part of the model
+   (`global.constraint.spec-constraint-scope`).
+3. **R3 — at most one note.** A node holds at most one note, deepening what is.
+4. **R4 — `details` names exactly one node.** A note's `details` edge names
+   exactly one node.
+5. **R5 — timeless truth.** A spec node states timeless truth: the reality it
+   defines.
+
+Content that fails R1–R5 — superseded/previous-state wording, change-log,
+rejected alternative, a decision/reconciliation/correction/provenance note,
+time-relative wording that ages ("today", "now", "no longer", "currently",
+"was", "previously"), or a note whose content is about another note or a past
+state rather than what is — is a **BLOCKING finding attached as `Feedback` on
+the offending node**, and the required fix is to **delete or rewrite** the
+content to the present truth. A Note-to-Note `details` pair is a structural
+rule the linter reports as an existing violation and the write surface refuses
+at write time (`domain.constraint.details-canonical-target-set`).
 
 ## The review procedure
 
@@ -352,7 +383,8 @@ spec and the implementation:
 3. **Feedback → resolution**:
    - **Fix the code** — issue the implementer to fix the divergence.
    - **Reconcile the spec** — issue the spec-writer (in reconciliation mode)
-     to tie the spec back to the implementation, through the spec-review cycle.
+     to rewrite the spec nodes to the present truth of the implementation,
+     through the spec-review cycle.
 4. When **all feedback is resolved**, the plan is ready for the **human gate**
    (the navigator summarizes the work, gotchas, and deviations still present)
    and then the **verify gate + merge** (`apg_plan_verify <project>` →
