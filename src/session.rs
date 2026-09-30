@@ -952,6 +952,40 @@ impl Coordinator {
         }
     }
 
+    /// `apg session abort` (client side): ask the live session to discard its
+    /// buffered node-file set and release the session. Idempotent — a
+    /// missing/stale socket is reclaimed and reported as no live session. The
+    /// client never releases a DB or node file it does not own; it only carries
+    /// the request and prints the coordinator's reply output.
+    pub fn signal_abort(apg_root: &Path) -> anyhow::Result<()> {
+        let socket = socket_path(apg_root);
+        if !socket.exists() {
+            println!("no live session to abort");
+            return Ok(());
+        }
+        let result = UnixStream::connect(&socket).and_then(|mut stream| {
+            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+            write_msg(&mut stream, &Request::Abort)?;
+            read_msg::<Reply>(&stream)
+        });
+        match result {
+            Ok(reply) => {
+                println!("{}", expect_ok(reply)?);
+                Ok(())
+            }
+            Err(_) => {
+                // A present-but-unreachable socket is an unclean exit. Reclaim
+                // it and rebuild the derived index from the durable node files
+                // exactly as a `start` crash-check does — the socket removal
+                // alone would strand the killed run's phantom projection with
+                // no later socket to detect it.
+                Self::reclaim_stale_socket(apg_root)?;
+                println!("no live session to abort (reclaimed stale socket)");
+                Ok(())
+            }
+        }
+    }
+
     /// The at-most-once client entry point: forward a node/edge mutation to the
     /// live session and return the coordinator's output message. A transport
     /// failure is reported (never a direct-path fallback).
