@@ -4,7 +4,13 @@
   "name": "cli-session-docs",
   "body": "The session documentation: the CLI session contract in `README.md` and `AGENTS.md`, and the `apg session` help text (`rust.apg.help_text`). The docs state the mandatory session for durable mutations, the save/end/abort lifecycle, the read routing, and the crash-recovery marker.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "README.md",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
