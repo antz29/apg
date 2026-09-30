@@ -53,6 +53,7 @@ permission:
   apg_file_units: allow
   apg_file_path: allow
   apg_query: allow
+  apg_session: allow
 ---
 
 You are the agent-builder. You scaffold a repo's **code-writer agents** into
@@ -115,6 +116,36 @@ After you have committed on main, the navigator **rebases the project worktree
 onto main**, **re-scans the worktree**, and the user **restarts opencode** (to
 load the new/updated agents and their grants) and **reconnects** before
 implementation continues.
+
+### Caller-owned sessions (a durable mutation needs a live session)
+
+A durable `apg node add|update|rm` / `apg edge add|update|rm` mutation is
+**admitted only through a live session**: it stages into the session's
+in-memory write-back buffer (projected into the worktree's `db.lbug` at
+admission, so routed reads see it) and is **not durable until saved**. With no
+live session the mutation refuses and names `apg session start`.
+
+The **caller owns the session lifecycle** — the agent performing the durable
+work opens the session for the worktree, decides when to persist, and releases
+it. It never outlives the call chain that owns it:
+
+- **start** — `apg_session` (or `apg session start`) launches the single-writer
+  coordinator, which owns the worktree's `db.lbug` and the extended
+  `specs.lock` flock and serves routed mutations/reads in receive order.
+- **save** — `apg session save` makes the whole buffered node-file set durable
+  (one atomic write into `apg/layers/**` + exactly one commit), then clears the
+  buffer.
+- **end** — `apg session end` releases the database, flock and socket; it
+  **refuses while the buffer is dirty** (save or abort first).
+- **abort** — `apg session abort` discards the buffer and releases the session.
+
+`apg query` routes through the live session (seeing unsaved buffered changes)
+and reads `db.lbug` directly when none is live; `apg scan` and
+`apg project merge` refuse while a session is live — save and end first.
+
+This is the session side of the guarded-mutation scoping above: a durable
+node/edge mutation is a session act, run through a live session rather than as
+a bare command.
 
 ## The agent set you generate
 
