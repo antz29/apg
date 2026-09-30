@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.node_cmd.node_rm_change",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.session.Coordinator.handle_mutation",
+      "properties": {}
     }
   ],
   "in": [
