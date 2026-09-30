@@ -12,6 +12,11 @@
       "kind": "contains",
       "target": "domain.entity.cli-session-coordinator",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.cli-session-buffer",
+      "properties": {}
     }
   ],
   "in": []
