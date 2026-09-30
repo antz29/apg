@@ -124,7 +124,7 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
     };
     let rest = &args[1..];
     match (kind, sub) {
-        ("node", "add") => node_add_change(apg_root, rest),
+        ("node", "add") => node_add_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("node", "update") => node_update_change(apg_root, rest),
         ("node", "rm") => node_rm_change(apg_root, rest),
         ("edge", "add") => edge_add_change(apg_root, rest),
@@ -144,7 +144,11 @@ fn apply_change(apg_root: &Path, change: Change) -> anyhow::Result<()> {
 /// `apg node add <layer> <type> <name> [--body B] [--property k=v]*` — refuses
 /// when the FQN already exists (existence is never an implicit upsert; a
 /// re-add full-replaces the file and drops its edges).
-fn node_add_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
+fn node_add_change(
+    apg_root: &Path,
+    args: &[String],
+    overlay: &layers::LayersOverlay,
+) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -156,7 +160,7 @@ fn node_add_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
     // by `cmd_node` (the single acquisition site) — no internal acquire, so the
     // read-modify-write is serialized and `node add` never double-locks.
     layers::refuse_if_present(
-        layers::node_file_path(apg_root, layer, &pos[1], &pos[2]).exists(),
+        overlay.exists(apg_root, layer, &pos[1], &pos[2]),
         &f,
         "apg node update",
         "apg node rm",
@@ -474,7 +478,10 @@ fn edge_rm_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
 // ---------------------------------------------------------------------------
 
 pub fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
-    apply_change(apg_root, node_add_change(apg_root, args)?)
+    apply_change(
+        apg_root,
+        node_add_change(apg_root, args, &layers::LayersOverlay::new())?,
+    )
 }
 
 pub fn node_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
