@@ -2229,4 +2229,136 @@ mod e2e {
         );
         testutil::remove(&repo);
     }
+
+    /// Phase-01 task-14: `apg session save` over a CLEAN buffer — a live session
+    /// that has admitted NO durable mutation — is a pure no-op. It writes no
+    /// node file, creates no commit, leaves HEAD and the whole on-disk
+    /// `apg/layers/**` tree byte-identical, reports the clean-buffer outcome
+    /// (the coordinator's `Session saved: no pending changes`), and leaves the
+    /// session live. (The dirty counterpart — one save flushes the whole buffer
+    /// in exactly one commit — is `save_flushes_the_buffer_in_one_commit`.)
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn save_on_a_clean_buffer_is_a_noop() {
+        let (wt_apg, repo, wt) = mutation_fixture("clean-save-noop");
+        let home = repo.root.join("home");
+
+        // A pre-existing durable node file, committed through the direct path:
+        // `apg/layers/**` is non-empty before the session starts, so "nothing
+        // written or changed" is a real claim rather than a vacuous one.
+        layers::write_project(
+            &wt_apg,
+            &[node("requirements", "requirement", "existing")],
+            &[],
+        )
+        .unwrap();
+
+        // A live session that has admitted no mutation: the write-back buffer
+        // is empty by construction.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+
+        // Baseline: commit count, HEAD, and the whole on-disk node-file tree.
+        let before_commits = testutil::commit_count(&wt);
+        let before_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        let snapshot = |apg_root: &Path| -> BTreeMap<String, Vec<u8>> {
+            let mut out = BTreeMap::new();
+            let mut stack = vec![apg_root.join(layers::LAYERS_DIR)];
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else {
+                        let rel = path
+                            .strip_prefix(apg_root)
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned();
+                        out.insert(rel, std::fs::read(&path).unwrap());
+                    }
+                }
+            }
+            out
+        };
+        let before_layers = snapshot(&wt_apg);
+        assert!(
+            before_layers.keys().any(|k| k.ends_with("existing.json")),
+            "the seeded node file must be on disk before the clean save: {before_layers:?}"
+        );
+
+        // The save over the clean buffer.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved",
+            "the save's client reply"
+        );
+
+        // No new commit, HEAD unmoved.
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a save over the clean buffer must not create a commit"
+        );
+        assert_eq!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string(),
+            before_head,
+            "a save over the clean buffer must not move HEAD"
+        );
+
+        // No node file written or changed: the whole tree is byte-identical.
+        assert_eq!(
+            snapshot(&wt_apg),
+            before_layers,
+            "a save over the clean buffer must not write or change any apg/layers file"
+        );
+
+        // The session stays live through the no-op save.
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "session save must not end the live session"
+        );
+
+        // End cleanly; the coordinator's captured output reports the clean
+        // buffer — the no-op/clean-buffer outcome.
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let server_out = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            server_out.contains("Session saved: no pending changes"),
+            "the clean-buffer save must report the no-op outcome: {server_out}"
+        );
+
+        testutil::remove(&repo);
+    }
 }
