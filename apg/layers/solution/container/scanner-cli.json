@@ -201,6 +201,11 @@
       "kind": "contains",
       "target": "solution.component.cli-session-warning-propagation",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cli-session-docs",
+      "properties": {}
     }
   ],
   "in": [
