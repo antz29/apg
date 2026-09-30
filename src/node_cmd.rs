@@ -247,19 +247,23 @@ fn node_update_change(
     }
     updated.properties = edit_properties(&updated.properties, &p);
     // Advisory-only wording warning (R1/R5): when the supplied `--body` carries
-    // likely-flagged wording, print the shared advisory but let the update
-    // proceed unchanged — the author decides. Only `--body` carries wording, so
-    // an update with no body is silent; the selection mirrors `apg spec lint`
-    // ([`crate::spec_lint::tier_body_warning`]).
+    // likely-flagged wording, carry the shared advisory in the returned
+    // [`Change`] but let the update proceed unchanged — the author decides. Only
+    // `--body` carries wording, so an update with no body is silent; the
+    // selection mirrors `apg spec lint` ([`crate::spec_lint::tier_body_warning`]).
+    // Carrying it (rather than printing here) lets a routed mutation return it in
+    // the session reply, and the caller (cmd_node) prints it on its own stderr
+    // while the update completes.
+    let mut warnings = Vec::new();
     if let Some(b) = body.as_deref()
         && let Some(msg) = crate::spec_lint::tier_body_warning(layer.layer_dir(), &pos[1], b)
     {
-        eprintln!("apg: warning: {f}: {msg}");
+        warnings.push(format!("apg: warning: {f}: {msg}"));
     }
     Ok(Change {
         writes: vec![updated],
         deletes: Vec::new(),
-        warnings: Vec::new(),
+        warnings,
         message: format!("Updated node {f}"),
     })
 }
