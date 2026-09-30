@@ -13,7 +13,7 @@ use crate::schema::Record;
 use super::catalog::{LAYERS_DIR, LAYERS_TREE, Layer, StoragePolicy, TRANS_DIR};
 use super::code_refs::validate_code_refs;
 use super::node_file::{NodeFile, fqn};
-use super::tree::{ingest_nodes, ingest_tree};
+use super::tree::ingest_nodes;
 use super::validate::{
     PROP_ATTACHES_TO, check_edge_pairing, eval_constraint, parse_fqn, valid_name, validate_edges,
     validate_node,
@@ -657,55 +657,17 @@ pub fn write_project_with(
     fire_mutation_hook(MutationBoundary::BeforeProject)?;
 
     // 6. Projection delta — applied only AFTER the durable commit
-    //    (commit-then-project). Skipped when there is no query index yet.
-    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
-        let graph_jsonl = apg_root.join(TRANS_DIR).join("graph.jsonl");
-        let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root)?;
-        if !graph_jsonl.exists() {
-            // No code-identity source: the mutation still lands (the durable
-            // node files are authoritative), but its code-FQN refs are
-            // recorded UNVALIDATED. Treat every implemented-by target as
-            // pending so the projection re-merge records them instead of
-            // rejecting them as drift. The next scan re-validates.
-            for n in read_existing_nodes(apg_root)? {
-                for oe in &n.out {
-                    if oe.kind == "implemented-by" {
-                        planned.insert(oe.target.clone());
-                    }
-                }
-            }
-            for n in writes {
-                for oe in &n.out {
-                    if oe.kind == "implemented-by" {
-                        planned.insert(oe.target.clone());
-                    }
-                }
-            }
-        }
-        let mut records = ingest_tree(apg_root, &scanned, &planned)?;
-        // The durable tree is the only source of DURABLE records, but a durable
-        // mutation detaches every changed FQN — and with it any incident
-        // TRANSIENT edge. Here that is precisely `Feedback -[:Reviews]-> <node>`:
-        // `detach_delete_project` DETACH-deletes the changed node, taking the
-        // Reviews edge with it, and a MERGE of the durable records alone cannot
-        // put it back. Append the worktree's transient record set (the plan
-        // store + the five feedback tier mirrors) so the same transaction also
-        // re-MERGEs it — a durable mutation then leaves any pre-existing
-        // Feedback/Reviews pairing intact, with no later transient write needed.
-        //
-        // `.trans` is branch-local, so every file here is this project's
-        // transient state; this is an idempotent MERGE (the DETACH set above is
-        // durable-FQN-only), never a delete. It cannot resurrect an edge to a
-        // node removed by a `node rm`: `merge_edge`'s dangling-endpoint guard
-        // resolves each endpoint through `known` (this record set), the code
-        // graph, then the LIVE DB (`node_label`), and skips the MERGE when
-        // either endpoint is absent — a node already detached by this apply is
-        // gone from the DB, so its transient edges stay gone.
-        append_transient_records(apg_root, &mut records)?;
-        let deletes = projection_deletes(apg_root, writes, deletes);
-        project(&deletes, &records)?;
-    }
-    Ok(())
+    //    (commit-then-project). The effective node set is read back from the
+    //    just-written tree and the FQN delete set is the same
+    //    `projection_deletes`; the projection itself is the shared
+    //    [`project_only`] entry point (also used by the session's
+    //    projection-only path), so there is one projection implementation
+    //    (the graph.jsonl-absent fallback, the transient re-merge, and the
+    //    no-DB skip all live there). `project_only` carries the no-DB skip, so
+    //    the read/set are harmless when no query index exists yet.
+    let nodes = read_existing_nodes(apg_root)?;
+    let deletes = projection_deletes(apg_root, writes, deletes);
+    project_only(apg_root, &nodes, &deletes, project)
 }
 
 /// The projection-only half of [`write_project_with`]'s step 6 — the entry
