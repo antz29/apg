@@ -1839,16 +1839,22 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-21: session lifecycle exclusivity — one session per
-    /// worktree DB; a second start refuses; `apg scan` and `apg project merge`
-    /// refuse while a session is live; routed reads keep working and a
-    /// non-routing direct DB open is out of contract.
+    /// Session lifecycle exclusivity (phase-03 task-21, extended phase-02
+    /// task-12): one session per worktree DB; a second start refuses; `apg scan`
+    /// and `apg project merge` refuse while a session is live, naming the fix
+    /// (`apg session save`, then `apg session end`); a dirty `session end`
+    /// refuses — it reports the pending change, releases nothing, and the
+    /// session stays live with the scan gate still closed; `apg session save`
+    /// flushes the buffer in exactly one commit and `session end` then
+    /// releases; and once ended the scan/merge gate is clear. Routed reads keep
+    /// working and a non-routing direct DB open is out of contract.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn session_lifecycle_is_exclusive_with_scan_and_merge() {
         let (wt_apg, repo, wt) = mutation_fixture("session-exclusive");
         let home = repo.root.join("home");
         let session = testutil::start_session_process(&wt, &home);
+        let before_commits = testutil::commit_count(&wt);
 
         // (a) One session per DB: a second start refuses.
         let second = testutil::ApgCommand::new(&["session", "start"])
@@ -1862,28 +1868,38 @@ mod e2e {
             String::from_utf8_lossy(&second.stderr)
         );
 
-        // (b) `apg scan` refuses while the session owns db.lbug.
+        // (b) `apg scan` refuses while the session owns db.lbug, naming the
+        // fix: `apg session save` then `apg session end`.
         let scan = testutil::ApgCommand::new(&["scan", wt.to_str().unwrap()])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
             .output();
         assert!(!scan.status.success(), "scan must refuse a live session");
+        let scan_err = String::from_utf8_lossy(&scan.stderr);
         assert!(
-            String::from_utf8_lossy(&scan.stderr).contains("live `apg session`"),
-            "{}",
-            String::from_utf8_lossy(&scan.stderr)
+            scan_err.contains("live `apg session`"),
+            "scan must name the live session: {scan_err}"
+        );
+        assert!(
+            scan_err.contains("apg session save") && scan_err.contains("apg session end"),
+            "scan must name `apg session save`/`apg session end`: {scan_err}"
         );
 
-        // (c) `apg project merge` refuses while the session owns the branch DB.
+        // (c) `apg project merge` refuses while the session owns the branch DB,
+        // naming the same fix.
         let merge = testutil::ApgCommand::new(&["project", "merge", "foo"])
             .cwd(&repo.root)
             .env("HOME", home.to_str().unwrap())
             .output();
         assert!(!merge.status.success(), "merge must refuse a live session");
+        let merge_err = String::from_utf8_lossy(&merge.stderr);
         assert!(
-            String::from_utf8_lossy(&merge.stderr).contains("live `apg session`"),
-            "{}",
-            String::from_utf8_lossy(&merge.stderr)
+            merge_err.contains("live `apg session`"),
+            "merge must name the live session: {merge_err}"
+        );
+        assert!(
+            merge_err.contains("apg session save") && merge_err.contains("apg session end"),
+            "merge must name `apg session save`/`apg session end`: {merge_err}"
         );
 
         // (d) Routed reads keep working; a non-routing direct open is OUT of
@@ -1899,12 +1915,129 @@ mod e2e {
             "a non-routing direct DB open must fail while the session holds it"
         );
 
+        // (e) A routed durable mutation dirties the write-back buffer: still no
+        // node file and no commit (the refused scan/merge above wrote nothing
+        // durable either).
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "pending",
+            "--body",
+            "buffered",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "pending")
+                .exists(),
+            "a buffered add must not write a node file before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered add (and the refused scan/merge) must not create a commit"
+        );
+
+        // (f) `apg session end` over the dirty buffer REFUSES: it reports the
+        // pending change, releases nothing, and the session stays live with the
+        // exclusivity gate still closed.
+        let end = testutil::ApgCommand::new(&["session", "end"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !end.status.success(),
+            "session end must refuse a dirty buffer"
+        );
+        let end_err = String::from_utf8_lossy(&end.stderr);
+        assert!(
+            end_err.contains("session end refused"),
+            "end must report the refusal: {end_err}"
+        );
+        assert!(
+            end_err.contains("1 pending change(s)"),
+            "end must report the pending-change count: {end_err}"
+        );
+        assert!(
+            end_err.contains("write requirements.requirement.pending"),
+            "end must name the pending change: {end_err}"
+        );
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "a refused end must not release the session"
+        );
+
+        // The still-live dirty session keeps `apg scan` refused.
+        let scan_still = testutil::ApgCommand::new(&["scan", wt.to_str().unwrap()])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !scan_still.status.success()
+                && String::from_utf8_lossy(&scan_still.stderr).contains("live `apg session`"),
+            "a refused end must keep the scan gate closed: {}",
+            String::from_utf8_lossy(&scan_still.stderr)
+        );
+
+        // (g) `apg session save` flushes the buffer in exactly one commit;
+        // `apg session end` then releases the session.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "session save: {}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert!(
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "pending").exists(),
+            "save must write the buffered node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "save must flush the buffer in exactly one commit"
+        );
         let out = end_session(&wt, session);
         assert!(
             out.status.success(),
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "session end must release the saved session"
+        );
+
+        // (h) With the session gone the scan/merge gate is clear: `apg scan`
+        // no longer refuses (save re-anchored scan_meta, so the unchanged tree
+        // hits the freshness fast path and the scan succeeds), and the merge
+        // path is no longer blocked by the session gate.
+        let scan_after = testutil::ApgCommand::new(&["scan", wt.to_str().unwrap()])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            scan_after.status.success(),
+            "scan must run after save+end: {}",
+            String::from_utf8_lossy(&scan_after.stderr)
+        );
+        let merge_after = testutil::ApgCommand::new(&["project", "merge", "foo"])
+            .cwd(&repo.root)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !String::from_utf8_lossy(&merge_after.stderr).contains("live `apg session`"),
+            "merge must not be blocked by the session gate after end: {}",
+            String::from_utf8_lossy(&merge_after.stderr)
+        );
+
         testutil::remove(&repo);
     }
 
