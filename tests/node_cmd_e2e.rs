@@ -2888,6 +2888,201 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Phase-02 task-10 (cli-session-crash-recovery): a SIGKILLed session is an
+    /// UNCLEAN EXIT. After the kill the `db.lbug` on disk still carries the
+    /// phantom projection of the buffer's admitted-but-unsaved mutation, and the
+    /// process died before it could checkpoint, leaving a `db.lbug.wal` sidecar
+    /// beside a present-but-unconnectable session socket. The next `apg query`
+    /// must NOT serve that stale index: it detects the stale socket, reclaims
+    /// it, forces the full rebuild (which discards `db.lbug` + its `.wal`/`.shm`
+    /// sidecars + `graph.jsonl`) from the durable `apg/layers/**` node files, and
+    /// serves ONLY the last-saved state — the buffered change is gone.
+    ///
+    /// The two seeded durable nodes are committed directly through
+    /// `layers::write_project` BEFORE the session starts, so the fixture is a
+    /// SAIDI-free last-saved state at HEAD: the crash-recovery scan sees a clean
+    /// tree (no frontend spawn, no monkeypatching of HEAD), rebuilds the index
+    /// from the node files, and the read-your-writes assertion is exact.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn killed_session_discards_the_dirty_buffer_and_repairs_the_db() {
+        let (wt_apg, repo, wt) = node_store_fixture("killed-dirty-repair");
+        let home = repo.root.join("home");
+
+        // The durable baseline: two committed node files, projected into a real
+        // `db.lbug` — the LAST SAVED state the recovery must serve. The write
+        // and the projection both run before any session exists, so HEAD sits
+        // on a clean tree (the scan below takes its full path, not the
+        // content-identity fast path).
+        layers::write_project(
+            &wt_apg,
+            &[
+                node("requirements", "requirement", "keep-a"),
+                node("requirements", "requirement", "keep-b"),
+            ],
+            &[],
+        )
+        .unwrap();
+        testutil::scan_checkout(&wt).unwrap();
+
+        // A live session owns the DB; its buffer then admits one routed durable
+        // mutation and PROJECTS it into the held `db.lbug` at admission.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "phantom",
+            "--body",
+            "buffered-but-never-durable",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+
+        // The buffer is dirty: nothing durable was written for `phantom`, and
+        // while the session lives its routed read DOES see the buffered change.
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "phantom")
+                .exists(),
+            "the buffered add must not write a node file before save"
+        );
+        let routed = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.phantom'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            routed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&routed.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the live session's index must carry the buffered projection"
+        );
+
+        // Baseline for the durable-state assertions: commit count, HEAD, and the
+        // whole on-disk node-file store.
+        let before_commits = testutil::commit_count(&wt);
+        let before_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        let before_store = layers::read_existing_nodes(&wt_apg).unwrap();
+
+        // SIGKILL — deliberately NOT a graceful `end`. The unsaved buffer dies
+        // with the process while its phantom projection stays in `db.lbug`, and
+        // the file left behind is a present-but-unreachable socket.
+        let pid = session.child.id() as i32;
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            !out.status.success(),
+            "the session was killed, not ended cleanly"
+        );
+        let socket = apg::session::socket_path(&wt_apg);
+        assert!(socket.exists(), "SIGKILL leaves the stale socket behind");
+        assert!(
+            !apg::session::live_session_at(&socket),
+            "the socket is present but unreachable — the unclean-exit signal"
+        );
+
+        // The next `apg query` must reclaim the stale socket, discard the stale
+        // index + its WAL sidecar, force the full rebuild from `apg/layers/**`,
+        // and serve ONLY the last-saved state.
+        let q = testutil::spawn_apg(
+            &["query", "MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn"],
+            &wt,
+        );
+        assert!(
+            q.status.success(),
+            "the recovery `apg query` failed: {}",
+            String::from_utf8_lossy(&q.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&q.stdout);
+        let rows: Vec<&str> = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        // Header row + exactly the two durable requirements, in order.
+        assert_eq!(
+            rows,
+            vec![
+                "n.fqn",
+                "requirements.requirement.keep-a",
+                "requirements.requirement.keep-b"
+            ],
+            "the recovered query must reflect only the last-saved state"
+        );
+        assert!(
+            !String::from_utf8_lossy(&q.stdout).contains("phantom"),
+            "the recovered query must never serve the phantom projection"
+        );
+        // The stale socket was reclaimed and the recovery left no live session.
+        assert!(
+            !socket.exists(),
+            "the recovery must reclaim the stale socket"
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the recovery leaves no live session behind"
+        );
+
+        // The durable node files are unchanged: the buffered change was
+        // discarded, never written, never committed.
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "phantom")
+                .exists(),
+            "the discarded buffer must never write a node file"
+        );
+        assert_eq!(
+            layers::read_existing_nodes(&wt_apg).unwrap(),
+            before_store,
+            "the discarded buffer must leave apg/layers/** at its last-saved state"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a discarded buffer creates no commit"
+        );
+        assert_eq!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string(),
+            before_head,
+            "a discarded buffer must not move HEAD"
+        );
+
+        testutil::remove(&repo);
+    }
+
     /// Phase-02 task-9: under the buffered session contract, `apg session end`
     /// REFUSES to release a session whose write-back buffer holds admitted but
     /// unsaved changes — it reports the pending change(s) and stays LIVE (a
