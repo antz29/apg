@@ -2890,12 +2890,7 @@ mod e2e {
 
         // The branch carries one node whose claim IS touched, so the delta is
         // non-empty and verify is not passing on a vacuous empty delta.
-        write_solution_node(
-            &apg_root,
-            "component",
-            "branch",
-            &["github.com/x/y.Branch"],
-        );
+        write_solution_node(&apg_root, "component", "branch", &["github.com/x/y.Branch"]);
         let sha = wt_commit_paths(
             &wt,
             &["apg/layers/solution/component/branch.json"],
@@ -2996,14 +2991,8 @@ mod e2e {
         let msg = format!("{err:#}");
         assert!(msg.contains("coverage incomplete"), "{msg}");
         for (solution, code) in [
-            (
-                "solution.component.edge-removed",
-                "github.com/x/y.EdgeCode",
-            ),
-            (
-                "solution.component.node-removed",
-                "github.com/x/y.NodeCode",
-            ),
+            ("solution.component.edge-removed", "github.com/x/y.EdgeCode"),
+            ("solution.component.node-removed", "github.com/x/y.NodeCode"),
             ("solution.component.repointed", "github.com/x/y.OldCode"),
             ("solution.component.repointed", "github.com/x/y.NewCode"),
         ] {
