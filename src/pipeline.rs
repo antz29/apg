@@ -189,8 +189,8 @@ pub(crate) fn run_pipeline(
             "[load] session socket present but unreachable (unclean exit) — reclaiming it and rebuilding db.lbug from apg/layers/**",
         );
         let _ = std::fs::remove_file(socket);
-        let _ = std::fs::remove_file("db.lbug");
-        let _ = std::fs::remove_file("graph.jsonl");
+        // cwd is `.trans`, so the derived index lives at ".".
+        session::discard_derived_index(Path::new("."));
     }
 
     // ---- DB build dispatch (win C, phase-03 task-4) ------------------------
@@ -234,7 +234,10 @@ pub(crate) fn run_pipeline(
         load::build_load_files(&graph, &dir).unwrap();
         log.ln("[load] parquet files written");
 
-        let _ = std::fs::remove_file("db.lbug");
+        // cwd is `.trans`, so the derived index lives at "."; discard the index
+        // and its sidecars (a leftover `db.lbug.wal` makes `Database::new`
+        // panic) before rebuilding. `graph.jsonl` is rewritten below.
+        session::discard_derived_index(Path::new("."));
         if std::path::Path::new("db.lbug").exists() {
             panic!(
                 "db.lbug still exists (a previous run is still holding it?) — kill any stray apg/java processes and retry"
