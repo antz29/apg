@@ -5,5 +5,11 @@
   "body": "The caller guidance for the session path: the navigator and agent-builder prompts state when and how to open, save, end, or abandon a session and how it composes with scan and merge. `opencode-suite/agents/codebase-navigator.md` and `opencode-suite/agents/agent-builder.md`.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    }
+  ]
 }

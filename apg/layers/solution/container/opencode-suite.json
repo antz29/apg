@@ -91,6 +91,11 @@
       "kind": "contains",
       "target": "solution.component.cli-session-suite-tool",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cli-session-caller-guidance",
+      "properties": {}
     }
   ],
   "in": [
