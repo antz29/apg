@@ -4,7 +4,13 @@
   "name": "cli-session-lifecycle-guards",
   "body": "The session lifecycle guards: the checks that keep the session the exclusive owner of the worktree database. `rust.apg.scan.cmd_scan` and `rust.apg.project_cmd.merge.project_merge_at` refuse while a session is live so the caller saves and ends first; the shared freshness fast path in `rust.apg.pipeline.run_pipeline` consults the session socket so a stale-socket detection rebuilds the derived index ahead of a scan.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.scan.cmd_scan",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
