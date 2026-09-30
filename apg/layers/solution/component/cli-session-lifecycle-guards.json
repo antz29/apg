@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.git.state.is_fresh",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.pipeline.run_pipeline",
+      "properties": {}
     }
   ],
   "in": [
