@@ -17,9 +17,16 @@ use apg::testutil::*;
 mod e2e {
     use super::*;
 
-    /// Phase-03 task-19: a SIGKILLed session leaves NO half-written durable
+    /// Phase-01 task-38: a SIGKILLed session leaves NO half-written durable
     /// state and no process holding `db.lbug`, and the stale socket it leaves
     /// behind (no live process) is reclaimed by the next `apg session start`.
+    ///
+    /// Under mandatory admission the routed mutation is admitted into the live
+    /// session's write-back buffer and never touches `apg/layers/**` before the
+    /// single save, so a SIGKILL leaves the durable store exactly at its last
+    /// saved state. The full crash-recovery discard/rebuild contract is
+    /// PHASE-02 work (task-13 extends this test) and is deliberately NOT
+    /// asserted here.
     #[test]
     #[ignore = "e2e tier: real I/O (spawned apg/scratch repo/db.lbug); run via cargo test-e2e"]
     fn killed_session_loses_nothing_and_its_stale_socket_is_reclaimed() {
@@ -27,7 +34,8 @@ mod e2e {
         let home = repo.root.join("home");
         let session = start_session_process(&wt, &home);
 
-        // One routed mutation so there is durable state to inspect.
+        // One routed mutation is admitted into the live session's write-back
+        // buffer, so it must NOT touch `apg/layers/**` before a save.
         let add = ApgCommand::new(&["node", "add", "requirements", "requirement", "survivor"])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
@@ -36,6 +44,11 @@ mod e2e {
             add.status.success(),
             "{}",
             String::from_utf8_lossy(&add.stderr)
+        );
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "survivor")
+                .exists(),
+            "a buffered add must not write a node file before save"
         );
 
         // SIGKILL — deliberately NOT a graceful `end`.
@@ -47,16 +60,20 @@ mod e2e {
             "the session was killed, not ended cleanly"
         );
 
-        // (a) no half-written node file: the survivor parses.
-        let nf = layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "survivor")
-            .unwrap();
-        assert_eq!(nf.name, "survivor");
+        // (a) no half-written node file: the buffered `survivor` never became
+        // durable, so the store is still exactly its last saved state.
+        assert!(
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "survivor")
+                .exists(),
+            "the killed session left a durable node file it should not have"
+        );
         // (b) no paired edge half mismatched (the store still pairs cleanly).
         layers::check_edge_pairing(&layers::read_existing_nodes(&wt_apg).unwrap()).unwrap();
-        // (c) no process holds db.lbug: a direct read-write open succeeds now.
-        let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
-        assert!(db.has_node("requirements.requirement.survivor"));
-        drop(db);
+        // (c) no process holds db.lbug: a direct read-write open succeeds now
+        // (scoped so the OS lock is released before the next start).
+        {
+            let _db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
+        }
 
         // (d) the SIGKILL left the socket file behind; the next start reclaims
         // it (no live process behind it) and serves normally.
