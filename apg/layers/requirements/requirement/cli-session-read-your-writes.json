@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cli-session-read-your-writes",
+  "body": "A read routed through a live session observes every buffered mutation at the point of admission, saved or pending. With the session absent, the read opens the database directly and returns the last saved state.\n\nACCEPTANCE:\n- With a live session, `apg query` observes a node or edge accepted moments earlier and yet unsaved.\n- With the session absent, the same query reads the last saved state from `db.lbug` without opening a session.",
+  "properties": {
+    "feature": "cli-session-substrate"
+  },
+  "out": [],
+  "in": []
+}
