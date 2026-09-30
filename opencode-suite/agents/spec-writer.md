@@ -43,6 +43,7 @@ permission:
   apg_hunk: allow
   apg_node: allow
   apg_edge: allow
+  apg_session: allow
   apg_review: allow
   apg_spec_lint: allow
   bash:
@@ -115,8 +116,35 @@ tools' walk-up discovery finds the worktree's own `apg/` (its branch DB). The
 navigator started the project (`apg project start <name>` from the main
 checkout) and gave you the printed worktree path. Your mutations are guarded:
 they run only inside a project worktree, on the project branch — main is never
-a mutation place. Each `apg node add` / `apg edge add` auto-commits its files
-on the branch; you never commit anything yourself.
+a mutation place. A durable `apg node` / `apg edge` mutation requires a live
+session (see *Caller-owned sessions* below): it is buffered until
+`apg session save` commits the buffered set; you never commit anything
+yourself.
+
+### Caller-owned sessions (a durable mutation needs a live session)
+
+A durable `apg node add|update|rm` / `apg edge add|update|rm` mutation is
+**admitted only through a live session**: it stages into the session's
+in-memory write-back buffer (projected into the worktree's `db.lbug` at
+admission, so routed reads see it) and is **not durable until saved**. With no
+live session the mutation refuses and names `apg session start`.
+
+You are the caller for the spec you author: open the session for the worktree,
+decide when to persist, and release it. It never outlives your authoring:
+
+- **start** — `apg_session` (or `apg session start`) launches the single-writer
+  coordinator, which owns the worktree's `db.lbug` and the extended
+  `specs.lock` flock and serves routed mutations/reads in receive order.
+- **save** — `apg session save` makes the whole buffered node-file set durable
+  (one atomic write into `apg/layers/**` + exactly one commit), then clears the
+  buffer.
+- **end** — `apg session end` releases the database, flock and socket; it
+  **refuses while the buffer is dirty** (save or abort first).
+- **abort** — `apg session abort` discards the buffer and releases the session.
+
+`apg query` routes through the live session (seeing unsaved buffered changes)
+and reads `db.lbug` directly when none is live; `apg scan` and
+`apg project merge` refuse while a session is live — save and end first.
 
 ## Constraint awareness
 
@@ -145,7 +173,10 @@ precondition; don't invent laws the spec doesn't need.
   outside this agent's remit.
 - Ordinary source files behind code FQNs remain readable with the `read` tool.
 - You never modify any file and you never commit anything. Node-file mutations
-  auto-commit on the project branch.
+  are buffered in the live session's write-back buffer and become durable only
+  on `apg session save` (one atomic `apg/layers/**` write plus exactly one
+  commit); you author them through `apg_node` / `apg_edge` inside the session
+  (see *Caller-owned sessions*).
 
 ## Codebase graph (mandatory starting point)
 
