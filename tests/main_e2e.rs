@@ -3004,11 +3004,17 @@ mod e2e {
         }
     }
 
-    /// Phase-03 task-23: with a session live, a separate routed `apg query`
-    /// process returns the post-mutation state with no lock error and without
-    /// waiting for the session to end. A NON-routing direct `db.lbug` open is
-    /// out of contract — lbug errors rather than waiting. After `apg session
-    /// end` a fresh query opens the DB directly and reads the same state.
+    /// Phase-03 task-23 / phase-02 task-14 (e2e): the full read-routing contract.
+    /// With a session live, a separate routed `apg query` process returns the
+    /// post-mutation state — including an UNSAVED buffered change (read-your-
+    /// writes through the session's held projection) — with no lock error and
+    /// without waiting for the session to end. A NON-routing direct `db.lbug`
+    /// open is out of contract for both reasons the routing exists: the
+    /// session's cache/projection is not on disk, and the session holds the DB's
+    /// lock, so lbug errors rather than waiting. `apg session save` is the single
+    /// durability point; the session's buffer must be clean before `apg session
+    /// end` (a dirty end is refused), and after the clean save + end a fresh
+    /// query opens the DB directly and reads the saved state.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn read_access_during_a_live_session_routes_and_after_end_reads_directly() {
@@ -3016,15 +3022,22 @@ mod e2e {
         let home = repo.root.join("home");
         let session = testutil::start_session_process(&wt, &home);
 
-        // A routed mutation lands and is projected write-through.
+        // A routed mutation lands in the write-back buffer and is projected
+        // write-through into the session-held DB — but it is NOT yet durable.
         let add = testutil::spawn_apg(&["node", "add", "requirements", "requirement", "live"], &wt);
         assert!(
             add.status.success(),
             "{}",
             String::from_utf8_lossy(&add.stderr)
         );
+        assert!(
+            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "live")
+                .exists(),
+            "a routed mutation must stay buffered (unsaved) until `session save`"
+        );
 
-        // Routed read: post-mutation state, no lock error, no wait for end.
+        // Routed read: the session's route exposes the UNSAVED buffered change
+        // (read-your-writes), with no lock error and no wait for end.
         let query = "MATCH (n:Requirement {fqn: 'requirements.requirement.live'}) RETURN count(n)";
         let routed = testutil::spawn_apg(&["query", query], &wt);
         assert!(
@@ -3037,10 +3050,12 @@ mod e2e {
                 .lines()
                 .last()
                 .map(str::trim),
-            Some("1")
+            Some("1"),
+            "the live routed read must see the unsaved buffered change"
         );
 
-        // Non-routing direct open: out of contract (errors, never waits).
+        // Non-routing direct open: out of contract while the session holds the DB
+        // (errors on the lock, never waits).
         let err = match apg::artifacts::ArtifactDb::open(&wt_apg) {
             Ok(_) => {
                 panic!("a non-routing direct DB open must fail while the session holds the DB")
@@ -3049,7 +3064,23 @@ mod e2e {
         };
         assert!(err.contains("Could not set lock on file"), "{err}");
 
-        // End the session; a fresh query opens the DB directly, same state.
+        // `apg session save` is the durability point: the buffered node file
+        // lands and the buffer clears, so the session can be ended cleanly (a
+        // dirty end is refused).
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert!(
+            layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "live")
+                .exists(),
+            "save must land the buffered node file"
+        );
+
+        // End the (now clean) session; a fresh query opens the DB directly and
+        // reads the saved state.
         let end = testutil::spawn_apg(&["session", "end"], &wt);
         assert!(
             end.status.success(),
@@ -3061,6 +3092,10 @@ mod e2e {
             out.status.success(),
             "{}",
             String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must be ended before the direct read"
         );
 
         let fresh = testutil::spawn_apg(&["query", query], &wt);
@@ -3075,7 +3110,7 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "after `session end` the direct reader sees the same state"
+            "after a clean `session save` + `session end` the direct reader sees the saved state"
         );
 
         testutil::remove(&repo);
