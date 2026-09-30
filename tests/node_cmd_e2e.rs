@@ -2016,4 +2016,217 @@ mod e2e {
         );
         testutil::remove(&repo);
     }
+
+    /// Phase-01 task-13: `apg session save` is the single durability point for
+    /// the whole buffered set — it atomically writes every buffered node file
+    /// under `apg/layers/**` with exactly ONE git commit, then clears the buffer
+    /// (a second save over the now-clean buffer writes nothing and makes no
+    /// commit). The session stays live throughout and ends cleanly afterwards.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn save_flushes_the_buffer_in_one_commit() {
+        let (wt_apg, repo, wt) = mutation_fixture("save-flush");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        // A run of N durable mutations admitted through the live session: three
+        // nodes plus an edge whose endpoints are both buffered (neither is on
+        // disk yet).
+        let run = |args: &[&str], expected: &str| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                expected,
+                "apg {args:?}"
+            );
+        };
+        run(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "alpha",
+                "--body",
+                "first",
+            ],
+            "Added node requirements.requirement.alpha",
+        );
+        run(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "beta",
+                "--body",
+                "second",
+            ],
+            "Added node requirements.requirement.beta",
+        );
+        run(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "gamma",
+                "--body",
+                "third",
+            ],
+            "Added node requirements.requirement.gamma",
+        );
+        run(
+            &[
+                "edge",
+                "add",
+                "depends-on",
+                "requirements.requirement.alpha",
+                "requirements.requirement.beta",
+            ],
+            "Added edge depends-on requirements.requirement.alpha -> requirements.requirement.beta",
+        );
+
+        // Before save nothing is durable: no node file, no commit.
+        let before_commits = testutil::commit_count(&wt);
+        let before_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        for name in ["alpha", "beta", "gamma"] {
+            assert!(
+                !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                "a buffered add must not write `{name}` before save"
+            );
+        }
+
+        // The single durability point: one save flushes the whole buffer.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+
+        // Every buffered node file now exists on disk under apg/layers/** …
+        let store = layers::read_existing_nodes(&wt_apg).unwrap();
+        for name in ["alpha", "beta", "gamma"] {
+            assert!(
+                layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                "save must write the `{name}` node file"
+            );
+            assert!(
+                store.iter().any(|n| n.name.as_str() == name),
+                "the durable store must contain `{name}` after save"
+            );
+        }
+        // … including BOTH halves of the buffered edge.
+        let alpha =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "alpha").unwrap();
+        let beta =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "beta").unwrap();
+        assert_eq!(
+            alpha
+                .out
+                .iter()
+                .filter(|e| e.kind == "depends-on"
+                    && e.target.as_str() == "requirements.requirement.beta")
+                .count(),
+            1,
+            "save must write the buffered out-edge"
+        );
+        assert_eq!(
+            beta.in_edges
+                .iter()
+                .filter(|e| e.kind == "depends-on"
+                    && e.source.as_str() == "requirements.requirement.alpha")
+                .count(),
+            1,
+            "save must write the buffered edge's matching in-half"
+        );
+
+        // Exactly ONE new commit landed, and it moved HEAD.
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the whole buffered set must land in exactly one commit"
+        );
+        let after_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        assert_ne!(after_head, before_head, "save must create a commit");
+        assert_eq!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .parent_count(),
+            1,
+            "the save commit is a normal single-parent commit"
+        );
+
+        // The buffer is cleared: a second save over the clean buffer is a no-op
+        // — no new commit, HEAD unchanged.
+        let resave = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            resave.status.success(),
+            "{}",
+            String::from_utf8_lossy(&resave.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "a save over the cleared buffer must make no commit"
+        );
+        assert_eq!(
+            git2::Repository::open(&wt)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string(),
+            after_head,
+            "a save over the cleared buffer must not move HEAD"
+        );
+
+        // The session stayed live through save …
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "session save must not end the live session"
+        );
+
+        // … and ends cleanly.
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        testutil::remove(&repo);
+    }
 }
