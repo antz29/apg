@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.cli-session-required-for-durable-mutations",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.cli-session-write-back-buffer",
+      "properties": {}
     }
   ]
 }
