@@ -2564,8 +2564,9 @@ mod e2e {
     /// mutation to the coordinator, which stages it in its write-back buffer
     /// (projected at admission, NON-durable until `apg session save`). A refused
     /// re-add changes nothing; an accepted `rm` of an existing node proceeds
-    /// into the buffer (and a rm of a never-existing node is admitted as a
-    /// buffered no-op, not the direct path's fs-delete refusal); `save` is the
+    /// into the buffer, while a `rm` of a never-existing node is refused (the
+    /// strict refusal restored by phase-01 task-40), not admitted as a buffered
+    /// no-op; `save` is the
     /// single durability point (asserted), and the session ends cleanly before
     /// the transient `plan` arms (which take the same extended flock).
     #[test]
@@ -2659,10 +2660,11 @@ mod e2e {
         );
 
         // --- rm of an EXISTING node proceeds into the buffer ---
-        // (An absent-node rm is NOT refused under mandatory admission: the
-        // coordinator admits the delete as a buffered intention, and an
-        // identity that never existed nets to nothing. The strict surface's
-        // absent-rm refusals are the plan-store ones asserted below.)
+        // (An absent-node rm is refused inside the session, not admitted as a
+        // buffered no-op: `node_rm_change` bails on an identity absent from the
+        // cumulative effective set — the refusal restored by phase-01 task-40.
+        // This assertion was re-added by phase-01 task-41, un-dropping what
+        // task-28 removed.)
         with_cwd(&wt, || {
             node_cmd::cmd_node(&argv(&["rm", "requirements", "requirement", "r1"]))
         })
@@ -2673,6 +2675,31 @@ mod e2e {
             "the buffered rm must be visible to a routed read"
         );
         assert!(!r1_path.exists(), "a buffered rm must not touch disk");
+
+        // --- rm of an ABSENT node is refused inside the session ---
+        // The same strict refusal as the direct path: an identity that never
+        // existed is non-zero (naming `does not exist`), never a buffered
+        // no-op. Nothing is written and no delete is staged.
+        let ghost_path = layers::node_file_path(
+            &apg_root,
+            layers::Layer::Requirements,
+            "requirement",
+            "ghost",
+        );
+        let err = with_cwd(&wt, || {
+            node_cmd::cmd_node(&argv(&["rm", "requirements", "requirement", "ghost"])).unwrap_err()
+        });
+        let msg = err.to_string();
+        assert!(msg.contains("does not exist"), "{msg}");
+        assert!(
+            !ghost_path.exists(),
+            "a refused absent-node rm must write nothing"
+        );
+        assert_eq!(
+            query("MATCH (n:Requirement {fqn: 'requirements.requirement.ghost'}) RETURN count(n)"),
+            "0",
+            "a refused absent-node rm must not stage a delete"
+        );
 
         // --- `apg session save` is the single durability point: the buffered
         // set (r2 written, r1 added-then-removed) lands in exactly one commit ---
