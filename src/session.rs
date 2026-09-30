@@ -37,7 +37,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::artifacts::{ArtifactDb, SpecLockGuard, acquire_spec_lock};
-use crate::layers;
+use crate::layers::{self, NodeFile};
 use crate::specs;
 
 /// The session socket file name under `apg/.trans/`.
@@ -229,6 +229,45 @@ pub fn forward_query(apg_root: &Path, query: &str, json: bool) -> anyhow::Result
         json,
     };
     expect_ok(send_with_retry(&socket, &request)?)
+}
+
+// ---------------------------------------------------------------------------
+// The write-back buffer (phase-01)
+// ---------------------------------------------------------------------------
+
+/// The in-memory write-back buffer entry for ONE buffered durable node-file
+/// write or delete.
+///
+/// A live session admits each routed durable `apg node`/`apg edge` mutation
+/// into a buffer of these records instead of rewriting the on-disk
+/// `apg/layers/**` tree; the whole buffered set is flushed to disk (and
+/// committed) at `apg session save` (`Coordinator::save`, phase-01 task-2, via
+/// the buffered write surface in `layers::write`, task-9). Each record carries
+/// the target node file's identity — layer dir, node type, name, and destination
+/// path — so the buffer keys by identity and keeps only the last mutation for a
+/// node (a later write/delete for an identity wins), and it carries the full
+/// pending [`NodeFile`] content so a later mutation composes against the state
+/// already buffered for that node. [`content`](Self::content) is `Some` for a
+/// staged write and `None` for the delete marker (the node file is to be
+/// removed). Plain data — no behavior; the buffer/save machinery that consumes
+/// it is built by the later phase-01 tasks.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingChange {
+    /// The node file's layer dir name (e.g. `requirements`) — the first
+    /// identity segment and the first path segment under `apg/layers/`.
+    pub layer: String,
+    /// The node file's type (e.g. `requirement`) — Rust reserves `type`, so the
+    /// field is `node_type`.
+    pub node_type: String,
+    /// The node file's name (the file-name stem) — its identity within
+    /// `(layer, node_type)`.
+    pub name: String,
+    /// The destination node file under
+    /// `apg/layers/<layer>/<node_type>/<name>.json`.
+    pub path: PathBuf,
+    /// The pending node-file content to stage (`Some`), or the delete marker
+    /// (`None`) when this identity's file is to be removed.
+    pub content: Option<NodeFile>,
 }
 
 // ---------------------------------------------------------------------------
