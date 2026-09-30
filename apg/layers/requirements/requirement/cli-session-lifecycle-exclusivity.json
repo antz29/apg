@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cli-session-lifecycle-exclusivity",
+  "body": "`apg scan` and `apg project merge` run only with the session closed: with a live session each refuses and directs the caller to save and end first. The transient plan and review `.trans` writes run in the presence or absence of a session.\n\nACCEPTANCE:\n- `apg scan` and `apg project merge` refuse while a session is live and state that the caller saves and ends the session first; with the session closed both run.\n- `apg plan *` and `apg review *` transient writes run both while a session is live and while it is closed.",
+  "properties": {
+    "feature": "cli-session-substrate"
+  },
+  "out": [],
+  "in": []
+}
