@@ -1822,9 +1822,9 @@ mod e2e {
     }
 
     /// The suite install derives from SUITE_TOOLS: the new project/layers
-    /// tools (apg_node/apg_edge/apg_project/apg_plan_verify) embed + install,
-    /// and the retired spec/invariant tools are gone from both the embed list
-    /// and the installed set (a stale file in the target is pruned).
+    /// tools (apg_node/apg_edge/apg_project/apg_session/apg_plan_verify) embed
+    /// and install, and the retired spec/invariant tools are gone from both the
+    /// embed list and the installed set (a stale file in the target is pruned).
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn suite_installs_node_edge_project_tools_and_retires_spec_invariant() {
@@ -1843,6 +1843,7 @@ mod e2e {
             "apg_node.ts",
             "apg_edge.ts",
             "apg_project.ts",
+            "apg_session.ts",
             "apg_plan_verify.ts",
             "apg_rm.ts",
             "apg_mv.ts",
@@ -1876,6 +1877,7 @@ mod e2e {
             "apg_node.ts",
             "apg_edge.ts",
             "apg_project.ts",
+            "apg_session.ts",
             "apg_plan_verify.ts",
             "apg_rm.ts",
             "apg_mv.ts",
