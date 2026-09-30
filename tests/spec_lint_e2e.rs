@@ -228,19 +228,19 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-01 task-37 (E2E, minimal make-green): `apg node add` and `apg node
-    /// update` on a tier node whose `--body` carries negation/future/
-    /// time-relative wording still SUCCEED — the writer decides, the advisory
-    /// never blocks a write — and land their node files. Plain present-tense
-    /// wording is accepted too. Covers the write-surface hooks
-    /// `rust.apg.node_cmd.node_add_change` / `node_update_change`.
+    /// Phase-03 task-12: `apg node add` and `apg node update` on a tier node
+    /// whose `--body` carries negation/future/time-relative wording still
+    /// SUCCEED — the writer decides, the advisory never blocks a write — and
+    /// land their node files; AND the routed write-time wording advisory
+    /// (`crate::spec_lint::WORDING_ADVISORY`, R1/R5) reaches the CLIENT's stderr
+    /// (`apg: warning: <fqn>: …`) while the write completes. Plain present-tense
+    /// wording prints no warning and is accepted too. Covers the write-surface
+    /// hooks `rust.apg.node_cmd.node_add_change` / `node_update_change`, the
+    /// session's warning carrier, and `cmd_node`'s caller-side print.
     ///
     /// Durable mutations are mandatory-session: the add/updates run under one
     /// live `apg session start` and `apg session save` is the single durability
-    /// point the node-file/read-back assertions below observe. The write-time
-    /// wording advisory's route to the CLIENT's stderr is phase-03 work; this
-    /// task asserts the writes' success and their durable result, not the
-    /// advisory's destination.
+    /// point the node-file/read-back assertions below observe.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn node_add_and_update_emit_advisory_wording_warning() {
@@ -294,6 +294,18 @@ mod e2e {
             "the advisory must not block the add: {}",
             String::from_utf8_lossy(&out.stderr)
         );
+        // The advisory is routed back through the session reply and printed on
+        // the CLIENT's stderr, naming the mutated node — while the write
+        // completes (the success assert above).
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("apg: warning: domain.value.demo-val:"),
+            "the warning must name the mutated node on the client's stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains(apg::spec_lint::WORDING_ADVISORY),
+            "the wording advisory must reach the client's stderr: {stderr}"
+        );
         save(&wt);
         assert!(
             path.exists(),
@@ -316,13 +328,26 @@ mod e2e {
             "the advisory must not block the update: {}",
             String::from_utf8_lossy(&out.stderr)
         );
+        // The future-tense (`will`) advisory also reaches the client's stderr
+        // while the update completes.
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("apg: warning: domain.value.demo-val:"),
+            "the warning must name the mutated node on the client's stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains(apg::spec_lint::WORDING_ADVISORY),
+            "the wording advisory must reach the client's stderr: {stderr}"
+        );
         save(&wt);
         let back =
             apg::layers::read_node_file(&apg_root, apg::layers::Layer::Domain, "value", "demo-val")
                 .unwrap();
         assert_eq!(back.body, "The service will retry the request.");
 
-        // Plain present-tense wording is accepted too; the body is stored.
+        // Plain present-tense wording is accepted too; the body is stored. Its
+        // accepted wording is NOT flagged, so the client's stderr carries no
+        // warning — the advisory is body-driven, not unconditional.
         let out = run(&[
             "node",
             "update",
@@ -336,6 +361,11 @@ mod e2e {
             out.status.success(),
             "a plain update must succeed: {}",
             String::from_utf8_lossy(&out.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("apg: warning:"),
+            "plain wording must not print a warning: {stderr}"
         );
         save(&wt);
         let back =
