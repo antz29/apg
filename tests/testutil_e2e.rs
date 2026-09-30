@@ -84,21 +84,25 @@ mod e2e {
         remove(&repo);
     }
 
-    /// Phase-04 task-2 (acceptance): a REAL long-running `apg session start`,
-    /// SIGKILLed (NOT gracefully ended) mid-life, loses nothing durable and
-    /// leaves no partial store:
+    /// Phase-01 task-35 (acceptance): a REAL long-running `apg session start`
+    /// BUFFERS its durable mutations — writing NOTHING to `apg/layers/**` and
+    /// making NO commit until the single save — and a SIGKILL (NOT a graceful
+    /// `end`) after that save loses nothing durable and leaves no partial store:
     ///
-    /// (a) no node file left half-written — every expected file parses with the
-    ///     right identity;
-    /// (b) no paired edge half mismatched — the store still pairs and both the
-    ///     source out-half and target in-half of the routed edge are present;
-    /// (c) no process holds `db.lbug` — a direct read-write open succeeds;
-    /// (d) the stale socket is reclaimed by the next `apg session start` with
+    /// (a) no partial `apg/layers/**` file and no commit BEFORE save — the
+    ///     buffered adds/edge leave the durable store exactly at its last saved
+    ///     state (no half-written file, no commit);
+    /// (b) `apg session save` is the single durability point: both node files
+    ///     and BOTH halves of the routed edge land in exactly one commit;
+    /// (c) no half-written node file after the crash — every expected file
+    ///     parses with the right identity, and the store still pairs;
+    /// (d) no process holds `db.lbug` — a direct read-write open succeeds;
+    /// (e) the stale socket is reclaimed by the next `apg session start` with
     ///     no live process behind it.
     ///
     /// The routed mutations deliberately write a node AND an edge (both
     /// endpoint files), so a crash between the two halves of the edge would be
-    /// caught by (b) — the node-only phase-03 regression cannot see that.
+    /// caught by (c) — the node-only phase-03 regression cannot see that.
     #[test]
     #[ignore = "e2e tier: real I/O (spawned apg/scratch repo/db.lbug); run via cargo test-e2e"]
     fn acceptance_crash_durability_no_partial_files_no_db_holder_and_socket_reclaim() {
@@ -106,7 +110,8 @@ mod e2e {
         let home = repo.root.join("home");
         let session = start_session_process(&wt, &home);
 
-        // Two routed node adds and the routed edge between them.
+        // Two routed node adds and the routed edge between them, all admitted
+        // into the live session's write-back buffer.
         for name in ["crash-a", "crash-b"] {
             let add = ApgCommand::new(&["node", "add", "requirements", "requirement", name])
                 .cwd(&wt)
@@ -134,6 +139,62 @@ mod e2e {
             String::from_utf8_lossy(&edge.stderr)
         );
 
+        // (a) the buffer leaves `apg/layers/**` at its last saved state: no
+        // partial node file for either buffered node and no commit before save.
+        let head_sha = |dir: &std::path::Path| {
+            git2::Repository::open(dir)
+                .unwrap()
+                .head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .id()
+                .to_string()
+        };
+        let before_commits = commit_count(&wt);
+        let before_head = head_sha(&wt);
+        for name in ["crash-a", "crash-b"] {
+            assert!(
+                !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                "a buffered add must not write a node file for `{name}` before save"
+            );
+        }
+        assert_eq!(
+            commit_count(&wt),
+            before_commits,
+            "a buffered mutation must not create a commit before save"
+        );
+        assert_eq!(
+            head_sha(&wt),
+            before_head,
+            "git history must stay at the last saved state until save"
+        );
+
+        // (b) the single durability point: one `session save` flushes the whole
+        // buffer — both node files, both edge halves, exactly one commit.
+        let save = spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+        for name in ["crash-a", "crash-b"] {
+            assert!(
+                layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                "save must write the `{name}` node file"
+            );
+        }
+        assert_eq!(
+            commit_count(&wt),
+            before_commits + 1,
+            "the whole buffered set must land in exactly one commit"
+        );
+        assert_ne!(head_sha(&wt), before_head, "save must create a commit");
+
         // SIGKILL — deliberately NOT a graceful `end`.
         let pid = session.child.id() as i32;
         unsafe { libc::kill(pid, libc::SIGKILL) };
@@ -143,15 +204,15 @@ mod e2e {
             "the session was killed, not ended cleanly"
         );
 
-        // (a) no half-written node file: every expected file parses with its
-        // identity intact.
+        // (c) no half-written node file after the crash: every expected file
+        // parses with its identity intact.
         for name in ["crash-a", "crash-b"] {
             let nf =
                 layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", name).unwrap();
             assert_eq!(nf.name, name, "node file {name} must be complete");
         }
 
-        // (b) no paired edge half mismatched: the store pairs cleanly AND both
+        // (d) no paired edge half mismatched: the store pairs cleanly AND both
         // halves of the routed edge are present.
         let all = layers::read_existing_nodes(&wt_apg).unwrap();
         layers::check_edge_pairing(&all).unwrap();
@@ -172,14 +233,15 @@ mod e2e {
             "the target in-half must be present and match the out-half"
         );
 
-        // (c) no process holds db.lbug: a direct read-write open succeeds now
-        // (the SIGKILL released the OS lock).
+        // (e) no process holds db.lbug: a direct read-write open succeeds now
+        // (the SIGKILL released the OS lock) and the derived DB is consistent
+        // with the saved store.
         let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
         assert!(db.has_node("requirements.requirement.crash-a"));
         assert!(db.has_node("requirements.requirement.crash-b"));
         drop(db);
 
-        // (d) the SIGKILL left the socket file behind; the next start reclaims
+        // (f) the SIGKILL left the socket file behind; the next start reclaims
         // it (no live process behind it) and serves normally.
         let socket = apg::session::socket_path(&wt_apg);
         assert!(socket.exists(), "SIGKILL leaves the stale socket behind");
