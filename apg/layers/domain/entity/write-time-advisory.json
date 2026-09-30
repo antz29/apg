@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.cli-session",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.cli-session-warning-visibility",
+      "properties": {}
     }
   ]
 }

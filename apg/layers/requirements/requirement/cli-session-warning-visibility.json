@@ -6,7 +6,13 @@
   "properties": {
     "feature": "cli-session-substrate"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.write-time-advisory",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
