@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::artifacts::{ParsedArgs, acquire_spec_lock, parse_args};
+use crate::artifacts::{ParsedArgs, parse_args};
 use crate::layers::{self, InEdge, Layer, NodeFile, OutEdge, fqn};
 use crate::schema::Record;
 use crate::session;
@@ -84,22 +84,23 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg edge <add|update|rm> …");
     };
     let apg_root = require_apg_root()?;
-    // Transparent routing (phase-03) — identical to `cmd_node`: forward to the
-    // live single writer, else the serialized direct path; never a silent
-    // fallback.
-    if session::live_session(&apg_root) {
-        let out = session::Coordinator::forward_mutation(&apg_root, "edge", args)?;
-        println!("{out}");
-        return Ok(());
+    // Durable mutations are mandatory-session (spec
+    // `requirements.requirement.cli-session-required-for-durable-mutations` /
+    // `requirements.constraint.cli-session-mandatory`): when a session is live
+    // it owns the DB AND the write-back buffer, and performs the whole durable
+    // write in receive order, so the mutation is forwarded and the flock is
+    // never acquired here (the session holds it for its life). A failed forward
+    // is an ERROR — there is no silent mid-flight fallback, which could
+    // double-apply a mutation that already landed. With no live session we
+    // REFUSE: the direct path is gone, and the caller must open a session.
+    if !session::live_session(&apg_root) {
+        anyhow::bail!(
+            "a live session is required for durable mutations — run `apg session start` first"
+        );
     }
-    // The extended whole-durable-sequence flock: acquired exactly ONCE here,
-    // before ANY source-file read, and held through add/update/rm's
-    // validate → write → single commit → projection. This is the single
-    // acquisition site for the edge path (`edge_add`/`edge_update`/`edge_rm`
-    // never acquire internally, so there is no double-lock).
-    let _lock = acquire_spec_lock(&apg_root)?;
-    let change = build_change(&apg_root, "edge", args)?;
-    apply_change(&apg_root, change)
+    let out = session::Coordinator::forward_mutation(&apg_root, "edge", args)?;
+    println!("{out}");
+    Ok(())
 }
 
 /// A complete logical mutation: the node files to write, the paths to delete,
