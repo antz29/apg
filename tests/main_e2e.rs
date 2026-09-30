@@ -3163,13 +3163,17 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-7 (acceptance, feedback-30): immediate queryability /
-    /// read-your-writes across the real CLI. A spawned `apg node add
-    /// requirements requirement foo` returns, then a NEW `apg query` process
-    /// resolves foo — no re-scan, no explicit flush, no session-end step — and
-    /// the test asserts NO `apg scan` was invoked: `db.lbug`'s inode never
-    /// changes (a scan unlinks and recreates it), the scan's `scanned_at`
-    /// scan-meta is never restamped, and the scan pipeline's
+    /// Phase-01 task-26 (acceptance): real-CLI read-your-writes across the
+    /// mandatory-session + write-back contract, without a scan. A live
+    /// `apg session start` process owns the DB and the single-writer lock, so
+    /// the durable mutations (`apg node add` ×2 and `apg edge add`) are admitted
+    /// into its write-back buffer rather than written to disk. A NEW `apg query`
+    /// process routes through that live session and resolves foo + the buffered
+    /// edge — read-your-writes with no re-scan and no save yet. `apg session
+    /// save` is then the single durability point, after which the node files
+    /// land and the session ends cleanly. The no-scan premise is concrete:
+    /// `db.lbug`'s inode never changes (a scan unlinks and recreates it), the
+    /// scan's `scanned_at` scan-meta is never restamped, and the scan pipeline's
     /// `apg-frontend.log` is never recreated.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
@@ -3200,18 +3204,53 @@ mod e2e {
         // pipeline.
         let _ = std::fs::remove_file(&log_path);
 
-        // (1) `apg node add requirements requirement foo` returns.
-        let add = testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "foo"])
-            .cwd(&wt)
-            .env("HOME", home.to_str().unwrap())
-            .output();
+        // (0) Open the live session: durable mutations are mandatory-session, so
+        // one live `apg session start` process owns the DB and its single-writer
+        // lock, and every mutation below lands in its write-back buffer.
+        let session = testutil::start_session_process(&wt, &home);
         assert!(
-            add.status.success(),
-            "{}",
-            String::from_utf8_lossy(&add.stderr)
+            apg::session::live_session(&wt_apg),
+            "the acceptance mutations must run under a live session"
+        );
+        let before_commits = testutil::commit_count(&wt);
+
+        // (1) The durable mutations return successfully, admitted into the
+        // session's buffer.
+        for args in [
+            ["node", "add", "requirements", "requirement", "foo"],
+            ["node", "add", "requirements", "requirement", "bar"],
+            [
+                "edge",
+                "add",
+                "depends-on",
+                "requirements.requirement.foo",
+                "requirements.requirement.bar",
+            ],
+        ] {
+            let out = testutil::spawn_apg(&args, &wt);
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        // The mutations stay BUFFERED: no node file has landed and no commit has
+        // been made — `apg session save` is the one durability point.
+        let foo_file =
+            layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "foo");
+        assert!(
+            !foo_file.exists(),
+            "the mutation must stay buffered until save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered mutation must not create a commit before save"
         );
 
-        // (2) A NEW `apg query` process resolves foo — no flush/session-end.
+        // (2) A NEW `apg query` process, routed through the live session,
+        // resolves foo AND the buffered edge — no flush/session-end/save.
         let q = testutil::spawn_apg(
             &[
                 "query",
@@ -3226,7 +3265,27 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "a NEW process must read the mutation immediately"
+            "a NEW process must read the buffered mutation through the session"
+        );
+        let edge_q = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (:Requirement {fqn: 'requirements.requirement.foo'})-[:DependsOn]->(b) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert!(
+            edge_q.status.success(),
+            "{}",
+            String::from_utf8_lossy(&edge_q.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&edge_q.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "a NEW process must read the buffered edge through the session, unsaved"
         );
 
         // (3) No `apg scan` was invoked.
@@ -3243,6 +3302,64 @@ mod e2e {
         assert!(
             !log_path.exists(),
             "a metadata mutation must not enter the scan pipeline"
+        );
+
+        // (4) `apg session save` is the single durability point: the buffered
+        // mutations land as node files in exactly one commit.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+        assert!(foo_file.exists(), "save must land the buffered node file");
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the buffered mutations must land in exactly one commit"
+        );
+
+        // (5) End the session cleanly; a fresh query then reads the saved state
+        // directly.
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let sout = session.child.wait_with_output().unwrap();
+        assert!(
+            sout.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sout.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must be ended"
+        );
+        let direct = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+            ],
+            &wt,
+        );
+        assert!(
+            direct.status.success(),
+            "{}",
+            String::from_utf8_lossy(&direct.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&direct.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "after session end the direct reader sees the saved mutation"
         );
 
         testutil::remove(&repo);
