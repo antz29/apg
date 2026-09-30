@@ -31,6 +31,11 @@
       "kind": "contains",
       "target": "requirements.requirement.cli-session-read-your-writes",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.cli-session-single-writer-receive-order",
+      "properties": {}
     }
   ],
   "in": [
