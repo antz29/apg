@@ -276,8 +276,9 @@ MATCH (fn:Function {fqn: '<fqn>'}) RETURN fn.path, fn.start_line, fn.end_line, f
 
 ## The durable-spec rules (R1–R5)
 
-The deterministic pre-pass above runs `apg_spec_lint` first (phase 3's grant
-and procedure): treat its R2/R3/R4 errors on changed nodes as **blocking**.
+The deterministic pre-pass (see *The review procedure* below; granted via
+`apg_spec_lint: allow`) runs `apg_spec_lint` first: treat its R2/R3/R4 errors on
+changed nodes as **blocking**.
 Then every phase review and the final implementation review examine **every
 changed spec node** semantically against the rules:
 
@@ -329,8 +330,9 @@ read its `coverage incomplete:` clause as the change-set delta's coverage
    under-review), `apg_plan_tasks` (the checklist). Identify the phase's
    `Satisfies` claims: which requirements it claims to deliver.
 2. **Pull the spec contract.** For each satisfied requirement, query the
-   layers in the graph: the requirement's body, its local `Constraint`s
-   (`attaches_to`), any `Note`s, and the spine down to the solution nodes and
+   layers in the graph: the requirement's body, its tier-scoped `Constraint`s
+   (`requirements.constraint.*` — a constraint's layer is its scope and it
+   names no node), any `Note`s, and the spine down to the solution nodes and
    their `SpecImplementedBy` code FQNs. The plan's coverage rule is the
    **change-set delta**: coverage is the merge-base durable-spec delta's changed
    `implemented-by` claims (added, re-pointed, or removed), read from the
