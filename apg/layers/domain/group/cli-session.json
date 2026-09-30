@@ -17,6 +17,11 @@
       "kind": "contains",
       "target": "domain.entity.cli-session-buffer",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.cli-session-socket",
+      "properties": {}
     }
   ],
   "in": []
