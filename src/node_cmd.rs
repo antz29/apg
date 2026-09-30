@@ -134,6 +134,34 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
     }
 }
 
+/// Buffer-aware twin of [`build_change`]: the same dispatch, but each arm
+/// passes a caller-supplied [`layers::LayersOverlay`] to its change builder, so
+/// a mutation's existence checks and read-modify-write resolve against the
+/// cumulative buffered state (an update/rm of an earlier-buffered node applies
+/// over its buffered content) before falling back to disk. The session
+/// coordinator calls this with the overlay it builds from its write-back
+/// buffer; the direct path ([`build_change`]) passes an empty one.
+pub fn build_change_over(
+    apg_root: &Path,
+    kind: &str,
+    args: &[String],
+    overlay: &layers::LayersOverlay,
+) -> anyhow::Result<Change> {
+    let Some(sub) = args.first().map(|s| s.as_str()) else {
+        anyhow::bail!("usage: apg {kind} <add|update|rm> …");
+    };
+    let rest = &args[1..];
+    match (kind, sub) {
+        ("node", "add") => node_add_change(apg_root, rest, overlay),
+        ("node", "update") => node_update_change(apg_root, rest, overlay),
+        ("node", "rm") => node_rm_change(apg_root, rest, overlay),
+        ("edge", "add") => edge_add_change(apg_root, rest, overlay),
+        ("edge", "update") => edge_update_change(apg_root, rest, overlay),
+        ("edge", "rm") => edge_rm_change(apg_root, rest, overlay),
+        (_, other) => anyhow::bail!("unknown apg {kind} subcommand: {other}"),
+    }
+}
+
 /// Persist a built change through the direct path and print its message.
 fn apply_change(apg_root: &Path, change: Change) -> anyhow::Result<()> {
     layers::write_project(apg_root, &change.writes, &change.deletes)?;
