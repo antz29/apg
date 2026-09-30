@@ -128,7 +128,7 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
         ("node", "update") => node_update_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("node", "rm") => node_rm_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("edge", "add") => edge_add_change(apg_root, rest, &layers::LayersOverlay::new()),
-        ("edge", "update") => edge_update_change(apg_root, rest),
+        ("edge", "update") => edge_update_change(apg_root, rest, &layers::LayersOverlay::new()),
         ("edge", "rm") => edge_rm_change(apg_root, rest),
         (_, other) => anyhow::bail!("unknown apg {kind} subcommand: {other}"),
     }
@@ -429,7 +429,17 @@ fn edge_add_change(
 /// properties only: `kind`/`from`/`to` are immutable identity. Rewrites the
 /// source out-half and the target in-half to the same MERGEd property map in
 /// one atomic mutation. Refuses an absent edge.
-fn edge_update_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change> {
+///
+/// Both endpoints resolve through `overlay`: the source out-half is read from
+/// the staged content first (so an edge added earlier in the same unsaved run
+/// is found and its properties merge on the buffered state), a staged delete
+/// marker reads as absent, and an unstaged identity falls through to the
+/// on-disk file.
+fn edge_update_change(
+    apg_root: &Path,
+    args: &[String],
+    overlay: &layers::LayersOverlay,
+) -> anyhow::Result<Change> {
     let p = parse_args(args);
     let pos = &p.positional;
     if pos.len() < 3 {
@@ -442,7 +452,14 @@ fn edge_update_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change
     let to = pos[2].as_str();
 
     let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
-    let mut source = layers::read_node_file(apg_root, src_layer, &src_type, &src_name)?;
+    let mut source = overlay
+        .read(apg_root, src_layer, &src_type, &src_name)?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no node file at {}",
+                layers::node_file_path(apg_root, src_layer, &src_type, &src_name).display()
+            )
+        })?;
     let idx = source
         .out
         .iter()
@@ -458,7 +475,7 @@ fn edge_update_change(apg_root: &Path, args: &[String]) -> anyhow::Result<Change
     source.out[idx].properties = merged.clone();
 
     let mut writes = vec![source];
-    if let Some(mut target) = read_endpoint(apg_root, &layers::LayersOverlay::new(), to)? {
+    if let Some(mut target) = read_endpoint(apg_root, overlay, to)? {
         let Some(in_edge) = target
             .in_edges
             .iter_mut()
@@ -544,7 +561,10 @@ pub fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
 }
 
 pub fn edge_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
-    apply_change(apg_root, edge_update_change(apg_root, args)?)
+    apply_change(
+        apg_root,
+        edge_update_change(apg_root, args, &layers::LayersOverlay::new())?,
+    )
 }
 
 #[cfg(test)]
