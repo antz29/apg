@@ -15,6 +15,11 @@
       "kind": "drives",
       "source": "requirements.requirement.cli-session-lifecycle-exclusivity",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.cli-session-crash-recovery",
+      "properties": {}
     }
   ]
 }
