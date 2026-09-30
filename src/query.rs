@@ -43,6 +43,21 @@ pub(crate) fn cmd_query(args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Crash recovery (phase-02 task-15): a session socket that is present but
+    // fails a connect + `Ping` is an UNCLEAN EXIT — the killed process left the
+    // file behind while its unsaved buffer's phantom projections remain in the
+    // derived `db.lbug`. Never serve that stale index: reclaim the stale socket
+    // and force the full scan that discards and rebuilds `db.lbug` from the
+    // durable `apg/layers/**` node files (the same recovery `abort` drives,
+    // reusing the existing scan entry point), then fall through to the
+    // read-only open below. The guard runs BEFORE that open, so the read can
+    // never touch the phantom index. A live session (above) still routes, and
+    // an absent socket is the ordinary direct path.
+    let socket = session::socket_path(&apg_root);
+    if socket.exists() && !session::live_session_at(&socket) {
+        session::Coordinator::reclaim_stale_socket(&apg_root)?;
+    }
+
     let db_path = apg_root.join(specs::TRANS).join("db.lbug");
     if !db_path.exists() {
         anyhow::bail!(
