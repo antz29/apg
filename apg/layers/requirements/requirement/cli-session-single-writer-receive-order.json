@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cli-session-single-writer-receive-order",
+  "body": "The session is the single writer of the buffered node files and the live database. It applies routed mutations in receive order, and a replayed client identifier returns the cached reply for that request and applies it at most once.\n\nACCEPTANCE:\n- Two mutations routed to the session apply in the order the session receives them, so the final buffered state reflects that order.\n- A request that replays a previously seen client identifier returns the cached reply and leaves the buffered state and the live index unchanged.",
+  "properties": {
+    "feature": "cli-session-substrate"
+  },
+  "out": [],
+  "in": []
+}
