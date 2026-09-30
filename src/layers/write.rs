@@ -2,6 +2,13 @@
 //! (SPEC §2.2/§4.1/§4.2): validate the complete change, write every affected
 //! node file (and delete the removed ones) in one logical mutation, commit
 //! once, and re-merge the exact delta into the live DB.
+//!
+//! Durable `apg node` / `apg edge` mutations require a live session and are
+//! **not** committed per mutation: the session admits each into its write-back
+//! buffer and only `apg session save` reaches [`write_through_with_deletes`] —
+//! one atomic write of the whole buffered set plus exactly ONE git commit. The
+//! per-mutation orchestrator ([`write_project`]) remains the direct/test path
+//! for a single logical mutation.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -134,7 +141,7 @@ pub fn write_through(apg_root: &Path, writes: &[NodeFile]) -> anyhow::Result<()>
         match git::commit_files(apg_root, &refs, &[], &msg) {
             Ok(Some(_)) => {
                 // Re-anchor the staleness gate's recorded scan_meta (mirrors
-                // the JSONL funnel's auto-commit — DB and tree in sync by
+                // the JSONL funnel's commit path — DB and tree in sync by
                 // construction). A re-anchor failure degrades to a warning.
                 if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
                     eprintln!(
@@ -413,6 +420,8 @@ pub fn validate_change_over(
 /// the writes, remove the deletes, and on any failure restore every path —
 /// never leave mismatched endpoint files. Commits once. `write_through` (the
 /// write-only primitive, task-11) delegates here with an empty delete list.
+/// `apg session save` reaches this with the whole buffered set — one call, one
+/// commit; the direct mutation path calls it once per logical mutation.
 pub fn write_through_with_deletes(
     apg_root: &Path,
     writes: &[NodeFile],
@@ -611,8 +620,11 @@ pub type ProjectionApply<'a> = &'a dyn Fn(&BTreeSet<String>, &[Record]) -> anyho
 /// 3. **Validate the complete change** ([`validate_change`]) before writing.
 /// 4. **Atomic write + delete + single commit** ([`write_through_with_deletes`])
 ///    — the system-of-record durability point, and the ONLY step that controls
-///    the flock-guaranteed one-commit-per-mutation. No durable write is ever
-///    buffered: the files hit disk (and git) before anything is projected.
+///    the flock-guaranteed single commit. On the direct (test/single-mutation)
+///    path that commit is one logical mutation; under a live session the save
+///    flush reaches step 4 with the whole buffered set and makes one commit for
+///    all of it. No durable write is ever buffered: the files hit disk (and
+///    git) before anything is projected.
 /// 5. **Re-anchor the staleness gate's `scan_meta`** after the commit
 ///    (graph.jsonl only — never opens `db.lbug`).
 /// 6. **Projection delta** — apply the exact durable delta
@@ -665,11 +677,13 @@ pub fn write_project_with(
     fire_mutation_hook(MutationBoundary::BeforeCommit)?;
 
     // 4. Atomic write + delete + single commit — the durability point. This is
-    //    the whole flock-held sequence's controlled commit.
+    //    the whole flock-held sequence's controlled commit (the direct path's
+    //    one logical mutation; under a session the save flush reaches this via
+    //    `write_through_with_deletes` with the whole buffered set).
     write_through_with_deletes(apg_root, writes, deletes)?;
 
     // 5. Re-anchor the staleness gate's recorded scan_meta AFTER the commit
-    //    (mirrors the JSONL funnel's auto-commit: DB and tree in sync by
+    //    (mirrors the JSONL funnel's commit path: DB and tree in sync by
     //    construction, so consecutive node/edge mutations never trip the
     //    refuse-on-stale gate). graph.jsonl only — no db.lbug open. A re-anchor
     //    failure degrades to a warning — the mutation already landed.
