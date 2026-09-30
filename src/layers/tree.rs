@@ -83,74 +83,20 @@ pub fn ingest_tree(
             }
         }
     }
-    // Deterministic record order (one file per node, so paths are unique).
-    nodes.sort_by(|a, b| (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name)));
-
-    // The assembled identity universe + FQN → node map: the constraint check
-    // and the property-aware §3.3 rules both resolve against them.
-    let universe: BTreeSet<(Layer, String, String)> = nodes
-        .iter()
-        .map(|n| (layer_of(&n.layer), n.node_type.clone(), n.name.clone()))
-        .collect();
-    let assembled: BTreeMap<String, &NodeFile> = nodes
-        .iter()
-        .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
-        .collect();
-
-    // 1. Pairwise in/out symmetry across ALL node files (R16 AC).
-    check_edge_pairing(&nodes)?;
-
-    // 2. Property-aware §3.3 rules over the assembled set: contains/depends-on
-    // trees acyclic, and publishes/subscribes targets are Entity (kind: event).
-    validate_assembled_rules(&assembled, &universe)?;
-
-    // 3. `implemented-by` code refs against the scanned graph + planned nodes.
-    let refs: Vec<&str> = nodes
-        .iter()
-        .flat_map(|n| n.out.iter())
-        .filter(|oe| oe.kind == "implemented-by")
-        .map(|oe| oe.target.as_str())
-        .collect();
-    validate_code_refs(&refs, scanned_code, planned)?;
-
-    // 4. Constraint structure/reference validation over the assembled graph.
-    for n in &nodes {
-        if n.node_type != "constraint" {
-            continue;
-        }
-        // The constraint under validation is not part of its own existence
-        // universe: `eval_constraint` reuses `validate_node`'s uniqueness
-        // rule, which compares against everything EXCEPT the node being
-        // validated (the same exclusion `validate_change` applies). Duplicates
-        // among constraints are still caught — each one validates against the
-        // other's presence.
-        let mut own_universe = universe.clone();
-        own_universe.remove(&(layer_of(&n.layer), n.node_type.clone(), n.name.clone()));
-        eval_constraint(layer_of(&n.layer), &n.name, &n.properties, &own_universe)?;
-    }
-
-    // Convert node files + out-edges into records (out is canonical).
-    let mut records = Vec::new();
-    for n in &nodes {
-        let layer = layer_of(&n.layer);
-        let f = fqn(layer, &n.node_type, &n.name);
-        records.push(node_record(&f, &n.node_type, n)?);
-        for oe in &n.out {
-            records.push(edge_record(&f, &oe.kind, &oe.target)?);
-        }
-    }
-    Ok(records)
+    // The read path and the in-memory path share one validation+conversion
+    // implementation: hand the gathered node set to `ingest_nodes`, which owns
+    // the deterministic ordering, validation, and record conversion.
+    ingest_nodes(&nodes, scanned_code, planned)
 }
 
 /// Ingest an already-gathered node set into the new-model graph records — the
-/// in-memory core [`ingest_tree`] delegates to (and duplicates, pending the
-/// read/delegate refactor).
+/// in-memory core [`ingest_tree`] delegates to.
 ///
 /// Unlike [`ingest_tree`], which walks `apg/layers/` and deserializes the
 /// durable tree, this takes the [`NodeFile`]s directly, so a buffered
 /// (in-memory) node set can be validated and converted without touching disk.
-/// The deterministic ordering, validation, and record conversion are identical
-/// to [`ingest_tree`]: sort by `(layer, node_type, name)`, pairwise
+/// The deterministic ordering, validation, and record conversion are the same
+/// path [`ingest_tree`] runs: sort by `(layer, node_type, name)`, pairwise
 /// [`check_edge_pairing`], property-aware [`validate_assembled_rules`],
 /// [`validate_code_refs`] against `scanned_code` + `planned`, the per-constraint
 /// [`eval_constraint`], then one node record per node plus one edge record per
