@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "cli-session-durability",
+  "body": "The session durability path: the atomic flush and commit that make the buffered node files durable. A save writes the buffered node files under `apg/layers/**` in one atomic pass (`rust.apg.layers.write`), then makes exactly one git commit and re-anchors the scan metadata (`rust.apg.git.commit.reanchor_scan_meta`).",
+  "properties": {},
+  "out": [],
+  "in": []
+}
