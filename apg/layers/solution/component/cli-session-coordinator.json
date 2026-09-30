@@ -5,5 +5,11 @@
   "body": "The session coordinator: the `apg session` server and its command surface. It owns the worktree database and the extended spec lock for the session's life, binds the session socket, admits and applies routed mutations in receive order, projects each into the live index, holds the pending node-file writes and deletes, flushes the buffer at a save as one atomic write plus one commit plus the scan_meta re-anchor, and reclaims a stale socket at `signal_end`. Rust: the `session` module (`rust.apg.session`) centres on `Coordinator`; `rust.apg.session_cmd` dispatches `apg session start|save|end|abort` from `main`.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
 }
