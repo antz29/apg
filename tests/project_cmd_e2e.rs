@@ -1510,15 +1510,77 @@ mod e2e {
         let wt = project_start_at(&repo.apg_root(), "foo").unwrap();
         let wt_apg = wt.join(specs::LAYOUT);
 
-        // mutate: author the spec (a durable node file -> auto-commits on the
-        // branch) and the plan (transient -> never commits), both through the
-        // funnel.
-        write_spec_node(&wt_apg);
+        // mutate: author the durable spec THROUGH A LIVE SESSION — the
+        // mandatory-session path a real caller uses (`apg node add` is admitted
+        // into the write-back buffer, `apg session save` makes it durable in
+        // one commit, `apg session end` releases) — then author the transient
+        // plan directly (`.trans` runs regardless of a live session). This pins
+        // that the live-session guard does NOT block a legitimate merge once
+        // the session has saved and ended.
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "timer",
+            "--body",
+            "A workitem can be started",
+            "--property",
+            "id=R1",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            add.status.success(),
+            "node add through the session: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        // The add is BUFFERED: no node file and no commit until save.
+        assert!(
+            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "timer")
+                .exists(),
+            "a buffered add must not write a node file before save"
+        );
+
+        // The single durability point: `apg session save` flushes the buffer
+        // (one atomic node-file write + one commit); `apg session end`
+        // releases the session.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "session save: {}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "session end: {}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "session process: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "session end must release the session"
+        );
+
         let plan_path = wt_apg.join(specs::TRANS).join("plans").join("foo.jsonl");
         artifacts::write_jsonl_and_reingest(&wt_apg, &plan_path, "foo", &plan_records(true))
             .unwrap();
-        // The spec mutation auto-committed; the plan mutation committed
-        // nothing (R8 — .trans never commits).
+        // The session's save commit holds the spec node file; the plan mutation
+        // committed nothing (R8 — .trans never commits).
         let wt_repo = git2::Repository::open(&wt).unwrap();
         let foo_tip = wt_repo.head().unwrap().peel_to_commit().unwrap();
         assert!(
