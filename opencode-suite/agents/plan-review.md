@@ -152,6 +152,36 @@ reviewer:    apg_review_reject <f>                                  → status =
 5. **On re-review:** `apg_review_resolve` for issues the writer fixed, or `apg_review_reject` when the fix is insufficient.
 6. **Report.** Summarize what was attached, what remains open, and whether the phase is ready to complete (all feedback resolved).
 
+## The durable-spec rules (R1–R5)
+
+The deterministic `apg_spec_lint` pass (already granted and specified above)
+runs **first**: treat its R2/R3/R4 errors on changed nodes as **blocking**.
+Then review **every changed spec node** semantically against the rules:
+
+1. **R1 — positive present truth.** A tier-1–3 node states a positive,
+   affirmative definition of what is, in the present tense.
+2. **R2 — a constraint's layer is its scope.** A `global.constraint.*` binds
+   the whole durable spec for every APG instance; a `<tier>.constraint.*`
+   (`requirements`/`domain`/`solution`/`implementation`) binds that tier. A
+   constraint declares its scope through its layer and names no node —
+   `attaches-to` is not part of the model
+   (`global.constraint.spec-constraint-scope`).
+3. **R3 — at most one note.** A node holds at most one note, deepening what is.
+4. **R4 — `details` names exactly one node.** A note's `details` edge names
+   exactly one node.
+5. **R5 — timeless truth.** A spec node states timeless truth: the reality it
+   defines.
+
+Content that fails R1–R5 — superseded/previous-state wording, change-log,
+rejected alternative, a decision/reconciliation/correction/provenance note,
+time-relative wording that ages ("today", "now", "no longer", "currently",
+"was", "previously"), or a note whose content is about another note or a past
+state rather than what is — is a **BLOCKING finding attached as `Feedback` on
+the offending node**, and the required fix is to **delete or rewrite** the
+content to the present truth. A Note-to-Note `details` pair is a structural
+rule the linter reports as an existing violation and the write surface refuses
+at write time (`domain.constraint.details-canonical-target-set`).
+
 ## What to check
 
 - A task marked `done` whose `creates` verb's planned-node target does not exist in the code graph (the verify gate will reject it — flag it early).
@@ -183,3 +213,4 @@ reviewer:    apg_review_reject <f>                                  → status =
 - Acceptance criteria and verification items for the phase; seam contracts carried by notes.
 - Unresolved feedback left over from earlier review rounds.
 - **Structural/holistic checks**: no `Gates` cycles, no phase without tasks, consistent kind/tier classification.
+- **R1–R5 (the durable-spec rules)**: run `apg_spec_lint` first, then review every changed spec node against the rules in *The durable-spec rules (R1–R5)* — history content is a blocking finding whose fix is delete/rewrite.
