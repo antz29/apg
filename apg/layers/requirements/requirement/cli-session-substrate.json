@@ -51,6 +51,11 @@
       "kind": "contains",
       "target": "requirements.requirement.cli-session-warning-visibility",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.cli-session",
+      "properties": {}
     }
   ],
   "in": [
