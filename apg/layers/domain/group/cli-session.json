@@ -1,0 +1,12 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "cli-session",
+  "body": "The CLI session domain: the caller-controlled-durability transaction substrate over the worktree's durable spec store. A session owns the worktree database and lock exclusively, admits durable node/edge mutations into an in-memory buffer projected into the live index, makes the buffer durable at a save, routes reads to see pending changes, and rebuilds the derived index from the on-disk node files after an unclean exit. Its aggregate root is the session coordinator.",
+  "properties": {
+    "attribute": "core",
+    "root": "cli-session-coordinator"
+  },
+  "out": [],
+  "in": []
+}
