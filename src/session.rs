@@ -135,8 +135,19 @@ pub(crate) enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Reply {
     Pong,
-    Ok { output: String },
-    Err { message: String },
+    Ok {
+        output: String,
+        /// Write-time warnings produced by a routed durable mutation, carried
+        /// from the coordinator to the client so the client can print them.
+        /// `#[serde(default)]` keeps the wire compatible in both directions: a
+        /// peer that predates this field deserializes it as an empty list, and
+        /// a reply with no warnings serializes a harmless empty array.
+        #[serde(default)]
+        warnings: Vec<String>,
+    },
+    Err {
+        message: String,
+    },
 }
 
 fn write_msg<T: Serialize>(stream: &mut UnixStream, msg: &T) -> std::io::Result<()> {
@@ -248,7 +259,7 @@ fn send_with_retry(socket: &Path, request: &Request) -> anyhow::Result<Reply> {
 
 fn expect_ok(reply: Reply) -> anyhow::Result<String> {
     match reply {
-        Reply::Ok { output } => Ok(output),
+        Reply::Ok { output, .. } => Ok(output),
         Reply::Err { message } => anyhow::bail!("{message}"),
         other => anyhow::bail!("unexpected session reply: {other:?}"),
     }
@@ -614,6 +625,7 @@ impl Coordinator {
                                 &mut stream,
                                 &Reply::Ok {
                                     output: "Session ended".to_string(),
+                                    warnings: Vec::new(),
                                 },
                             )?;
                             self.end()?;
@@ -634,6 +646,7 @@ impl Coordinator {
                         let reply = match self.save() {
                             Ok(()) => Reply::Ok {
                                 output: "Session saved".to_string(),
+                                warnings: Vec::new(),
                             },
                             Err(e) => Reply::Err {
                                 message: format!("{e:#}"),
@@ -648,6 +661,7 @@ impl Coordinator {
                         let reply = match self.abort() {
                             Ok(()) => Reply::Ok {
                                 output: "Session aborted".to_string(),
+                                warnings: Vec::new(),
                             },
                             Err(e) => Reply::Err {
                                 message: format!("{e:#}"),
@@ -692,7 +706,12 @@ impl Coordinator {
     /// `socket_path` surface.
     pub(crate) fn handle_mutation(&mut self, kind: &str, args: &[String]) -> Reply {
         match self.apply_mutation(kind, args) {
-            Ok(output) => Reply::Ok { output },
+            // Task-2 wires the mutation's write-time warnings into the reply;
+            // for now the carrier is present but empty.
+            Ok(output) => Reply::Ok {
+                output,
+                warnings: Vec::new(),
+            },
             Err(e) => Reply::Err {
                 message: format!("{e:#}"),
             },
@@ -899,7 +918,10 @@ impl Coordinator {
             };
         };
         match crate::render_query(&db.db, query, json) {
-            Ok(output) => Reply::Ok { output },
+            Ok(output) => Reply::Ok {
+                output,
+                warnings: Vec::new(),
+            },
             Err(e) => Reply::Err {
                 message: format!("{e:#}"),
             },
