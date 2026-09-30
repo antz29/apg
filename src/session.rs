@@ -768,6 +768,36 @@ impl Coordinator {
         }
     }
 
+    /// `apg session save` (client side): ask the live session to make its whole
+    /// buffered node-file set durable. Idempotent — a missing/stale socket is
+    /// reclaimed and reported as no live session. The client never writes a DB
+    /// or node file it does not own; it only carries the request and prints the
+    /// coordinator's reply output.
+    pub fn signal_save(apg_root: &Path) -> anyhow::Result<()> {
+        let socket = socket_path(apg_root);
+        if !socket.exists() {
+            println!("no live session to save");
+            return Ok(());
+        }
+        let result = UnixStream::connect(&socket).and_then(|mut stream| {
+            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+            write_msg(&mut stream, &Request::Save)?;
+            read_msg::<Reply>(&stream)
+        });
+        match result {
+            Ok(reply) => {
+                println!("{}", expect_ok(reply)?);
+                Ok(())
+            }
+            Err(_) => {
+                // Stale socket: reclaim so the next start can bind cleanly.
+                let _ = std::fs::remove_file(&socket);
+                println!("no live session to save (reclaimed stale socket)");
+                Ok(())
+            }
+        }
+    }
+
     /// The at-most-once client entry point: forward a node/edge mutation to the
     /// live session and return the coordinator's output message. A transport
     /// failure is reported (never a direct-path fallback).
