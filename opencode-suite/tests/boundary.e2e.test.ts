@@ -1320,4 +1320,64 @@ test.skipIf(!enabled || !binary)(
   60000,
 )
 
+// apg-sessions phase-04.task-18: regression guard for the hang-proof liveness
+// probe (task-17). `sessionLiveAt` must resolve `false` — never hang — for a
+// socket path that does not exist, for a path that once existed and was removed,
+// and for a path where a non-socket file sits with no listener behind it (the
+// removed/stale socket shapes a crashed coordinator leaves behind). The probe's
+// hard, socket-event-independent deadline is what bounds the wait; a settled
+// promise proves the hang regression stays fixed. `startDetachedSession` must
+// likewise return its string error (not hang) for a root with no live session.
+// Real I/O (Unix-socket connects, fs), so opt-in suite e2e.
+test.skipIf(!enabled)(
+  "e2e: sessionLiveAt resolves false without hanging for absent/removed socket paths",
+  async () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-probe-"))
+    try {
+      // (1) A path that was never bound.
+      const missing = path.join(base, "never-bound.sock")
+      const t0 = Date.now()
+      expect(await sessionLiveAt(missing, 500)).toBe(false)
+      expect(Date.now() - t0).toBeLessThan(5000)
+
+      // (2) A path that once existed and was removed (the crash shape: the
+      // coordinator's socket file is gone but a client still probes the path).
+      const removed = path.join(base, "removed.sock")
+      fs.writeFileSync(removed, "")
+      fs.rmSync(removed, { force: true })
+      expect(existsSync(removed)).toBe(false)
+      const t1 = Date.now()
+      expect(await sessionLiveAt(removed, 500)).toBe(false)
+      expect(Date.now() - t1).toBeLessThan(5000)
+
+      // (3) A stale socket FILE with no listener behind it (present-but-
+      // unreachable): a regular file at the socket path.
+      const stale = path.join(base, "stale.sock")
+      fs.writeFileSync(stale, "")
+      expect(existsSync(stale)).toBe(true)
+      const t2 = Date.now()
+      expect(await sessionLiveAt(stale, 500)).toBe(false)
+      expect(Date.now() - t2).toBeLessThan(5000)
+
+      // (4) `startDetachedSession` reports a string error (not a hang) for a
+      // root with no live session — a bare dir with no apg root resolves the
+      // shared NO_DB_ERROR promptly rather than blocking.
+      const bare = path.join(base, "bare")
+      fs.mkdirSync(bare, { recursive: true })
+      const t3 = Date.now()
+      const started = await startDetachedSession(
+        { directory: bare, worktree: bare },
+        bare,
+        { timeoutMs: 500 },
+      )
+      expect(typeof started).toBe("string")
+      expect(started as string).toBe(NO_DB_ERROR)
+      expect(Date.now() - t3).toBeLessThan(5000)
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  },
+  15000,
+)
+
 
