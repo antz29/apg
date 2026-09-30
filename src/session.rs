@@ -943,9 +943,14 @@ impl Coordinator {
 
     /// `apg session save` (client side): ask the live session to make its whole
     /// buffered node-file set durable. Idempotent — a missing/stale socket is
-    /// reclaimed and reported as no live session. The client never writes a DB
-    /// or node file it does not own; it only carries the request and prints the
-    /// coordinator's reply output.
+    /// reclaimed and reported as no live session. A present-but-unreachable
+    /// (stale) socket is an unclean exit: [`reclaim_stale_socket`] rebuilds the
+    /// derived index from the durable node files exactly as a `start`
+    /// crash-check does. The client never writes a DB or node file it does not
+    /// own; it only carries the request and prints the coordinator's reply
+    /// output.
+    ///
+    /// [`reclaim_stale_socket`]: Self::reclaim_stale_socket
     pub fn signal_save(apg_root: &Path) -> anyhow::Result<()> {
         let socket = socket_path(apg_root);
         if !socket.exists() {
@@ -963,8 +968,12 @@ impl Coordinator {
                 Ok(())
             }
             Err(_) => {
-                // Stale socket: reclaim so the next start can bind cleanly.
-                let _ = std::fs::remove_file(&socket);
+                // A present-but-unreachable socket is an unclean exit. Reclaim
+                // it and rebuild the derived index from the durable node files
+                // exactly as a `start` crash-check does — the socket removal
+                // alone would strand the killed run's phantom projection with
+                // no later socket to detect it.
+                Self::reclaim_stale_socket(apg_root)?;
                 println!("no live session to save (reclaimed stale socket)");
                 Ok(())
             }
