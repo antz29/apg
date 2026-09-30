@@ -453,6 +453,83 @@ impl Coordinator {
         Ok(())
     }
 
+    /// `apg session abort`: abandon the session, discarding every buffered
+    /// change without ever making it durable. Over a DIRTY run (a non-empty
+    /// buffer — admission projected the buffered changes into the live
+    /// `db.lbug`, so the index carries phantom projections the durable
+    /// `apg/layers/**` node files do not) it releases the session and forces a
+    /// FULL scan that discards and rebuilds `db.lbug` from those node files, so
+    /// the phantom projection is never served. Over a CLEAN run it simply
+    /// releases the session — nothing was projected, so there is no phantom to
+    /// discard and no rebuild is needed.
+    ///
+    /// The release is exactly [`end`](Self::end)'s ordering and runs BEFORE the
+    /// forced scan: the owned DB handle, the extended flock, then the socket.
+    /// The scan opens (and locks) its own DB/socket, so holding either across
+    /// it would self-deadlock — the scan's live-session guard would see this
+    /// session's socket and refuse, and the stale handle would hold the index.
+    ///
+    /// The rebuild reuses the existing `apg scan` entry point
+    /// ([`crate::cmd_scan`]), which drives the same
+    /// [`crate::pipeline::run_pipeline`] a normal scan runs — ingestion is
+    /// never reimplemented here. The derived index (`db.lbug` and its
+    /// `graph.jsonl` export) is discarded FIRST so the scan cannot take its
+    /// content-identity freshness fast path (or an incremental splice seeded
+    /// from the phantom-projected DB) and reuse the phantom state; a genuine
+    /// full scan then rebuilds both from the durable node files and the
+    /// scanned code.
+    pub fn abort(&mut self) -> anyhow::Result<()> {
+        // Discard the whole buffered set before anything else: an aborted
+        // change is never written to `apg/layers/**` and never committed.
+        let dirty = !self.buffer.is_empty();
+        self.buffer.clear();
+
+        // Release exactly as `end` does, BEFORE the forced scan opens its own
+        // DB handle / flock / socket.
+        self.db = None;
+        self._lock = None;
+        let _ = std::fs::remove_file(&self.socket_path);
+
+        if dirty {
+            self.force_full_scan()?;
+        }
+
+        eprintln!("apg session: aborted");
+        Ok(())
+    }
+
+    /// Force a full `apg scan` (the existing scan/pipeline entry point) that
+    /// discards the derived index and rebuilds it from the durable node files.
+    ///
+    /// The session's DB handle, flock and socket are already released by the
+    /// caller ([`abort`](Self::abort)); this only discards the derived
+    /// `db.lbug` + `graph.jsonl` so the scan cannot take a reuse fast path over
+    /// the phantom projection, then runs the scan from the project root (the
+    /// session owns the layout root, whose parent is the project dir). The
+    /// scan's process-global `chdir` into `.trans` is restored so the serve
+    /// loop's remaining lifetime is unaffected.
+    fn force_full_scan(&self) -> anyhow::Result<()> {
+        // Discard the derived index and its export: with no `db.lbug` the scan
+        // freshness fast path cannot fire, and with no `graph.jsonl` there is
+        // no previous export to splice from — the scan is forced to rebuild
+        // from the durable node files (`apg/layers/**`) and freshly scanned
+        // code. The node files themselves are the system of record and are
+        // never touched.
+        let trans = self.apg_root.join(specs::TRANS);
+        let _ = std::fs::remove_file(trans.join("db.lbug"));
+        let _ = std::fs::remove_file(trans.join("graph.jsonl"));
+
+        let project_dir = self
+            .apg_root
+            .parent()
+            .unwrap_or(&self.apg_root)
+            .to_path_buf();
+        let previous = std::env::current_dir()?;
+        let result = crate::cmd_scan(&[project_dir.display().to_string()]);
+        let _ = std::env::set_current_dir(previous);
+        result
+    }
+
     /// Serve routed mutations AND routed reads in receive order until an `end`
     /// request arrives. Single-threaded: one request is fully applied before the
     /// next is read, so mutations are applied exactly in the order received with
