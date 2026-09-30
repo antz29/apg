@@ -228,9 +228,8 @@ fn node_update_change(
     // (phase-00 task-9): a node written earlier in the same unsaved run is the
     // base (its buffered content and edges are kept), a staged delete marker
     // means it is absent, and an unstaged identity falls back to the on-disk
-    // file. This mirrors `layers::update_node_file`'s refusal and its
-    // edge-preserving body/properties merge, over the resolved base rather than
-    // a fresh disk read.
+    // file. The refusal and the edge-preserving body/properties merge are
+    // applied over the resolved base rather than a fresh disk read.
     let Some(mut updated) = overlay.read(apg_root, layer, &pos[1], &pos[2])? else {
         anyhow::bail!("node `{f}` does not exist — use `apg node add` to create it");
     };

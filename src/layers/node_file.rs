@@ -190,8 +190,8 @@ pub fn refuse_if_present(exists: bool, entity: &str, update: &str, rm: &str) -> 
 /// MERGE a property edit over `base` (SPEC §4.1 property-map): the keys in
 /// `set` overwrite only what they carry, the keys in `unset` are deleted, and
 /// every other key is preserved — omitting `unset` never drops a key; there is
-/// no implicit unset. The shared merge helper behind [`update_node_file`] and
-/// the `node update` / `edge update` command surfaces.
+/// no implicit unset. The shared merge helper behind the `node update` /
+/// `edge update` command surfaces.
 pub fn merge_properties(
     base: &NodeProperties,
     set: &BTreeMap<String, String>,
@@ -205,33 +205,6 @@ pub fn merge_properties(
         merged.remove(k);
     }
     merged
-}
-
-/// Compute the edge-preserving in-place update of a node file (SPEC §4.1):
-/// read `layer.type.name`, refuse when it is absent, set `body` when supplied,
-/// MERGE `set`/`unset` over its properties via [`merge_properties`], and leave
-/// the node's immutable identity (`layer`/`type`/`name`) and every out/in edge
-/// untouched. Pure — the caller persists the returned node through the guarded
-/// [`write_project`] funnel.
-pub fn update_node_file(
-    apg_root: &Path,
-    layer: Layer,
-    node_type: &str,
-    name: &str,
-    body: Option<&str>,
-    set: &BTreeMap<String, String>,
-    unset: &BTreeSet<String>,
-) -> anyhow::Result<NodeFile> {
-    let f = fqn(layer, node_type, name);
-    if !node_file_path(apg_root, layer, node_type, name).exists() {
-        anyhow::bail!("node `{f}` does not exist — use `apg node add` to create it");
-    }
-    let mut node = read_node_file(apg_root, layer, node_type, name)?;
-    if let Some(body) = body {
-        node.body = body.to_string();
-    }
-    node.properties = merge_properties(&node.properties, set, unset);
-    Ok(node)
 }
 
 // ---------------------------------------------------------------------------
