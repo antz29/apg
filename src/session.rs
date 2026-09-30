@@ -18,9 +18,12 @@
 //!
 //! Amortization is of the DB **open**, never of visibility: the DB is opened
 //! once for the session's life ([`Coordinator`]'s owned handle) and every routed
-//! mutation's exact projection delta is applied synchronously as it completes
-//! through that handle — there is no write-back buffer and no end-of-session
-//! flush. Forwarded mutations carry a client-generated id; the coordinator
+//! durable mutation is admitted into an in-memory write-back buffer of
+//! node-file writes/deletes whose exact projection delta is applied
+//! synchronously through that handle AT ADMISSION — `apg/layers/**` and git
+//! stay at the last saved state until [`Coordinator::save`], so a routed read
+//! observes the buffered intention while a direct read observes the last saved
+//! state. Forwarded mutations carry a client-generated id; the coordinator
 //! records applied ids so a replay is at-most-once, and a failed forward is
 //! reported — the client never silently falls back to the direct path
 //! mid-flight.
@@ -37,7 +40,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::artifacts::{ArtifactDb, SpecLockGuard, acquire_spec_lock};
-use crate::layers::{self, NodeFile};
+use crate::layers::{self, Layer, NodeFile};
 use crate::specs;
 
 /// The session socket file name under `apg/.trans/`.
@@ -386,7 +389,7 @@ impl Coordinator {
 
     /// Server-side shutdown: release the DB handle and the extended flock and
     /// remove the socket, so a later `start` (or a direct writer) can proceed.
-    /// Every mutation's projection delta was already applied write-through, so
+    /// Every mutation's projection delta was already applied at admission, so
     /// there is NO end-of-session flush.
     pub fn end(&mut self) -> anyhow::Result<()> {
         self.db = None;
@@ -406,9 +409,9 @@ impl Coordinator {
     /// mirroring the direct path's steps 4–5) and the buffer is cleared.
     ///
     /// A clean buffer writes nothing, makes no commit, and clears nothing — a
-    /// pure no-op. The DB projection is NOT run here: the design projects each
-    /// mutation into the live `db.lbug` at ADMISSION (a later task), so save
-    /// only makes the node files durable and re-anchors.
+    /// pure no-op. The DB projection is NOT run here: each mutation is
+    /// projected into the live `db.lbug` at admission (phase-01 task-4), so
+    /// save only makes the node files durable and re-anchors.
     pub fn save(&mut self) -> anyhow::Result<()> {
         if self.buffer.is_empty() {
             println!("Session saved: no pending changes");
@@ -497,9 +500,12 @@ impl Coordinator {
                         args,
                     } => {
                         // At-most-once: a replayed id returns the cached reply
-                        // and is never re-applied.
-                        let reply = match self.ledger.get(&client_id) {
-                            Some(cached) => cached.clone(),
+                        // and is never re-applied. Clone the cached reply out
+                        // first so the ledger borrow ends before the (mutable)
+                        // admission below.
+                        let cached = self.ledger.get(&client_id).cloned();
+                        let reply = match cached {
+                            Some(cached) => cached,
                             None => {
                                 let reply = self.handle_mutation(&kind, &args);
                                 self.ledger.insert(client_id, reply.clone());
@@ -513,16 +519,12 @@ impl Coordinator {
         }
     }
 
-    /// The whole durable write for one routed mutation, performed by the
-    /// coordinator itself: build the node-file change (read-modify-write) and
-    /// apply it — atomic write + exactly one commit — then apply the exact
-    /// projection delta write-through through the session-held DB handle. The
-    /// session already holds the extended flock, so nothing is re-acquired.
-    ///
-    /// Crate-private: it is driven only by [`serve`](Self::serve) over the wire,
-    /// and its `Reply` wire type stays internal. Integration crates reach the
-    /// session through the public `forward_*`/`signal_end`/`socket_path` surface.
-    pub(crate) fn handle_mutation(&self, kind: &str, args: &[String]) -> Reply {
+    /// Admit one routed durable mutation into the buffer and project it into
+    /// the live DB. Crate-private: it is driven only by [`serve`](Self::serve)
+    /// over the wire, and its `Reply` wire type stays internal. Integration
+    /// crates reach the session through the public `forward_*`/`signal_end`/
+    /// `socket_path` surface.
+    pub(crate) fn handle_mutation(&mut self, kind: &str, args: &[String]) -> Reply {
         match self.apply_mutation(kind, args) {
             Ok(output) => Reply::Ok { output },
             Err(e) => Reply::Err {
@@ -531,24 +533,195 @@ impl Coordinator {
         }
     }
 
-    fn apply_mutation(&self, kind: &str, args: &[String]) -> anyhow::Result<String> {
-        let change = crate::node_cmd::build_change(&self.apg_root, kind, args)?;
-        let db = self.db.as_ref();
-        layers::write_project_with(
+    /// Admit one routed durable mutation as a write-back change (phase-01
+    /// task-4, SPEC `cli-session-write-back-buffer`).
+    ///
+    /// The sequence, over the session's ONE owned DB handle:
+    ///
+    /// 1. Build a [`layers::LayersOverlay`] from the current buffer, then build
+    ///    the change with [`node_cmd::build_change_over`](crate::node_cmd::build_change_over)
+    ///    so its existence checks and read-modify-write resolve against the
+    ///    CUMULATIVE buffered state (an update/rm of a node written earlier in
+    ///    the same unsaved run applies over its buffered content).
+    /// 2. Validate the change against that cumulative base via
+    ///    [`layers::write::validate_change_over`] — NOT the disk-only
+    ///    [`layers::write::validate_change`] — so an edge to a node added
+    ///    earlier in the run is accepted though its file is not on disk yet.
+    /// 3. Stage the change into a tentative overlay and, from the effective
+    ///    buffered node set and the touched-FQN delete set, project it into the
+    ///    live `db.lbug` AT ADMISSION through [`layers::write::project_only`] —
+    ///    NO `apg/layers/**` write and NO commit.
+    /// 4. Only after the projection SUCCEEDS, commit the change to
+    ///    `self.buffer` (last write/delete for an identity wins). A failure at
+    ///    any earlier step leaves `self.buffer` unchanged and the DB
+    ///    un-projected.
+    ///
+    /// `self.db` may be `None` when no `db.lbug` exists yet: the change is
+    /// still built, validated, and buffered, and the projection is skipped.
+    fn apply_mutation(&mut self, kind: &str, args: &[String]) -> anyhow::Result<String> {
+        // (1) The cumulative buffered state as an overlay.
+        let overlay = self.overlay_from_buffer()?;
+
+        // (2) Build the change against the cumulative buffered state.
+        let change = crate::node_cmd::build_change_over(&self.apg_root, kind, args, &overlay)?;
+
+        // The on-disk store and the cumulative base this change applies over.
+        let disk = layers::read_existing_nodes(&self.apg_root)?;
+        let base = overlay.apply_to_base(&disk);
+
+        // (3) Validate against the cumulative base, NOT the disk-only store.
+        layers::write::validate_change_over(
             &self.apg_root,
+            &base,
             &change.writes,
             &change.deletes,
-            &|deletes, records| {
-                match db {
-                    // Write-through through the ONE session-held handle: the
-                    // projection delta (exact removed ∪ changed FQNs) is applied
-                    // as the mutation completes.
-                    Some(db) => db.reingest_layers_on(deletes, records),
-                    None => Ok(()),
-                }
-            },
         )?;
+
+        // Resolve every identity this change touches BEFORE projecting, so the
+        // projection and the buffer commit cannot disagree on identity.
+        let mut write_ids: Vec<(Layer, String, String)> = Vec::with_capacity(change.writes.len());
+        for w in &change.writes {
+            write_ids.push((
+                crate::node_cmd::resolve_layer(&w.layer)?,
+                w.node_type.clone(),
+                w.name.clone(),
+            ));
+        }
+        let mut delete_ids: Vec<(Layer, String, String, PathBuf)> =
+            Vec::with_capacity(change.deletes.len());
+        for path in &change.deletes {
+            let (layer, node_type, name) = self.identity_of_node_path(path)?;
+            delete_ids.push((layer, node_type, name, path.clone()));
+        }
+
+        // (4) Stage the change into a TENTATIVE overlay and compute the
+        // effective buffered node set and the projection delete set (every
+        // touched/changed identity FQN ∪ every deleted FQN).
+        let mut tentative = overlay.clone();
+        for w in &change.writes {
+            tentative.stage_write(w.clone())?;
+        }
+        for (layer, node_type, name, _) in &delete_ids {
+            tentative.stage_delete(*layer, node_type, name);
+        }
+        let effective_nodes = tentative.apply_to_base(&disk);
+        let delete_fqns = tentative.touched_fqns();
+
+        // Project the effective buffered state into the live db.lbug at
+        // admission. Skipped when no query index exists yet (the durable node
+        // files are the system of record); project_only also carries the
+        // graph.jsonl-absent fallback and the transient re-merge.
+        if let Some(db) = self.db.as_ref() {
+            layers::write::project_only(
+                &self.apg_root,
+                &effective_nodes,
+                &delete_fqns,
+                &|deletes, records| db.reingest_layers_on(deletes, records),
+            )?;
+        }
+
+        // (5) Only after the projection SUCCEEDS, commit the change to the
+        // buffer — last write/delete for an identity wins.
+        for (w, (layer, node_type, name)) in change.writes.iter().zip(&write_ids) {
+            self.upsert_buffer(*layer, node_type, name, Some(w.clone()));
+        }
+        for (layer, node_type, name, path) in &delete_ids {
+            if path.exists() {
+                // A durable file backs this identity: keep a delete marker so
+                // the next save removes it.
+                self.upsert_buffer(*layer, node_type, name, None);
+            } else {
+                // The identity only ever existed in the buffer (added earlier
+                // in this unsaved run): add-then-rm nets to nothing on disk, so
+                // drop the pending write rather than leave a delete marker for
+                // a file that was never written.
+                self.remove_buffer_entry(*layer, node_type, name);
+            }
+        }
+
         Ok(change.message)
+    }
+
+    /// Build the cumulative buffered state as a [`layers::LayersOverlay`]: each
+    /// buffered write is a staged write, each buffered delete marker a staged
+    /// delete. Empty when nothing is buffered (every identity resolves to disk).
+    fn overlay_from_buffer(&self) -> anyhow::Result<layers::LayersOverlay> {
+        let mut overlay = layers::LayersOverlay::new();
+        for change in &self.buffer {
+            match &change.content {
+                Some(node) => overlay.stage_write(node.clone())?,
+                None => {
+                    let layer = crate::node_cmd::resolve_layer(&change.layer)?;
+                    overlay.stage_delete(layer, &change.node_type, &change.name);
+                }
+            }
+        }
+        Ok(overlay)
+    }
+
+    /// Replace the buffered state for one identity (last write wins), or append
+    /// a new [`PendingChange`]. A replaced entry keeps its original position.
+    fn upsert_buffer(
+        &mut self,
+        layer: Layer,
+        node_type: &str,
+        name: &str,
+        content: Option<NodeFile>,
+    ) {
+        let layer_dir = layer.layer_dir();
+        if let Some(entry) = self
+            .buffer
+            .iter_mut()
+            .find(|c| c.layer == layer_dir && c.node_type == node_type && c.name == name)
+        {
+            entry.content = content;
+        } else {
+            let path = layers::node_file_path(&self.apg_root, layer, node_type, name);
+            self.buffer.push(PendingChange {
+                layer: layer_dir.to_string(),
+                node_type: node_type.to_string(),
+                name: name.to_string(),
+                path,
+                content,
+            });
+        }
+    }
+
+    /// Drop any buffered entry for one identity (an add-then-rm that nets to
+    /// nothing on disk).
+    fn remove_buffer_entry(&mut self, layer: Layer, node_type: &str, name: &str) {
+        let layer_dir = layer.layer_dir();
+        self.buffer
+            .retain(|c| !(c.layer == layer_dir && c.node_type == node_type && c.name == name));
+    }
+
+    /// Derive the `(layer, type, name)` identity of a node-file path under
+    /// `apg/layers/` — the inverse of [`layers::node_file_path`], keying a
+    /// change's `deletes` back to their buffer identity.
+    fn identity_of_node_path(&self, path: &Path) -> anyhow::Result<(Layer, String, String)> {
+        let rel = path
+            .strip_prefix(self.apg_root.join(layers::LAYERS_DIR))
+            .map_err(|_| {
+                anyhow::anyhow!("node-file path {} is not under apg/layers/", path.display())
+            })?;
+        let mut comps = rel.components();
+        let layer_dir = comps
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+            .ok_or_else(|| anyhow::anyhow!("malformed node-file path {}", path.display()))?;
+        let node_type = comps
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+            .ok_or_else(|| anyhow::anyhow!("malformed node-file path {}", path.display()))?;
+        let file = comps
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+            .ok_or_else(|| anyhow::anyhow!("malformed node-file path {}", path.display()))?;
+        let name = file.strip_suffix(".json").ok_or_else(|| {
+            anyhow::anyhow!("node-file path {} is not a .json file", path.display())
+        })?;
+        let layer = crate::node_cmd::resolve_layer(layer_dir)?;
+        Ok((layer, node_type.to_string(), name.to_string()))
     }
 
     /// Serve a routed read against the session-held DB, rendered exactly like
