@@ -310,6 +310,14 @@ fn node_rm_change(
         }
     }
 
+    // Refuse an absent identity through the overlay (task-40), mirroring
+    // `node_update_change`: a node written earlier in the same unsaved run is
+    // present (rm succeeds), a staged delete marker is absent, and an unstaged
+    // identity falls back to the on-disk file (absent when none exists).
+    if overlay.read(apg_root, layer, &pos[1], &pos[2])?.is_none() {
+        anyhow::bail!("node `{f}` does not exist — use `apg node add` to create it");
+    }
+
     let mut deletes = vec![layers::node_file_path(apg_root, layer, &pos[1], &pos[2])];
     let mut writes: Vec<NodeFile> = Vec::new();
     // Rewrite incident edges over the EFFECTIVE node set (phase-00 task-10): the
