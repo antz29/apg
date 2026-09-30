@@ -493,35 +493,94 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// `apg edge add` (the command shape) writes BOTH endpoint files — the
-    /// out half in the source's file, the matching in half in the target's —
-    /// keeping the store pairing-consistent and landing the edge in the
-    /// branch DB.
+    /// Phase-01 task-16: `apg edge add` (the command shape) through a LIVE
+    /// session writes BOTH endpoint files at the session's single durability
+    /// point (`apg session save`) — the out half in the source's file, the
+    /// matching in half in the target's, with identical properties — keeping
+    /// the store pairing-consistent and landing the edge in the branch DB.
+    ///
+    /// The two endpoint adds and the edge add are ADMITTED into the session's
+    /// write-back buffer (no `apg/layers/**` file, no commit); only
+    /// `apg session save` flushes them — one atomic node-file write plus exactly
+    /// one commit — the on-disk halves, pairing and commit count asserted here.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn edge_add_writes_both_endpoint_files() {
-        let (wt_apg, repo, _wt) = mutation_fixture("edge-add");
-        layers::write_project(&wt_apg, &[node("requirements", "requirement", "r1")], &[]).unwrap();
-        layers::write_project(&wt_apg, &[node("requirements", "requirement", "r2")], &[]).unwrap();
-        // `apg edge add depends-on requirements.requirement.r1
-        // requirements.requirement.r2`.
-        let mut src =
-            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
-        src.out.push(OutEdge {
-            kind: "depends-on".to_string(),
-            target: "requirements.requirement.r2".to_string(),
-            properties: BTreeMap::new(),
-        });
-        let mut dst =
-            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r2").unwrap();
-        dst.in_edges.push(InEdge {
-            kind: "depends-on".to_string(),
-            source: "requirements.requirement.r1".to_string(),
-            properties: BTreeMap::new(),
-        });
-        layers::write_project(&wt_apg, &[src, dst], &[]).unwrap();
+        let (wt_apg, repo, wt) = mutation_fixture("edge-add");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
 
-        // Both halves landed: out in the source's file, in in the target's.
+        // `apg node add` × 2 and `apg edge add depends-on
+        // requirements.requirement.r1 requirements.requirement.r2`, each routed
+        // through the live session and admitted into the write-back buffer.
+        let run = |args: &[&str], expected: &str| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                expected,
+                "apg {args:?}"
+            );
+        };
+        let before_commits = testutil::commit_count(&wt);
+        run(
+            &["node", "add", "requirements", "requirement", "r1"],
+            "Added node requirements.requirement.r1",
+        );
+        run(
+            &["node", "add", "requirements", "requirement", "r2"],
+            "Added node requirements.requirement.r2",
+        );
+        run(
+            &[
+                "edge",
+                "add",
+                "depends-on",
+                "requirements.requirement.r1",
+                "requirements.requirement.r2",
+            ],
+            "Added edge depends-on requirements.requirement.r1 -> requirements.requirement.r2",
+        );
+
+        // Buffered: neither endpoint file exists yet and no commit landed.
+        for name in ["r1", "r2"] {
+            assert!(
+                !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                "a buffered add must not write `{name}` before save"
+            );
+        }
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered mutation must not create a commit before save"
+        );
+
+        // The single durability point: `apg session save` flushes the buffer
+        // with one atomic node-file write plus one commit.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+
+        // Both halves landed on disk: out in the source's file, in in the
+        // target's, with matching kind/endpoints and identical properties.
         let src_back =
             layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
         let dst_back =
@@ -532,9 +591,34 @@ mod e2e {
         assert_eq!(dst_back.in_edges.len(), 1);
         assert_eq!(dst_back.in_edges[0].kind, "depends-on");
         assert_eq!(dst_back.in_edges[0].source, "requirements.requirement.r1");
+        assert_eq!(
+            src_back.out[0].properties, dst_back.in_edges[0].properties,
+            "the out half and its matching in half must carry identical properties"
+        );
 
-        // The store stays pairing-consistent, and the edge is in the branch DB.
+        // The store stays pairing-consistent.
         layers::check_edge_pairing(&layers::read_existing_nodes(&wt_apg).unwrap()).unwrap();
+
+        // Exactly ONE commit landed for the whole buffered set, and it moved
+        // HEAD.
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the buffered endpoints + edge must land in exactly one save commit"
+        );
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "session save must not end the live session"
+        );
+
+        // The edge is in the branch DB — assert after the session ends, against
+        // the db.lbug the save left behind.
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let db = ArtifactDb::open(&wt_apg).unwrap();
         let out = db
         .q("MATCH (a:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->(b:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)")
@@ -544,6 +628,7 @@ mod e2e {
             Some("1"),
             "the DependsOn edge must be in the branch DB: {out}"
         );
+        drop(db);
         testutil::remove(&repo);
     }
 
