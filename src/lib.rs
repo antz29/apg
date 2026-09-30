@@ -141,21 +141,23 @@ fn print_help() {
     println!("{}", help_text());
 }
 
-/// `apg session <start|save|end>` (phase-03): `start` launches the
+/// `apg session <start|save|abort|end>` (phase-03): `start` launches the
 /// session-scoped single-writer coordinator (bind socket, own `db.lbug`, serve
 /// routed mutations/reads) and blocks in the foreground; `save` signals the
-/// running session to make its whole buffered node-file set durable; `end`
-/// signals the running session — the server-side shutdown releases the
-/// DB/socket and `serve` exits. Every mutation's projection delta was applied
-/// at admission, so `end` performs no flush.
+/// running session to make its whole buffered node-file set durable; `abort`
+/// signals the running session to discard its buffered node-file set and
+/// release the session; `end` signals the running session — the server-side
+/// shutdown releases the DB/socket and `serve` exits. Every mutation's
+/// projection delta was applied at admission, so `end` performs no flush.
 fn session_cmd(args: &[String]) -> anyhow::Result<()> {
     let apg_root = session::require_apg_root()?;
     match args.first().map(|s| s.as_str()) {
         Some("start") => session::Coordinator::start(&apg_root),
         Some("save") => session::Coordinator::signal_save(&apg_root),
+        Some("abort") => session::Coordinator::signal_abort(&apg_root),
         Some("end") => session::Coordinator::signal_end(&apg_root),
         other => anyhow::bail!(
-            "usage: apg session <start|save|end> (got `{}`)",
+            "usage: apg session <start|save|abort|end> (got `{}`)",
             other.unwrap_or("<none>")
         ),
     }
