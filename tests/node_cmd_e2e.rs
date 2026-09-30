@@ -1895,27 +1895,27 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-1 (acceptance): the cross-process parallel node/edge burst
-    /// of N SEPARATE `apg` binaries completes with ZERO lock errors on every
-    /// named lock — the lbug `apg/.trans/db.lbug` read-write open, the
-    /// `apg/.trans/specs.lock` flock, and git's `.git/index.lock` — and the
-    /// durable store equals the serial application.
+    /// Phase-01 task-29 (acceptance): the cross-process parallel burst of N
+    /// SEPARATE `apg edge add` binaries routes through ONE live session — the
+    /// single writer — and completes with ZERO lock errors on every named lock:
+    /// the lbug `apg/.trans/db.lbug` read-write open, the
+    /// `apg/.trans/specs.lock` flock, and git's `.git/index.lock`. The buffered
+    /// burst is projected into the session-held DB and is observable to a
+    /// routed read as the serial application; the on-disk store equals that
+    /// serial application once `apg session save` makes the whole burst durable
+    /// in exactly ONE commit, and the session ends cleanly.
     ///
     /// Cross-process by construction (`ApgCommand`/`spawn_apg`): `SPEC_LOCK`
     /// is a process-lifetime `OnceLock` flock, so an in-process thread burst
     /// would pass with the lock absent and false-green exactly the race this
-    /// test exists to catch.
+    /// test exists to catch. Routing the whole burst through the single live
+    /// session means no two children ever contend for the DB/specs/git locks
+    /// directly — the session is the ONE writer that serialises them.
     ///
-    /// Stage A (DB present) exercises all three locks; stage B (DB removed)
-    /// isolates the `.git/index.lock` + specs.lock + the shared hub-file
-    /// read-modify-write that a DB-only fix cannot reach; stage C drives the
-    /// node path's own existence-check + write + commit burst on stage A's
-    /// DB-present fixture (its `accept-` names do not collide with
-    /// `hub`/`leaf-*`), so only two repos/scans are built.
-    ///
-    /// N=4 keeps genuine cross-process contention while halving the child
-    /// fan-out (each child is a full 33 MB debug `apg`, and the whole e2e
-    /// tier runs hundreds of them concurrently).
+    /// N=4 keeps genuine cross-process contention over the shared hub's
+    /// read-modify-write while keeping the child fan-out modest (each child is
+    /// a full 33 MB debug `apg`, and the whole e2e tier runs hundreds of them
+    /// concurrently).
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn acceptance_cross_process_burst_has_zero_lock_errors_and_serial_store() {
@@ -1927,115 +1927,119 @@ mod e2e {
             "node-file RMW (pairing mismatch)",
         ];
 
-        // Stage A — the real project state (DB present).
-        let (wt_apg, repo, wt) = mutation_fixture("accept-burst-db");
+        let (wt_apg, repo, wt) = mutation_fixture("accept-burst-session");
         setup_hub_and_leaves(&wt, N);
-        let hist_a = run_edge_burst_attributed(&wt, &repo.root.join("home"), N);
-        eprintln!("acceptance stage A per-lock: {hist_a:?}");
+        let home = repo.root.join("home");
+
+        // ONE live session is the single writer for the whole burst.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the acceptance burst must run against one live session"
+        );
+
+        // Baseline: the buffered burst below must not move git until save.
+        let before_commits = testutil::commit_count(&wt);
+
+        // The cross-process burst: N SEPARATE `apg edge add` binaries, each
+        // routed through the live session's socket to the ONE writer.
+        let hist = run_edge_burst_attributed(&wt, &home, N);
+        eprintln!("acceptance burst per-lock: {hist:?}");
         assert_eq!(
-            hist_a.get("ok"),
+            hist.get("ok"),
             Some(&N),
-            "stage A must complete every mutation: {hist_a:?}"
+            "the routed burst must complete every mutation: {hist:?}"
         );
         for lock in NAMED_LOCKS {
-            assert_eq!(hist_a.get(lock), None, "stage A hit {lock}: {hist_a:?}");
+            assert_eq!(
+                hist.get(lock),
+                None,
+                "the routed burst hit {lock}: {hist:?}"
+            );
         }
+
+        // Serial store, buffered: a routed read observes the projected intention
+        // (all N edges), while the on-disk store and git stay at the last saved
+        // state.
+        let routed = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (:Requirement {fqn: 'requirements.requirement.hub'})-[:DependsOn]->(b) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert!(
+            routed.status.success(),
+            "routed read: {}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&routed.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("4"),
+            "the buffered burst must be visible to a routed read as the serial application"
+        );
+        assert_eq!(
+            hub_out_edges(&wt_apg),
+            0,
+            "a buffered burst must not write the hub node file before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered burst must not create a commit before save"
+        );
+
+        // The single durability point: one save lands the whole burst.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+
+        // Durable now: the shared hub carries exactly N distinct out-edges — the
+        // serial store — landed in exactly ONE commit at save.
         assert_eq!(
             hub_out_edges(&wt_apg),
             N,
-            "stage A: the shared hub lost edges"
+            "the saved burst must be the serial store (one edge per leaf)"
         );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the whole burst must land in exactly one save commit"
+        );
+
+        // End the session cleanly.
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must have ended"
+        );
+
+        // Store == serial application, now visible in the DB with the session
+        // gone and no live writer.
         {
             let db = ArtifactDb::open(&wt_apg).unwrap();
-            let out = db
+            let q = db
             .q("MATCH (:Requirement {fqn: 'requirements.requirement.hub'})-[:DependsOn]->(b) RETURN count(*)")
             .unwrap();
-            let expected = N.to_string();
-            assert_eq!(
-                out.lines().last().map(str::trim),
-                Some(expected.as_str()),
-                "stage A DB must equal the serial application: {out}"
-            );
+            assert_eq!(q.lines().last().map(str::trim), Some("4"), "{q}");
         }
-
-        // Stage B — DB absent: isolates git `.git/index.lock`, the specs.lock
-        // flock, and the shared hub-file read-modify-write.
-        let (wt_apg_b, repo_b, wt_b) = mutation_fixture("accept-burst-nodb");
-        std::fs::remove_file(wt_apg_b.join(specs::TRANS).join("db.lbug")).unwrap();
-        setup_hub_and_leaves(&wt_b, N);
-        let hist_b = run_edge_burst_attributed(&wt_b, &repo_b.root.join("home"), N);
-        eprintln!("acceptance stage B per-lock: {hist_b:?}");
-        assert_eq!(
-            hist_b.get("ok"),
-            Some(&N),
-            "stage B must complete every mutation: {hist_b:?}"
-        );
-        for lock in NAMED_LOCKS {
-            assert_eq!(hist_b.get(lock), None, "stage B hit {lock}: {hist_b:?}");
-        }
-        assert_eq!(
-            hub_out_edges(&wt_apg_b),
-            N,
-            "stage B: the shared hub lost edges"
-        );
-
-        // Stage C — N separate `apg node add` processes: the node path's own
-        // burst (existence check + write + commit) behind the same entry flock.
-        // Reuses stage A's DB-present fixture; only the `accept-` names are
-        // counted, so `hub`/`leaf-*` do not interfere.
-        let home_c = repo.root.join("home");
-        std::fs::create_dir_all(&home_c).unwrap();
-        let mut hist_c: BTreeMap<&'static str, usize> = BTreeMap::new();
-        let mut kids = Vec::with_capacity(N);
-        for i in 0..N {
-            let name = format!("accept-{i}");
-            kids.push(
-                testutil::ApgCommand::new(&[
-                    "node",
-                    "add",
-                    "requirements",
-                    "requirement",
-                    name.as_str(),
-                ])
-                .cwd(&wt)
-                .env("HOME", home_c.to_str().unwrap())
-                .spawn(),
-            );
-        }
-        for child in kids {
-            let out = child.wait_with_output().unwrap();
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let key = if out.status.success() {
-                "ok"
-            } else {
-                let lock = classify_lock(&stderr);
-                eprintln!("accept-node-burst FAILED ({lock}): {stderr}");
-                lock
-            };
-            *hist_c.entry(key).or_default() += 1;
-        }
-        eprintln!("acceptance stage C per-lock: {hist_c:?}");
-        assert_eq!(
-            hist_c.get("ok"),
-            Some(&N),
-            "stage C must complete every add: {hist_c:?}"
-        );
-        for lock in NAMED_LOCKS {
-            assert_eq!(hist_c.get(lock), None, "stage C hit {lock}: {hist_c:?}");
-        }
-        let stored = layers::read_existing_nodes(&wt_apg)
-            .unwrap()
-            .iter()
-            .filter(|n| {
-                n.layer == "requirements"
-                    && n.node_type == "requirement"
-                    && n.name.starts_with("accept-")
-            })
-            .count();
-        assert_eq!(stored, N, "stage C store must equal the serial adds");
 
         testutil::remove(&repo);
-        testutil::remove(&repo_b);
     }
 
     /// Phase-02 task-7 (E2E): `apg node rm` on a node reviewed by an
