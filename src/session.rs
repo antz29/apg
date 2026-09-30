@@ -369,15 +369,24 @@ impl Coordinator {
         Ok(Some(db))
     }
 
-    /// Reclaim a leftover socket with no live process behind it (a crash/SIGKILL
-    /// leaves the file but no listener, so connect fails). A socket with a live
-    /// session behind it is a hard refusal (one session per worktree DB).
+    /// Classify a leftover session socket and recover from an unclean exit.
+    ///
+    /// * absent — nothing to reclaim;
+    /// * a live session answers a connect + `Ping` — a hard refusal (one session
+    ///   per worktree DB);
+    /// * present but fails connect + `Ping` — an UNCLEAN EXIT (a crash/SIGKILL
+    ///   leaves the file but no listener): reclaim the stale socket, then
+    ///   discard and rebuild the derived `db.lbug` from the durable
+    ///   `apg/layers/**` node files via
+    ///   [`force_full_scan`](Self::force_full_scan) — the same recovery
+    ///   [`abort`](Self::abort) drives — so a killed run's phantom projection
+    ///   (admitted into the index but never made durable) is never served.
     pub fn reclaim_stale_socket(apg_root: &Path) -> anyhow::Result<()> {
         let socket = socket_path(apg_root);
         if !socket.exists() {
             return Ok(());
         }
-        if UnixStream::connect(&socket).is_ok() {
+        if live_session_at(&socket) {
             anyhow::bail!(
                 "a session is already live on {} — only one session may own the worktree DB; stop it with `apg session end`",
                 socket.display()
@@ -390,7 +399,7 @@ impl Coordinator {
             )
         })?;
         eprintln!("apg session: reclaimed stale socket {}", socket.display());
-        Ok(())
+        Self::force_full_scan(apg_root)
     }
 
     /// Server-side shutdown: release the DB handle and the extended flock and
@@ -403,6 +412,30 @@ impl Coordinator {
         let _ = std::fs::remove_file(&self.socket_path);
         eprintln!("apg session: ended");
         Ok(())
+    }
+
+    /// Render the buffered-but-unsaved changes for a refused `end`: the count
+    /// plus one `<write|delete> <layer>.<type>.<name>` line per pending change.
+    /// These changes live only in memory (their projection is in the held DB,
+    /// their node files are not written), so [`end`](Self::end) refuses to
+    /// release the session over them.
+    fn pending_changes_message(&self) -> String {
+        let mut msg = format!(
+            "session end refused: {} pending change(s) are not durable — run `apg session save` to make them durable, or `apg session abort` to discard them",
+            self.buffer.len()
+        );
+        for change in &self.buffer {
+            let kind = if change.content.is_some() {
+                "write"
+            } else {
+                "delete"
+            };
+            msg.push_str(&format!(
+                "\n  {kind} {}.{}.{}",
+                change.layer, change.node_type, change.name
+            ));
+        }
+        msg
     }
 
     /// `apg session save`: make the whole buffered set durable. The buffered
@@ -491,7 +524,7 @@ impl Coordinator {
         let _ = std::fs::remove_file(&self.socket_path);
 
         if dirty {
-            self.force_full_scan()?;
+            Self::force_full_scan(&self.apg_root)?;
         }
 
         eprintln!("apg session: aborted");
@@ -501,29 +534,26 @@ impl Coordinator {
     /// Force a full `apg scan` (the existing scan/pipeline entry point) that
     /// discards the derived index and rebuilds it from the durable node files.
     ///
-    /// The session's DB handle, flock and socket are already released by the
-    /// caller ([`abort`](Self::abort)); this only discards the derived
-    /// `db.lbug` + `graph.jsonl` so the scan cannot take a reuse fast path over
-    /// the phantom projection, then runs the scan from the project root (the
-    /// session owns the layout root, whose parent is the project dir). The
-    /// scan's process-global `chdir` into `.trans` is restored so the serve
-    /// loop's remaining lifetime is unaffected.
-    fn force_full_scan(&self) -> anyhow::Result<()> {
+    /// The caller has already released (or not yet acquired) the session's DB
+    /// handle, flock and socket ([`abort`](Self::abort) releases them, the
+    /// start crash-check has not bound them yet); this only discards the
+    /// derived `db.lbug` + `graph.jsonl` so the scan cannot take a reuse fast
+    /// path over the phantom projection, then runs the scan from the project
+    /// root (the session owns the layout root, whose parent is the project
+    /// dir). The scan's process-global `chdir` into `.trans` is restored so the
+    /// serve loop's remaining lifetime is unaffected.
+    fn force_full_scan(apg_root: &Path) -> anyhow::Result<()> {
         // Discard the derived index and its export: with no `db.lbug` the scan
         // freshness fast path cannot fire, and with no `graph.jsonl` there is
         // no previous export to splice from — the scan is forced to rebuild
         // from the durable node files (`apg/layers/**`) and freshly scanned
         // code. The node files themselves are the system of record and are
         // never touched.
-        let trans = self.apg_root.join(specs::TRANS);
+        let trans = apg_root.join(specs::TRANS);
         let _ = std::fs::remove_file(trans.join("db.lbug"));
         let _ = std::fs::remove_file(trans.join("graph.jsonl"));
 
-        let project_dir = self
-            .apg_root
-            .parent()
-            .unwrap_or(&self.apg_root)
-            .to_path_buf();
+        let project_dir = apg_root.parent().unwrap_or(apg_root).to_path_buf();
         let previous = std::env::current_dir()?;
         let result = crate::cmd_scan(&[project_dir.display().to_string()]);
         let _ = std::env::set_current_dir(previous);
@@ -553,14 +583,29 @@ impl Coordinator {
                 match request {
                     Request::Ping => write_msg(&mut stream, &Reply::Pong)?,
                     Request::End => {
+                        // A clean buffer: release the DB handle, the extended
+                        // flock and the socket, and let `serve` exit. A DIRTY
+                        // buffer holds admitted-but-unsaved changes in memory
+                        // only, so releasing would silently lose them: report
+                        // the pending changes and stay live until the caller
+                        // saves (`apg session save`) or discards
+                        // (`apg session abort`).
+                        if self.buffer.is_empty() {
+                            write_msg(
+                                &mut stream,
+                                &Reply::Ok {
+                                    output: "Session ended".to_string(),
+                                },
+                            )?;
+                            self.end()?;
+                            return Ok(());
+                        }
                         write_msg(
                             &mut stream,
-                            &Reply::Ok {
-                                output: String::new(),
+                            &Reply::Err {
+                                message: self.pending_changes_message(),
                             },
                         )?;
-                        self.end()?;
-                        return Ok(());
                     }
                     Request::Query { query, json } => {
                         let reply = self.handle_query(&query, json);
@@ -850,13 +895,20 @@ impl Coordinator {
             read_msg::<Reply>(&stream)
         });
         match result {
-            Ok(_) => {
-                println!("Session ended");
+            Ok(reply) => {
+                // Print the coordinator's reply: a clean `end` reports the
+                // release, a dirty buffer comes back as an Err naming the
+                // pending changes (the session stays live).
+                println!("{}", expect_ok(reply)?);
                 Ok(())
             }
             Err(_) => {
-                // Stale socket: reclaim so the next start can bind cleanly.
-                let _ = std::fs::remove_file(&socket);
+                // A present-but-unreachable socket is an unclean exit. Reclaim
+                // it and rebuild the derived index from the durable node files
+                // exactly as a `start` crash-check does — the socket removal
+                // alone would strand the killed run's phantom projection with
+                // no later socket to detect it.
+                Self::reclaim_stale_socket(apg_root)?;
                 println!("no live session to end (reclaimed stale socket)");
                 Ok(())
             }
