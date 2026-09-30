@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "README.md",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "AGENTS.md",
+      "properties": {}
     }
   ],
   "in": [
