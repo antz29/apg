@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "cli-session-substrate",
+  "body": "Durable spec mutations flow through a caller-controlled-durability session. A live CLI session owns the worktree's `apg/.trans/db.lbug` and the extended spec lock, accepts durable `apg node` / `apg edge` mutations as an in-memory buffer projected into the live database, and makes the whole buffered set durable at a `save` — one atomic node-file write, one git commit, and the scan_meta re-anchor. The session is the single writer of the buffered node files and the live index; the node files are the system of record and the database index is derived from them. This umbrella decomposes into the session's admission, buffering, save, end/abandon, read-routing, write-ordering, lifecycle-exclusivity, crash-recovery, and warning-visibility behaviours.",
+  "properties": {
+    "feature": "cli-session-substrate"
+  },
+  "out": [],
+  "in": []
+}
