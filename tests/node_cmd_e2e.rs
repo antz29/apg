@@ -2172,21 +2172,62 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-02 task-7 (E2E): `apg node rm` on a node reviewed by an
-    /// outstanding item WARNS (stderr) naming each open/actioned Feedback and
-    /// its status, then removes the node anyway. The record set is
-    /// authoritative: the Feedback records and their reviewed-target references
-    /// survive in the requirements mirror, so `apg review list` still reports
-    /// both items marked `(removed target)`. A node whose items are all
-    /// `resolved`, and a node with no items, remove silently.
+    /// Phase-01 task-36 (E2E, minimal make-green): `apg node rm` on a node
+    /// reviewed by an outstanding item proceeds, and the Feedback records
+    /// survive — the record set is authoritative, so the Feedback records and
+    /// their reviewed-target references persist in the requirements mirror and
+    /// `apg review list` still reports both items marked `(removed target)`. A
+    /// node whose items are all `resolved`, and a node with no items, remove
+    /// cleanly too.
+    ///
+    /// Durable mutations are mandatory-session, so every node add/rm runs under
+    /// a live `apg session start` with `apg session save` as the single
+    /// durability point; the transient `apg review …` writes take the same
+    /// extended flock as a live session, so they run only between sessions.
+    /// The write-time warning that names the outstanding feedback rides the
+    /// session reply and reaches the CLIENT's stderr — that routing is
+    /// phase-03 work; this task asserts the removal's success and the
+    /// surviving records, not the warning's destination.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn node_rm_warns_on_outstanding_feedback_and_keeps_the_record() {
-        let (_wt_apg, repo, wt) = mutation_fixture("node-rm-warn");
+        let (wt_apg, repo, wt) = mutation_fixture("node-rm-warn");
+        let home = repo.root.join("home");
 
-        // Run the real CLI, asserting success (dumping stderr on failure).
+        // Run a durable `args` under a fresh live session, make the buffered
+        // change durable with `save`, then end the session cleanly.
+        let mutate = |args: &[&str]| -> std::process::Output {
+            let session = testutil::start_session_process(&wt, &home);
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let save = testutil::spawn_apg(&["session", "save"], &wt);
+            assert!(
+                save.status.success(),
+                "session save failed: {}",
+                String::from_utf8_lossy(&save.stderr)
+            );
+            let end = end_session(&wt, session);
+            assert!(
+                end.status.success(),
+                "session end failed: {}",
+                String::from_utf8_lossy(&end.stderr)
+            );
+            out
+        };
+        // A direct CLI run — the transient review writes, which run only while
+        // no session holds the extended flock.
         let run = |args: &[&str]| -> std::process::Output {
-            let out = spawn_apg(args, &wt);
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
             assert!(
                 out.status.success(),
                 "apg {args:?} failed: {}",
@@ -2195,8 +2236,8 @@ mod e2e {
             out
         };
 
-        // --- Outstanding feedback (one open, one actioned) → warn + proceed ---
-        run(&[
+        // --- Outstanding feedback (one open, one actioned) → removal proceeds ---
+        mutate(&[
             "node",
             "add",
             "requirements",
@@ -2225,23 +2266,10 @@ mod e2e {
         ]);
         run(&["review", "action", "foo/feedback-2", "--fix"]);
 
-        let removed = run(&["node", "rm", "requirements", "requirement", "gone"]);
-        let stderr = String::from_utf8_lossy(&removed.stderr);
+        mutate(&["node", "rm", "requirements", "requirement", "gone"]);
         assert!(
-            stderr.contains("apg: warning: removing"),
-            "the removal must warn about outstanding feedback: {stderr}"
-        );
-        assert!(
-            stderr.contains("requirements.requirement.gone"),
-            "the warning must name the removed FQN: {stderr}"
-        );
-        assert!(
-            stderr.contains("foo/feedback-1 (open)"),
-            "the warning must name the open item and its status: {stderr}"
-        );
-        assert!(
-            stderr.contains("foo/feedback-2 (actioned)"),
-            "the warning must name the actioned item and its status: {stderr}"
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "gone").exists(),
+            "the removed node must not survive as a node file after save"
         );
 
         // The records survive the target's removal and still list, marked.
@@ -2258,8 +2286,8 @@ mod e2e {
             "the actioned item must survive and list against its removed target: {out}"
         );
 
-        // --- All resolved → no warning, removal still succeeds ---
-        run(&[
+        // --- All resolved → removal still succeeds ---
+        mutate(&[
             "node",
             "add",
             "requirements",
@@ -2278,14 +2306,14 @@ mod e2e {
             "foo",
         ]);
         run(&["review", "resolve", "foo/feedback-3"]);
-        let removed = run(&["node", "rm", "requirements", "requirement", "calm"]);
+        mutate(&["node", "rm", "requirements", "requirement", "calm"]);
         assert!(
-            !String::from_utf8_lossy(&removed.stderr).contains("apg: warning: removing"),
-            "all-resolved feedback must not warn"
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "calm").exists(),
+            "the all-resolved node's removal must land"
         );
 
-        // --- No feedback → no warning, removal still succeeds ---
-        run(&[
+        // --- No feedback → removal still succeeds ---
+        mutate(&[
             "node",
             "add",
             "requirements",
@@ -2294,10 +2322,10 @@ mod e2e {
             "--body",
             "x",
         ]);
-        let removed = run(&["node", "rm", "requirements", "requirement", "bare"]);
+        mutate(&["node", "rm", "requirements", "requirement", "bare"]);
         assert!(
-            !String::from_utf8_lossy(&removed.stderr).contains("apg: warning: removing"),
-            "an unreviewed node must not warn"
+            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "bare").exists(),
+            "the unreviewed node's removal must land"
         );
 
         testutil::remove(&repo);
