@@ -1055,20 +1055,21 @@ impl Coordinator {
     }
 
     /// The at-most-once client entry point: forward a node/edge mutation to the
-    /// live session and return the coordinator's output message. A transport
-    /// failure is reported (never a direct-path fallback).
+    /// live session and return the coordinator's [`ForwardedMutation`] (human
+    /// output message plus the write-time warnings), so the caller can print
+    /// the warnings on its own stderr while the write's result is left intact.
+    /// A transport failure is reported (never a direct-path fallback).
     ///
-    /// The warning-carrying shape is produced by
-    /// [`forward_mutation_with_id`](Self::forward_mutation_with_id); this
-    /// wrapper currently forwards only the output message. Task-10 propagates
-    /// the warnings through to `cmd_node`/`cmd_edge`.
+    /// This is the warning-carrying shape produced by
+    /// [`forward_mutation_with_id`](Self::forward_mutation_with_id), delegated
+    /// with a freshly generated client id.
     pub fn forward_mutation(
         apg_root: &Path,
         kind: &str,
         args: &[String],
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<ForwardedMutation> {
         let client_id = new_client_id();
-        Self::forward_mutation_with_id(apg_root, &client_id, kind, args).map(|r| r.output)
+        Self::forward_mutation_with_id(apg_root, &client_id, kind, args)
     }
 
     /// [`forward_mutation`](Self::forward_mutation) with an explicit client id —

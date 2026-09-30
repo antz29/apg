@@ -74,7 +74,7 @@ pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
             "a live session is required for durable mutations — run `apg session start` first"
         );
     }
-    let out = session::Coordinator::forward_mutation(&apg_root, "node", args)?;
+    let out = session::Coordinator::forward_mutation(&apg_root, "node", args)?.output;
     println!("{out}");
     Ok(())
 }
@@ -98,7 +98,7 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
             "a live session is required for durable mutations — run `apg session start` first"
         );
     }
-    let out = session::Coordinator::forward_mutation(&apg_root, "edge", args)?;
+    let out = session::Coordinator::forward_mutation(&apg_root, "edge", args)?.output;
     println!("{out}");
     Ok(())
 }
