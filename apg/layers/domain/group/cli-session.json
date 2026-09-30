@@ -52,6 +52,11 @@
       "kind": "realised-by",
       "target": "solution.component.cli-session-lifecycle-guards",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.cli-session-docs",
+      "properties": {}
     }
   ],
   "in": [
