@@ -286,10 +286,21 @@ pub fn recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 /// its DB) there is nothing to reuse → NOT fresh. A missing/pre-hardening
 /// recorded key means freshness cannot be verified → NOT fresh.
 ///
+/// A session socket that is present but fails a connect/`Ping` is also NOT
+/// fresh: an unclean session exit leaves the socket behind while the derived
+/// DB reflects only the last saved state, so a phantom projection exists and
+/// the on-disk DB cannot be trusted until a rebuild. A LIVE session (one that
+/// answers `Ping`) is the session's own business — it holds the DB directly,
+/// so its presence never makes the on-disk fast path unfresh.
+///
 /// This is deliberately not `!is_stale`: `is_stale` is N/A (false) when there
 /// is no DB or the dir is not a git repo, so `is_stale != !is_fresh` there.
 pub fn is_fresh(apg_root: &Path) -> bool {
     if !db_path(apg_root).exists() {
+        return false;
+    }
+    let socket = crate::session::socket_path(apg_root);
+    if socket.exists() && !crate::session::live_session_at(&socket) {
         return false;
     }
     let Ok(repo) = git2::Repository::discover(apg_root) else {
