@@ -374,12 +374,8 @@ mod e2e {
         // The positive case: a NEW constraint WITHOUT `attaches-to` SUCCEEDS —
         // the refusal targets only a newly-added attached constraint, never
         // every new constraint.
-        let law_path = apg::layers::node_file_path(
-            &apg_root,
-            apg::layers::Layer::Domain,
-            "constraint",
-            "law",
-        );
+        let law_path =
+            apg::layers::node_file_path(&apg_root, apg::layers::Layer::Domain, "constraint", "law");
         let out = testutil::spawn_apg(&["node", "add", "domain", "constraint", "law"], &wt);
         assert!(
             out.status.success(),
