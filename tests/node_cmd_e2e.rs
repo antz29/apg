@@ -1293,10 +1293,13 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-03 task-15: with a live session, a parallel burst of N separate
+    /// Phase-01 task-23: with a live session, a parallel burst of N separate
     /// routed `apg edge add` processes is applied by the ONE coordinator in
-    /// receive order — zero failures and the shared hub carries exactly N
-    /// out-edges (no lost update), and the DB equals the serial application.
+    /// receive order — zero failures, and no lost update. The write-back buffer
+    /// is projected into the live DB at admission but stays NON-durable (no node
+    /// file, no commit) until `apg session save`, which lands the whole burst in
+    /// exactly ONE commit; after save the shared hub carries exactly N distinct
+    /// out-edges on disk and the DB equals the serial application.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn live_session_applies_routed_mutations_in_receive_order_as_single_writer() {
@@ -1306,13 +1309,107 @@ mod e2e {
         let home = repo.root.join("home");
         let session = testutil::start_session_process(&wt, &home);
 
+        // Baseline: the buffered burst below must not move git until save.
+        let before_commits = testutil::commit_count(&wt);
+        let before_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+
+        // A parallel burst of N separate routed `apg edge add` processes: zero
+        // failures is the single-writer / no-lost-update evidence.
         let (failed, by_lock) = run_edge_burst(&wt, &home, N);
         assert_eq!(
             failed, 0,
             "routed burst lost {failed}/{N} mutations ({by_lock:?})"
         );
-        assert_eq!(hub_out_edges(&wt_apg), N, "the single writer lost an edge");
 
+        // Still buffered: a routed read observes the projected intention (all
+        // N edges), but the on-disk store and git stay at the last saved state.
+        let routed = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (:Requirement {fqn: 'requirements.requirement.hub'})-[:DependsOn]->(b) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert!(
+            routed.status.success(),
+            "routed read: {}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&routed.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("10"),
+            "the buffered burst must be visible to a routed read at admission"
+        );
+        assert_eq!(
+            hub_out_edges(&wt_apg),
+            0,
+            "a buffered burst must not write the hub node file before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered burst must not create a commit before save"
+        );
+
+        // The single durability point: one save lands the whole burst.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
+        );
+
+        // Durable now: the hub carries exactly N distinct out-edges — one per
+        // leaf, no duplicate and no lost update — in the received order, and the
+        // whole burst landed in exactly ONE commit at save.
+        let hub =
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "hub").unwrap();
+        assert_eq!(hub.out.len(), N, "the single writer lost an edge");
+        let mut targets: Vec<String> = hub
+            .out
+            .iter()
+            .filter(|e| e.kind == "depends-on")
+            .map(|e| e.target.clone())
+            .collect();
+        targets.sort();
+        let mut expected: Vec<String> = (0..N)
+            .map(|i| format!("requirements.requirement.leaf-{i}"))
+            .collect();
+        expected.sort();
+        assert_eq!(
+            targets, expected,
+            "the saved burst must carry exactly one edge to each leaf"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the whole burst must land in exactly one save commit"
+        );
+        let after_head = git2::Repository::open(&wt)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        assert_ne!(after_head, before_head, "save must create a commit");
+
+        // End the session cleanly.
         let out = end_session(&wt, session);
         assert!(
             out.status.success(),
