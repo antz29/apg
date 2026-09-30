@@ -398,22 +398,24 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The strict add/update primitives: `refuse_if_present` refuses a present
-    /// FQN and allows an absent one; `update_node_file` is edge-preserving — it
-    /// merges body/properties (set + explicit unset) while keeping the exact
-    /// count/content of the node's out/in edges — and refuses an absent node.
+    /// The strict add/update surface through the PRODUCTION path: the
+    /// `refuse_if_present` gate refuses a present FQN and allows an absent one,
+    /// and `apg node update` (`node_cmd::build_change` + `layers::write_project`,
+    /// the exact sequence production runs) is edge-preserving — it merges
+    /// body/properties (set + explicit unset) while keeping the immutable
+    /// identity and the exact count/content of the node's out/in edges — and
+    /// refuses an absent node.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn update_node_file_preserves_edges_and_merges_body_and_properties() {
-        let root = temp_root("node-update");
+        let (wt_apg, repo, _wt) = mutation_fixture("node-update");
         let (mut a, b) = authored_pair("a", "b");
         a.properties.insert("a".to_string(), "0".to_string());
         a.properties.insert("b".to_string(), "2".to_string());
-        write_node(&root, &a).unwrap();
-        write_node(&root, &b).unwrap();
+        write_project(&wt_apg, &[a.clone(), b.clone()], &[]).unwrap();
 
         // refuse_if_present: a present FQN is refused, naming update/rm.
-        let a_path = node_file_path(&root, Layer::Requirements, "requirement", "a");
+        let a_path = node_file_path(&wt_apg, Layer::Requirements, "requirement", "a");
         let err = refuse_if_present(
             a_path.exists(),
             &fqn(Layer::Requirements, "requirement", "a"),
@@ -428,7 +430,7 @@ mod e2e {
         // An absent FQN passes the same gate.
         assert!(
             refuse_if_present(
-                node_file_path(&root, Layer::Requirements, "requirement", "ghost").exists(),
+                node_file_path(&wt_apg, Layer::Requirements, "requirement", "ghost").exists(),
                 "requirements.requirement.ghost",
                 "apg node update",
                 "apg node rm",
@@ -436,20 +438,26 @@ mod e2e {
             .is_ok()
         );
 
-        // update_node_file: body set, properties MERGE ({a:0,b:2} ->
-        // --property a=1 -> {a:1,b:2} -> --unset-property b -> {a:1}), and the
-        // exact out/in edge content is untouched.
-        let set = BTreeMap::from([("a".to_string(), "1".to_string())]);
-        let updated = update_node_file(
-            &root,
-            Layer::Requirements,
-            "requirement",
-            "a",
-            Some("new body"),
-            &set,
-            &BTreeSet::new(),
+        // `apg node update` (the real builder + write): body set, properties
+        // MERGE ({a:0,b:2} -> --property a=1 -> {a:1,b:2}), the immutable
+        // identity kept, and the exact out/in edge content untouched.
+        let change = apg::node_cmd::build_change(
+            &wt_apg,
+            "node",
+            &[
+                "update".to_string(),
+                "requirements".to_string(),
+                "requirement".to_string(),
+                "a".to_string(),
+                "--body".to_string(),
+                "new body".to_string(),
+                "--property".to_string(),
+                "a=1".to_string(),
+            ],
         )
         .unwrap();
+        let updated = change.writes[0].clone();
+        write_project(&wt_apg, &change.writes, &change.deletes).unwrap();
         assert_eq!(updated.body, "new body");
         assert_eq!(
             updated.properties,
@@ -465,20 +473,24 @@ mod e2e {
         assert_eq!(updated.out, a.out, "out-edges must be preserved");
         assert_eq!(updated.in_edges, a.in_edges, "in-edges must be preserved");
 
-        // `update_node_file` is pure: persist the merged node before the next
-        // edit reads it back off disk.
-        write_node(&root, &updated).unwrap();
-        let unset = BTreeSet::from(["b".to_string()]);
-        let updated = update_node_file(
-            &root,
-            Layer::Requirements,
-            "requirement",
-            "a",
-            None,
-            &BTreeMap::new(),
-            &unset,
+        // A second `apg node update` reads the just-written state back through
+        // the production path: `--unset-property b` removes exactly the named
+        // key and an omitted `--body` is preserved.
+        let change = apg::node_cmd::build_change(
+            &wt_apg,
+            "node",
+            &[
+                "update".to_string(),
+                "requirements".to_string(),
+                "requirement".to_string(),
+                "a".to_string(),
+                "--unset-property".to_string(),
+                "b".to_string(),
+            ],
         )
         .unwrap();
+        let updated = change.writes[0].clone();
+        write_project(&wt_apg, &change.writes, &change.deletes).unwrap();
         assert_eq!(
             updated.properties,
             BTreeMap::from([("a".to_string(), "1".to_string())]),
@@ -487,19 +499,21 @@ mod e2e {
         assert_eq!(updated.body, "new body", "omitted --body is preserved");
 
         // An absent node is refused before any update is computed.
-        let err = update_node_file(
-            &root,
-            Layer::Requirements,
-            "requirement",
-            "ghost",
-            None,
-            &BTreeMap::new(),
-            &BTreeSet::new(),
+        let err = apg::node_cmd::build_change(
+            &wt_apg,
+            "node",
+            &[
+                "update".to_string(),
+                "requirements".to_string(),
+                "requirement".to_string(),
+                "ghost".to_string(),
+            ],
         )
-        .unwrap_err()
+        .err()
+        .expect("an update of an absent node must be refused")
         .to_string();
         assert!(err.contains("does not exist"), "{err}");
-        let _ = std::fs::remove_dir_all(&root);
+        testutil::remove(&repo);
     }
 
     // --- Tree ingestion (phase-3 task-15) ---
