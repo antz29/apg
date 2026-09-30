@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "cli-session-mandatory",
+  "body": "A durable node-file mutation is never written to disk or committed outside a live session's save. The session is the sole writer of the worktree node files, the live index, and their commits; a mutation issued with the session absent is refused and names the session command that opens one.",
+  "properties": {
+    "attaches-to": "requirements.requirement.cli-session-substrate"
+  },
+  "out": [],
+  "in": []
+}
