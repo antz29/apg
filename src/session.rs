@@ -623,16 +623,23 @@ impl Coordinator {
                         write_msg(&mut stream, &reply)?;
                     }
                     Request::Abort => {
-                        // Declared in phase-02 task-1; the abort lifecycle
-                        // (discard the buffer, release the session, force a full
-                        // scan over a dirty run) lands in task-2/task-3. This
-                        // arm replies cleanly and touches no session state.
-                        write_msg(
-                            &mut stream,
-                            &Reply::Err {
-                                message: "session abort is not implemented yet".to_string(),
+                        // Discard the buffer, release the session, and (over a
+                        // dirty run) force the full scan that rebuilds the
+                        // phantom-projected index from the durable node files.
+                        let reply = match self.abort() {
+                            Ok(()) => Reply::Ok {
+                                output: "Session aborted".to_string(),
                             },
-                        )?;
+                            Err(e) => Reply::Err {
+                                message: format!("{e:#}"),
+                            },
+                        };
+                        write_msg(&mut stream, &reply)?;
+                        // `abort` released the DB handle, the extended flock
+                        // and the socket (its forced scan may already have
+                        // rebuilt the index), so there is nothing left to
+                        // serve — exit like `Request::End`'s clean path.
+                        return Ok(());
                     }
                     Request::Mutate {
                         client_id,
