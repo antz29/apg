@@ -6,7 +6,13 @@
   "properties": {
     "kind": "event"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.cli-session-warning-propagation",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
