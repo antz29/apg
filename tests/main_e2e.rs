@@ -3248,10 +3248,14 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// Phase-04 task-8 (acceptance): the hermetic external-project scratch-repo
+    /// Phase-01 task-20 (acceptance): the hermetic external-project scratch-repo
     /// acceptance — a FRESH NON-FIXTURE repo driven by a REAL `apg init` + REAL
     /// `apg scan` (the genuine added dimension; every other test uses the
-    /// hermetic `scan_checkout` payload fixture).
+    /// hermetic `scan_checkout` payload fixture) — under the mandatory-session +
+    /// write-back contract. A live session admits a BURST of durable mutations
+    /// into its write-back buffer, read-your-writes is observed through the
+    /// session, `apg session save` is the single durability point (one commit),
+    /// and the session ends cleanly.
     ///
     /// The already-built artifact is resolved through the `apg.testutil`
     /// binary-locating helper (`ApgCommand`) — no nested `cargo build`. Each
@@ -3259,7 +3263,8 @@ mod e2e {
     /// 2024 forbids process-wide `env::set_var`, and `apg init` installs the
     /// suite into `$HOME/.opencode`). A real source file is committed BEFORE
     /// scanning so `auto_detect_languages` selects just the Go frontend. The
-    /// project context is established with `apg project start`, and every
+    /// project context is established with `apg project start`, the live session
+    /// is started with a real `apg session start` process, and every
     /// durable-write assertion runs with cwd inside
     /// `<scratch>/apg/.worktrees/<name>`. Both the `/tmp` scratch repo and the
     /// isolated HOME are torn down at the end.
@@ -3320,7 +3325,21 @@ mod e2e {
         );
         let wt_apg = wt.join(specs::LAYOUT);
 
-        // ---- (a) cross-process burst == serial application, zero lock errors ----
+        // ---- (a) open the live session; the burst is admitted into its buffer ----
+        // Durable mutations are mandatory-session: one live `apg session start`
+        // process owns the DB and the single-writer lock, and every mutation
+        // below is admitted into its write-back buffer rather than written to
+        // disk. The burst of N separate `apg` processes (each its own binary
+        // invocation) routes through that one live session, so the serial
+        // application and the zero-lock-error property are preserved by
+        // construction.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the acceptance burst must run under a live session"
+        );
+        let before_commits = testutil::commit_count(&wt);
+
         const N: usize = 6;
         run_in(&wt, &["node", "add", "requirements", "requirement", "hub"]);
         for i in 0..N {
@@ -3363,16 +3382,46 @@ mod e2e {
                 "burst[{i}] hit the specs.lock flock: {stderr}"
             );
         }
-        let hub =
-            layers::read_node_file(&wt_apg, layers::Layer::Requirements, "requirement", "hub")
-                .unwrap();
+
+        // The whole burst is BUFFERED: no node file has landed and no commit has
+        // been made — `apg session save` is the one durability point.
+        assert!(
+            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "hub")
+                .exists(),
+            "the burst must stay buffered until save"
+        );
         assert_eq!(
-            hub.out.len(),
-            N,
-            "the burst store must equal the serial application"
+            testutil::commit_count(&wt),
+            before_commits,
+            "a buffered burst must not create a commit before save"
         );
 
-        // ---- (b) immediate read-your-writes across the real CLI ----
+        // ---- (b) read-your-writes through the live session ----
+        // The session projected the cumulative buffer into its held DB, so a
+        // SEPARATE `apg query` process (routed through the socket) sees the
+        // hub's N buffered out-edges before any save.
+        let burst_read = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (:Requirement {fqn: 'requirements.requirement.hub'})-[:DependsOn]->(b) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert!(
+            burst_read.status.success(),
+            "{}",
+            String::from_utf8_lossy(&burst_read.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&burst_read.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("6"),
+            "a NEW apg query process must read the buffered burst through the session"
+        );
+
+        // An immediate read-your-writes across the real CLI, still unsaved.
         run_in(&wt, &["node", "add", "requirements", "requirement", "foo"]);
         let q = testutil::spawn_apg(
             &[
@@ -3388,35 +3437,38 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "a NEW apg query process must read foo with no scan/flush"
+            "a NEW apg query process must read foo through the session with no save"
         );
 
-        // ---- (c) full session lifecycle: start → routed mutation/read → end → direct read ----
-        let session = testutil::start_session_process(&wt, &home);
-        run_in(
-            &wt,
-            &["node", "add", "requirements", "requirement", "routed"],
-        );
-        let routed = testutil::spawn_apg(
-            &[
-                "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.routed'}) RETURN count(n)",
-            ],
-            &wt,
-        );
+        // ---- (c) `apg session save` is the single durability point ----
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
-            routed.status.success(),
+            save.status.success(),
             "{}",
-            String::from_utf8_lossy(&routed.stderr)
+            String::from_utf8_lossy(&save.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&routed.stdout)
-                .lines()
-                .last()
-                .map(str::trim),
-            Some("1"),
-            "a routed read must see the routed mutation before session end"
+            String::from_utf8_lossy(&save.stdout).trim(),
+            "Session saved"
         );
+        // The whole buffered burst is now durable, and it equals the serial
+        // application: the hub carries all N out-edges, in exactly one commit.
+        let hub =
+            layers::read_node_file(&wt_apg, layers::Layer::Requirements, "requirement", "hub")
+                .unwrap();
+        assert_eq!(
+            hub.out.len(),
+            N,
+            "the burst store must equal the serial application"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            before_commits + 1,
+            "the whole burst must land in exactly one commit"
+        );
+
+        // ---- (d) session lifecycle: end cleanly, then a direct read sees the
+        // saved state and db.lbug is consistent with the node files ----
         let end = testutil::spawn_apg(&["session", "end"], &wt);
         assert!(
             end.status.success(),
@@ -3429,14 +3481,21 @@ mod e2e {
             "{}",
             String::from_utf8_lossy(&sout.stderr)
         );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must be ended"
+        );
+        assert!(
+            apg::artifacts::ArtifactDb::open(&wt_apg).is_ok(),
+            "with no live session the DB must be directly openable"
+        );
 
-        // After `session end`, a direct read sees the same state, and db.lbug is
-        // consistent with the durable node files (every requirement node file
-        // has its row; the row count matches).
+        // With no live session, a fresh query process reads the last saved state
+        // directly from db.lbug.
         let direct = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.routed'}) RETURN count(n)",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -3451,7 +3510,7 @@ mod e2e {
                 .last()
                 .map(str::trim),
             Some("1"),
-            "after session end the direct reader sees the routed mutation"
+            "after session end the direct reader sees the saved mutation"
         );
         {
             let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
