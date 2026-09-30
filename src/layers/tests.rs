@@ -1,4 +1,5 @@
 use super::*;
+use crate::schema::Record;
 use crate::testutil::{code_universe, in_edge, node, out_edge};
 
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
@@ -1616,5 +1617,69 @@ mod unit {
                 "domain.value.stale"
             ])
         );
+    }
+
+    /// [`ingest_nodes`] is the in-memory core [`ingest_tree`] delegates to
+    /// (phase-00 task-2): handed a `Vec<NodeFile>` directly — no disk walk — it
+    /// sorts the set, runs the same validation pipeline, and emits one node
+    /// record per node plus one edge record per **out**-edge (out is canonical;
+    /// the paired in-edge emits nothing). A pairing-inconsistent set (an
+    /// out-edge whose other half is absent) is refused, the same
+    /// [`check_edge_pairing`] gate `ingest_tree` runs. Pure in-memory — the
+    /// scanned/planned universes are empty and no `implemented-by` target is
+    /// present, so no code-ref validation fires.
+    #[test]
+    fn ingest_nodes_emits_records_for_an_in_memory_node_set() {
+        // A paired authored edge: `a` depends-on `b` (out in a's file, the
+        // matching in-edge in b's).
+        let mut a = node("requirements", "requirement", "a");
+        a.out
+            .push(out_edge("depends-on", "requirements.requirement.b"));
+        let mut b = node("requirements", "requirement", "b");
+        b.in_edges
+            .push(in_edge("depends-on", "requirements.requirement.a"));
+
+        let empty = BTreeSet::new();
+        let records = ingest_nodes(&[a, b], &empty, &empty).expect("a paired set ingests");
+
+        // Two node records (sorted: a then b) + exactly one edge record, from
+        // a's out-edge; b's in-edge is verified but never emitted.
+        assert_eq!(
+            records,
+            vec![
+                Record::Requirement {
+                    fqn: "requirements.requirement.a".to_string(),
+                    id: String::new(),
+                    title: "a".to_string(),
+                    body: String::new(),
+                    feature: String::new(),
+                },
+                Record::DependsOn {
+                    from: "requirements.requirement.a".to_string(),
+                    to: "requirements.requirement.b".to_string(),
+                },
+                Record::Requirement {
+                    fqn: "requirements.requirement.b".to_string(),
+                    id: String::new(),
+                    title: "b".to_string(),
+                    body: String::new(),
+                    feature: String::new(),
+                },
+            ]
+        );
+
+        // A pairing-inconsistent set — an out-edge whose matching in-edge is
+        // absent from the target's file — is REFUSED, naming the missing half
+        // (the same gate `ingest_tree` runs).
+        let mut c = node("requirements", "requirement", "c");
+        c.out
+            .push(out_edge("depends-on", "requirements.requirement.d"));
+        let d = node("requirements", "requirement", "d");
+        let msg = ingest_nodes(&[c, d], &empty, &empty)
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("requirements.requirement.c"), "{msg}");
+        assert!(msg.contains("depends-on"), "{msg}");
+        assert!(msg.contains("BOTH endpoint files"), "{msg}");
     }
 }
