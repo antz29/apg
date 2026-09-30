@@ -294,6 +294,12 @@ pub struct Coordinator {
     /// The receive-order queue of accepted requests (FIFO — the single writer
     /// applies mutations in the order it receives them).
     queue: VecDeque<Request>,
+    /// The in-memory write-back buffer of admitted-but-unsaved durable
+    /// node-file changes (phase-01): each routed durable mutation stages its
+    /// [`PendingChange`] here instead of touching `apg/layers/**`; the whole
+    /// buffered set becomes durable — atomically, in one commit — at
+    /// [`save`](Self::save). Populated by admission/routing (phase-01 task-4).
+    buffer: Vec<PendingChange>,
 }
 
 impl Coordinator {
@@ -332,6 +338,7 @@ impl Coordinator {
             _lock: Some(lock),
             ledger: HashMap::new(),
             queue: VecDeque::new(),
+            buffer: Vec::new(),
         };
         coordinator.serve()
     }
@@ -381,6 +388,54 @@ impl Coordinator {
         self._lock = None;
         let _ = std::fs::remove_file(&self.socket_path);
         eprintln!("apg session: ended");
+        Ok(())
+    }
+
+    /// `apg session save`: make the whole buffered set durable. The buffered
+    /// [`PendingChange`]s are collected into the node-file `writes` (those with
+    /// `content: Some(node)`) and `deletes` (those with `content: None`, by
+    /// their destination `path`), flushed ATOMICALLY to
+    /// `apg/layers/<layer>/<type>/<name>.json` with exactly ONE git commit
+    /// ([`layers::write::write_through_with_deletes`]), then the staleness
+    /// gate's recorded `scan_meta` is re-anchored ([`git::reanchor_scan_meta`],
+    /// mirroring the direct path's steps 4–5) and the buffer is cleared.
+    ///
+    /// A clean buffer writes nothing, makes no commit, and clears nothing — a
+    /// pure no-op. The DB projection is NOT run here: the design projects each
+    /// mutation into the live `db.lbug` at ADMISSION (a later task), so save
+    /// only makes the node files durable and re-anchors.
+    pub fn save(&mut self) -> anyhow::Result<()> {
+        if self.buffer.is_empty() {
+            println!("Session saved: no pending changes");
+            return Ok(());
+        }
+
+        let mut writes: Vec<NodeFile> = Vec::new();
+        let mut deletes: Vec<PathBuf> = Vec::new();
+        for change in &self.buffer {
+            match &change.content {
+                Some(node) => writes.push(node.clone()),
+                None => deletes.push(change.path.clone()),
+            }
+        }
+
+        // Atomic multi-file write/delete + exactly ONE commit — the single
+        // durability point for the whole buffered set.
+        layers::write::write_through_with_deletes(&self.apg_root, &writes, &deletes)?;
+
+        // Re-anchor the staleness gate AFTER the commit (mirrors the direct
+        // path's write_project_with steps 4–5): graph.jsonl only, never opens
+        // db.lbug. A re-anchor failure degrades to a warning — the durable
+        // write already landed.
+        if let Err(e) =
+            crate::git::reanchor_scan_meta(&self.apg_root, &crate::git::git_state(&self.apg_root))
+        {
+            eprintln!("apg: warning: could not re-anchor scan_meta after session save: {e:#}");
+        }
+
+        let saved = self.buffer.len();
+        self.buffer.clear();
+        println!("Session saved: {saved} change(s) in one commit");
         Ok(())
     }
 
