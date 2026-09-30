@@ -191,6 +191,11 @@
       "kind": "contains",
       "target": "solution.component.cli-session-routing",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cli-session-lifecycle-guards",
+      "properties": {}
     }
   ],
   "in": [
