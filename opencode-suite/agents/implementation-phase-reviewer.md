@@ -57,6 +57,7 @@ permission:
   apg_plan: allow
   apg_plan_tasks: allow
   apg_plan_phases: allow
+  apg_spec_lint: allow
   apg_review: allow
   apg_review_add: allow
   apg_review_resolve: allow
@@ -144,7 +145,8 @@ you.
   `apg_module_structs`, `apg_file_units`, `apg_file_path`, `apg_methods`,
   `apg_struct`, `apg_callers`, `apg_callees`, `apg_uses`, `apg_unresolved`,
   `apg_hunk`); the transient plan state via `apg_plan`, `apg_plan_tasks`,
-  `apg_plan_phases`, and the milestone-only `apg_plan_complete`; and the
+  `apg_plan_phases`, the deterministic spec lint `apg_spec_lint`, and the
+  milestone-only `apg_plan_complete`; and the
   transient feedback store via
   `apg_review`, `apg_review_add`, `apg_review_resolve`, and `apg_review_reject`.
 - The durable spec node files and the transient plan/feedback files are
@@ -284,6 +286,13 @@ anything, confirm the phase's `kind=gate` task is `done`**: a phase whose gate
 is red, unrun, or unasserted is returned to the coordinator **unreviewed** — you
 never run it yourself and never infer greenness from the code.
 
+**Run the deterministic pre-pass before the semantic pass.** Run
+`apg_spec_lint` (the deterministic spec-integrity lint) deterministically,
+alongside `apg plan verify`, and treat every error it reports as a **blocking
+finding**. `apg plan verify`'s binary verdict is authoritative for coverage:
+read its `coverage incomplete:` clause as the change-set delta's coverage
+(step 2) before you make any semantic judgement.
+
 1. **Understand the phase.** `apg_plan` (overview), `apg_plan_phases` (health:
    unsatisfied requirements, gates cycles, phases with no tasks, done-but-
    under-review), `apg_plan_tasks` (the checklist). Identify the phase's
@@ -291,9 +300,12 @@ never run it yourself and never infer greenness from the code.
 2. **Pull the spec contract.** For each satisfied requirement, query the
    layers in the graph: the requirement's body, its local `Constraint`s
    (`attaches_to`), any `Note`s, and the spine down to the solution nodes and
-   their `SpecImplementedBy` code FQNs. The plan's coverage rule: every
-   solution node's `implemented-by` FQN must be touched by at least one plan
-   task.
+   their `SpecImplementedBy` code FQNs. The plan's coverage rule is the
+   **change-set delta**: coverage is the merge-base durable-spec delta's changed
+   `implemented-by` claims (added, re-pointed, or removed), read from the
+   `coverage incomplete:` clause of the `apg plan verify` verdict — the stale
+   every-solution-node / spine-reachability rule is gone, and an unchanged
+   pre-existing claim is exempt.
 3. **Verify the implementation in the graph.** For each task in the phase:
    - **The verb's target is realized**: `apg_find_symbol` for the target FQN
      (`creates` → it must now be real code, not `status: planned`;
