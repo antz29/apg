@@ -168,6 +168,31 @@ pub(crate) fn run_pipeline(
         );
     }
 
+    // Crash recovery (phase-02 task-8, cli-session-crash-recovery): a session
+    // socket that is present but fails a connect + `Ping` is an UNCLEAN EXIT —
+    // the killed process left the file behind while its own `db.lbug` handle
+    // closed with the unsaved buffer's phantom projections still in the index.
+    // The on-disk `db.lbug` therefore reflects only the last SAVED state plus a
+    // phantom projection, so it must never be reused. Reclaim the stale socket,
+    // discard the derived index and its export, and force the full load below to
+    // rebuild both from the assembled graph (`apg/layers/**` + the scanned
+    // code) rather than seeding the splice from the phantom rows. A live
+    // session answers `Ping` (refused above) and an absent socket is the
+    // ordinary case — the reuse fast path is unchanged for both.
+    let stale_socket = apg_root.as_ref().and_then(|root| {
+        let socket = session::socket_path(root);
+        (socket.exists() && !session::live_session_at(&socket)).then_some(socket)
+    });
+    let force_full_load = stale_socket.is_some();
+    if let Some(socket) = &stale_socket {
+        log.ln(
+            "[load] session socket present but unreachable (unclean exit) — reclaiming it and rebuilding db.lbug from apg/layers/**",
+        );
+        let _ = std::fs::remove_file(socket);
+        let _ = std::fs::remove_file("db.lbug");
+        let _ = std::fs::remove_file("graph.jsonl");
+    }
+
     // ---- DB build dispatch (win C, phase-03 task-4) ------------------------
     //
     // On the win-B incremental path the previous `db.lbug` already holds every
@@ -180,7 +205,9 @@ pub(crate) fn run_pipeline(
     // full-scan fallback), and `input.targets_rel`/`removed_fqns` are the SAME
     // phase-2 sets that drove the frontend target hand-off.
     let splice_report = match (input, apg_root.as_deref()) {
-        (Some(input), Some(apg_root)) => try_splice_build(&graph, input, apg_root, log),
+        (Some(input), Some(apg_root)) if !force_full_load => {
+            try_splice_build(&graph, input, apg_root, log)
+        }
         _ => None,
     };
     if let Some(report) = splice_report {
