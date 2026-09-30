@@ -104,13 +104,19 @@ pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// A complete logical mutation: the node files to write, the paths to delete,
-/// and the human message the command prints. Building the change only READS the
-/// store (existence checks + RMW); applying it is the durable sequence. The
-/// phase-03 session coordinator builds a change and applies it itself (single
-/// writer), so this one builder serves both the direct and the routed path.
+/// the write-time advisories to surface to the caller, and the human message the
+/// command prints. Building the change only READS the store (existence checks +
+/// RMW); applying it is the durable sequence. The phase-03 session coordinator
+/// builds a change and applies it itself (single writer), so this one builder
+/// serves both the direct and the routed path.
 pub struct Change {
     pub writes: Vec<NodeFile>,
     pub deletes: Vec<PathBuf>,
+    /// Write-time advisories built beside the write (e.g. the node-add/update
+    /// wording advisory and the node-rm outstanding-feedback notice). They ride
+    /// in the change so a routed mutation can return them to the caller, who
+    /// prints them on stderr at the mutation — they never block the write.
+    pub warnings: Vec<String>,
     pub message: String,
 }
 
@@ -199,6 +205,7 @@ fn node_add_change(
     Ok(Change {
         writes: vec![node],
         deletes: Vec::new(),
+        warnings: Vec::new(),
         message: format!("Added node {f}"),
     })
 }
@@ -248,6 +255,7 @@ fn node_update_change(
     Ok(Change {
         writes: vec![updated],
         deletes: Vec::new(),
+        warnings: Vec::new(),
         message: format!("Updated node {f}"),
     })
 }
@@ -351,6 +359,7 @@ fn node_rm_change(
     Ok(Change {
         writes,
         deletes,
+        warnings: Vec::new(),
         message: format!("Removed node {f}"),
     })
 }
@@ -442,6 +451,7 @@ fn edge_add_change(
     Ok(Change {
         writes,
         deletes: Vec::new(),
+        warnings: Vec::new(),
         message: format!("Added edge {kind} {from} -> {to}"),
     })
 }
@@ -513,6 +523,7 @@ fn edge_update_change(
     Ok(Change {
         writes,
         deletes: Vec::new(),
+        warnings: Vec::new(),
         message: format!("Updated edge {kind} {from} -> {to}"),
     })
 }
@@ -562,6 +573,7 @@ fn edge_rm_change(
     Ok(Change {
         writes,
         deletes: Vec::new(),
+        warnings: Vec::new(),
         message: format!("Removed edge {kind} {from} -> {to}"),
     })
 }
