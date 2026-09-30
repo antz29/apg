@@ -1548,4 +1548,73 @@ mod unit {
             assert!(msg.contains(kind), "{kind}: {msg}");
         }
     }
+
+    /// [`LayersOverlay`]'s in-memory semantics (phase-00 task-1): a staged
+    /// write resolves to the staged `NodeFile`, a staged delete marker
+    /// resolves as absent, `apply_to_base` replaces staged writes / drops
+    /// delete-marked identities / keeps unstaged base nodes, and
+    /// `touched_fqns` names every staged identity. Pure in-memory — every
+    /// asserted identity is staged, so the disk fallback is never reached and
+    /// the root path is never read.
+    #[test]
+    fn overlay_resolves_staged_writes_and_deletes_in_memory() {
+        // A deliberately non-existent root: staged identities resolve before
+        // the disk fallback, so nothing under it is ever touched.
+        let root = std::path::Path::new("/apg-overlay-test-never-reads-disk");
+
+        let mut overlay = LayersOverlay::new();
+
+        // A staged write that shadows a base node, and a staged write that
+        // adds an identity absent from the base.
+        let mut replaced = node("domain", "entity", "order");
+        replaced.body = "staged".to_string();
+        overlay
+            .stage_write(replaced.clone())
+            .expect("a known layer stages");
+        let mut added = node("domain", "value", "money");
+        added.body = "added".to_string();
+        overlay
+            .stage_write(added.clone())
+            .expect("a known layer stages");
+
+        // A delete marker for an identity the base carries.
+        let stale = node("domain", "value", "stale");
+        overlay.stage_delete(Layer::Domain, "value", "stale");
+
+        // A staged write resolves to the staged content (not the base/disk).
+        assert_eq!(
+            overlay
+                .read(root, Layer::Domain, "entity", "order")
+                .unwrap(),
+            Some(replaced.clone())
+        );
+        // A staged delete marker resolves as absent.
+        assert_eq!(
+            overlay.read(root, Layer::Domain, "value", "stale").unwrap(),
+            None
+        );
+
+        // An explicit base: the shadowed node, the delete-marked node, and an
+        // unstaged node that must survive untouched.
+        let mut on_disk = node("domain", "entity", "order");
+        on_disk.body = "base".to_string();
+        let untouched = node("requirements", "requirement", "untouched");
+        let base = vec![on_disk, stale, untouched.clone()];
+
+        // The overlay replaces the staged write, drops the delete marker, and
+        // keeps the unstaged node (base order preserved, additions appended).
+        let effective = overlay.apply_to_base(&base);
+        assert_eq!(effective, vec![replaced, untouched, added]);
+
+        // Every staged identity — writes and delete markers — is named as its
+        // `<layer>.<type>.<name>` FQN.
+        assert_eq!(
+            overlay.touched_fqns(),
+            code_universe(&[
+                "domain.entity.order",
+                "domain.value.money",
+                "domain.value.stale"
+            ])
+        );
+    }
 }
