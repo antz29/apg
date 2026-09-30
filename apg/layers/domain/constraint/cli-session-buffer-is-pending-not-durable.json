@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "cli-session-buffer-is-pending-not-durable",
+  "body": "A buffered change is a pending intention, not a durable fact. The on-disk node files are durable only after a save's commit, and `db.lbug` is a derived index rebuilt from the node files. A read that reaches the live session observes the buffered intention; a read that opens the database directly observes the last saved state.",
+  "properties": {
+    "attaches-to": "domain.group.cli-session"
+  },
+  "out": [],
+  "in": []
+}
