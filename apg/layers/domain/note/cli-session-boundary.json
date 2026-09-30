@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "note",
+  "name": "cli-session-boundary",
+  "body": "The CLI session's boundary. Inside it: opening and closing the session, the extended worktree lock, the in-memory buffer and its live-index projection, the save flush, read routing through the session, and the socket crash marker. Outside it: the durable node files as the system of record, git history, the derived `db.lbug` index, and the transient plan/review `.trans` mirrors that stay session-free. Scan and merge sit at the boundary — they run once the caller saves and ends the session.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
