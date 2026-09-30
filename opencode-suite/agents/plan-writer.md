@@ -46,6 +46,7 @@ permission:
   apg_plan_tasks: allow
   apg_plan_add: allow
   apg_review: allow
+  apg_spec_lint: allow
   bash:
     "*": deny
     "ls *": allow
@@ -71,6 +72,39 @@ on existing code). The plan survives until the verify gate — `plan done` is an
 implementer assertion, `plan complete` a milestone; nothing advances
 automatically during execution (a branch scan simply **replaces realized
 planned nodes** with the real code nodes).
+
+## The durable-spec rules (R1–R5)
+
+The plan carries the spec's proposed reality into code, and it states what
+**is**:
+
+1. **R1 — positive present truth.** A tier-1–3 node states a positive,
+   affirmative definition of what is, in the present tense.
+2. **R2 — a constraint's layer is its scope.** A `global.constraint.*` binds
+   the whole durable spec for every APG instance; a `<tier>.constraint.*`
+   (`requirements`/`domain`/`solution`/`implementation`) binds that tier. A
+   constraint declares its scope through its layer and names no node —
+   `attaches-to` is not part of the model
+   (`global.constraint.spec-constraint-scope`).
+3. **R3 — at most one note.** A node has at most one note, and that note
+   deepens the node's definition of what is.
+4. **R4 — `details` names exactly one node.** A note's `details` edge names
+   exactly one node. A Note-to-Note `details` pair is a structural rule the
+   write surface and `apg_spec_lint` both check — the write surface refuses a
+   new pair at write time
+   (`domain.constraint.details-canonical-target-set`) and the linter reports
+   existing violations.
+5. **R5 — timeless truth.** A spec node states timeless truth: the reality it
+   defines.
+
+**WRITER RULES.** Author a positive, present-tense definition of what is;
+place a negative rule in a constraint whose layer is its scope (global or a
+tier); give a node at most one note deepening what is, with a `details` edge
+naming exactly one node; author timeless truth. A superseded statement is
+updated or removed; a rejected alternative, a change-log, a
+decision/reconciliation/correction/provenance note, and time-relative wording
+that ages ("today", "now", "no longer", "currently", "was", "previously") are
+rewritten as what is.
 
 ## Project context (operational)
 
@@ -210,7 +244,7 @@ orchestrates; you operate the breakdown or a per-phase write):
 2. **Understand the intent.** Route clarifying questions through the coordinator (one at a time; multiple choice preferred). Cover phase breakdown, task decomposition, test tiers, and any seams or gates the coordinator cares about.
 3. **Breakdown stage: propose the phase skeleton only.** Present the phases, each phase's deliverable (which requirements it satisfies) and prereqs — **no tasks yet**. Get approval, then `apg_plan_add <project>` (the plan record) + `apg_plan_add <project> phase` per phase + `apg_plan_add <project> planned` for the delta's planned Implementation nodes.
 4. **Per-phase writing (after the structural gate).** For your assigned phase, author its tasks: `apg_plan_add task`, each with its verb + target FQN. For a large plan, phases are authored in parallel.
-5. **Self-review.** `apg_plan_phases` must report no unsatisfied requirements (every spec requirement is Satisfied by some phase), **no requirement Satisfied by more than one phase**, no `Gates` cycles, and no phases without tasks.
+5. **Self-review.** Run `apg_spec_lint` (the deterministic spec-integrity lint) and treat its reported errors as blocking. `apg_plan_phases` must report no unsatisfied requirements (every spec requirement is Satisfied by some phase), **no requirement Satisfied by more than one phase**, no `Gates` cycles, and no phases without tasks.
 6. **Report.** Return the plan fqn (`<project>/plan`) and the next step (the navigator routes structural vs per-phase feedback; implementation proceeds via `apg_plan_done` per task as an assertion — the plan survives until verify).
 
 ## Re-planning discovered work
@@ -222,8 +256,7 @@ written:
 - For each new unit, declare a **planned Implementation node**
   (`apg_plan_add <project> planned <kind> <fqn>`) and a `creates` task naming it
   — **declared before the code exists**: a planned FQN is refused once the code
-  resolves in a scan, so a unit landed first can only be back-filled as a
-  `modifies` task plus a note recording the ordering slip.
+  resolves in a scan, so a unit must be planned before it is implemented.
 - A unit that already resolves in the scanned graph is a `modifies` (or
   `deletes`/`renames`/`moves`) target, never `creates`.
 - The discoverer's proposed shape is a proposal: confirm the units, the verb
@@ -239,9 +272,11 @@ the plan graph: strategy → `Plan.strategy`; the phase table's deliverable
 columns → `Satisfies`; prereq lines → `Gates`; "this phase creates this code"
 → a `creates` task naming the planned node; "this phase changes X" → a
 `modifies` task naming the existing FQN; files touched → task anchors (the
-`--fqn` targets); phase ACs and gates → notes. Confirm every created node is
-declared with `apg_plan_add planned`, and ask via the coordinator before
-inventing code the spec's proposed reality doesn't justify.
+`--fqn` targets). The translated plan states what is; anything the source plan
+carried as a past state, a rejected alternative, or a
+decision/reconciliation note is rewritten as what is (WRITER RULES). Confirm
+every created node is declared with `apg_plan_add planned`, and ask via the
+coordinator before inventing code the spec's proposed reality doesn't justify.
 
 ## Output requirements
 
