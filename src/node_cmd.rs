@@ -60,26 +60,23 @@ pub fn cmd_node(args: &[String]) -> anyhow::Result<()> {
         anyhow::bail!("usage: apg node <add|update|rm> …");
     };
     let apg_root = require_apg_root()?;
-    // Transparent routing (phase-03): when a session is live it owns the DB AND
-    // performs the whole durable write in receive order, so the mutation is
-    // forwarded and the flock is never acquired here (the session holds it for
-    // its life). A failed forward is an ERROR — there is no silent mid-flight
-    // fallback, which could double-apply a mutation that already landed. With
-    // no live session we take the serialized direct path below.
-    if session::live_session(&apg_root) {
-        let out = session::Coordinator::forward_mutation(&apg_root, "node", args)?;
-        println!("{out}");
-        return Ok(());
+    // Durable mutations are mandatory-session (spec
+    // `requirements.requirement.cli-session-required-for-durable-mutations` /
+    // `requirements.constraint.cli-session-mandatory`): when a session is live
+    // it owns the DB AND the write-back buffer, and performs the whole durable
+    // write in receive order, so the mutation is forwarded and the flock is
+    // never acquired here (the session holds it for its life). A failed forward
+    // is an ERROR — there is no silent mid-flight fallback, which could
+    // double-apply a mutation that already landed. With no live session we
+    // REFUSE: the direct path is gone, and the caller must open a session.
+    if !session::live_session(&apg_root) {
+        anyhow::bail!(
+            "a live session is required for durable mutations — run `apg session start` first"
+        );
     }
-    // The extended whole-durable-sequence flock: acquired exactly ONCE here,
-    // before any node-file read, and held through add/update/rm's
-    // validate → write → single commit → projection. This is the single
-    // acquisition site for the node path (`node_add`/`node_update`/`node_rm`
-    // never acquire internally, so there is no double-lock). The flock is
-    // released when this command returns (the guard drops).
-    let _lock = acquire_spec_lock(&apg_root)?;
-    let change = build_change(&apg_root, "node", args)?;
-    apply_change(&apg_root, change)
+    let out = session::Coordinator::forward_mutation(&apg_root, "node", args)?;
+    println!("{out}");
+    Ok(())
 }
 
 pub fn cmd_edge(args: &[String]) -> anyhow::Result<()> {
