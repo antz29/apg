@@ -1055,30 +1055,82 @@ mod e2e {
     /// absent target with the exact `<target> (removed target)` cell, and the
     /// item still closes through the same `apg review reject|resolve <fqn>`
     /// surfaces as any other.
+    ///
+    /// Phase-01 task-32: durable mutations are mandatory-session, so the
+    /// reviewed node's add and removal each run under a live `apg session
+    /// start` and are made durable by `apg session save`. The transient
+    /// `apg review …` writes take the same extended flock as a live session, so
+    /// they run only once the session has ended — between the add (which the
+    /// review attaches to) and the removal (which orphans it).
     #[test]
     #[ignore = "e2e tier: real I/O (transient mirrors/db.lbug/git); run via cargo test-e2e"]
     fn review_list_marks_orphaned_target_and_closes_by_fqn() {
         let (apg_root, repo, wt) = fixture("orphan");
+        let home = repo.root.join("home");
 
-        // Add the durable node through the real CLI (auto-committed on the
-        // branch, projected into the branch DB).
-        let added = spawn_apg(
-            &[
-                "node",
-                "add",
-                "requirements",
-                "requirement",
-                "gone",
-                "--body",
-                "x",
-            ],
-            &wt,
+        // Run one CLI command with the isolated HOME the session needs (the
+        // durable mutations, save and end all run under it).
+        let run = |args: &[&str]| -> std::process::Output {
+            testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output()
+        };
+        // End a live session cleanly, waiting for the coordinator process, and
+        // assert no session remains.
+        let end = |session: testutil::SessionProcess| {
+            let out = run(&["session", "end"]);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let coord = session.child.wait_with_output().unwrap();
+            assert!(
+                coord.status.success(),
+                "{}",
+                String::from_utf8_lossy(&coord.stderr)
+            );
+            assert!(
+                !apg::session::live_session(&apg_root),
+                "the session must have ended"
+            );
+        };
+
+        // Add the durable node under a live session (mandatory-session
+        // admission): the routed mutation is admitted into the write-back
+        // buffer and projected into the held DB at admission, and `save` is the
+        // one durability point that flushes it as an auto-committed node file.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&apg_root),
+            "the durable mutation must run under a live session"
         );
+        let added = run(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "gone",
+            "--body",
+            "x",
+        ]);
         assert!(
             added.status.success(),
             "{}",
             String::from_utf8_lossy(&added.stderr)
         );
+        let saved = run(&["session", "save"]);
+        assert!(
+            saved.status.success(),
+            "{}",
+            String::from_utf8_lossy(&saved.stderr)
+        );
+
+        // End the session before the transient review writes: they take the
+        // same extended flock as a live session, so they run only once it has
+        // ended. The saved node is durable and visible to their direct DB open.
+        end(session);
 
         // Review it while it exists: both halves land in the requirements
         // mirror and the Reviews edge resolves in the DB.
@@ -1100,15 +1152,27 @@ mod e2e {
             String::from_utf8_lossy(&reviewed.stderr)
         );
 
-        // Remove the reviewed node: the record set survives in `.trans`, but
-        // the DB projection drops the node — and the dangling Reviews edge
-        // with it.
-        let removed = spawn_apg(&["node", "rm", "requirements", "requirement", "gone"], &wt);
+        // Remove the reviewed node under a fresh live session, then `save`: the
+        // record set survives in `.trans`, but the DB projection drops the node
+        // — and the dangling Reviews edge with it.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&apg_root),
+            "the removal must run under a live session"
+        );
+        let removed = run(&["node", "rm", "requirements", "requirement", "gone"]);
         assert!(
             removed.status.success(),
             "{}",
             String::from_utf8_lossy(&removed.stderr)
         );
+        let saved = run(&["session", "save"]);
+        assert!(
+            saved.status.success(),
+            "{}",
+            String::from_utf8_lossy(&saved.stderr)
+        );
+        end(session);
 
         // The record set is authoritative: the orphan is still listed, with the
         // exact marker cell for its now-absent target.
