@@ -142,7 +142,9 @@ fn hub_out_edges(wt_apg: &Path) -> usize {
 /// Forwards a node mutation to the live session with a chosen client id (the
 /// at-most-once replay primitive), panicking on transport errors.
 fn session_forward_node(apg_root: &Path, client_id: &str, args: &[String]) -> String {
-    apg::session::Coordinator::forward_mutation_with_id(apg_root, client_id, "node", args).unwrap()
+    apg::session::Coordinator::forward_mutation_with_id(apg_root, client_id, "node", args)
+        .unwrap()
+        .output
 }
 
 /// Ends a live session and returns its (captured) output.

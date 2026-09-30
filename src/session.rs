@@ -150,6 +150,17 @@ pub(crate) enum Reply {
     },
 }
 
+/// The client-side result of a forwarded durable mutation: the coordinator's
+/// human output message alongside the write-time warnings the mutation
+/// produced. [`Coordinator::forward_mutation_with_id`] returns this instead of
+/// a bare `String`, so the caller can print the warnings on its own stderr
+/// while the write's result is left intact.
+#[derive(Debug, Clone)]
+pub struct ForwardedMutation {
+    pub output: String,
+    pub warnings: Vec<String>,
+}
+
 fn write_msg<T: Serialize>(stream: &mut UnixStream, msg: &T) -> std::io::Result<()> {
     let line = serde_json::to_string(msg).expect("serialize session message");
     stream.write_all(line.as_bytes())?;
@@ -1046,25 +1057,31 @@ impl Coordinator {
     /// The at-most-once client entry point: forward a node/edge mutation to the
     /// live session and return the coordinator's output message. A transport
     /// failure is reported (never a direct-path fallback).
+    ///
+    /// The warning-carrying shape is produced by
+    /// [`forward_mutation_with_id`](Self::forward_mutation_with_id); this
+    /// wrapper currently forwards only the output message. Task-10 propagates
+    /// the warnings through to `cmd_node`/`cmd_edge`.
     pub fn forward_mutation(
         apg_root: &Path,
         kind: &str,
         args: &[String],
     ) -> anyhow::Result<String> {
         let client_id = new_client_id();
-        Self::forward_mutation_with_id(apg_root, &client_id, kind, args)
+        Self::forward_mutation_with_id(apg_root, &client_id, kind, args).map(|r| r.output)
     }
 
     /// [`forward_mutation`](Self::forward_mutation) with an explicit client id —
     /// the primitive the at-most-once replay test drives directly (resend the
     /// same id and the coordinator returns the cached reply without
-    /// re-applying).
+    /// re-applying). Carries the reply's write-time warnings alongside the
+    /// output message.
     pub fn forward_mutation_with_id(
         apg_root: &Path,
         client_id: &str,
         kind: &str,
         args: &[String],
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<ForwardedMutation> {
         let socket = socket_path(apg_root);
         let request = Request::Mutate {
             client_id: client_id.to_string(),
@@ -1076,6 +1093,10 @@ impl Coordinator {
                 "session forward failed for client id {client_id}: {e} — the coordinator is not reachable and the mutation was NOT applied locally (no silent fallback); retry once the session is reachable or run `apg session end`"
             )
         })?;
-        expect_ok(reply)
+        match reply {
+            Reply::Ok { output, warnings } => Ok(ForwardedMutation { output, warnings }),
+            Reply::Err { message } => anyhow::bail!("{message}"),
+            other => anyhow::bail!("unexpected session reply: {other:?}"),
+        }
     }
 }
