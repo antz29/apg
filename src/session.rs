@@ -211,8 +211,6 @@ pub fn live_session(apg_root: &Path) -> bool {
 /// The node files under `apg/layers/**` are the system of record and are never
 /// touched here; the caller rebuilds the index from them (plus a fresh scan of
 /// the code).
-// (Unused until its callers are wired, phase-02 tasks 21/22.)
-#[allow(dead_code)]
 pub(crate) fn discard_derived_index(trans_dir: &Path) {
     for name in ["db.lbug", "db.lbug.wal", "db.lbug.shm", "graph.jsonl"] {
         let _ = std::fs::remove_file(trans_dir.join(name));
@@ -572,8 +570,7 @@ impl Coordinator {
         // code. The node files themselves are the system of record and are
         // never touched.
         let trans = apg_root.join(specs::TRANS);
-        let _ = std::fs::remove_file(trans.join("db.lbug"));
-        let _ = std::fs::remove_file(trans.join("graph.jsonl"));
+        discard_derived_index(&trans);
 
         let project_dir = apg_root.parent().unwrap_or(apg_root).to_path_buf();
         let previous = std::env::current_dir()?;
