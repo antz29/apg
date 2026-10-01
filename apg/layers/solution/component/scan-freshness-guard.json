@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "scan-freshness-guard",
-  "body": "The recorded-scan and freshness surface: `rust.apg.git.state.is_fresh` reads the recorded scan from `graph.jsonl` line 1 (`rust.apg.git.state.recorded_scan`, keyed by `rust.apg.git.state.content_key`); `rust.apg.scan.cmd_scan` takes the fast path before any frontend or rebuild; `rust.apg.git.commit.reanchor_scan_meta` rewrites line 1 after a durable commit without touching the DB's `Scan` row. Together they are how a re-anchored line makes a diverged DB look fresh.",
+  "body": "The recorded-scan and freshness surface: `rust.apg.git.state.is_fresh` reads the recorded scan from `graph.jsonl` line 1 (`rust.apg.git.state.recorded_scan`, keyed by `rust.apg.git.state.content_key`) and reads the database's own `Scan` row through `rust.apg.git.state.db_recorded_scan`; the fast path holds when the two name one git state and the database's authored digest (`rust.apg.splice.seed.seed_authored_identity` over `db.lbug`) equals the tree's assembled digest (`rust.apg.splice.seed.tree_authored_identity`), so a dropped authored row sends the next `rust.apg.scan.cmd_scan` through a full load. A live session owning the database short-circuits the database reads and evaluates the recorded-scan half alone. `rust.apg.git.commit.reanchor_scan_meta` rewrites line 1 after a durable commit, and `rust.apg.artifacts.db.ArtifactDb.refresh_scan_row` moves the database's `Scan` row to the same re-anchored state at the durable write points.",
   "properties": {},
   "out": [
     {
