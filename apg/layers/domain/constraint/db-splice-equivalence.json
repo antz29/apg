@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "db-splice-equivalence",
+  "body": "A scan's spliced `db.lbug` must equal a full rebuild of the same assembled graph on EVERY table: the per-label node counts and per-rel-type counts for the authored/transient tables (Stakeholder, User, Requirement, DomainGroup, Entity, Value, Service, System, Container, Component, Person, Constraint, Note and their spine rels; Plan, PlanPhase, Task, Feedback and their rels) exactly as for the code tables (Language, Module, File, Struct, Function, UnresolvedTarget and Contains/Calls/Uses/UnresolvedCall/UnresolvedUse). The `db.lbug` and `graph.jsonl` a single scan publishes must be projections of the same assembled graph. When the seed cannot be shown to already hold the assembled authored/transient rows, the splice must be refused and the full load (the correctness reference) must run. Never publish a DB that diverges from a rebuild. (Prose; assessed by review.)",
+  "properties": {
+    "attaches-to": "domain.group.splice-equivalence"
+  },
+  "out": [],
+  "in": []
+}
