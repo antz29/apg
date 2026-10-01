@@ -5,5 +5,11 @@
   "body": "The DML half of the splice: `rust.apg.splice.apply.apply` seeds from the previous DB and applies the delta's code tables (Language/Module/Struct/Function/File/UnresolvedTarget plus their rels), with the delete scope bounded by the phase-2 target set and the assembled graph vouching only for units it reaches. It writes no authored/transient row — the eligibility guard must therefore never admit a splice whose authored rows are stale.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.group.splice-equivalence",
+      "properties": {}
+    }
+  ]
 }
