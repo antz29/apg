@@ -39,6 +39,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.splice.seed.tree_authored_identity",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.artifacts.db.ArtifactDb.refresh_scan_row",
+      "properties": {}
     }
   ],
   "in": [
