@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "constraint",
+  "name": "freshness-tracks-db-jsonl-agreement",
+  "body": "The freshness fast path must not declare a `db.lbug` fresh when it disagrees with the `graph.jsonl` recorded for it: a recorded scan re-anchored ahead of the DB's own `Scan` row must not let a later `apg scan` reuse a DB whose authored/transient rows differ from the tree's assembled graph. Any published divergence must be recoverable by re-scanning; it must never be permanently masked. (Prose; assessed by review.)",
+  "properties": {
+    "attaches-to": "domain.entity.freshness-fast-path"
+  },
+  "out": [],
+  "in": []
+}
