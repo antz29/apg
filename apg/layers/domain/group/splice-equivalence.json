@@ -37,6 +37,11 @@
       "kind": "contains",
       "target": "domain.entity.merge-rebuild",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.content-identity",
+      "properties": {}
     }
   ],
   "in": []

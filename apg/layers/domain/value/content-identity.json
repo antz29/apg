@@ -5,5 +5,11 @@
   "body": "The content-identity key folding the HEAD sha and the working-tree/index/untracked content, recorded in `graph.jsonl` line 1 and in the DB's `Scan` row. It is the freshness rule's key and the seed guard's equivalence key. A re-anchored `graph.jsonl` can carry a new key while the DB's `Scan` row still carries the old one, which is how a worktree scan fast-paths without advancing the shared store.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.splice-equivalence",
+      "properties": {}
+    }
+  ]
 }
