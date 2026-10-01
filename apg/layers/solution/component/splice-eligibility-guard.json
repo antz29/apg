@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.splice.seed.seed_checked",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.seed.seed_key_matches",
+      "properties": {}
     }
   ],
   "in": [
