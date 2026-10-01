@@ -1,0 +1,9 @@
+{
+  "layer": "domain",
+  "type": "note",
+  "name": "db-splice-equivalence-was-unrecorded",
+  "body": "source: `src/splice/apply.rs:156` cites `domain.constraint.db-splice-equivalence`, and `tests/splice_e2e.rs:1039`/`:1933` name it as the law they prove.\n\nInconsistency: no `domain.constraint.db-splice-equivalence` node existed under `apg/layers/**` — a `MATCH (n:Constraint)` enumeration did not list it, a targeted FQN lookup returned nothing, a `CONTAINS 'equiv'` search returned nothing, and a filename search under `apg/layers/` found no such file. The code referenced a durable-spec law that was never authored.\n\nResolution: authored `domain.constraint.db-splice-equivalence` (attached to `domain.group.splice-equivalence`) and extended it to the authored/transient tables, which the original code comment scoped to \"a full rebuild keeps\" for code tables only. [autonomous]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
