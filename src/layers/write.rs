@@ -686,8 +686,11 @@ pub fn write_project_with(
     //    (mirrors the JSONL funnel's commit path: DB and tree in sync by
     //    construction, so consecutive node/edge mutations never trip the
     //    refuse-on-stale gate). graph.jsonl only — no db.lbug open. A re-anchor
-    //    failure degrades to a warning — the mutation already landed.
-    if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
+    //    failure degrades to a warning — the mutation already landed. The
+    //    captured state is reused below to reconcile the DB's own `Scan` row to
+    //    the SAME state.
+    let state = git::git_state(apg_root);
+    if let Err(e) = git::reanchor_scan_meta(apg_root, &state) {
         eprintln!("apg: warning: could not re-anchor scan_meta after node-file commit: {e:#}");
     }
 
@@ -707,7 +710,33 @@ pub fn write_project_with(
     //    the read/set are harmless when no query index exists yet.
     let nodes = read_existing_nodes(apg_root)?;
     let deletes = projection_deletes(apg_root, writes, deletes);
-    project_only(apg_root, &nodes, &deletes, project)
+    project_only(apg_root, &nodes, &deletes, project)?;
+
+    // 7. Reconcile the DB's own `Scan` row to the SAME re-anchored state that
+    //    graph.jsonl's lead now names, so db_recorded_scan and recorded_scan can
+    //    never disagree. The projection above opened and closed its own DB, so
+    //    this opens a fresh handle (there is no held one on the direct path); a
+    //    failure degrades to a warning like the re-anchor it mirrors — the
+    //    durable write already landed and the next scan rebuilds.
+    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
+        match artifacts::ArtifactDb::open(apg_root) {
+            Ok(db) => {
+                if let Err(e) = db.refresh_scan_row(
+                    state.sha.as_deref(),
+                    state.sha.as_ref().map(|_| state.clean),
+                    state.content_key.as_deref(),
+                ) {
+                    eprintln!(
+                        "apg: warning: could not refresh the DB Scan row after node-file commit: {e:#}"
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("apg: warning: could not open the DB to refresh its Scan row: {e:#}");
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The projection-only half of [`write_project_with`]'s step 6 — the entry

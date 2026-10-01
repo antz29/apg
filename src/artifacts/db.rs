@@ -9,6 +9,7 @@ use crate::git;
 use crate::load;
 use crate::schema::Record;
 use crate::specs;
+use crate::splice::seed::{cell, query_rows};
 
 use super::project::{assembled_records, reingest_project_with, transient_delta};
 
@@ -209,13 +210,22 @@ pub fn write_jsonl_and_reingest(
     std::fs::rename(&tmp, path)?;
 
     // 2. Auto-commit durable targets, then re-anchor scan_meta.
+    //
+    // Capture the post-commit state so the DB's OWN `Scan` row can be brought to
+    // the identical state (step 4): the re-anchor is graph.jsonl-only, and the
+    // two halves must name the same git state.
+    let mut reanchored: Option<git::GitState> = None;
     if !path.starts_with(apg_root.join(specs::TRANS)) {
         match git::auto_commit(apg_root, path) {
             Ok(Some(_)) => {
-                if let Err(e) = git::reanchor_scan_meta(apg_root, &git::git_state(apg_root)) {
-                    eprintln!(
-                        "apg: warning: could not re-anchor scan_meta after auto-commit: {e:#}"
-                    );
+                let state = git::git_state(apg_root);
+                match git::reanchor_scan_meta(apg_root, &state) {
+                    Ok(()) => reanchored = Some(state),
+                    Err(e) => {
+                        eprintln!(
+                            "apg: warning: could not re-anchor scan_meta after auto-commit: {e:#}"
+                        );
+                    }
                 }
             }
             Ok(None) => {}
@@ -232,6 +242,32 @@ pub fn write_jsonl_and_reingest(
     //    of record and the next rebuild reproduces it.
     if let Some((deletes, after)) = delta {
         reingest_project_with(apg_root, &deletes, &after)?;
+    }
+
+    // 4. Reconcile the DB's own `Scan` row to the re-anchored graph.jsonl state.
+    //    A transient (`apg/.trans/`) write never commits and never re-anchors
+    //    line 1, so its DB `Scan` row must stay put — refresh only when the
+    //    durable commit re-anchored a live DB. The DB is opened from scratch
+    //    (the projection's own open has already closed); a failure degrades to a
+    //    warning, exactly like the re-anchor it mirrors (the durable write
+    //    already landed, and the next scan rebuilds).
+    if let (Some(state), true) = (&reanchored, has_db) {
+        match ArtifactDb::open(apg_root) {
+            Ok(db) => {
+                if let Err(e) = db.refresh_scan_row(
+                    state.sha.as_deref(),
+                    state.sha.as_ref().map(|_| state.clean),
+                    state.content_key.as_deref(),
+                ) {
+                    eprintln!(
+                        "apg: warning: could not refresh the DB Scan row after commit: {e:#}"
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("apg: warning: could not open the DB to refresh its Scan row: {e:#}");
+            }
+        }
     }
     Ok(())
 }
@@ -375,5 +411,50 @@ impl ArtifactDb {
             }
         }
         false
+    }
+
+    /// DELETE-then-CREATE the single `Scan` row (fqn [`crate::schema::SCAN_HEAD`],
+    /// `scan/HEAD`) on the **already-open** database, setting it to the same git
+    /// state the caller just re-anchored `graph.jsonl`'s `scan_meta` lead to.
+    ///
+    /// This is the DB-side half of every durability point's reconciliation: a
+    /// durable commit re-anchors `graph.jsonl` line 1 (`git::reanchor_scan_meta`,
+    /// which never opens the DB), and this primitive brings the DB's OWN `Scan`
+    /// row to the identical state so [`crate::git::db_recorded_scan`] and
+    /// [`crate::git::recorded_scan`] can never disagree.
+    ///
+    /// The columns mirror the two existing writers exactly — the splice's step 9
+    /// ([`crate::splice::apply`]) and [`crate::load::tables::build_load_files`]'s
+    /// `Scan` table: `git_sha`/`content_key` are empty strings when `None`,
+    /// `git_clean` renders `"true"`/`"false"` (empty when `None`), and
+    /// `scanned_at` is **preserved** from the row being replaced — a metadata
+    /// mutation re-anchors, it never re-scans, so the scan's own timestamp must
+    /// survive.
+    ///
+    /// Runs on a fresh connection over the caller's handle, so the caller never
+    /// reopens `db.lbug`.
+    pub fn refresh_scan_row(
+        &self,
+        git_sha: Option<&str>,
+        git_clean: Option<bool>,
+        content_key: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn()?;
+        let (_, rows) = query_rows(&conn, "MATCH (s:Scan) RETURN s.scanned_at AS scanned_at")?;
+        let scanned_at = rows
+            .first()
+            .map(|row| cell(row, 0))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(crate::git::now_iso8601);
+        conn.query("MATCH (s:Scan) DELETE s")?;
+        conn.query(&format!(
+            "CREATE (s:Scan {{fqn: {}, git_sha: {}, git_clean: {}, content_key: {}, scanned_at: {}}})",
+            lit(crate::schema::SCAN_HEAD),
+            lit(git_sha.unwrap_or("")),
+            lit(&git_clean.map(|c| c.to_string()).unwrap_or_default()),
+            lit(content_key.unwrap_or("")),
+            lit(&scanned_at),
+        ))?;
+        Ok(())
     }
 }

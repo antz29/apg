@@ -516,10 +516,29 @@ impl Coordinator {
         // path's write_project_with steps 4–5): graph.jsonl only, never opens
         // db.lbug. A re-anchor failure degrades to a warning — the durable
         // write already landed.
-        if let Err(e) =
-            crate::git::reanchor_scan_meta(&self.apg_root, &crate::git::git_state(&self.apg_root))
-        {
-            eprintln!("apg: warning: could not re-anchor scan_meta after session save: {e:#}");
+        let state = crate::git::git_state(&self.apg_root);
+        match crate::git::reanchor_scan_meta(&self.apg_root, &state) {
+            Ok(()) => {
+                // Reconcile the session's OWN DB `Scan` row to the SAME state,
+                // through the handle it already holds — never a second `db.lbug`
+                // open. `self.db` is `None` when the worktree has no query index
+                // (the durable node files are the system of record), in which
+                // case there is no DB Scan row to refresh.
+                if let Some(db) = self.db.as_ref()
+                    && let Err(e) = db.refresh_scan_row(
+                        state.sha.as_deref(),
+                        state.sha.as_ref().map(|_| state.clean),
+                        state.content_key.as_deref(),
+                    )
+                {
+                    eprintln!(
+                        "apg: warning: could not refresh the DB Scan row after session save: {e:#}"
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("apg: warning: could not re-anchor scan_meta after session save: {e:#}");
+            }
         }
 
         let saved = self.buffer.len();
