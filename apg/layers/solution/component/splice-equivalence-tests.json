@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.splice_e2e.e2e.spliced_and_full_rebuild_agree_on_every_table_count",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.splice_e2e.e2e.seed_copy_preserves_every_table_and_row",
+      "properties": {}
     }
   ],
   "in": [
