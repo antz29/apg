@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "requirements.requirement.splice-db-equals-full-rebuild-for-all-tables",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
+      "properties": {}
     }
   ],
   "in": [
