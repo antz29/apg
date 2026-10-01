@@ -29,11 +29,6 @@
     },
     {
       "kind": "drives",
-      "target": "domain.entity.merge-rebuild",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
       "target": "domain.entity.shared-fact-store",
       "properties": {}
     },

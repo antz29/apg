@@ -12,11 +12,6 @@
       "kind": "contains",
       "source": "domain.group.splice-equivalence",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
-      "properties": {}
     }
   ]
 }
