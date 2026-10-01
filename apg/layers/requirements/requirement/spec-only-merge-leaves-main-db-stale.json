@@ -21,6 +21,11 @@
       "kind": "contains",
       "target": "requirements.requirement.freshness-fast-path-cannot-mask-divergence",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.spec-only-splice-equivalence-tests",
+      "properties": {}
     }
   ],
   "in": [
