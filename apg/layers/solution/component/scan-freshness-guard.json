@@ -34,6 +34,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.git.state.db_recorded_scan",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.seed.tree_authored_identity",
+      "properties": {}
     }
   ],
   "in": [
