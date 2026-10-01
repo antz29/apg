@@ -6,7 +6,13 @@
   "properties": {
     "feature": "splice-equivalence"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.group.splice-equivalence",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

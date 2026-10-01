@@ -49,5 +49,11 @@
       "properties": {}
     }
   ],
-  "in": []
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.splice-db-equals-full-rebuild-for-all-tables",
+      "properties": {}
+    }
+  ]
 }
