@@ -375,6 +375,136 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
     format!("{hash:016x}")
 }
 
+/// The canonical digest of a **seed DB's own** authored/transient rows — the
+/// read-only, DB-side twin of [`assembled_authored_identity`].
+///
+/// Opens `previous` read-only and reproduces, from the DB's own rows, the exact
+/// canonical form [`assembled_authored_identity`] computes from an assembled
+/// [`Graph`]: one row per authored/transient node — the seventeen
+/// layer/plan/feedback tables, whose columns are projected in `create_schema`
+/// order — and one row per edge in the fourteen authored/transient rel tables
+/// whose SOURCE FQN belongs to one of those tables. Each row is a JSON array of
+/// strings; the rows are sorted and folded into the same 64-bit FNV-1a digest.
+///
+/// `seed_authored_identity(seed) == assembled_authored_identity(graph)` iff the
+/// seed DB already represents the assembled graph's authored/transient rows —
+/// the equivalence the seed guard ([`seed_checked`]) requires before letting the
+/// code-only win-C splice publish a DB that must answer like a full rebuild.
+///
+/// Pure of side effects on the DB (read-only; no writes and no schema changes)
+/// and never panics: a missing, locked, or corrupt DB — or one missing a table —
+/// is returned as an `Err`.
+pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
+    let db = Database::new(previous, SystemConfig::default().read_only(true))?;
+    let conn = Connection::new(&db)?;
+
+    // Every authored/transient node table and its columns in `create_schema`
+    // order — the exact table/column vocabulary `build_load_files` writes.
+    let node_tables: [(&str, &[&str]); 17] = [
+        ("Requirement", &["fqn", "id", "title", "body", "feature"]),
+        ("Note", &["fqn", "body", "kind"]),
+        ("Feedback", &["fqn", "body", "status", "disposition"]),
+        ("Plan", &["fqn", "title", "strategy"]),
+        (
+            "PlanPhase",
+            &["fqn", "number", "title", "deliverable", "status"],
+        ),
+        (
+            "Task",
+            &[
+                "fqn", "title", "kind", "tier", "status", "verb", "target", "new_fqn",
+            ],
+        ),
+        ("Stakeholder", &["fqn", "name", "body"]),
+        ("Entity", &["fqn", "name", "body"]),
+        ("System", &["fqn", "name", "body"]),
+        ("Container", &["fqn", "name", "kind", "body"]),
+        ("Component", &["fqn", "name", "body"]),
+        ("User", &["fqn", "name", "body"]),
+        ("DomainGroup", &["fqn", "name", "attribute", "root", "body"]),
+        ("Value", &["fqn", "name", "body"]),
+        ("Service", &["fqn", "name", "body"]),
+        ("Person", &["fqn", "name", "body"]),
+        ("Constraint", &["fqn", "name", "body", "attaches_to"]),
+    ];
+
+    let mut authored: HashSet<String> = HashSet::new();
+    let mut rows: Vec<String> = Vec::new();
+    for (table, columns) in node_tables {
+        let projection = columns
+            .iter()
+            .map(|c| format!("n.`{c}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let (_, node_rows) = query_rows(&conn, &format!("MATCH (n:{table}) RETURN {projection}"))?;
+        for row in node_rows {
+            authored.insert(cell(&row, 0));
+            let mut canonical: Vec<String> = Vec::with_capacity(columns.len() + 2);
+            canonical.push("N".into());
+            canonical.push(table.into());
+            for i in 0..columns.len() {
+                canonical.push(cell(&row, i));
+            }
+            rows.push(serde_json::to_string(&canonical)?);
+        }
+    }
+
+    // An edge belongs to the authored/transient set iff its SOURCE FQN is one
+    // of the authored/transient nodes — the same source-kind filter
+    // `assembled_authored_identity` applies. This drops the shared
+    // `Contains`/`Calls`/`Uses` tables' code pairs while retaining authored
+    // edges whose target is a code FQN (`Details`, `Reviews`,
+    // `SpecImplementedBy`).
+    let rel_tables: [&str; 14] = [
+        "Contains",
+        "Calls",
+        "Uses",
+        "Details",
+        "Reviews",
+        "DependsOn",
+        "Gates",
+        "Satisfies",
+        "Drives",
+        "Represents",
+        "RealisedBy",
+        "SpecImplementedBy",
+        "Publishes",
+        "Subscribes",
+    ];
+    for table in rel_tables {
+        let (_, edge_rows) = query_rows(
+            &conn,
+            &format!("MATCH (a)-[:{table}]->(b) RETURN a.fqn, b.fqn"),
+        )?;
+        for row in edge_rows {
+            let from = cell(&row, 0);
+            if authored.contains(&from) {
+                let to = cell(&row, 1);
+                rows.push(serde_json::to_string(&[
+                    "E",
+                    table,
+                    from.as_str(),
+                    to.as_str(),
+                ])?);
+            }
+        }
+    }
+
+    // Byte-identical canonical fold to `assembled_authored_identity`: sort, then
+    // fold each row plus its separator into the 64-bit FNV-1a digest.
+    rows.sort();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for row in &rows {
+        for &byte in row.as_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash ^= u64::from(b'\n');
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    Ok(format!("{hash:016x}"))
+}
+
 /// Opens `previous` read-only and compares its structural fingerprint to this
 /// binary's `create_schema`. A read failure or a fingerprint mismatch is the
 /// invalidation. No temp file is created on this path.
