@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.seed-equivalence-guard",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.service.splice-eligibility",
+      "properties": {}
     }
   ],
   "in": [
