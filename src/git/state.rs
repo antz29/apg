@@ -317,15 +317,23 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 }
 
 /// The content-identity freshness predicate (win A): the live DB is reusable
-/// as-is iff it exists AND the current tree's content identity matches the
-/// recorded scan exactly — recorded HEAD sha, cleanliness and content-identity
-/// key all equal the current values. mtime is never consulted: a touch without
-/// a byte change stays fresh, a byte edit is stale.
+/// as-is iff it exists, the DB's **own** `Scan` row agrees with the
+/// `graph.jsonl` recorded scan, AND the current tree's content identity matches
+/// that recorded scan exactly — recorded HEAD sha, cleanliness and
+/// content-identity key all equal the current values. mtime is never consulted:
+/// a touch without a byte change stays fresh, a byte edit is stale.
 ///
 /// The DB-existence precondition comes FIRST. The fast-path's action is "reuse
 /// the existing DB", so with no `db.lbug` at all (or a `graph.jsonl` without
 /// its DB) there is nothing to reuse → NOT fresh. A missing/pre-hardening
 /// recorded key means freshness cannot be verified → NOT fresh.
+///
+/// **DB↔export agreement** ([`db_recorded_scan`] vs [`recorded_scan`]): the two
+/// halves must name the same git state (sha, cleanliness and content key) — the
+/// DB is reusable only when its own `Scan` row and the export cannot disagree.
+/// A DB with no `Scan` row, or one that disagrees, is NOT fresh. Every failure
+/// **fails closed** (never panics): a missing/unopenable/locked DB, a missing
+/// export, or a mismatch all mean "not fresh".
 ///
 /// A session socket that is present but fails a connect/`Ping` is also NOT
 /// fresh: an unclean session exit leaves the socket behind while the derived
@@ -353,6 +361,16 @@ pub fn is_fresh(apg_root: &Path) -> bool {
     let Some(rec) = recorded_scan(apg_root) else {
         return false;
     };
+    // The DB's own `Scan` row must exist and agree with the export exactly:
+    // either half alone is not enough to reuse the DB (the DB and graph.jsonl
+    // are refreshed together at every durability point, so they agree by
+    // construction on a soundly-built DB).
+    let Some(db_rec) = db_recorded_scan(apg_root) else {
+        return false;
+    };
+    if db_rec.sha != rec.sha || db_rec.clean != rec.clean || db_rec.content_key != rec.content_key {
+        return false;
+    }
     let Some(rec_key) = rec.content_key.as_deref() else {
         return false; // pre-hardening: freshness cannot be verified
     };

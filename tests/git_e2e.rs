@@ -138,10 +138,10 @@ mod e2e {
         // A DB whose scan was not in a git repo, plus no git repo now → N/A.
         let dir = std::env::temp_dir().join(format!("apg-nongit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let apg = dir.join("apg").join(specs::TRANS);
-        std::fs::create_dir_all(&apg).unwrap();
         let apg = dir.join("apg");
-        std::fs::write(apg.join(specs::TRANS).join("db.lbug"), "").unwrap();
+        // A real (schema-carrying) DB, so the recorded scan's DB half can be
+        // materialized; is_fresh still short-circuits on "not a git repo".
+        testutil::touch_db(&apg);
         testutil::write_scan_meta(&apg, None, false, "2026-09-07T00:00:00Z");
         assert!(!is_stale(&apg));
         // The gate is N/A, but the fast-path is NOT fresh: is_stale != !is_fresh.
@@ -178,21 +178,30 @@ mod e2e {
 
     /// The DB-existence precondition: with no `db.lbug`, or a `graph.jsonl`
     /// without its DB, the fast-path is NOT fresh (there is nothing to reuse) —
-    /// even when the recorded scan_meta matches the tree.
+    /// even when the recorded scan_meta matches the tree. With the DB present
+    /// it must ALSO carry the agreeing `Scan` row (`db_recorded_scan`).
     #[test]
     #[ignore = "e2e tier: real I/O (scratch repo/fs/git/process); run via cargo test-e2e"]
     fn is_fresh_requires_the_live_db() {
         let repo = fixture_repo("freshdb");
         let sha = repo.head_sha();
         let apg = repo.apg_root();
+        // A graph.jsonl without its DB → not fresh (nothing to reuse); the
+        // gate is N/A without a DB (is_stale != !is_fresh).
         testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
         assert!(!is_fresh(&apg), "no db.lbug → not fresh");
         assert!(
             !is_stale(&apg),
             "the gate is N/A without a DB (is_stale != !is_fresh)"
         );
-        // The DB appearing makes the matching recorded state fresh.
+        // A DB that does not carry the agreeing Scan row is still not fresh.
         testutil::touch_db(&apg);
+        assert!(
+            !is_fresh(&apg),
+            "a DB with no Scan row cannot agree with the export → not fresh"
+        );
+        // The DB's own Scan row brought into agreement makes it fresh.
+        testutil::write_scan_meta(&apg, Some(&sha), true, "2026-09-07T00:00:00Z");
         assert!(is_fresh(&apg), "matching recorded state + DB → fresh");
         assert!(!is_stale(&apg));
         // A DB but no recorded scan_meta (graph.jsonl removed) → not fresh.

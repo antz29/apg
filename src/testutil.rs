@@ -179,8 +179,11 @@ impl Repo {
 }
 
 /// Writes a graph.jsonl whose line 1 is the scan_meta control record for a
-/// scan at `sha`/`clean` (the real export writer; the DB Scan node is written
-/// by the same `load` path the fixture DB builders use).
+/// scan at `sha`/`clean` (the real export writer). When a `db.lbug` already
+/// exists, the DB's OWN `Scan` row is refreshed to the identical state, so the
+/// fixture models a real scan's **two agreeing halves** — required by
+/// [`crate::git::is_fresh`], which refuses a DB whose `Scan` row disagrees with
+/// the export.
 ///
 /// The content-identity key is taken from the checkout's CURRENT git state, so
 /// a fixture that records the live sha/clean is genuinely fresh under the
@@ -193,6 +196,10 @@ pub fn write_scan_meta(apg_root: &Path, sha: Option<&str>, clean: bool, at: &str
 
 /// [`write_scan_meta`] with an explicit content-identity key (`None` models a
 /// pre-hardening record whose freshness cannot be verified).
+///
+/// The DB half is written only when a `db.lbug` already exists (and opens): a
+/// `graph.jsonl` without its DB is a legitimate fixture state, and
+/// [`crate::git::is_fresh`] independently requires the live DB.
 pub fn write_scan_meta_keyed(
     apg_root: &Path,
     sha: Option<&str>,
@@ -213,14 +220,29 @@ pub fn write_scan_meta_keyed(
         },
     );
     load::write_graph_jsonl(&g, &apg_root.join(specs::TRANS).join("graph.jsonl")).unwrap();
+
+    // The DB's OWN `Scan` row — the other half of the recorded scan. Refresh it
+    // to the identical state so `db_recorded_scan` and `recorded_scan` agree
+    // (a real scan writes both together; `is_fresh` refuses a DB that only has
+    // one half or whose halves disagree).
+    if apg_root.join(specs::TRANS).join("db.lbug").exists()
+        && let Ok(db) = crate::artifacts::ArtifactDb::open(apg_root)
+    {
+        db.refresh_scan_row(sha, sha.map(|_| clean), content_key)
+            .unwrap();
+    }
 }
 
-/// An empty `apg/.trans/db.lbug` marker (staleness predicates only check DB
-/// existence). Full DBs are built by each test module's own fixture over the
-/// same layout.
+/// A real, empty `apg/.trans/db.lbug` with the full schema but no rows — the
+/// DB-existence fixture the staleness predicates need (they open the DB to read
+/// its `Scan` row; a raw empty marker is not a database). A test that wants the
+/// DB to carry a `Scan` row pairs this with [`write_scan_meta`].
 pub fn touch_db(apg_root: &Path) {
-    std::fs::create_dir_all(apg_root.join(specs::TRANS)).unwrap();
-    std::fs::write(apg_root.join(specs::TRANS).join("db.lbug"), "").unwrap();
+    let trans = apg_root.join(specs::TRANS);
+    std::fs::create_dir_all(&trans).unwrap();
+    let db = lbug::Database::new(trans.join("db.lbug"), Default::default()).unwrap();
+    let conn = lbug::Connection::new(&db).unwrap();
+    load::create_schema(&conn).unwrap();
 }
 
 /// Removes the fixture repo's temp dir (each test cleans up after itself).
