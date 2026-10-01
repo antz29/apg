@@ -226,6 +226,11 @@
       "kind": "contains",
       "target": "solution.component.scan-freshness-guard",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.incremental-fact-store",
+      "properties": {}
     }
   ],
   "in": [

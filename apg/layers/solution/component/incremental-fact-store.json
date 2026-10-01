@@ -10,6 +10,11 @@
       "kind": "realised-by",
       "source": "domain.entity.shared-fact-store",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
     }
   ]
 }
