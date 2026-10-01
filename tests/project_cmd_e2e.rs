@@ -2425,4 +2425,256 @@ mod e2e {
         );
         testutil::remove(&repo);
     }
+
+    /// spec-splice-guard phase-03 task-1 (e2e): a SPEC-ONLY `apg project
+    /// merge` — no code change at all — must land the merged authored
+    /// node/edge in main's `db.lbug` (the query index), not merely in the
+    /// `graph.jsonl` export it publishes beside it.
+    ///
+    /// The defect path: `project start` seeds the branch DB from main's scan;
+    /// the branch then authors a durable requirement + value + `drives` edge
+    /// through a LIVE session (the mandatory-session path) and saves — a
+    /// SPEC-ONLY change, with NO worktree scan, so the branch DB still matches
+    /// main's seed content identity. Merging fast-forwards main to the branch;
+    /// its rebuild takes the win-C splice fast path, whose `apply` writes no
+    /// authored/transient row (it applies only the code delta) while
+    /// `publish` serializes `graph.jsonl` from the FULL assembled graph. Main's
+    /// DB therefore silently loses the merged spec, and the splice stamps the
+    /// merged HEAD so a later `apg scan` fast-paths as fresh and never corrects
+    /// it.
+    ///
+    /// The phase-01 authored-identity guard makes the seed ineligible (the
+    /// assembled graph's authored rows are not represented in the seed DB), so
+    /// the correctness-reference FULL LOAD runs and main's DB and export agree.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/live session/db.lbug); run via cargo test-e2e"]
+    fn merge_spec_only_lands_authored_rows_in_main_db() {
+        let req_fqn = "requirements.requirement.timer";
+        let val_fqn = "domain.value.tick";
+
+        // A real scratch git repo with Go sources + a versioned `apg/` layout,
+        // driven by the REAL candidate binary (the frontends resolve relative
+        // to the spawned binary, so the whole pipeline is genuinely exercised).
+        let (base, repo_dir, home) = warm_scratch("spec-only-merge");
+        let repo_apg = repo_dir.join(specs::LAYOUT);
+
+        // Main must carry a fresh scan: `project start` seeds the branch DB
+        // from it, AND the full scan records the SHARED content-addressed store
+        // that the merge rebuild's splice seed is validated against.
+        let scan = warm_run(&repo_dir, &home, &["scan", "."]);
+        assert!(
+            scan.status.success(),
+            "main scan: {}",
+            String::from_utf8_lossy(&scan.stderr)
+        );
+
+        // start -> worktree + branch + branch DB copied from main's scan.
+        let start = warm_run(&repo_dir, &home, &["project", "start", "spec-only"]);
+        assert!(
+            start.status.success(),
+            "project start: {}",
+            String::from_utf8_lossy(&start.stderr)
+        );
+        let wt = repo_dir
+            .join(specs::LAYOUT)
+            .join(".worktrees")
+            .join("spec-only");
+        let wt_apg = wt.join(specs::LAYOUT);
+        assert!(
+            wt_apg.join(specs::TRANS).join("db.lbug").exists(),
+            "start must seed the branch db.lbug"
+        );
+
+        // Author a durable authored node + edge THROUGH A LIVE SESSION — the
+        // mandatory-session surface a real caller uses. Each admission is
+        // projected into the live branch DB; `session save` is the single
+        // durability point (one atomic node-file write + one commit) and
+        // `session end` releases. SPEC-ONLY: no code edit and NO worktree scan
+        // follows, so the branch DB stays at main's seed content identity (the
+        // eligibility the pre-fix splice needs).
+        let session = testutil::start_session_process(&wt, &home);
+        let add_req = warm_run(
+            &wt,
+            &home,
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "timer",
+                "--body",
+                "A workitem can be started",
+                "--property",
+                "id=R1",
+            ],
+        );
+        assert!(
+            add_req.status.success(),
+            "node add requirement: {}",
+            String::from_utf8_lossy(&add_req.stderr)
+        );
+        let add_val = warm_run(
+            &wt,
+            &home,
+            &[
+                "node", "add", "domain", "value", "tick", "--body", "One tick",
+            ],
+        );
+        assert!(
+            add_val.status.success(),
+            "node add value: {}",
+            String::from_utf8_lossy(&add_val.stderr)
+        );
+        let add_edge = warm_run(&wt, &home, &["edge", "add", "drives", req_fqn, val_fqn]);
+        assert!(
+            add_edge.status.success(),
+            "edge add: {}",
+            String::from_utf8_lossy(&add_edge.stderr)
+        );
+
+        let save = warm_run(&wt, &home, &["session", "save"]);
+        assert!(
+            save.status.success(),
+            "session save: {}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let end = warm_run(&wt, &home, &["session", "end"]);
+        assert!(
+            end.status.success(),
+            "session end: {}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "session process: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "session end must release the session"
+        );
+
+        // A minimal transient plan that passes `apg plan verify` with NO
+        // planned node: one phase that `Satisfies` the changed requirement —
+        // the only coverage obligation a spec-only delta creates — so the
+        // verify gate has nothing to block on.
+        let plan_records = vec![
+            Record::Plan {
+                fqn: "spec-only/plan".into(),
+                title: "Spec-only merge".into(),
+                strategy: String::new(),
+            },
+            Record::PlanPhase {
+                fqn: "spec-only/plan.phase-01".into(),
+                number: 1,
+                title: "P1".into(),
+                deliverable: "the merged spec".into(),
+                status: "pending".into(),
+            },
+            Record::Contains {
+                from: "spec-only/plan".into(),
+                to: "spec-only/plan.phase-01".into(),
+            },
+            Record::Satisfies {
+                from: "spec-only/plan.phase-01".into(),
+                to: req_fqn.into(),
+            },
+            Record::Task {
+                fqn: "spec-only/plan.phase-01.task-1".into(),
+                title: "Author the spec".into(),
+                kind: "source".into(),
+                tier: String::new(),
+                status: "pending".into(),
+                verb: "creates".into(),
+                target: String::new(),
+                new_fqn: String::new(),
+            },
+            Record::Contains {
+                from: "spec-only/plan.phase-01".into(),
+                to: "spec-only/plan.phase-01.task-1".into(),
+            },
+        ];
+        let plan_path = wt_apg
+            .join(specs::TRANS)
+            .join("plans")
+            .join("spec-only.jsonl");
+        artifacts::write_jsonl_and_reingest(&wt_apg, &plan_path, "spec-only", &plan_records)
+            .unwrap();
+        plan_cmd::plan_verify_at(&wt_apg, "spec-only").unwrap();
+
+        // Merge from the main checkout with a REAL rebuild: the rebuild seam
+        // spawns the candidate binary's `apg scan .` on main (the binary is
+        // what resolves the staged frontends; the in-process default cannot).
+        // That is the production incremental path whose win-C splice the guard
+        // must refuse.
+        // The trait object requires `'static`, so the closure owns its copy of
+        // the isolated HOME (the test keeps `home` for the later re-scan).
+        let rebuild_home = home.clone();
+        let rebuild = move |dir: &Path| -> anyhow::Result<()> {
+            let out = testutil::ApgCommand::new(&["scan", "."])
+                .cwd(dir)
+                .env("HOME", &rebuild_home.to_string_lossy())
+                .output();
+            if !out.status.success() {
+                anyhow::bail!(
+                    "main rebuild scan failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+            Ok(())
+        };
+        project_merge_at(&repo_apg, "spec-only", Some(&rebuild)).unwrap();
+
+        // THE ASSERTION THAT ISOLATES THE DEFECT: main's `db.lbug` ITSELF (the
+        // query index), not just `graph.jsonl`, carries the merged authored
+        // node and edge. Pre-fix the splice published a DB without them while
+        // the export, serialized from the full assembled graph, kept them.
+        let main_apg = repo_dir.join(specs::LAYOUT);
+        let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+        assert!(
+            db.has_node(req_fqn),
+            "main's db.lbug must carry the merged authored requirement (the splice dropped it)"
+        );
+        assert!(
+            db.has_node(val_fqn),
+            "main's db.lbug must carry the merged authored value"
+        );
+        let count = |q: &str| -> i64 {
+            db.q(q)
+                .unwrap()
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .trim()
+                .parse()
+                .unwrap_or(0)
+        };
+        assert_eq!(
+            count(&format!(
+                "MATCH (:Requirement {{fqn: '{req_fqn}'}})-[:Drives]->(:Value {{fqn: '{val_fqn}'}}) RETURN count(*)"
+            )),
+            1,
+            "main's db.lbug must carry the merged authored drives edge"
+        );
+        drop(db);
+
+        // A subsequent scan must not MASK the loss: pre-fix the splice stamped
+        // the merged HEAD, so an `apg scan` fast-pathed as fresh and never
+        // corrected the missing row. The authored row must still be there.
+        let rescan = warm_run(&repo_dir, &home, &["scan", "."]);
+        assert!(
+            rescan.status.success(),
+            "post-merge re-scan: {}",
+            String::from_utf8_lossy(&rescan.stderr)
+        );
+        let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
+        assert!(
+            db.has_node(req_fqn),
+            "a subsequent scan must not mask the authored-row loss"
+        );
+        drop(db);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
