@@ -214,11 +214,6 @@
     },
     {
       "kind": "contains",
-      "target": "solution.component.splice-delta-application",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "solution.component.splice-publish",
       "properties": {}
     },
