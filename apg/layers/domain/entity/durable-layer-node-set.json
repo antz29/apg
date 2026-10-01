@@ -17,6 +17,11 @@
       "kind": "drives",
       "source": "requirements.requirement.splice-db-equals-full-rebuild-for-all-tables",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
+      "properties": {}
     }
   ]
 }

@@ -16,6 +16,11 @@
       "kind": "drives",
       "target": "domain.service.splice-eligibility",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.durable-layer-node-set",
+      "properties": {}
     }
   ],
   "in": [
