@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "note",
+  "name": "reconcile-scan-freshness-guard",
+  "body": "source: `spec-splice-guard/feedback-6` (final-review divergence) — the `solution.component.scan-freshness-guard` body narrated the pre-fix defect and its implemented-by set omitted the reconciliation units.\n\nInconsistency: the body read \"reanchor_scan_meta rewrites line 1 after a durable commit without touching the DB's Scan row. Together they are how a re-anchored line makes a diverged DB look fresh\"; a `SpecImplementedBy` query listed only `reanchor_scan_meta`, `content_key`, `is_fresh`, `recorded_scan`, and `cmd_scan`, with no claim reaching `rust.apg.git.state.db_recorded_scan`, `rust.apg.splice.seed.tree_authored_identity`, or `rust.apg.artifacts.db.ArtifactDb.refresh_scan_row` — all real code.\n\nResolution: added the three `implemented-by` edges and rewrote the body as the shipped reconciliation: the DB `Scan` row equals the graph.jsonl recorded scan, the database's authored digest (`seed_authored_identity` over `db.lbug`) equals the tree's assembled digest (`tree_authored_identity`), a live session short-circuits the database reads, and `refresh_scan_row` moves the DB `Scan` row at the durable write points. [with user]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
