@@ -6,13 +6,14 @@ mod common;
 
 use apg::artifacts;
 use apg::graph::{Graph, Location, Node, NodeKind};
+use apg::layers;
 use apg::load;
 use apg::plan_cmd::*;
 use apg::schema::Record;
 use apg::specs;
 use apg::testutil::{self, Repo, av, nf, task_rec, with_cwd, wt_commit_paths};
 use lbug::{Connection, Database};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// A temp repo with a real project context for `foo` (R4 — non-git
@@ -43,6 +44,184 @@ fn plan_store_fixture(name: &str) -> (PathBuf, Repo, PathBuf) {
     let repo = Repo::new(&format!("plan-{name}"));
     let wt = repo.start_project("foo");
     (wt.join(specs::LAYOUT), repo, wt)
+}
+
+/// The authored/transient DB labels a full tree re-projection detaches before
+/// re-merging — the code graph's own labels are never touched.
+const AUTHORED_LABELS: &[&str] = &[
+    "Requirement",
+    "Stakeholder",
+    "User",
+    "Note",
+    "DomainGroup",
+    "Entity",
+    "Value",
+    "Service",
+    "System",
+    "Container",
+    "Component",
+    "Person",
+    "Constraint",
+    "Plan",
+    "PlanPhase",
+    "Task",
+    "Feedback",
+];
+
+/// Resolve a layer directory name back to its [`layers::Layer`].
+fn layer_of_dir(dir: &str) -> layers::Layer {
+    *layers::Layer::ALL
+        .iter()
+        .find(|l| l.layer_dir() == dir)
+        .unwrap_or_else(|| panic!("unknown layer dir `{dir}`"))
+}
+
+/// The FQN a node file's identity derives to (`<layer>.<type>.<name>`).
+fn node_file_fqn(n: &layers::NodeFile) -> String {
+    format!("{}.{}.{}", n.layer, n.node_type, n.name)
+}
+
+/// Every authored/transient FQN the live DB currently carries — the detach set
+/// a full tree re-projection replaces. Queried per label so code nodes
+/// (`Module`/`File`/`Struct`/`Function`/`UnresolvedTarget`/`Scan`) are never
+/// touched.
+fn authored_fqns_in_db(apg_root: &Path) -> BTreeSet<String> {
+    let db = artifacts::ArtifactDb::open(apg_root).unwrap();
+    let conn = db.conn().unwrap();
+    let mut out = BTreeSet::new();
+    for label in AUTHORED_LABELS {
+        let rows = conn
+            .query(&format!("MATCH (n:{label}) RETURN n.fqn"))
+            .unwrap();
+        for row in rows {
+            if let Some(v) = row.first() {
+                let fqn = v.to_string();
+                if !fqn.is_empty() {
+                    out.insert(fqn);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Re-project the fixture worktree's whole authored tree into the DB so the DB
+/// carries exactly the rows `tree_authored_identity` assembles — the fixture
+/// half of `is_fresh`'s authored/transient reconciliation.
+///
+/// 1. **Pairing completion**: fixtures write only the out half of an authored
+///    edge, but `layers::ingest_tree` requires both halves. Every authored
+///    node's in-edge set is rebuilt from the assembled out-edges (a minimal
+///    file is materialised for an authored target that has none yet).
+/// 2. **Planned registration**: every `implemented-by` target the tree
+///    references but the code export does not know is registered as a
+///    `status: planned` code node in BOTH the export (so the tree digest
+///    classifies it Pending instead of drifting) and the projected stream (so
+///    the DB can materialise the authored→code edge).
+/// 3. **Full re-projection**: detach every authored/transient FQN the DB
+///    carries, then re-merge the durable tree plus the transient plan/feedback
+///    legs.
+fn reproject_layers(apg_root: &Path) {
+    // 1. Pairing completion.
+    let mut nodes = layers::read_existing_nodes(apg_root).unwrap();
+    let mut required: BTreeMap<String, Vec<layers::InEdge>> = BTreeMap::new();
+    for n in &nodes {
+        let source = node_file_fqn(n);
+        for oe in &n.out {
+            if layers::parse_fqn(&oe.target).is_ok() {
+                required
+                    .entry(oe.target.clone())
+                    .or_default()
+                    .push(layers::InEdge {
+                        kind: oe.kind.clone(),
+                        source: source.clone(),
+                        properties: oe.properties.clone(),
+                    });
+            }
+        }
+    }
+    for n in &mut nodes {
+        let f = node_file_fqn(n);
+        let mut want = required.remove(&f).unwrap_or_default();
+        want.sort_by(|a, b| (&a.kind, &a.source).cmp(&(&b.kind, &b.source)));
+        if n.in_edges != want {
+            n.in_edges = want;
+            let path =
+                layers::node_file_path(apg_root, layer_of_dir(&n.layer), &n.node_type, &n.name);
+            if let Some(p) = path.parent() {
+                std::fs::create_dir_all(p).unwrap();
+            }
+            std::fs::write(&path, serde_json::to_string_pretty(n).unwrap()).unwrap();
+        }
+    }
+    for (target, in_edges) in required {
+        let (layer, node_type, name) = layers::parse_fqn(&target).unwrap();
+        let nf = layers::NodeFile {
+            layer: layer.layer_dir().to_string(),
+            node_type,
+            name,
+            body: String::new(),
+            properties: BTreeMap::new(),
+            out: Vec::new(),
+            in_edges,
+        };
+        let path = layers::node_file_path(apg_root, layer, &nf.node_type, &nf.name);
+        if let Some(p) = path.parent() {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(&nf).unwrap()).unwrap();
+    }
+
+    // 2. Planned registration.
+    let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root).unwrap();
+    let mut registered: Vec<String> = Vec::new();
+    for n in &nodes {
+        for oe in &n.out {
+            if oe.kind == "implemented-by"
+                && layers::classify_code_ref(&oe.target, &scanned, &planned)
+                    == layers::CodeRefStatus::Drift
+            {
+                planned.insert(oe.target.clone());
+                registered.push(oe.target.clone());
+            }
+        }
+    }
+    registered.sort();
+    registered.dedup();
+    let export = apg_root.join(specs::TRANS).join("graph.jsonl");
+    if !registered.is_empty() && export.exists() {
+        let mut g = testutil::read_graph_jsonl(&export).unwrap();
+        for fqn in &registered {
+            g.nodes.insert(
+                fqn.clone(),
+                Node {
+                    kind: NodeKind::Module,
+                    status: Some("planned".to_string()),
+                    ..Node::default()
+                },
+            );
+        }
+        load::write_graph_jsonl(&g, &export).unwrap();
+    }
+
+    // 3. Full re-projection.
+    let mut records = layers::ingest_tree(apg_root, &scanned, &planned).unwrap();
+    for fqn in &registered {
+        records.push(Record::PlannedNode {
+            fqn: fqn.clone(),
+            kind: "module".to_string(),
+            name: String::new(),
+            parent: String::new(),
+        });
+    }
+    for f in specs::plan_files(apg_root)
+        .into_iter()
+        .chain(specs::trans_mirror_files(apg_root))
+    {
+        records.extend(specs::read_jsonl(&f).unwrap());
+    }
+    let deletes = authored_fqns_in_db(apg_root);
+    artifacts::reingest_layers(apg_root, &deletes, &records).unwrap();
 }
 
 /// Builds a real DB + load files under `dir/apg` (used by `fixture`).
@@ -116,6 +295,17 @@ fn db_at(dir: &Path) {
     load::copy_from(&conn, &ldir).unwrap();
     drop(conn);
     drop(db);
+
+    // The fixture's code universe must exist in BOTH the DB and the export:
+    // `code_universes_from_export` / `tree_authored_identity` read the export
+    // only, so a DB-only code graph reads as an empty universe and silently
+    // drops the authored implemented-by / authored-to-code edges.
+    let apg_root = dir.join(specs::LAYOUT);
+    load::write_graph_jsonl(&g, &apg_root.join(specs::TRANS).join("graph.jsonl")).unwrap();
+    // Project any pre-existing durable layers the fixture already carries (a
+    // baseline authored on `main` before the branch was cut) so the DB agrees
+    // with `tree_authored_identity` from the outset.
+    reproject_layers(&apg_root);
 }
 
 /// Writes a plan JSONL for `foo` with one phase containing one task.
@@ -153,7 +343,7 @@ fn write_plan(apg_root: &Path) -> PathBuf {
             to: "foo/plan.phase-01.task-1".to_string(),
         },
     ];
-    specs::write_jsonl(&path, &records).unwrap();
+    artifacts::write_jsonl_and_reingest(apg_root, &path, "foo", &records).unwrap();
     path
 }
 
@@ -172,6 +362,7 @@ fn write_requirement(apg_root: &Path, name: &str) {
         r#"{{"name":"{name}","type":"requirement","layer":"requirements","body":"x","properties":{{}},"out":[],"in":[]}}"#
     );
     std::fs::write(&path, body).unwrap();
+    reproject_layers(apg_root);
 }
 
 /// Writes one solution-layer node file under `apg/layers/solution/` with
@@ -198,6 +389,7 @@ fn write_solution_node(apg_root: &Path, node_type: &str, name: &str, refs: &[&st
     let path = apg::layers::node_file_path(apg_root, apg::layers::Layer::Solution, node_type, name);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, serde_json::to_string_pretty(&nf).unwrap()).unwrap();
+    reproject_layers(apg_root);
 }
 
 /// Writes an arbitrary layers node file with the given `(kind, target)`
@@ -221,6 +413,7 @@ fn write_node_file(
     let path = apg::layers::node_file_path(apg_root, l, node_type, name);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, serde_json::to_string_pretty(&node).unwrap()).unwrap();
+    reproject_layers(apg_root);
 }
 
 /// A minimal green plan: Plan + phase-01 (no tasks, no planned nodes, no
@@ -476,7 +669,7 @@ mod e2e {
                 parent: String::new(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         // The gate rejects: the planned node does not resolve to real code.
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
@@ -533,7 +726,7 @@ mod e2e {
                 to: "foo/plan.phase-01".to_string(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         // Green: every planned node is realized, all feedback resolved.
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
@@ -586,7 +779,7 @@ mod e2e {
                 parent: String::new(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         assert!(err.to_string().contains("github.com/x/y.Gateway"), "{err}");
@@ -641,7 +834,7 @@ mod e2e {
                 to: "foo/plan.phase-01".to_string(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         assert!(
@@ -2118,7 +2311,7 @@ mod e2e {
             from: "foo/feedback-1".into(),
             to: "foo/plan.phase-01.task-1".into(),
         });
-        specs::write_jsonl(&plan_path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &plan_path, "foo", &records).unwrap();
         let before = std::fs::read_to_string(&plan_path).unwrap();
 
         // Re-adding the existing phase is refused, naming update/rm.
@@ -2290,7 +2483,7 @@ mod e2e {
                 to: "requirements.requirement.R3".into(),
             },
         ];
-        specs::write_jsonl(&plan_path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &plan_path, "foo", &records).unwrap();
 
         // `apg plan link` is retired at dispatch: an unknown subcommand.
         let err = cmd_plan(&["link".to_string(), "foo".to_string(), "1".to_string()]).unwrap_err();
@@ -2450,7 +2643,7 @@ mod e2e {
                 disposition: String::new(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         assert!(err.to_string().contains("not realized"), "{err}");
@@ -2523,7 +2716,13 @@ mod e2e {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-2".to_string(),
         });
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
 
         // Every implemented-by FQN is touched -> the bridge is complete.
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
@@ -2571,7 +2770,13 @@ mod e2e {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
         });
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
 
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         let msg = format!("{err:#}");
@@ -2621,7 +2826,13 @@ mod e2e {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
         });
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
 
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
@@ -2660,7 +2871,13 @@ mod e2e {
         testutil::write_scan_meta(&apg_root, Some(&sha), true, "2026-09-07T00:00:00Z");
 
         let records = bare_plan();
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
 
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
@@ -2775,7 +2992,13 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
         });
         records.push(task_rec("modifies", "github.com/x/y.Store", ""));
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
         // Claim refusal: drop the touching task (keep the Satisfies) -> the
@@ -2786,7 +3009,13 @@ mod e2e {
             from: "foo/plan.phase-01".to_string(),
             to: "requirements.requirement.cr".to_string(),
         });
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("coverage incomplete"), "{msg}");
@@ -2814,7 +3043,13 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
         });
         records.push(task_rec("modifies", "github.com/x/y.Store", ""));
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("coverage incomplete"), "{msg}");
@@ -2835,7 +3070,13 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
         });
         records.push(task_rec("modifies", "github.com/x/y.Store", ""));
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
         testutil::remove(&repo);
@@ -2904,7 +3145,13 @@ mod e2e {
             to: "foo/plan.phase-01.task-1".to_string(),
         });
         records.push(task_rec("modifies", "github.com/x/y.Branch", ""));
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
 
         // The branch claim is covered and the post-cut `main`-only node is NOT
         // in the merge-base delta -> green.
@@ -2913,7 +3160,13 @@ mod e2e {
         // Sanity: drop the branch touch -> ONLY the branch claim is a gap; the
         // `main`-only node is never named, proving the base is the merge-base.
         let records = bare_plan();
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("solution.component.branch"), "{msg}");
@@ -2986,7 +3239,13 @@ mod e2e {
         // No task -> every removed/added claim is a gap; assert each lost FQN
         // and its owning solution node is named.
         let records = bare_plan();
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("coverage incomplete"), "{msg}");
@@ -3030,7 +3289,13 @@ mod e2e {
                 new_fqn: new_fqn.to_string(),
             });
         }
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
         assert!(plan_verify_at(&apg_root, "foo").is_ok());
 
         testutil::remove(&repo);
@@ -3097,7 +3362,13 @@ mod e2e {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-2".to_string(),
         });
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
 
         // Every branch-delta solution node's every implemented-by FQN is
         // touched -> green.
@@ -3147,7 +3418,13 @@ mod e2e {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
         });
-        specs::write_jsonl(&specs::plan_jsonl_path(&apg_root, "foo"), &records).unwrap();
+        artifacts::write_jsonl_and_reingest(
+            &apg_root,
+            &specs::plan_jsonl_path(&apg_root, "foo"),
+            "foo",
+            &records,
+        )
+        .unwrap();
 
         let err = plan_verify_at(&apg_root, "foo").unwrap_err();
         let msg = format!("{err:#}");
@@ -3223,7 +3500,7 @@ mod e2e {
                 to: "foo/plan.phase-01".to_string(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         // Phase completion is blocked by the PHASE-scope feedback but NOT the
         // structural (Plan-scope) feedback — the milestone routes by scope.
@@ -3236,7 +3513,7 @@ mod e2e {
                 *status = "resolved".to_string();
             }
         }
-        specs::write_jsonl(&path, &recs).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
         assert!(
             plan_complete_at(&apg_root, "foo", 1).is_ok(),
             "structural (Plan-scope) feedback must not block the phase milestone"
@@ -3308,7 +3585,7 @@ mod e2e {
                 to: "foo/plan.phase-01.task-1".to_string(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         // A durable-node review lands in the requirements tier mirror — NOT the
         // plan store, so the old plan-store-only check never saw it.
@@ -3326,7 +3603,7 @@ mod e2e {
                 to: "requirements.requirement.timer".to_string(),
             },
         ];
-        specs::write_jsonl(&mirror, &feedback).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &mirror, "foo", &feedback).unwrap();
 
         // `plan complete` is phase-scoped: feedback outside the phase/its tasks
         // does not gate the milestone.
@@ -3361,7 +3638,7 @@ mod e2e {
                 other => other.clone(),
             })
             .collect();
-        specs::write_jsonl(&mirror, &resolved).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &mirror, "foo", &resolved).unwrap();
         assert!(
             plan_verify_at(&apg_root, "foo").is_ok(),
             "verify must pass once every tier-mirror Feedback is resolved"
@@ -3382,7 +3659,7 @@ mod e2e {
             from: "foo/feedback-orphan".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
         });
-        specs::write_jsonl(&path, &recs).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
 
         // The forced task cascade removes the reviewed task; the Feedback and
         // its Reviews reference survive.
@@ -3757,7 +4034,7 @@ mod e2e {
                 disposition: String::new(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         // Every non-Plan record, serialized — must be byte-identical before
         // and after each update (phase/task/planned records + all plan edges).
@@ -3933,7 +4210,7 @@ mod e2e {
                 to: "github.com/x/y.Store".to_string(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
         let before = std::fs::read_to_string(&path).unwrap();
 
         // A plan with a phase refuses, naming the phase + --force.
@@ -3973,7 +4250,7 @@ mod e2e {
             from: "foo/feedback-1".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
         });
-        specs::write_jsonl(&path, &recs).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &recs).unwrap();
         let before_fb = std::fs::read_to_string(&path).unwrap();
         let err = plan_rm_task_at(&apg_root, "foo", 1, 1, false)
             .unwrap_err()
@@ -4120,7 +4397,7 @@ mod e2e {
                 to: "foo/plan.phase-01".to_string(),
             },
         ];
-        specs::write_jsonl(&path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
 
         // The creates-targeted planned node refuses without --force; --force
         // removes it plus its parent Contains edge, leaving no dangling edge.
@@ -4472,7 +4749,7 @@ mod e2e {
                 to: "/todo/app.ts".into(),
             },
         ];
-        specs::write_jsonl(&plan_path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &plan_path, "foo", &records).unwrap();
 
         let task_contains = |recs: &[Record]| {
             recs.iter().any(|r| {
@@ -4723,7 +5000,7 @@ mod e2e {
                 to: "github.com/x/y.Gateway".into(),
             },
         ];
-        specs::write_jsonl(&plan_path, &records).unwrap();
+        artifacts::write_jsonl_and_reingest(&apg_root, &plan_path, "foo", &records).unwrap();
         let before = std::fs::read_to_string(&plan_path).unwrap();
 
         // One cwd hold for the whole surface: `cmd_plan` resolves `apg/` by
@@ -4766,7 +5043,7 @@ mod e2e {
                 from: "foo/feedback-1".into(),
                 to: "foo/plan.phase-01.task-1".into(),
             });
-            specs::write_jsonl(&plan_path, &recs).unwrap();
+            artifacts::write_jsonl_and_reingest(&apg_root, &plan_path, "foo", &recs).unwrap();
             let fb_before = std::fs::read_to_string(&plan_path).unwrap();
             let err = cmd_plan(&av(&["rm", "foo", "task", "1", "1"])).unwrap_err();
             assert!(err.to_string().contains("foo/feedback-1"), "{err}");

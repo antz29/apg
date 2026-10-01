@@ -197,6 +197,12 @@ pub fn write_scan_meta(apg_root: &Path, sha: Option<&str>, clean: bool, at: &str
 /// [`write_scan_meta`] with an explicit content-identity key (`None` models a
 /// pre-hardening record whose freshness cannot be verified).
 ///
+/// **Re-anchor, never truncate**: only line 1 (the `scan_meta` control record)
+/// is replaced; every pre-existing export row — the code universe
+/// `code_universes_from_export` reads and the authored→code edges
+/// `tree_authored_identity` keeps — is preserved verbatim. A fixture with a
+/// real code export therefore stays internally consistent across a re-anchor.
+///
 /// The DB half is written only when a `db.lbug` already exists (and opens): a
 /// `graph.jsonl` without its DB is a legitimate fixture state, and
 /// [`crate::git::is_fresh`] independently requires the live DB.
@@ -207,19 +213,39 @@ pub fn write_scan_meta_keyed(
     at: &str,
     content_key: Option<&str>,
 ) {
-    let mut g = Graph::default();
-    g.nodes.insert(
-        schema::SCAN_HEAD.to_string(),
-        Node {
-            kind: NodeKind::Scan,
-            git_sha: sha.map(str::to_string),
-            git_clean: sha.map(|_| clean),
-            content_key: content_key.map(str::to_string),
-            scanned_at: Some(at.to_string()),
-            ..Node::default()
-        },
-    );
-    load::write_graph_jsonl(&g, &apg_root.join(specs::TRANS).join("graph.jsonl")).unwrap();
+    // Re-anchor ONLY the `scan_meta` control record on line 1, preserving every
+    // pre-existing export row byte-for-byte (the code universe
+    // `code_universes_from_export` reads, and the authored→code edges
+    // `tree_authored_identity` keeps). A scan-meta-only rewrite would empty the
+    // export's code set and silently drop those edges from the tree digest.
+    let path = apg_root.join(specs::TRANS).join("graph.jsonl");
+    let meta = serde_json::to_string(&schema::Record::ScanMeta {
+        git_sha: sha.map(str::to_string),
+        git_clean: sha.map(|_| clean),
+        content_key: content_key.map(str::to_string),
+        scanned_at: at.to_string(),
+    })
+    .unwrap();
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut body = String::with_capacity(meta.len() + existing.len() + 1);
+    body.push_str(&meta);
+    body.push('\n');
+    for (i, line) in existing.lines().enumerate() {
+        // Line 1 is the old scan_meta lead (if any) — dropped and replaced;
+        // every other line (code/spec/edge rows) is preserved verbatim.
+        if i == 0
+            && serde_json::from_str::<schema::Record>(line.trim())
+                .is_ok_and(|r| matches!(r, schema::Record::ScanMeta { .. }))
+        {
+            continue;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&path, body).unwrap();
 
     // The DB's OWN `Scan` row — the other half of the recorded scan. Refresh it
     // to the identical state so `db_recorded_scan` and `recorded_scan` agree
