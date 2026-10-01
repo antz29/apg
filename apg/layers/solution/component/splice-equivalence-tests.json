@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.splice_e2e.e2e.spliced_and_full_rebuild_agree_on_every_table_count",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.project_cmd_e2e.e2e.merge_spec_only_lands_authored_rows_in_main_db",
       "properties": {}
     },
