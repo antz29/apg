@@ -32,6 +32,11 @@
       "kind": "contains",
       "target": "domain.entity.freshness-fast-path",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.merge-rebuild",
+      "properties": {}
     }
   ],
   "in": []
