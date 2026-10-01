@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.pipeline.try_splice_build",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.seed.seed_checked",
+      "properties": {}
     }
   ],
   "in": [
