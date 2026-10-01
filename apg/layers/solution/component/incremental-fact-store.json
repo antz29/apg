@@ -14,6 +14,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.incremental.prepare.Prepared",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.incremental.prepare.PipelineInput",
+      "properties": {}
     }
   ],
   "in": [
