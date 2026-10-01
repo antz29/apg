@@ -57,6 +57,11 @@
       "kind": "realised-by",
       "target": "solution.component.splice-delta-application",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.splice-publish",
+      "properties": {}
     }
   ],
   "in": [
