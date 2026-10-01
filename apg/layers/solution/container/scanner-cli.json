@@ -221,6 +221,11 @@
       "kind": "contains",
       "target": "solution.component.splice-publish",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.scan-freshness-guard",
+      "properties": {}
     }
   ],
   "in": [
