@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "splice-publish",
+  "body": "The atomic publish: `rust.apg.splice.publish.publish` writes the `graph.jsonl` export from the FULL assembled graph (`rust.apg.load.export.write_graph_jsonl`) but swaps in the seeded+spliced `db.lbug`, and the splice refreshes the `Scan` row to the new HEAD. That asymmetry — full export, partial DB — is the defect's publication step: the export carries the merged authored rows, the DB does not.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
