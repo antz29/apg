@@ -768,6 +768,17 @@ pub enum SeedFallback {
     /// rebuild, so the caller runs the full load. Carries the seed's recorded
     /// content-identity key and the expected (shared) one (feedback-101).
     StaleSeed { seed: String, recorded: String },
+    /// The previous DB was built from the same tree content the delta was
+    /// derived from, but its **authored/transient rows** are not the assembled
+    /// graph's — the win-C splice writes no authored/transient row and
+    /// `graph.jsonl` is serialized from the full assembled graph, so seeding it
+    /// would publish a DB that diverges from its export (phase-01). Distinct
+    /// from [`StaleSeed`](Self::StaleSeed), which is a content-key / worktree
+    /// drift: this is the assembled identity's authored/transient divergence.
+    /// Carries the seed DB's authored/transient digest and the assembled
+    /// graph's so the log attributes the divergence. The caller runs the full
+    /// load.
+    UnrepresentedAuthored { assembled: String, seed: String },
     /// The whole-file copy succeeded but the copied DB could not be opened.
     SeededCopyUnreadable(String),
 }
@@ -785,6 +796,9 @@ impl SeedFallback {
             }
             SeedFallback::StaleSeed { seed, recorded } => format!(
                 "previous db.lbug was built from content {seed} but the shared scan record is {recorded} (another worktree scanned) — full load"
+            ),
+            SeedFallback::UnrepresentedAuthored { assembled, seed } => format!(
+                "previous db.lbug does not represent the assembled graph's authored/transient rows (seed {seed}, assembled {assembled}) — full load"
             ),
             SeedFallback::SeededCopyUnreadable(e) => {
                 format!("seeded db.lbug copy could not be opened: {e}")

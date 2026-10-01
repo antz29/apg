@@ -42,6 +42,13 @@ mod int {
                 "seed-key",
             ),
             (
+                SeedFallback::UnrepresentedAuthored {
+                    assembled: "assembled-key".into(),
+                    seed: "seed-key".into(),
+                },
+                "assembled-key",
+            ),
+            (
                 SeedFallback::SeededCopyUnreadable("bad copy".into()),
                 "bad copy",
             ),
@@ -63,6 +70,20 @@ mod int {
             stale.contains("seed-key") && stale.contains("rec-key"),
             "{stale}"
         );
+        // The unrepresented-authored line names BOTH authored/transient
+        // digests so the log attributes the divergence, names the full-load
+        // outcome, and is distinct from the content-key drift `StaleSeed`
+        // reports (which names neither of these keys).
+        let unrepresented = SeedFallback::UnrepresentedAuthored {
+            assembled: "assembled-key".into(),
+            seed: "seed-key".into(),
+        }
+        .describe();
+        assert!(
+            unrepresented.contains("assembled-key") && unrepresented.contains("seed-key"),
+            "{unrepresented}"
+        );
+        assert!(unrepresented.contains("full load"), "{unrepresented}");
     }
 }
 
