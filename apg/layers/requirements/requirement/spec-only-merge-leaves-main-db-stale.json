@@ -36,6 +36,11 @@
       "kind": "drives",
       "target": "domain.entity.shared-fact-store",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.incremental-splice",
+      "properties": {}
     }
   ],
   "in": [
