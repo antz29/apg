@@ -17,6 +17,11 @@
       "kind": "contains",
       "target": "domain.entity.seed-equivalence-guard",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.durable-layer-node-set",
+      "properties": {}
     }
   ],
   "in": []
