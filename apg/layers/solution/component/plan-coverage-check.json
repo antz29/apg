@@ -36,6 +36,11 @@
       "kind": "realised-by",
       "source": "domain.entity.plan-coverage",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "solution.note.reconcile-splice-guard-delta-scope",
+      "properties": {}
     }
   ]
 }
