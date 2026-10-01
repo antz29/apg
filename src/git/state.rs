@@ -1,8 +1,11 @@
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
+use lbug::{Connection, Database, SystemConfig};
+
 use crate::schema::Record;
 use crate::specs;
+use crate::splice::seed::{cell, query_rows};
 
 /// The git state of a directory at a point in time.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,6 +276,44 @@ pub fn recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
         }),
         _ => None,
     }
+}
+
+/// The recorded state of the scan that built the live DB, read from the DB's
+/// **own** single `Scan` row (SCAN_HEAD) in `<apg_root>/.trans/db.lbug` — the
+/// DB's account of itself, independent of the `graph.jsonl` export
+/// [`recorded_scan`] reads. This is the SCAN_HEAD half of the freshness check:
+/// the export and the DB must agree before the DB is reusable.
+///
+/// The DB is opened **read-only** and never modified. Every failure **fails
+/// closed** and never panics: a missing, unopenable or locked DB; a DB with no
+/// `Scan` row; an empty `git_sha` (a non-git scan); a `git_clean` that is
+/// neither `"true"` nor `"false"`; or an empty `content_key` (a pre-hardening
+/// DB). Parsing matches [`recorded_scan`]: `git_sha` empty means non-git,
+/// `git_clean` is `"true"`/`"false"`, and an empty key is `None`.
+pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
+    let db = Database::new(db_path(apg_root), SystemConfig::default().read_only(true)).ok()?;
+    let conn = Connection::new(&db).ok()?;
+    let (_, rows) = query_rows(
+        &conn,
+        "MATCH (s:Scan) RETURN s.git_sha AS git_sha, s.git_clean AS git_clean, s.content_key AS content_key",
+    )
+    .ok()?;
+    let row = rows.first()?;
+    let sha = cell(row, 0);
+    if sha.is_empty() {
+        return None;
+    }
+    let clean = match cell(row, 1).as_str() {
+        "true" => true,
+        "false" => false,
+        _ => return None,
+    };
+    let key = cell(row, 2);
+    Some(RecordedScan {
+        sha,
+        clean,
+        content_key: (!key.is_empty()).then_some(key),
+    })
 }
 
 /// The content-identity freshness predicate (win A): the live DB is reusable
