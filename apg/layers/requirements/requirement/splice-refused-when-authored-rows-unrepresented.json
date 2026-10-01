@@ -6,7 +6,13 @@
   "properties": {
     "feature": "splice-equivalence"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.seed-equivalence-guard",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",

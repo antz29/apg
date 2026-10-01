@@ -12,6 +12,11 @@
       "kind": "contains",
       "source": "domain.group.splice-equivalence",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
+      "properties": {}
     }
   ]
 }
