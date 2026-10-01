@@ -19,6 +19,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.git.state.content_key",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.commit.reanchor_scan_meta",
+      "properties": {}
     }
   ],
   "in": [
