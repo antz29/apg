@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "note",
+  "name": "spec-only-merge-defect-recorded",
+  "body": "source: the change-set brief, \"apg project merge of a SPEC-ONLY change-set ... leaves main's db.lbug without the merged authored nodes/edges, while graph.jsonl ... DOES contain them\".\n\nInconsistency: verified [autonomous] against the graph and anchored source — `rust.apg.splice.apply.apply` (src/splice/apply.rs:141) matches only Language/Module/Struct/Function/File and falls through `_ => {}` (line 228); `rust.apg.splice.publish.publish` (src/splice/publish.rs:53) writes graph.jsonl from the full assembled graph via `rust.apg.load.export.write_graph_jsonl` but swaps in the seeded+spliced db.lbug; `rust.apg.scan.cmd_scan` (src/scan.rs:181) fast-paths on `rust.apg.git.state.is_fresh`, which reads graph.jsonl line 1 (`rust.apg.git.state.recorded_scan`), a line `rust.apg.git.commit.reanchor_scan_meta` rewrites without touching the DB Scan row. The brief's mechanism holds as written.\n\nResolution: authored the requirement tree under `requirements.requirement.spec-only-merge-leaves-main-db-stale`, the domain group `domain.group.splice-equivalence`, and the eligibility-guard spine. The remediation is stated as the invariant (splices must equal full rebuilds for authored/transient tables too) plus a refusal-and-full-load eligibility guard — not a prescribed implementation. [with user: the remediation direction was selected by the user.]",
+  "properties": {},
+  "out": [],
+  "in": []
+}
