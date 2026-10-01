@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.splice.publish.publish",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.load.export.write_graph_jsonl",
+      "properties": {}
     }
   ],
   "in": [
