@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "splice-db-equals-full-rebuild-for-all-tables",
+  "body": "A scan's `db.lbug` and its `graph.jsonl` are two renderings of ONE assembled graph and must agree for EVERY table — the authored/transient rows (Stakeholder/User/Requirement/DomainGroup/Entity/Value/Service/System/Container/Component/Person/Constraint/Note and their spine rels; Plan/PlanPhase/Task/Feedback and their rels) exactly as for the code tables. A win-C splice publishes a `db.lbug` that is a full rebuild's projection of the assembled graph for every table; when it cannot be, it must not publish a diverged DB.\n\nObservable completion: splice a delta whose assembled graph carries authored/transient rows the seed does not already hold; the resulting `db.lbug` either equals a full-rebuild reference of that same assembled graph on every table, or the splice is refused and the full load runs. Under the current code the spliced DB keeps the seed's stale authored rows while `graph.jsonl` is written from the full assembled graph — the two disagree.",
+  "properties": {
+    "feature": "splice-equivalence"
+  },
+  "out": [],
+  "in": []
+}
