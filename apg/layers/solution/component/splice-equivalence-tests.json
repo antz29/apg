@@ -4,7 +4,13 @@
   "name": "splice-equivalence-tests",
   "body": "The e2e equivalence surface: `tests/splice_e2e.rs`'s fixture, seed/table oracles and publish path, and `tests/project_cmd_e2e.rs`'s merge round trip. Both currently exercise code-only fixtures — the fixture graph carries no authored/transient rows and the merge e2e always adds code and rescans the branch — so this change-set adds a spec-only splice-delta test and a spec-only merge round trip.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.splice_e2e.fixture_graph",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "realised-by",
