@@ -47,6 +47,11 @@
       "kind": "contains",
       "target": "domain.service.splice-eligibility",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.splice-eligibility-guard",
+      "properties": {}
     }
   ],
   "in": [
