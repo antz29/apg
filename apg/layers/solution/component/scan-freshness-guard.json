@@ -17,11 +17,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.git.state.content_key",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.scan.cmd_scan",
       "properties": {}
     },
