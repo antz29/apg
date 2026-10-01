@@ -29,6 +29,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.splice.seed.seed",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.seed.assembled_authored_identity",
+      "properties": {}
     }
   ],
   "in": [
