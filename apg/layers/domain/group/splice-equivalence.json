@@ -12,6 +12,11 @@
       "kind": "contains",
       "target": "domain.entity.incremental-splice",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.seed-equivalence-guard",
+      "properties": {}
     }
   ],
   "in": []
