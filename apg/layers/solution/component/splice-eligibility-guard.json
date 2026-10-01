@@ -30,6 +30,11 @@
       "kind": "realised-by",
       "source": "domain.entity.shared-fact-store",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.service.splice-eligibility",
+      "properties": {}
     }
   ]
 }
