@@ -25,6 +25,11 @@
       "kind": "realised-by",
       "source": "domain.entity.durable-layer-node-set",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.shared-fact-store",
+      "properties": {}
     }
   ]
 }
