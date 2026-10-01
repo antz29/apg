@@ -818,8 +818,10 @@ mod e2e {
     /// Phase-05 task-10 (int): a forced mid-apply re-ingest failure rolls the
     /// projection back to the prior state and the mutation reports failure. The
     /// durable file write landed FIRST (commit-then-project), so the committed
-    /// JSONL holds the new state while the projection stays prior — and the
-    /// next apply reproduces the committed state.
+    /// JSONL holds the new state while the projection stays prior — the DB is
+    /// deliberately behind the tree, which the corrected staleness model refuses
+    /// until the DB is resynced; once level again, the committed state is
+    /// reproducible.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn projection_apply_failure_rolls_back_and_reports() {
@@ -866,8 +868,28 @@ mod e2e {
             .collect();
         assert!(leftovers.is_empty(), "temp residue: {leftovers:?}");
 
-        // The failure was one-shot: the next apply reproduces the committed
-        // state.
+        // Commit-then-project deliberately leaves the DB behind the committed
+        // JSONL after the rollback, and the corrected staleness model now REFUSES
+        // the next write-through: `is_fresh` compares the DB's actual
+        // authored/transient digest to `tree_authored_identity` (the independent
+        // source of truth), so the behind-the-tree DB can never be reused.
+        let err = write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("stale"),
+            "the behind-the-tree DB must refuse the next write: {err:#}"
+        );
+
+        // Resync the fixture DB to the committed JSONL — the projection the
+        // rolled-back attempt would have applied — so the tree and DB agree
+        // again, then assert the failure was one-shot: the next apply reproduces
+        // the committed state.
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            let conn = db.conn().unwrap();
+            conn.query("BEGIN TRANSACTION").unwrap();
+            db.merge_records(&conn, &mutated).unwrap();
+            conn.query("COMMIT").unwrap();
+        }
         write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap();
         {
             let db = ArtifactDb::open(&apg_root).unwrap();

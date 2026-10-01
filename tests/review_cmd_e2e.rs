@@ -3,6 +3,7 @@ mod common;
 use apg::artifacts;
 use apg::artifacts::parse_args;
 use apg::graph::{Graph, Location, Node, NodeKind};
+use apg::layers;
 use apg::load;
 use apg::review_cmd::*;
 use apg::schema::Record;
@@ -19,13 +20,42 @@ fn fixture(name: &str) -> (PathBuf, Repo, PathBuf) {
     let repo = Repo::new(&format!("review-{name}"));
     let wt = repo.start_project("foo");
     db_at(&wt);
+    // The fixture's durable `apg/layers/**` node files are untracked, so the
+    // worktree is legitimately DIRTY. Record the scan as dirty so the
+    // recorded git half agrees with the tree (`is_fresh` compares the recorded
+    // cleanliness to the live worktree), and the DB's authored/transient
+    // digest — projected by `db_at` — agrees with `tree_authored_identity`.
     testutil::write_scan_meta(
         &wt.join(specs::LAYOUT),
         Some(&repo.head_sha()),
-        true,
+        false,
         "2026-09-07T00:00:00Z",
     );
     (wt.join(specs::LAYOUT), repo, wt)
+}
+
+/// Write one durable `apg/layers/**` node file with the given identity and body
+/// (the raw file write the review fixtures use; the production node/edge path is
+/// exercised by layers' own tests). The file is the durable identity a review
+/// resolves against, so backing the DB's authored rows with real files keeps the
+/// DB and `tree_authored_identity` in agreement.
+fn write_layer_node(
+    apg_root: &Path,
+    layer: layers::Layer,
+    node_type: &str,
+    name: &str,
+    body: &str,
+) {
+    let node = layers::NodeFile {
+        layer: layer.layer_dir().to_string(),
+        node_type: node_type.to_string(),
+        name: name.to_string(),
+        body: body.to_string(),
+        properties: std::collections::BTreeMap::new(),
+        out: Vec::new(),
+        in_edges: Vec::new(),
+    };
+    layers::write_node(apg_root, &node).unwrap();
 }
 
 /// Builds a real DB + load files under `dir/apg` (used by `fixture`).
@@ -75,53 +105,6 @@ fn db_at(dir: &Path) {
         "github.com/x/y.Store".to_string(),
     ));
 
-    // A durable layer node (SPEC §3.1): a requirement under
-    // `apg/layers/requirements/requirement/`, FQN without a project
-    // prefix. Durable-node reviews resolve against it in the graph.
-    g.nodes.insert(
-        "requirements.requirement.timer".to_string(),
-        Node {
-            kind: NodeKind::Requirement,
-            ..Node::default()
-        },
-    );
-
-    // One durable node per remaining file-backed tier (SPEC §3.1) — a
-    // domain Entity, a solution System, a global Constraint — so reviews
-    // of every tier route to their own `.trans` mirror.
-    g.nodes.insert(
-        "domain.entity.order".to_string(),
-        Node {
-            kind: NodeKind::Entity,
-            ..Node::default()
-        },
-    );
-    g.nodes.insert(
-        "solution.system.checkout".to_string(),
-        Node {
-            kind: NodeKind::System,
-            ..Node::default()
-        },
-    );
-    g.nodes.insert(
-        "global.constraint.law".to_string(),
-        Node {
-            kind: NodeKind::Constraint,
-            ..Node::default()
-        },
-    );
-
-    // A durable Note (SPEC §3.1) — reviewable, but deliberately absent from
-    // the shared `Details` target list. A review on it exercises the
-    // Reviews-only `(Feedback, Note)` pair.
-    g.nodes.insert(
-        "requirements.note.design".to_string(),
-        Node {
-            kind: NodeKind::Note,
-            ..Node::default()
-        },
-    );
-
     let ldir = dir.join("apg").join(specs::TRANS).join("load");
     std::fs::create_dir_all(&ldir).unwrap();
     load::build_load_files(&g, &ldir).unwrap();
@@ -135,6 +118,37 @@ fn db_at(dir: &Path) {
     load::copy_from(&conn, &ldir).unwrap();
     drop(conn);
     drop(db);
+
+    // The durable layer nodes the review fixtures resolve against are REAL
+    // `apg/layers/**` node files, not DB-only graph rows: the DB must carry the
+    // same authored rows `tree_authored_identity` assembles (the phase-2
+    // authored/transient reconciliation `is_fresh` enforces), or every mutation
+    // is refused "graph is stale". One node per file-backed tier (SPEC §3.1): a
+    // requirements requirement + note, a domain entity, a solution system, and a
+    // global constraint — so reviews of every tier route to their own `.trans`
+    // mirror.
+    let apg_root = dir.join(specs::LAYOUT);
+    write_layer_node(
+        &apg_root,
+        layers::Layer::Requirements,
+        "requirement",
+        "timer",
+        "x",
+    );
+    write_layer_node(&apg_root, layers::Layer::Requirements, "note", "design", "");
+    write_layer_node(&apg_root, layers::Layer::Domain, "entity", "order", "");
+    write_layer_node(&apg_root, layers::Layer::Solution, "system", "checkout", "");
+    write_layer_node(&apg_root, layers::Layer::Global, "constraint", "law", "");
+
+    // The fixture's code universe must exist in the export — the sole
+    // code-identity source `code_universes_from_export` reads — then the durable
+    // authored rows are projected through the funnel (`layers::ingest_tree` +
+    // `artifacts::reingest_layers`), mirroring the `plan_cmd_e2e` modernization.
+    // The code graph above holds no authored rows, so the detach set is empty.
+    load::write_graph_jsonl(&g, &apg_root.join(specs::TRANS).join("graph.jsonl")).unwrap();
+    let (scanned, planned) = artifacts::code_universes_from_export(&apg_root).unwrap();
+    let records = layers::ingest_tree(&apg_root, &scanned, &planned).unwrap();
+    artifacts::reingest_layers(&apg_root, &std::collections::BTreeSet::new(), &records).unwrap();
 }
 
 /// e2e tier -- real I/O: every test here writes/reads the transient tier
