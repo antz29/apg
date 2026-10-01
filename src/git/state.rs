@@ -335,12 +335,24 @@ pub fn db_recorded_scan(apg_root: &Path) -> Option<RecordedScan> {
 /// **fails closed** (never panics): a missing/unopenable/locked DB, a missing
 /// export, or a mismatch all mean "not fresh".
 ///
+/// **Authored/transient reconciliation**: the DB's own authored/transient
+/// digest ([`crate::splice::seed::seed_authored_identity`]) must also equal the
+/// on-disk tree's ([`crate::splice::seed::tree_authored_identity`]) — the
+/// independent source of truth. This is the recovery safety net: a durability
+/// commit that re-anchors the DB `Scan` row to the current state cannot mask an
+/// authored row the DB dropped, because the DB digest is compared to the tree,
+/// never to a value refreshed from the DB. An error computing either digest is
+/// NOT fresh (fail closed).
+///
 /// A session socket that is present but fails a connect/`Ping` is also NOT
 /// fresh: an unclean session exit leaves the socket behind while the derived
 /// DB reflects only the last saved state, so a phantom projection exists and
 /// the on-disk DB cannot be trusted until a rebuild. A LIVE session (one that
-/// answers `Ping`) is the session's own business — it holds the DB directly,
-/// so its presence never makes the on-disk fast path unfresh.
+/// answers `Ping`) owns the DB directly, so opening it here would contend with
+/// the session and see only its last saved buffer: the DB reads
+/// ([`db_recorded_scan`] and the authored/transient reconciliation) are
+/// SHORT-CIRCUITED and only the `recorded_scan`/git half is evaluated. A live
+/// session therefore never makes the on-disk fast path unfresh.
 ///
 /// This is deliberately not `!is_stale`: `is_stale` is N/A (false) when there
 /// is no DB or the dir is not a git repo, so `is_stale != !is_fresh` there.
@@ -348,8 +360,12 @@ pub fn is_fresh(apg_root: &Path) -> bool {
     if !db_path(apg_root).exists() {
         return false;
     }
+    // A present socket that fails a connect/`Ping` is an unclean exit (see the
+    // doc above) — NOT fresh. A LIVE session is handled by the short-circuit
+    // below. An absent socket is the ordinary case.
     let socket = crate::session::socket_path(apg_root);
-    if socket.exists() && !crate::session::live_session_at(&socket) {
+    let live_session = socket.exists() && crate::session::live_session_at(&socket);
+    if socket.exists() && !live_session {
         return false;
     }
     let Ok(repo) = git2::Repository::discover(apg_root) else {
@@ -361,15 +377,38 @@ pub fn is_fresh(apg_root: &Path) -> bool {
     let Some(rec) = recorded_scan(apg_root) else {
         return false;
     };
-    // The DB's own `Scan` row must exist and agree with the export exactly:
-    // either half alone is not enough to reuse the DB (the DB and graph.jsonl
-    // are refreshed together at every durability point, so they agree by
-    // construction on a soundly-built DB).
-    let Some(db_rec) = db_recorded_scan(apg_root) else {
-        return false;
-    };
-    if db_rec.sha != rec.sha || db_rec.clean != rec.clean || db_rec.content_key != rec.content_key {
-        return false;
+    // While a live session owns `db.lbug` it holds the DB exclusively; opening
+    // it here would contend with the session and observe only its last saved
+    // buffer. Short-circuit BOTH DB reads and evaluate the recorded_scan/git
+    // half alone, so a live session never makes the on-disk fast path unfresh.
+    if !live_session {
+        // The DB's own `Scan` row must exist and agree with the export exactly:
+        // either half alone is not enough to reuse the DB (the DB and graph.jsonl
+        // are refreshed together at every durability point, so they agree by
+        // construction on a soundly-built DB).
+        let Some(db_rec) = db_recorded_scan(apg_root) else {
+            return false;
+        };
+        if db_rec.sha != rec.sha
+            || db_rec.clean != rec.clean
+            || db_rec.content_key != rec.content_key
+        {
+            return false;
+        }
+        // Recovery safety net: the DB's ACTUAL authored/transient digest must
+        // equal the on-disk tree's (the independent source of truth), so a
+        // re-anchored `Scan` row cannot mask an authored row the DB dropped.
+        // Any error fails closed.
+        let Ok(db_authored) = crate::splice::seed::seed_authored_identity(&db_path(apg_root))
+        else {
+            return false;
+        };
+        let Ok(tree_authored) = crate::splice::seed::tree_authored_identity(apg_root) else {
+            return false;
+        };
+        if db_authored != tree_authored {
+            return false;
+        }
     }
     let Some(rec_key) = rec.content_key.as_deref() else {
         return false; // pre-hardening: freshness cannot be verified

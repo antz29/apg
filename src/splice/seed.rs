@@ -10,6 +10,7 @@ use lbug::{Connection, Database, SystemConfig};
 
 use crate::graph::{Graph, Node, NodeKind};
 use crate::load;
+use crate::schema::Record;
 
 /// The previous `db.lbug` path under an `apg/` layout root.
 pub fn db_path(apg_root: &Path) -> PathBuf {
@@ -530,6 +531,72 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     Ok(format!("{hash:016x}"))
+}
+
+/// The canonical digest of the worktree's **authored/transient sources** — the
+/// tree-side source of truth for [`seed_authored_identity`]'s DB-side digest.
+///
+/// Assembles exactly the post-code record stream `cmd_scan` chains after the
+/// scanner records — the durable `apg/layers/**` tree via
+/// [`crate::layers::ingest_tree`] plus the transient `.trans/plans/*.jsonl` and
+/// `.trans/<tier>/*.jsonl` legs via [`crate::specs::plan_files`] /
+/// [`crate::specs::trans_mirror_files`] — and folds it through the single
+/// canonicalizer [`assembled_authored_identity`], so the result is
+/// byte-identical to those same authored rows' entry in a real scan's assembled
+/// graph.
+///
+/// The code-reference universe `ingest_tree` validates `implemented-by` targets
+/// against is read from the export
+/// ([`crate::artifacts::code_universes_from_export`]), never from the DB. Those
+/// real code FQNs are ALSO carried into the assembly as placeholder code nodes,
+/// so `ingest`'s finalize keeps the authored→code edges (`implemented-by`,
+/// `details`, `reviews`) exactly as the real scan's assembled graph does — the
+/// real scan has the actual code nodes; the tree has none. A `PlannedNode`
+/// placeholder enters at its exact FQN (no language re-rooting) and, being a
+/// code kind, contributes no authored row to the digest; its only effect is to
+/// keep those edges.
+///
+/// No database is opened. Every failure (a malformed layers/transient file, a
+/// drift ref, a bad export line) is returned as an `Err`.
+pub fn tree_authored_identity(apg_root: &Path) -> anyhow::Result<String> {
+    // The code-identity universe the real scan validates `implemented-by` refs
+    // against, from the export only.
+    let (scanned, planned) = crate::artifacts::code_universes_from_export(apg_root)?;
+
+    // The durable tree (validated against the code/planned universes) plus the
+    // worktree's transient legs — exactly `cmd_scan`'s post-code record stream.
+    let mut records = crate::layers::ingest_tree(apg_root, &scanned, &planned)?;
+    for path in crate::specs::plan_files(apg_root)
+        .into_iter()
+        .chain(crate::specs::trans_mirror_files(apg_root))
+    {
+        records.extend(crate::specs::read_jsonl(&path)?);
+    }
+
+    // Placeholder code nodes for the code universe — the analog of the real
+    // scan's actual code nodes, without which `ingest`'s finalize would prune
+    // every authored→code edge (the target node would be absent). Code kinds
+    // contribute no authored row, so the digest is unchanged by their presence
+    // other than through the edges they keep.
+    for fqn in scanned.iter().chain(planned.iter()) {
+        records.push(Record::PlannedNode {
+            fqn: fqn.clone(),
+            kind: "module".to_string(),
+            name: String::new(),
+            parent: String::new(),
+        });
+    }
+
+    let (graph, _) = crate::ingest::ingest(
+        records,
+        &crate::ingest::IngestOptions {
+            blacklist: &[],
+            language: "",
+            config: None,
+            base: None,
+        },
+    );
+    Ok(assembled_authored_identity(&graph))
 }
 
 /// Opens `previous` read-only and compares its structural fingerprint to this
