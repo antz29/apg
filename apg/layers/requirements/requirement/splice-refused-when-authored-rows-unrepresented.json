@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "splice-refused-when-authored-rows-unrepresented",
+  "body": "When the win-C splice would be selected but the assembled graph's durable-layer/transient rows (`apg/layers/**`, `.trans/plans/**`) are not already represented in the seed, the splice must be REFUSED and the existing FULL LOAD — the correctness reference — must run. The guard is an eligibility check, never a partial write: the splice must not attempt to patch authored/transient rows into the seeded DB.\n\nObservable completion: seed a DB whose authored/transient rows differ from the assembled graph's; a scan must not publish a DB that diverges from a full rebuild — it full-loads instead. This extends the existing content-identity seed guard (`rust.apg.splice.seed.seed_checked`), which today equates only the code content identity (`rust.apg.splice.seed.seed_key_matches`) and therefore admits a seed whose authored rows are stale.",
+  "properties": {
+    "feature": "splice-equivalence"
+  },
+  "out": [],
+  "in": []
+}
