@@ -20,6 +20,11 @@
       "kind": "realised-by",
       "source": "domain.entity.seed-equivalence-guard",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.durable-layer-node-set",
+      "properties": {}
     }
   ]
 }
