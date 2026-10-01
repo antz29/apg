@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.project_cmd.merge.project_merge_at",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd.merge.project_merge",
+      "properties": {}
     }
   ],
   "in": [
