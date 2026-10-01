@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "freshness-fast-path-cannot-mask-divergence",
+  "body": "The recorded scan and the win-A freshness fast path must never declare fresh a `db.lbug` that disagrees with the `graph.jsonl` it was recorded with for authored/transient rows. If a divergence is ever published, `apg scan` must be able to recover: the next scan must not reuse a DB that does not match the assembled graph. The primary defence is the eligibility guard above; this is the safety net that keeps the defect from being permanent.\n\nObservable completion: after a diverged DB is recorded as scanned, a subsequent `apg scan` does not fast-path past the divergence — it either rebuilds or otherwise leaves the DB consistent with `graph.jsonl`. Today `rust.apg.git.state.is_fresh` reads the recorded scan from `graph.jsonl` line 1 (`rust.apg.git.state.recorded_scan`), which `rust.apg.git.commit.reanchor_scan_meta` rewrites after a durable commit WITHOUT touching the DB's `Scan` row, so a re-anchored line makes the next scan FRESH and the divergence sticks.",
+  "properties": {
+    "feature": "splice-equivalence"
+  },
+  "out": [],
+  "in": []
+}
