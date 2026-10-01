@@ -229,11 +229,6 @@
     },
     {
       "kind": "contains",
-      "target": "solution.component.project-merge-rebuild",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "solution.component.splice-equivalence-tests",
       "properties": {}
     }

@@ -6,13 +6,7 @@
   "properties": {
     "kind": "entity"
   },
-  "out": [
-    {
-      "kind": "realised-by",
-      "target": "solution.component.project-merge-rebuild",
-      "properties": {}
-    }
-  ],
+  "out": [],
   "in": [
     {
       "kind": "contains",
