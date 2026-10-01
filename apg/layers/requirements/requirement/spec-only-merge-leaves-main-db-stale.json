@@ -48,6 +48,11 @@
       "kind": "contains",
       "source": "requirements.stakeholder.multi-user-repo-team",
       "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.spec-only-merge-defect-recorded",
+      "properties": {}
     }
   ]
 }
