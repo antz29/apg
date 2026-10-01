@@ -3,11 +3,12 @@
 //! open the copy read-write — the [`SeedDecision`] surface the pipeline
 //! dispatches on.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use lbug::{Connection, Database, SystemConfig};
 
+use crate::graph::{Graph, Node, NodeKind};
 use crate::load;
 
 /// The previous `db.lbug` path under an `apg/` layout root.
@@ -118,6 +119,260 @@ pub fn seed_checked(previous: &Path, expected: Option<&str>) -> SeedDecision {
 /// divergence. No filesystem, no database.
 pub fn seed_key_matches(seed: Option<&str>, expected: Option<&str>) -> bool {
     matches!((seed, expected), (Some(s), Some(r)) if s == r)
+}
+
+/// The canonical digest of the assembled graph's **authored/transient** rows —
+/// the layer/plan/feedback node kinds (`Requirement`, `Note`, `Feedback`,
+/// `Plan`, `PlanPhase`, `Task`, `Stakeholder`, `User`, `DomainGroup`, `Entity`,
+/// `Value`, `Service`, `System`, `Container`, `Component`, `Person`,
+/// `Constraint`) and the edges those nodes author — the identity the seed
+/// equivalence guard ([`seed_checked`]) compares against a seed DB's own
+/// authored/transient set.
+///
+/// The win-C splice writes no authored/transient row (it applies only the code
+/// delta), while `graph.jsonl` is serialized from the FULL assembled graph, so
+/// a spec-only change-set would publish a DB that diverges from its export. The
+/// caller threads this digest — and a seed DB digest computed the same way
+/// (`seed_authored_identity`) — into the guard; an inequality makes the seed
+/// ineligible and the existing full load (the correctness reference) runs.
+///
+/// ## Canonical form
+///
+/// Every authored/transient node contributes one row, every edge whose SOURCE
+/// node is one of those kinds contributes one row, and each row is a JSON array
+/// of strings:
+///
+/// * node — `["N", <DB table>, <column 1>, …, <column n>]`, the table's columns
+///   in `create_schema` order, so the digest is reproducible from the seed DB's
+///   own rows. A missing property is normalized to exactly what
+///   `build_load_files` writes: the empty string for an absent string, `0` for
+///   an absent `PlanPhase.number`;
+/// * edge — `["E", <DB rel table>, <from>, <to>]`. The source-kind filter
+///   excludes the code pairs of the shared `Contains`/`Calls`/`Uses` tables and
+///   includes `Details`/`Reviews`/`SpecImplementedBy` edges whose target is a
+///   code FQN.
+///
+/// The rows are sorted (so set iteration order never matters) and folded into a
+/// 64-bit FNV-1a digest rendered as 16 lowercase hex digits. Pure: it reads
+/// only `graph` — no filesystem, database, git, or process.
+pub fn assembled_authored_identity(graph: &Graph) -> String {
+    // The Option→value normalization `build_load_files` applies: an absent
+    // string is written as "", never NULL, so both sides agree.
+    let empty = |v: &Option<String>| v.clone().unwrap_or_default();
+
+    let node_row = |fqn: &str, node: &Node| -> Option<String> {
+        let mut row: Vec<String> = Vec::new();
+        match node.kind {
+            NodeKind::Requirement => {
+                row.push("N".into());
+                row.push("Requirement".into());
+                row.push(fqn.into());
+                row.push(empty(&node.id));
+                row.push(empty(&node.title));
+                row.push(empty(&node.body));
+                row.push(empty(&node.feature));
+            }
+            NodeKind::Note => {
+                row.push("N".into());
+                row.push("Note".into());
+                row.push(fqn.into());
+                row.push(empty(&node.body));
+                row.push(empty(&node.sub_kind));
+            }
+            NodeKind::Feedback => {
+                row.push("N".into());
+                row.push("Feedback".into());
+                row.push(fqn.into());
+                row.push(empty(&node.body));
+                row.push(empty(&node.status));
+                row.push(empty(&node.disposition));
+            }
+            NodeKind::Plan => {
+                row.push("N".into());
+                row.push("Plan".into());
+                row.push(fqn.into());
+                row.push(empty(&node.title));
+                row.push(empty(&node.strategy));
+            }
+            NodeKind::PlanPhase => {
+                row.push("N".into());
+                row.push("PlanPhase".into());
+                row.push(fqn.into());
+                row.push(node.number.unwrap_or_default().to_string());
+                row.push(empty(&node.title));
+                row.push(empty(&node.deliverable));
+                row.push(empty(&node.status));
+            }
+            NodeKind::Task => {
+                row.push("N".into());
+                row.push("Task".into());
+                row.push(fqn.into());
+                row.push(empty(&node.title));
+                row.push(empty(&node.sub_kind));
+                row.push(empty(&node.tier));
+                row.push(empty(&node.status));
+                row.push(empty(&node.verb));
+                row.push(empty(&node.target));
+                row.push(empty(&node.new_fqn));
+            }
+            NodeKind::Stakeholder => {
+                row.push("N".into());
+                row.push("Stakeholder".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
+            NodeKind::Entity => {
+                row.push("N".into());
+                row.push("Entity".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
+            NodeKind::System => {
+                row.push("N".into());
+                row.push("System".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
+            NodeKind::Container => {
+                row.push("N".into());
+                row.push("Container".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.sub_kind));
+                row.push(empty(&node.body));
+            }
+            NodeKind::Component => {
+                row.push("N".into());
+                row.push("Component".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
+            NodeKind::User => {
+                row.push("N".into());
+                row.push("User".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
+            NodeKind::Group => {
+                row.push("N".into());
+                row.push("DomainGroup".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.attribute));
+                row.push(empty(&node.root));
+                row.push(empty(&node.body));
+            }
+            NodeKind::Value => {
+                row.push("N".into());
+                row.push("Value".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
+            NodeKind::Service => {
+                row.push("N".into());
+                row.push("Service".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
+            NodeKind::Person => {
+                row.push("N".into());
+                row.push("Person".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
+            NodeKind::Constraint => {
+                row.push("N".into());
+                row.push("Constraint".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+                row.push(empty(&node.attaches_to));
+            }
+            _ => return None,
+        }
+        Some(serde_json::to_string(&row).expect("a JSON array of strings is always serializable"))
+    };
+
+    let is_authored = |kind: NodeKind| {
+        matches!(
+            kind,
+            NodeKind::Requirement
+                | NodeKind::Note
+                | NodeKind::Feedback
+                | NodeKind::Plan
+                | NodeKind::PlanPhase
+                | NodeKind::Task
+                | NodeKind::Stakeholder
+                | NodeKind::User
+                | NodeKind::Group
+                | NodeKind::Entity
+                | NodeKind::Value
+                | NodeKind::Service
+                | NodeKind::System
+                | NodeKind::Container
+                | NodeKind::Component
+                | NodeKind::Person
+                | NodeKind::Constraint
+        )
+    };
+
+    let mut rows: Vec<String> = Vec::new();
+    for (fqn, node) in &graph.nodes {
+        if let Some(row) = node_row(fqn, node) {
+            rows.push(row);
+        }
+    }
+
+    // An edge belongs to the authored/transient set iff its SOURCE is one of the
+    // authored/transient kinds: this keeps the shared `Contains`/`Calls`/`Uses`
+    // tables' code pairs out while retaining authored edges whose target is a
+    // code FQN (`Details`, `Reviews`, `SpecImplementedBy`).
+    let mut add_edges = |table: &str, edges: &HashSet<(String, String)>| {
+        for (from, to) in edges {
+            if graph.nodes.get(from).is_some_and(|n| is_authored(n.kind)) {
+                rows.push(
+                    serde_json::to_string(&["E", table, from.as_str(), to.as_str()])
+                        .expect("a JSON array of strings is always serializable"),
+                );
+            }
+        }
+    };
+    add_edges("Contains", &graph.contains);
+    add_edges("Calls", &graph.calls);
+    add_edges("Uses", &graph.uses);
+    add_edges("Details", &graph.details);
+    add_edges("Reviews", &graph.reviews);
+    add_edges("DependsOn", &graph.depends_on);
+    add_edges("Gates", &graph.gates);
+    add_edges("Satisfies", &graph.satisfies);
+    add_edges("Drives", &graph.drives);
+    add_edges("Represents", &graph.represents);
+    add_edges("RealisedBy", &graph.realised_by);
+    add_edges("SpecImplementedBy", &graph.spec_implemented_by);
+    add_edges("Publishes", &graph.publishes);
+    add_edges("Subscribes", &graph.subscribes);
+
+    // Order-independent: sort before folding, then include the row separator so
+    // adjacent rows can never run together ambiguously.
+    rows.sort();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for row in &rows {
+        for &byte in row.as_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash ^= u64::from(b'\n');
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
 }
 
 /// Opens `previous` read-only and compares its structural fingerprint to this
