@@ -1,0 +1,11 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "spec-only-merge-leaves-main-db-stale",
+  "body": "A SPEC-ONLY change-set — only `apg/layers/**` changed, no code — merged by `apg project merge` leaves main's `db.lbug` WITHOUT the merged authored nodes/edges, while the `graph.jsonl` written by the same rebuild DOES contain them. The rebuild records the merged HEAD as scanned, so a later `apg scan` takes the freshness fast path and never corrects the DB; queries against main then silently return the pre-merge spec.\n\nObservable completion: (a) merge a spec-only change-set into main; (b) `apg query` on main returns every authored node/edge the branch committed; (c) a subsequent `apg scan` does not revert main's DB to the pre-merge spec. Fails today: `rust.apg.splice.apply.apply` falls through `_ => {}` for every authored/transient kind, so the seeded+spliced `db.lbug` `rust.apg.splice.publish.publish` swaps in is missing the merged rows that its `graph.jsonl` carries.",
+  "properties": {
+    "feature": "splice-equivalence"
+  },
+  "out": [],
+  "in": []
+}
