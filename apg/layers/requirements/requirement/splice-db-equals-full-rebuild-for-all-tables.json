@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.group.splice-equivalence",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.durable-layer-node-set",
+      "properties": {}
     }
   ],
   "in": [
