@@ -22,11 +22,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.splice.seed.recorded_content_key",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.splice.seed.seed",
       "properties": {}
     },
