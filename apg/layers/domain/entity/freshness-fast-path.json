@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "freshness-fast-path",
+  "body": "The win-A reuse path: `apg scan` reuses the existing `db.lbug` without rebuilding when the current tree's content identity equals the scan recorded in `graph.jsonl` line 1. It is what makes a diverged-but-re-anchored DB persist, because the recorded line can be rewritten ahead of the DB's own `Scan` row and the next scan then skips the rebuild that would have corrected it.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
