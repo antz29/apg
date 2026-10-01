@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "merge-rebuild",
+  "body": "The plain unguarded `apg scan` of the main checkout that `apg project merge` runs after the verify gate and the branch merge. It is the act that must land the merged authored rows in main's `db.lbug`; when it splices instead of full-loading, it publishes a main DB that lacks them.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
