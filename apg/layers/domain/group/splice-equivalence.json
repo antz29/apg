@@ -1,0 +1,12 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "splice-equivalence",
+  "body": "The correctness law of the incremental database build: the win-C spliced `db.lbug` must be a full rebuild's projection of the assembled graph for EVERY table — code and authored/transient alike — not only the code tables its DML writes. Core domain concept of this change-set; its aggregate root is the incremental splice. Supporting concepts: the seed-equivalence guard, the durable layer node set, the shared fact store vs the local seed, the content identity, the freshness fast path, and the merge rebuild.",
+  "properties": {
+    "attribute": "core",
+    "root": "incremental-splice"
+  },
+  "out": [],
+  "in": []
+}
