@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "splice-eligibility-guard",
+  "body": "The win-C eligibility decision and its seed-equivalence guard: `rust.apg.pipeline.try_splice_build` decides splice vs full load; `rust.apg.splice.seed.seed_checked`, `rust.apg.splice.seed.seed_key_matches` and `rust.apg.splice.seed.recorded_content_key` are the content-identity equivalence check, and `rust.apg.splice.seed.seed` performs the whole-file seed. This change-set extends the guard so the splice is refused when the assembled graph's durable-layer/transient rows are not already represented in the seed.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
