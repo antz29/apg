@@ -11,6 +11,11 @@
       "kind": "drives",
       "target": "domain.entity.freshness-fast-path",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.content-identity",
+      "properties": {}
     }
   ],
   "in": [
