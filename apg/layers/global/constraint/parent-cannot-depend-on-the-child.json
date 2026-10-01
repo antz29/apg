@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "parent-cannot-depend-on-the-child",
+  "body": "A change-set is finalised with the INSTALLED binary, whose checks are exact-match against the graph it builds. Nothing the durable spec or the plan must read may be written in a future binary's rendering: `implemented-by`/`details` code targets, task targets, and planned-node FQNs are the language-agnostic identities the installed binary renders (e.g. `rust.apg.splice.apply.apply`), never a rendering only a not-yet-released child produces. A change-set that alters how the next binary renders FQNs must not make the current spec or plan depend on that rendering; the next binary's tolerance resolves the same identities once released. A durable artifact only the next binary can read is broken, not advanced. Corollary (with `global.constraint.no-real-project-test`): a change-set is verified by the tests against scratch `/tmp` repos, never by pointing a branch-built `apg` at the apg repo. (Prose; assessed by review.)",
+  "properties": {},
+  "out": [],
+  "in": []
+}
