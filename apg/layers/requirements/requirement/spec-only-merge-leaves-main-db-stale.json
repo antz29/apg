@@ -16,6 +16,11 @@
       "kind": "contains",
       "target": "requirements.requirement.splice-refused-when-authored-rows-unrepresented",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.freshness-fast-path-cannot-mask-divergence",
+      "properties": {}
     }
   ],
   "in": [
