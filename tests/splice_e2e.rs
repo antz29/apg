@@ -268,6 +268,38 @@ fn with_authored_row(mut g: Graph) -> Graph {
     g
 }
 
+/// [`with_authored_row`] plus the `Scan` row the seed guard's content-key check
+/// reads — a realistic seed side: one `Requirement` (`req`), its `Entity`, and a
+/// `Drives` edge, built at content key `oldkey`.
+fn seeded_authored_graph(base: Graph) -> Graph {
+    let mut g = with_authored_row(base);
+    g.nodes.insert(
+        SCAN_HEAD.into(),
+        scan_node("oldsha", "oldkey", "2026-01-01T00:00:00Z"),
+    );
+    g
+}
+
+/// A spec-only delta over [`seeded_authored_graph`]: the SAME code, the SAME
+/// `Scan` row, but an EXTRA `Requirement` (`req2`) and its `Drives` edge the
+/// seed DB does not carry. Its authored/transient identity can therefore never
+/// equal a seed built from [`seeded_authored_graph`], while every code row is
+/// unchanged.
+fn with_authored_delta(base: Graph) -> Graph {
+    let mut g = seeded_authored_graph(base);
+    let req2 = Node {
+        kind: NodeKind::Requirement,
+        body: Some("a second requirement".into()),
+        ..Node::default()
+    };
+    g.nodes.insert("requirements.requirement.req2".into(), req2);
+    g.drives.insert((
+        "requirements.requirement.req2".into(),
+        "domain.entity.task".into(),
+    ));
+    g
+}
+
 /// The previous tree: module `m` with `a.go` (struct `m.A`, fun `m.A.f`) and
 /// `b.go` (fun `m.B.g` → `m.A.f`), plus module `m.C` with `c.go` (fun
 /// `m.C.q`). `m.A.f` references `ext.Old`.
@@ -1289,6 +1321,94 @@ mod e2e {
             seed_checked(&prev_path, None, &assembled_authored),
             SeedDecision::FullLoad(SeedFallback::StaleSeed { .. })
         ));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A spec-only change-set: the assembled graph carries the SAME code as the
+    /// seed DB but DIFFERENT authored/transient rows (an extra `Requirement`).
+    /// The win-C splice writes no authored row while `graph.jsonl` is serialized
+    /// from the full assembled graph, so seeding this DB would publish a
+    /// `db.lbug` that diverges from its own export. The phase-01 authored-identity
+    /// guard must refuse the seed and hand the caller to the full load, which
+    /// projects exactly the assembled authored/transient tables — so a spec-only
+    /// splice can never diverge from a full rebuild.
+    ///
+    /// Pre-fix `seed_checked` had no authored-identity parameter; with a matching
+    /// content key it returned `Seed`, so the step-3 assertion below (an
+    /// `UnrepresentedAuthored` fallback) could not hold.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/graph.jsonl/fs); run via cargo test-e2e"]
+    fn spec_only_delta_cannot_diverge_from_full_rebuild() {
+        let dir = scratch("spec-only-splice");
+        let prev_path = dir.join("db.lbug");
+
+        // The seed DB: fixture code + authored rows (`req`) + `Scan` row, built
+        // through the same full load the scan path uses.
+        let seed_graph = seeded_authored_graph(fixture_graph());
+        build_db(&prev_path, &seed_graph);
+        let seed_authored = seed_authored_identity(&prev_path).unwrap();
+
+        // The assembled graph: the same code, one EXTRA authored requirement —
+        // a spec-only delta whose authored rows the seed does not represent.
+        let assembled = with_authored_delta(fixture_graph());
+        let assembled_authored = assembled_authored_identity(&assembled);
+        assert_ne!(
+            seed_authored, assembled_authored,
+            "the fixture must genuinely diverge in authored rows"
+        );
+
+        // (1) The guard refuses: the content key matches ("oldkey"), but the
+        // seed does not represent the assembled authored rows, so the caller runs
+        // the full load instead of publishing a diverged DB.
+        match seed_checked(&prev_path, Some("oldkey"), &assembled_authored) {
+            SeedDecision::FullLoad(SeedFallback::UnrepresentedAuthored {
+                assembled: a,
+                seed: s,
+            }) => {
+                assert_eq!(a, assembled_authored);
+                assert_eq!(s, seed_authored);
+            }
+            SeedDecision::FullLoad(other) => {
+                panic!("expected UnrepresentedAuthored, got: {}", other.describe())
+            }
+            SeedDecision::Seed(_) => panic!(
+                "a spec-only delta must never seed: the spliced DB would diverge from its export"
+            ),
+        }
+
+        // (2) Positive control: when the assembled authored rows DO match the
+        // seed's, the guard is not over-broad — it still seeds.
+        let represented = seeded_authored_graph(fixture_graph());
+        let represented_authored = assembled_authored_identity(&represented);
+        assert_eq!(represented_authored, seed_authored);
+        match seed_checked(&prev_path, Some("oldkey"), &represented_authored) {
+            SeedDecision::Seed(s) => s.discard().unwrap(),
+            SeedDecision::FullLoad(f) => {
+                panic!(
+                    "the guard must not refuse a represented seed: {}",
+                    f.describe()
+                )
+            }
+        }
+
+        // (3) The full-load reference: the guard's fallback loads the assembled
+        // graph whole, so the resulting DB carries exactly the assembled
+        // authored/transient rows — no divergence is possible.
+        let full_path = dir.join("full.lbug");
+        build_db(&full_path, &assembled);
+        assert_eq!(
+            seed_authored_identity(&full_path).unwrap(),
+            assembled_authored,
+            "the full load must project exactly the assembled authored rows"
+        );
+        let full_counts = {
+            let db = Database::new(&full_path, SystemConfig::default().read_only(true)).unwrap();
+            row_counts(&db)
+        };
+        assert_eq!(full_counts.get("Requirement"), Some(&2));
+        assert_eq!(full_counts.get("Entity"), Some(&1));
+        assert_eq!(full_counts.get("Drives"), Some(&2));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
