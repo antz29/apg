@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.splice_e2e.fixture_graph",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.splice_e2e.e2e.delta_application_matches_a_full_rebuild",
+      "properties": {}
     }
   ],
   "in": [
