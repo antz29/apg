@@ -342,7 +342,16 @@ pub fn try_splice_build(
         .flat_map(|rel| [rel.clone(), incremental::absolute(&input.scan_root, rel)])
         .collect();
 
-    let seeded = match splice::seed_checked(&db, input.recorded_content_key.as_deref()) {
+    // The content key guards cross-worktree drift; the assembled authored
+    // identity additionally requires the seed DB to represent the assembled
+    // graph's authored/transient rows (the win-C splice writes none), so a
+    // spec-only change-set is refused here and the full load runs.
+    let assembled_authored = splice::assembled_authored_identity(graph);
+    let seeded = match splice::seed_checked(
+        &db,
+        input.recorded_content_key.as_deref(),
+        &assembled_authored,
+    ) {
         splice::SeedDecision::Seed(seeded) => seeded,
         splice::SeedDecision::FullLoad(reason) => {
             log.ln(&format!("[load] splice: {} — full load", reason.describe()));

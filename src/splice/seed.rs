@@ -94,7 +94,21 @@ pub fn recorded_content_key(previous: &Path) -> anyhow::Result<Option<String>> {
 /// `expected` is the shared recorded key (`ScanRecord::content_key`) captured
 /// BEFORE the completed scan rewrites it. The caller runs the existing full
 /// load on any [`SeedFallback`], keeping it the correctness reference.
-pub fn seed_checked(previous: &Path, expected: Option<&str>) -> SeedDecision {
+///
+/// `assembled` is the assembled graph's authored/transient identity
+/// ([`assembled_authored_identity`]). Once the content key matches, the seed DB
+/// must ALSO represent the assembled authored/transient rows: the win-C splice
+/// writes no authored row, while `graph.jsonl` is serialized from the full
+/// assembled graph, so a same-content seed that lacks those rows would publish
+/// a DB diverging from its export. When the seed's own digest
+/// ([`seed_authored_identity`]) differs, the seed is refused with
+/// [`SeedFallback::UnrepresentedAuthored`] and the caller runs the full load.
+///
+/// Every failure is a [`SeedFallback`], never a panic: an unopenable seed DB on
+/// the authored-identity read falls back to the full load rather than
+/// propagating. Refusal ordering is content-key first (`StaleSeed`), then
+/// authored identity.
+pub fn seed_checked(previous: &Path, expected: Option<&str>, assembled: &str) -> SeedDecision {
     if !previous.exists() {
         return SeedDecision::FullLoad(SeedFallback::MissingPrevious);
     }
@@ -106,6 +120,19 @@ pub fn seed_checked(previous: &Path, expected: Option<&str>) -> SeedDecision {
         return SeedDecision::FullLoad(SeedFallback::StaleSeed {
             seed: seed_key.unwrap_or_else(|| "(none)".to_string()),
             recorded: expected.unwrap_or("(none)").to_string(),
+        });
+    }
+    // Content key matches: the tree content is the same, but the seed must also
+    // represent the assembled graph's authored/transient rows. A read failure is
+    // a fallback (never a panic), exactly like the content-key read above.
+    let seed_authored = match seed_authored_identity(previous) {
+        Ok(identity) => identity,
+        Err(e) => return SeedDecision::FullLoad(SeedFallback::Unreadable(e.to_string())),
+    };
+    if seed_authored != assembled {
+        return SeedDecision::FullLoad(SeedFallback::UnrepresentedAuthored {
+            assembled: assembled.to_string(),
+            seed: seed_authored,
         });
     }
     seed(previous)

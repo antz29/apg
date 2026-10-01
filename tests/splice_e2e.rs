@@ -241,6 +241,33 @@ fn scan_node(sha: &str, key: &str, at: &str) -> Node {
     }
 }
 
+/// Inserts one authored/transient node (`Requirement`) plus one authored edge
+/// whose source is that node — enough to give a graph a non-trivial
+/// authored/transient identity. Shared by both sides of the authored-identity
+/// guard test (the seed DB's built graph and the assembled graph) so their
+/// digests match.
+fn with_authored_row(mut g: Graph) -> Graph {
+    let mut req = Node {
+        kind: NodeKind::Requirement,
+        ..Node::default()
+    };
+    req.body = Some("the requirement body".into());
+    req.feature = Some("the feature".into());
+    g.nodes.insert("requirements.requirement.req".into(), req);
+    g.nodes.insert(
+        "domain.entity.task".into(),
+        Node {
+            kind: NodeKind::Entity,
+            ..Node::default()
+        },
+    );
+    g.drives.insert((
+        "requirements.requirement.req".into(),
+        "domain.entity.task".into(),
+    ));
+    g
+}
+
 /// The previous tree: module `m` with `a.go` (struct `m.A`, fun `m.A.f`) and
 /// `b.go` (fun `m.B.g` → `m.A.f`), plus module `m.C` with `c.go` (fun
 /// `m.C.q`). `m.A.f` references `ext.Old`.
@@ -1160,11 +1187,17 @@ mod e2e {
         let c = "/x/c.go".to_string();
 
         // This worktree's LOCAL DB: built by its last scan at content "oldkey".
-        build_db(&prev_path, &previous_graph(&a, &b, &c));
+        // It carries an authored/transient row (a requirement + its edge) so the
+        // authored-identity guard has something to agree on.
+        build_db(&prev_path, &with_authored_row(previous_graph(&a, &b, &c)));
 
         // The ASSEMBLED graph for this worktree's CURRENT tree, and its full
         // rebuild (the same graph loaded whole) — the correctness reference.
-        let assembled = assembled_graph(&a, &b);
+        // The assembled graph carries the SAME authored/transient rows as the
+        // seed, so the content-key / cross-worktree staleness is the only
+        // divergence this test exercises.
+        let assembled = with_authored_row(assembled_graph(&a, &b));
+        let assembled_authored = assembled_authored_identity(&assembled);
         let expected_path = dir.join("expected.lbug");
         build_db(&expected_path, &assembled);
         let expected = published_snapshot(&expected_path);
@@ -1222,8 +1255,14 @@ mod e2e {
 
         // The fix: the shared recorded key ("newkey") does not match the local
         // seed's own key ("oldkey"), so the splice is REFUSED — the caller runs
-        // the full load, which is the correctness reference.
-        match seed_checked(&prev_path, recorded.content_key.as_deref()) {
+        // the full load, which is the correctness reference. The assembled
+        // authored identity MATCHES the seed, so the refusal is unambiguously
+        // the content-key staleness, not the authored guard.
+        match seed_checked(
+            &prev_path,
+            recorded.content_key.as_deref(),
+            &assembled_authored,
+        ) {
             SeedDecision::FullLoad(SeedFallback::StaleSeed { seed, recorded }) => {
                 assert_eq!(seed, "oldkey");
                 assert_eq!(recorded, "newkey");
@@ -1235,8 +1274,9 @@ mod e2e {
         }
 
         // The common single-worktree case still seeds: the shared recorded key
-        // IS the local DB's own key.
-        match seed_checked(&prev_path, Some("oldkey")) {
+        // IS the local DB's own key AND the seed represents the assembled
+        // authored/transient rows.
+        match seed_checked(&prev_path, Some("oldkey"), &assembled_authored) {
             SeedDecision::Seed(s) => s.discard().unwrap(),
             SeedDecision::FullLoad(f) => {
                 panic!("a current local seed must still splice: {}", f.describe())
@@ -1246,7 +1286,7 @@ mod e2e {
         // A missing key on either side is ineligible — equivalence cannot be
         // verified.
         assert!(matches!(
-            seed_checked(&prev_path, None),
+            seed_checked(&prev_path, None, &assembled_authored),
             SeedDecision::FullLoad(SeedFallback::StaleSeed { .. })
         ));
 
