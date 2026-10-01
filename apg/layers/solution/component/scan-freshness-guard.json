@@ -29,6 +29,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.scan.cmd_scan",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.state.db_recorded_scan",
+      "properties": {}
     }
   ],
   "in": [
