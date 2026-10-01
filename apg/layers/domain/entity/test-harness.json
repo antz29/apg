@@ -28,6 +28,11 @@
       "kind": "drives",
       "source": "requirements.requirement.graph-visible-tests",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.spec-only-splice-equivalence-tests",
+      "properties": {}
     }
   ]
 }
