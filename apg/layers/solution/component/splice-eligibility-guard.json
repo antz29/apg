@@ -71,11 +71,6 @@
       "kind": "details",
       "source": "solution.note.reconcile-splice-eligibility-guard",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.reconcile-splice-guard-delta-scope",
-      "properties": {}
     }
   ]
 }
