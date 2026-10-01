@@ -211,6 +211,11 @@
       "kind": "contains",
       "target": "solution.component.splice-eligibility-guard",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.splice-delta-application",
+      "properties": {}
     }
   ],
   "in": [
