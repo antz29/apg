@@ -17,11 +17,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.splice.seed.seed_key_matches",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.splice.seed.assembled_authored_identity",
       "properties": {}
     },
