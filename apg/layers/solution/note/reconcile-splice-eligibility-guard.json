@@ -4,6 +4,12 @@
   "name": "reconcile-splice-eligibility-guard",
   "body": "source: `spec-splice-guard/feedback-5` (final-review divergence) — the `solution.component.splice-eligibility-guard` implemented-by set omitted the realized authored/transient units and its body carried change-set, future-tense wording.\n\nInconsistency: a `SpecImplementedBy` query over the component listed only `try_splice_build`, `seed_checked`, `seed_key_matches`, `recorded_content_key`, and `seed`; `rust.apg.splice.seed.assembled_authored_identity`, `rust.apg.splice.seed.seed_authored_identity`, and the `SeedFallback` enum carrying the `UnrepresentedAuthored` variant all resolve as real code with no claim reaching them.\n\nResolution: added `implemented-by` edges to `rust.apg.splice.seed.assembled_authored_identity`, `rust.apg.splice.seed.seed_authored_identity`, and `rust.apg.splice.seed.SeedFallback`, and rewrote the body as the shipped guard in the present tense. `rust.apg.splice.seed.SeedFallback.describe` carries the new variant's describe arm and stays unclaimed because the plan's phase-1 task-3 subject is the `SeedFallback` struct. [with user]",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "details",
+      "target": "solution.component.splice-eligibility-guard",
+      "properties": {}
+    }
+  ],
   "in": []
 }
