@@ -39,6 +39,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.splice.seed.seed_authored_identity",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice.seed.SeedFallback",
+      "properties": {}
     }
   ],
   "in": [
