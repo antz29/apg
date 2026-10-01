@@ -4,7 +4,13 @@
   "name": "incremental-fact-store",
   "body": "The shared delta/manifest preparation (`rust.apg.incremental.prepare.prepare`, its `Prepared` target/removed sets and `PipelineInput` reuse plan) that decides the phase-2 target set and carries the recorded content identity the seed guard compares. It lives in the shared store while the seeded DB is worktree-local, which is why the guard exists and why a spec-only change-set can slip through it.",
   "properties": {},
-  "out": [],
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.incremental.prepare.prepare",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "realised-by",
