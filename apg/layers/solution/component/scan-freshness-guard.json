@@ -9,6 +9,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.git.state.is_fresh",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.state.recorded_scan",
+      "properties": {}
     }
   ],
   "in": [
