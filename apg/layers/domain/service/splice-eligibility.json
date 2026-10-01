@@ -5,5 +5,11 @@
   "body": "The decision of whether to build the DB incrementally (win-C splice) or from scratch (full load): try the splice only when the seed provably represents the assembled graph; otherwise run the full load. This change-set extends its evidence from code content identity alone to the authored/transient row set, so the service's verdict is the same whether or not the change-set touched code.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.splice-equivalence",
+      "properties": {}
+    }
+  ]
 }

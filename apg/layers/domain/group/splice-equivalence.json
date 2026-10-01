@@ -42,6 +42,11 @@
       "kind": "contains",
       "target": "domain.value.content-identity",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.service.splice-eligibility",
+      "properties": {}
     }
   ],
   "in": []
