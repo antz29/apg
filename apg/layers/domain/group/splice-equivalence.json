@@ -22,6 +22,11 @@
       "kind": "contains",
       "target": "domain.entity.durable-layer-node-set",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.shared-fact-store",
+      "properties": {}
     }
   ],
   "in": []
