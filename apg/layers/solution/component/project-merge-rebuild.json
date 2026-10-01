@@ -5,5 +5,11 @@
   "body": "The merge-and-rebuild act: `rust.apg.project_cmd.merge.project_merge_at` runs the verify gate, merges the project branch into the default branch (fast-forward or merge commit), then runs a plain unguarded scan of main (`rust.apg.project_cmd.merge.project_merge`). That rebuild is where a spec-only merge must land the authored rows in main's `db.lbug`.",
   "properties": {},
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.merge-rebuild",
+      "properties": {}
+    }
+  ]
 }
