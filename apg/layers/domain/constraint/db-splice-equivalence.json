@@ -7,5 +7,11 @@
     "attaches-to": "domain.group.splice-equivalence"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "details",
+      "source": "domain.note.db-splice-equivalence-was-unrecorded",
+      "properties": {}
+    }
+  ]
 }
