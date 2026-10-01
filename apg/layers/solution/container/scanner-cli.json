@@ -206,6 +206,11 @@
       "kind": "contains",
       "target": "solution.component.cli-session-docs",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.splice-eligibility-guard",
+      "properties": {}
     }
   ],
   "in": [

@@ -35,6 +35,11 @@
       "kind": "realised-by",
       "source": "domain.service.splice-eligibility",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
     }
   ]
 }
