@@ -14,6 +14,11 @@
       "kind": "contains",
       "target": "requirements.requirement.graph-first-navigation",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
+      "properties": {}
     }
   ],
   "in": []
