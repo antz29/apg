@@ -231,6 +231,11 @@
       "kind": "contains",
       "target": "solution.component.incremental-fact-store",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.project-merge-rebuild",
+      "properties": {}
     }
   ],
   "in": [
