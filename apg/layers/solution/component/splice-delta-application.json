@@ -10,6 +10,11 @@
       "kind": "realised-by",
       "source": "domain.group.splice-equivalence",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.incremental-splice",
+      "properties": {}
     }
   ]
 }
