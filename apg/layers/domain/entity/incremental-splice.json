@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "incremental-splice",
+  "body": "The win-C database build: on the incremental path it seeds a working copy of the previous `db.lbug`, applies the phase-2 code delta as DML, and publishes `db.lbug` + `graph.jsonl` atomically. It writes only the code tables — Language / Module / Struct / Function / File / UnresolvedTarget and their rels — and assumes the seed already holds the current authored/transient rows by write-through. When that assumption is false the seeded+spliced DB is not a full rebuild.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
