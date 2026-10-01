@@ -24,6 +24,11 @@
       "kind": "implemented-by",
       "target": "rust.splice_e2e.e2e.seed_copy_preserves_every_table_and_row",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.project_cmd_e2e.e2e.merge_round_trip_start_mutate_verify_merge_rebuild",
+      "properties": {}
     }
   ],
   "in": [
