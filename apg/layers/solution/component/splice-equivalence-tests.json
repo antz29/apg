@@ -39,6 +39,11 @@
       "kind": "implemented-by",
       "target": "rust.splice_e2e.e2e.spec_only_delta_cannot_diverge_from_full_rebuild",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.splice_e2e.e2e.diverged_authored_rows_are_not_fast_pathed",
+      "properties": {}
     }
   ],
   "in": [
