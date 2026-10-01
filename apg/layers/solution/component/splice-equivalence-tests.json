@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "splice-equivalence-tests",
-  "body": "The e2e equivalence surface: `tests/splice_e2e.rs`'s fixture, seed/table oracles and publish path, and `tests/project_cmd_e2e.rs`'s merge round trip. Both currently exercise code-only fixtures — the fixture graph carries no authored/transient rows and the merge e2e always adds code and rescans the branch — so this change-set adds a spec-only splice-delta test and a spec-only merge round trip.",
+  "body": "The e2e equivalence surface: `tests/splice_e2e.rs`'s fixture, seed/table oracles and publish path, and `tests/project_cmd_e2e.rs`'s merge round trip. The fixture graph carries authored/transient rows, and the surface exercises a spec-only splice delta against a full rebuild, a database seeded with a dropped authored row across a durable commit, and a spec-only merge round trip whose main `db.lbug` carries the merged authored row.",
   "properties": {},
   "out": [
     {
