@@ -1,0 +1,11 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "durable-layer-node-set",
+  "body": "The authored rows a scan assembles from the durable layer tree `apg/layers/**` (Stakeholder/User/Requirement/DomainGroup/Entity/Value/Service/System/Container/Component/Person/Constraint/Note and their spine edges) together with the transient rows from `.trans/plans/**` (Plan/PlanPhase/Task/Feedback and their rels). A full rebuild writes them into `db.lbug`; the splice writes none of them. This set is the half of the assembled graph the splice assumes the seed already holds.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [],
+  "in": []
+}
