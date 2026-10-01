@@ -7,5 +7,11 @@
     "feature": "splice-equivalence"
   },
   "out": [],
-  "in": []
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
+      "properties": {}
+    }
+  ]
 }

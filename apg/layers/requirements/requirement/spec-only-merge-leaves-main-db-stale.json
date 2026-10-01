@@ -6,7 +6,13 @@
   "properties": {
     "feature": "splice-equivalence"
   },
-  "out": [],
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.splice-db-equals-full-rebuild-for-all-tables",
+      "properties": {}
+    }
+  ],
   "in": [
     {
       "kind": "contains",
