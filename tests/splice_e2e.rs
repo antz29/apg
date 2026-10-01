@@ -1413,6 +1413,165 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The recovery proof for
+    /// `requirements.requirement.freshness-fast-path-cannot-mask-divergence` (and
+    /// the observable completion of feedback-3): a re-anchored, agreeing
+    /// `Scan`-row pair cannot declare a DB that dropped an authored row fresh.
+    ///
+    /// 1. A scratch project worktree carries an authored `Requirement` under
+    ///    `apg/layers/**`; a hermetic scan builds `db.lbug` + `graph.jsonl` in
+    ///    sync with it.
+    /// 2. A durable commit through a live-session save re-anchors the Scan
+    ///    metadata to the current state, so the DB's own `Scan` row and the
+    ///    export's recorded scan agree — the pre-fix trap.
+    /// 3. Re-anchoring done, the authored row is dropped from `db.lbug` ONLY
+    ///    (the tree still carries it), producing a DB the tree contradicts while
+    ///    both Scan-row halves still name the current git state. The drop must
+    ///    FOLLOW the save: a routed session mutation re-projects the whole
+    ///    effective node set at admission, so an earlier drop would be healed.
+    /// 4. `is_fresh(apg_root)` is FALSE — the DB's ACTUAL authored digest is
+    ///    compared to the on-disk tree, never to the refreshed Scan row — so the
+    ///    next scan does NOT fast-path: it rebuilds and restores the row.
+    ///
+    /// Pre-fix (before the authored/transient reconciliation) step 4's
+    /// `!is_fresh` assertion fails: the re-anchored, agreeing Scan-row pair made
+    /// the diverged DB look fresh and it was reused.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/db.lbug/graph.jsonl/git/live-session process); run via cargo test-e2e"]
+    fn diverged_authored_rows_are_not_fast_pathed() {
+        use apg::artifacts::ArtifactDb;
+        use apg::testutil::{self, Repo};
+
+        let repo = Repo::new("splice-diverged-authored");
+        let wt = repo.start_project("foo");
+        let apg_root = wt.join(apg::specs::LAYOUT);
+
+        // 1. The checkout carries an authored Requirement. Commit it so the
+        //    worktree is clean, then scan: `db.lbug` and `graph.jsonl` carry the
+        //    authored row and the scan_meta records the clean HEAD.
+        let req = apg::layers::NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "requirement".to_string(),
+            name: "req".to_string(),
+            body: "the authored row the divergence will drop".to_string(),
+            properties: BTreeMap::new(),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        };
+        let req_path = apg::layers::node_file_path(
+            &apg_root,
+            apg::layers::Layer::Requirements,
+            "requirement",
+            "req",
+        );
+        apg::layers::write_node(&apg_root, &req).unwrap();
+        testutil::wt_commit_paths(
+            &wt,
+            &["apg/layers/requirements/requirement/req.json"],
+            "author requirement",
+        );
+        testutil::scan_checkout(&wt).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(
+                db.has_node("requirements.requirement.req"),
+                "the scan must project the authored row"
+            );
+        }
+        assert!(
+            apg::git::is_fresh(&apg_root),
+            "a scan carrying an authored row must be fresh"
+        );
+
+        // 2. A durable commit through a live-session save re-anchors the Scan
+        //    metadata to the current state: the session's own `Scan` row and the
+        //    re-anchored graph.jsonl lead name the SAME (post-commit) state.
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+        let add =
+            testutil::ApgCommand::new(&["node", "add", "requirements", "requirement", "req2"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            add.status.success(),
+            "routed node add: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "session save: {}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "session end: {}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let coord = session.child.wait_with_output().unwrap();
+        assert!(
+            coord.status.success(),
+            "session process: {}",
+            String::from_utf8_lossy(&coord.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "the session must have released the DB"
+        );
+
+        // The re-anchor landed: the DB's own Scan row and the export's recorded
+        // scan agree on the current state — the pre-fix trap's agreeing pair.
+        let db_scan = apg::git::db_recorded_scan(&apg_root).expect("DB Scan row");
+        let rec_scan = apg::git::recorded_scan(&apg_root).expect("recorded scan");
+        assert_eq!(
+            (db_scan.sha, db_scan.clean, db_scan.content_key),
+            (rec_scan.sha, rec_scan.clean, rec_scan.content_key),
+            "the durability commit must leave the DB and export Scan rows agreeing"
+        );
+
+        // 3. Drop the authored `req` row from `db.lbug` ONLY — the tree still
+        //    carries it. The re-anchored, agreeing Scan-row pair now hides the
+        //    divergence from the pre-fix fast path.
+        let deleted = testutil::detach_node(&apg_root, "requirements.requirement.req");
+        assert_eq!(deleted, 1, "exactly one authored row must be dropped");
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(
+                !db.has_node("requirements.requirement.req"),
+                "the authored row must be gone from the DB"
+            );
+            assert!(
+                db.has_node("requirements.requirement.req2"),
+                "the durability commit's row must survive the drop"
+            );
+        }
+        assert!(req_path.exists(), "the tree must still carry the row");
+
+        // 4. The recovery safety net: the re-anchored Scan row cannot mask the
+        //    dropped row — the DB's actual authored digest differs from the
+        //    tree's, so the fast path is NOT fresh and the DB is not reused.
+        assert!(
+            !apg::git::is_fresh(&apg_root),
+            "a diverged authored row must make the DB unfresh even with an agreeing, re-anchored Scan row"
+        );
+
+        // The next scan therefore does not fast-path; it rebuilds from the tree
+        // and restores the dropped authored row in `db.lbug`.
+        testutil::scan_checkout(&wt).unwrap();
+        {
+            let db = ArtifactDb::open(&apg_root).unwrap();
+            assert!(
+                db.has_node("requirements.requirement.req"),
+                "the rebuilding scan must restore the dropped authored row"
+            );
+            assert!(db.has_node("requirements.requirement.req2"));
+        }
+
+        testutil::remove(&repo);
+    }
+
     /// The win-C spawn skip must not delete a skipped language's global module
     /// scaffolding (feedback-100). The assembled graph is MISSING the skipped
     /// language's pure-intermediate modules and every `Module -> Module`

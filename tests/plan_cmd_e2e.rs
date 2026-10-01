@@ -734,6 +734,149 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// feedback-4: while a live session owns the worktree `db.lbug`, `is_fresh`
+    /// SHORT-CIRCUITS its DB reads and evaluates only the `recorded_scan`/git
+    /// half. The reason is concrete: a routed durable mutation is projected into
+    /// the session-held DB at admission but is NOT durable until `apg session
+    /// save`, so a direct read of `db.lbug` observes a DB the saved tree (and
+    /// `graph.jsonl`) does not yet describe —
+    /// `seed_authored_identity(db) != tree_authored_identity(tree)`. Pre-fix
+    /// that divergence read as a stale DB, so plan verify's stale precheck and a
+    /// transient plan/review write's stale gate were spuriously refused. The
+    /// short-circuit makes `is_fresh` TRUE while a session is live:
+    ///
+    /// * `is_fresh` is TRUE even over the session's UNSAVED buffered mutation;
+    /// * `is_stale` / `refusal_message` report NO stale, so a transient
+    ///   plan/review write is accepted rather than refused.
+    ///
+    /// The session holds the extended `specs.lock` flock for its life, so the
+    /// direct `plan verify` / plan-write paths run once it releases; this saves
+    /// and ends the session, then asserts `apg plan verify` succeeds and a
+    /// transient plan write lands — the live session induced no stale state.
+    ///
+    /// Pre-fix (before the short-circuit) the `is_fresh` / `is_stale` /
+    /// `refusal_message` assertions below fail: the buffered mutation's
+    /// DB-vs-saved-tree divergence reads as a stale DB.
+    #[test]
+    #[ignore = "e2e tier: real I/O (live session/db.lbug/plan store/git/process); run via cargo test-e2e"]
+    fn plan_verify_succeeds_during_a_live_session() {
+        let (apg_root, repo, wt) = fixture("live-session-verify");
+        // A green branch plan (no planned nodes, no feedback, no coverage
+        // claims), projected into the branch DB.
+        write_plan(&apg_root);
+
+        // A real live session owns the worktree DB for the whole assertion
+        // block below.
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&apg_root),
+            "the session must be live"
+        );
+
+        // The session admits an UNSAVED durable mutation: projected into the
+        // session-held DB at admission, but no node file and no commit land
+        // until `apg session save`. A direct DB read therefore diverges from
+        // the saved tree — exactly the state the short-circuit must not read as
+        // stale.
+        let buffered = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "note",
+            "buffered",
+            "--body",
+            "unsaved",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            buffered.status.success(),
+            "routed node add: {}",
+            String::from_utf8_lossy(&buffered.stderr)
+        );
+
+        // The divergence is REAL and observable through a direct (read-only) DB
+        // read: the DB's authored digest differs from the saved tree's. Left to
+        // the pre-fix DB reads, `is_fresh` would return false.
+        let db_path = apg_root.join(specs::TRANS).join("db.lbug");
+        let db_digest = apg::splice::seed::seed_authored_identity(&db_path).unwrap();
+        let tree_digest = apg::splice::seed::tree_authored_identity(&apg_root).unwrap();
+        assert_ne!(
+            db_digest, tree_digest,
+            "the unsaved buffered mutation must make the on-disk DB diverge from the saved tree"
+        );
+
+        // The short-circuit: `is_fresh` skips those DB reads and stays TRUE.
+        assert!(
+            apg::git::is_fresh(&apg_root),
+            "a live session must not make the on-disk fast path unfresh"
+        );
+        // Plan verify's stale precheck and the transient write's stale gate
+        // both route through is_stale / refusal_message: neither refuses.
+        assert!(
+            !apg::git::is_stale(&apg_root),
+            "plan verify's stale precheck must not fire over a live session"
+        );
+        assert!(
+            apg::git::refusal_message(&apg_root).is_none(),
+            "the transient write's stale gate must accept while a session is live"
+        );
+
+        // Make the buffered mutation durable so the session can end cleanly
+        // (a dirty `end` is refused).
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "session save: {}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "session end: {}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let coord = session.child.wait_with_output().unwrap();
+        assert!(
+            coord.status.success(),
+            "session process: {}",
+            String::from_utf8_lossy(&coord.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&apg_root),
+            "the session must have ended"
+        );
+
+        // `plan verify` succeeds: the live session left no stale state behind.
+        plan_verify_at(&apg_root, "foo").unwrap();
+
+        // A transient plan write is accepted by the stale gate and lands in the
+        // branch DB (not refused with a spurious stale).
+        let path = specs::plan_jsonl_path(&apg_root, "foo");
+        let mut records = specs::read_jsonl(&path).unwrap();
+        records.push(Record::Note {
+            fqn: "foo/note-1".to_string(),
+            body: "live-session transient write".to_string(),
+            kind: "background".to_string(),
+        });
+        records.push(Record::Details {
+            from: "foo/note-1".to_string(),
+            to: "foo/plan".to_string(),
+        });
+        artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
+        {
+            let db = artifacts::ArtifactDb::open(&apg_root).unwrap();
+            assert!(
+                db.has_node("foo/note-1"),
+                "the transient plan write must be projected after the live session"
+            );
+        }
+
+        testutil::remove(&repo);
+    }
+
     #[test]
     #[ignore = "e2e tier: real I/O (plan store/node files/db.lbug/git/process); run via cargo test-e2e"]
     fn apply_gate_checks_every_planned_node_not_just_builds_targets() {

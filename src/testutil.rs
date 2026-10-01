@@ -271,6 +271,38 @@ pub fn touch_db(apg_root: &Path) {
     load::create_schema(&conn).unwrap();
 }
 
+/// DETACH DELETEs the node at `fqn` from the live `db.lbug` under `apg_root`,
+/// returning the number of rows removed — a test-support primitive that
+/// manufactures the divergence [`crate::git::is_fresh`]'s authored/transient
+/// reconciliation exists to catch: the on-disk tree still carries the row, the
+/// DB does not.
+///
+/// Label-agnostic by construction: the node's label is resolved through
+/// [`crate::artifacts::ArtifactDb::node_label`], so an authored/transient FQN is
+/// dropped wherever it lives (a code FQN would be dropped too, but the recovery
+/// test names an authored `Requirement`). Panics when no DB node resolves at
+/// `fqn`, or when the delete fails.
+pub fn detach_node(apg_root: &Path, fqn: &str) -> i64 {
+    let db = crate::artifacts::ArtifactDb::open(apg_root).expect("open fixture db");
+    let label = db
+        .node_label(fqn)
+        .unwrap_or_else(|| panic!("no DB node at `{fqn}`"));
+    let conn = db.conn().expect("fixture db connection");
+    let before = crate::artifacts::count(
+        &db.db,
+        &format!(
+            "MATCH (n:{label} {{fqn: {}}}) RETURN count(*)",
+            crate::artifacts::lit(fqn)
+        ),
+    );
+    conn.query(&format!(
+        "MATCH (n:{label} {{fqn: {}}}) DETACH DELETE n",
+        crate::artifacts::lit(fqn)
+    ))
+    .expect("detach delete the diverged row");
+    before
+}
+
 /// Removes the fixture repo's temp dir (each test cleans up after itself).
 pub fn remove(repo: &Repo) {
     let _ = std::fs::remove_dir_all(&repo.root);
