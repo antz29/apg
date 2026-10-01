@@ -12,11 +12,6 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.git.state.recorded_scan",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.scan.cmd_scan",
       "properties": {}
     },
