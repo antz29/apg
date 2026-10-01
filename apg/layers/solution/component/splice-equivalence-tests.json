@@ -34,6 +34,11 @@
       "kind": "implemented-by",
       "target": "rust.project_cmd_e2e.e2e.merge_spec_only_lands_authored_rows_in_main_db",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.splice_e2e.e2e.spec_only_delta_cannot_diverge_from_full_rebuild",
+      "properties": {}
     }
   ],
   "in": [
