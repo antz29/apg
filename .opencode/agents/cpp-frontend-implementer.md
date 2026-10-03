@@ -67,7 +67,6 @@ permission:
   bash:
     "*": deny
     "ls *": allow
-    "find *": allow
     "pwd": allow
     "cd *": allow
     "git status *": allow
@@ -185,6 +184,12 @@ exact failure** — which tool, the invocation, what it returned or errored, and
 the graph state — to the coordinator. There is no fallback: no raw file reads,
 no reading the transient plan or feedback stores directly, no retry, no cause
 diagnosis. The coordinator runs the scan and re-dispatches you.
+
+**No permission workarounds.** A refused tool or permission is likewise a
+stop-and-report: never route it through another allowed command (no `ls`/`git`
+trick to read a denied path, no edit to reach a denied write). `find` is not
+granted — `-exec`/`-execdir`/`-ok` would run arbitrary commands past every bash
+deny; use `glob`/`grep` for file discovery.
 
 ## Discovered work stops you — plan first, then implement
 

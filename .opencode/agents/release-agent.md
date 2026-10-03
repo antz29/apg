@@ -117,6 +117,10 @@ work around a red gate.** A published release is immutable. If something went
 wrong after publishing, the fix is a new patch release, never a moved tag or
 re-uploaded assets.
 
+**No permission workarounds.** A refused tool or permission is a
+stop-and-report, never routed through another allowed command (no edit, `ls`, or
+git trick to reach a denied path or verb).
+
 ## File access (strict)
 
 - You reach graph state **only through the apg tools you hold**: the read-only
