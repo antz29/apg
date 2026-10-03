@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -6,6 +6,7 @@ use std::sync::{Mutex, OnceLock};
 use lbug::{Connection, Database, SystemConfig};
 
 use crate::git;
+use crate::layers::{InEdge, NodeFile, OutEdge, parse_fqn};
 use crate::load;
 use crate::schema::Record;
 use crate::specs;
@@ -457,4 +458,215 @@ impl ArtifactDb {
         ))?;
         Ok(())
     }
+
+    /// Reconstruct the durable `apg/layers/**` node-file set from the **live
+    /// database** — the inverse of the layers projection
+    /// ([`reingest_layers_on`](Self::reingest_layers_on) / `merge_records`).
+    ///
+    /// Every durable authored node is read back from its node table (identity
+    /// from the FQN segments `layer.type.name`, `body` from the `body` column,
+    /// and the projected metadata columns back into the node-file `properties`
+    /// map), and every authored edge is read back from its rel table into
+    /// **both** halves: the source node's `out` edge and the target node's `in`
+    /// edge. A code-endpoint edge (`implemented-by`, a code-targeted `details`)
+    /// has only the source's `out` half, exactly as a node file carries it — a
+    /// code node has no file to hold the in half.
+    ///
+    /// Only the durable layers (requirements, domain, solution, implementation,
+    /// global) are reconstructed; the transient `.trans` node tables (`Plan`,
+    /// `PlanPhase`, `Task`, `Feedback`) are not node files and are skipped. The
+    /// result is ordered by `(layer, node_type, name)` and each node's edges by
+    /// `(kind, endpoint)`, matching [`crate::layers::read_existing_nodes`]'s
+    /// deterministic order.
+    ///
+    /// **Fidelity limit.** This is the exact inverse of what the schema
+    /// *stores*: no authored rel table has a property column and the node tables
+    /// only carry the named columns, so an edge is reconstructed with an empty
+    /// `properties` map and node-file metadata the schema does not name (a
+    /// `Group`'s arbitrary short-id, an `Entity`'s `kind`) is not reconstructed.
+    /// A node file whose `properties` are the projected keys
+    /// (`id`/`feature`/`kind`/`attribute`/`root`/`attaches-to`) round-trips.
+    pub fn node_files_from_db(&self) -> anyhow::Result<Vec<NodeFile>> {
+        let conn = self.conn()?;
+        let mut by_fqn: BTreeMap<String, NodeFile> = BTreeMap::new();
+
+        // One durable node table per node-file type the durable tree can hold.
+        for (table, columns, body_col, props) in DURABLE_NODE_TABLES {
+            collect_durable_nodes(&conn, table, columns, body_col, props, &mut by_fqn)?;
+        }
+
+        // Both halves of every authored edge, read back from the rel tables. A
+        // rel row whose source is not a durable node (a code pair of the shared
+        // Contains/Calls/Uses tables, or a transient Plan/Feedback source) is
+        // skipped; a row whose target is not a durable node contributes only the
+        // source's out half (a code endpoint has no node file).
+        for (table, kind) in DURABLE_EDGE_TABLES {
+            let (_, rows) = query_rows(
+                &conn,
+                &format!("MATCH (a)-[:{table}]->(b) RETURN a.fqn, b.fqn"),
+            )?;
+            for row in rows {
+                let from = cell(&row, 0);
+                let to = cell(&row, 1);
+                if let Some(src) = by_fqn.get_mut(&from) {
+                    src.out.push(OutEdge {
+                        kind: kind.to_string(),
+                        target: to.clone(),
+                        properties: BTreeMap::new(),
+                    });
+                }
+                if let Some(dst) = by_fqn.get_mut(&to) {
+                    dst.in_edges.push(InEdge {
+                        kind: kind.to_string(),
+                        source: from.clone(),
+                        properties: BTreeMap::new(),
+                    });
+                }
+            }
+        }
+
+        let mut nodes: Vec<NodeFile> = by_fqn.into_values().collect();
+        for node in &mut nodes {
+            node.out
+                .sort_by(|a, b| (&a.kind, &a.target).cmp(&(&b.kind, &b.target)));
+            node.in_edges
+                .sort_by(|a, b| (&a.kind, &a.source).cmp(&(&b.kind, &b.source)));
+        }
+        nodes.sort_by(|a, b| {
+            (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name))
+        });
+        Ok(nodes)
+    }
+}
+
+/// One durable node table's reconstruction shape: `(DB table label, non-FQN
+/// columns in `create_schema` order, the body column, the metadata columns and
+/// the node-file `properties` key each feeds)`.
+type DurableNodeTable = (
+    &'static str,
+    &'static [&'static str],
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+
+/// Every durable node table — the `apg/layers/**` node-file layers
+/// (requirements, domain, solution, implementation, global) — with the metadata
+/// columns a node file's `properties` map carries. An `Entity`'s `kind` is
+/// absent deliberately: the schema has no entity-kind column (the projection
+/// does not carry it), so it cannot be reconstructed. The transient `.trans`
+/// tables (`Feedback`, `Plan`, `PlanPhase`, `Task`) are not node files and are
+/// absent.
+const DURABLE_NODE_TABLES: &[DurableNodeTable] = &[
+    (
+        "Requirement",
+        &["id", "title", "body", "feature"],
+        "body",
+        &[("id", "id"), ("feature", "feature")],
+    ),
+    ("Stakeholder", &["name", "body"], "body", &[]),
+    ("User", &["name", "body"], "body", &[]),
+    ("Note", &["body", "kind"], "body", &[("kind", "kind")]),
+    (
+        "Constraint",
+        &["name", "body", "attaches_to"],
+        "body",
+        &[("attaches_to", "attaches-to")],
+    ),
+    (
+        "DomainGroup",
+        &["name", "attribute", "root", "body"],
+        "body",
+        &[("attribute", "attribute"), ("root", "root")],
+    ),
+    ("Entity", &["name", "body"], "body", &[]),
+    ("Value", &["name", "body"], "body", &[]),
+    ("Service", &["name", "body"], "body", &[]),
+    ("System", &["name", "body"], "body", &[]),
+    (
+        "Container",
+        &["name", "kind", "body"],
+        "body",
+        &[("kind", "kind")],
+    ),
+    ("Component", &["name", "body"], "body", &[]),
+    ("Person", &["name", "body"], "body", &[]),
+];
+
+/// Every durable authored edge rel table and the node-file edge kind it
+/// carries. The shared `Contains`/`Calls`/`Uses` tables also hold code rows; a
+/// row whose source is not a durable node is skipped, so only authored pairs
+/// are reconstructed.
+const DURABLE_EDGE_TABLES: [(&str, &str); 11] = [
+    ("Contains", "contains"),
+    ("Drives", "drives"),
+    ("RealisedBy", "realised-by"),
+    ("SpecImplementedBy", "implemented-by"),
+    ("Calls", "calls"),
+    ("Publishes", "publishes"),
+    ("Subscribes", "subscribes"),
+    ("DependsOn", "depends-on"),
+    ("Uses", "uses"),
+    ("Represents", "represents"),
+    ("Details", "details"),
+];
+
+/// Read one durable node table into `nodes`, keyed by its FQN: identity from
+/// the FQN segments, `body` from `body_col`, and each metadata column back into
+/// the node-file `properties` map when non-empty (an absent column projects to
+/// the empty string, which round-trips to absent). A malformed FQN is a hard
+/// error — the projection never writes one.
+fn collect_durable_nodes(
+    conn: &Connection,
+    table: &str,
+    columns: &[&str],
+    body_col: &str,
+    props: &[(&str, &str)],
+    nodes: &mut BTreeMap<String, NodeFile>,
+) -> anyhow::Result<()> {
+    let projection = std::iter::once("n.fqn".to_string())
+        .chain(columns.iter().map(|c| format!("n.`{c}`")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let (_, rows) = query_rows(conn, &format!("MATCH (n:{table}) RETURN {projection}"))?;
+    // Positions are positional, never header-name based: the engine names a
+    // projected property `n.<col>`, so `fqn` is index 0 and `columns` follow in
+    // order.
+    let column_index = |column: &str| -> anyhow::Result<usize> {
+        columns
+            .iter()
+            .position(|c| *c == column)
+            .map(|i| i + 1)
+            .ok_or_else(|| anyhow::anyhow!("{table}: no `{column}` column in the projection"))
+    };
+    let body_i = column_index(body_col)?;
+    let prop_i: Vec<(usize, &str)> = props
+        .iter()
+        .map(|(column, key)| Ok((column_index(column)?, *key)))
+        .collect::<anyhow::Result<_>>()?;
+
+    for row in rows {
+        let f = cell(&row, 0);
+        let (layer, node_type, name) =
+            parse_fqn(&f).map_err(|e| anyhow::anyhow!("{table} `{f}`: {e}"))?;
+        let mut properties = BTreeMap::new();
+        for (i, key) in &prop_i {
+            let value = cell(&row, *i);
+            if !value.is_empty() {
+                properties.insert((*key).to_string(), value);
+            }
+        }
+        nodes.insert(
+            f,
+            NodeFile {
+                layer: layer.layer_dir().to_string(),
+                node_type,
+                name,
+                body: cell(&row, body_i),
+                properties,
+                out: Vec::new(),
+                in_edges: Vec::new(),
+            },
+        );
+    }
+    Ok(())
 }
