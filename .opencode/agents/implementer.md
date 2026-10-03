@@ -47,6 +47,7 @@ permission:
     "apg/.worktrees/*/src/schema/**": allow
     "apg/.worktrees/*/src/splice/**": allow
     "apg/.worktrees/*/src/timing/**": allow
+    "apg/.worktrees/*/src/spec_lint/**": allow
     "apg/.worktrees/*/src/version_gate/**": allow
     "apg/.worktrees/*/tests/**": allow
     "apg/.worktrees/*/opencode-suite/**": allow
@@ -163,6 +164,7 @@ permission:
     "apg/.worktrees/*/src/schema/**": allow
     "apg/.worktrees/*/src/splice/**": allow
     "apg/.worktrees/*/src/timing/**": allow
+    "apg/.worktrees/*/src/spec_lint/**": allow
     "apg/.worktrees/*/src/version_gate/**": allow
     "apg/.worktrees/*/tests/**": allow
     "apg/.worktrees/*/opencode-suite/**": allow
@@ -192,6 +194,7 @@ permission:
     "apg/.worktrees/*/src/schema/**": allow
     "apg/.worktrees/*/src/splice/**": allow
     "apg/.worktrees/*/src/timing/**": allow
+    "apg/.worktrees/*/src/spec_lint/**": allow
     "apg/.worktrees/*/src/version_gate/**": allow
     "apg/.worktrees/*/tests/**": allow
     "apg/.worktrees/*/opencode-suite/**": allow
@@ -221,6 +224,7 @@ permission:
     "apg/.worktrees/*/src/schema/**": allow
     "apg/.worktrees/*/src/splice/**": allow
     "apg/.worktrees/*/src/timing/**": allow
+    "apg/.worktrees/*/src/spec_lint/**": allow
     "apg/.worktrees/*/src/version_gate/**": allow
     "apg/.worktrees/*/tests/**": allow
     "apg/.worktrees/*/opencode-suite/**": allow
@@ -399,7 +403,8 @@ reviewer:    apg_review_reject <f>                               → status = op
   modules**: a `src/<module>/mod.rs` tree for `artifacts`, `cache`, `git`,
   `impact`, `incremental`, `ingest`, `layers`, `load`, `plan_cmd`,
   `project_cmd`, `splice`, and the `src/<module>.rs` + `src/<module>/**` pairs
-  for `classify`, `delta`, `node_cmd`, `schema`, `timing`, and `version_gate`.
+  for `classify`, `delta`, `node_cmd`, `schema`, `spec_lint`, `timing`, and
+  `version_gate`.
   Production is `src/*.rs` and `src/<module>/**/*.rs`; the relocated unit/int
   tests are the sibling `src/<module>/tests.rs` files, and the top-level e2e
   crates are `tests/**`.
