@@ -288,7 +288,10 @@ reviewer:    apg_review_reject <f>                               → status = op
   place.**
 - The **durable spec tiers** are maintained by the **spec-writer** through the
   `apg_node` / `apg_edge` tools — you hold no such grant and you never author
-  or edit spec files.
+  or edit spec files. Durable `node`/`edge` mutations are **session acts** —
+  admitted only through a live, caller-owned session (start → save → end or
+  abort) driven by the spec-writer/coordinator; you hold no session grant and
+  never start, save, end, or abort one.
 - The **plan** and all **feedback** live in **transient, branch-local stores**
   — never committed. Review state dies with the branch.
 - **Plan tasks carry a Task→Implementation verb** and target:
