@@ -40,8 +40,33 @@ fn parse_unset_properties(p: &ParsedArgs) -> BTreeSet<String> {
 /// (delete exactly the named keys) over `base`, preserving every other key.
 /// Omitting `--unset-property` never drops a key. Reused by `node update` and
 /// `edge update`.
-fn edit_properties(base: &BTreeMap<String, String>, p: &ParsedArgs) -> BTreeMap<String, String> {
-    layers::merge_properties(base, &parse_properties(p), &parse_unset_properties(p))
+///
+/// An `--unset-property k` naming a key absent from `base` is refused (never a
+/// silent no-op that reports success): the error names the keys present and,
+/// when the requested key differs only by `_`/`-`, the stored spelling.
+fn edit_properties(
+    base: &BTreeMap<String, String>,
+    p: &ParsedArgs,
+) -> anyhow::Result<BTreeMap<String, String>> {
+    let unset = parse_unset_properties(p);
+    for k in &unset {
+        if base.contains_key(k) {
+            continue;
+        }
+        let present: Vec<&str> = base.keys().map(String::as_str).collect();
+        let near = base
+            .keys()
+            .find(|have| have.replace('_', "-") == k.replace('_', "-"));
+        let hint = match near {
+            Some(have) => format!(" — did you mean `{have}`?"),
+            None => String::new(),
+        };
+        anyhow::bail!(
+            "--unset-property `{k}`: no such property (present: [{}]){hint}",
+            present.join(", ")
+        );
+    }
+    Ok(layers::merge_properties(base, &parse_properties(p), &unset))
 }
 
 /// Resolve a layer dir name to its [`Layer`] (closed catalog). Public so the
@@ -261,7 +286,7 @@ fn node_update_change(
     if let Some(body) = body.as_deref() {
         updated.body = body.to_string();
     }
-    updated.properties = edit_properties(&updated.properties, &p);
+    updated.properties = edit_properties(&updated.properties, &p)?;
     // Advisory-only wording warning (R1/R5): when the supplied `--body` carries
     // likely-flagged wording, carry the shared advisory in the returned
     // [`Change`] but let the update proceed unchanged — the author decides. Only
@@ -530,7 +555,7 @@ fn edge_update_change(
         })?;
     // MERGE the passed keys over the edge's current out-half properties; both
     // halves must end up with the identical map (pairing requires it).
-    let merged = edit_properties(&source.out[idx].properties, &p);
+    let merged = edit_properties(&source.out[idx].properties, &p)?;
     source.out[idx].properties = merged.clone();
 
     let mut writes = vec![source];
