@@ -1186,4 +1186,71 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-01 task-6: `ArtifactDb::code_universes_from_db` reads the scanned
+    /// and planned code-FQN universes from a REAL `db.lbug` — a hermetic scan of
+    /// real source (`testutil::project_with_db`, the canonical code payload)
+    /// plus a plan-writer-authored planned Implementation node the scan
+    /// projects as a `status = planned` code row — and those sets equal the ones
+    /// `artifacts::code_universes_from_export` derives from the SAME scan's
+    /// `graph.jsonl` (plus the plan store). The DB-side twin lets session
+    /// admission validate `implemented-by` refs with no `graph.jsonl` read.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+    fn code_universes_from_db_match_the_export_universes_for_a_real_scan() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("code-universes-from-db");
+
+        // A planned Implementation node declared in the plan store: the next
+        // scan projects it as a `status = planned` Struct row into both
+        // `db.lbug` and `graph.jsonl`. `parent` is the scanned module FQN, so
+        // the Contains edge resolves.
+        let planned_fqn = "go.fixture.mod.Future";
+        specs::write_jsonl(
+            &specs::plan_jsonl_path(&wt_apg, "foo"),
+            &[Record::PlannedNode {
+                fqn: planned_fqn.to_string(),
+                kind: "struct".to_string(),
+                name: "Future".to_string(),
+                parent: "go.fixture.mod".to_string(),
+            }],
+        )
+        .unwrap();
+        testutil::scan_checkout(&wt).unwrap();
+
+        // The DB-side universes from the real `db.lbug`.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let (db_scanned, db_planned) = db.code_universes_from_db().unwrap();
+        drop(db);
+
+        // The export-side universes from the same scan's `graph.jsonl`.
+        let (export_scanned, export_planned) = code_universes_from_export(&wt_apg).unwrap();
+
+        // The scanned universe carries the real code from the source payload
+        // (PHASE_09: the frontend module identity is language-rooted),
+        // independent of the export file.
+        assert!(db_scanned.contains("go.fixture.mod"), "{db_scanned:?}");
+        assert!(
+            db_scanned.contains("go.fixture.mod.Store"),
+            "{db_scanned:?}"
+        );
+        assert!(db_scanned.contains("/abs/store.go"), "{db_scanned:?}");
+        // The planned placeholder is planned, never real code.
+        assert!(
+            !db_scanned.contains(planned_fqn),
+            "a status:planned node is not scanned code: {db_scanned:?}"
+        );
+        assert!(db_planned.contains(planned_fqn), "{db_planned:?}");
+
+        // The DB reader and the graph.jsonl reader agree exactly on both sets.
+        assert_eq!(
+            db_scanned, export_scanned,
+            "scanned universes must be identical from db.lbug and graph.jsonl"
+        );
+        assert_eq!(
+            db_planned, export_planned,
+            "planned universes must be identical from db.lbug and graph.jsonl+plan store"
+        );
+
+        testutil::remove(&repo);
+    }
 }
