@@ -414,6 +414,43 @@ impl ArtifactDb {
         false
     }
 
+    /// The two code-reference universes `layers::validate_change_over` (and the
+    /// direct `validate_change`) validate `implemented-by` targets against, read
+    /// from the **live database this handle already holds** — the DB-side twin
+    /// of [`crate::artifacts::code_universes_from_export`], so session admission
+    /// never opens a second `db.lbug` handle nor reads `apg/.trans/graph.jsonl`:
+    ///
+    /// - `scanned` — the real code FQNs of the four Implementation labels
+    ///   (`Module`/`File`/`Struct`/`Function`) whose `status` is not `planned`.
+    /// - `planned` — the FQNs of those labels carrying `status = 'planned'` (a
+    ///   plan-writer placeholder awaiting realization). The plan store's
+    ///   `Record::PlannedNode` declarations are projected into exactly these rows
+    ///   by the authoring paths, so the held DB reproduces the export reader's
+    ///   union without touching the transient plan files.
+    ///
+    /// Unlike the free [`crate::artifacts::code_universes`] (which opens its own
+    /// read-write handle), this borrows the caller's held handle, so the session
+    /// amortizes ONE open across its whole life. `UnresolvedTarget` is
+    /// deliberately excluded — an unresolved reference is not code.
+    pub fn code_universes_from_db(&self) -> anyhow::Result<(BTreeSet<String>, BTreeSet<String>)> {
+        let conn = self.conn()?;
+        let mut scanned = BTreeSet::new();
+        let mut planned = BTreeSet::new();
+        for label in PLANNED_CODE_LABELS {
+            let result = conn.query(&format!("MATCH (n:{label}) RETURN n.fqn, n.status"))?;
+            for row in result {
+                let fqn = row.first().map(|v| v.to_string()).unwrap_or_default();
+                let status = row.get(1).map(|v| v.to_string()).unwrap_or_default();
+                if status == "planned" {
+                    planned.insert(fqn);
+                } else {
+                    scanned.insert(fqn);
+                }
+            }
+        }
+        Ok((scanned, planned))
+    }
+
     /// DELETE-then-CREATE the single `Scan` row (fqn [`crate::schema::SCAN_HEAD`],
     /// `scan/HEAD`) on the **already-open** database, setting it to the same git
     /// state the caller just re-anchored `graph.jsonl`'s `scan_meta` lead to.
