@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "cli-session-buffer",
-  "body": "The pending change set of a live session: the cumulative in-memory node-file writes and deletes accepted since the previous save. It is the source of a node's current content when the session changed that node earlier in the run, and the live database is the source otherwise; together they hold every field a node file carries. A save makes the buffer durable and empties it; an abort discards it. A mutation is built against the cumulative buffer, so a later change composes over every earlier pending change.",
+  "body": "The pending change set of a live session: the cumulative in-memory node-file writes and deletes accepted since the previous save. A node's current content is the buffer's pending entry for a node the session changed earlier in the run, and the live database's entry for a node the session has not changed; the live database is held open by the session for its whole life. The buffer and the live database together hold every field a node file carries. A save makes the buffer durable and empties it; an abort discards it. A mutation is built against the cumulative buffer, so a later change composes over every earlier pending change.",
   "properties": {
     "kind": "entity"
   },

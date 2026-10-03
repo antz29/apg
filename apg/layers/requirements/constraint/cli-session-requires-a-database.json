@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "cli-session-requires-a-database",
+  "body": "A live session holds a worktree database: `apg session start` refuses in a worktree whose `db.lbug` is absent and names `apg scan` as the remedy, so every admitted mutation validates against and applies to a live database. The session has no buffer-only admission path, and `apg scan` produces the database the session requires.",
+  "properties": {},
+  "out": [],
+  "in": []
+}
