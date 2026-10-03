@@ -359,18 +359,45 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
         }
     }
 
+    // The loader writes a spec edge into the DB only when its `(table, from, to)`
+    // kind pair is one the schema declares ([`load::tables::rel_table_pairs`],
+    // the single enumeration shared with `build_load_files`/`create_schema`).
+    // The DB-side twin ([`seed_authored_identity`]) can therefore only ever
+    // observe those pairs, so the graph-side canonical form must apply the same
+    // filter: a raw `graph.*` edge whose pair is undeclared — e.g. a legacy
+    // `Note`→`Note` `details` the write-time validator now refuses
+    // ([`crate::layers::validate`]) — is not representable in the DB and must
+    // not contribute a row, or the two digests can never agree and freshness
+    // fails closed forever.
+    let pair_allowed = |table: &str, from: NodeKind, to: NodeKind| {
+        let (from_label, to_label) = (load::tables::label_of(from), load::tables::label_of(to));
+        load::tables::rel_table_pairs()
+            .iter()
+            .any(|(t, f, o)| *t == table && *f == from_label && *o == to_label)
+    };
     // An edge belongs to the authored/transient set iff its SOURCE is one of the
-    // authored/transient kinds: this keeps the shared `Contains`/`Calls`/`Uses`
-    // tables' code pairs out while retaining authored edges whose target is a
-    // code FQN (`Details`, `Reviews`, `SpecImplementedBy`).
+    // authored/transient kinds AND its `(table, from, to)` pair is DB-declared:
+    // this keeps the shared `Contains`/`Calls`/`Uses` tables' code pairs out
+    // while retaining authored edges whose target is a code FQN (`Details`,
+    // `Reviews`, `SpecImplementedBy`).
     let mut add_edges = |table: &str, edges: &HashSet<(String, String)>| {
         for (from, to) in edges {
-            if graph.nodes.get(from).is_some_and(|n| is_authored(n.kind)) {
-                rows.push(
-                    serde_json::to_string(&["E", table, from.as_str(), to.as_str()])
-                        .expect("a JSON array of strings is always serializable"),
-                );
+            let Some(from_node) = graph.nodes.get(from) else {
+                continue;
+            };
+            if !is_authored(from_node.kind) {
+                continue;
             }
+            let Some(to_node) = graph.nodes.get(to) else {
+                continue;
+            };
+            if !pair_allowed(table, from_node.kind, to_node.kind) {
+                continue;
+            }
+            rows.push(
+                serde_json::to_string(&["E", table, from.as_str(), to.as_str()])
+                    .expect("a JSON array of strings is always serializable"),
+            );
         }
     };
     add_edges("Contains", &graph.contains);

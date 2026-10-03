@@ -175,4 +175,55 @@ mod unit {
             "a Details edge from an authored node must be in the digest"
         );
     }
+
+    /// A raw authored edge whose `(table, from, to)` kind pair the DB schema
+    /// does not declare — a legacy `Note`→`Note` `details`, the pair the
+    /// write-time validator now refuses — is not representable in `db.lbug`:
+    /// the loader (`load::tables::build_load_files`) writes only declared
+    /// pairs, so the DB-side twin (`seed_authored_identity`) can never observe
+    /// it. The graph-side canonical form must apply the SAME filter, or the two
+    /// digests can never agree and `git::is_fresh` fails closed forever (the
+    /// `project start` wedge this regresses).
+    #[test]
+    fn assembled_authored_identity_ignores_undeclared_pairs() {
+        let note = |fqn: &str| {
+            (
+                fqn.to_string(),
+                Node {
+                    kind: NodeKind::Note,
+                    ..Default::default()
+                },
+            )
+        };
+        let (a, na) = note("global.note.a");
+        let (b, nb) = note("global.note.b");
+        let mut g = Graph::default();
+        g.nodes.insert(a.clone(), na);
+        g.nodes.insert(b.clone(), nb);
+        let without = assembled_authored_identity(&g);
+        // Note→Note `details` is undeclared in the schema → DB-unrepresentable,
+        // so it must not move the digest.
+        g.details.insert((a.clone(), b));
+        assert_eq!(
+            without,
+            assembled_authored_identity(&g),
+            "an undeclared Note→Note details edge must not contribute to the digest"
+        );
+        // A DECLARED pair (Note→Module) still does.
+        let (code, node_code) = (
+            "rust.apg".to_string(),
+            Node {
+                kind: NodeKind::Module,
+                ..Default::default()
+            },
+        );
+        g.nodes.insert(code.clone(), node_code);
+        let with_declared_target = assembled_authored_identity(&g);
+        g.details.insert((a, code));
+        assert_ne!(
+            with_declared_target,
+            assembled_authored_identity(&g),
+            "a declared Note→Module details edge must contribute to the digest"
+        );
+    }
 }
