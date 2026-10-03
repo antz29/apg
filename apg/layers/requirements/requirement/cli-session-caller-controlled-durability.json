@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-caller-controlled-durability",
-  "body": "`apg session save` makes durable everything buffered since the previous save: one atomic write of the buffered node files into `apg/layers/<layer>/<type>/<name>.json`, one git commit, and the scan_meta re-anchor. After the flush the buffer is empty, and a `save` over an empty buffer is a noop.\n\nACCEPTANCE:\n- A `save` after a run of N accepted mutations writes every buffered node file and lands exactly one git commit plus the scan_meta re-anchor, and the buffer empties.\n- A `save` issued over an empty buffer writes nothing and lands no commit.\n- A run of N buffered mutations followed by one save produces the same on-disk state as N save-after-each-mutation runs, with one commit.",
+  "body": "`apg session save` is the single durability point and the only step in the admission-to-durability flow that performs file I/O and git: it makes durable everything buffered since the previous save — one atomic write of the buffered node files into `apg/layers/<layer>/<type>/<name>.json`, one git commit, and the scan_meta re-anchor. After the flush the buffer is empty, and a `save` over an empty buffer is a noop.\n\nACCEPTANCE:\n- A `save` after a run of N accepted mutations writes every buffered node file and lands exactly one git commit plus the scan_meta re-anchor, and the buffer empties.\n- A `save` issued over an empty buffer writes nothing and lands no commit.\n- A run of N buffered mutations followed by one save produces the same on-disk state as N save-after-each-mutation runs, with one commit.",
   "properties": {
     "feature": "cli-session-substrate"
   },
