@@ -1619,6 +1619,97 @@ mod unit {
         );
     }
 
+    /// [`LayersOverlay::over_base`] resolves a staged write to its buffered
+    /// content over a caller-supplied base (phase-01 task-4): the staged
+    /// `NodeFile` wins whether the base carries a differing node for the same
+    /// identity or no node at all. Pure in-memory — no path is read.
+    #[test]
+    fn over_base_resolves_a_staged_write_to_its_buffered_content() {
+        let mut overlay = LayersOverlay::new();
+        let mut staged = node("domain", "entity", "order");
+        staged.body = "staged".to_string();
+        overlay
+            .stage_write(staged.clone())
+            .expect("a known layer stages");
+
+        // A base with a *different* body for the same identity — the staged
+        // content still wins.
+        let mut from_base = node("domain", "entity", "order");
+        from_base.body = "base".to_string();
+        assert_eq!(
+            overlay.over_base(&[from_base], Layer::Domain, "entity", "order"),
+            Some(staged.clone())
+        );
+
+        // A base that does not carry the identity at all still yields the
+        // staged write.
+        assert_eq!(
+            overlay.over_base(&[], Layer::Domain, "entity", "order"),
+            Some(staged)
+        );
+    }
+
+    /// [`LayersOverlay::over_base`] resolves a staged delete marker as absent
+    /// even when the caller-supplied base carries the identity (phase-01
+    /// task-4). Pure in-memory — no path is read.
+    #[test]
+    fn over_base_resolves_a_staged_delete_to_none() {
+        let mut overlay = LayersOverlay::new();
+        overlay.stage_delete(Layer::Domain, "value", "stale");
+
+        let stale = node("domain", "value", "stale");
+        assert_eq!(
+            overlay.over_base(&[stale], Layer::Domain, "value", "stale"),
+            None
+        );
+        assert_eq!(
+            overlay.over_base(&[], Layer::Domain, "value", "stale"),
+            None
+        );
+    }
+
+    /// [`LayersOverlay::over_base`] resolves an unstaged identity from the
+    /// caller-supplied base — the base is the node universe (phase-01 task-4).
+    /// Pure in-memory — no path is read.
+    #[test]
+    fn over_base_resolves_an_unstaged_identity_from_the_supplied_base() {
+        let overlay = LayersOverlay::new();
+        let kept = node("requirements", "requirement", "untouched");
+        assert_eq!(
+            overlay.over_base(
+                std::slice::from_ref(&kept),
+                Layer::Requirements,
+                "requirement",
+                "untouched"
+            ),
+            Some(kept)
+        );
+    }
+
+    /// [`LayersOverlay::over_base`] has **no disk fallback**: an identity
+    /// absent from the caller-supplied base resolves as `None` even though a
+    /// matching node file exists under the on-disk `apg/layers/**` tree — the
+    /// supplied base is the sole universe (phase-01 task-4). Because
+    /// `over_base` takes no `apg_root`, an absent-from-base identity can never
+    /// synthesize a node from disk; the empty-base assertion is the pure
+    /// in-memory proof, and no path is ever read.
+    #[test]
+    fn over_base_absent_identity_never_falls_back_to_disk() {
+        let overlay = LayersOverlay::new();
+        assert_eq!(
+            overlay.over_base(&[], Layer::Domain, "value", "money"),
+            None
+        );
+
+        // A base carrying only *other* identities still yields `None` for the
+        // absent one (no near-miss per-layer/type/name fallback).
+        let other = node("domain", "value", "other");
+        assert_eq!(
+            overlay.over_base(&[other], Layer::Domain, "value", "money"),
+            None
+        );
+    }
+
     /// [`ingest_nodes`] is the in-memory core [`ingest_tree`] delegates to
     /// (phase-00 task-2): handed a `Vec<NodeFile>` directly — no disk walk — it
     /// sorts the set, runs the same validation pipeline, and emits one node
