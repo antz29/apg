@@ -30,7 +30,6 @@ permission:
   bash:
     "*": deny
     "ls *": allow
-    "find *": allow
     "wc *": allow
     "diff *": allow
     "stat *": allow

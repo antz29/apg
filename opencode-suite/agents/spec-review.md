@@ -49,7 +49,6 @@ permission:
   bash:
     "*": deny
     "ls *": allow
-    "find *": allow
     "pwd": allow
     "cd *": allow
 ---

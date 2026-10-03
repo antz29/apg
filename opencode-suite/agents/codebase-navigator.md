@@ -65,7 +65,6 @@ permission:
     "*": deny
     "ls *": allow
     "wc *": allow
-    "find *": allow
     "file *": allow
     "stat *": allow
     "diff *": allow
@@ -204,19 +203,30 @@ The **caller owns the session lifecycle** — you (or the writer you dispatch)
 open the session for the worktree, decide when to persist, and release it. It
 never outlives the call chain that owns it:
 
-- **start** — `apg_session` (or `apg session start`) launches the single-writer
-  coordinator, which owns the worktree's `db.lbug` and the extended
-  `specs.lock` flock and serves routed mutations/reads in receive order.
-- **save** — `apg session save` makes the whole buffered node-file set durable
-  (one atomic write into `apg/layers/**` + exactly one commit), then clears the
-  buffer.
-- **end** — `apg session end` releases the database, flock and socket; it
-  **refuses while the buffer is dirty** (save or abort first).
-- **abort** — `apg session abort` discards the buffer and releases the session.
+- **start** — `apg_session` (`action: start`, the default) launches the
+  single-writer coordinator, which owns the worktree's `db.lbug` and the
+  extended `specs.lock` flock and serves routed mutations/reads in receive
+  order.
+- **save** — `apg_session` `action: save` makes the whole buffered node-file
+  set durable (one atomic write into `apg/layers/**` + exactly one commit),
+  then clears the buffer.
+- **end** — `apg_session` `action: end` releases the database, flock and
+  socket; it **refuses while the buffer is dirty** (save or abort first).
+- **abort** — `apg_session` `action: abort` discards the buffer and releases
+  the session.
 
-`apg query` routes through the live session (seeing unsaved buffered changes)
-and reads `db.lbug` directly when none is live; `apg scan` and
+The whole lifecycle runs through the `apg_session` tool (pass the worktree as
+`directory`) — never through `bash`, and never instruct a subagent to use
+`bash` for it. `apg_query` routes through the live session (seeing unsaved
+buffered changes); `apg_spec_lint` reads the durable node files, so it
+reflects a writer's changes only after a save. `apg scan` and
 `apg project merge` refuse while a session is live — save and end first.
+
+**A blocked step is a stop, never a workaround** — for you and every subagent
+you dispatch. A refused tool or permission is reported verbatim and routed
+(fix the tool/agent, or ask the user); a command is never smuggled through
+another allowed command (a shell wrapper, `-exec`, …) to get around a
+permission.
 
 ## The canonical staged flow (always strictly followed)
 

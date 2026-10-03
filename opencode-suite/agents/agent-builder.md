@@ -30,7 +30,6 @@ permission:
   bash:
     "*": deny
     "ls *": allow
-    "find *": allow
     "pwd": allow
     "cd *": allow
     "git status *": allow
@@ -129,19 +128,22 @@ The **caller owns the session lifecycle** — the agent performing the durable
 work opens the session for the worktree, decides when to persist, and releases
 it. It never outlives the call chain that owns it:
 
-- **start** — `apg_session` (or `apg session start`) launches the single-writer
-  coordinator, which owns the worktree's `db.lbug` and the extended
-  `specs.lock` flock and serves routed mutations/reads in receive order.
-- **save** — `apg session save` makes the whole buffered node-file set durable
-  (one atomic write into `apg/layers/**` + exactly one commit), then clears the
-  buffer.
-- **end** — `apg session end` releases the database, flock and socket; it
-  **refuses while the buffer is dirty** (save or abort first).
-- **abort** — `apg session abort` discards the buffer and releases the session.
+- **start** — `apg_session` (`action: start`, the default) launches the
+  single-writer coordinator, which owns the worktree's `db.lbug` and the
+  extended `specs.lock` flock and serves routed mutations/reads in receive
+  order.
+- **save** — `apg_session` `action: save` makes the whole buffered node-file
+  set durable (one atomic write into `apg/layers/**` + exactly one commit),
+  then clears the buffer.
+- **end** — `apg_session` `action: end` releases the database, flock and
+  socket; it **refuses while the buffer is dirty** (save or abort first).
+- **abort** — `apg_session` `action: abort` discards the buffer and releases
+  the session.
 
-`apg query` routes through the live session (seeing unsaved buffered changes)
-and reads `db.lbug` directly when none is live; `apg scan` and
-`apg project merge` refuse while a session is live — save and end first.
+The whole lifecycle runs through the `apg_session` tool (worktree as
+`directory`), never through `bash`. `apg_query` routes through the live
+session (seeing unsaved buffered changes); `apg scan` and `apg project merge`
+refuse while a session is live — save and end first.
 
 This is the session side of the guarded-mutation scoping above: a durable
 node/edge mutation is a session act, run through a live session rather than as
@@ -158,7 +160,15 @@ a bare command.
   working tree and `apg/config.json` stays readable. Drop the bash file-read
   commands (`cat *`, `head *`, `tail *`, `dd *`, `rg *`, `grep *`, and
   `git grep *` — `git grep` reads tracked files, and `apg/layers/**` is
-  tracked).
+  tracked). Never grant `find *` either: `find -exec`/`-execdir`/`-ok` runs
+  arbitrary commands past every other bash deny, and `glob`/`grep` cover
+  file discovery.
+- **Session lifecycle through the tool.** Any generated agent that performs
+  durable `apg node`/`apg edge` mutations is granted `apg_session` and drives
+  start/save/end/abort through its `action` argument — never through `bash`.
+- **No permission workarounds.** Every generated agent's body states that a
+  refused tool or permission is a stop-and-report, never routed through
+  another allowed command.
 - **Read-guard body prose (positive rule).** The deny blocks alone are not
   enough: every generated agent's body must state the positive form of the
   rule — graph state is reached only through the apg tools that agent is

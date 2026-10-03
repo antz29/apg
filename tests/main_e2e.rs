@@ -3041,6 +3041,30 @@ mod e2e {
             );
         }
 
+        // The session lifecycle is driven through the `apg_session` tool's
+        // `action` argument (never bash), and no distributed agent grants
+        // `find *` — `find -exec` runs arbitrary commands past every bash deny.
+        assert!(
+            session_tool.contains(r#"enum(["start", "save", "end", "abort"])"#),
+            "apg_session.ts must expose the start/save/end/abort actions"
+        );
+        for name in [
+            "spec-writer.md",
+            "codebase-navigator.md",
+            "agent-builder.md",
+        ] {
+            assert!(
+                agent(name).contains("`apg_session` `action: save`"),
+                "agent prompt {name} must drive save through apg_session"
+            );
+        }
+        for (name, content) in AGENTS {
+            assert!(
+                !content.contains(r#""find *""#),
+                "agent prompt {name} must not grant `find *`"
+            );
+        }
+
         // Every embedded agent prompt is scanned: none may name a retired
         // surface (the pinned forms above are the only accepted vocabulary).
         for (name, content) in AGENTS {
