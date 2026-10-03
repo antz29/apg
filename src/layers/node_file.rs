@@ -323,6 +323,41 @@ impl LayersOverlay {
         }
     }
 
+    /// Resolve an identity over the overlay against a **caller-supplied base
+    /// node set** — the base-supplied twin of [`read`](Self::read)/[`exists`](Self::exists)
+    /// for a caller that holds its durable node universe in memory (e.g. the
+    /// session's `ArtifactDb::node_files_from_db`) and must **not** fall back to
+    /// `apg/layers/**`. The precedence matches [`read`](Self::read): a staged
+    /// write yields its buffered content, a staged delete marker yields `None`,
+    /// and an unstaged identity yields the matching base node (or `None` when
+    /// the base holds none). Pure map/list logic — no filesystem access, so it
+    /// cannot observe a node file the caller's base does not carry.
+    ///
+    /// A base node whose `layer` directory is not a known [`Layer`] can never
+    /// match a `layer` key and is ignored (it is kept verbatim by
+    /// [`apply_to_base`](Self::apply_to_base) but has no resolvable identity).
+    pub fn over_base(
+        &self,
+        base: &[NodeFile],
+        layer: Layer,
+        node_type: &str,
+        name: &str,
+    ) -> Option<NodeFile> {
+        let identity = (layer, node_type.to_string(), name.to_string());
+        match self.staged.get(&identity) {
+            Some(Some(node)) => Some(node.clone()),
+            Some(None) => None,
+            None => base
+                .iter()
+                .find(|node| {
+                    node.layer == layer.layer_dir()
+                        && node.node_type == node_type
+                        && node.name == name
+                })
+                .cloned(),
+        }
+    }
+
     /// Fold the overlay over a base node list (the disk store) into the
     /// cumulative **effective** node set: staged writes replace the matching
     /// base node (or add one absent from the base), delete markers drop the
