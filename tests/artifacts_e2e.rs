@@ -970,4 +970,220 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-01 task-5: `ArtifactDb::node_files_from_db` reconstructs the
+    /// durable node-file set from a REAL `db.lbug` — the metadata nodes were
+    /// written as node files, projected into the DB by a real scan (the
+    /// canonical `layers::ingest_tree` → `create_schema`/`build_load_files`
+    /// path), and read back.
+    ///
+    /// This pins the subset the CURRENT (lossy) columns carry: `body`, the
+    /// projected typed property keys (`Requirement` `id`/`feature`, `Note`
+    /// `kind`, `Container` `kind`, `Group` `attribute`/`root`, `Constraint`
+    /// `attaches-to` → the `attaches-to` property), and BOTH halves of every
+    /// durable authored edge. Because no rel table has a property column, the
+    /// reconstructed OUT/IN edges carry an EMPTY `properties` map even though the
+    /// authored `drives` edge declared one — the exact full-fidelity round-trip
+    /// (edge properties, `Entity` `kind`, arbitrary keys) is phase 4's task.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+    fn node_files_from_db_reconstructs_the_projected_columns() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("node-files-from-db");
+
+        let props = |pairs: &[(&str, &str)]| -> layers::NodeProperties {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let out_edge =
+            |kind: &str, target: &str, properties: layers::NodeProperties| layers::OutEdge {
+                kind: kind.to_string(),
+                target: target.to_string(),
+                properties,
+            };
+        let in_edge =
+            |kind: &str, source: &str, properties: layers::NodeProperties| layers::InEdge {
+                kind: kind.to_string(),
+                source: source.to_string(),
+                properties,
+            };
+
+        // The `drives` edge carries an authored edge property on BOTH halves
+        // (the pairing invariant demands identical properties); the current
+        // schema has no rel property column, so the reconstruction must drop it.
+        let drives_props = || props(&[("flavor", "context-map")]);
+
+        // Each node carries exactly the typed metadata keys the schema projects.
+        let requirement = layers::NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "requirement".to_string(),
+            name: "checkout".to_string(),
+            body: "the checkout flow".to_string(),
+            properties: props(&[("id", "REQ-1"), ("feature", "feature-checkout")]),
+            out: vec![out_edge("drives", "domain.group.core", drives_props())],
+            in_edges: vec![in_edge("details", "requirements.note.note-1", props(&[]))],
+        };
+        let note = layers::NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "note".to_string(),
+            name: "note-1".to_string(),
+            body: "a note".to_string(),
+            properties: props(&[("kind", "background")]),
+            out: vec![out_edge(
+                "details",
+                "requirements.requirement.checkout",
+                props(&[]),
+            )],
+            in_edges: Vec::new(),
+        };
+        let group = layers::NodeFile {
+            layer: "domain".to_string(),
+            node_type: "group".to_string(),
+            name: "core".to_string(),
+            body: "the core domain".to_string(),
+            properties: props(&[("attribute", "core"), ("root", "checkout")]),
+            out: vec![out_edge(
+                "realised-by",
+                "solution.container.api",
+                props(&[]),
+            )],
+            in_edges: vec![in_edge(
+                "drives",
+                "requirements.requirement.checkout",
+                drives_props(),
+            )],
+        };
+        let container = layers::NodeFile {
+            layer: "solution".to_string(),
+            node_type: "container".to_string(),
+            name: "api".to_string(),
+            body: "the api service".to_string(),
+            properties: props(&[("kind", "service")]),
+            // A code endpoint: the target has no node file, so only this
+            // source-side `out` half exists.
+            out: vec![out_edge(
+                "implemented-by",
+                "go.fixture.mod.Store",
+                props(&[]),
+            )],
+            in_edges: vec![in_edge("realised-by", "domain.group.core", props(&[]))],
+        };
+        let constraint = layers::NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "constraint".to_string(),
+            name: "local-rule".to_string(),
+            body: "the local rule".to_string(),
+            properties: props(&[("attaches-to", "requirements.requirement.checkout")]),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        };
+
+        for node in [&requirement, &note, &group, &container, &constraint] {
+            layers::write_node(&wt_apg, node).unwrap();
+        }
+        // Project the durable tree into a real db.lbug through the real scan
+        // path (the canonical schema/load projection).
+        testutil::scan_checkout(&wt).unwrap();
+
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let nodes = db.node_files_from_db().unwrap();
+        drop(db);
+
+        // Only the five durable authored nodes are reconstructed — the scanned
+        // code and the transient rows are not durable node files.
+        assert_eq!(nodes.len(), 5, "durable node files: {nodes:#?}");
+
+        let find = |layer: &str, node_type: &str, name: &str| -> layers::NodeFile {
+            nodes
+                .iter()
+                .find(|n| n.layer == layer && n.node_type == node_type && n.name == name)
+                .cloned()
+                .unwrap_or_else(|| {
+                    panic!("node_files_from_db is missing `{layer}.{node_type}.{name}`")
+                })
+        };
+        let out = |n: &layers::NodeFile, kind: &str, target: &str| -> layers::OutEdge {
+            n.out
+                .iter()
+                .find(|e| e.kind == kind && e.target == target)
+                .cloned()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing out edge `{kind}` -> `{target}` on `{}.{}.{}`",
+                        n.layer, n.node_type, n.name
+                    )
+                })
+        };
+        let incoming = |n: &layers::NodeFile, kind: &str, source: &str| -> layers::InEdge {
+            n.in_edges
+                .iter()
+                .find(|e| e.kind == kind && e.source == source)
+                .cloned()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing in edge `{source}` -{kind}-> on `{}.{}.{}`",
+                        n.layer, n.node_type, n.name
+                    )
+                })
+        };
+
+        // Body + the projected typed property keys, per node type.
+        let r = find("requirements", "requirement", "checkout");
+        assert_eq!(r.body, "the checkout flow");
+        assert_eq!(
+            r.properties,
+            props(&[("id", "REQ-1"), ("feature", "feature-checkout")])
+        );
+
+        let n = find("requirements", "note", "note-1");
+        assert_eq!(n.body, "a note");
+        assert_eq!(n.properties, props(&[("kind", "background")]));
+
+        let g = find("domain", "group", "core");
+        assert_eq!(g.body, "the core domain");
+        assert_eq!(
+            g.properties,
+            props(&[("attribute", "core"), ("root", "checkout")])
+        );
+
+        let c = find("solution", "container", "api");
+        assert_eq!(c.body, "the api service");
+        assert_eq!(c.properties, props(&[("kind", "service")]));
+
+        let k = find("requirements", "constraint", "local-rule");
+        assert_eq!(k.body, "the local rule");
+        assert_eq!(
+            k.properties,
+            props(&[("attaches-to", "requirements.requirement.checkout")])
+        );
+
+        // Both halves of `drives`, with the authored edge property dropped: the
+        // lossy rel columns carry no edge properties.
+        let drives_out = out(&r, "drives", "domain.group.core");
+        assert!(
+            drives_out.properties.is_empty(),
+            "the rel columns carry no edge properties: {drives_out:?}"
+        );
+        let drives_in = incoming(&g, "drives", "requirements.requirement.checkout");
+        assert!(
+            drives_in.properties.is_empty(),
+            "the rel columns carry no edge properties: {drives_in:?}"
+        );
+
+        // Both halves of `realised-by`.
+        out(&g, "realised-by", "solution.container.api");
+        incoming(&c, "realised-by", "domain.group.core");
+
+        // `implemented-by`: only the source's out half (the code endpoint has no
+        // node file to hold the in half).
+        let implemented_out = out(&c, "implemented-by", "go.fixture.mod.Store");
+        assert!(implemented_out.properties.is_empty());
+
+        // Both halves of `details`.
+        out(&n, "details", "requirements.requirement.checkout");
+        incoming(&r, "details", "requirements.note.note-1");
+
+        testutil::remove(&repo);
+    }
 }
