@@ -565,11 +565,13 @@ impl Coordinator {
     /// releases the session — nothing was projected, so there is no phantom to
     /// discard and no rebuild is needed.
     ///
-    /// The release is exactly [`end`](Self::end)'s ordering and runs BEFORE the
-    /// forced scan: the owned DB handle, the extended flock, then the socket.
-    /// The scan opens (and locks) its own DB/socket, so holding either across
-    /// it would self-deadlock — the scan's live-session guard would see this
-    /// session's socket and refuse, and the stale handle would hold the index.
+    /// Consumes the coordinator, dropping the non-optional held DB handle as
+    /// it releases the extended flock and removes the socket. The release is
+    /// exactly [`end`](Self::end)'s ordering and runs BEFORE the forced scan:
+    /// the owned DB handle, the extended flock, then the socket. The scan opens
+    /// (and locks) its own DB/socket, so holding either across it would
+    /// self-deadlock — the scan's live-session guard would see this session's
+    /// socket and refuse, and the stale handle would hold the index.
     ///
     /// The rebuild reuses the existing `apg scan` entry point
     /// ([`crate::cmd_scan`]), which drives the same
@@ -580,15 +582,18 @@ impl Coordinator {
     /// from the phantom-projected DB) and reuse the phantom state; a genuine
     /// full scan then rebuilds both from the durable node files and the
     /// scanned code.
-    pub fn abort(&mut self) -> anyhow::Result<()> {
+    pub fn abort(mut self) -> anyhow::Result<()> {
         // Discard the whole buffered set before anything else: an aborted
         // change is never written to `apg/layers/**` and never committed.
         let dirty = !self.buffer.is_empty();
         self.buffer.clear();
 
         // Release exactly as `end` does, BEFORE the forced scan opens its own
-        // DB handle / flock / socket.
-        self.db = None;
+        // DB handle / flock / socket: drop the owned DB handle first (no impl
+        // `Drop`, so move the field out) so its stale mmap cannot hold the
+        // index the scan is about to discard and rebuild, then release the
+        // extended flock and remove the socket.
+        drop(self.db);
         self._lock = None;
         let _ = std::fs::remove_file(&self.socket_path);
 
