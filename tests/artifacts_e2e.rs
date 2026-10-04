@@ -1706,6 +1706,245 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Phase-05 task-14 (partial-delta path): phase-4's lossless projection
+    /// survives the session's PARTIAL delta. A routed mutation projects only the
+    /// delta it changed — the written node's node+out-edge records via
+    /// `layers::tree::records_for_nodes`, extended with the in-edges read back
+    /// from the held DB (`ArtifactDb::incident_edge_records_from_db`) — through
+    /// `layers::write::project_only`.
+    ///
+    /// The authored set carries arbitrary/unknown AND empty-valued property keys
+    /// on every node, an authored `drives` edge with its own property map on BOTH
+    /// halves, and an incoming durable `contains` edge on the mutated node from a
+    /// source the mutation does NOT touch — so the incident-restore seam is
+    /// exercised with real edge properties. After a routed `node update` over the
+    /// property-carrying node through the live session, the held DB (read once the
+    /// session releases it) reconstructs the WHOLE node-file set exactly: the
+    /// updated body, the full properties map (arbitrary + empty-valued keys), the
+    /// `drives` properties on both halves, and the restored `contains` in-edge
+    /// with its properties.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+    fn node_files_from_db_round_trips_every_property_through_the_partial_delta() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("lossless-partial-delta");
+        let home = repo.root.join("home");
+
+        let props = |pairs: &[(&str, &str)]| -> layers::NodeProperties {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let out_edge =
+            |kind: &str, target: &str, properties: layers::NodeProperties| layers::OutEdge {
+                kind: kind.to_string(),
+                target: target.to_string(),
+                properties,
+            };
+        let in_edge =
+            |kind: &str, source: &str, properties: layers::NodeProperties| layers::InEdge {
+                kind: kind.to_string(),
+                source: source.to_string(),
+                properties,
+            };
+
+        // The authored `drives` edge carries a property map on BOTH halves (the
+        // pairing invariant); the incoming `contains` edge carries its own map so
+        // the incident-restore round-trips edge properties, not just endpoints.
+        let drives_props = || props(&[("flavor", "context-map"), ("empty-prop", "")]);
+        let contains_props = || props(&[("since", "v1"), ("empty-prop", "")]);
+
+        // The mutated node: arbitrary + empty-valued property keys, an out-edge
+        // with properties, and an incoming durable edge from a source the
+        // mutation will NOT touch (so `incident_edge_records_from_db` restores it).
+        let checkout = layers::NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "requirement".to_string(),
+            name: "checkout".to_string(),
+            body: "the checkout flow".to_string(),
+            properties: props(&[
+                ("id", "REQ-1"),
+                ("feature", "checkout"),
+                ("owner", ""),
+                ("empty-meta", ""),
+            ]),
+            out: vec![out_edge("drives", "domain.entity.order", drives_props())],
+            in_edges: vec![in_edge(
+                "contains",
+                "requirements.stakeholder.customer",
+                contains_props(),
+            )],
+        };
+        // The `drives` target: an `Entity` carrying `kind = event` (a durable key
+        // with no dedicated column, so only the serialized-properties column can
+        // carry it) plus empty-valued keys.
+        let order = layers::NodeFile {
+            layer: "domain".to_string(),
+            node_type: "entity".to_string(),
+            name: "order".to_string(),
+            body: "the order event".to_string(),
+            properties: props(&[("kind", "event"), ("owner", ""), ("empty-meta", "")]),
+            out: Vec::new(),
+            in_edges: vec![in_edge(
+                "drives",
+                "requirements.requirement.checkout",
+                drives_props(),
+            )],
+        };
+        // The `contains` source: untouched by the mutation, so its out half
+        // persists while the target's in half is restored by the incident seam.
+        let customer = layers::NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "stakeholder".to_string(),
+            name: "customer".to_string(),
+            body: "the customer".to_string(),
+            properties: props(&[("tier", "gold"), ("empty-meta", "")]),
+            out: vec![out_edge(
+                "contains",
+                "requirements.requirement.checkout",
+                contains_props(),
+            )],
+            in_edges: Vec::new(),
+        };
+
+        for node in [&checkout, &order, &customer] {
+            layers::write_node(&wt_apg, node).unwrap();
+        }
+        wt_commit_paths(&wt, &["apg/layers"], "seed the lossless node set");
+        // Project the durable tree through the canonical full scan; the session
+        // then owns this DB and reconstructs its base from it.
+        testutil::scan_checkout(&wt).unwrap();
+
+        // Precondition: the base full-scan projection already round-trips exactly.
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            let base = db.node_files_from_db().unwrap();
+            drop(db);
+            assert_lossless_round_trip(&base, &[checkout.clone(), order.clone(), customer.clone()]);
+        }
+
+        // A routed `node update` through the live session: edge-preserving, so the
+        // delta is `records_for_nodes` (checkout + its `drives` out-edge) plus
+        // `incident_edge_records_from_db` (the `contains` in-edge from the
+        // untouched customer), applied via `project_only`.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+
+        let update = testutil::ApgCommand::new(&[
+            "node",
+            "update",
+            "requirements",
+            "requirement",
+            "checkout",
+            "--body",
+            "updated through the partial delta",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            update.status.success(),
+            "routed update must admit through the partial-delta path: {}",
+            String::from_utf8_lossy(&update.stderr)
+        );
+
+        // The single durability point (the DB projection already landed at
+        // admission), then release the DB so the direct Rust read can take the
+        // lbug file lock a live session holds exclusively.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        // The partial admission projection survives: the held DB reconstructs the
+        // full authored set exactly, with the mutated body.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let reconstructed = db.node_files_from_db().unwrap();
+        drop(db);
+
+        let expected_checkout = layers::NodeFile {
+            body: "updated through the partial delta".to_string(),
+            ..checkout.clone()
+        };
+        assert_lossless_round_trip(
+            &reconstructed,
+            &[expected_checkout, order.clone(), customer.clone()],
+        );
+
+        // Direct assertions naming each fidelity the partial path must preserve.
+        let find = |layer: &str, node_type: &str, name: &str| -> layers::NodeFile {
+            reconstructed
+                .iter()
+                .find(|n| n.layer == layer && n.node_type == node_type && n.name == name)
+                .cloned()
+                .unwrap_or_else(|| {
+                    panic!("node_files_from_db is missing `{layer}.{node_type}.{name}`")
+                })
+        };
+        let r = find("requirements", "requirement", "checkout");
+        assert_eq!(r.body, "updated through the partial delta");
+        assert_eq!(
+            r.properties,
+            props(&[
+                ("id", "REQ-1"),
+                ("feature", "checkout"),
+                ("owner", ""),
+                ("empty-meta", "")
+            ]),
+            "the mutated node's arbitrary + empty-valued keys must survive the partial delta"
+        );
+        let drives_out = r
+            .out
+            .iter()
+            .find(|e| e.kind == "drives" && e.target == "domain.entity.order")
+            .cloned()
+            .expect("the drives out half must survive the partial delta");
+        assert_eq!(drives_out.properties, drives_props());
+        let contains_in = r
+            .in_edges
+            .iter()
+            .find(|e| e.kind == "contains" && e.source == "requirements.stakeholder.customer")
+            .cloned()
+            .expect("the restored contains in-edge must survive the partial delta");
+        assert_eq!(contains_in.properties, contains_props());
+
+        let o = find("domain", "entity", "order");
+        assert_eq!(
+            o.properties,
+            props(&[("kind", "event"), ("owner", ""), ("empty-meta", "")])
+        );
+        let drives_in = o
+            .in_edges
+            .iter()
+            .find(|e| e.kind == "drives" && e.source == "requirements.requirement.checkout")
+            .cloned()
+            .expect("the drives in half must survive the partial delta");
+        assert_eq!(
+            drives_in.properties,
+            drives_props(),
+            "the drives properties must survive on BOTH halves"
+        );
+
+        testutil::remove(&repo);
+    }
+
     /// Phase-02 task-3: live-session admission resolves the durable node set and
     /// the `implemented-by` code universes SOLELY from the held `db.lbug`.
     ///
