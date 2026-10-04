@@ -708,7 +708,11 @@ pub fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
 pub fn node_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     apply_change(
         apg_root,
-        node_update_change(apg_root, args, &layers::LayersOverlay::new())?,
+        node_update_change(
+            &layers::read_existing_nodes(apg_root)?,
+            args,
+            &layers::LayersOverlay::new(),
+        )?,
     )
 }
 
