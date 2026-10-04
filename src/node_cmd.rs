@@ -697,7 +697,11 @@ fn edge_rm_change(
 pub fn node_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     apply_change(
         apg_root,
-        node_add_change(apg_root, args, &layers::LayersOverlay::new())?,
+        node_add_change(
+            &layers::read_existing_nodes(apg_root)?,
+            args,
+            &layers::LayersOverlay::new(),
+        )?,
     )
 }
 
