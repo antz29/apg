@@ -854,7 +854,12 @@ impl Coordinator {
     ///    over that base + overlay, so its existence checks and
     ///    read-modify-write resolve against the CUMULATIVE buffered state (an
     ///    update/rm of a node written earlier in the same unsaved run applies
-    ///    over its buffered content).
+    ///    over its buffered content). A routed `node rm`'s outstanding-feedback
+    ///    warning is built from the held DB's transient feedback set, scoped to
+    ///    the coordinator's resolved `project`
+    ///    ([`crate::artifacts::ArtifactDb::feedback_records_from_db`]), never a
+    ///    `.trans` read; a `None` project (detached HEAD / non-git) supplies an
+    ///    empty set, so a routed rm warns on nothing — matching the direct path.
     /// 2. Validate the change against that cumulative base via
     ///    [`layers::write::validate_change_over`] — NOT the disk-only
     ///    [`layers::write::validate_change`]. The two code-FQN universes come
@@ -906,8 +911,29 @@ impl Coordinator {
         //     the change over it so existence checks and read-modify-write
         //     resolve against buffered content.
         let base = overlay.apply_to_base(&db_nodes);
-        let change =
-            crate::node_cmd::build_change_over(&base, &self.apg_root, kind, args, &overlay)?;
+
+        // The held DB's transient feedback set, scoped to this session's own
+        // project, is the node-rm warning's source — admission reads no `.trans`.
+        // A None project (detached HEAD / non-git) supplies an empty set, so a
+        // routed rm warns on nothing, matching the direct path.
+        let feedback: Vec<crate::schema::Record> =
+            if kind == "node" && args.first().map(String::as_str) == Some("rm") {
+                match self.project.as_deref() {
+                    Some(project) => self.db.feedback_records_from_db(project)?,
+                    None => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            };
+
+        let change = crate::node_cmd::build_change_over(
+            &base,
+            &feedback,
+            &self.apg_root,
+            kind,
+            args,
+            &overlay,
+        )?;
 
         // (3) The two code-reference universes from the same held DB handle —
         //     validate against them, NOT a `graph.jsonl` export.
