@@ -339,9 +339,12 @@ pub struct Coordinator {
     apg_root: PathBuf,
     socket_path: PathBuf,
     listener: Option<UnixListener>,
-    /// The exclusively-owned DB handle — ONE open/parse amortized across N
-    /// mutations. The projection apply runs through this handle.
-    db: Option<ArtifactDb>,
+    /// The exclusively-owned DB handle, always present for the session's whole
+    /// life — a session only starts against an existing `db.lbug` (`start`'s
+    /// `open_owned_db` is fallible), and `end` merely drops this handle. ONE
+    /// open/parse amortized across N mutations; the projection apply runs
+    /// through it.
+    db: ArtifactDb,
     /// The extended whole-sequence flock held for the session's life, so a
     /// non-routing direct writer can never RMW the same node files.
     _lock: Option<SpecLockGuard>,
