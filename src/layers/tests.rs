@@ -1776,4 +1776,95 @@ mod unit {
         assert!(msg.contains("depends-on"), "{msg}");
         assert!(msg.contains("BOTH endpoint files"), "{msg}");
     }
+
+    /// [`properties_json`] / [`properties_from_json`] are exact inverses over
+    /// the full properties map: unknown keys and keys carrying an **empty
+    /// value** survive the round-trip verbatim, and the canonical encoding is
+    /// the sorted-key JSON object (phase-04 task-16). Pure in-memory.
+    #[test]
+    fn properties_json_round_trips_unknown_and_empty_valued_keys() {
+        let mut properties = NodeProperties::new();
+        // A known typed key, an unknown metadata key, and an empty-valued key.
+        properties.insert("kind".to_string(), "event".to_string());
+        properties.insert("unknown-key".to_string(), "kept".to_string());
+        properties.insert("empty".to_string(), String::new());
+
+        let encoded = properties_json(&properties);
+        // Canonical: sorted keys, every key emitted (including the empty one).
+        assert_eq!(
+            encoded,
+            r#"{"empty":"","kind":"event","unknown-key":"kept"}"#
+        );
+        assert_eq!(
+            properties_from_json(&encoded).expect("canonical JSON decodes"),
+            properties
+        );
+    }
+
+    /// Equal maps encode to byte-identical canonical strings regardless of
+    /// insertion order — [`NodeProperties`] is a [`BTreeMap`], whose iteration
+    /// order is sorted, so the encoding is deterministic (phase-04 task-16).
+    /// Pure in-memory.
+    #[test]
+    fn properties_json_is_deterministic_for_equal_maps() {
+        let mut a = NodeProperties::new();
+        a.insert("z".to_string(), "1".to_string());
+        a.insert("a".to_string(), "2".to_string());
+        a.insert("m".to_string(), String::new());
+
+        // The same map built in a different insertion order.
+        let mut b = NodeProperties::new();
+        b.insert("m".to_string(), String::new());
+        b.insert("a".to_string(), "2".to_string());
+        b.insert("z".to_string(), "1".to_string());
+
+        assert_eq!(a, b);
+        assert_eq!(properties_json(&a), properties_json(&b));
+        assert_eq!(properties_json(&a), r#"{"a":"2","m":"","z":"1"}"#);
+    }
+
+    /// The empty map encodes as the canonical `"{}"`, and both `"{}"` and the
+    /// empty (or whitespace-only) column value decode back to the empty map —
+    /// the projection's representation of an absent/unset property set
+    /// (phase-04 task-16). Pure in-memory.
+    #[test]
+    fn properties_json_and_from_json_agree_on_the_empty_map() {
+        assert_eq!(properties_json(&NodeProperties::new()), "{}");
+        assert_eq!(
+            properties_from_json("{}").expect("empty object decodes"),
+            NodeProperties::new()
+        );
+        assert_eq!(
+            properties_from_json("").expect("empty column decodes to empty"),
+            NodeProperties::new()
+        );
+        assert_eq!(
+            properties_from_json("   ").expect("blank column decodes to empty"),
+            NodeProperties::new()
+        );
+    }
+
+    /// [`properties_from_json`] refuses malformed input rather than silently
+    /// dropping keys: invalid JSON and valid JSON that is **not** a
+    /// `string -> string` object (array, number, `null`, string, non-string
+    /// value) are each an `Err` (phase-04 task-16). Pure in-memory.
+    #[test]
+    fn properties_from_json_rejects_malformed_and_non_string_maps() {
+        for raw in [
+            "not json",
+            "{",
+            "[1,2]",
+            "null",
+            "42",
+            r#""a string""#,
+            r#"{"a":1}"#,
+            r#"{"a":null}"#,
+            r#"{"a":{"b":"c"}}"#,
+        ] {
+            assert!(
+                properties_from_json(raw).is_err(),
+                "`{raw}` must be refused"
+            );
+        }
+    }
 }
