@@ -1273,6 +1273,11 @@ mod e2e {
             properties: BTreeMap::new(),
         }];
         layers::write_project(&wt_apg, &[r0, r1, r2], &[]).unwrap();
+        // A session always holds a database, so build one from the committed
+        // baseline before opening it — the same write-then-scan pattern the
+        // crash/reclaim test uses. The DB's reconstructed base carries r1's
+        // incident edges, so the edge-preservation assertions still bite.
+        testutil::scan_checkout(&wt).unwrap();
 
         let before =
             layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "r1").unwrap();
@@ -3578,6 +3583,13 @@ mod e2e {
         let (wt_apg, repo, wt) = node_store_fixture("routed-warning");
         let home = repo.root.join("home");
         let path = layers::node_file_path(&wt_apg, Layer::Domain, "value", "demo-val");
+
+        // A session always holds a database, so seed a committed baseline and
+        // scan it before opening the session — the same write-then-scan pattern
+        // the crash/reclaim test uses.
+        layers::write_project(&wt_apg, &[node("requirements", "requirement", "seed")], &[])
+            .unwrap();
+        testutil::scan_checkout(&wt).unwrap();
 
         // Durable mutations are mandatory-session: one live `apg session start`
         // owns the DB AND the write-back buffer, so the `node` writes below are
