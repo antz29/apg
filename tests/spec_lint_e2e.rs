@@ -249,6 +249,17 @@ mod e2e {
         let path =
             apg::layers::node_file_path(&apg_root, apg::layers::Layer::Domain, "value", "demo-val");
 
+        // A session always holds a database, so seed a committed baseline and
+        // scan it before opening the session — the same write-then-scan pattern
+        // the crash/reclaim test uses.
+        apg::layers::write_project(
+            &apg_root,
+            &[testutil::node("requirements", "requirement", "seed")],
+            &[],
+        )
+        .unwrap();
+        testutil::scan_checkout(&wt).unwrap();
+
         // Durable mutations are mandatory-session: one live `apg session start`
         // owns the DB AND the write-back buffer, so every `node` write below is
         // forwarded to it and staged (NON-durable until `apg session save`).
@@ -428,6 +439,13 @@ mod e2e {
             &["apg/layers/requirements/constraint/legacy.json"],
             "seed the legacy attached constraint",
         );
+
+        // A session always holds a database, so build one from the committed
+        // baseline (the legacy attached constraint) before opening the session —
+        // the same write-then-scan pattern the crash/reclaim test uses. The
+        // DB's reconstructed base carries the legacy node, so the existing-
+        // constraint admission assertions still bite.
+        testutil::scan_checkout(&wt).unwrap();
 
         // Durable mutations are mandatory-session: one live `apg session start`
         // owns the DB AND the write-back buffer, so every `node`/`edge` write
