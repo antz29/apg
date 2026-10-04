@@ -375,13 +375,23 @@ pub struct Coordinator {
 
 impl Coordinator {
     /// `apg session start`: reclaim any stale socket, take the extended flock,
-    /// open (and own) `db.lbug` once, bind the worktree socket, and serve until
-    /// an `end` request arrives.
+    /// open (and own) `db.lbug` once, seed its transient projection from
+    /// `.trans`, bind the worktree socket, and serve until an `end` request
+    /// arrives.
     ///
     /// A session always holds a database: an absent `db.lbug` is a hard
     /// refusal naming `apg scan` (via [`open_owned_db`](Self::open_owned_db)),
     /// raised before the socket is bound, so a refused start leaves no socket
     /// bound and no flock held behind.
+    ///
+    /// The seed makes the held DB's transient rows (the plan store and the
+    /// five tier mirrors — `Reviews`/`Gates`/`Satisfies` edges among them)
+    /// current **once at start**, so DB-only admission can restore those
+    /// edges without ever reading `.trans` afterwards. Like the DB open it is
+    /// fail-closed and runs before the socket is bound: an absent `.trans`
+    /// file is a no-op, but a present-but-malformed one refuses start before
+    /// any socket is bound and leaves the held DB unchanged (the seed applies
+    /// through one `BEGIN`/`COMMIT` that ROLLBACKs on error).
     pub fn start(apg_root: &Path) -> anyhow::Result<()> {
         let apg_root = apg_root.to_path_buf();
         // One session per worktree DB: a live session refuses a second start.
@@ -400,6 +410,30 @@ impl Coordinator {
         // `db.lbug` refuses here, naming `apg scan`, before the socket is
         // bound, and `apg/layers/**` is never used as a DB-less fallback.
         let db = Self::open_owned_db(&apg_root)?;
+
+        // Seed the held DB's transient projection ONCE, before the socket is
+        // bound: merge the worktree's `.trans` plan-store + tier-mirror records
+        // (the shared reader) with an EMPTY delete set, so the DB's transient
+        // rows — `Reviews`/`Gates`/`Satisfies` edges among them — are current
+        // for the session's whole life. DB-only admission can then restore
+        // those edges without ever reading `.trans` again.
+        //
+        // Fail-closed: `append_transient_records` enumerates only EXISTING
+        // files (an absent `.trans` is a benign no-op) and reads them ALL
+        // before returning, erroring loudly on a present-but-malformed file
+        // (its error already names the file + line). The `map_err` adds the
+        // remedy without losing the file name. `reingest_layers_on` wraps the
+        // apply in ONE BEGIN/COMMIT that ROLLBACKs on error, so a failed seed
+        // leaves the held DB unchanged — and, because both run before
+        // `UnixListener::bind`, a `?` abort leaves no socket bound and no flock
+        // held (`lock`/`db` then drop).
+        let mut transient: Vec<crate::schema::Record> = Vec::new();
+        crate::layers::write::append_transient_records(&apg_root, &mut transient).map_err(|e| {
+            anyhow::anyhow!(
+                "{e}\nrepair or remove the offending .trans file, or run `apg scan` to re-project the transient records"
+            )
+        })?;
+        db.reingest_layers_on(&std::collections::BTreeSet::new(), &transient)?;
 
         let socket = socket_path(&apg_root);
         if let Some(parent) = socket.parent() {
