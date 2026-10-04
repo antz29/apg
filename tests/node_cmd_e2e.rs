@@ -4216,4 +4216,214 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-05 task-13 (make-or-break for feedback-20): DB-only admission
+    /// restores a transient `Feedback -[:Reviews]-> durable-node` pairing FROM
+    /// THE HELD DB with `.trans` destroyed.
+    ///
+    /// A committed-and-scanned durable requirement (`reviewed`) plus a
+    /// `Feedback` record and its `Reviews` edge seeded into the requirements
+    /// tier mirror BEFORE `apg session start` (so the start seed — not the scan
+    /// — projects the pair into the held DB). While the session is live, EVERY
+    /// `.trans` plan file and tier mirror is DELETED, and a corrupt probe file
+    /// is planted under `.trans/plans/*.jsonl` so that any surviving
+    /// `.trans`-enumerating read at admission (`append_transient_records` /
+    /// `plan_files`) would fail loud. Then:
+    ///
+    ///   1. A routed **update** of `reviewed` SUCCEEDS — admission performs no
+    ///      `.trans` read — and the `Feedback -[:Reviews]-> reviewed` pairing is
+    ///      **restored from the DB** (the update's detach drops it; the
+    ///      incident-edge restore re-merges it), with the Feedback record
+    ///      intact.
+    ///   2. A routed **rm** of `reviewed` drops the now-dangling `Reviews` edge
+    ///      (its target is gone) while the `Feedback` record survives — the
+    ///      state a full rebuild from an intact `.trans` would produce.
+    ///
+    /// The corrupt probe is a DIFFERENT file name from the project's own
+    /// `.trans/plans/foo.jsonl`, because `node rm`'s best-effort
+    /// outstanding-feedback warning reads only the project's six transient
+    /// files (`project_transient_files`) — a corrupt `foo.jsonl` would fail
+    /// that advisory read and refuse an otherwise-valid rm. The probe still
+    /// proves the admission path performs no `.trans` enumeration: the removed
+    /// `append_transient_records` read globbed `.trans/plans/*.jsonl`, so it
+    /// would have read the probe and failed.
+    ///
+    /// A rebuild-equivalence leg is deliberately omitted: with `.trans`
+    /// destroyed, a full scan reads an empty transient leg and cannot re-project
+    /// the Feedback record at all, so it could not reproduce the live-DB final
+    /// state (Reviews gone, Feedback present). The task permits this omission
+    /// when it materially complicates the test.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn admission_restores_reviews_from_the_db_with_trans_destroyed() {
+        const REVIEWS_EDGE: &str = "MATCH (f:Feedback)-[:Reviews]->\
+             (n:Requirement {fqn: 'requirements.requirement.reviewed'}) RETURN f.fqn, n.fqn";
+        const REVIEWS_COUNT: &str = "MATCH (:Feedback)-[:Reviews]->\
+             (:Requirement {fqn: 'requirements.requirement.reviewed'}) RETURN count(*)";
+        const FEEDBACK_ROW: &str = "MATCH (f:Feedback {fqn: 'foo/feedback-1'}) \
+             RETURN f.fqn, f.body, f.status, f.disposition";
+        const REVIEWED_BODY: &str = "MATCH (n:Requirement {fqn: 'requirements.requirement.reviewed'}) \
+             RETURN n.body";
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("admission-db-only-trans");
+        let home = repo.root.join("home");
+
+        // A committed durable requirement, scanned into the branch DB.
+        let mut reviewed = node("requirements", "requirement", "reviewed");
+        reviewed.body = "before .trans destruction".to_string();
+        layers::write_node(&wt_apg, &reviewed).unwrap();
+        testutil::wt_commit_paths(&wt, &["apg/layers"], "seed the durable reviewed node");
+        testutil::scan_checkout(&wt).unwrap();
+
+        // Seed the Feedback + Reviews pair into the requirements tier mirror
+        // BEFORE the session starts: the scan above saw no mirror, so the START
+        // SEED (not the scan) is what projects it into the held DB. Both halves
+        // of the relationship live in the one file.
+        let mirror = specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
+        specs::write_jsonl(
+            &mirror,
+            &[
+                Record::Feedback {
+                    fqn: "foo/feedback-1".to_string(),
+                    body: "review of reviewed".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-1".to_string(),
+                    to: "requirements.requirement.reviewed".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // Precondition (no session yet): the durable node is in the DB and the
+        // Reviews edge is NOT — the start seed is what adds it.
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            assert!(db.has_node("requirements.requirement.reviewed"));
+            assert_eq!(
+                db.q(REVIEWS_COUNT).unwrap().lines().last().map(str::trim),
+                Some("0"),
+                "the Reviews edge must not be in the DB before the session seed"
+            );
+        }
+
+        // The start seed projects the transient Feedback + Reviews pair into the
+        // held DB, before the socket is bound.
+        let session = testutil::start_session_process(&wt, &home);
+
+        // Routed reads observe the held DB's projection at admission.
+        let routed = |q: &str| -> String {
+            let out = testutil::spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "routed query `{q}` failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap()
+        };
+
+        let reviews_before = routed(REVIEWS_EDGE);
+        assert!(
+            reviews_before.contains("foo/feedback-1")
+                && reviews_before.contains("requirements.requirement.reviewed"),
+            "the start seed must project Feedback -[:Reviews]-> reviewed into the held DB: \
+             {reviews_before}"
+        );
+        let feedback_before = routed(FEEDBACK_ROW);
+
+        // Destroy `.trans` while the session is live: delete every plan file and
+        // every tier mirror, then plant a corrupt probe plan file that any
+        // surviving `.trans`-enumerating admission read would have to parse.
+        for f in specs::plan_files(&wt_apg) {
+            std::fs::remove_file(&f).unwrap();
+        }
+        for f in specs::trans_mirror_files(&wt_apg) {
+            std::fs::remove_file(&f).unwrap();
+        }
+        assert!(
+            !mirror.exists(),
+            "the requirements tier mirror must be destroyed"
+        );
+        let probe = wt_apg
+            .join(specs::TRANS)
+            .join("plans")
+            .join("zzz-corrupt-probe.jsonl");
+        std::fs::create_dir_all(probe.parent().unwrap()).unwrap();
+        std::fs::write(&probe, "this is not a jsonl record\n").unwrap();
+        assert!(
+            specs::read_jsonl(&probe).is_err(),
+            "the corrupt probe must be unparseable, so any read of it fails loud"
+        );
+
+        // (1) A routed UPDATE of the reviewed node SUCCEEDS: admission reads no
+        // `.trans` (the corrupt probe would fail loud if it did), and the
+        // incident Reviews edge is restored FROM THE DB.
+        let args = av(&[
+            "update",
+            "requirements",
+            "requirement",
+            "reviewed",
+            "--body",
+            "updated after .trans destroyed",
+        ]);
+        assert_eq!(
+            session_forward_node(&wt_apg, "db-only-trans-1", &args),
+            "Updated node requirements.requirement.reviewed"
+        );
+
+        let reviews_after = routed(REVIEWS_EDGE);
+        assert_eq!(
+            reviews_after, reviews_before,
+            "the Feedback -[:Reviews]-> reviewed pairing must be restored from the DB by the update"
+        );
+        let feedback_after = routed(FEEDBACK_ROW);
+        assert_eq!(
+            feedback_after, feedback_before,
+            "the Feedback record must survive the update"
+        );
+        let body_after = routed(REVIEWED_BODY);
+        assert!(
+            body_after.contains("updated after .trans destroyed"),
+            "the routed update must be projected into the live DB: {body_after}"
+        );
+
+        // (2) A routed rm of the reviewed node drops the now-dangling Reviews
+        // edge while the Feedback record itself survives. (`node rm`'s warning
+        // reader looks only at `.trans/<project>.jsonl` — absent here — so the
+        // corrupt probe, a different file name, does not trip it.)
+        let rm = av(&["rm", "requirements", "requirement", "reviewed"]);
+        assert_eq!(
+            session_forward_node(&wt_apg, "db-only-trans-2", &rm),
+            "Removed node requirements.requirement.reviewed"
+        );
+        assert_eq!(
+            routed(REVIEWS_COUNT).lines().last().map(str::trim),
+            Some("0"),
+            "the dangling Reviews edge must be gone after the rm"
+        );
+        let feedback_after_rm = routed(FEEDBACK_ROW);
+        assert!(
+            feedback_after_rm.contains("foo/feedback-1")
+                && feedback_after_rm.contains("review of reviewed"),
+            "the Feedback record must survive the target's removal: {feedback_after_rm}"
+        );
+
+        // Clean release: save (the single durability point) then end.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
 }
