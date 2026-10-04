@@ -350,10 +350,15 @@ fn node_update_change(
 /// node staged earlier in the same unsaved run. Both resolve purely over the
 /// caller-supplied base and the overlay: the builder never reads
 /// `apg/layers/**` and never probes `node_file_path`, so it cannot observe a
-/// node file the caller's base does not carry. `apg_root` is still needed for
-/// the transient-feedback warning and to compute the deleted file's path.
+/// node file the caller's base does not carry.
+///
+/// The outstanding-feedback warning sources its records from the caller-supplied
+/// effective `feedback` set — the caller supplies its own source (the direct path
+/// from `.trans`, the session from the held DB) — so this builder performs no
+/// disk/git I/O. `apg_root` is still needed to compute the deleted file's path.
 fn node_rm_change(
     base: &[NodeFile],
+    feedback: &[Record],
     apg_root: &Path,
     args: &[String],
     overlay: &layers::LayersOverlay,
@@ -370,47 +375,39 @@ fn node_rm_change(
     // the returned [`Change`] (rather than printing it here), then PROCEED: a
     // removed node's Feedback records and their Reviews edges survive in the
     // project's transient record set, so the writer's claim and the reviewer's
-    // resolve-or-reject still proceed. `node rm` takes no project argument, so
-    // the project is the current worktree's branch — resolved exactly as
-    // `review list` does. Best-effort: the write's own project-context guard
-    // still governs. Carrying it (rather than printing here) lets a routed
-    // mutation return it in the session reply, and the caller (cmd_node) prints
-    // it on its own stderr while the removal completes.
+    // resolve-or-reject still proceed. The selection runs over the
+    // caller-supplied effective `feedback` record set (the `Record::Feedback` /
+    // `Record::Reviews` shape `ArtifactDb::feedback_records_from_db` returns):
+    // the direct path supplies it from `.trans`, the session from the held DB.
+    // Best-effort: the write's own project-context guard still governs. Carrying
+    // it (rather than printing here) lets a routed mutation return it in the
+    // session reply, and the caller (cmd_node) prints it on its own stderr while
+    // the removal completes.
     let mut warnings = Vec::new();
-    if let Ok(identity) = crate::git::repo_identity(apg_root)
-        && let Some(project) = identity.branch.as_deref()
-    {
-        let mut records: Vec<Record> = Vec::new();
-        for file in specs::project_transient_files(apg_root, project) {
-            if file.exists() {
-                records.extend(specs::read_jsonl(&file)?);
-            }
+    let mut items: Vec<String> = Vec::new();
+    for r in feedback {
+        let Record::Feedback {
+            fqn: item, status, ..
+        } = r
+        else {
+            continue;
+        };
+        if status != "open" && status != "actioned" {
+            continue;
         }
-        let mut items: Vec<String> = Vec::new();
-        for r in &records {
-            let Record::Feedback {
-                fqn: item, status, ..
-            } = r
-            else {
-                continue;
-            };
-            if status != "open" && status != "actioned" {
-                continue;
-            }
-            if records
-                .iter()
-                .any(|e| matches!(e, Record::Reviews { from, to } if from == item && to == &f))
-            {
-                items.push(format!("{item} ({status})"));
-            }
+        if feedback
+            .iter()
+            .any(|e| matches!(e, Record::Reviews { from, to } if from == item && to == &f))
+        {
+            items.push(format!("{item} ({status})"));
         }
-        items.sort();
-        if !items.is_empty() {
-            warnings.push(format!(
-                "apg: warning: removing `{f}` — it is reviewed by unresolved feedback: {}",
-                items.join(", ")
-            ));
-        }
+    }
+    items.sort();
+    if !items.is_empty() {
+        warnings.push(format!(
+            "apg: warning: removing `{f}` — it is reviewed by unresolved feedback: {}",
+            items.join(", ")
+        ));
     }
 
     // Refuse an absent identity through the overlay against the caller-supplied
