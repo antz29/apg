@@ -1,4 +1,5 @@
 use super::*;
+use crate::layers::NodeProperties;
 
 fn fd(id: &str, parent: &str, name: &str, params: &[&str], file: &str) -> FuncDecl {
     FuncDecl {
@@ -295,14 +296,17 @@ mod unit {
             Record::Contains {
                 from: "n1".to_string(),
                 to: "n2".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::Calls {
                 from: "n1".to_string(),
                 to: "n2".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::Uses {
                 from: "n1".to_string(),
                 to: "n2".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::UnresolvedCall {
                 from: "n1".to_string(),

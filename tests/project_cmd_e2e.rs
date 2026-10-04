@@ -126,6 +126,7 @@ fn plan_records(with_feedback: bool) -> Vec<Record> {
         Record::Contains {
             from: "foo/plan".into(),
             to: "foo/plan.phase-01".into(),
+            properties: layers::NodeProperties::default(),
         },
         Record::Satisfies {
             from: "foo/plan.phase-01".into(),
@@ -144,6 +145,7 @@ fn plan_records(with_feedback: bool) -> Vec<Record> {
         Record::Contains {
             from: "foo/plan.phase-01".into(),
             to: "foo/plan.phase-01.task-1".into(),
+            properties: layers::NodeProperties::default(),
         },
         Record::PlannedNode {
             fqn: format!("{MOD_FQN}.Widget"),
@@ -761,6 +763,7 @@ fn apg_projects_plan_records(project: &str) -> Vec<Record> {
         Record::Contains {
             from: format!("{project}/plan"),
             to: format!("{project}/plan.phase-01"),
+            properties: layers::NodeProperties::default(),
         },
         Record::Satisfies {
             from: format!("{project}/plan.phase-01"),
@@ -788,6 +791,7 @@ fn apg_projects_plan_records(project: &str) -> Vec<Record> {
         r.push(Record::Contains {
             from: format!("{project}/plan.phase-01"),
             to: task,
+            properties: layers::NodeProperties::default(),
         });
     }
     r
@@ -2066,6 +2070,7 @@ mod e2e {
                 Record::Contains {
                     from: "fail/plan".to_string(),
                     to: "fail/plan.phase-01".to_string(),
+                    properties: layers::NodeProperties::default(),
                 },
                 Record::PlannedNode {
                     fqn: format!("{MOD_FQN}.Widget"),
@@ -2135,6 +2140,7 @@ mod e2e {
                 Record::Contains {
                     from: "test/plan".to_string(),
                     to: "test/plan.phase-01".to_string(),
+                    properties: layers::NodeProperties::default(),
                 },
                 Record::Satisfies {
                     from: "test/plan.phase-01".to_string(),
@@ -2575,6 +2581,7 @@ mod e2e {
             Record::Contains {
                 from: "spec-only/plan".into(),
                 to: "spec-only/plan.phase-01".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Satisfies {
                 from: "spec-only/plan.phase-01".into(),
@@ -2593,6 +2600,7 @@ mod e2e {
             Record::Contains {
                 from: "spec-only/plan.phase-01".into(),
                 to: "spec-only/plan.phase-01.task-1".into(),
+                properties: layers::NodeProperties::default(),
             },
         ];
         let plan_path = wt_apg

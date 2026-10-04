@@ -5,7 +5,11 @@
 //! verbatim `fqn` (`module`/`unresolved`). Edge records reference endpoints by
 //! `id` (project node) or `fqn` (unresolved target).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+
+use crate::layers::NodeProperties;
 
 /// The FQN of the DB's `Scan` node (the git state of the scan that built the
 /// live DB). One per database — every scan replaces it.
@@ -99,14 +103,20 @@ pub enum Record {
     Contains {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
     Calls {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
     Uses {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     UnresolvedCall {
@@ -130,6 +140,8 @@ pub enum Record {
         body: String,
         #[serde(default)]
         feature: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"planned_node","fqn":"github.com/x/y.Store","kind":"struct","name":"Store","parent":"github.com/x/y"}`
@@ -162,6 +174,8 @@ pub enum Record {
         name: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"entity","fqn":"<project>/entity.<name>","name":"...","body":"..."}`
@@ -170,6 +184,8 @@ pub enum Record {
         name: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"system","fqn":"<project>/system.<name>","name":"...","body":"..."}`
@@ -179,6 +195,8 @@ pub enum Record {
         name: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"container","fqn":"<project>/container.<name>","name":"...","kind":"app","body":"..."}`
@@ -190,6 +208,8 @@ pub enum Record {
         kind: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"component","fqn":"<project>/component.<name>","name":"...","body":"..."}`
@@ -198,6 +218,8 @@ pub enum Record {
         name: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     // --- New-model tier catalog (apg-projects SPEC §3.1). FQNs are now
@@ -210,6 +232,8 @@ pub enum Record {
         name: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"group","fqn":"domain.group.<name>","name":"...","attribute":"core","root":"...","body":"..."}`
@@ -224,6 +248,8 @@ pub enum Record {
         root: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"value","fqn":"domain.value.<name>","name":"...","body":"..."}`
@@ -233,6 +259,8 @@ pub enum Record {
         name: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"service","fqn":"domain.service.<name>","name":"...","body":"..."}`
@@ -242,6 +270,8 @@ pub enum Record {
         name: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"person","fqn":"solution.person.<name>","name":"...","body":"..."}`
@@ -251,6 +281,8 @@ pub enum Record {
         name: String,
         #[serde(default)]
         body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"constraint","fqn":"<layer>.constraint.<name>","name":"...","body":"...","attaches-to":"..."}`
@@ -264,6 +296,8 @@ pub enum Record {
         body: String,
         #[serde(rename = "attaches-to", default)]
         attaches_to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"note","fqn":"<project>/note-<n>","body":"...","kind":"background"}`
@@ -272,6 +306,8 @@ pub enum Record {
         body: String,
         #[serde(default)]
         kind: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     /// `{"type":"feedback","fqn":"<project>/feedback-<n>","body":"...","status":"open","disposition":""}`
@@ -336,6 +372,8 @@ pub enum Record {
     Details {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
     Reviews {
         from: String,
@@ -344,6 +382,8 @@ pub enum Record {
     DependsOn {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
     Gates {
         from: String,
@@ -361,10 +401,14 @@ pub enum Record {
     Drives {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
     Represents {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 
     // --- New-model §3.3 spec edges (apg-projects). The kebab spellings are the
@@ -380,6 +424,8 @@ pub enum Record {
     RealisedBy {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
     /// `{"type":"implemented-by","from":"solution.component.<name>","to":"<code fqn>"}`
     /// Solution System/Container/Component → code FQN (validated vs the
@@ -388,18 +434,24 @@ pub enum Record {
     SpecImplementedBy {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
     /// `{"type":"publishes","from":"domain.service.<name>","to":"domain.entity.<name>"}`
     /// Service → Entity (kind: event).
     Publishes {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
     /// `{"type":"subscribes","from":"domain.service.<name>","to":"domain.entity.<name>"}`
     /// Service → Entity (kind: event).
     Subscribes {
         from: String,
         to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
     },
 }
 

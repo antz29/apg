@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::artifacts::{self, parse_args};
+use crate::layers::NodeProperties;
 use crate::schema::Record;
 use crate::specs;
 
@@ -455,6 +456,7 @@ pub fn plan_update_planned_at(
         records.push(Record::Contains {
             from: eff_parent.to_string(),
             to: fqn.to_string(),
+            properties: NodeProperties::default(),
         });
     }
     Ok(())
@@ -891,6 +893,7 @@ pub fn plan_add_phase_at(
     recs.push(Record::Contains {
         from: plan_fqn.to_string(),
         to: fqn.clone(),
+        properties: NodeProperties::default(),
     });
     for g in prereqs {
         push_gate(&fqn, &format!("{project}/plan.phase-{g:02}"), records)?;
@@ -972,6 +975,7 @@ pub fn plan_add_task_at(
     recs.push(Record::Contains {
         from: phase_fqn,
         to: fqn.clone(),
+        properties: NodeProperties::default(),
     });
     records.extend(recs);
     Ok(())
@@ -1036,6 +1040,7 @@ pub fn plan_add_planned_at(
         records.push(Record::Contains {
             from: parent.to_string(),
             to: fqn.to_string(),
+            properties: NodeProperties::default(),
         });
     }
     Ok(())

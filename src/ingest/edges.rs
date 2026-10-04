@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::io::{BufRead, Write};
 
 use crate::graph::{Graph, NodeKind};
+use crate::layers::NodeProperties;
 use crate::schema::Record;
 
 /// Whether a `(from, to)` kind pair is a valid `Contains` edge (SPEC §7, R2,
@@ -75,26 +76,26 @@ pub(crate) fn filter_edges(
 /// the last empty for most).
 pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
     match r {
-        Record::Contains { from, to } => write_edge_fields(w, 0, &from, &to, ""),
-        Record::Calls { from, to } => write_edge_fields(w, 1, &from, &to, ""),
-        Record::Uses { from, to } => write_edge_fields(w, 2, &from, &to, ""),
+        Record::Contains { from, to, .. } => write_edge_fields(w, 0, &from, &to, ""),
+        Record::Calls { from, to, .. } => write_edge_fields(w, 1, &from, &to, ""),
+        Record::Uses { from, to, .. } => write_edge_fields(w, 2, &from, &to, ""),
         Record::UnresolvedCall {
             from,
             to,
             target_type,
         } => write_edge_fields(w, 3, &from, &to, &target_type),
         Record::UnresolvedUse { from, to } => write_edge_fields(w, 4, &from, &to, ""),
-        Record::Details { from, to } => write_edge_fields(w, 5, &from, &to, ""),
+        Record::Details { from, to, .. } => write_edge_fields(w, 5, &from, &to, ""),
         Record::Reviews { from, to } => write_edge_fields(w, 6, &from, &to, ""),
-        Record::DependsOn { from, to } => write_edge_fields(w, 7, &from, &to, ""),
+        Record::DependsOn { from, to, .. } => write_edge_fields(w, 7, &from, &to, ""),
         Record::Gates { from, to } => write_edge_fields(w, 8, &from, &to, ""),
         Record::Satisfies { from, to } => write_edge_fields(w, 9, &from, &to, ""),
-        Record::Drives { from, to } => write_edge_fields(w, 10, &from, &to, ""),
-        Record::Represents { from, to } => write_edge_fields(w, 11, &from, &to, ""),
-        Record::RealisedBy { from, to } => write_edge_fields(w, 12, &from, &to, ""),
-        Record::SpecImplementedBy { from, to } => write_edge_fields(w, 13, &from, &to, ""),
-        Record::Publishes { from, to } => write_edge_fields(w, 14, &from, &to, ""),
-        Record::Subscribes { from, to } => write_edge_fields(w, 15, &from, &to, ""),
+        Record::Drives { from, to, .. } => write_edge_fields(w, 10, &from, &to, ""),
+        Record::Represents { from, to, .. } => write_edge_fields(w, 11, &from, &to, ""),
+        Record::RealisedBy { from, to, .. } => write_edge_fields(w, 12, &from, &to, ""),
+        Record::SpecImplementedBy { from, to, .. } => write_edge_fields(w, 13, &from, &to, ""),
+        Record::Publishes { from, to, .. } => write_edge_fields(w, 14, &from, &to, ""),
+        Record::Subscribes { from, to, .. } => write_edge_fields(w, 15, &from, &to, ""),
         other => unreachable!("non-edge record reached the edge spool: {other:?}"),
     }
 }
@@ -121,26 +122,70 @@ impl<R: BufRead> EdgeReader<R> {
         let b = self.read_str();
         let c = self.read_str();
         Some(match tag[0] {
-            0 => Record::Contains { from: a, to: b },
-            1 => Record::Calls { from: a, to: b },
-            2 => Record::Uses { from: a, to: b },
+            0 => Record::Contains {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
+            1 => Record::Calls {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
+            2 => Record::Uses {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
             3 => Record::UnresolvedCall {
                 from: a,
                 to: b,
                 target_type: c,
             },
             4 => Record::UnresolvedUse { from: a, to: b },
-            5 => Record::Details { from: a, to: b },
+            5 => Record::Details {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
             6 => Record::Reviews { from: a, to: b },
-            7 => Record::DependsOn { from: a, to: b },
+            7 => Record::DependsOn {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
             8 => Record::Gates { from: a, to: b },
             9 => Record::Satisfies { from: a, to: b },
-            10 => Record::Drives { from: a, to: b },
-            11 => Record::Represents { from: a, to: b },
-            12 => Record::RealisedBy { from: a, to: b },
-            13 => Record::SpecImplementedBy { from: a, to: b },
-            14 => Record::Publishes { from: a, to: b },
-            15 => Record::Subscribes { from: a, to: b },
+            10 => Record::Drives {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
+            11 => Record::Represents {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
+            12 => Record::RealisedBy {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
+            13 => Record::SpecImplementedBy {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
+            14 => Record::Publishes {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
+            15 => Record::Subscribes {
+                from: a,
+                to: b,
+                properties: NodeProperties::default(),
+            },
             t => panic!("bad edge spool tag: {t}"),
         })
     }

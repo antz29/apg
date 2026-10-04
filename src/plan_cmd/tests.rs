@@ -1,4 +1,5 @@
 use super::*;
+use crate::layers::NodeProperties;
 use crate::testutil::{nf, task_rec};
 
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
@@ -185,14 +186,17 @@ mod unit {
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-1".into(),
+                properties: NodeProperties::default(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-2".into(),
+                properties: NodeProperties::default(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-3".into(),
+                properties: NodeProperties::default(),
             },
         ];
         let out = render_phase_tasks(&records, "foo/plan.phase-01");
@@ -697,20 +701,24 @@ mod unit {
                 fqn: "foo/plan.note-1".into(),
                 body: "orphan".into(),
                 kind: String::new(),
+                properties: NodeProperties::default(),
             },
             Record::Details {
                 from: "foo/plan.note-1".into(),
                 to: removed.clone(),
+                properties: NodeProperties::default(),
             },
             // A Note attached to a surviving record -> kept.
             Record::Note {
                 fqn: "foo/plan.note-2".into(),
                 body: "keep".into(),
                 kind: String::new(),
+                properties: NodeProperties::default(),
             },
             Record::Details {
                 from: "foo/plan.note-2".into(),
                 to: "foo/plan.phase-01".into(),
+                properties: NodeProperties::default(),
             },
         ];
         cascade_remove(&mut records, std::slice::from_ref(&removed));
@@ -742,7 +750,7 @@ mod unit {
         );
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Details { from, to }
+            Record::Details { from, to, .. }
                 if from == "foo/plan.note-2" && to == "foo/plan.phase-01"
         )));
     }

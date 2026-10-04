@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 
 use crate::classify::{ApgConfig, classify_code_type};
 use crate::graph::{Graph, Location, Node, NodeKind};
+use crate::layers::NodeProperties;
 use crate::schema::{Record, SCAN_HEAD};
 
 pub mod blacklist;
@@ -635,6 +636,7 @@ fn ingest_records(
                     title,
                     body,
                     feature,
+                    ..
                 } => insert_node(
                     &mut graph,
                     fqn,
@@ -678,7 +680,9 @@ fn ingest_records(
                 // Tier-1/2/3 spec nodes (GraphModel-SPEC.md; PHASE_01): authored
                 // via the spec tools, never scanned. All carry `name` (+ `body`);
                 // Container carries a `kind`.
-                Record::Stakeholder { fqn, name, body } => insert_node(
+                Record::Stakeholder {
+                    fqn, name, body, ..
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -687,7 +691,9 @@ fn ingest_records(
                         ..spec_node(NodeKind::Stakeholder)
                     },
                 ),
-                Record::Entity { fqn, name, body } => insert_node(
+                Record::Entity {
+                    fqn, name, body, ..
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -696,7 +702,9 @@ fn ingest_records(
                         ..spec_node(NodeKind::Entity)
                     },
                 ),
-                Record::System { fqn, name, body } => insert_node(
+                Record::System {
+                    fqn, name, body, ..
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -710,6 +718,7 @@ fn ingest_records(
                     name,
                     kind,
                     body,
+                    ..
                 } => insert_node(
                     &mut graph,
                     fqn,
@@ -720,7 +729,9 @@ fn ingest_records(
                         ..spec_node(NodeKind::Container)
                     },
                 ),
-                Record::Component { fqn, name, body } => insert_node(
+                Record::Component {
+                    fqn, name, body, ..
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -730,7 +741,9 @@ fn ingest_records(
                     },
                 ),
                 // New-model tier catalog (apg-projects SPEC §3.1).
-                Record::User { fqn, name, body } => insert_node(
+                Record::User {
+                    fqn, name, body, ..
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -745,6 +758,7 @@ fn ingest_records(
                     attribute,
                     root,
                     body,
+                    ..
                 } => insert_node(
                     &mut graph,
                     fqn,
@@ -756,7 +770,9 @@ fn ingest_records(
                         ..spec_node(NodeKind::Group)
                     },
                 ),
-                Record::Value { fqn, name, body } => insert_node(
+                Record::Value {
+                    fqn, name, body, ..
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -765,7 +781,9 @@ fn ingest_records(
                         ..spec_node(NodeKind::Value)
                     },
                 ),
-                Record::Service { fqn, name, body } => insert_node(
+                Record::Service {
+                    fqn, name, body, ..
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -774,7 +792,9 @@ fn ingest_records(
                         ..spec_node(NodeKind::Service)
                     },
                 ),
-                Record::Person { fqn, name, body } => insert_node(
+                Record::Person {
+                    fqn, name, body, ..
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -788,6 +808,7 @@ fn ingest_records(
                     name,
                     body,
                     attaches_to,
+                    ..
                 } => insert_node(
                     &mut graph,
                     fqn,
@@ -798,7 +819,9 @@ fn ingest_records(
                         ..spec_node(NodeKind::Constraint)
                     },
                 ),
-                Record::Note { fqn, body, kind } => insert_node(
+                Record::Note {
+                    fqn, body, kind, ..
+                } => insert_node(
                     &mut graph,
                     fqn,
                     Node {
@@ -882,25 +905,28 @@ fn ingest_records(
                 // (phase-02 task-9) — root the latter by its module prefix.
                 // `Unresolved*` roots only the `from` (the emitted unit); the
                 // `to` is a FOREIGN name, never rooted.
-                Record::Contains { from, to } => write_edge(
+                Record::Contains { from, to, .. } => write_edge(
                     &mut sw,
                     Record::Contains {
                         from: root_module_endpoint(&lang, &from, &module_identities, base),
                         to: root_module_endpoint(&lang, &to, &module_identities, base),
+                        properties: NodeProperties::default(),
                     },
                 ),
-                Record::Calls { from, to } => write_edge(
+                Record::Calls { from, to, .. } => write_edge(
                     &mut sw,
                     Record::Calls {
                         from: root_edge_endpoint(&lang, &from, &module_identities, base),
                         to: root_edge_endpoint(&lang, &to, &module_identities, base),
+                        properties: NodeProperties::default(),
                     },
                 ),
-                Record::Uses { from, to } => write_edge(
+                Record::Uses { from, to, .. } => write_edge(
                     &mut sw,
                     Record::Uses {
                         from: root_edge_endpoint(&lang, &from, &module_identities, base),
                         to: root_edge_endpoint(&lang, &to, &module_identities, base),
+                        properties: NodeProperties::default(),
                     },
                 ),
                 Record::UnresolvedCall {
@@ -1077,7 +1103,7 @@ fn ingest_records(
         };
         while let Some(e) = er.next_edge() {
             match e {
-                Record::Contains { from, to } => {
+                Record::Contains { from, to, .. } => {
                     // A shadowed package cannot be a parent: dropping the module
                     // node re-roots its containment tree at the type of the same
                     // name, and a class does not contain a package beneath it
@@ -1095,7 +1121,7 @@ fn ingest_records(
                     }
                     graph.contains.insert((a, b));
                 }
-                Record::Calls { from, to } => {
+                Record::Calls { from, to, .. } => {
                     let a = resolve(&from);
                     let b = resolve(&to);
                     if is_blacklisted(&a, None, &lang, opts)
@@ -1106,7 +1132,7 @@ fn ingest_records(
                     }
                     graph.calls.insert((a, b));
                 }
-                Record::Uses { from, to } => {
+                Record::Uses { from, to, .. } => {
                     let a = resolve(&from);
                     let b = resolve(&to);
                     if is_blacklisted(&a, None, &lang, opts)
@@ -1140,7 +1166,7 @@ fn ingest_records(
                 // Spec/plan edges reference canonical FQNs directly; `resolve`
                 // is identity for them. Blacklisting prunes edges into excluded
                 // code, like any other edge.
-                Record::Details { from, to } => {
+                Record::Details { from, to, .. } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)
@@ -1160,7 +1186,7 @@ fn ingest_records(
                     }
                     graph.reviews.insert((a, b));
                 }
-                Record::DependsOn { from, to } => {
+                Record::DependsOn { from, to, .. } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)
@@ -1191,7 +1217,7 @@ fn ingest_records(
                     graph.satisfies.insert((a, b));
                 }
                 // Spine edges (GraphModel-SPEC.md; PHASE_01).
-                Record::Drives { from, to } => {
+                Record::Drives { from, to, .. } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)
@@ -1201,7 +1227,7 @@ fn ingest_records(
                     }
                     graph.drives.insert((a, b));
                 }
-                Record::Represents { from, to } => {
+                Record::Represents { from, to, .. } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)
@@ -1212,7 +1238,7 @@ fn ingest_records(
                     graph.represents.insert((a, b));
                 }
                 // New-model §3.3 spec edges (apg-projects).
-                Record::RealisedBy { from, to } => {
+                Record::RealisedBy { from, to, .. } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)
@@ -1222,7 +1248,7 @@ fn ingest_records(
                     }
                     graph.realised_by.insert((a, b));
                 }
-                Record::SpecImplementedBy { from, to } => {
+                Record::SpecImplementedBy { from, to, .. } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)
@@ -1232,7 +1258,7 @@ fn ingest_records(
                     }
                     graph.spec_implemented_by.insert((a, b));
                 }
-                Record::Publishes { from, to } => {
+                Record::Publishes { from, to, .. } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)
@@ -1242,7 +1268,7 @@ fn ingest_records(
                     }
                     graph.publishes.insert((a, b));
                 }
-                Record::Subscribes { from, to } => {
+                Record::Subscribes { from, to, .. } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
                         || is_blacklisted(&b, None, &lang, opts)

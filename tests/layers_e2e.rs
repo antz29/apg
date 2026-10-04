@@ -557,17 +557,17 @@ mod e2e {
         // The spine edges, out-side only.
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Drives { from, to }
+            Record::Drives { from, to, .. }
                 if from == "requirements.requirement.place-order" && to == "domain.group.sales"
         )));
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::RealisedBy { from, to }
+            Record::RealisedBy { from, to, .. }
                 if from == "domain.group.sales" && to == "solution.system.payments"
         )));
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::SpecImplementedBy { from, to }
+            Record::SpecImplementedBy { from, to, .. }
                 if from == "solution.system.payments" && to == "apg.main"
         )));
         // The in-edge halves are never emitted (out is canonical).
@@ -615,7 +615,7 @@ mod e2e {
         let records = ingest_tree(&root, &scanned, &planned).unwrap();
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::SpecImplementedBy { from, to }
+            Record::SpecImplementedBy { from, to, .. }
                 if from == "solution.system.payments" && to == "apg.main"
         )));
         let _ = std::fs::remove_dir_all(&root);
@@ -1182,6 +1182,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
@@ -1196,6 +1197,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
                 to: "foo/plan.phase-01.task-1".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::PlannedNode {
                 fqn: "fixture.mod.Widget".to_string(),
@@ -1532,10 +1534,12 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".into(),
                 to: "foo/plan.phase-01".into(),
+                properties: NodeProperties::default(),
             },
             Record::Contains {
                 from: "foo/plan".into(),
                 to: "foo/plan.phase-02".into(),
+                properties: NodeProperties::default(),
             },
             Record::Gates {
                 from: "foo/plan.phase-02".into(),

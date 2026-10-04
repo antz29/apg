@@ -2,6 +2,7 @@ mod common;
 
 use apg::graph::NodeKind;
 use apg::ingest::*;
+use apg::layers::NodeProperties;
 use apg::schema::{Record, SCAN_HEAD};
 use apg::testutil::read_graph_jsonl;
 use std::collections::BTreeSet;
@@ -174,10 +175,12 @@ mod e2e {
             Record::Contains {
                 from: "org.pkg".to_string(),
                 to: "org.pkg.A".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::Contains {
                 from: "org.pkg.A".to_string(),
                 to: "org.pkg.A.deep".to_string(),
+                properties: NodeProperties::default(),
             },
         ];
         let (graph, report) = ingest(
@@ -260,14 +263,17 @@ mod e2e {
             Record::Contains {
                 from: "p".to_string(),
                 to: "p.A".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::Contains {
                 from: "n1".to_string(),
                 to: "n3".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::Contains {
                 from: "n1".to_string(),
                 to: "n5".to_string(),
+                properties: NodeProperties::default(),
             },
         ];
         let (graph, report) = ingest(
@@ -593,6 +599,7 @@ mod e2e {
             Record::Contains {
                 from: "n1".to_string(),
                 to: "n2b".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::UnresolvedCall {
                 from: "n2".to_string(),
@@ -712,10 +719,12 @@ mod e2e {
                 fqn: "solution.component.checkout".to_string(),
                 name: "checkout".to_string(),
                 body: String::new(),
+                properties: NodeProperties::default(),
             },
             Record::SpecImplementedBy {
                 from: "solution.component.checkout".to_string(),
                 to: "go.github.com/x/y.Gateway".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::PlannedNode {
                 fqn: "go.github.com/x/y.Gateway".to_string(),
@@ -770,6 +779,7 @@ mod e2e {
             Record::Contains {
                 from: "drop.mod".to_string(),
                 to: "/x/b.go".to_string(),
+                properties: NodeProperties::default(),
             },
         ];
         let (graph, report) = ingest(
@@ -1106,10 +1116,12 @@ mod e2e {
             Record::Calls {
                 from: "f1".to_string(),
                 to: "f2".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::Uses {
                 from: "f1".to_string(),
                 to: "f3".to_string(),
+                properties: NodeProperties::default(),
             },
             Record::UnresolvedCall {
                 from: "f1".to_string(),

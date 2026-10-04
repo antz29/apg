@@ -152,7 +152,9 @@ mod unit {
             let _ = parse(l);
         }
         match parse(lines[1]) {
-            Record::Entity { fqn, name, body } => {
+            Record::Entity {
+                fqn, name, body, ..
+            } => {
                 assert_eq!(fqn, "foo/entity.User");
                 assert_eq!(name, "User");
                 assert_eq!(body, "an identity");
@@ -174,10 +176,12 @@ mod unit {
         for l in lines {
             let _ = parse(l);
         }
-        assert!(matches!(parse(lines[0]), Record::Drives { from, to }
+        assert!(matches!(parse(lines[0]), Record::Drives { from, to, .. }
             if from == "foo/spec.R1" && to == "domain.group.sales"));
-        assert!(matches!(parse(lines[1]), Record::Represents { from, to }
-            if from == "requirements.user.u1" && to == "domain.entity.e1"));
+        assert!(
+            matches!(parse(lines[1]), Record::Represents { from, to, .. }
+            if from == "requirements.user.u1" && to == "domain.entity.e1")
+        );
     }
 
     #[test]
@@ -244,7 +248,7 @@ mod unit {
             let _ = parse(l);
         }
         assert!(
-            matches!(parse(lines[0]), Record::RealisedBy { ref from, ref to }
+            matches!(parse(lines[0]), Record::RealisedBy { ref from, ref to, .. }
             if from == "domain.group.sales" && to == "solution.system.payments")
         );
         assert!(
@@ -252,7 +256,7 @@ mod unit {
             if to == "apg.layers.ingest_tree")
         );
         assert!(
-            matches!(parse(lines[2]), Record::Publishes { ref from, ref to }
+            matches!(parse(lines[2]), Record::Publishes { ref from, ref to, .. }
             if from == "domain.service.orders" && to == "domain.entity.order-placed")
         );
         assert!(matches!(parse(lines[3]), Record::Subscribes { ref to, .. }

@@ -3,7 +3,7 @@ mod common;
 use apg::artifacts::*;
 use apg::git;
 use apg::graph::{Graph, Location, Node, NodeKind};
-use apg::layers::{self, Layer};
+use apg::layers::{self, Layer, NodeProperties};
 use apg::load;
 use apg::schema::Record;
 use apg::specs;
@@ -115,15 +115,18 @@ fn baseline_records() -> Vec<Record> {
         Record::Contains {
             from: "foo/plan".into(),
             to: "foo/plan.phase-01".into(),
+            properties: NodeProperties::default(),
         },
         Record::Note {
             fqn: "foo/note-1".into(),
             body: "first".into(),
             kind: "background".into(),
+            properties: NodeProperties::default(),
         },
         Record::Details {
             from: "foo/note-1".into(),
             to: "foo/plan".into(),
+            properties: NodeProperties::default(),
         },
     ]
 }
@@ -174,10 +177,12 @@ mod e2e {
             fqn: "foo/note-2".into(),
             body: "poison".into(),
             kind: "background".into(),
+            properties: NodeProperties::default(),
         });
         mutated.push(Record::Details {
             from: "foo/note-2".into(),
             to: "foo/note-1".into(),
+            properties: NodeProperties::default(),
         });
         write_jsonl_and_reingest(&apg_root, &path, "foo", &mutated).unwrap();
 
@@ -271,6 +276,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".into(),
                 to: "foo/plan.phase-01".into(),
+                properties: NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
@@ -285,6 +291,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-1".into(),
+                properties: NodeProperties::default(),
             },
         ];
 
@@ -721,10 +728,12 @@ mod e2e {
                 fqn: "foo/note-2".into(),
                 body: "second".into(),
                 kind: "background".into(),
+                properties: NodeProperties::default(),
             });
             r.push(Record::Details {
                 from: "foo/note-2".into(),
                 to: "foo/plan".into(),
+                properties: NodeProperties::default(),
             });
             r
         };
@@ -835,10 +844,12 @@ mod e2e {
             fqn: "foo/note-2".into(),
             body: "second".into(),
             kind: "background".into(),
+            properties: NodeProperties::default(),
         });
         mutated.push(Record::Details {
             from: "foo/note-2".into(),
             to: "foo/plan".into(),
+            properties: NodeProperties::default(),
         });
 
         install_projection_hook(|| anyhow::bail!("forced mid-apply re-ingest failure"));

@@ -1,6 +1,7 @@
 mod common;
 
 use apg::graph::{Graph, Location, Node, NodeKind};
+use apg::layers::NodeProperties;
 use apg::load;
 use apg::schema::SCAN_HEAD;
 use apg::splice::*;
@@ -1762,14 +1763,17 @@ mod e2e {
             Record::Contains {
                 from: "godemo".into(),
                 to: "godemo/changed".into(),
+                properties: NodeProperties::default(),
             },
             Record::Contains {
                 from: "s1".into(),
                 to: "f1".into(),
+                properties: NodeProperties::default(),
             },
             Record::Contains {
                 from: "s1".into(),
                 to: "f2".into(),
+                properties: NodeProperties::default(),
             },
         ];
         let (assembled, _) = ingest_with_reuse(
@@ -1875,14 +1879,17 @@ mod e2e {
                 Record::Contains {
                     from: "pkg".into(),
                     to: "pkg.a".into(),
+                    properties: NodeProperties::default(),
                 },
                 Record::Contains {
                     from: "pkg".into(),
                     to: "pkg.b".into(),
+                    properties: NodeProperties::default(),
                 },
                 Record::Contains {
                     from: "pkg".into(),
                     to: "pkg.c".into(),
+                    properties: NodeProperties::default(),
                 },
             ]
         };
@@ -1922,6 +1929,7 @@ mod e2e {
                 Record::Contains {
                     from: "sb".into(),
                     to: "fb".into(),
+                    properties: NodeProperties::default(),
                 },
             ]
         };
@@ -2011,6 +2019,7 @@ mod e2e {
         pre_fix.push(Record::Contains {
             from: "pkg".into(),
             to: "pkg.b".into(),
+            properties: NodeProperties::default(),
         });
         pre_fix.extend(target_facts());
         let (before_fix, _) = ingest_with_reuse(pre_fix, &opts, Some(&reuse));

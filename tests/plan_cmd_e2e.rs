@@ -327,6 +327,7 @@ fn write_plan(apg_root: &Path) -> PathBuf {
         Record::Contains {
             from: "foo/plan".to_string(),
             to: "foo/plan.phase-01".to_string(),
+            properties: layers::NodeProperties::default(),
         },
         Record::Task {
             fqn: "foo/plan.phase-01.task-1".to_string(),
@@ -341,6 +342,7 @@ fn write_plan(apg_root: &Path) -> PathBuf {
         Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         },
     ];
     artifacts::write_jsonl_and_reingest(apg_root, &path, "foo", &records).unwrap();
@@ -435,6 +437,7 @@ fn bare_plan() -> Vec<Record> {
         Record::Contains {
             from: "foo/plan".to_string(),
             to: "foo/plan.phase-01".to_string(),
+            properties: layers::NodeProperties::default(),
         },
     ]
 }
@@ -610,7 +613,7 @@ mod e2e {
         )));
         assert!(recs.iter().any(|r| matches!(
             r,
-            Record::Details { from, to }
+            Record::Details { from, to, .. }
                 if from == "foo/plan.note-1" && to == "foo/plan.phase-01.task-1"
         )));
 
@@ -860,10 +863,12 @@ mod e2e {
             fqn: "foo/note-1".to_string(),
             body: "live-session transient write".to_string(),
             kind: "background".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         records.push(Record::Details {
             from: "foo/note-1".to_string(),
             to: "foo/plan".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
         {
@@ -1025,6 +1030,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".into(),
                 to: "foo/plan.phase-01".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
@@ -1039,6 +1045,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-1".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Satisfies {
                 from: "foo/plan.phase-01".into(),
@@ -1088,7 +1095,7 @@ mod e2e {
         assert_eq!(phase, ("P1b", "D1b"));
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Contains { from, to }
+            Record::Contains { from, to, .. }
                 if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
         )));
         assert!(records.iter().any(|r| matches!(
@@ -1137,7 +1144,7 @@ mod e2e {
         )));
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Contains { from, to }
+            Record::Contains { from, to, .. }
                 if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
         )));
 
@@ -1230,6 +1237,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".into(),
                 to: "foo/plan.phase-01".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
@@ -1244,6 +1252,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-1".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Reviews {
                 from: "foo/feedback-1".into(),
@@ -1394,6 +1403,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".into(),
                 to: "foo/plan.phase-01".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
@@ -1408,6 +1418,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-1".into(),
+                properties: layers::NodeProperties::default(),
             },
         ];
         let snapshot = |recs: &[Record]| -> Vec<String> {
@@ -1554,6 +1565,7 @@ mod e2e {
             Record::Contains {
                 from: "github.com/x/y.Missing".into(),
                 to: "/todo/app.ts".into(),
+                properties: layers::NodeProperties::default(),
             },
             // A non-Contains incident edge must survive the repoint.
             Record::Reviews {
@@ -1592,7 +1604,7 @@ mod e2e {
         let contains: Vec<&str> = records
             .iter()
             .filter_map(|r| match r {
-                Record::Contains { from, to } if to == "/todo/app.ts" => Some(from.as_str()),
+                Record::Contains { from, to, .. } if to == "/todo/app.ts" => Some(from.as_str()),
                 _ => None,
             })
             .collect();
@@ -1649,6 +1661,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
 
@@ -1744,6 +1757,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
 
@@ -1866,7 +1880,7 @@ mod e2e {
         let contains: Vec<&str> = recs
             .iter()
             .filter_map(|r| match r {
-                Record::Contains { from, to } if to == "/todo/app.ts" => Some(from.as_str()),
+                Record::Contains { from, to, .. } if to == "/todo/app.ts" => Some(from.as_str()),
                 _ => None,
             })
             .collect();
@@ -1981,6 +1995,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
 
@@ -2103,6 +2118,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
 
@@ -2242,6 +2258,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
 
@@ -2449,6 +2466,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "github.com/x/y".into(),
             to: "/todo/app.ts".into(),
+            properties: layers::NodeProperties::default(),
         });
         records.push(Record::Reviews {
             from: "foo/feedback-1".into(),
@@ -2501,7 +2519,7 @@ mod e2e {
         );
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Contains { from, to }
+            Record::Contains { from, to, .. }
                 if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
         )));
         assert!(records.iter().any(|r| matches!(
@@ -2529,7 +2547,7 @@ mod e2e {
         );
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::Contains { from, to }
+            Record::Contains { from, to, .. }
                 if from == "github.com/x/y" && to == "/todo/app.ts"
         )));
         assert_eq!(
@@ -2592,6 +2610,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".into(),
                 to: "foo/plan.phase-01".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
@@ -2606,6 +2625,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-1".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Satisfies {
                 from: "foo/plan.phase-01".into(),
@@ -2690,7 +2710,7 @@ mod e2e {
         )));
         assert!(recs.iter().any(|r| matches!(
             r,
-            Record::Contains { from, to }
+            Record::Contains { from, to, .. }
                 if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
         )));
 
@@ -2844,6 +2864,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-2".to_string(),
@@ -2858,6 +2879,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-2".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         artifacts::write_jsonl_and_reingest(
             &apg_root,
@@ -2912,6 +2934,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         artifacts::write_jsonl_and_reingest(
             &apg_root,
@@ -2968,6 +2991,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         artifacts::write_jsonl_and_reingest(
             &apg_root,
@@ -3133,6 +3157,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         records.push(task_rec("modifies", "github.com/x/y.Store", ""));
         artifacts::write_jsonl_and_reingest(
@@ -3184,6 +3209,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         records.push(task_rec("modifies", "github.com/x/y.Store", ""));
         artifacts::write_jsonl_and_reingest(
@@ -3211,6 +3237,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         records.push(task_rec("modifies", "github.com/x/y.Store", ""));
         artifacts::write_jsonl_and_reingest(
@@ -3286,6 +3313,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         records.push(task_rec("modifies", "github.com/x/y.Branch", ""));
         artifacts::write_jsonl_and_reingest(
@@ -3420,6 +3448,7 @@ mod e2e {
             records.push(Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
                 to: fqn.clone(),
+                properties: layers::NodeProperties::default(),
             });
             records.push(Record::Task {
                 fqn,
@@ -3490,6 +3519,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         records.push(Record::Task {
             fqn: "foo/plan.phase-01.task-2".to_string(),
@@ -3504,6 +3534,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-2".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         artifacts::write_jsonl_and_reingest(
             &apg_root,
@@ -3560,6 +3591,7 @@ mod e2e {
         records.push(Record::Contains {
             from: "foo/plan.phase-01".to_string(),
             to: "foo/plan.phase-01.task-1".to_string(),
+            properties: layers::NodeProperties::default(),
         });
         artifacts::write_jsonl_and_reingest(
             &apg_root,
@@ -3722,10 +3754,12 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
                 to: "foo/plan.phase-01.task-1".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
         artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
@@ -4137,6 +4171,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
@@ -4151,6 +4186,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
                 to: "foo/plan.phase-01.task-1".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Gateway".to_string(),
@@ -4327,6 +4363,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".to_string(),
@@ -4341,6 +4378,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
                 to: "foo/plan.phase-01.task-1".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -4351,6 +4389,7 @@ mod e2e {
             Record::Contains {
                 from: "github.com/x/y".to_string(),
                 to: "github.com/x/y.Store".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
         artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
@@ -4469,10 +4508,12 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-02".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Gates {
                 from: "foo/plan.phase-02".to_string(),
@@ -4495,6 +4536,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
                 to: "foo/plan.phase-01.task-1".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Store".to_string(),
@@ -4505,6 +4547,7 @@ mod e2e {
             Record::Contains {
                 from: "github.com/x/y".to_string(),
                 to: "github.com/x/y.Store".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             // Task-level feedback: its Reviews target is removed by the task
             // cascade; the record survives either way.
@@ -4534,10 +4577,12 @@ mod e2e {
                 fqn: "foo/plan.note-1".to_string(),
                 body: "note".to_string(),
                 kind: "note".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Details {
                 from: "foo/plan.note-1".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
         artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
@@ -4835,6 +4880,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".into(),
                 to: "foo/plan.phase-01".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
@@ -4849,6 +4895,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-1".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Satisfies {
                 from: "foo/plan.phase-01".into(),
@@ -4886,6 +4933,7 @@ mod e2e {
             Record::Contains {
                 from: "github.com/x/y".into(),
                 to: "/todo/app.ts".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Reviews {
                 from: "foo/feedback-2".into(),
@@ -4898,7 +4946,7 @@ mod e2e {
             recs.iter().any(|r| {
                 matches!(
                     r,
-                    Record::Contains { from, to }
+                    Record::Contains { from, to, .. }
                         if from == "foo/plan.phase-01" && to == "foo/plan.phase-01.task-1"
                 )
             })
@@ -5077,7 +5125,9 @@ mod e2e {
             let contains: Vec<&str> = recs
                 .iter()
                 .filter_map(|r| match r {
-                    Record::Contains { from, to } if to == "/todo/app.ts" => Some(from.as_str()),
+                    Record::Contains { from, to, .. } if to == "/todo/app.ts" => {
+                        Some(from.as_str())
+                    }
                     _ => None,
                 })
                 .collect();
@@ -5117,6 +5167,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".into(),
                 to: "foo/plan.phase-01".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Task {
                 fqn: "foo/plan.phase-01.task-1".into(),
@@ -5131,6 +5182,7 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan.phase-01".into(),
                 to: "foo/plan.phase-01.task-1".into(),
+                properties: layers::NodeProperties::default(),
             },
             Record::PlannedNode {
                 fqn: "github.com/x/y.Gateway".into(),
@@ -5141,6 +5193,7 @@ mod e2e {
             Record::Contains {
                 from: "github.com/x/y".into(),
                 to: "github.com/x/y.Gateway".into(),
+                properties: layers::NodeProperties::default(),
             },
         ];
         artifacts::write_jsonl_and_reingest(&apg_root, &plan_path, "foo", &records).unwrap();

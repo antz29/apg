@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use crate::artifacts::{self, parse_args};
+use crate::layers::NodeProperties;
 use crate::schema::Record;
 
 use super::{load_plan, require_apg_root, write_through};
@@ -137,10 +138,12 @@ pub fn plan_note_at(
         fqn: fqn.clone(),
         body: body.to_string(),
         kind: kind.to_string(),
+        properties: NodeProperties::default(),
     });
     records.push(Record::Details {
         from: fqn.clone(),
         to: task_fqn.to_string(),
+        properties: NodeProperties::default(),
     });
     write_through(apg_root, project, &records)?;
     println!("Added task note `{fqn}` on `{task_fqn}`");
@@ -179,7 +182,7 @@ pub fn plan_complete_at(apg_root: &Path, project: &str, phase: u32) -> anyhow::R
     let tasks: Vec<String> = records
         .iter()
         .filter_map(|e| match e {
-            Record::Contains { from, to } if from == &phase_fqn => Some(to.clone()),
+            Record::Contains { from, to, .. } if from == &phase_fqn => Some(to.clone()),
             _ => None,
         })
         .filter(|t| {

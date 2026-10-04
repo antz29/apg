@@ -111,7 +111,7 @@ pub(crate) fn render_phase_tasks(records: &[Record], pfqn: &str) -> String {
     let tasks: Vec<String> = records
         .iter()
         .filter_map(|e| match e {
-            Record::Contains { from, to } if from == pfqn => Some(to.clone()),
+            Record::Contains { from, to, .. } if from == pfqn => Some(to.clone()),
             _ => None,
         })
         .filter(|t| {

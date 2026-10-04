@@ -3,6 +3,7 @@ use super::*;
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
     use super::*;
+    use crate::layers::NodeProperties;
 
     /// The two record kinds the write-through re-merge used to drop through
     /// `_ => None`: authored `uses` (Person→System) and `calls`
@@ -13,6 +14,7 @@ mod unit {
             edge_merge(&Record::Uses {
                 from: "solution.person.alice".into(),
                 to: "solution.system.portal".into(),
+                properties: NodeProperties::default(),
             }),
             Some(("Uses", "solution.person.alice", "solution.system.portal"))
         );
@@ -20,6 +22,7 @@ mod unit {
             edge_merge(&Record::Calls {
                 from: "domain.service.a".into(),
                 to: "domain.service.b".into(),
+                properties: NodeProperties::default(),
             }),
             Some(("Calls", "domain.service.a", "domain.service.b"))
         );
@@ -43,39 +46,47 @@ mod unit {
                 fqn: "solution.person.alice".into(),
                 name: "alice".into(),
                 body: String::new(),
+                properties: NodeProperties::default(),
             },
             Record::System {
                 fqn: "solution.system.portal".into(),
                 name: "portal".into(),
                 body: String::new(),
+                properties: NodeProperties::default(),
             },
             Record::Uses {
                 from: "solution.person.alice".into(),
                 to: "solution.system.portal".into(),
+                properties: NodeProperties::default(),
             },
             Record::Service {
                 fqn: "domain.service.a".into(),
                 name: "a".into(),
                 body: String::new(),
+                properties: NodeProperties::default(),
             },
             Record::Service {
                 fqn: "domain.service.b".into(),
                 name: "b".into(),
                 body: String::new(),
+                properties: NodeProperties::default(),
             },
             Record::Calls {
                 from: "domain.service.a".into(),
                 to: "domain.service.b".into(),
+                properties: NodeProperties::default(),
             },
             // An unrelated node + edge that must survive both removals.
             Record::Note {
                 fqn: "foo/note-1".into(),
                 body: "background".into(),
                 kind: "background".into(),
+                properties: NodeProperties::default(),
             },
             Record::Details {
                 from: "foo/note-1".into(),
                 to: "solution.system.portal".into(),
+                properties: NodeProperties::default(),
             },
         ];
 

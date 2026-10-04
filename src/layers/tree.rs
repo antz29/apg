@@ -9,7 +9,7 @@ use crate::schema::Record;
 
 use super::catalog::{LAYERS_DIR, LAYERS_TREE, Layer};
 use super::code_refs::validate_code_refs;
-use super::node_file::{NodeFile, fqn};
+use super::node_file::{NodeFile, NodeProperties, fqn};
 use super::validate::{check_edge_pairing, eval_constraint};
 use super::validate_assembled_rules;
 
@@ -190,11 +190,13 @@ fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record>
             fqn: f.to_string(),
             name,
             body,
+            properties: NodeProperties::default(),
         },
         "user" => Record::User {
             fqn: f.to_string(),
             name,
             body,
+            properties: NodeProperties::default(),
         },
         "requirement" => Record::Requirement {
             fqn: f.to_string(),
@@ -202,17 +204,20 @@ fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record>
             title: name,
             body,
             feature: prop("feature"),
+            properties: NodeProperties::default(),
         },
         "note" => Record::Note {
             fqn: f.to_string(),
             body,
             kind: prop("kind"),
+            properties: NodeProperties::default(),
         },
         "constraint" => Record::Constraint {
             fqn: f.to_string(),
             name,
             body,
             attaches_to: prop("attaches-to"),
+            properties: NodeProperties::default(),
         },
         "group" => Record::Group {
             fqn: f.to_string(),
@@ -220,42 +225,50 @@ fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record>
             attribute: prop("attribute"),
             root: prop("root"),
             body,
+            properties: NodeProperties::default(),
         },
         "entity" => Record::Entity {
             fqn: f.to_string(),
             name,
             body,
+            properties: NodeProperties::default(),
         },
         "value" => Record::Value {
             fqn: f.to_string(),
             name,
             body,
+            properties: NodeProperties::default(),
         },
         "service" => Record::Service {
             fqn: f.to_string(),
             name,
             body,
+            properties: NodeProperties::default(),
         },
         "system" => Record::System {
             fqn: f.to_string(),
             name,
             body,
+            properties: NodeProperties::default(),
         },
         "container" => Record::Container {
             fqn: f.to_string(),
             name,
             kind: prop("kind"),
             body,
+            properties: NodeProperties::default(),
         },
         "component" => Record::Component {
             fqn: f.to_string(),
             name,
             body,
+            properties: NodeProperties::default(),
         },
         "person" => Record::Person {
             fqn: f.to_string(),
             name,
             body,
+            properties: NodeProperties::default(),
         },
         other => anyhow::bail!("unknown node type `{other}` in layer `{}`", n.layer),
     })
@@ -270,17 +283,61 @@ fn edge_record(from: &str, kind: &str, to: &str) -> anyhow::Result<Record> {
     let from = from.to_string();
     let to = to.to_string();
     Ok(match kind {
-        "contains" => Record::Contains { from, to },
-        "drives" => Record::Drives { from, to },
-        "realised-by" => Record::RealisedBy { from, to },
-        "implemented-by" => Record::SpecImplementedBy { from, to },
-        "calls" => Record::Calls { from, to },
-        "publishes" => Record::Publishes { from, to },
-        "subscribes" => Record::Subscribes { from, to },
-        "depends-on" => Record::DependsOn { from, to },
-        "uses" => Record::Uses { from, to },
-        "represents" => Record::Represents { from, to },
-        "details" => Record::Details { from, to },
+        "contains" => Record::Contains {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "drives" => Record::Drives {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "realised-by" => Record::RealisedBy {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "implemented-by" => Record::SpecImplementedBy {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "calls" => Record::Calls {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "publishes" => Record::Publishes {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "subscribes" => Record::Subscribes {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "depends-on" => Record::DependsOn {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "uses" => Record::Uses {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "represents" => Record::Represents {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
+        "details" => Record::Details {
+            from,
+            to,
+            properties: NodeProperties::default(),
+        },
         other => anyhow::bail!("unknown edge kind `{other}`"),
     })
 }

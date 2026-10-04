@@ -208,6 +208,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             title,
             body,
             feature,
+            ..
         } => Some((
             "Requirement",
             fqn,
@@ -231,7 +232,9 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             fqn,
             vec![("status", "planned".to_string())],
         )),
-        Record::Note { fqn, body, kind } => Some((
+        Record::Note {
+            fqn, body, kind, ..
+        } => Some((
             "Note",
             fqn,
             vec![("body", body.clone()), ("kind", kind.clone())],
@@ -297,17 +300,23 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("new_fqn", new_fqn.clone()),
             ],
         )),
-        Record::Stakeholder { fqn, name, body } => Some((
+        Record::Stakeholder {
+            fqn, name, body, ..
+        } => Some((
             "Stakeholder",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
         )),
-        Record::Entity { fqn, name, body } => Some((
+        Record::Entity {
+            fqn, name, body, ..
+        } => Some((
             "Entity",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
         )),
-        Record::System { fqn, name, body } => Some((
+        Record::System {
+            fqn, name, body, ..
+        } => Some((
             "System",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
@@ -317,6 +326,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             name,
             kind,
             body,
+            ..
         } => Some((
             "Container",
             fqn,
@@ -326,12 +336,16 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("body", body.clone()),
             ],
         )),
-        Record::Component { fqn, name, body } => Some((
+        Record::Component {
+            fqn, name, body, ..
+        } => Some((
             "Component",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
         )),
-        Record::User { fqn, name, body } => Some((
+        Record::User {
+            fqn, name, body, ..
+        } => Some((
             "User",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
@@ -342,6 +356,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             attribute,
             root,
             body,
+            ..
         } => Some((
             "DomainGroup",
             fqn,
@@ -352,17 +367,23 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("body", body.clone()),
             ],
         )),
-        Record::Value { fqn, name, body } => Some((
+        Record::Value {
+            fqn, name, body, ..
+        } => Some((
             "Value",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
         )),
-        Record::Service { fqn, name, body } => Some((
+        Record::Service {
+            fqn, name, body, ..
+        } => Some((
             "Service",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
         )),
-        Record::Person { fqn, name, body } => Some((
+        Record::Person {
+            fqn, name, body, ..
+        } => Some((
             "Person",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
@@ -372,6 +393,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             name,
             body,
             attaches_to,
+            ..
         } => Some((
             "Constraint",
             fqn,
@@ -395,20 +417,20 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
 /// reach this merge (they come from the load path, not a record set).
 pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str)> {
     match r {
-        Record::Contains { from, to } => Some(("Contains", from, to)),
-        Record::Calls { from, to } => Some(("Calls", from, to)),
-        Record::Uses { from, to } => Some(("Uses", from, to)),
-        Record::Details { from, to } => Some(("Details", from, to)),
+        Record::Contains { from, to, .. } => Some(("Contains", from, to)),
+        Record::Calls { from, to, .. } => Some(("Calls", from, to)),
+        Record::Uses { from, to, .. } => Some(("Uses", from, to)),
+        Record::Details { from, to, .. } => Some(("Details", from, to)),
         Record::Reviews { from, to } => Some(("Reviews", from, to)),
-        Record::DependsOn { from, to } => Some(("DependsOn", from, to)),
+        Record::DependsOn { from, to, .. } => Some(("DependsOn", from, to)),
         Record::Gates { from, to } => Some(("Gates", from, to)),
         Record::Satisfies { from, to } => Some(("Satisfies", from, to)),
-        Record::Drives { from, to } => Some(("Drives", from, to)),
-        Record::Represents { from, to } => Some(("Represents", from, to)),
-        Record::RealisedBy { from, to } => Some(("RealisedBy", from, to)),
-        Record::SpecImplementedBy { from, to } => Some(("SpecImplementedBy", from, to)),
-        Record::Publishes { from, to } => Some(("Publishes", from, to)),
-        Record::Subscribes { from, to } => Some(("Subscribes", from, to)),
+        Record::Drives { from, to, .. } => Some(("Drives", from, to)),
+        Record::Represents { from, to, .. } => Some(("Represents", from, to)),
+        Record::RealisedBy { from, to, .. } => Some(("RealisedBy", from, to)),
+        Record::SpecImplementedBy { from, to, .. } => Some(("SpecImplementedBy", from, to)),
+        Record::Publishes { from, to, .. } => Some(("Publishes", from, to)),
+        Record::Subscribes { from, to, .. } => Some(("Subscribes", from, to)),
         _ => None,
     }
 }
@@ -464,20 +486,20 @@ pub fn node_label_fqn(r: &Record) -> Option<(&'static str, &str)> {
 #[allow(dead_code)]
 pub fn edge_endpoints(r: &Record) -> Option<(&str, &str)> {
     match r {
-        Record::Contains { from, to }
-        | Record::Calls { from, to }
-        | Record::Uses { from, to }
-        | Record::Details { from, to }
+        Record::Contains { from, to, .. }
+        | Record::Calls { from, to, .. }
+        | Record::Uses { from, to, .. }
+        | Record::Details { from, to, .. }
         | Record::Reviews { from, to }
-        | Record::DependsOn { from, to }
+        | Record::DependsOn { from, to, .. }
         | Record::Gates { from, to }
         | Record::Satisfies { from, to }
-        | Record::Drives { from, to }
-        | Record::Represents { from, to }
-        | Record::RealisedBy { from, to }
-        | Record::SpecImplementedBy { from, to }
-        | Record::Publishes { from, to }
-        | Record::Subscribes { from, to } => Some((from, to)),
+        | Record::Drives { from, to, .. }
+        | Record::Represents { from, to, .. }
+        | Record::RealisedBy { from, to, .. }
+        | Record::SpecImplementedBy { from, to, .. }
+        | Record::Publishes { from, to, .. }
+        | Record::Subscribes { from, to, .. } => Some((from, to)),
         _ => None,
     }
 }

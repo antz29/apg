@@ -1744,10 +1744,12 @@ mod unit {
                     title: "a".to_string(),
                     body: String::new(),
                     feature: String::new(),
+                    properties: NodeProperties::default(),
                 },
                 Record::DependsOn {
                     from: "requirements.requirement.a".to_string(),
                     to: "requirements.requirement.b".to_string(),
+                    properties: NodeProperties::default(),
                 },
                 Record::Requirement {
                     fqn: "requirements.requirement.b".to_string(),
@@ -1755,6 +1757,7 @@ mod unit {
                     title: "b".to_string(),
                     body: String::new(),
                     feature: String::new(),
+                    properties: NodeProperties::default(),
                 },
             ]
         );

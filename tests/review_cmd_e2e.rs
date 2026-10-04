@@ -191,10 +191,12 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
                 to: "foo/plan.phase-01.task-1".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Feedback {
                 fqn: "foo/feedback-1".to_string(),
@@ -412,10 +414,12 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
                 to: "foo/plan.phase-01.task-1".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
         artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
@@ -617,10 +621,12 @@ mod e2e {
             Record::Contains {
                 from: "foo/plan".to_string(),
                 to: "foo/plan.phase-01".to_string(),
+                properties: layers::NodeProperties::default(),
             },
             Record::Contains {
                 from: "foo/plan.phase-01".to_string(),
                 to: "foo/plan.phase-01.task-1".to_string(),
+                properties: layers::NodeProperties::default(),
             },
         ];
         artifacts::write_jsonl_and_reingest(&apg_root, &path, "foo", &records).unwrap();
