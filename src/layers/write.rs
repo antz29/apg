@@ -268,7 +268,7 @@ pub fn validate_change(
     // pre-decoupling behaviour recorded code-FQN refs UNVALIDATED (never
     // drift): seed `planned` with every `implemented-by` target in the base +
     // written set so each classifies Pending. The next scan re-validates.
-    // (Mirrors `project_only`'s export-absent fallback.)
+    // (Mirrors `write_project_with`'s export-absent fallback.)
     let graph_jsonl = apg_root.join(TRANS_DIR).join("graph.jsonl");
     let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root)?;
     if !graph_jsonl.exists() {
@@ -732,13 +732,36 @@ pub fn write_project_with(
     //    just-written tree and the FQN delete set is the same
     //    `projection_deletes`; the projection itself is the shared
     //    [`project_only`] entry point (also used by the session's
-    //    projection-only path), so there is one projection implementation
-    //    (the graph.jsonl-absent fallback, the transient re-merge, and the
-    //    no-DB skip all live there). `project_only` carries the no-DB skip, so
-    //    the read/set are harmless when no query index exists yet.
+    //    projection-only path), so there is one projection implementation.
+    //    The direct path owns the two caller-side responsibilities
+    //    [`project_only`] used to carry: the no-DB skip (the projection applies
+    //    only when a query index exists — the files are the durable form
+    //    otherwise) and the code-identity source (the `graph.jsonl` export,
+    //    with the export-absent fallback seeding every `implemented-by` target
+    //    as planned so it records UNVALIDATED rather than aborting on a phantom
+    //    drift; the next scan re-validates).
     let nodes = read_existing_nodes(apg_root)?;
     let deletes = projection_deletes(apg_root, writes, deletes);
-    project_only(apg_root, &nodes, &deletes, project)?;
+    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
+        let graph_jsonl = apg_root.join(TRANS_DIR).join("graph.jsonl");
+        let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root)?;
+        if !graph_jsonl.exists() {
+            // No code-identity source: the code-FQN refs are recorded
+            // UNVALIDATED. Treat every implemented-by target as pending so the
+            // projection re-merge records them instead of rejecting them as
+            // drift. The direct path's effective set IS the on-disk store read
+            // back above (the durable write already landed), so the write set
+            // and the base set are one and the same.
+            for n in &nodes {
+                for oe in &n.out {
+                    if oe.kind == "implemented-by" {
+                        planned.insert(oe.target.clone());
+                    }
+                }
+            }
+        }
+        project_only(apg_root, &nodes, &deletes, &scanned, &planned, project)?;
+    }
 
     // 7. Reconcile the DB's own `Scan` row to the SAME re-anchored state that
     //    graph.jsonl's lead now names, so db_recorded_scan and recorded_scan can
