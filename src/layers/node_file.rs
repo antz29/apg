@@ -15,6 +15,31 @@ use super::validate::valid_name;
 /// keys are metadata — allowed, never identity.
 pub type NodeProperties = BTreeMap<String, String>;
 
+/// Encode a node-file / edge properties map to the **canonical JSON string**
+/// stored in the layers projection's serialized-properties column.
+///
+/// This is the single source of truth for that column on every durable
+/// authored node table and every rel table a durable authored edge can
+/// occupy, shared by both the full-scan path (create_schema /
+/// `build_load_files`) and the session's incremental reingest path
+/// (`merge_node` / `merge_edge`), and mirrored by `properties_from_json`'s
+/// decode (phase-4 task-2).
+///
+/// Canonical means:
+/// - **deterministic key order** — the map is a [`BTreeMap`], which iterates
+///   in sorted key order, so equal maps always encode to identical strings;
+/// - **every key preserved** — unknown keys and keys carrying an empty value
+///   are emitted verbatim (the properties map is metadata, never identity);
+/// - an **empty map encodes as `"{}"`** — the exact value the shared
+///   `Contains` / `Calls` / `Uses` tables' scanned-code rows carry, so a code
+///   row and an authored row with no properties are indistinguishable in the
+///   column (both decode back to an empty map).
+///
+/// Infallible: a `BTreeMap<String, String>` always serializes.
+pub fn properties_json(properties: &NodeProperties) -> String {
+    serde_json::to_string(properties).expect("a string->string map always serializes")
+}
+
 // ---------------------------------------------------------------------------
 // Node-file schema + single-node writer (phase-3 task-8)
 // ---------------------------------------------------------------------------
