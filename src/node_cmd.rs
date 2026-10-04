@@ -330,7 +330,21 @@ fn node_update_change(
 
 /// `apg node rm <layer> <type> <name>` — remove the node file and rewrite every
 /// file that references it (drop the incident edges), one atomic mutation.
+///
+/// The node's existence resolves through `overlay` against the caller-supplied
+/// `base` node set (the session's `ArtifactDb::node_files_from_db`-reconstructed
+/// durable universe) via [`layers::LayersOverlay::over_base`]: a staged write is
+/// present, a staged delete marker is absent, and an unstaged identity is present
+/// exactly when the base carries it. The incident-edge rewrite iterates the
+/// EFFECTIVE node set — the caller-supplied base with the overlay folded in
+/// ([`layers::LayersOverlay::apply_to_base`]) — so a removal drops the edges a
+/// node staged earlier in the same unsaved run. Both resolve purely over the
+/// caller-supplied base and the overlay: the builder never reads
+/// `apg/layers/**` and never probes `node_file_path`, so it cannot observe a
+/// node file the caller's base does not carry. `apg_root` is still needed for
+/// the transient-feedback warning and to compute the deleted file's path.
 fn node_rm_change(
+    base: &[NodeFile],
     apg_root: &Path,
     args: &[String],
     overlay: &layers::LayersOverlay,
@@ -390,22 +404,22 @@ fn node_rm_change(
         }
     }
 
-    // Refuse an absent identity through the overlay (task-40), mirroring
-    // `node_update_change`: a node written earlier in the same unsaved run is
-    // present (rm succeeds), a staged delete marker is absent, and an unstaged
-    // identity falls back to the on-disk file (absent when none exists).
-    if overlay.read(apg_root, layer, &pos[1], &pos[2])?.is_none() {
+    // Refuse an absent identity through the overlay against the caller-supplied
+    // base (task-14), mirroring `node_update_change`: a node written earlier in
+    // the same unsaved run is present (rm succeeds), a staged delete marker is
+    // absent, and an unstaged identity is present exactly when the base carries
+    // it.
+    if overlay.over_base(base, layer, &pos[1], &pos[2]).is_none() {
         anyhow::bail!("node `{f}` does not exist — use `apg node add` to create it");
     }
 
     let mut deletes = vec![layers::node_file_path(apg_root, layer, &pos[1], &pos[2])];
     let mut writes: Vec<NodeFile> = Vec::new();
-    // Rewrite incident edges over the EFFECTIVE node set (phase-00 task-10): the
-    // on-disk nodes with the overlay folded in, so a removal sees and drops the
-    // edges a node staged earlier in the same unsaved run — not just the edges
-    // present on disk. Delete-marked identities are already absent from the base.
-    let base = layers::read_existing_nodes(apg_root)?;
-    for node in overlay.apply_to_base(&base) {
+    // Rewrite incident edges over the EFFECTIVE node set: the caller-supplied
+    // base with the overlay folded in, so a removal sees and drops the edges a
+    // node staged earlier in the same unsaved run — not just the edges in the
+    // base. Delete-marked identities are already absent from the effective set.
+    for node in overlay.apply_to_base(base) {
         let node_fqn = fqn(resolve_layer(&node.layer)?, &node.node_type, &node.name);
         if node_fqn == f {
             continue; // the deleted node itself — dropped, not rewritten.
