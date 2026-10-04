@@ -40,6 +40,31 @@ pub fn properties_json(properties: &NodeProperties) -> String {
     serde_json::to_string(properties).expect("a string->string map always serializes")
 }
 
+/// Decode the **canonical JSON string** stored in the layers projection's
+/// serialized-properties column back into the full [`NodeProperties`] map —
+/// the exact inverse of [`properties_json`], used by
+/// `ArtifactDb::node_files_from_db`.
+///
+/// Round-trip fidelity mirrors the encoder: every key is preserved, unknown
+/// keys and keys carrying an empty value alike, and equal strings decode to
+/// equal maps. Two inputs decode to the **empty map**:
+/// - `"{}"` — the canonical encoding of an empty map ([`properties_json`]);
+/// - the **empty column value** (after trimming) — the projection's
+///   representation of an absent/unset column, e.g. a scanned-code row of the
+///   shared `Contains`/`Calls`/`Uses` tables, which carries no properties.
+///
+/// Any other malformed input — invalid JSON, or valid JSON that is not a
+/// `string -> string` object (an array, a number, `null`, a non-string value)
+/// — is an [`Err`] rather than a silently-partial map, so a corrupt column can
+/// never drop a key unnoticed.
+pub fn properties_from_json(raw: &str) -> anyhow::Result<NodeProperties> {
+    if raw.trim().is_empty() {
+        return Ok(NodeProperties::new());
+    }
+    serde_json::from_str(raw)
+        .map_err(|e| anyhow::anyhow!("malformed serialized properties `{raw}`: {e}"))
+}
+
 // ---------------------------------------------------------------------------
 // Node-file schema + single-node writer (phase-3 task-8)
 // ---------------------------------------------------------------------------
