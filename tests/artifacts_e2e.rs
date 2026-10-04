@@ -988,14 +988,14 @@ mod e2e {
     /// canonical `layers::ingest_tree` → `create_schema`/`build_load_files`
     /// path), and read back.
     ///
-    /// This pins the subset the CURRENT (lossy) columns carry: `body`, the
-    /// projected typed property keys (`Requirement` `id`/`feature`, `Note`
-    /// `kind`, `Container` `kind`, `Group` `attribute`/`root`, `Constraint`
+    /// This pins the subset the CURRENT columns carry: `body`, the projected
+    /// typed property keys (`Requirement` `id`/`feature`, `Note` `kind`,
+    /// `Container` `kind`, `Group` `attribute`/`root`, `Constraint`
     /// `attaches-to` → the `attaches-to` property), and BOTH halves of every
-    /// durable authored edge. Because no rel table has a property column, the
-    /// reconstructed OUT/IN edges carry an EMPTY `properties` map even though the
-    /// authored `drives` edge declared one — the exact full-fidelity round-trip
-    /// (edge properties, `Entity` `kind`, arbitrary keys) is phase 4's task.
+    /// durable authored edge. Phase 4 added the serialized-properties column, so
+    /// the authored `drives` edge property now round-trips on both halves; the
+    /// exact full-fidelity round-trip (arbitrary keys, `Entity` `kind`, the
+    /// session's incremental merge path) is pinned by phase 4's own e2e task.
     #[test]
     #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
     fn node_files_from_db_reconstructs_the_projected_columns() {
@@ -1169,17 +1169,19 @@ mod e2e {
             props(&[("attaches-to", "requirements.requirement.checkout")])
         );
 
-        // Both halves of `drives`, with the authored edge property dropped: the
-        // lossy rel columns carry no edge properties.
+        // Both halves of `drives`, with the authored edge property intact: the
+        // serialized-properties column carries it, and it feeds both halves.
         let drives_out = out(&r, "drives", "domain.group.core");
-        assert!(
-            drives_out.properties.is_empty(),
-            "the rel columns carry no edge properties: {drives_out:?}"
+        assert_eq!(
+            drives_out.properties,
+            drives_props(),
+            "the serialized-properties column round-trips an edge property: {drives_out:?}"
         );
         let drives_in = incoming(&g, "drives", "requirements.requirement.checkout");
-        assert!(
-            drives_in.properties.is_empty(),
-            "the rel columns carry no edge properties: {drives_in:?}"
+        assert_eq!(
+            drives_in.properties,
+            drives_props(),
+            "the serialized-properties column round-trips an edge property: {drives_in:?}"
         );
 
         // Both halves of `realised-by`.

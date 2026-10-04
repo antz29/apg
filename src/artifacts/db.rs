@@ -6,7 +6,7 @@ use std::sync::{Mutex, OnceLock};
 use lbug::{Connection, Database, SystemConfig};
 
 use crate::git;
-use crate::layers::{InEdge, NodeFile, OutEdge, parse_fqn};
+use crate::layers::{InEdge, NodeFile, OutEdge, parse_fqn, properties_from_json};
 use crate::load;
 use crate::schema::Record;
 use crate::specs;
@@ -516,13 +516,13 @@ impl ArtifactDb {
     /// `(kind, endpoint)`, matching [`crate::layers::read_existing_nodes`]'s
     /// deterministic order.
     ///
-    /// **Fidelity limit.** This is the exact inverse of what the schema
-    /// *stores*: no authored rel table has a property column and the node tables
-    /// only carry the named columns, so an edge is reconstructed with an empty
-    /// `properties` map and node-file metadata the schema does not name (a
-    /// `Group`'s arbitrary short-id, an `Entity`'s `kind`) is not reconstructed.
-    /// A node file whose `properties` are the projected keys
-    /// (`id`/`feature`/`kind`/`attribute`/`root`/`attaches-to`) round-trips.
+    /// **Fidelity.** The projection is lossless for the durable authored set:
+    /// the serialized-properties column carries the full node/edge properties
+    /// map (arbitrary and empty-valued keys, and an `Entity`'s `kind`), and the
+    /// named typed columns (kind/feature/attribute/root/attaches_to/…) are
+    /// merged back over it — no key is duplicated or lost. Edge properties are
+    /// read from the rel row and attached to **both** halves, so a node file
+    /// round-trips exactly.
     pub fn node_files_from_db(&self) -> anyhow::Result<Vec<NodeFile>> {
         let conn = self.conn()?;
         let mut by_fqn: BTreeMap<String, NodeFile> = BTreeMap::new();
@@ -536,27 +536,30 @@ impl ArtifactDb {
         // rel row whose source is not a durable node (a code pair of the shared
         // Contains/Calls/Uses tables, or a transient Plan/Feedback source) is
         // skipped; a row whose target is not a durable node contributes only the
-        // source's out half (a code endpoint has no node file).
+        // source's out half (a code endpoint has no node file). The rel row's
+        // serialized-properties column feeds both halves.
         for (table, kind) in DURABLE_EDGE_TABLES {
             let (_, rows) = query_rows(
                 &conn,
-                &format!("MATCH (a)-[:{table}]->(b) RETURN a.fqn, b.fqn"),
+                &format!("MATCH (a)-[r:{table}]->(b) RETURN a.fqn, b.fqn, r.properties"),
             )?;
             for row in rows {
                 let from = cell(&row, 0);
                 let to = cell(&row, 1);
+                let properties = properties_from_json(&cell(&row, 2))
+                    .map_err(|e| anyhow::anyhow!("{table} `{from}` -> `{to}`: {e}"))?;
                 if let Some(src) = by_fqn.get_mut(&from) {
                     src.out.push(OutEdge {
                         kind: kind.to_string(),
                         target: to.clone(),
-                        properties: BTreeMap::new(),
+                        properties: properties.clone(),
                     });
                 }
                 if let Some(dst) = by_fqn.get_mut(&to) {
                     dst.in_edges.push(InEdge {
                         kind: kind.to_string(),
                         source: from.clone(),
-                        properties: BTreeMap::new(),
+                        properties,
                     });
                 }
             }
@@ -579,6 +582,11 @@ impl ArtifactDb {
 /// One durable node table's reconstruction shape: `(DB table label, non-FQN
 /// columns in `create_schema` order, the body column, the metadata columns and
 /// the node-file `properties` key each feeds)`.
+///
+/// `columns` includes the trailing `properties` serialized-properties column
+/// (`properties_from_json` decodes it into the node file's full map); the
+/// metadata columns are merged back over the decoded map so a table that
+/// predates the column still reconstructs its typed keys.
 type DurableNodeTable = (
     &'static str,
     &'static [&'static str],
@@ -588,45 +596,49 @@ type DurableNodeTable = (
 
 /// Every durable node table — the `apg/layers/**` node-file layers
 /// (requirements, domain, solution, implementation, global) — with the metadata
-/// columns a node file's `properties` map carries. An `Entity`'s `kind` is
-/// absent deliberately: the schema has no entity-kind column (the projection
-/// does not carry it), so it cannot be reconstructed. The transient `.trans`
-/// tables (`Feedback`, `Plan`, `PlanPhase`, `Task`) are not node files and are
-/// absent.
+/// columns a node file's `properties` map carries and the serialized-properties
+/// column that carries the full map (including arbitrary keys and an `Entity`'s
+/// `kind`). The transient `.trans` tables (`Feedback`, `Plan`, `PlanPhase`,
+/// `Task`) are not node files and are absent.
 const DURABLE_NODE_TABLES: &[DurableNodeTable] = &[
     (
         "Requirement",
-        &["id", "title", "body", "feature"],
+        &["id", "title", "body", "feature", "properties"],
         "body",
         &[("id", "id"), ("feature", "feature")],
     ),
-    ("Stakeholder", &["name", "body"], "body", &[]),
-    ("User", &["name", "body"], "body", &[]),
-    ("Note", &["body", "kind"], "body", &[("kind", "kind")]),
+    ("Stakeholder", &["name", "body", "properties"], "body", &[]),
+    ("User", &["name", "body", "properties"], "body", &[]),
+    (
+        "Note",
+        &["body", "kind", "properties"],
+        "body",
+        &[("kind", "kind")],
+    ),
     (
         "Constraint",
-        &["name", "body", "attaches_to"],
+        &["name", "body", "attaches_to", "properties"],
         "body",
         &[("attaches_to", "attaches-to")],
     ),
     (
         "DomainGroup",
-        &["name", "attribute", "root", "body"],
+        &["name", "attribute", "root", "body", "properties"],
         "body",
         &[("attribute", "attribute"), ("root", "root")],
     ),
-    ("Entity", &["name", "body"], "body", &[]),
-    ("Value", &["name", "body"], "body", &[]),
-    ("Service", &["name", "body"], "body", &[]),
-    ("System", &["name", "body"], "body", &[]),
+    ("Entity", &["name", "body", "properties"], "body", &[]),
+    ("Value", &["name", "body", "properties"], "body", &[]),
+    ("Service", &["name", "body", "properties"], "body", &[]),
+    ("System", &["name", "body", "properties"], "body", &[]),
     (
         "Container",
-        &["name", "kind", "body"],
+        &["name", "kind", "body", "properties"],
         "body",
         &[("kind", "kind")],
     ),
-    ("Component", &["name", "body"], "body", &[]),
-    ("Person", &["name", "body"], "body", &[]),
+    ("Component", &["name", "body", "properties"], "body", &[]),
+    ("Person", &["name", "body", "properties"], "body", &[]),
 ];
 
 /// Every durable authored edge rel table and the node-file edge kind it
@@ -648,9 +660,10 @@ const DURABLE_EDGE_TABLES: [(&str, &str); 11] = [
 ];
 
 /// Read one durable node table into `nodes`, keyed by its FQN: identity from
-/// the FQN segments, `body` from `body_col`, and each metadata column back into
-/// the node-file `properties` map when non-empty (an absent column projects to
-/// the empty string, which round-trips to absent). A malformed FQN is a hard
+/// the FQN segments, `body` from `body_col`, the serialized-properties column
+/// decoded into the full `properties` map, and each metadata column merged back
+/// over it when non-empty (an absent column projects to the empty string, which
+/// round-trips to absent). A malformed FQN or properties payload is a hard
 /// error — the projection never writes one.
 fn collect_durable_nodes(
     conn: &Connection,
@@ -676,6 +689,7 @@ fn collect_durable_nodes(
             .ok_or_else(|| anyhow::anyhow!("{table}: no `{column}` column in the projection"))
     };
     let body_i = column_index(body_col)?;
+    let properties_i = column_index("properties")?;
     let prop_i: Vec<(usize, &str)> = props
         .iter()
         .map(|(column, key)| Ok((column_index(column)?, *key)))
@@ -685,7 +699,12 @@ fn collect_durable_nodes(
         let f = cell(&row, 0);
         let (layer, node_type, name) =
             parse_fqn(&f).map_err(|e| anyhow::anyhow!("{table} `{f}`: {e}"))?;
-        let mut properties = BTreeMap::new();
+        // The serialized-properties column carries the full node-file map; the
+        // typed columns are merged back over it so a row whose column predates
+        // the enrichment (or is empty) still reconstructs its named keys, with
+        // no key duplicated or lost.
+        let mut properties = properties_from_json(&cell(&row, properties_i))
+            .map_err(|e| anyhow::anyhow!("{table} `{f}`: {e}"))?;
         for (i, key) in &prop_i {
             let value = cell(&row, *i);
             if !value.is_empty() {
