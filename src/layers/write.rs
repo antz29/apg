@@ -269,8 +269,17 @@ pub fn validate_change(
 /// cumulative state the proposed `writes`/`deletes` apply over: the direct path
 /// ([`validate_change`]) passes `read_existing_nodes(apg_root)`, while the
 /// session's write-back buffer passes the overlay's `apply_to_base` (the
-/// buffered writes staged over the on-disk store). Every check is otherwise
-/// identical to [`validate_change`] — per-node uniqueness, the out-edge matrix
+/// buffered writes staged over the on-disk store). `scanned`/`planned` are the
+/// two code-FQN universes the `implemented-by` drift check resolves against,
+/// supplied by the caller so this entry point performs no file I/O: the direct
+/// path ([`validate_change`]) passes
+/// [`code_universes_from_export`](crate::artifacts::code_universes_from_export)
+/// (the `graph.jsonl` export), while the session's admission passes the held
+/// database's
+/// [`code_universes_from_db`](crate::artifacts::ArtifactDb::code_universes_from_db)
+/// — neither opens a second handle nor reads `apg/.trans/graph.jsonl`. Every
+/// check is otherwise identical to [`validate_change`] — per-node uniqueness,
+/// the out-edge matrix
 /// ([`validate_edges`]), the assembled §3.3 rules ([`validate_assembled_rules`]),
 /// the `implemented-by` code-ref drift check ([`validate_code_refs`]), the
 /// constraint structure + `attaches-to` rules ([`eval_constraint`]), and edge
@@ -283,6 +292,8 @@ pub fn validate_change_over(
     base: &[NodeFile],
     writes: &[NodeFile],
     deletes: &[PathBuf],
+    scanned: &BTreeSet<String>,
+    planned: &BTreeSet<String>,
 ) -> anyhow::Result<()> {
     let mut existing: BTreeMap<String, NodeFile> = BTreeMap::new();
     for n in base {
@@ -359,22 +370,19 @@ pub fn validate_change_over(
     // Code-ref drift (SPEC §4.1): an `implemented-by` target gone from the
     // scanned graph must abort BEFORE anything is written — otherwise the
     // file lands and commits and only the step-5 re-merge fails (a committed
-    // partial mutation). Decoupled from the DB: when `graph.jsonl` exists it is
-    // the sole code-identity source (real code FQNs UNION the plan store's
-    // planned FQNs), resolved WITHOUT opening `db.lbug`. When `graph.jsonl` is
-    // absent, code-FQN refs are recorded **unvalidated** even when `db.lbug`
-    // exists (deliberate: `db.lbug` is a derived projection and is never opened
-    // for validation); the next scan re-validates them.
-    if apg_root.join(TRANS_DIR).join("graph.jsonl").exists() {
-        let (scanned, planned) = artifacts::code_universes_from_export(apg_root)?;
-        let refs: Vec<&str> = assembled
-            .values()
-            .flat_map(|n| n.out.iter())
-            .filter(|oe| oe.kind == "implemented-by")
-            .map(|oe| oe.target.as_str())
-            .collect();
-        validate_code_refs(&refs, &scanned, &planned)?;
-    }
+    // partial mutation). The code-identity source is the caller-supplied
+    // `scanned`/`planned` universes — the direct path resolves them from
+    // `graph.jsonl`, the session from the `db.lbug` it already holds — so this
+    // admission check performs NO file I/O and never opens `db.lbug`. A caller
+    // with no code-identity source supplies universes that classify its refs
+    // Pending, mirroring the export-absent fallback.
+    let refs: Vec<&str> = assembled
+        .values()
+        .flat_map(|n| n.out.iter())
+        .filter(|oe| oe.kind == "implemented-by")
+        .map(|oe| oe.target.as_str())
+        .collect();
+    validate_code_refs(&refs, scanned, planned)?;
 
     // Constraint validation (R14 / R2): [`eval_constraint`] owns the structural
     // rules (name allowlist, type-in-layer, uniqueness), and the off-model
