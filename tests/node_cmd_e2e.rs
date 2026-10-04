@@ -4426,4 +4426,536 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-05 task-24 (a)+(b): a routed `node rm`'s outstanding-feedback
+    /// warning is sourced from the held DB, so it survives the session's OWN
+    /// `.trans/<project>.jsonl` mirrors being CORRUPT and then ABSENT.
+    ///
+    /// Two committed-and-scanned durable requirements (`reviewed-a`,
+    /// `reviewed-b`) each carry a `Feedback -[:Reviews]-> node` pair seeded into
+    /// the requirements tier mirror BEFORE `apg session start`, so the start seed
+    /// (not the scan) projects both pairs into the held DB. While the session is
+    /// live:
+    ///
+    ///   (a) the session's own `.trans` files are OVERWRITTEN with garbage
+    ///       bytes: a routed rm of `reviewed-a` still ADMITS with the
+    ///       DB-sourced warning, a routed query shows `reviewed-a` is gone, and
+    ///       both corrupt files are left byte-for-byte unchanged (admission did
+    ///       not read, rewrite, or delete them); and
+    ///   (b) the session's own `.trans` files are ABSENT: a routed rm of the
+    ///       fresh `reviewed-b` still ADMITS with the DB-sourced warning and the
+    ///       files stay absent (admission did not recreate them).
+    ///
+    /// The corrupt plan file is a strong probe: it is a `.trans/plans/*.jsonl`
+    /// file the removed per-admission plan-store enumeration
+    /// (`append_transient_records` / `plan_files`) used to glob, so any
+    /// surviving `.trans` read at admission would fail loud on it.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn routed_rm_warns_from_the_db_with_corrupt_and_absent_own_trans() {
+        const REVIEWS_A: &str = "MATCH (f:Feedback)-[:Reviews]->\
+             (n:Requirement {fqn: 'requirements.requirement.reviewed-a'}) RETURN f.fqn, n.fqn";
+        const COUNT_A: &str = "MATCH (n:Requirement {fqn: 'requirements.requirement.reviewed-a'}) \
+             RETURN count(n)";
+        const COUNT_B: &str = "MATCH (n:Requirement {fqn: 'requirements.requirement.reviewed-b'}) \
+             RETURN count(n)";
+        const FEEDBACK_A: &str = "MATCH (f:Feedback {fqn: 'foo/feedback-1'}) \
+             RETURN f.fqn, f.body, f.status";
+        const REVIEWS_COUNT: &str = "MATCH (:Feedback)-[:Reviews]->(:Requirement) RETURN count(*)";
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("routed-rm-db-warn-trans");
+        let home = repo.root.join("home");
+
+        // Two committed durable requirements, scanned into the branch DB.
+        for name in ["reviewed-a", "reviewed-b"] {
+            let mut reviewed = node("requirements", "requirement", name);
+            reviewed.body = format!("body of {name}");
+            layers::write_node(&wt_apg, &reviewed).unwrap();
+        }
+        testutil::wt_commit_paths(&wt, &["apg/layers"], "seed the durable reviewed nodes");
+        testutil::scan_checkout(&wt).unwrap();
+
+        // Seed both Feedback + Reviews pairs into the requirements tier mirror
+        // BEFORE the session starts: the scan above saw no mirror, so the START
+        // SEED (not the scan) projects them into the held DB. Both halves of
+        // each relationship live in the one file.
+        let mirror = specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
+        specs::write_jsonl(
+            &mirror,
+            &[
+                Record::Feedback {
+                    fqn: "foo/feedback-1".to_string(),
+                    body: "review of reviewed-a".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-1".to_string(),
+                    to: "requirements.requirement.reviewed-a".to_string(),
+                },
+                Record::Feedback {
+                    fqn: "foo/feedback-2".to_string(),
+                    body: "review of reviewed-b".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-2".to_string(),
+                    to: "requirements.requirement.reviewed-b".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // Precondition (no session yet): the durable nodes are in the DB and no
+        // Reviews edge is — the start seed is what adds them.
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            assert!(db.has_node("requirements.requirement.reviewed-a"));
+            assert!(db.has_node("requirements.requirement.reviewed-b"));
+            assert_eq!(
+                db.q(REVIEWS_COUNT).unwrap().lines().last().map(str::trim),
+                Some("0"),
+                "no Reviews edge may be in the DB before the session seed"
+            );
+        }
+
+        // The start seed projects the transient Feedback + Reviews pairs into
+        // the held DB, before the socket is bound.
+        let session = testutil::start_session_process(&wt, &home);
+
+        // Routed reads observe the held DB's projection at admission.
+        let routed = |q: &str| -> String {
+            let out = testutil::spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "routed query `{q}` failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap()
+        };
+
+        // The seed really landed the edge; capture the "before" state.
+        let reviews_before = routed(REVIEWS_A);
+        assert!(
+            reviews_before.contains("foo/feedback-1")
+                && reviews_before.contains("requirements.requirement.reviewed-a"),
+            "the start seed must project Feedback -[:Reviews]-> reviewed-a into the held DB: \
+             {reviews_before}"
+        );
+
+        // (a) Corrupt the session's OWN `.trans/<project>.jsonl` files: the
+        // requirements mirror that carries the feedback, and the plan file.
+        // Capture the exact bytes so the test can prove admission touched
+        // neither.
+        let corrupt_mirror: Vec<u8> = b"\x00not a jsonl record\x01\nfor sure not jsonl\n".to_vec();
+        let corrupt_plan: Vec<u8> = b"garbage plan bytes {[(]} not jsonl\n".to_vec();
+        let plan_mirror = specs::plan_jsonl_path(&wt_apg, "foo");
+        std::fs::write(&mirror, &corrupt_mirror).unwrap();
+        std::fs::create_dir_all(plan_mirror.parent().unwrap()).unwrap();
+        std::fs::write(&plan_mirror, &corrupt_plan).unwrap();
+
+        // A routed rm of `reviewed-a` ADMITS: the warning is sourced from the
+        // held DB, not the corrupt mirror.
+        let rm_a =
+            testutil::ApgCommand::new(&["node", "rm", "requirements", "requirement", "reviewed-a"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            rm_a.status.success(),
+            "a routed rm with corrupt own .trans must still admit: {}",
+            String::from_utf8_lossy(&rm_a.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&rm_a.stdout).trim(),
+            "Removed node requirements.requirement.reviewed-a"
+        );
+        let stderr_a = String::from_utf8_lossy(&rm_a.stderr);
+        assert!(
+            stderr_a.contains("apg: warning: removing `requirements.requirement.reviewed-a`"),
+            "the DB-sourced warning must reach the client's stderr: {stderr_a}"
+        );
+        assert!(
+            stderr_a.contains("foo/feedback-1 (open)"),
+            "the warning must name reviewed-a's outstanding feedback: {stderr_a}"
+        );
+
+        // (a)(i) The mutation was actually buffered/admitted: a routed query
+        // through the live session shows the removed node is gone.
+        assert_eq!(
+            routed(COUNT_A).lines().last().map(str::trim),
+            Some("0"),
+            "the routed rm must be projected into the live DB"
+        );
+
+        // (a)(ii) The corrupt own-.trans files were left exactly as they were,
+        // byte-for-byte: admission did not read, rewrite, or delete them.
+        assert_eq!(
+            std::fs::read(&mirror).unwrap(),
+            corrupt_mirror,
+            "admission must leave the corrupt tier mirror byte-for-byte unchanged"
+        );
+        assert_eq!(
+            std::fs::read(&plan_mirror).unwrap(),
+            corrupt_plan,
+            "admission must leave the corrupt plan file byte-for-byte unchanged"
+        );
+
+        // (b) The session's own `.trans` files are ABSENT: a routed rm of the
+        // fresh `reviewed-b` still admits with the DB-sourced warning, and the
+        // absent files stay absent.
+        std::fs::remove_file(&mirror).unwrap();
+        std::fs::remove_file(&plan_mirror).unwrap();
+        assert!(!mirror.exists() && !plan_mirror.exists());
+
+        let rm_b =
+            testutil::ApgCommand::new(&["node", "rm", "requirements", "requirement", "reviewed-b"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            rm_b.status.success(),
+            "a routed rm with absent own .trans must still admit: {}",
+            String::from_utf8_lossy(&rm_b.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&rm_b.stdout).trim(),
+            "Removed node requirements.requirement.reviewed-b"
+        );
+        let stderr_b = String::from_utf8_lossy(&rm_b.stderr);
+        assert!(
+            stderr_b.contains("apg: warning: removing `requirements.requirement.reviewed-b`"),
+            "the DB-sourced warning must reach the client's stderr: {stderr_b}"
+        );
+        assert!(
+            stderr_b.contains("foo/feedback-2 (open)"),
+            "the warning must name reviewed-b's outstanding feedback: {stderr_b}"
+        );
+        assert_eq!(
+            routed(COUNT_B).lines().last().map(str::trim),
+            Some("0"),
+            "the routed rm must be projected into the live DB"
+        );
+        assert!(
+            !mirror.exists() && !plan_mirror.exists(),
+            "admission must not recreate the absent .trans files"
+        );
+
+        // The Feedback records themselves survive (they are authoritative), so
+        // `apg review list` still reports the removed targets.
+        assert!(
+            routed(FEEDBACK_A).contains("foo/feedback-1"),
+            "the Feedback record must survive the target's removal"
+        );
+
+        // Clean release: save (the single durability point) then end.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-24 (c): a routed `node rm`'s DB-sourced warning is SCOPED
+    /// to the session's own project, matching the direct path's
+    /// `specs::project_transient_files(project)` scope.
+    ///
+    /// A committed-and-scanned durable requirement (`reviewed`) carries TWO
+    /// `Feedback -[:Reviews]-> reviewed` pairings seeded into `.trans` before
+    /// `apg session start`: one in the session's OWN project (`foo/feedback-1`,
+    /// from `.trans/requirements/foo.jsonl`) and one in a SECOND project
+    /// (`other/feedback-1`, from `.trans/requirements/other.jsonl`). The start
+    /// seed loads BOTH into the held DB. Then a routed rm of `reviewed` must:
+    ///
+    ///   1. NOT name `other/feedback-1` — the admission read is scoped to the
+    ///      session's project (`<project>/…`); and
+    ///   2. yield a warning that MATCHES, byte-for-byte, the warning
+    ///      `node_cmd::build_change` (the direct-path builder over the INTACT
+    ///      `.trans`) yields for the same node — the same outstanding-feedback
+    ///      warning, not merely the absence of the other project's feedback.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn routed_rm_feedback_warning_is_scoped_to_the_session_project() {
+        const REVIEWED: &str = "requirements.requirement.reviewed";
+        const BOTH_REVIEWS: &str = "MATCH (f:Feedback)-[:Reviews]->\
+             (n:Requirement {fqn: 'requirements.requirement.reviewed'}) RETURN f.fqn ORDER BY f.fqn";
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("routed-rm-feedback-scope");
+        let home = repo.root.join("home");
+
+        // A committed durable requirement, scanned into the branch DB.
+        let mut reviewed = node("requirements", "requirement", "reviewed");
+        reviewed.body = "scoped review".to_string();
+        layers::write_node(&wt_apg, &reviewed).unwrap();
+        testutil::wt_commit_paths(&wt, &["apg/layers"], "seed the durable reviewed node");
+        testutil::scan_checkout(&wt).unwrap();
+
+        // Project `foo`'s Feedback + Reviews pair (the session's own project).
+        let foo_mirror = specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
+        specs::write_jsonl(
+            &foo_mirror,
+            &[
+                Record::Feedback {
+                    fqn: "foo/feedback-1".to_string(),
+                    body: "foo review".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-1".to_string(),
+                    to: REVIEWED.to_string(),
+                },
+            ],
+        )
+        .unwrap();
+        // A SECOND project's Feedback + Reviews pair reviewing the SAME node.
+        let other_mirror = specs::transient_feedback_path(&wt_apg, "other", Layer::Requirements);
+        specs::write_jsonl(
+            &other_mirror,
+            &[
+                Record::Feedback {
+                    fqn: "other/feedback-1".to_string(),
+                    body: "other review".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "other/feedback-1".to_string(),
+                    to: REVIEWED.to_string(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // The start seed loads ALL projects' feedback into the held DB.
+        let session = testutil::start_session_process(&wt, &home);
+
+        let routed = |q: &str| -> String {
+            let out = testutil::spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "routed query `{q}` failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap()
+        };
+
+        // Both projects' Reviews edges are in the held DB — the scope, not the
+        // seed, is what must exclude `other` from the warning.
+        let both = routed(BOTH_REVIEWS);
+        assert!(
+            both.contains("foo/feedback-1") && both.contains("other/feedback-1"),
+            "the start seed must load both projects' feedback into the held DB: {both}"
+        );
+
+        // The direct-path builder over the INTACT `.trans` yields exactly one
+        // warning, scoped to `foo` by `project_transient_files(apg_root, "foo")`.
+        let args = av(&["rm", "requirements", "requirement", "reviewed"]);
+        let direct = build_change(&wt_apg, "node", &args).unwrap();
+        assert_eq!(
+            direct.warnings.len(),
+            1,
+            "the direct builder must yield exactly one warning: {:?}",
+            direct.warnings
+        );
+        let direct_warning = direct.warnings[0].as_str();
+        assert!(
+            direct_warning.contains("foo/feedback-1 (open)"),
+            "the direct builder's warning must name the session project's feedback: {direct_warning}"
+        );
+        assert!(
+            !direct_warning.contains("other"),
+            "the direct builder must not name another project's feedback: {direct_warning}"
+        );
+
+        // The routed rm admits with the DB-sourced warning; it must MATCH the
+        // direct builder's warning byte-for-byte and exclude `other`.
+        let out =
+            testutil::ApgCommand::new(&["node", "rm", "requirements", "requirement", "reviewed"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            out.status.success(),
+            "the routed rm must admit: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "Removed node requirements.requirement.reviewed"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("other/feedback-1"),
+            "the routed warning must not name another project's feedback: {stderr}"
+        );
+        let routed_warning = stderr
+            .lines()
+            .find(|l| l.starts_with("apg: warning:"))
+            .expect("the routed rm must print its outstanding-feedback warning");
+        assert_eq!(
+            routed_warning, direct_warning,
+            "the routed warning must match the direct builder's byte-for-byte"
+        );
+
+        // Clean release: save (the single durability point) then end.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-24 (d): a session started in a detached-HEAD checkout
+    /// (the Coordinator's resolved project is `None`) warns on NOTHING,
+    /// matching the direct path's `git::repo_identity(...).branch` `None` case.
+    ///
+    /// A committed-and-scanned durable requirement (`reviewed`) plus a
+    /// `Feedback -[:Reviews]-> reviewed` pair seeded into `.trans` before start
+    /// (so the start seed still projects the pair into the held DB, and the DB
+    /// demonstrably carries it). HEAD is then detached at the scanned commit, so
+    /// `Coordinator::start` resolves its `project` field to `None`. A routed rm
+    /// of `reviewed` still ADMITS (the mandatory-session path does not guard on
+    /// branch membership) but carries NO outstanding-feedback warning, exactly
+    /// like `node_cmd::build_change` (the direct-path builder) over the same
+    /// intact `.trans` under a detached HEAD.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn routed_rm_warns_on_nothing_in_a_detached_head_checkout() {
+        const REVIEWS: &str = "MATCH (f:Feedback)-[:Reviews]->\
+             (n:Requirement {fqn: 'requirements.requirement.reviewed'}) RETURN f.fqn";
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("routed-rm-detached-head");
+        let home = repo.root.join("home");
+
+        // A committed durable requirement, scanned into the branch DB.
+        let mut reviewed = node("requirements", "requirement", "reviewed");
+        reviewed.body = "detached head".to_string();
+        layers::write_node(&wt_apg, &reviewed).unwrap();
+        testutil::wt_commit_paths(&wt, &["apg/layers"], "seed the durable reviewed node");
+        testutil::scan_checkout(&wt).unwrap();
+
+        // Seed the Feedback + Reviews pair into `.trans` BEFORE start: the start
+        // seed still projects it into the held DB (the seed does not depend on
+        // the branch). The plan review's warning source is project-scoped, not
+        // the seed.
+        let mirror = specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
+        specs::write_jsonl(
+            &mirror,
+            &[
+                Record::Feedback {
+                    fqn: "foo/feedback-1".to_string(),
+                    body: "review of reviewed".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-1".to_string(),
+                    to: "requirements.requirement.reviewed".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // Detach HEAD at the scanned commit, so `repo_identity` yields no branch
+        // and `Coordinator::start` resolves `project` to `None`.
+        {
+            let git_repo = git2::Repository::open(&wt).unwrap();
+            let head = git_repo.head().unwrap().peel_to_commit().unwrap().id();
+            git_repo.set_head_detached(head).unwrap();
+            assert!(
+                git_repo.head_detached().unwrap(),
+                "HEAD must be detached for this scenario"
+            );
+            assert!(
+                apg::git::repo_identity(&wt_apg).unwrap().branch.is_none(),
+                "a detached HEAD must resolve to no project"
+            );
+        }
+
+        let session = testutil::start_session_process(&wt, &home);
+
+        let routed = |q: &str| -> String {
+            let out = testutil::spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "routed query `{q}` failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap()
+        };
+
+        // The start seed still projected the pair into the held DB.
+        assert!(
+            routed(REVIEWS).contains("foo/feedback-1"),
+            "the start seed must project the pair into the held DB regardless of HEAD"
+        );
+
+        // The direct-path builder over the intact `.trans` warns on nothing when
+        // HEAD is detached (branch None) — the case the routed path mirrors.
+        let args = av(&["rm", "requirements", "requirement", "reviewed"]);
+        assert!(
+            build_change(&wt_apg, "node", &args)
+                .unwrap()
+                .warnings
+                .is_empty(),
+            "a detached-HEAD direct-path builder must warn on nothing"
+        );
+
+        // The routed rm admits but carries no warning.
+        let out =
+            testutil::ApgCommand::new(&["node", "rm", "requirements", "requirement", "reviewed"])
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+        assert!(
+            out.status.success(),
+            "the routed rm must admit under a detached HEAD: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "Removed node requirements.requirement.reviewed"
+        );
+        assert!(
+            !String::from_utf8_lossy(&out.stderr).contains("apg: warning:"),
+            "a detached-HEAD session must warn on nothing: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        // Clean release: save (the single durability point) then end.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
 }
