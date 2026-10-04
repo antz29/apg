@@ -166,9 +166,42 @@ pub struct Change {
 /// The direct path supplies `build_change_over` the on-disk node set as its base
 /// ([`layers::read_existing_nodes`]) with an empty overlay, preserving the
 /// direct path's existence checks and read-modify-write over `apg/layers/**`.
+///
+/// The direct path's `node rm` outstanding-feedback warning sources its records
+/// from the worktree's `.trans` feedback mirrors (the git branch names the
+/// project); every other subcommand passes an empty set, so the direct path
+/// reads `.trans` exactly when it did before. A malformed `.trans` record still
+/// fails loudly through [`specs::read_jsonl`].
 pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Result<Change> {
     let base = layers::read_existing_nodes(apg_root)?;
-    build_change_over(&base, apg_root, kind, args, &layers::LayersOverlay::new())
+    // The direct path's own `.trans` source for the node-rm outstanding-feedback
+    // warning (moved out of `node_rm_change`). Read ONLY for `node rm`, so the
+    // direct path reads `.trans` exactly when it did before; the loud-on-malformed
+    // `read_jsonl` error still propagates.
+    let feedback: Vec<Record> = if kind == "node" && args.first().map(String::as_str) == Some("rm")
+    {
+        let mut records: Vec<Record> = Vec::new();
+        if let Ok(identity) = crate::git::repo_identity(apg_root)
+            && let Some(project) = identity.branch.as_deref()
+        {
+            for file in specs::project_transient_files(apg_root, project) {
+                if file.exists() {
+                    records.extend(specs::read_jsonl(&file)?);
+                }
+            }
+        }
+        records
+    } else {
+        Vec::new()
+    };
+    build_change_over(
+        &base,
+        &feedback,
+        apg_root,
+        kind,
+        args,
+        &layers::LayersOverlay::new(),
+    )
 }
 
 /// Buffer-aware twin of [`build_change`]: the same dispatch, but every arm
