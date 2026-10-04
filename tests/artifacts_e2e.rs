@@ -2537,4 +2537,388 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-05 task-15: the session's PARTIAL DELTA converges to the state a
+    /// FULL SCAN REBUILD produces — no residue, no lost incident edge.
+    ///
+    /// A live session is seeded with durable authored nodes (one carrying an
+    /// incoming durable edge from an untouched source and one reviewed by a
+    /// `Feedback -[:Reviews]->` pair, plus a plan whose `Gates`/`Satisfies` rows
+    /// the start seed projects), then admits N routed mutations spanning every
+    /// mutation shape: two adds, an update of the reviewed node, an `edge add`,
+    /// an `edge rm`, and a `node rm`. A set of ROUTED queries captures the full
+    /// session DB state; `session save` + `session end` make the buffer durable
+    /// and a full scan rebuilds `db.lbug` from source. The SAME queries against
+    /// the rebuilt DB must return the identical rows — every authored durable
+    /// table, their durable edges, and the transient `Feedback`/`Reviews`/
+    /// `Gates`/`Satisfies` rows. The named assertions pin the two failure modes:
+    /// the `rm` left no residue, and the untouched `contains`/`Reviews` in-edges
+    /// on a mutated node survived the partial delta.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/git/process); run via cargo test-e2e"]
+    fn session_partial_delta_converges_to_a_full_rebuild() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("session-db-only-convergence");
+        let home = repo.root.join("home");
+
+        let props = |pairs: &[(&str, &str)]| -> NodeProperties {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let out_edge = |kind: &str, target: &str, properties: NodeProperties| layers::OutEdge {
+            kind: kind.to_string(),
+            target: target.to_string(),
+            properties,
+        };
+        let in_edge = |kind: &str, source: &str, properties: NodeProperties| layers::InEdge {
+            kind: kind.to_string(),
+            source: source.to_string(),
+            properties,
+        };
+        let nf = |layer: &str,
+                  node_type: &str,
+                  name: &str,
+                  body: &str,
+                  out: Vec<layers::OutEdge>,
+                  in_edges: Vec<layers::InEdge>| layers::NodeFile {
+            layer: layer.to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            body: body.to_string(),
+            properties: NodeProperties::default(),
+            out,
+            in_edges,
+        };
+
+        // checkout — the node the Feedback reviews and the node every non-add
+        // mutation touches. Its incoming `contains` (from the untouched
+        // customer) and its incoming `Reviews` (from the Feedback) are the
+        // incident edges the partial delta must restore.
+        let checkout = nf(
+            "requirements",
+            "requirement",
+            "checkout",
+            "checkout original",
+            vec![
+                out_edge("drives", "domain.entity.order", props(&[("flavor", "map")])),
+                out_edge("drives", "domain.value.scratch", NodeProperties::default()),
+            ],
+            vec![in_edge(
+                "contains",
+                "requirements.stakeholder.customer",
+                NodeProperties::default(),
+            )],
+        );
+        let customer = nf(
+            "requirements",
+            "stakeholder",
+            "customer",
+            "the customer",
+            vec![out_edge(
+                "contains",
+                "requirements.requirement.checkout",
+                NodeProperties::default(),
+            )],
+            Vec::new(),
+        );
+        let order = nf(
+            "domain",
+            "entity",
+            "order",
+            "the order event",
+            Vec::new(),
+            vec![in_edge(
+                "drives",
+                "requirements.requirement.checkout",
+                props(&[("flavor", "map")]),
+            )],
+        );
+        let scratch = nf(
+            "domain",
+            "value",
+            "scratch",
+            "a scratch value",
+            Vec::new(),
+            vec![in_edge(
+                "drives",
+                "requirements.requirement.checkout",
+                NodeProperties::default(),
+            )],
+        );
+        // doomed — standalone (no incident edge), so its routed `rm` leaves no
+        // dangling counterpart to reconcile: the no-residue half.
+        let doomed = nf(
+            "domain",
+            "value",
+            "doomed",
+            "a doomed value",
+            Vec::new(),
+            Vec::new(),
+        );
+
+        for node in [&checkout, &customer, &order, &scratch, &doomed] {
+            layers::write_node(&wt_apg, node).unwrap();
+        }
+
+        // The transient review pair + the plan's Gates/Satisfies rows are
+        // written into `.trans` BEFORE the session starts, so the start seed
+        // projects them into the held DB (and the full rebuild re-projects the
+        // same records).
+        let feedback_path = specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
+        specs::write_jsonl(
+            &feedback_path,
+            &[
+                Record::Feedback {
+                    fqn: "foo/feedback-1".to_string(),
+                    body: "reviewing the checkout requirement".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-1".to_string(),
+                    to: "requirements.requirement.checkout".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+        let plan_path = specs::plan_jsonl_path(&wt_apg, "foo");
+        specs::write_jsonl(
+            &plan_path,
+            &[
+                Record::Plan {
+                    fqn: "foo/plan".to_string(),
+                    title: "Foo".to_string(),
+                    strategy: "converge".to_string(),
+                },
+                Record::PlanPhase {
+                    fqn: "foo/plan.phase-01".to_string(),
+                    number: 1,
+                    title: "P1".to_string(),
+                    deliverable: "D1".to_string(),
+                    status: "pending".to_string(),
+                },
+                Record::PlanPhase {
+                    fqn: "foo/plan.phase-02".to_string(),
+                    number: 2,
+                    title: "P2".to_string(),
+                    deliverable: "D2".to_string(),
+                    status: "pending".to_string(),
+                },
+                Record::Contains {
+                    from: "foo/plan".to_string(),
+                    to: "foo/plan.phase-01".to_string(),
+                    properties: NodeProperties::default(),
+                },
+                Record::Contains {
+                    from: "foo/plan".to_string(),
+                    to: "foo/plan.phase-02".to_string(),
+                    properties: NodeProperties::default(),
+                },
+                Record::Satisfies {
+                    from: "foo/plan.phase-01".to_string(),
+                    to: "requirements.requirement.checkout".to_string(),
+                },
+                Record::Gates {
+                    from: "foo/plan.phase-02".to_string(),
+                    to: "foo/plan.phase-01".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // Commit + scan: the branch DB carries the durable nodes and the
+        // transient rows the session's held DB starts from.
+        wt_commit_paths(&wt, &["apg/layers"], "seed the convergence node set");
+        testutil::scan_checkout(&wt).unwrap();
+
+        // The routed queries whose FULL results the session state and the
+        // rebuilt state must agree on: every authored durable table, their
+        // durable edges, and the transient Feedback/Reviews/Gates/Satisfies
+        // rows.
+        let queries: &[&str] = &[
+            "MATCH (n:Requirement) RETURN n.fqn, n.body ORDER BY n.fqn",
+            "MATCH (n:Stakeholder) RETURN n.fqn, n.body ORDER BY n.fqn",
+            "MATCH (n:Entity) RETURN n.fqn, n.body ORDER BY n.fqn",
+            "MATCH (n:Value) RETURN n.fqn, n.body ORDER BY n.fqn",
+            "MATCH (a:Requirement)-[r:Drives]->(b) RETURN a.fqn, b.fqn ORDER BY a.fqn, b.fqn",
+            "MATCH (a:Stakeholder)-[r:Contains]->(b) RETURN a.fqn, b.fqn ORDER BY a.fqn, b.fqn",
+            "MATCH (f:Feedback) RETURN f.fqn, f.body, f.status, f.disposition ORDER BY f.fqn",
+            "MATCH (f:Feedback)-[r:Reviews]->(t) RETURN f.fqn, t.fqn ORDER BY f.fqn, t.fqn",
+            "MATCH (a:PlanPhase)-[r:Gates]->(b) RETURN a.fqn, b.fqn ORDER BY a.fqn, b.fqn",
+            "MATCH (a:PlanPhase)-[r:Satisfies]->(b) RETURN a.fqn, b.fqn ORDER BY a.fqn, b.fqn",
+        ];
+
+        // One routed durable mutation, asserting success.
+        let run = |args: &[&str]| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        // Runs one query, returning its full result rows (header included, empty
+        // lines dropped). While the session is live this routes to the held DB;
+        // after `end` it reads the rebuilt DB directly — the same query text.
+        let read = |q: &str| -> Vec<String> {
+            let out = testutil::spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "query `{q}` failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::to_string)
+                .filter(|l| !l.is_empty())
+                .collect()
+        };
+
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+
+        // (1) N routed mutations: adds, an update of the reviewed node (which
+        // also carries the untouched incoming `contains`), an `edge add`, an
+        // `edge rm`, and a `node rm`.
+        run(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "added-req",
+            "--body",
+            "added requirement",
+        ]);
+        run(&[
+            "node",
+            "add",
+            "domain",
+            "value",
+            "added-val",
+            "--body",
+            "added value",
+        ]);
+        run(&[
+            "node",
+            "update",
+            "requirements",
+            "requirement",
+            "checkout",
+            "--body",
+            "checkout updated",
+        ]);
+        run(&[
+            "edge",
+            "add",
+            "drives",
+            "requirements.requirement.checkout",
+            "domain.value.added-val",
+        ]);
+        run(&[
+            "edge",
+            "rm",
+            "drives",
+            "requirements.requirement.checkout",
+            "domain.value.scratch",
+        ]);
+        run(&["node", "rm", "domain", "value", "doomed"]);
+
+        // Capture the live session DB state through ROUTED queries.
+        let captured: Vec<(&str, Vec<String>)> = queries.iter().map(|q| (*q, read(q))).collect();
+
+        // (2) The single durability point, the session release, then a full scan
+        // rebuild of `db.lbug` from source.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must have released the DB"
+        );
+
+        testutil::scan_checkout(&wt).unwrap();
+
+        // (3) The SAME queries against the rebuilt DB must equal the captured
+        // session state, row for row: the partial delta converged to the full
+        // rebuild on every durable table and every transient Reviews/Gates/
+        // Satisfies row.
+        for (q, before) in &captured {
+            let after = read(q);
+            assert_eq!(
+                &after, before,
+                "the partial delta must converge to the full rebuild for `{q}`"
+            );
+        }
+
+        // The two failure modes, named directly.
+        let gone = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Value {fqn: 'domain.value.doomed'}) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&gone.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("0"),
+            "the routed rm must leave no residue after the rebuild"
+        );
+        let incident = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (a:Stakeholder)-[:Contains]->(b:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&incident.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the untouched incoming contains edge must survive the partial delta"
+        );
+        let reviewed = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (f:Feedback {fqn: 'foo/feedback-1'})-[:Reviews]->(b:Requirement {fqn: 'requirements.requirement.checkout'}) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&reviewed.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the Reviews pairing on the mutated node must survive the partial delta"
+        );
+
+        testutil::remove(&repo);
+    }
 }
