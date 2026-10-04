@@ -183,10 +183,41 @@ impl ArtifactDb {
     }
 
     /// Re-ingests a set of records into the live DB (write-through, R5): nodes
-    /// first (upserts), then edges (endpoints resolved against the code graph
-    /// or the node set being merged). Every statement runs on `conn` so the
-    /// caller can run the merge inside a single transaction — a failed edge
-    /// merge then rolls back the node merges instead of leaving orphans.
+    /// first (upserts, `node_merge`/`merge_node`), then edges
+    /// (`edge_merge`/`merge_edge`).
+    ///
+    /// # The partial-set contract
+    ///
+    /// There is **no full-set assumption**: `records` may be a partial delta —
+    /// the changed identities' records plus any restored incident records — and
+    /// only those records are merged. The caller never has to drag the full
+    /// durable/transient set along to project one change.
+    ///
+    /// An edge endpoint **absent from the supplied record set** still resolves
+    /// its label: `merge_edge` looks it up in the supplied `known` map, then the
+    /// code graph (`code_label`), then the **live DB** (`node_label`). A
+    /// persistent endpoint the delta did not restate (a durable layer node, a
+    /// code node) therefore still resolves. A dangling endpoint is skipped.
+    ///
+    /// # Planned-node realization guard
+    ///
+    /// A `PlannedNode` record **never overwrites a present (realized)
+    /// Implementation node**. The plan JSONL keeps its planned records until
+    /// apply, so a write-through *after* a realization scan would otherwise
+    /// re-mark the scanned code `planned` and break the apply gate's
+    /// realization check. This mirrors the scanner-replace rule (`ingest.rs`): a
+    /// present node supersedes the planned record; the planned record is
+    /// skipped. The guard is computed up front into `realized` (below).
+    ///
+    /// # Transaction
+    ///
+    /// Every statement runs on `conn`, so the caller can wrap the merge in a
+    /// single transaction — a failed edge merge then rolls back the node merges
+    /// instead of leaving orphans.
+    ///
+    /// This is the general partial-set apply seam, not an authoring-mutation
+    /// special case: `reingest_layers_on` and `reingest_project_with` both drive
+    /// it with a delta, and the phase-03 session's admission path reuses it.
     pub fn merge_records(&self, conn: &Connection, records: &[Record]) -> anyhow::Result<()> {
         // A PlannedNode record must never overwrite a **present** (realized)
         // Implementation node: the plan JSONL keeps its planned records until
