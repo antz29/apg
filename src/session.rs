@@ -349,6 +349,14 @@ pub struct PendingChange {
 /// re-applies a mutation.
 pub struct Coordinator {
     apg_root: PathBuf,
+    /// The worktree's resolved project — the branch identity
+    /// [`crate::git::repo_identity`] yields — populated once in
+    /// [`Coordinator::start`] and used by admission to scope the held DB's
+    /// transient-feedback read to the session's OWN project (`<project>/…`).
+    /// `None` for a detached HEAD or a non-git checkout, mirroring the direct
+    /// path's best-effort `repo_identity → branch` (which warns on nothing when
+    /// there is no branch).
+    project: Option<String>,
     socket_path: PathBuf,
     listener: Option<UnixListener>,
     /// The exclusively-owned DB handle, always present for the session's whole
