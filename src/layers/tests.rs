@@ -1777,6 +1777,108 @@ mod unit {
         assert!(msg.contains("BOTH endpoint files"), "{msg}");
     }
 
+    /// [`records_for_nodes`] is the **partial-delta record seam** (phase-05
+    /// task-1): handed a `NodeFile` subset whose authored edge counterpart is
+    /// deliberately ABSENT (the exact shape [`check_edge_pairing`] rejects), it
+    /// performs **no** full-set validation — it succeeds and emits the node
+    /// record followed by exactly one record per out-edge (out is canonical).
+    /// The validating full path ([`ingest_nodes`]) run on the SAME partial set
+    /// still refuses it, pinning the difference between the validating full
+    /// path and the non-validating partial seam. Pure in-memory — the
+    /// scanned/planned universes are empty and no `implemented-by` target is
+    /// present, so no code-ref validation fires.
+    #[test]
+    fn records_for_nodes_emits_a_partial_delta_without_full_set_validation() {
+        // Node `a` carries two out-edges to `b` and `c`, both deliberately
+        // absent from the supplied set (a complete set's `b`/`c` files would
+        // carry the matching in-edge). `check_edge_pairing` rejects exactly
+        // this shape.
+        let mut a = node("requirements", "requirement", "a");
+        a.out
+            .push(out_edge("depends-on", "requirements.requirement.b"));
+        a.out
+            .push(out_edge("depends-on", "requirements.requirement.c"));
+        let nodes = vec![a];
+
+        // The partial builder succeeds: node `a`'s record, then exactly one
+        // edge record per out-edge, with the right from/to/kind.
+        let records =
+            records_for_nodes(&nodes).expect("a partial set needs no full-set validation");
+        assert_eq!(
+            records,
+            vec![
+                Record::Requirement {
+                    fqn: "requirements.requirement.a".to_string(),
+                    id: String::new(),
+                    title: "a".to_string(),
+                    body: String::new(),
+                    feature: String::new(),
+                    properties: NodeProperties::default(),
+                },
+                Record::DependsOn {
+                    from: "requirements.requirement.a".to_string(),
+                    to: "requirements.requirement.b".to_string(),
+                    properties: NodeProperties::default(),
+                },
+                Record::DependsOn {
+                    from: "requirements.requirement.a".to_string(),
+                    to: "requirements.requirement.c".to_string(),
+                    properties: NodeProperties::default(),
+                },
+            ]
+        );
+
+        // The SAME partial set is REFUSED by the validating full path: the
+        // full ingest still runs `check_edge_pairing`, so an out-edge whose
+        // authored target file is absent is an error there (the dangling
+        // authored reference), unlike the non-validating partial seam above.
+        let empty = BTreeSet::new();
+        let msg = ingest_nodes(&nodes, &empty, &empty)
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("requirements.requirement.a"), "{msg}");
+        assert!(msg.contains("depends-on"), "{msg}");
+        assert!(msg.contains("no node file supplies it"), "{msg}");
+    }
+
+    /// [`records_for_nodes`] carries the authored node's full `properties` map
+    /// into the emitted `Record` unchanged (phase-05 task-1): a known key, an
+    /// arbitrary key, and an empty-valued key all survive the partial builder
+    /// verbatim. Pure in-memory.
+    #[test]
+    fn records_for_nodes_round_trips_authored_properties() {
+        let mut entity = node("domain", "entity", "order");
+        // A known key, an arbitrary key, and an empty-valued key.
+        entity
+            .properties
+            .insert("kind".to_string(), "event".to_string());
+        entity
+            .properties
+            .insert("arbitrary".to_string(), "kept".to_string());
+        entity.properties.insert("empty".to_string(), String::new());
+
+        let records =
+            records_for_nodes(std::slice::from_ref(&entity)).expect("an in-memory node emits");
+        assert_eq!(records.len(), 1);
+
+        // The emitted variant carries the SAME full properties map — no key
+        // dropped, no empty value coerced away.
+        match &records[0] {
+            Record::Entity {
+                fqn,
+                name,
+                body,
+                properties,
+            } => {
+                assert_eq!(fqn.as_str(), "domain.entity.order");
+                assert_eq!(name.as_str(), "order");
+                assert!(body.is_empty());
+                assert_eq!(properties, &entity.properties);
+            }
+            other => panic!("expected an Entity record, got {other:?}"),
+        }
+    }
+
     /// [`properties_json`] / [`properties_from_json`] are exact inverses over
     /// the full properties map: unknown keys and keys carrying an **empty
     /// value** survive the round-trip verbatim, and the canonical encoding is
