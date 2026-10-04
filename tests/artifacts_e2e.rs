@@ -2161,4 +2161,141 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-03 task-6: after `apg session save` over a NON-EMPTY buffer, the
+    /// durability commit moves HEAD and save's warn-only `scan_meta` re-anchor /
+    /// DB `Scan`-row refresh is observable:
+    ///   * `graph.jsonl`'s `scan_meta` lead names the NEW HEAD (the export the
+    ///     staleness gate reads);
+    ///   * the HELD DB's own `Scan` row names the SAME sha — read through a
+    ///     routed query while the session still owns `db.lbug`; and
+    ///   * the worktree is NOT stale: the full freshness check (export + DB
+    ///     `Scan` row + authored/transient digest vs the tree) succeeds after the
+    ///     session releases, with no rescan.
+    ///
+    /// This pins save's EXISTING warn-only re-anchor / refresh — no new
+    /// mechanism, and no `apg scan` is run to reach the fresh state.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/git/process); run via cargo test-e2e"]
+    fn session_save_reanchors_scan_meta_to_the_new_head() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("session-save-reanchor");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        // The scan that built the DB recorded the pre-save HEAD.
+        let before = git::recorded_scan(&wt_apg).expect("pre-save scan_meta");
+        let before_head = git::git_state(&wt_apg).sha.expect("pre-save HEAD");
+        assert_eq!(
+            before.sha, before_head,
+            "the fixture scan must lead with the pre-save HEAD"
+        );
+        let commits_before = testutil::commit_count(&wt);
+
+        // Route one durable mutation: admitted into the write-back buffer (and
+        // projected into the held DB) but NOT durable until save.
+        let add = testutil::ApgCommand::new(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "reanchored",
+            "--body",
+            "a buffered durable node",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            add.status.success(),
+            "routed node add: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before,
+            "a buffered mutation must not commit before save"
+        );
+
+        // The single durability point: one commit, which moves HEAD.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "session save: {}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "save must land exactly one durability commit"
+        );
+
+        // The commit moved HEAD; capture the new state save re-anchored to.
+        let new_state = git::git_state(&wt_apg);
+        let new_head = new_state.sha.clone().expect("post-save HEAD");
+        assert_ne!(new_head, before_head, "save's commit must move HEAD");
+
+        // (1) The export's scan_meta lead names the NEW HEAD (and the new
+        // state's cleanliness / content-identity key).
+        let recorded = git::recorded_scan(&wt_apg).expect("post-save scan_meta");
+        assert_eq!(
+            recorded.sha, new_head,
+            "graph.jsonl scan_meta must name the new HEAD"
+        );
+        assert_eq!(
+            recorded.clean, new_state.clean,
+            "the recorded cleanliness must re-anchor"
+        );
+        assert_eq!(
+            recorded.content_key, new_state.content_key,
+            "the recorded content-identity key must re-anchor"
+        );
+
+        // (2) The HELD DB's own Scan row names the SAME sha, read through a
+        // routed query while the session still owns db.lbug.
+        let scan_query = format!("MATCH (s:Scan) WHERE s.git_sha = '{new_head}' RETURN count(*)");
+        let routed = testutil::spawn_apg(&["query", &scan_query], &wt);
+        assert!(
+            routed.status.success(),
+            "routed Scan read: {}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&routed.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the held DB's Scan row must carry the new HEAD"
+        );
+
+        // (3) Release the session, then the FULL freshness check (export + DB
+        // Scan row + authored/transient digest vs the tree) succeeds — the
+        // worktree is not stale and needs no rescan.
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "session end: {}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let coord = session.child.wait_with_output().unwrap();
+        assert!(
+            coord.status.success(),
+            "session process: {}",
+            String::from_utf8_lossy(&coord.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must have released the DB"
+        );
+        assert!(
+            git::is_fresh(&wt_apg),
+            "a saved worktree must not be stale after the re-anchor"
+        );
+        assert!(
+            !git::is_stale(&wt_apg),
+            "the staleness gate must not report the saved worktree stale"
+        );
+
+        testutil::remove(&repo);
+    }
 }
