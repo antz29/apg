@@ -476,14 +476,19 @@ fn read_endpoint(
 /// Refuses a duplicate `(kind, from, to)` on the source's out-half (the edge is
 /// identified by that triple; re-adding duplicates both halves).
 ///
-/// Both endpoints resolve through `overlay` (phase-00 task-11): the source
-/// out-half is read from the staged content first (so an endpoint created or
-/// modified earlier in the same unsaved run composes), a staged delete marker
-/// reads as absent, and an unstaged identity falls through to the on-disk file.
-/// The duplicate-triple refusal is evaluated on the resolved (buffered)
+/// Both endpoints resolve through `overlay` against the caller-supplied `base`
+/// node set (the session's `ArtifactDb::node_files_from_db`-reconstructed
+/// durable universe) via [`layers::LayersOverlay::over_base`] and
+/// [`read_endpoint`]: the source out-half is read from the staged content first
+/// (so an endpoint created or modified earlier in the same unsaved run
+/// composes), a staged delete marker reads as absent, and an unstaged identity
+/// yields the matching base node (or nothing when the base holds none). Pure
+/// map/list logic — it never reads `apg/layers/**` and never probes
+/// `node_file_path`, so it cannot observe a node file the caller's base does not
+/// carry. The duplicate-triple refusal is evaluated on the resolved (buffered)
 /// out-half.
 fn edge_add_change(
-    apg_root: &Path,
+    base: &[NodeFile],
     args: &[String],
     overlay: &layers::LayersOverlay,
 ) -> anyhow::Result<Change> {
@@ -502,16 +507,13 @@ fn edge_add_change(
     // runs inside the whole-durable-sequence flock held by `cmd_edge` (the
     // single acquisition site) — no internal acquire, so no double-lock and the
     // shared endpoint file is never read outside the serialization scope. The
-    // read resolves through `overlay`, so a source staged earlier in the same
-    // unsaved run is the base; a staged delete (or an absent file) refuses
-    // exactly as the direct disk read did.
+    // read resolves through `overlay` against the caller-supplied `base`, so a
+    // source staged earlier in the same unsaved run is the base; a staged
+    // delete, or an identity the base does not carry, refuses.
     let mut source = overlay
-        .read(apg_root, src_layer, &src_type, &src_name)?
+        .over_base(base, src_layer, &src_type, &src_name)
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "no node file at {}",
-                layers::node_file_path(apg_root, src_layer, &src_type, &src_name).display()
-            )
+            anyhow::anyhow!("node `{from}` does not exist — use `apg node add` to create it")
         })?;
     layers::refuse_if_present(
         source
@@ -529,7 +531,7 @@ fn edge_add_change(
     });
 
     let mut writes = vec![source];
-    if let Some(mut target) = read_endpoint(apg_root, overlay, to)? {
+    if let Some(mut target) = read_endpoint(base, overlay, to) {
         target.in_edges.push(InEdge {
             kind: kind.to_string(),
             source: from.to_string(),
