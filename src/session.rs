@@ -365,6 +365,11 @@ impl Coordinator {
     /// `apg session start`: reclaim any stale socket, take the extended flock,
     /// open (and own) `db.lbug` once, bind the worktree socket, and serve until
     /// an `end` request arrives.
+    ///
+    /// A session always holds a database: an absent `db.lbug` is a hard
+    /// refusal naming `apg scan` (via [`open_owned_db`](Self::open_owned_db)),
+    /// raised before the socket is bound, so a refused start leaves no socket
+    /// bound and no flock held behind.
     pub fn start(apg_root: &Path) -> anyhow::Result<()> {
         let apg_root = apg_root.to_path_buf();
         // One session per worktree DB: a live session refuses a second start.
@@ -372,12 +377,16 @@ impl Coordinator {
 
         // Hold the SAME extended flock the direct path uses for the session's
         // life. A non-routing `apg node`/`apg edge` therefore waits instead of
-        // RMW-ing a node file the coordinator is rewriting.
+        // RMW-ing a node file the coordinator is rewriting. The flock is taken
+        // before the DB is opened because it is what serializes every
+        // `db.lbug` access against a direct writer's reingest; on any `?`
+        // refusal below the guard drops, releasing the flock.
         let lock = acquire_spec_lock(&apg_root)?;
 
-        // Own the DB exclusively, opened ONCE (the amortized open). A missing
-        // DB (no scan yet) is allowed — the durable node files are
-        // authoritative and the projection is skipped until a scan creates it.
+        // Own the DB exclusively, opened ONCE (the amortized open). The session
+        // always holds a database — there is no buffer-only path: an absent
+        // `db.lbug` refuses here, naming `apg scan`, before the socket is
+        // bound, and `apg/layers/**` is never used as a DB-less fallback.
         let db = Self::open_owned_db(&apg_root)?;
 
         let socket = socket_path(&apg_root);
@@ -389,7 +398,7 @@ impl Coordinator {
         })?;
         eprintln!("apg session: listening on {}", socket.display());
 
-        let mut coordinator = Coordinator {
+        let coordinator = Coordinator {
             apg_root,
             socket_path: socket,
             listener: Some(listener),
