@@ -161,7 +161,7 @@ pub fn ingest_nodes(
         let f = fqn(layer, &n.node_type, &n.name);
         records.push(node_record(&f, &n.node_type, n)?);
         for oe in &n.out {
-            records.push(edge_record(&f, &oe.kind, &oe.target)?);
+            records.push(edge_record(&f, &oe.kind, &oe.target, &oe.properties)?);
         }
     }
     Ok(records)
@@ -184,19 +184,23 @@ pub(crate) fn layer_of(layer_dir: &str) -> Layer {
 fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record> {
     let name = n.name.clone();
     let body = n.body.clone();
+    // The full node-file properties map travels with the record (alongside the
+    // typed keys the schema extracts), so arbitrary/empty-valued keys and an
+    // `Entity`'s `kind` reach the projection's serialized-properties column.
+    let properties = n.properties.clone();
     let prop = |k: &str| n.properties.get(k).cloned().unwrap_or_default();
     Ok(match node_type {
         "stakeholder" => Record::Stakeholder {
             fqn: f.to_string(),
             name,
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         "user" => Record::User {
             fqn: f.to_string(),
             name,
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         "requirement" => Record::Requirement {
             fqn: f.to_string(),
@@ -204,20 +208,20 @@ fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record>
             title: name,
             body,
             feature: prop("feature"),
-            properties: NodeProperties::default(),
+            properties,
         },
         "note" => Record::Note {
             fqn: f.to_string(),
             body,
             kind: prop("kind"),
-            properties: NodeProperties::default(),
+            properties,
         },
         "constraint" => Record::Constraint {
             fqn: f.to_string(),
             name,
             body,
             attaches_to: prop("attaches-to"),
-            properties: NodeProperties::default(),
+            properties,
         },
         "group" => Record::Group {
             fqn: f.to_string(),
@@ -225,50 +229,50 @@ fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record>
             attribute: prop("attribute"),
             root: prop("root"),
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         "entity" => Record::Entity {
             fqn: f.to_string(),
             name,
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         "value" => Record::Value {
             fqn: f.to_string(),
             name,
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         "service" => Record::Service {
             fqn: f.to_string(),
             name,
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         "system" => Record::System {
             fqn: f.to_string(),
             name,
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         "container" => Record::Container {
             fqn: f.to_string(),
             name,
             kind: prop("kind"),
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         "component" => Record::Component {
             fqn: f.to_string(),
             name,
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         "person" => Record::Person {
             fqn: f.to_string(),
             name,
             body,
-            properties: NodeProperties::default(),
+            properties,
         },
         other => anyhow::bail!("unknown node type `{other}` in layer `{}`", n.layer),
     })
@@ -279,64 +283,73 @@ fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record>
 /// (`realised-by` → `RealisedBy`, `implemented-by` → `SpecImplementedBy`);
 /// `contains`/`drives`/`calls`/`uses`/`represents`/`details`/`depends-on` map
 /// to the shared records the ingestor routes by endpoint node-kind.
-fn edge_record(from: &str, kind: &str, to: &str) -> anyhow::Result<Record> {
+fn edge_record(
+    from: &str,
+    kind: &str,
+    to: &str,
+    properties: &NodeProperties,
+) -> anyhow::Result<Record> {
     let from = from.to_string();
     let to = to.to_string();
+    // The out-edge's full properties map travels with the record, so an
+    // authored edge property reaches the projection's serialized-properties
+    // column (both halves, via the pairing invariant).
+    let properties = properties.clone();
     Ok(match kind {
         "contains" => Record::Contains {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "drives" => Record::Drives {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "realised-by" => Record::RealisedBy {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "implemented-by" => Record::SpecImplementedBy {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "calls" => Record::Calls {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "publishes" => Record::Publishes {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "subscribes" => Record::Subscribes {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "depends-on" => Record::DependsOn {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "uses" => Record::Uses {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "represents" => Record::Represents {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         "details" => Record::Details {
             from,
             to,
-            properties: NodeProperties::default(),
+            properties,
         },
         other => anyhow::bail!("unknown edge kind `{other}`"),
     })
