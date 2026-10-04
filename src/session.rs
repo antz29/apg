@@ -532,13 +532,11 @@ impl Coordinator {
                 // open. `self.db` is `None` when the worktree has no query index
                 // (the durable node files are the system of record), in which
                 // case there is no DB Scan row to refresh.
-                if let Some(db) = self.db.as_ref()
-                    && let Err(e) = db.refresh_scan_row(
-                        state.sha.as_deref(),
-                        state.sha.as_ref().map(|_| state.clean),
-                        state.content_key.as_deref(),
-                    )
-                {
+                if let Err(e) = self.db.refresh_scan_row(
+                    state.sha.as_deref(),
+                    state.sha.as_ref().map(|_| state.clean),
+                    state.content_key.as_deref(),
+                ) {
                     eprintln!(
                         "apg: warning: could not refresh the DB Scan row after session save: {e:#}"
                     );
