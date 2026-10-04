@@ -294,6 +294,21 @@ enum Export {
 /// non-git), and a Struct/Function's `path` is the same source-file identity.
 /// No absolute checkout path is emitted; the absolute path is reconstructed in
 /// the suite-tool boundary against the caller's project directory.
+///
+/// **Lossless-layers consistency (phase-4 task-15).** The durable authored
+/// node/edge properties now travel on `Graph` (`Node::properties` and
+/// `Graph::edge_properties`) so the DB projection can be lossless
+/// (`create_schema`/`build_load_files` write the serialized-properties column;
+/// the session's `merge_records` re-merges it). This export is a *stable view*
+/// of that graph: it deliberately does **not** serialize those properties, so
+/// the `Export` record shape — and therefore `graph.jsonl` line-for-line
+/// output — is unchanged for code records AND for the durable authored
+/// records/edges, and the transient plan/feedback sets keep their current
+/// shape. A `read_graph_jsonl` → `write_graph_jsonl` round-trip stays
+/// byte-stable, and the export reader (`code_universes_from_export`, the
+/// splice/cache comparisons) needs no property handling. The properties live in
+/// the DB projection (`ArtifactDb::node_files_from_db`), which is the
+/// phase-4 round-trip source of truth — not in this JSONL.
 pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
