@@ -837,16 +837,31 @@ pub fn project_only(
     Ok(())
 }
 
-/// Appends the worktree's transient record set to `records`: the plan store
+/// The shared **plan-store-plus-tier-mirror** transient reader: appends the
+/// worktree's transient record set to `records` — the plan store
 /// (`.trans/plans/*.jsonl`) plus the five feedback tier mirrors
-/// (`.trans/<tier>/*.jsonl`), via the public enumerators
+/// (`.trans/<tier>/*.jsonl`) — via the public enumerators
 /// [`specs::plan_files`](crate::specs::plan_files) /
-/// [`specs::trans_mirror_files`](crate::specs::trans_mirror_files). Used by
-/// [`write_project_with`]'s projection apply so a durable mutation re-MERGEs
-/// the transient nodes/edges (notably `Feedback -[:Reviews]-> <durable node>`)
-/// that its changed-FQN DETACH would otherwise drop. Errors loudly on a
-/// malformed transient file (never a silent skip).
-fn append_transient_records(apg_root: &Path, records: &mut Vec<Record>) -> anyhow::Result<()> {
+/// [`specs::trans_mirror_files`](crate::specs::trans_mirror_files).
+///
+/// It reads at most the file paths those enumerators return, and those
+/// enumerate only **existing** files: an absent `.trans` is a benign no-op (an
+/// empty append), while a present-but-malformed file is a **loud** error via
+/// [`specs::read_jsonl`](crate::specs::read_jsonl) (never a silent skip). Every
+/// file's records are collected before it returns, so a caller that re-ingests
+/// only after this returns `Ok` gets all-or-nothing (nothing applied on any
+/// malformed file).
+///
+/// Two callers: the **direct path** [`write_project_with`]'s assembly (it
+/// re-merges the transient set so a changed-FQN DETACH cannot drop a
+/// `Feedback -[:Reviews]-> <node>` pairing), and the **session-start seed**
+/// (it projects the transient set into the held DB once at `session start`).
+/// It is deliberately **NOT** part of the per-mutation admission path:
+/// admission reads the held DB, never `.trans`.
+pub(crate) fn append_transient_records(
+    apg_root: &Path,
+    records: &mut Vec<Record>,
+) -> anyhow::Result<()> {
     for path in crate::specs::plan_files(apg_root)
         .into_iter()
         .chain(crate::specs::trans_mirror_files(apg_root))
