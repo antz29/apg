@@ -167,14 +167,19 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
     build_change_over(apg_root, kind, args, &layers::LayersOverlay::new())
 }
 
-/// Buffer-aware twin of [`build_change`]: the same dispatch, but each arm
-/// passes a caller-supplied [`layers::LayersOverlay`] to its change builder, so
-/// a mutation's existence checks and read-modify-write resolve against the
-/// cumulative buffered state (an update/rm of an earlier-buffered node applies
-/// over its buffered content) before falling back to disk. The session
-/// coordinator calls this with the overlay it builds from its write-back
-/// buffer; the direct path ([`build_change`]) passes an empty one.
+/// Buffer-aware twin of [`build_change`]: the same dispatch, but every arm
+/// threads the caller-supplied `base` node set (the effective node set — the
+/// session's `ArtifactDb::node_files_from_db`-reconstructed durable universe)
+/// and a caller-supplied [`layers::LayersOverlay`] to its change builder, so a
+/// mutation's existence checks and read-modify-write resolve against the base
+/// with the cumulative buffered state folded in (an update/rm of an
+/// earlier-buffered node applies over its buffered content) rather than against
+/// unstaged identities read from `apg/layers/**` on disk. The session
+/// coordinator calls this with the overlay it builds from its write-back buffer
+/// and the DB-reconstructed base; the direct path ([`build_change`]) passes the
+/// on-disk node set and an empty overlay.
 pub fn build_change_over(
+    base: &[NodeFile],
     apg_root: &Path,
     kind: &str,
     args: &[String],
@@ -185,12 +190,12 @@ pub fn build_change_over(
     };
     let rest = &args[1..];
     match (kind, sub) {
-        ("node", "add") => node_add_change(apg_root, rest, overlay),
-        ("node", "update") => node_update_change(apg_root, rest, overlay),
-        ("node", "rm") => node_rm_change(apg_root, rest, overlay),
-        ("edge", "add") => edge_add_change(apg_root, rest, overlay),
-        ("edge", "update") => edge_update_change(apg_root, rest, overlay),
-        ("edge", "rm") => edge_rm_change(apg_root, rest, overlay),
+        ("node", "add") => node_add_change(base, rest, overlay),
+        ("node", "update") => node_update_change(base, rest, overlay),
+        ("node", "rm") => node_rm_change(base, apg_root, rest, overlay),
+        ("edge", "add") => edge_add_change(base, rest, overlay),
+        ("edge", "update") => edge_update_change(base, rest, overlay),
+        ("edge", "rm") => edge_rm_change(base, rest, overlay),
         (_, other) => anyhow::bail!("unknown apg {kind} subcommand: {other}"),
     }
 }
