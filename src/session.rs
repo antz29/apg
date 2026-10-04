@@ -384,8 +384,8 @@ pub struct Coordinator {
 impl Coordinator {
     /// `apg session start`: reclaim any stale socket, take the extended flock,
     /// open (and own) `db.lbug` once, seed its transient projection from
-    /// `.trans`, bind the worktree socket, and serve until an `end` request
-    /// arrives.
+    /// `.trans`, resolve the worktree's project (best-effort), bind the
+    /// worktree socket, and serve until an `end` request arrives.
     ///
     /// A session always holds a database: an absent `db.lbug` is a hard
     /// refusal naming `apg scan` (via [`open_owned_db`](Self::open_owned_db)),
@@ -443,6 +443,15 @@ impl Coordinator {
         })?;
         db.reingest_layers_on(&std::collections::BTreeSet::new(), &transient)?;
 
+        // The worktree's project (branch identity), resolved ONCE and stored so
+        // admission can scope the held DB's transient-feedback read to this
+        // session's own project. Best-effort exactly like the direct path:
+        // a detached HEAD or a non-git checkout resolves to None (warns on
+        // nothing), never a start refusal.
+        let project = crate::git::repo_identity(&apg_root)
+            .ok()
+            .and_then(|identity| identity.branch);
+
         let socket = socket_path(&apg_root);
         if let Some(parent) = socket.parent() {
             std::fs::create_dir_all(parent)?;
@@ -454,6 +463,7 @@ impl Coordinator {
 
         let coordinator = Coordinator {
             apg_root,
+            project,
             socket_path: socket,
             listener: Some(listener),
             db,
