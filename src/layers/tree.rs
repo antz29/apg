@@ -154,6 +154,36 @@ pub fn ingest_nodes(
         eval_constraint(layer_of(&n.layer), &n.name, &n.properties, &own_universe)?;
     }
 
+    // Convert the validated node set + its out-edges into records (out is
+    // canonical). The deterministic ordering and conversion live in
+    // `records_for_nodes` so the same builder serves the partial-delta paths.
+    records_for_nodes(&nodes)
+}
+
+/// Convert an arbitrary caller-supplied [`NodeFile`] subset into the unified
+/// [`Record`] stream — the general **partial-delta record seam**.
+///
+/// It emits one node record per supplied node file (derived FQN, the same
+/// [`node_record`] conversion), followed by one edge record per out-edge (out
+/// is canonical, the same [`edge_record`] conversion), in deterministic
+/// `(layer, node_type, name)` order. It performs **no** full-set validation —
+/// no [`check_edge_pairing`], no [`validate_assembled_rules`], no
+/// [`validate_code_refs`], no [`eval_constraint`]: the caller has already
+/// validated the change over the full base (via `layers::write::
+/// validate_change_over`), and a subset's edges may legitimately have their
+/// counterpart outside the supplied set.
+///
+/// This is not an authoring-mutation-specific path: it is reused by the
+/// session's admission path and by future core-scan-into-session work, both of
+/// which build only the delta they changed rather than re-projecting the whole
+/// node set. [`ingest_nodes`] calls it after its full-set validation, so the
+/// full path's record output stays byte-identical.
+pub fn records_for_nodes(nodes: &[NodeFile]) -> anyhow::Result<Vec<Record>> {
+    // Deterministic record order (one file per node, so paths are unique). A
+    // borrowed slice is not owned, so sort an owned clone.
+    let mut nodes: Vec<NodeFile> = nodes.to_vec();
+    nodes.sort_by(|a, b| (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name)));
+
     // Convert node files + out-edges into records (out is canonical).
     let mut records = Vec::new();
     for n in &nodes {
