@@ -953,7 +953,14 @@ impl Coordinator {
 
     /// Build the cumulative buffered state as a [`layers::LayersOverlay`]: each
     /// buffered write is a staged write, each buffered delete marker a staged
-    /// delete. Empty when nothing is buffered (every identity resolves to disk).
+    /// delete. The overlay carries ONLY those buffered writes and delete
+    /// markers, so an identity no buffered change touches resolves to the held
+    /// DB base reconstructed by
+    /// [`crate::artifacts::ArtifactDb::node_files_from_db`] — the session's
+    /// admission base — and NEVER to `apg/layers/**` on disk.
+    /// [`layers::LayersOverlay::apply_to_base`] folds the buffer over that
+    /// DB-reconstructed base, so with an empty buffer every identity resolves
+    /// to the held DB base.
     fn overlay_from_buffer(&self) -> anyhow::Result<layers::LayersOverlay> {
         let mut overlay = layers::LayersOverlay::new();
         for change in &self.buffer {
