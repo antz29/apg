@@ -3,6 +3,7 @@ mod common;
 use apg::artifacts::ArtifactDb;
 use apg::layers::{self, InEdge, Layer, NodeFile, OutEdge, fqn};
 use apg::node_cmd::*;
+use apg::schema::Record;
 use apg::specs;
 use apg::testutil::{self, Repo, av, spawn_apg};
 use common::{with_cwd, wt_commit};
@@ -4021,6 +4022,198 @@ mod e2e {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-12: a routed durable mutation touches ONLY its own rows.
+    ///
+    /// With two committed-and-scanned durable requirements (`keep` and `move`)
+    /// in the held DB, plus a pre-existing transient
+    /// `Feedback -[:Reviews]-> requirements.requirement.keep` pairing seeded
+    /// into `.trans` BEFORE `apg session start` (so the start seed — not the
+    /// scan — projects it into the held DB), one routed update of `move` must:
+    ///
+    ///   1. leave the untouched `keep` row — fqn/id/title/body/feature and the
+    ///      full serialized `properties` — **byte-for-byte unchanged**, and the
+    ///      `Reviews` edge and its Feedback record unchanged; and
+    ///   2. move only `move`'s row: its body reflects the mutation (with its
+    ///      preserved properties).
+    ///
+    /// The before/after captures go through the live session (routed
+    /// `apg query`), so they observe the held DB's projection at admission.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn routed_mutation_touches_only_its_own_rows() {
+        const KEEP_ROW: &str = "MATCH (n:Requirement {fqn: 'requirements.requirement.keep'}) \
+             RETURN n.fqn, n.id, n.title, n.body, n.feature, n.properties";
+        const MOVE_ROW: &str = "MATCH (n:Requirement {fqn: 'requirements.requirement.move'}) \
+             RETURN n.fqn, n.id, n.title, n.body, n.feature, n.properties";
+        const REVIEWS_EDGE: &str = "MATCH (f:Feedback)-[:Reviews]->\
+             (n:Requirement {fqn: 'requirements.requirement.keep'}) RETURN f.fqn, n.fqn";
+        const FEEDBACK_ROW: &str = "MATCH (f:Feedback {fqn: 'foo/feedback-1'}) \
+             RETURN f.fqn, f.body, f.status, f.disposition";
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("mutation-isolation");
+        let home = repo.root.join("home");
+
+        // Two durable authored requirements, committed and scanned into the DB.
+        // `keep` carries an arbitrary key and an empty-valued key so its
+        // serialized `properties` column is non-trivial: the row must not move
+        // at all.
+        let mut keep = node("requirements", "requirement", "keep");
+        keep.body = "keep body".to_string();
+        keep.properties
+            .insert("feature".to_string(), "isolation".to_string());
+        keep.properties.insert("empty".to_string(), String::new());
+        layers::write_node(&wt_apg, &keep).unwrap();
+
+        let mut moved = node("requirements", "requirement", "move");
+        moved.body = "before the mutation".to_string();
+        moved
+            .properties
+            .insert("feature".to_string(), "isolation".to_string());
+        layers::write_node(&wt_apg, &moved).unwrap();
+
+        testutil::wt_commit_paths(&wt, &["apg/layers"], "seed the durable nodes");
+        testutil::scan_checkout(&wt).unwrap();
+
+        // Seed a pre-existing `Feedback -[:Reviews]-> keep` pairing into the
+        // worktree's `.trans` requirements mirror BEFORE the session starts: the
+        // scan above saw no mirror, so the START SEED is what projects it into
+        // the held DB. Both halves of the relationship live in the one file.
+        let mirror = specs::transient_feedback_path(&wt_apg, "foo", Layer::Requirements);
+        specs::write_jsonl(
+            &mirror,
+            &[
+                Record::Feedback {
+                    fqn: "foo/feedback-1".to_string(),
+                    body: "review of keep".to_string(),
+                    status: "open".to_string(),
+                    disposition: String::new(),
+                },
+                Record::Reviews {
+                    from: "foo/feedback-1".to_string(),
+                    to: "requirements.requirement.keep".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // Precondition (no session yet): both durable nodes are in the DB and
+        // the Reviews edge is NOT — the start seed is what will add it.
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            assert!(db.has_node("requirements.requirement.keep"));
+            assert!(db.has_node("requirements.requirement.move"));
+            assert_eq!(
+                db.q("MATCH (:Feedback)-[:Reviews]->\
+                     (:Requirement {fqn: 'requirements.requirement.keep'}) RETURN count(*)")
+                    .unwrap()
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("0"),
+                "the Reviews edge must not be in the DB before the session seed"
+            );
+        }
+
+        // The start seed projects the transient Feedback + Reviews pair into the
+        // held DB, before the socket is bound.
+        let session = testutil::start_session_process(&wt, &home);
+
+        // Routed reads observe the held DB's projection at admission.
+        let routed = |q: &str| -> String {
+            let out = testutil::spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "routed query `{q}` failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap()
+        };
+
+        // The seed really landed the edge; capture the "before" state.
+        let reviews_before = routed(REVIEWS_EDGE);
+        assert!(
+            reviews_before.contains("foo/feedback-1")
+                && reviews_before.contains("requirements.requirement.keep"),
+            "the start seed must project Feedback -[:Reviews]-> keep into the \
+             held DB: {reviews_before}"
+        );
+        let keep_before = routed(KEEP_ROW);
+        let move_before = routed(MOVE_ROW);
+        let feedback_before = routed(FEEDBACK_ROW);
+        assert!(
+            keep_before.contains("isolation") && keep_before.contains("empty"),
+            "the untouched node's full properties must be present in its row: {keep_before}"
+        );
+
+        // Admit ONE routed mutation that changes ONLY `move`.
+        let args = av(&[
+            "update",
+            "requirements",
+            "requirement",
+            "move",
+            "--body",
+            "moved body",
+        ]);
+        assert_eq!(
+            session_forward_node(&wt_apg, "isolation-1", &args),
+            "Updated node requirements.requirement.move"
+        );
+
+        // (1) The untouched identity is byte-for-byte unchanged — its full row
+        // and the transient Feedback/Reviews pair seeded against it.
+        let keep_after = routed(KEEP_ROW);
+        let reviews_after = routed(REVIEWS_EDGE);
+        let feedback_after = routed(FEEDBACK_ROW);
+        assert_eq!(
+            keep_after, keep_before,
+            "the unaffected node's row must be byte-for-byte unchanged by the mutation"
+        );
+        assert_eq!(
+            reviews_after, reviews_before,
+            "the pre-existing Feedback -[:Reviews]-> keep edge must be unchanged"
+        );
+        assert_eq!(
+            feedback_after, feedback_before,
+            "the Feedback record must be unchanged"
+        );
+
+        // (2) Only `move` moved: its body reflects the mutation and its
+        // preserved properties survive.
+        let move_after = routed(MOVE_ROW);
+        assert_ne!(
+            move_after, move_before,
+            "the mutated node's row must change"
+        );
+        assert!(
+            move_after.contains("moved body"),
+            "the mutated node's body must reflect the mutation: {move_after}"
+        );
+        assert!(
+            !move_before.contains("moved body"),
+            "the pre-mutation row must not already carry the new body: {move_before}"
+        );
+        assert!(
+            move_after.contains("isolation"),
+            "the mutated node's preserved properties must survive: {move_after}"
+        );
+
+        // Clean release: save (the single durability point) then end.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
         testutil::remove(&repo);
     }
 }
