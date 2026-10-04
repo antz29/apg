@@ -11,6 +11,7 @@ use lbug::Connection;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 
 use crate::graph::{Graph, NodeKind};
+use crate::layers::{NodeProperties, properties_json};
 
 use super::parquet::{Col, lines, loc, write_parquet};
 
@@ -54,9 +55,11 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut req_title = Vec::new();
     let mut req_body = Vec::new();
     let mut req_feature = Vec::new();
+    let mut req_props = Vec::new();
     let mut note_fqn = Vec::new();
     let mut note_body = Vec::new();
     let mut note_kind = Vec::new();
+    let mut note_props = Vec::new();
     let mut feedback_fqn = Vec::new();
     let mut feedback_body = Vec::new();
     let mut feedback_status = Vec::new();
@@ -82,42 +85,53 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut stakeholder_fqn = Vec::new();
     let mut stakeholder_name = Vec::new();
     let mut stakeholder_body = Vec::new();
+    let mut stakeholder_props = Vec::new();
     let mut entity_fqn = Vec::new();
     let mut entity_name = Vec::new();
     let mut entity_body = Vec::new();
+    let mut entity_props = Vec::new();
     let mut system_fqn = Vec::new();
     let mut system_name = Vec::new();
     let mut system_body = Vec::new();
+    let mut system_props = Vec::new();
     let mut container_fqn = Vec::new();
     let mut container_name = Vec::new();
     let mut container_kind = Vec::new();
     let mut container_body = Vec::new();
+    let mut container_props = Vec::new();
     let mut component_fqn = Vec::new();
     let mut component_name = Vec::new();
     let mut component_body = Vec::new();
+    let mut component_props = Vec::new();
 
     // New-model tier catalog (apg-projects SPEC §3.1).
     let mut user_fqn = Vec::new();
     let mut user_name = Vec::new();
     let mut user_body = Vec::new();
+    let mut user_props = Vec::new();
     let mut group_fqn = Vec::new();
     let mut group_name = Vec::new();
     let mut group_attribute = Vec::new();
     let mut group_root = Vec::new();
     let mut group_body = Vec::new();
+    let mut group_props = Vec::new();
     let mut value_fqn = Vec::new();
     let mut value_name = Vec::new();
     let mut value_body = Vec::new();
+    let mut value_props = Vec::new();
     let mut service_fqn = Vec::new();
     let mut service_name = Vec::new();
     let mut service_body = Vec::new();
+    let mut service_props = Vec::new();
     let mut person_fqn = Vec::new();
     let mut person_name = Vec::new();
     let mut person_body = Vec::new();
+    let mut person_props = Vec::new();
     let mut constraint_fqn = Vec::new();
     let mut constraint_name = Vec::new();
     let mut constraint_body = Vec::new();
     let mut constraint_attaches_to = Vec::new();
+    let mut constraint_props = Vec::new();
 
     for (fqn, node) in &graph.nodes {
         match node.kind {
@@ -180,11 +194,13 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 req_title.push(node.title.clone().unwrap_or_default());
                 req_body.push(node.body.clone().unwrap_or_default());
                 req_feature.push(node.feature.clone().unwrap_or_default());
+                req_props.push(properties_json(&node.properties));
             }
             NodeKind::Note => {
                 note_fqn.push(fqn.clone());
                 note_body.push(node.body.clone().unwrap_or_default());
                 note_kind.push(node.sub_kind.clone().unwrap_or_default());
+                note_props.push(properties_json(&node.properties));
             }
             NodeKind::Feedback => {
                 feedback_fqn.push(fqn.clone());
@@ -218,32 +234,38 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 stakeholder_fqn.push(fqn.clone());
                 stakeholder_name.push(node.name.clone().unwrap_or_default());
                 stakeholder_body.push(node.body.clone().unwrap_or_default());
+                stakeholder_props.push(properties_json(&node.properties));
             }
             NodeKind::Entity => {
                 entity_fqn.push(fqn.clone());
                 entity_name.push(node.name.clone().unwrap_or_default());
                 entity_body.push(node.body.clone().unwrap_or_default());
+                entity_props.push(properties_json(&node.properties));
             }
             NodeKind::System => {
                 system_fqn.push(fqn.clone());
                 system_name.push(node.name.clone().unwrap_or_default());
                 system_body.push(node.body.clone().unwrap_or_default());
+                system_props.push(properties_json(&node.properties));
             }
             NodeKind::Container => {
                 container_fqn.push(fqn.clone());
                 container_name.push(node.name.clone().unwrap_or_default());
                 container_kind.push(node.sub_kind.clone().unwrap_or_default());
                 container_body.push(node.body.clone().unwrap_or_default());
+                container_props.push(properties_json(&node.properties));
             }
             NodeKind::Component => {
                 component_fqn.push(fqn.clone());
                 component_name.push(node.name.clone().unwrap_or_default());
                 component_body.push(node.body.clone().unwrap_or_default());
+                component_props.push(properties_json(&node.properties));
             }
             NodeKind::User => {
                 user_fqn.push(fqn.clone());
                 user_name.push(node.name.clone().unwrap_or_default());
                 user_body.push(node.body.clone().unwrap_or_default());
+                user_props.push(properties_json(&node.properties));
             }
             NodeKind::Group => {
                 group_fqn.push(fqn.clone());
@@ -251,27 +273,32 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 group_attribute.push(node.attribute.clone().unwrap_or_default());
                 group_root.push(node.root.clone().unwrap_or_default());
                 group_body.push(node.body.clone().unwrap_or_default());
+                group_props.push(properties_json(&node.properties));
             }
             NodeKind::Value => {
                 value_fqn.push(fqn.clone());
                 value_name.push(node.name.clone().unwrap_or_default());
                 value_body.push(node.body.clone().unwrap_or_default());
+                value_props.push(properties_json(&node.properties));
             }
             NodeKind::Service => {
                 service_fqn.push(fqn.clone());
                 service_name.push(node.name.clone().unwrap_or_default());
                 service_body.push(node.body.clone().unwrap_or_default());
+                service_props.push(properties_json(&node.properties));
             }
             NodeKind::Person => {
                 person_fqn.push(fqn.clone());
                 person_name.push(node.name.clone().unwrap_or_default());
                 person_body.push(node.body.clone().unwrap_or_default());
+                person_props.push(properties_json(&node.properties));
             }
             NodeKind::Constraint => {
                 constraint_fqn.push(fqn.clone());
                 constraint_name.push(node.name.clone().unwrap_or_default());
                 constraint_body.push(node.body.clone().unwrap_or_default());
                 constraint_attaches_to.push(node.attaches_to.clone().unwrap_or_default());
+                constraint_props.push(properties_json(&node.properties));
             }
         }
     }
@@ -348,6 +375,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("title", Col::Str(req_title)),
             ("body", Col::Str(req_body)),
             ("feature", Col::Str(req_feature)),
+            ("properties", Col::Str(req_props)),
         ],
     )?;
     write_parquet(
@@ -356,6 +384,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(note_fqn)),
             ("body", Col::Str(note_body)),
             ("kind", Col::Str(note_kind)),
+            ("properties", Col::Str(note_props)),
         ],
     )?;
     write_parquet(
@@ -404,6 +433,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(stakeholder_fqn)),
             ("name", Col::Str(stakeholder_name)),
             ("body", Col::Str(stakeholder_body)),
+            ("properties", Col::Str(stakeholder_props)),
         ],
     )?;
     write_parquet(
@@ -412,6 +442,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(entity_fqn)),
             ("name", Col::Str(entity_name)),
             ("body", Col::Str(entity_body)),
+            ("properties", Col::Str(entity_props)),
         ],
     )?;
     write_parquet(
@@ -420,6 +451,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(system_fqn)),
             ("name", Col::Str(system_name)),
             ("body", Col::Str(system_body)),
+            ("properties", Col::Str(system_props)),
         ],
     )?;
     write_parquet(
@@ -429,6 +461,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(container_name)),
             ("kind", Col::Str(container_kind)),
             ("body", Col::Str(container_body)),
+            ("properties", Col::Str(container_props)),
         ],
     )?;
     write_parquet(
@@ -437,6 +470,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(component_fqn)),
             ("name", Col::Str(component_name)),
             ("body", Col::Str(component_body)),
+            ("properties", Col::Str(component_props)),
         ],
     )?;
     write_parquet(
@@ -445,6 +479,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(user_fqn)),
             ("name", Col::Str(user_name)),
             ("body", Col::Str(user_body)),
+            ("properties", Col::Str(user_props)),
         ],
     )?;
     write_parquet(
@@ -455,6 +490,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("attribute", Col::Str(group_attribute)),
             ("root", Col::Str(group_root)),
             ("body", Col::Str(group_body)),
+            ("properties", Col::Str(group_props)),
         ],
     )?;
     write_parquet(
@@ -463,6 +499,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(value_fqn)),
             ("name", Col::Str(value_name)),
             ("body", Col::Str(value_body)),
+            ("properties", Col::Str(value_props)),
         ],
     )?;
     write_parquet(
@@ -471,6 +508,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(service_fqn)),
             ("name", Col::Str(service_name)),
             ("body", Col::Str(service_body)),
+            ("properties", Col::Str(service_props)),
         ],
     )?;
     write_parquet(
@@ -479,6 +517,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("fqn", Col::Str(person_fqn)),
             ("name", Col::Str(person_name)),
             ("body", Col::Str(person_body)),
+            ("properties", Col::Str(person_props)),
         ],
     )?;
     write_parquet(
@@ -488,6 +527,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("name", Col::Str(constraint_name)),
             ("body", Col::Str(constraint_body)),
             ("attaches_to", Col::Str(constraint_attaches_to)),
+            ("properties", Col::Str(constraint_props)),
         ],
     )?;
 
@@ -576,23 +616,76 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         dst.1.push(b.clone());
     }
 
-    let rel = |name: &str, from: Vec<String>, to: Vec<String>| -> anyhow::Result<()> {
+    // The node-file edge kind backing each durable rel table, so the load
+    // files can look up the row's authored properties. `None` for the transient
+    // plan/feedback rels, whose tables carry no serialized-properties column.
+    let rel_kind = |table: &str| -> Option<&'static str> {
+        match table {
+            "Contains" => Some("contains"),
+            "Calls" => Some("calls"),
+            "Uses" => Some("uses"),
+            "Details" => Some("details"),
+            "DependsOn" => Some("depends-on"),
+            "Drives" => Some("drives"),
+            "Represents" => Some("represents"),
+            "RealisedBy" => Some("realised-by"),
+            "SpecImplementedBy" => Some("implemented-by"),
+            "Publishes" => Some("publishes"),
+            "Subscribes" => Some("subscribes"),
+            _ => None,
+        }
+    };
+    // A code-only/transient rel table's load file: the two endpoint columns.
+    let rel_plain = |name: &str, from: Vec<String>, to: Vec<String>| -> anyhow::Result<()> {
         write_parquet(
             &dir.join(name),
             &[("from", Col::Str(from)), ("to", Col::Str(to))],
         )
     };
-    rel("contains_mod_mod.parquet", c_mm.0, c_mm.1)?;
-    rel("contains_mod_file.parquet", c_mfile.0, c_mfile.1)?;
-    rel("contains_file_struct.parquet", c_fs.0, c_fs.1)?;
-    rel("contains_file_fn.parquet", c_ff.0, c_ff.1)?;
-    rel("contains_struct_struct.parquet", c_ss.0, c_ss.1)?;
-    rel("contains_struct_fn.parquet", c_sf.0, c_sf.1)?;
-    rel("calls_fn.parquet", calls_fn.0, calls_fn.1)?;
-    rel("calls_svc.parquet", calls_svc.0, calls_svc.1)?;
-    rel("uses_fn.parquet", u_fn.0, u_fn.1)?;
-    rel("uses_struct.parquet", u_st.0, u_st.1)?;
-    rel("uses_person.parquet", u_person.0, u_person.1)?;
+    // A durable authored rel table's load file: the endpoint columns plus the
+    // serialized-properties column, looked up per row (an absent entry — a code
+    // row or an authored edge with no properties — is the empty object, `"{}"`).
+    let rel_props = |name: &str,
+                     kind: &'static str,
+                     from: Vec<String>,
+                     to: Vec<String>|
+     -> anyhow::Result<()> {
+        let props: Vec<String> = from
+            .iter()
+            .zip(to.iter())
+            .map(|(a, b)| {
+                graph
+                    .edge_properties
+                    .get(&(kind, a.clone(), b.clone()))
+                    .map(properties_json)
+                    .unwrap_or_else(|| properties_json(&NodeProperties::new()))
+            })
+            .collect();
+        write_parquet(
+            &dir.join(name),
+            &[
+                ("from", Col::Str(from)),
+                ("to", Col::Str(to)),
+                ("properties", Col::Str(props)),
+            ],
+        )
+    };
+    rel_props("contains_mod_mod.parquet", "contains", c_mm.0, c_mm.1)?;
+    rel_props(
+        "contains_mod_file.parquet",
+        "contains",
+        c_mfile.0,
+        c_mfile.1,
+    )?;
+    rel_props("contains_file_struct.parquet", "contains", c_fs.0, c_fs.1)?;
+    rel_props("contains_file_fn.parquet", "contains", c_ff.0, c_ff.1)?;
+    rel_props("contains_struct_struct.parquet", "contains", c_ss.0, c_ss.1)?;
+    rel_props("contains_struct_fn.parquet", "contains", c_sf.0, c_sf.1)?;
+    rel_props("calls_fn.parquet", "calls", calls_fn.0, calls_fn.1)?;
+    rel_props("calls_svc.parquet", "calls", calls_svc.0, calls_svc.1)?;
+    rel_props("uses_fn.parquet", "uses", u_fn.0, u_fn.1)?;
+    rel_props("uses_struct.parquet", "uses", u_st.0, u_st.1)?;
+    rel_props("uses_person.parquet", "uses", u_person.0, u_person.1)?;
     write_parquet(
         &dir.join("unresolved_call.parquet"),
         &[
@@ -601,8 +694,8 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             ("target_type", Col::Str(uc_tt)),
         ],
     )?;
-    rel("unresolved_use_fn.parquet", uu_fn.0, uu_fn.1)?;
-    rel("unresolved_use_struct.parquet", uu_st.0, uu_st.1)?;
+    rel_plain("unresolved_use_fn.parquet", uu_fn.0, uu_fn.1)?;
+    rel_plain("unresolved_use_struct.parquet", uu_st.0, uu_st.1)?;
 
     // Spec/plan rel tables, one file per `(from, to)` pair. `contains`
     // (multi-pair) keeps its explicit code pair files; the new tables reuse
@@ -620,7 +713,9 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         let name = pair_file("contains", from, to);
         let empty = (Vec::new(), Vec::new());
         let (fa, fb) = contains_spec.get(&name).unwrap_or(&empty);
-        rel(&name, fa.clone(), fb.clone())?;
+        // The shared `Contains` table carries the serialized-properties column
+        // for every pair, code rows included (they store the empty object).
+        rel_props(&name, "contains", fa.clone(), fb.clone())?;
     }
 
     for (table, from, to) in spec_rel_pairs() {
@@ -718,7 +813,14 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             }
             _ => unreachable!("unknown spec rel table: {table}"),
         }
-        rel(&pair_file(table, from, to), fa, fb)?;
+        let name = pair_file(table, from, to);
+        // The durable authored rel tables carry the serialized-properties
+        // column; the transient plan/feedback rels (`Reviews`/`Gates`/
+        // `Satisfies`) have no column and take the plain two-column file.
+        match rel_kind(table) {
+            Some(kind) => rel_props(&name, kind, fa, fb)?,
+            None => rel_plain(&name, fa, fb)?,
+        }
     }
 
     Ok(())
@@ -1015,9 +1117,11 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     )?;
     conn.query("CREATE NODE TABLE UnresolvedTarget(fqn STRING PRIMARY KEY, category STRING)")?;
     conn.query(
-        "CREATE NODE TABLE Requirement(fqn STRING PRIMARY KEY, id STRING, title STRING, body STRING, feature STRING)",
+        "CREATE NODE TABLE Requirement(fqn STRING PRIMARY KEY, id STRING, title STRING, body STRING, feature STRING, properties STRING)",
     )?;
-    conn.query("CREATE NODE TABLE Note(fqn STRING PRIMARY KEY, body STRING, kind STRING)")?;
+    conn.query(
+        "CREATE NODE TABLE Note(fqn STRING PRIMARY KEY, body STRING, kind STRING, properties STRING)",
+    )?;
     conn.query(
         "CREATE NODE TABLE Feedback(fqn STRING PRIMARY KEY, body STRING, status STRING, disposition STRING)",
     )?;
@@ -1028,29 +1132,52 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query(
         "CREATE NODE TABLE Task(fqn STRING PRIMARY KEY, title STRING, kind STRING, tier STRING, status STRING, verb STRING, target STRING, new_fqn STRING)",
     )?;
-    conn.query("CREATE NODE TABLE Stakeholder(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
-    conn.query("CREATE NODE TABLE Entity(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
-    conn.query("CREATE NODE TABLE System(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
     conn.query(
-        "CREATE NODE TABLE Container(fqn STRING PRIMARY KEY, name STRING, kind STRING, body STRING)",
-    )?;
-    conn.query("CREATE NODE TABLE Component(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
-    conn.query("CREATE NODE TABLE User(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
-    conn.query(
-        "CREATE NODE TABLE DomainGroup(fqn STRING PRIMARY KEY, name STRING, attribute STRING, root STRING, body STRING)",
-    )?;
-    conn.query("CREATE NODE TABLE Value(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
-    conn.query("CREATE NODE TABLE Service(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
-    conn.query("CREATE NODE TABLE Person(fqn STRING PRIMARY KEY, name STRING, body STRING)")?;
-    conn.query(
-        "CREATE NODE TABLE Constraint(fqn STRING PRIMARY KEY, name STRING, body STRING, attaches_to STRING)",
+        "CREATE NODE TABLE Stakeholder(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
     )?;
     conn.query(
-        "CREATE REL TABLE Contains(FROM Language TO Module, FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM Stakeholder TO Requirement, FROM User TO Requirement, FROM Requirement TO Requirement, FROM DomainGroup TO DomainGroup, FROM DomainGroup TO Entity, FROM DomainGroup TO Value, FROM DomainGroup TO Service, FROM System TO Container, FROM Container TO Component)",
+        "CREATE NODE TABLE Entity(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
     )?;
-    conn.query("CREATE REL TABLE Calls(FROM Function TO Function, FROM Service TO Service)")?;
     conn.query(
-        "CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct, FROM Person TO System)",
+        "CREATE NODE TABLE System(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Container(fqn STRING PRIMARY KEY, name STRING, kind STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Component(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE User(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE DomainGroup(fqn STRING PRIMARY KEY, name STRING, attribute STRING, root STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Value(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Service(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Person(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Constraint(fqn STRING PRIMARY KEY, name STRING, body STRING, attaches_to STRING, properties STRING)",
+    )?;
+    // The durable authored rel tables gain the serialized-properties column.
+    // `Contains`/`Calls`/`Uses` are shared with scanned code rows; those carry
+    // the empty-object value (`"{}"`). The transient plan/feedback rels
+    // (`Reviews`/`Gates`/`Satisfies`) and the code-only
+    // `UnresolvedCall`/`UnresolvedUse` stay uncolumned.
+    conn.query(
+        "CREATE REL TABLE Contains(FROM Language TO Module, FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM Stakeholder TO Requirement, FROM User TO Requirement, FROM Requirement TO Requirement, FROM DomainGroup TO DomainGroup, FROM DomainGroup TO Entity, FROM DomainGroup TO Value, FROM DomainGroup TO Service, FROM System TO Container, FROM Container TO Component, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Calls(FROM Function TO Function, FROM Service TO Service, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct, FROM Person TO System, properties STRING)",
     )?;
     conn.query(
         "CREATE REL TABLE UnresolvedCall(FROM Function TO UnresolvedTarget, target_type STRING)",
@@ -1059,26 +1186,28 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE REL TABLE UnresolvedUse(FROM Function TO UnresolvedTarget, FROM Struct TO UnresolvedTarget)",
     )?;
     conn.query(
-        "CREATE REL TABLE Details(FROM Note TO Module, FROM Note TO Function, FROM Note TO Struct, FROM Note TO File, FROM Note TO Requirement, FROM Note TO Plan, FROM Note TO PlanPhase, FROM Note TO Task, FROM Note TO Stakeholder, FROM Note TO Entity, FROM Note TO System, FROM Note TO Container, FROM Note TO Component, FROM Note TO User, FROM Note TO DomainGroup, FROM Note TO Value, FROM Note TO Service, FROM Note TO Person, FROM Note TO Constraint)",
+        "CREATE REL TABLE Details(FROM Note TO Module, FROM Note TO Function, FROM Note TO Struct, FROM Note TO File, FROM Note TO Requirement, FROM Note TO Plan, FROM Note TO PlanPhase, FROM Note TO Task, FROM Note TO Stakeholder, FROM Note TO Entity, FROM Note TO System, FROM Note TO Container, FROM Note TO Component, FROM Note TO User, FROM Note TO DomainGroup, FROM Note TO Value, FROM Note TO Service, FROM Note TO Person, FROM Note TO Constraint, properties STRING)",
     )?;
     conn.query(
         "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Requirement, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task, FROM Feedback TO Stakeholder, FROM Feedback TO Entity, FROM Feedback TO System, FROM Feedback TO Container, FROM Feedback TO Component, FROM Feedback TO User, FROM Feedback TO DomainGroup, FROM Feedback TO Value, FROM Feedback TO Service, FROM Feedback TO Person, FROM Feedback TO Constraint, FROM Feedback TO Note)",
     )?;
-    conn.query("CREATE REL TABLE DependsOn(FROM Requirement TO Requirement)")?;
+    conn.query("CREATE REL TABLE DependsOn(FROM Requirement TO Requirement, properties STRING)")?;
     conn.query("CREATE REL TABLE Gates(FROM PlanPhase TO PlanPhase)")?;
     conn.query("CREATE REL TABLE Satisfies(FROM PlanPhase TO Requirement)")?;
     conn.query(
-        "CREATE REL TABLE Drives(FROM Requirement TO DomainGroup, FROM Requirement TO Entity, FROM Requirement TO Value, FROM Requirement TO Service)",
-    )?;
-    conn.query("CREATE REL TABLE Represents(FROM User TO Entity, FROM Entity TO Person)")?;
-    conn.query(
-        "CREATE REL TABLE RealisedBy(FROM DomainGroup TO System, FROM DomainGroup TO Container, FROM DomainGroup TO Component, FROM Entity TO System, FROM Entity TO Container, FROM Entity TO Component, FROM Service TO System, FROM Service TO Container, FROM Service TO Component)",
+        "CREATE REL TABLE Drives(FROM Requirement TO DomainGroup, FROM Requirement TO Entity, FROM Requirement TO Value, FROM Requirement TO Service, properties STRING)",
     )?;
     conn.query(
-        "CREATE REL TABLE SpecImplementedBy(FROM System TO Module, FROM System TO File, FROM System TO Struct, FROM System TO Function, FROM Container TO Module, FROM Container TO File, FROM Container TO Struct, FROM Container TO Function, FROM Component TO Module, FROM Component TO File, FROM Component TO Struct, FROM Component TO Function)",
+        "CREATE REL TABLE Represents(FROM User TO Entity, FROM Entity TO Person, properties STRING)",
     )?;
-    conn.query("CREATE REL TABLE Publishes(FROM Service TO Entity)")?;
-    conn.query("CREATE REL TABLE Subscribes(FROM Service TO Entity)")?;
+    conn.query(
+        "CREATE REL TABLE RealisedBy(FROM DomainGroup TO System, FROM DomainGroup TO Container, FROM DomainGroup TO Component, FROM Entity TO System, FROM Entity TO Container, FROM Entity TO Component, FROM Service TO System, FROM Service TO Container, FROM Service TO Component, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE SpecImplementedBy(FROM System TO Module, FROM System TO File, FROM System TO Struct, FROM System TO Function, FROM Container TO Module, FROM Container TO File, FROM Container TO Struct, FROM Container TO Function, FROM Component TO Module, FROM Component TO File, FROM Component TO Struct, FROM Component TO Function, properties STRING)",
+    )?;
+    conn.query("CREATE REL TABLE Publishes(FROM Service TO Entity, properties STRING)")?;
+    conn.query("CREATE REL TABLE Subscribes(FROM Service TO Entity, properties STRING)")?;
     Ok(())
 }
 
