@@ -261,7 +261,27 @@ pub fn validate_change(
     // The direct path's effective base is the on-disk store; the validation
     // body is shared with the overlay path via [`validate_change_over`].
     let base = read_existing_nodes(apg_root)?;
-    validate_change_over(apg_root, &base, writes, deletes)
+
+    // The direct path's code-identity source is the `graph.jsonl` export
+    // ([`code_universes_from_export`]); the session's admission supplies the
+    // held `db.lbug`'s universes instead. When the export is absent, the
+    // pre-decoupling behaviour recorded code-FQN refs UNVALIDATED (never
+    // drift): seed `planned` with every `implemented-by` target in the base +
+    // written set so each classifies Pending. The next scan re-validates.
+    // (Mirrors `project_only`'s export-absent fallback.)
+    let graph_jsonl = apg_root.join(TRANS_DIR).join("graph.jsonl");
+    let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root)?;
+    if !graph_jsonl.exists() {
+        for n in base.iter().chain(writes.iter()) {
+            for oe in &n.out {
+                if oe.kind == "implemented-by" {
+                    planned.insert(oe.target.clone());
+                }
+            }
+        }
+    }
+
+    validate_change_over(apg_root, &base, writes, deletes, &scanned, &planned)
 }
 
 /// Validate a complete proposed mutation against a caller-supplied **effective
