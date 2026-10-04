@@ -496,6 +496,71 @@ mod e2e {
         testutil::remove(&repo);
     }
 
+    /// Regression (`session-serve-crash`): a client that disconnects before its
+    /// reply is delivered must NOT kill the live session. The serve loop
+    /// confines a broken-pipe reply write to that one connection, so a liveness
+    /// probe that timed out — or any client killed mid-request — can never
+    /// orphan a healthy coordinator behind a stale socket (which would then
+    /// force a full rebuild on the next `start`/`save`/`end`).
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn a_client_that_disconnects_before_reading_its_reply_does_not_kill_the_session() {
+        use std::io::Write as _;
+
+        let (wt_apg, repo, wt) = mutation_fixture("session-client-disconnect");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+
+        // A client that sends a request and then drops WITHOUT reading the
+        // reply: the coordinator's reply write hits a broken pipe. Repeated so
+        // the disconnect lands both before and after the server reads the
+        // request.
+        let socket = apg::session::socket_path(&wt_apg);
+        for _ in 0..5 {
+            let mut stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+            stream.write_all(b"\"Ping\"\n").unwrap();
+            // drop(stream) with the Pong unread.
+        }
+
+        // The coordinator must still be alive and serving.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "a client that disconnected before reading its reply must not kill the session"
+        );
+
+        // And it still routes a real durable mutation.
+        let add = testutil::spawn_apg(
+            &["node", "add", "requirements", "requirement", "survivor"],
+            &wt,
+        );
+        assert!(
+            add.status.success(),
+            "a routed mutation after the disconnect must succeed: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+
+        // Flush the buffered add (a clean `end` refuses a dirty buffer), then end.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
+
     /// Phase-01 task-16: `apg edge add` (the command shape) through a LIVE
     /// session writes BOTH endpoint files at the session's single durability
     /// point (`apg session save`) — the out half in the source's file, the

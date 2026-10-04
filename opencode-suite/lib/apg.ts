@@ -7,9 +7,9 @@
 // and Cypher string-literal escaping (so structured args can never break out
 // of or inject into a query).
 
-import { closeSync, existsSync, openSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs"
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync } from "node:fs"
 import net from "node:net"
-import { homedir, tmpdir } from "node:os"
+import { homedir } from "node:os"
 import path from "node:path"
 
 export interface ToolContext {
@@ -935,16 +935,18 @@ export async function branchAddedRequirementNames(
 // `apg/.trans/db.lbug` and the extended `specs.lock` flock for its whole life
 // and serves routed mutations/reads over a Unix socket until `apg session end`
 // (or `abort`) arrives. A suite tool cannot block on it, so
-// `startDetachedSession` spawns it with detached stdio, waits until its socket
-// answers live, and returns while the coordinator keeps running — the caller
-// (the `apg_session` tool) then routes further `apg node`/`apg edge`/`apg
-// query` calls through it.
+// `startDetachedSession` spawns it in its OWN session/process group
+// (`detached: true`), waits until its socket answers live, and returns while the
+// coordinator keeps running — the caller (the `apg_session` tool) then routes
+// further `apg node`/`apg edge`/`apg query` calls through it.
 //
 // The socket is NOT re-derived here: a deeply nested worktree path exceeds the
 // OS `SUN_LEN`, so the binary falls back to a deterministic `/tmp` short path
 // the suite cannot reproduce, and it REPORTS whichever path it bound
 // ("apg session: listening on <path>", the same line every client-side resolver
-// keys off). This helper captures that line from a stderr log.
+// keys off). This helper captures that line from the coordinator's stderr log,
+// which it KEEPS at `apg/.trans/session.log` — so a coordinator that exits after
+// the handshake leaves a diagnostic instead of vanishing with the tool call.
 
 /** The `apg session start` stderr prefix naming the socket it bound. */
 const SESSION_LISTENING_PREFIX = "listening on "
@@ -963,6 +965,12 @@ export interface DetachedSession {
   socket: string
   /** The detached coordinator's process id (diagnostics). */
   pid: number
+  /**
+   * The coordinator's retained stderr log (`apg/.trans/session.log`), absolute —
+   * kept after a successful start so a crash that follows the handshake is
+   * diagnosable.
+   */
+  logPath: string
 }
 
 /** Tunables for `startDetachedSession`. */
@@ -1020,12 +1028,20 @@ export function sessionLiveAt(socket: string, timeoutMs = 2000): Promise<boolean
  * points at a change-set. The opt-in suite e2e points `APG_BINARY` at a
  * candidate build the same way every other suite helper does.
  *
+ * The coordinator runs in its OWN session/process group (`detached: true`), so
+ * it outlives this process and is never signalled with the caller's process
+ * group. Its stderr goes to a STABLE, project-local `apg/.trans/session.log`
+ * that is KEPT after a successful start (truncated on each start), so a
+ * coordinator that exits after the handshake leaves a diagnostic instead of
+ * vanishing with the tool call.
+ *
  * Returns a `DetachedSession` on success, or an error STRING on failure —
  * mirroring the lib's string-or-data subprocess contract (`runCli`): no DB
  * found (`NO_DB_ERROR`), a `start` that exited early (a second session already
  * owns the worktree, a bad layout, …), or a socket that never answered live
  * within the timeout. A timeout kills the half-started process. The captured
- * `start` output is carried in the returned error for diagnosis.
+ * `start` output — and the retained log path — are carried in the returned
+ * error for diagnosis.
  */
 export async function startDetachedSession(
   context: ToolContext,
@@ -1037,25 +1053,28 @@ export async function startDetachedSession(
   const timeoutMs = options?.timeoutMs ?? 15000
   const pollMs = options?.pollMs ?? 50
 
-  // Detached stdio: the child outlives the tool call, so it never shares a pipe
-  // this process would have to keep draining. Its stderr goes to a unique temp
-  // log we can read the bound-socket line from; stdout and stdin are ignored.
-  const logFile = path.join(
-    tmpdir(),
-    `apg-session-start-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
-  )
+  // The coordinator's stderr log: a stable, project-local, gitignored path we
+  // read the bound-socket line from AND keep afterwards. A unique temp name
+  // would be undiscoverable once this process exits — exactly when a
+  // post-handshake crash needs the log.
+  const transDir = path.join(root, "apg", ".trans")
+  mkdirSync(transDir, { recursive: true })
+  const logFile = path.join(transDir, "session.log")
   const fd = openSync(logFile, "w")
   let proc: ReturnType<typeof Bun.spawn>
   try {
     proc = Bun.spawn([apgBinary(), "session", "start"], {
       cwd: root,
+      // A truly detached coordinator: `detached: true` calls setsid() on POSIX,
+      // so the child starts a new session/process group and outlives this
+      // process, independent of its process group.
+      detached: true,
       stdin: "ignore",
       stdout: "ignore",
       stderr: fd,
     })
   } catch (e) {
     closeSync(fd)
-    rmSync(logFile, { force: true })
     return `apg session start failed to spawn: ${e instanceof Error ? e.message : String(e)}`
   }
   closeSync(fd)
@@ -1069,37 +1088,33 @@ export async function startDetachedSession(
     }
   }
 
-  try {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      const line = log()
-        .split("\n")
-        .find((l) => l.includes(SESSION_LISTENING_PREFIX))
-      if (line) {
-        const socket = line
-          .slice(line.indexOf(SESSION_LISTENING_PREFIX) + SESSION_LISTENING_PREFIX.length)
-          .trim()
-        if (socket) {
-          // Bound the probe by what remains of the overall deadline so the
-          // loop can never overshoot it, even if a single liveness probe is
-          // slow to settle.
-          const remaining = deadline - Date.now()
-          if (remaining <= 0) break
-          if (await sessionLiveAt(socket, remaining)) {
-            return { root, socket, pid: proc.pid }
-          }
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const line = log()
+      .split("\n")
+      .find((l) => l.includes(SESSION_LISTENING_PREFIX))
+    if (line) {
+      const socket = line
+        .slice(line.indexOf(SESSION_LISTENING_PREFIX) + SESSION_LISTENING_PREFIX.length)
+        .trim()
+      if (socket) {
+        // Bound the probe by what remains of the overall deadline so the
+        // loop can never overshoot it, even if a single liveness probe is
+        // slow to settle.
+        const remaining = deadline - Date.now()
+        if (remaining <= 0) break
+        if (await sessionLiveAt(socket, remaining)) {
+          return { root, socket, pid: proc.pid, logPath: logFile }
         }
       }
-      // A start that exited early (already-live refusal, bad layout, …) never
-      // binds a socket: report its output instead of waiting out the deadline.
-      if (proc.exitCode !== null) {
-        return `apg session start failed (exit ${proc.exitCode}):\n${log().trim()}`
-      }
-      await sleep(pollMs)
     }
-    proc.kill()
-    return `apg session start did not become live within ${timeoutMs}ms:\n${log().trim()}`
-  } finally {
-    rmSync(logFile, { force: true })
+    // A start that exited early (already-live refusal, bad layout, …) never
+    // binds a socket: report its output instead of waiting out the deadline.
+    if (proc.exitCode !== null) {
+      return `apg session start failed (exit ${proc.exitCode}):\n${log().trim()}\nlog: ${logFile}`
+    }
+    await sleep(pollMs)
   }
+  proc.kill()
+  return `apg session start did not become live within ${timeoutMs}ms:\n${log().trim()}\nlog: ${logFile}`
 }

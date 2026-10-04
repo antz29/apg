@@ -381,6 +381,16 @@ pub struct Coordinator {
     buffer: Vec<PendingChange>,
 }
 
+/// What the accept loop must do after serving one connection.
+enum ConnOutcome {
+    /// The connection is done (or failed); keep serving.
+    Continue,
+    /// The peer asked for a clean `end`; the caller releases the session.
+    End,
+    /// The peer asked for `abort`; the caller discards the buffer and rebuilds.
+    Abort,
+}
+
 impl Coordinator {
     /// `apg session start`: reclaim any stale socket, take the extended flock,
     /// open (and own) `db.lbug` once, seed its transient projection from
@@ -714,6 +724,15 @@ impl Coordinator {
     /// request arrives. Single-threaded: one request is fully applied before the
     /// next is read, so mutations are applied exactly in the order received with
     /// one writer and no lost update.
+    ///
+    /// **A connection's I/O failure never ends the session.** A client that
+    /// disconnects before its reply is delivered — a liveness probe that timed
+    /// out, a killed process, an abandoned-then-retried request — yields a
+    /// broken pipe on the reply write; that error is confined to that
+    /// connection, and the accept loop keeps serving. A transient `accept`
+    /// error is likewise retried or reported, never fatal. Only an explicit
+    /// `end` (clean buffer) or `abort` request returns, so a routine probe can
+    /// never orphan a healthy session.
     pub fn serve(mut self) -> anyhow::Result<()> {
         let listener = self
             .listener
@@ -721,102 +740,135 @@ impl Coordinator {
             .ok_or_else(|| anyhow::anyhow!("session has no bound listener"))?
             .try_clone()?;
         loop {
-            let (mut stream, _) = listener.accept()?;
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
-            let request = match read_msg::<Request>(&stream) {
-                Ok(request) => request,
-                Err(_) => continue,
+            let (stream, _) = match listener.accept() {
+                Ok(pair) => pair,
+                // A signal-interrupted accept is retried; any other accept
+                // failure is reported and the loop continues, so a transient
+                // listener error cannot take down the coordinator.
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    eprintln!("apg session: accept failed: {e}");
+                    continue;
+                }
             };
-            // Receive order: queue, then drain FIFO.
-            self.queue.push_back(request);
-            while let Some(request) = self.queue.pop_front() {
-                match request {
-                    Request::Ping => write_msg(&mut stream, &Reply::Pong)?,
-                    Request::End => {
-                        // A clean buffer: release the DB handle, the extended
-                        // flock and the socket, and let `serve` exit. A DIRTY
-                        // buffer holds admitted-but-unsaved changes in memory
-                        // only, so releasing would silently lose them: report
-                        // the pending changes and stay live until the caller
-                        // saves (`apg session save`) or discards
-                        // (`apg session abort`).
-                        if self.buffer.is_empty() {
-                            write_msg(
-                                &mut stream,
-                                &Reply::Ok {
-                                    output: "Session ended".to_string(),
-                                    warnings: Vec::new(),
-                                },
-                            )?;
-                            self.end()?;
-                            return Ok(());
-                        }
-                        write_msg(
-                            &mut stream,
-                            &Reply::Err {
-                                message: self.pending_changes_message(),
-                            },
-                        )?;
+            match self.handle_connection(stream) {
+                ConnOutcome::Continue => {}
+                ConnOutcome::End => {
+                    if let Err(e) = self.end() {
+                        eprintln!("apg session: end failed: {e:#}");
                     }
-                    Request::Query { query, json } => {
-                        let reply = self.handle_query(&query, json);
-                        write_msg(&mut stream, &reply)?;
+                    return Ok(());
+                }
+                ConnOutcome::Abort => {
+                    if let Err(e) = self.abort() {
+                        eprintln!("apg session: abort failed: {e:#}");
                     }
-                    Request::Save => {
-                        let reply = match self.save() {
-                            Ok(()) => Reply::Ok {
-                                output: "Session saved".to_string(),
-                                warnings: Vec::new(),
-                            },
-                            Err(e) => Reply::Err {
-                                message: format!("{e:#}"),
-                            },
-                        };
-                        write_msg(&mut stream, &reply)?;
-                    }
-                    Request::Abort => {
-                        // Discard the buffer, release the session, and (over a
-                        // dirty run) force the full scan that rebuilds the
-                        // phantom-projected index from the durable node files.
-                        let reply = match self.abort() {
-                            Ok(()) => Reply::Ok {
-                                output: "Session aborted".to_string(),
-                                warnings: Vec::new(),
-                            },
-                            Err(e) => Reply::Err {
-                                message: format!("{e:#}"),
-                            },
-                        };
-                        write_msg(&mut stream, &reply)?;
-                        // `abort` released the DB handle, the extended flock
-                        // and the socket (its forced scan may already have
-                        // rebuilt the index), so there is nothing left to
-                        // serve — exit like `Request::End`'s clean path.
-                        return Ok(());
-                    }
-                    Request::Mutate {
-                        client_id,
-                        kind,
-                        args,
-                    } => {
-                        // At-most-once: a replayed id returns the cached reply
-                        // and is never re-applied. Clone the cached reply out
-                        // first so the ledger borrow ends before the (mutable)
-                        // admission below.
-                        let cached = self.ledger.get(&client_id).cloned();
-                        let reply = match cached {
-                            Some(cached) => cached,
-                            None => {
-                                let reply = self.handle_mutation(&kind, &args);
-                                self.ledger.insert(client_id, reply.clone());
-                                reply
-                            }
-                        };
-                        write_msg(&mut stream, &reply)?;
-                    }
+                    return Ok(());
                 }
             }
         }
+    }
+
+    /// Serve exactly one accepted connection, returning what the accept loop
+    /// must do next. No I/O error escapes: a peer that closes early, times out,
+    /// or resets is confined to [`ConnOutcome::Continue`], so the coordinator's
+    /// liveness never depends on a client reading its reply.
+    fn handle_connection(&mut self, mut stream: UnixStream) -> ConnOutcome {
+        // Bounded reads AND writes: a stalled peer can never block this
+        // single-threaded loop indefinitely — the wait times out, the
+        // connection is dropped, and the loop moves on.
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
+        let request = match read_msg::<Request>(&stream) {
+            Ok(request) => request,
+            // The peer closed or timed out before sending: nothing to reply to.
+            Err(_) => return ConnOutcome::Continue,
+        };
+        // Receive order: queue, then drain FIFO.
+        self.queue.push_back(request);
+        while let Some(request) = self.queue.pop_front() {
+            match request {
+                // A liveness probe whose peer has already gone away is not an
+                // error: the write failure is discarded.
+                Request::Ping => {
+                    let _ = write_msg(&mut stream, &Reply::Pong);
+                }
+                Request::End => {
+                    // A clean buffer: ask the caller to release the DB handle,
+                    // the extended flock and the socket. A DIRTY buffer holds
+                    // admitted-but-unsaved changes in memory only, so releasing
+                    // would silently lose them: report the pending changes and
+                    // stay live until the caller saves or aborts.
+                    if self.buffer.is_empty() {
+                        let _ = write_msg(
+                            &mut stream,
+                            &Reply::Ok {
+                                output: "Session ended".to_string(),
+                                warnings: Vec::new(),
+                            },
+                        );
+                        return ConnOutcome::End;
+                    }
+                    let _ = write_msg(
+                        &mut stream,
+                        &Reply::Err {
+                            message: self.pending_changes_message(),
+                        },
+                    );
+                }
+                Request::Query { query, json } => {
+                    let reply = self.handle_query(&query, json);
+                    let _ = write_msg(&mut stream, &reply);
+                }
+                Request::Save => {
+                    let reply = match self.save() {
+                        Ok(()) => Reply::Ok {
+                            output: "Session saved".to_string(),
+                            warnings: Vec::new(),
+                        },
+                        Err(e) => Reply::Err {
+                            message: format!("{e:#}"),
+                        },
+                    };
+                    let _ = write_msg(&mut stream, &reply);
+                }
+                Request::Abort => {
+                    // Reply BEFORE the caller releases the session and runs the
+                    // dirty-buffer forced rebuild (which can take a full scan):
+                    // the peer has already been answered, so the rebuild can
+                    // never race a client read timeout into a broken pipe.
+                    let _ = write_msg(
+                        &mut stream,
+                        &Reply::Ok {
+                            output: "Session aborted".to_string(),
+                            warnings: Vec::new(),
+                        },
+                    );
+                    return ConnOutcome::Abort;
+                }
+                Request::Mutate {
+                    client_id,
+                    kind,
+                    args,
+                } => {
+                    // At-most-once: a replayed id returns the cached reply
+                    // and is never re-applied. Clone the cached reply out
+                    // first so the ledger borrow ends before the (mutable)
+                    // admission below.
+                    let cached = self.ledger.get(&client_id).cloned();
+                    let reply = match cached {
+                        Some(cached) => cached,
+                        None => {
+                            let reply = self.handle_mutation(&kind, &args);
+                            self.ledger.insert(client_id, reply.clone());
+                            reply
+                        }
+                    };
+                    let _ = write_msg(&mut stream, &reply);
+                }
+            }
+        }
+        ConnOutcome::Continue
     }
 
     /// Admit one routed durable mutation into the buffer and project it into

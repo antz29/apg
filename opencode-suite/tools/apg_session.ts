@@ -27,6 +27,7 @@ export default tool({
       `Session live for ${session.root}`,
       `  socket: ${session.socket}`,
       `  pid: ${session.pid}`,
+      `  log: ${session.logPath}`,
       "Durable mutations and queries now route through the live session. Save with apg_session action=save, then end with action=end (or action=abort to discard).",
     ].join("\n")
   },
