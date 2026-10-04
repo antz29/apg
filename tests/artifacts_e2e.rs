@@ -1907,4 +1907,258 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-03 task-4: `apg session save` is the as-is single durability point
+    /// over the WHOLE buffered set — a mix of accepted writes plus an accepted
+    /// delete of a durable node — with NO reconstruction.
+    ///
+    /// A live session admits every routed mutation into its write-back buffer
+    /// and projects it into the held DB, but `apg/layers/**` and git stay at the
+    /// last saved state. One `apg session save` then:
+    ///   * writes each buffered node file EXACTLY as staged (byte-identical to
+    ///     the admitted `PendingChange` content, not rebuilt from the DB);
+    ///   * removes the deleted durable node's file; and
+    ///   * lands exactly ONE new git commit for the whole set.
+    ///
+    /// A routed read afterwards agrees: the held DB reports the same admitted
+    /// bodies and the deleted node is gone, so disk and DB converge.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+    fn session_save_flushes_buffered_writes_and_delete_as_is_in_one_commit() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("session-save-flush");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        // Runs one routed mutation through the live session, asserting success.
+        let run = |args: &[&str]| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
+        // A durable baseline: `survivor` (a later RMW target) and `doomed` (a
+        // later accepted-delete target) added through the session and saved.
+        run(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "survivor",
+            "--body",
+            "survivor baseline",
+        ]);
+        run(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "doomed",
+            "--body",
+            "doomed baseline",
+        ]);
+        let seed_save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            seed_save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&seed_save.stderr)
+        );
+
+        let path =
+            |name: &str| layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name);
+        assert!(path("survivor").exists() && path("doomed").exists());
+
+        let commits_before = testutil::commit_count(&wt);
+
+        // The buffered mix: three accepted writes (two adds and an update over
+        // a durable node) plus an accepted delete of a durable node. The
+        // expected node files are exactly the content asserted at admission.
+        let bare = |name: &str, body: &str| layers::NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "requirement".to_string(),
+            name: name.to_string(),
+            body: body.to_string(),
+            properties: NodeProperties::default(),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        };
+        let kept_a = bare("kept-a", "kept a");
+        let kept_b = bare("kept-b", "kept b");
+        let updated_survivor = bare("survivor", "survivor buffered");
+
+        run(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "kept-a",
+            "--body",
+            "kept a",
+        ]);
+        run(&[
+            "node",
+            "add",
+            "requirements",
+            "requirement",
+            "kept-b",
+            "--body",
+            "kept b",
+        ]);
+        run(&[
+            "node",
+            "update",
+            "requirements",
+            "requirement",
+            "survivor",
+            "--body",
+            "survivor buffered",
+        ]);
+        run(&["node", "rm", "requirements", "requirement", "doomed"]);
+
+        // Before save nothing is durable: the new node files are absent, the
+        // update/delete have not touched `apg/layers/**`, and no commit landed.
+        assert!(
+            !path("kept-a").exists() && !path("kept-b").exists(),
+            "a buffered write must not write apg/layers/** before save"
+        );
+        assert!(
+            path("doomed").exists(),
+            "a buffered delete must not touch apg/layers/** before save"
+        );
+        assert_eq!(
+            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "survivor")
+                .unwrap()
+                .body,
+            "survivor baseline",
+            "a buffered update must not touch apg/layers/** before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before,
+            "a buffered write/delete must not create a commit before save"
+        );
+
+        // The single durability point: the whole buffered set in ONE commit.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "the whole buffered set must land in exactly one commit"
+        );
+
+        // Every written node file equals its buffered admitted content,
+        // byte-for-byte: save flushes the staged `PendingChange` as-is (no
+        // reconstruction).
+        for expected in [&kept_a, &kept_b, &updated_survivor] {
+            let node_path = path(&expected.name);
+            assert!(node_path.exists(), "save must write `{}`", expected.name);
+            assert_eq!(
+                layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", &expected.name)
+                    .unwrap(),
+                *expected,
+                "the on-disk node file for `{}` must equal the admitted content",
+                expected.name
+            );
+            assert_eq!(
+                std::fs::read_to_string(&node_path).unwrap(),
+                serde_json::to_string_pretty(expected).unwrap(),
+                "save must flush `{}` as the exact staged bytes",
+                expected.name
+            );
+        }
+
+        // The deleted durable node's file is gone.
+        assert!(
+            !path("doomed").exists(),
+            "save must remove the deleted durable node's file"
+        );
+
+        // The held DB agrees with disk: routed reads report the admitted bodies
+        // and the deleted node is gone.
+        let assert_body = |fqn: &str, body: &str| {
+            let query = format!(
+                "MATCH (n:Requirement {{fqn: '{fqn}'}}) WHERE n.body = '{body}' RETURN count(*)"
+            );
+            let out = testutil::spawn_apg(&["query", &query], &wt);
+            assert!(
+                out.status.success(),
+                "routed read of {fqn}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1"),
+                "the held DB must report the admitted body for {fqn}"
+            );
+        };
+        assert_body("requirements.requirement.kept-a", "kept a");
+        assert_body("requirements.requirement.kept-b", "kept b");
+        assert_body("requirements.requirement.survivor", "survivor buffered");
+
+        let gone = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.doomed'}) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert!(
+            gone.status.success(),
+            "routed read: {}",
+            String::from_utf8_lossy(&gone.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&gone.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("0"),
+            "the held DB must agree the deleted node is gone"
+        );
+
+        // The durable node-file store matches disk: the three writes are present
+        // and the deleted node is absent.
+        let nodes = layers::read_existing_nodes(&wt_apg).unwrap();
+        for name in ["kept-a", "kept-b", "survivor"] {
+            assert!(
+                nodes
+                    .iter()
+                    .any(|n| n.node_type == "requirement" && n.name == name),
+                "the durable store must contain `{name}`"
+            );
+        }
+        assert!(
+            !nodes.iter().any(|n| n.name == "doomed"),
+            "the durable store must no longer contain `doomed`"
+        );
+
+        // Clean release: save cleared the buffer (a dirty `end` would refuse).
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
 }
