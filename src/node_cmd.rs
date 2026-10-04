@@ -419,18 +419,22 @@ fn node_rm_change(
 
 /// Read an edge endpoint: an authored node (`<layer>.<type>.<name>`) or, when it
 /// does not parse, a code FQN (`implemented-by`/`details` targets). An authored
-/// endpoint resolves through `overlay` (phase-00 task-14): a staged write yields
-/// its buffered content, a staged delete marker yields absent, and an unstaged
-/// identity falls through to the on-disk file. A code FQN still resolves to no
-/// node file.
+/// endpoint resolves through `overlay` against the caller-supplied `base` node
+/// set (the session's `ArtifactDb::node_files_from_db`-reconstructed durable
+/// universe) via [`layers::LayersOverlay::over_base`]: a staged write yields its
+/// buffered content, a staged delete marker yields absent, and an unstaged
+/// identity yields the matching base node (or nothing when the base holds none).
+/// This is pure map/list logic — it never reads `apg/layers/**` and never probes
+/// `node_file_path`, so it cannot observe a node file the caller's base does not
+/// carry. A code FQN resolves to no node file. Infallible.
 fn read_endpoint(
-    apg_root: &Path,
+    base: &[NodeFile],
     overlay: &layers::LayersOverlay,
     f: &str,
-) -> anyhow::Result<Option<NodeFile>> {
+) -> Option<NodeFile> {
     match layers::parse_fqn(f) {
-        Ok((layer, node_type, name)) => overlay.read(apg_root, layer, &node_type, &name),
-        Err(_) => Ok(None), // code FQN — no node file.
+        Ok((layer, node_type, name)) => overlay.over_base(base, layer, &node_type, &name),
+        Err(_) => None, // code FQN — no node file.
     }
 }
 
