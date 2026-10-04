@@ -4975,6 +4975,10 @@ mod e2e {
     ///      node-file reconstruction is identical and no partial transient row
     ///      leaked. (A byte comparison is unusable: lbug rewrites `db.lbug` on
     ///      open, so the test snapshots the DB's logical state instead.)
+    ///   4. releases the extended `specs.lock` flock it acquired before the seed
+    ///      — proven cross-process by removing the corrupt file and bringing up
+    ///      a second `apg session start`, which would block on the flock (and
+    ///      time out) if the refused start still held it.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
     fn session_start_refuses_corrupt_trans_seed_and_leaves_db_unchanged() {
@@ -5101,6 +5105,68 @@ mod e2e {
             "the refused seed must not leave a partial transient row"
         );
         drop(opened);
+
+        // (4) The refused start must also have RELEASED the extended
+        // `specs.lock` flock. It takes that flock before the DB open and the
+        // seed; because the local `SpecLockGuard` drops on the error path, the
+        // fd closes and the flock frees when the refusing process exits. The
+        // strongest proof is cross-process: remove the corrupt file so a fresh
+        // start's seed is a clean no-op, then bring up a second `apg session
+        // start` on the SAME worktree. If the refused start still held the
+        // flock, `flock(LOCK_EX)` would block and `start_session_process` would
+        // time out; a live second session proves the release.
+        std::fs::remove_file(&plan_file).unwrap();
+        assert!(
+            !plan_file.exists(),
+            "the corrupt plan file must be removed before the clean restart"
+        );
+        assert!(
+            specs::plan_files(&wt_apg).is_empty(),
+            "no plan file may remain for the fresh start's seed to choke on"
+        );
+
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "a second start must succeed once the refused start released the specs.lock flock"
+        );
+
+        // The restarted session owns the held DB and serves a routed read.
+        let routed = spawn_apg(&["query", COUNT_SEEDED], &wt);
+        assert!(
+            routed.status.success(),
+            "a routed read through the restarted session must succeed: {}",
+            String::from_utf8_lossy(&routed.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(routed.stdout)
+                .unwrap()
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the restarted session must serve the durable node set"
+        );
+
+        // End the restarted session cleanly: save (the single durability point,
+        // a no-op on the untouched buffer) then end, and confirm no session
+        // lingers.
+        let save = spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the restarted session must end cleanly"
+        );
 
         testutil::remove(&repo);
     }
