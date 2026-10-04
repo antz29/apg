@@ -1,7 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use serde::Serialize;
+
+use crate::layers::NodeProperties;
 
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct Graph {
@@ -200,6 +202,14 @@ pub struct Node {
     pub content_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scanned_at: Option<String>,
+    /// The authored node's **full** node-file properties map (apg-projects
+    /// SPEC §4.1) — arbitrary and empty-valued keys included, e.g. an
+    /// `Entity`'s `kind`, which the typed columns do not carry. Empty for
+    /// scanned code, unresolved targets, and the transient plan/feedback
+    /// nodes. Carried so `build_load_files` can emit the projection's
+    /// serialized-properties column.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub properties: NodeProperties,
 }
 
 impl Default for Node {
@@ -235,6 +245,7 @@ impl Default for Node {
             git_clean: None,
             content_key: None,
             scanned_at: None,
+            properties: NodeProperties::new(),
         }
     }
 }
