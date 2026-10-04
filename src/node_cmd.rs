@@ -730,7 +730,11 @@ pub fn edge_add(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
 pub fn edge_update(apg_root: &Path, args: &[String]) -> anyhow::Result<()> {
     apply_change(
         apg_root,
-        edge_update_change(apg_root, args, &layers::LayersOverlay::new())?,
+        edge_update_change(
+            &layers::read_existing_nodes(apg_root)?,
+            args,
+            &layers::LayersOverlay::new(),
+        )?,
     )
 }
 
