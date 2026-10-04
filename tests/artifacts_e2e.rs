@@ -1705,4 +1705,206 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-02 task-3: live-session admission resolves the durable node set and
+    /// the `implemented-by` code universes SOLELY from the held `db.lbug`.
+    ///
+    /// While the session is live, BOTH disk-side sources the pre-phase-2
+    /// admission path could have leaned on are destroyed: the mutated node's own
+    /// `apg/layers/**` file (deleted) and the code-identity export
+    /// `apg/.trans/graph.jsonl` (corrupted). A routed mutation touching the node
+    /// still admits — it resolves the node's base content from the held DB, not
+    /// the gone file — and its `implemented-by` target validates against the DB's
+    /// scanned code universe: the REAL target (`go.fixture.mod.Store`, the scanned
+    /// struct) admits, while a bogus target is refused as spec drift, never
+    /// silently recorded unchecked/pending (which is what an empty universe would
+    /// do). A routed query then sees the projected change.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+    fn session_admission_resolves_the_node_set_and_code_universes_from_the_held_db() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("db-only-admission");
+        let home = repo.root.join("home");
+
+        // A committed durable Solution System whose `implemented-by` target is
+        // REAL scanned code from the fixture payload (`go.fixture.mod.Store`).
+        // The scan projects it into `db.lbug`, so the session holds it when the
+        // node file and the export are later destroyed.
+        let system = layers::NodeFile {
+            layer: "solution".to_string(),
+            node_type: "system".to_string(),
+            name: "api".to_string(),
+            body: "the api system".to_string(),
+            properties: NodeProperties::default(),
+            out: vec![layers::OutEdge {
+                kind: "implemented-by".to_string(),
+                target: "go.fixture.mod.Store".to_string(),
+                properties: NodeProperties::default(),
+            }],
+            in_edges: Vec::new(),
+        };
+        layers::write_node(&wt_apg, &system).unwrap();
+        testutil::wt_commit(
+            &wt,
+            &["apg/layers/solution/system/api.json"],
+            "seed the api system",
+        );
+        testutil::scan_checkout(&wt).unwrap();
+
+        // The DB precondition admission relies on: the System is a durable node
+        // and the real target is in its scanned code universe.
+        {
+            let db = ArtifactDb::open(&wt_apg).unwrap();
+            assert!(db.has_node("solution.system.api"));
+            let (scanned, _planned) = db.code_universes_from_db().unwrap();
+            assert!(
+                scanned.contains("go.fixture.mod.Store"),
+                "fixture scanned code: {scanned:?}"
+            );
+        }
+
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the session must be live"
+        );
+
+        // Destroy BOTH disk-side sources while the session is live: the mutated
+        // node's file and the code-identity export.
+        let node_file = layers::node_file_path(&wt_apg, Layer::Solution, "system", "api");
+        assert!(
+            node_file.exists(),
+            "the node file must exist before it is deleted"
+        );
+        std::fs::remove_file(&node_file).unwrap();
+        let export = wt_apg.join(specs::TRANS).join("graph.jsonl");
+        assert!(
+            export.exists(),
+            "the export must exist before it is corrupted"
+        );
+        std::fs::write(&export, "this is not a graph.jsonl\n").unwrap();
+
+        // (1) A routed mutation touching the (file-deleted) node still admits:
+        // its base content and its `implemented-by` ref resolve from the held DB.
+        // The edge-preserving update re-validates the existing REAL target.
+        let update = testutil::ApgCommand::new(&[
+            "node",
+            "update",
+            "solution",
+            "system",
+            "api",
+            "--body",
+            "updated against the held db",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            update.status.success(),
+            "a routed mutation touching a node whose file is gone must admit from the DB: {}",
+            String::from_utf8_lossy(&update.stderr)
+        );
+
+        // The projected update is visible to a routed reader while the session is
+        // still live and nothing has been saved.
+        let body = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:System {fqn: 'solution.system.api'}) \
+                 WHERE n.body = 'updated against the held db' RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert!(
+            body.status.success(),
+            "routed body read: {}",
+            String::from_utf8_lossy(&body.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&body.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the routed update must be projected into the live DB at admission"
+        );
+
+        // (2) The held DB's scanned universe drives validation: a bogus
+        // `implemented-by` target is refused as drift, NOT recorded
+        // unchecked/pending (an empty universe would classify it Pending and
+        // admit it).
+        let bogus = testutil::ApgCommand::new(&[
+            "edge",
+            "add",
+            "implemented-by",
+            "solution.system.api",
+            "go.fixture.mod.Absent",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            !bogus.status.success(),
+            "a bogus implemented-by target must be refused, got: {}",
+            String::from_utf8_lossy(&bogus.stdout)
+        );
+        let bogus_err = String::from_utf8_lossy(&bogus.stderr);
+        assert!(
+            bogus_err.contains("spec drift"),
+            "the bogus target must be refused as spec drift: {bogus_err}"
+        );
+        assert!(
+            bogus_err.contains("go.fixture.mod.Absent"),
+            "the refusal must name the bogus target: {bogus_err}"
+        );
+
+        // (3) The routed read sees the projected change: the REAL implemented-by
+        // target, and only it (the refused bogus edge was never recorded).
+        let query = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:System {fqn: 'solution.system.api'})-[:SpecImplementedBy]->(c) \
+                 RETURN c.fqn",
+            ],
+            &wt,
+        );
+        assert!(
+            query.status.success(),
+            "routed edge read: {}",
+            String::from_utf8_lossy(&query.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&query.stdout);
+        let rows: Vec<&str> = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(
+            rows,
+            vec!["c.fqn", "go.fixture.mod.Store"],
+            "the routed read must see exactly the projected REAL implemented-by target"
+        );
+
+        // Clean release: save is the single durability point (a dirty `session
+        // end` would refuse), then end the session.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let end = testutil::spawn_apg(&["session", "end"], &wt);
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        let out = session.child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
 }
