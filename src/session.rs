@@ -29,7 +29,7 @@
 //! mid-flight.
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -844,12 +844,17 @@ impl Coordinator {
     ///    ([`crate::artifacts::ArtifactDb::code_universes_from_db`]), so an
     ///    `implemented-by` ref validates without opening a second handle or
     ///    reading the export.
-    /// 3. Stage the change into a tentative overlay and, from the effective
-    ///    node set and the touched-FQN delete set, project it into the live
-    ///    `db.lbug` AT ADMISSION through [`layers::write::project_only`] and the
-    ///    owned handle's
+    /// 3. Build ONLY this mutation's delta — the written node files' node +
+    ///    out-edge records via [`layers::tree::records_for_nodes`], extended
+    ///    with the incident in-edges read back from the held DB via
+    ///    [`incident_edge_records_from_db`](crate::artifacts::ArtifactDb::incident_edge_records_from_db)
+    ///    — and project exactly that delta, detaching exactly the touched
+    ///    identity set, into the live `db.lbug` AT ADMISSION through
+    ///    [`layers::write::project_only`] and the owned handle's
     ///    [`reingest_layers_on`](crate::artifacts::ArtifactDb::reingest_layers_on)
-    ///    — NO `apg/layers/**` write and NO commit.
+    ///    — NO `apg/layers/**` write, NO commit, and NO `.trans` re-read (the
+    ///    start seed in [`Coordinator::start`](Self::start) established the
+    ///    DB's transient rows).
     /// 4. Only after the projection SUCCEEDS, commit the change to
     ///    `self.buffer` (last write/delete for an identity wins). A failure at
     ///    any earlier step leaves `self.buffer` unchanged and the DB
@@ -915,31 +920,29 @@ impl Coordinator {
             delete_ids.push((layer, node_type, name, path.clone()));
         }
 
-        // (4) Stage the change into a TENTATIVE overlay and compute the
-        // effective node set and the projection delete set (every
-        // touched/changed identity FQN ∪ every deleted FQN).
-        let mut tentative = overlay.clone();
-        for w in &change.writes {
-            tentative.stage_write(w.clone())?;
+        // (4) The exact identity FQN set this mutation touched: every written
+        //     identity ∪ every deleted identity. Never the cumulative buffer.
+        let mut touched: BTreeSet<String> = BTreeSet::new();
+        for (layer, node_type, name) in &write_ids {
+            touched.insert(layers::node_file::fqn(*layer, node_type, name));
         }
         for (layer, node_type, name, _) in &delete_ids {
-            tentative.stage_delete(*layer, node_type, name);
+            touched.insert(layers::node_file::fqn(*layer, node_type, name));
         }
-        let effective_nodes = tentative.apply_to_base(&db_nodes);
-        let delete_fqns = tentative.touched_fqns();
 
-        // (5) Project the effective node set into the live db.lbug at
-        //     admission through the session's OWNED handle — no `apg/layers/**`
-        //     write, no commit, no second DB open. The session always holds a
-        //     database, so there is no absent-DB branch.
-        layers::write::project_only(
-            &self.apg_root,
-            &effective_nodes,
-            &delete_fqns,
-            &scanned,
-            &planned,
-            &|deletes, records| self.db.reingest_layers_on(deletes, records),
-        )?;
+        // (5) Build ONLY this mutation's delta: the written node files' node
+        //     records + out-edge records (records_for_nodes), extended with the
+        //     incident in-edges read back FROM THE HELD DB (a changed/removed
+        //     identity's detach drops them; records_for_nodes only owns
+        //     out-edges).
+        let mut records = layers::tree::records_for_nodes(&change.writes)?;
+        records.extend(self.db.incident_edge_records_from_db(&touched)?);
+
+        // Project exactly that delta, detaching exactly the touched identities,
+        // through the session's OWNED handle. No `.trans` re-read.
+        layers::write::project_only(&touched, &records, &|deletes, records| {
+            self.db.reingest_layers_on(deletes, records)
+        })?;
 
         // (6) Only after the projection SUCCEEDS, commit the change to the
         // buffer — last write/delete for an identity wins.
