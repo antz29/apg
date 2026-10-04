@@ -182,8 +182,15 @@ pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Res
 /// coordinator calls this with the overlay it builds from its write-back buffer
 /// and the DB-reconstructed base; the direct path ([`build_change`]) passes the
 /// on-disk node set and an empty overlay.
+///
+/// The caller-supplied effective `feedback` record set is threaded only to the
+/// `node rm` arm (its outstanding-feedback warning); every other arm ignores
+/// it. The builder itself performs no `.trans` read — each caller supplies its
+/// own source: [`build_change`] from `.trans`, the session's
+/// `Coordinator::apply_mutation` from the held DB.
 pub fn build_change_over(
     base: &[NodeFile],
+    feedback: &[Record],
     apg_root: &Path,
     kind: &str,
     args: &[String],
@@ -196,7 +203,7 @@ pub fn build_change_over(
     match (kind, sub) {
         ("node", "add") => node_add_change(base, rest, overlay),
         ("node", "update") => node_update_change(base, rest, overlay),
-        ("node", "rm") => node_rm_change(base, apg_root, rest, overlay),
+        ("node", "rm") => node_rm_change(base, feedback, apg_root, rest, overlay),
         ("edge", "add") => edge_add_change(base, rest, overlay),
         ("edge", "update") => edge_update_change(base, rest, overlay),
         ("edge", "rm") => edge_rm_change(base, rest, overlay),
