@@ -204,9 +204,16 @@ fn apply_change(apg_root: &Path, change: Change) -> anyhow::Result<()> {
 
 /// `apg node add <layer> <type> <name> [--body B] [--property k=v]*` — refuses
 /// when the FQN already exists (existence is never an implicit upsert; a
-/// re-add full-replaces the file and drops its edges).
+/// re-add full-replaces the file and drops its edges). Existence resolves
+/// through `overlay` against the caller-supplied `base` node set (the session's
+/// `ArtifactDb::node_files_from_db`-reconstructed durable universe) via
+/// [`layers::LayersOverlay::over_base`]: a staged write is present, a staged
+/// delete marker is absent, and an unstaged identity is present exactly when the
+/// base carries it. Pure map/list logic — it never reads `apg/layers/**` and
+/// never probes `node_file_path`, so it cannot observe a node file the caller's
+/// base does not carry.
 fn node_add_change(
-    apg_root: &Path,
+    base: &[NodeFile],
     args: &[String],
     overlay: &layers::LayersOverlay,
 ) -> anyhow::Result<Change> {
@@ -221,7 +228,7 @@ fn node_add_change(
     // by `cmd_node` (the single acquisition site) — no internal acquire, so the
     // read-modify-write is serialized and `node add` never double-locks.
     layers::refuse_if_present(
-        overlay.exists(apg_root, layer, &pos[1], &pos[2]),
+        overlay.over_base(base, layer, &pos[1], &pos[2]).is_some(),
         &f,
         "apg node update",
         "apg node rm",
