@@ -36,6 +36,19 @@ pub struct Graph {
     pub spec_implemented_by: HashSet<(String, String)>,
     pub publishes: HashSet<(String, String)>,
     pub subscribes: HashSet<(String, String)>,
+    /// The **full** node-file properties map of every durable authored edge,
+    /// keyed by the node-file edge kind and its `(from, to)` endpoints (e.g.
+    /// `("drives", "requirements.requirement.checkout", "domain.group.core")`).
+    /// The endpoint sets above carry membership; this map carries the per-row
+    /// metadata the projection's serialized-properties column stores. A scanned
+    /// code edge — or an authored edge declared without properties — has no
+    /// entry (an absent entry is the empty map), exactly like the shared
+    /// `Contains`/`Calls`/`Uses` tables' code rows. The transient
+    /// `gates`/`satisfies`/`reviews` sets carry no such column and never appear
+    /// here. `build_load_files` emits the column from this map and the session's
+    /// incremental reingest re-merges it, so both paths stay lossless.
+    #[serde(skip)]
+    pub edge_properties: HashMap<(&'static str, String, String), NodeProperties>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
