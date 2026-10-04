@@ -452,12 +452,12 @@ impl Coordinator {
         Self::force_full_scan(apg_root)
     }
 
-    /// Server-side shutdown: release the DB handle and the extended flock and
-    /// remove the socket, so a later `start` (or a direct writer) can proceed.
+    /// Server-side shutdown: consume the coordinator, dropping the
+    /// non-optional held DB handle as it releases the extended flock and
+    /// removes the socket, so a later `start` (or a direct writer) can proceed.
     /// Every mutation's projection delta was already applied at admission, so
     /// there is NO end-of-session flush.
-    pub fn end(&mut self) -> anyhow::Result<()> {
-        self.db = None;
+    pub fn end(mut self) -> anyhow::Result<()> {
         self._lock = None;
         let _ = std::fs::remove_file(&self.socket_path);
         eprintln!("apg session: ended");
