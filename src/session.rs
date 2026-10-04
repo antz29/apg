@@ -550,9 +550,9 @@ impl Coordinator {
             Ok(()) => {
                 // Reconcile the session's OWN DB `Scan` row to the SAME state,
                 // through the handle it already holds — never a second `db.lbug`
-                // open. `self.db` is `None` when the worktree has no query index
-                // (the durable node files are the system of record), in which
-                // case there is no DB Scan row to refresh.
+                // open. The session always holds the database (a DB-less session
+                // is refused at `start`, via `open_owned_db`), so the DB `Scan`
+                // row is always present to refresh.
                 if let Err(e) = self.db.refresh_scan_row(
                     state.sha.as_deref(),
                     state.sha.as_ref().map(|_| state.clean),
