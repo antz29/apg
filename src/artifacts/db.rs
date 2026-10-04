@@ -647,6 +647,67 @@ impl ArtifactDb {
 
         Ok(records)
     }
+
+    /// Read the held DB's **transient, project-scoped** `Feedback` rows and
+    /// their `Reviews` edges as [`Record`]s — the DB-only source for `node rm`'s
+    /// outstanding-feedback warning.
+    ///
+    /// The direct (non-session) path builds that warning from the project's
+    /// transient `.trans` mirror files
+    /// ([`crate::specs::project_transient_files`]); this is the session-path
+    /// equivalent, reading the same project-scoped set from the DB the session
+    /// already holds instead of re-reading `.trans`. Only rows whose FQN sits in
+    /// the caller-supplied `project`'s namespace (`<project>/…`) are returned —
+    /// exactly the scope `project_transient_files` selects — so a routed `rm` in
+    /// one project never warns about another project's feedback. The `Feedback`
+    /// table carries `fqn`/`body`/`status`/`disposition`
+    /// ([`crate::artifacts::merge::node_merge`]); the `Reviews` rel carries only
+    /// its endpoints.
+    ///
+    /// This reads the **held DB** and performs no `.trans` read, and it does
+    /// **not** decide which feedback is outstanding: the open/actioned selection
+    /// and the warning text stay in [`crate::node_cmd::node_rm_change`], which
+    /// consumes these records. The caller supplies the `Coordinator`'s resolved
+    /// project; the detached-HEAD / non-git `None` case is handled by the caller
+    /// passing no project (receiving an empty set).
+    ///
+    /// Deterministic: the `Feedback` records are ordered by `fqn`, then the
+    /// `Reviews` records by `(from, to)`.
+    pub fn feedback_records_from_db(&self, project: &str) -> anyhow::Result<Vec<Record>> {
+        let conn = self.conn()?;
+        let prefix = format!("{project}/");
+        let mut records: Vec<Record> = Vec::new();
+
+        let (_, mut feedback_rows) = query_rows(
+            &conn,
+            "MATCH (f:Feedback) RETURN f.fqn, f.body, f.status, f.disposition",
+        )?;
+        feedback_rows.retain(|row| cell(row, 0).starts_with(&prefix));
+        feedback_rows.sort_by_key(|row| cell(row, 0));
+        for row in feedback_rows {
+            records.push(Record::Feedback {
+                fqn: cell(&row, 0),
+                body: cell(&row, 1),
+                status: cell(&row, 2),
+                disposition: cell(&row, 3),
+            });
+        }
+
+        let (_, mut review_rows) = query_rows(
+            &conn,
+            "MATCH (f:Feedback)-[r:Reviews]->(t) RETURN f.fqn, t.fqn",
+        )?;
+        review_rows.retain(|row| cell(row, 0).starts_with(&prefix));
+        review_rows.sort_by_key(|row| (cell(row, 0), cell(row, 1)));
+        for row in review_rows {
+            records.push(Record::Reviews {
+                from: cell(&row, 0),
+                to: cell(&row, 1),
+            });
+        }
+
+        Ok(records)
+    }
 }
 
 /// The transient `.trans` rel tables an authored plan/review edge can occupy.
