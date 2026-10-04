@@ -638,7 +638,7 @@ impl Coordinator {
     /// request arrives. Single-threaded: one request is fully applied before the
     /// next is read, so mutations are applied exactly in the order received with
     /// one writer and no lost update.
-    pub fn serve(&mut self) -> anyhow::Result<()> {
+    pub fn serve(mut self) -> anyhow::Result<()> {
         let listener = self
             .listener
             .as_ref()
