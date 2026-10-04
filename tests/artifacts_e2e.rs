@@ -10,6 +10,7 @@ use apg::specs;
 use apg::testutil::{self, Repo};
 use common::wt_commit_paths;
 use lbug::{Connection, Database};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// A real project context (R4): a git repo whose worktree `foo` on branch
@@ -140,6 +141,369 @@ fn orphan_notes(db: &ArtifactDb) -> i64 {
         "MATCH (n:Note)-[:Details]->() RETURN count(DISTINCT n)",
     );
     total - with_edge
+}
+
+/// The authored node set the phase-4 lossless round-trip pins.
+///
+/// One node of every durable type, each carrying arbitrary *unknown* property
+/// keys and empty-valued keys; the `Entity` carries `kind = event` (a durable
+/// key the `Entity` table has no dedicated column for, so only the
+/// serialized-properties column can carry it); and edges — with their own
+/// properties — of every durable authored kind. Every authored edge appears in
+/// BOTH endpoint files with identical properties (the pairing invariant),
+/// except `implemented-by`, whose code target (`go.fixture.mod.Store`, the
+/// scanned struct `testutil::project_with_db` provides) has no node file to
+/// hold the in half.
+fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
+    use layers::{InEdge, NodeFile, OutEdge};
+
+    fn props(pairs: &[(&str, &str)]) -> NodeProperties {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+    fn out(kind: &str, target: &str, properties: NodeProperties) -> OutEdge {
+        OutEdge {
+            kind: kind.to_string(),
+            target: target.to_string(),
+            properties,
+        }
+    }
+    fn inc(kind: &str, source: &str, properties: NodeProperties) -> InEdge {
+        InEdge {
+            kind: kind.to_string(),
+            source: source.to_string(),
+            properties,
+        }
+    }
+    fn node(
+        layer: &str,
+        node_type: &str,
+        name: &str,
+        body: &str,
+        properties: NodeProperties,
+        out_edges: Vec<OutEdge>,
+        in_edges: Vec<InEdge>,
+    ) -> NodeFile {
+        NodeFile {
+            layer: layer.to_string(),
+            node_type: node_type.to_string(),
+            name: name.to_string(),
+            body: body.to_string(),
+            properties,
+            out: out_edges,
+            in_edges,
+        }
+    }
+
+    let drives_props = props(&[("flavor", "context-map"), ("empty-prop", "")]);
+    let calls_props = props(&[("protocol", "http"), ("empty-prop", "")]);
+    let buyer_props = props(&[("role", "buyer")]);
+    let approver_props = props(&[("role", "approver")]);
+    let admin_props = props(&[("role", "admin")]);
+    let impl_props = props(&[("version", "1"), ("empty-prop", "")]);
+
+    vec![
+        node(
+            "requirements",
+            "stakeholder",
+            "customer",
+            "the customer",
+            props(&[("tier", "gold"), ("empty-meta", "")]),
+            vec![out(
+                "contains",
+                "requirements.requirement.checkout",
+                props(&[]),
+            )],
+            vec![],
+        ),
+        node(
+            "requirements",
+            "user",
+            "shopper",
+            "the shopper",
+            props(&[("channel", "mobile"), ("empty-meta", "")]),
+            vec![out(
+                "represents",
+                "domain.entity.order",
+                buyer_props.clone(),
+            )],
+            vec![],
+        ),
+        node(
+            "requirements",
+            "requirement",
+            "checkout",
+            "the checkout flow",
+            props(&[
+                ("id", "REQ-1"),
+                ("feature", "checkout"),
+                ("owner", "team-x"),
+                ("empty-meta", ""),
+            ]),
+            vec![
+                out("drives", "domain.entity.order", drives_props.clone()),
+                out("depends-on", "requirements.requirement.audit", props(&[])),
+            ],
+            vec![inc(
+                "contains",
+                "requirements.stakeholder.customer",
+                props(&[]),
+            )],
+        ),
+        node(
+            "requirements",
+            "requirement",
+            "audit",
+            "the audit flow",
+            props(&[
+                ("id", "REQ-2"),
+                ("feature", ""),
+                ("owner", ""),
+                ("empty-meta", ""),
+            ]),
+            vec![],
+            vec![inc(
+                "depends-on",
+                "requirements.requirement.checkout",
+                props(&[]),
+            )],
+        ),
+        node(
+            "requirements",
+            "note",
+            "design",
+            "a design note",
+            props(&[("kind", "background"), ("tag", "d"), ("empty-meta", "")]),
+            vec![out("details", "solution.container.api", props(&[]))],
+            vec![],
+        ),
+        node(
+            "requirements",
+            "constraint",
+            "local-rule",
+            "the local rule",
+            props(&[
+                ("attaches-to", "requirements.requirement.checkout"),
+                ("scope", "local"),
+                ("empty-meta", ""),
+            ]),
+            vec![],
+            vec![],
+        ),
+        node(
+            "domain",
+            "group",
+            "core",
+            "the core domain",
+            props(&[
+                ("attribute", "core"),
+                ("root", "checkout"),
+                ("owner-team", ""),
+                ("empty-meta", ""),
+            ]),
+            vec![
+                out("realised-by", "solution.system.platform", props(&[])),
+                out("contains", "domain.value.cart", props(&[])),
+            ],
+            vec![],
+        ),
+        node(
+            "domain",
+            "entity",
+            "order",
+            "the order event",
+            props(&[("kind", "event"), ("owner", ""), ("empty-meta", "")]),
+            vec![
+                out("realised-by", "solution.container.api", props(&[])),
+                out(
+                    "represents",
+                    "solution.person.alice",
+                    approver_props.clone(),
+                ),
+            ],
+            vec![
+                inc(
+                    "drives",
+                    "requirements.requirement.checkout",
+                    drives_props.clone(),
+                ),
+                inc(
+                    "represents",
+                    "requirements.user.shopper",
+                    buyer_props.clone(),
+                ),
+                inc(
+                    "publishes",
+                    "domain.service.billing",
+                    props(&[("topic", "orders")]),
+                ),
+                inc(
+                    "subscribes",
+                    "domain.service.billing",
+                    props(&[("topic", "orders")]),
+                ),
+            ],
+        ),
+        node(
+            "domain",
+            "value",
+            "cart",
+            "the cart",
+            props(&[("unit", "currency"), ("empty-meta", "")]),
+            vec![],
+            vec![inc("contains", "domain.group.core", props(&[]))],
+        ),
+        node(
+            "domain",
+            "service",
+            "billing",
+            "the billing service",
+            props(&[("runtime", "rust"), ("empty-meta", "")]),
+            vec![
+                out("calls", "domain.service.notify", calls_props.clone()),
+                out(
+                    "publishes",
+                    "domain.entity.order",
+                    props(&[("topic", "orders")]),
+                ),
+                out(
+                    "subscribes",
+                    "domain.entity.order",
+                    props(&[("topic", "orders")]),
+                ),
+            ],
+            vec![],
+        ),
+        node(
+            "domain",
+            "service",
+            "notify",
+            "the notify service",
+            props(&[("runtime", "rust"), ("empty-meta", "")]),
+            vec![],
+            vec![inc("calls", "domain.service.billing", calls_props.clone())],
+        ),
+        node(
+            "solution",
+            "system",
+            "platform",
+            "the platform",
+            props(&[("owner-team", ""), ("empty-meta", "")]),
+            vec![out("contains", "solution.container.api", props(&[]))],
+            vec![
+                inc("realised-by", "domain.group.core", props(&[])),
+                inc("uses", "solution.person.alice", admin_props.clone()),
+            ],
+        ),
+        node(
+            "solution",
+            "container",
+            "api",
+            "the api container",
+            props(&[("kind", "service"), ("owner", ""), ("empty-meta", "")]),
+            vec![
+                out("implemented-by", "go.fixture.mod.Store", impl_props.clone()),
+                out("contains", "solution.component.worker", props(&[])),
+            ],
+            vec![
+                inc("realised-by", "domain.entity.order", props(&[])),
+                inc("contains", "solution.system.platform", props(&[])),
+                inc("details", "requirements.note.design", props(&[])),
+            ],
+        ),
+        node(
+            "solution",
+            "component",
+            "worker",
+            "the worker component",
+            props(&[("runtime", "rust"), ("empty-meta", "")]),
+            vec![],
+            vec![inc("contains", "solution.container.api", props(&[]))],
+        ),
+        node(
+            "solution",
+            "person",
+            "alice",
+            "alice",
+            props(&[("email", "a@x"), ("empty-meta", "")]),
+            vec![out("uses", "solution.system.platform", admin_props.clone())],
+            vec![inc(
+                "represents",
+                "domain.entity.order",
+                approver_props.clone(),
+            )],
+        ),
+    ]
+}
+
+/// The exact FQN delete set for `nodes` (`<layer>.<type>.<name>`) — the
+/// touched-FQN set the session's admission computes (`LayersOverlay::touched_fqns`).
+fn touched_fqns(nodes: &[layers::NodeFile]) -> BTreeSet<String> {
+    nodes
+        .iter()
+        .map(|n| format!("{}.{}.{}", n.layer, n.node_type, n.name))
+        .collect()
+}
+
+/// Normalize a node set the way `ArtifactDb::node_files_from_db` renders it:
+/// nodes by `(layer, node_type, name)`, each node's out edges by
+/// `(kind, target)` and in edges by `(kind, source)`.
+fn normalize_node_files(mut nodes: Vec<layers::NodeFile>) -> Vec<layers::NodeFile> {
+    for node in &mut nodes {
+        node.out
+            .sort_by(|a, b| (&a.kind, &a.target).cmp(&(&b.kind, &b.target)));
+        node.in_edges
+            .sort_by(|a, b| (&a.kind, &a.source).cmp(&(&b.kind, &b.source)));
+    }
+    nodes.sort_by(|a, b| (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name)));
+    nodes
+}
+
+/// `node_files_from_db` must reconstruct `expected` exactly: bodies, every
+/// property key (arbitrary, empty-valued, and an `Entity`'s `kind`), and both
+/// edge halves with their properties.
+fn assert_lossless_round_trip(reconstructed: &[layers::NodeFile], expected: &[layers::NodeFile]) {
+    let expected = normalize_node_files(expected.to_vec());
+    assert_eq!(
+        reconstructed,
+        expected.as_slice(),
+        "node_files_from_db must round-trip the authored node set exactly"
+    );
+}
+
+/// The DB-only serialized-properties column must never leak into `graph.jsonl`:
+/// every export line keeps the `Export` shape, and the export round-trips
+/// through `read_graph_jsonl` → `write_graph_jsonl` (line-set equality —
+/// `Graph`'s maps are unordered, so the scan's line order is not stable).
+fn assert_graph_jsonl_consistent(graph_path: &Path) {
+    let text = std::fs::read_to_string(graph_path).unwrap();
+    for line in text.lines() {
+        let value: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert!(
+            value.get("properties").is_none(),
+            "graph.jsonl must not carry the DB-only serialized-properties column: {line}"
+        );
+    }
+    let graph = testutil::read_graph_jsonl(graph_path).unwrap();
+    let round_trip = graph_path.with_extension("roundtrip.jsonl");
+    load::write_graph_jsonl(&graph, &round_trip).unwrap();
+    let canonical = |p: &Path| -> Vec<String> {
+        let mut lines: Vec<String> = std::fs::read_to_string(p)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        lines.sort();
+        lines
+    };
+    assert_eq!(
+        canonical(graph_path),
+        canonical(&round_trip),
+        "graph.jsonl must round-trip through read_graph_jsonl"
+    );
+    std::fs::remove_file(&round_trip).unwrap();
 }
 
 /// e2e tier -- real I/O: every test here builds a real project context
@@ -1263,6 +1627,81 @@ mod e2e {
             db_planned, export_planned,
             "planned universes must be identical from db.lbug and graph.jsonl+plan store"
         );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-04 task-17 (full-scan path): author a node set carrying arbitrary
+    /// and empty-valued property keys, an `Entity` with `kind = event`, edge
+    /// properties, and both edge halves; project it through a REAL scan
+    /// (`create_schema`/`build_load_files`, the `layers::ingest_tree` leg); then
+    /// assert `ArtifactDb::node_files_from_db` reconstructs it exactly and that
+    /// `graph.jsonl` stays a consistent, property-free export.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+    fn node_files_from_db_round_trips_every_property_through_a_full_scan() {
+        let (repo, wt, wt_apg) = testutil::project_with_db("lossless-full-scan");
+        let expected = lossless_authored_nodes();
+
+        for node in &expected {
+            layers::write_node(&wt_apg, node).unwrap();
+        }
+        // The full scan path: create_schema + build_load_files project the
+        // durable tree (the canonical schema/load projection).
+        testutil::scan_checkout(&wt).unwrap();
+
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let reconstructed = db.node_files_from_db().unwrap();
+        drop(db);
+
+        assert_lossless_round_trip(&reconstructed, &expected);
+
+        let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
+        assert_graph_jsonl_consistent(&graph_path);
+
+        // The export still describes the authored nodes by identity (it is
+        // deliberately not the property carrier).
+        let export = std::fs::read_to_string(&graph_path).unwrap();
+        assert!(
+            export.lines().any(|line| {
+                let v: serde_json::Value = serde_json::from_str(line).unwrap();
+                v.get("type").and_then(|t| t.as_str()) == Some("entity")
+                    && v.get("fqn").and_then(|f| f.as_str()) == Some("domain.entity.order")
+            }),
+            "graph.jsonl must describe the authored entity"
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-04 task-17 (session incremental path): the same authored node set,
+    /// projected through the session's incremental reingest/merge path
+    /// (`ArtifactDb::reingest_layers_on`, the `merge_records` write-through the
+    /// live coordinator applies at admission) against a real `db.lbug`, must
+    /// reconstruct exactly — the serialized-properties column carries the full
+    /// map through `merge_node`/`merge_edge` (both halves), and `graph.jsonl` is
+    /// left consistent.
+    #[test]
+    #[ignore = "e2e tier: real I/O (db.lbug/temp dir/process); run via cargo test-e2e"]
+    fn node_files_from_db_round_trips_every_property_through_the_session_merge() {
+        let (repo, _wt, wt_apg) = testutil::project_with_db("lossless-session-merge");
+        let expected = lossless_authored_nodes();
+
+        // The in-memory effective node set the session holds: build the
+        // validated ingest records and the exact touched-FQN delete set, then
+        // apply them through the already-held DB handle — the same call the
+        // coordinator makes at admission.
+        let db = ArtifactDb::open(&wt_apg).unwrap();
+        let (scanned, planned) = db.code_universes_from_db().unwrap();
+        let records = layers::ingest_nodes(&expected, &scanned, &planned).unwrap();
+        db.reingest_layers_on(&touched_fqns(&expected), &records)
+            .unwrap();
+
+        let reconstructed = db.node_files_from_db().unwrap();
+        drop(db);
+
+        assert_lossless_round_trip(&reconstructed, &expected);
+        assert_graph_jsonl_consistent(&wt_apg.join(specs::TRANS).join("graph.jsonl"));
 
         testutil::remove(&repo);
     }
