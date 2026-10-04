@@ -290,12 +290,43 @@ pub fn reingest_layers(
 }
 
 impl ArtifactDb {
-    /// The write-through projection apply for the durable layers tree, run
-    /// against an **already-held** database handle: detach exactly the mutated
-    /// FQNs `deletes` ([`detach_delete_project`], with the planned-code guard) and
-    /// re-merge the caller-supplied `records` (the `layers::ingest_tree`
-    /// output) — nodes first, then edges, in one transaction. A failed merge
-    /// rolls back, so the DB keeps its prior committed state.
+    /// The **general partial-delta apply seam** for the projection: it applies
+    /// exactly the caller-supplied `records` set and `deletes` set to an
+    /// **already-held** database handle, in one transaction.
+    ///
+    /// # The partial-delta contract
+    ///
+    /// The caller supplies only the delta it changed — this seam makes **no
+    /// full-set assumption, no global recompute, and no assumption that
+    /// `deletes` covers all identities**:
+    ///
+    /// - `deletes` is the exact FQN set to detach (a node/edge mutation's
+    ///   removed ∪ changed identities). [`detach_delete_project`] removes
+    ///   exactly those FQNs, **one label at a time**, applying the planned-code
+    ///   guard; an absent/unknown identity matches no row and is a **no-op, not
+    ///   an error**. The set is never a whole-layer prefix: a planned code FQN
+    ///   carries no project prefix, so a prefix delete could not reach it.
+    /// - `records` is the caller's record stream (the affected slice of
+    ///   `layers::ingest_tree` output, plus any appended restore records).
+    ///   [`merge_records`] merges exactly those records — **nodes first**
+    ///   (upserts), **then edges** — and resolves an edge endpoint **absent from
+    ///   the supplied record set** against the code graph and then the **live DB
+    ///   this handle holds** ([`Self::node_label`]). A partial set therefore
+    ///   merges without dragging the full durable/transient set along: the live
+    ///   DB supplies the labels of the persistent endpoints the delta did not
+    ///   restate.
+    ///
+    /// **Restores are ordinary, appended records in the same set** — e.g. the
+    /// incident in-edges a changed node's DETACH would otherwise drop are read
+    /// back from the DB and appended to `records` by the caller; this seam
+    /// gives them no special path. That is what makes it reusable beyond
+    /// authoring mutations: the phase-03 session's admission path projects each
+    /// buffered mutation through it, and a future core-scan-into-session apply
+    /// reuses this same partial-delta entry point — it is **not** an
+    /// authoring-mutation-specific path.
+    ///
+    /// A failed merge **ROLLBACKs** the whole transaction, so the DB keeps its
+    /// prior committed state (never a half-applied delta).
     ///
     /// Split from the free [`reingest_layers`](crate::artifacts::reingest_layers)
     /// so the phase-03 session coordinator can amortize ONE DB open across N
