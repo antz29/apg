@@ -3776,4 +3776,251 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// feedback-18: a DURABLE node that is first updated (buffering an entry)
+    /// and then removed in the same unsaved run keeps its delete marker, so
+    /// `save` removes its node file. The old rule keyed the marker off the held
+    /// DB plus "is it a pending write", and the update made it a pending write —
+    /// so `rm` dropped the buffer entry, `save` left the node file in
+    /// `apg/layers/**`, and the DB (which had already projected the deletion at
+    /// admission) disagreed with disk. The fix records durability at FIRST
+    /// admission (`PendingChange::durable_before`) and keeps the marker exactly
+    /// when the node was durable before.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn session_rm_of_a_saved_node_that_was_updated_leaves_no_file_and_one_commit() {
+        let (wt_apg, repo, wt) = mutation_fixture("session-rm-marker");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+
+        let run = |args: &[&str], expected: &str| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                expected,
+                "apg {args:?}"
+            );
+        };
+
+        // A durable baseline: add a node through the session and save it.
+        run(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "doomed",
+                "--body",
+                "first",
+            ],
+            "Added node requirements.requirement.doomed",
+        );
+        let first_save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            first_save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&first_save.stderr)
+        );
+        let node_path =
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "doomed");
+        assert!(
+            node_path.exists(),
+            "the baseline save must have written the `doomed` node file"
+        );
+        let commits_before = testutil::commit_count(&wt);
+
+        // An update (buffering the durable node) followed by a remove in the
+        // same unsaved run, then the single durability point.
+        run(
+            &[
+                "node",
+                "update",
+                "requirements",
+                "requirement",
+                "doomed",
+                "--body",
+                "second",
+            ],
+            "Updated node requirements.requirement.doomed",
+        );
+        run(
+            &["node", "rm", "requirements", "requirement", "doomed"],
+            "Removed node requirements.requirement.doomed",
+        );
+
+        // Before the save nothing else is durable: the last saved file is still
+        // there and no commit has landed for the update/remove.
+        assert!(
+            node_path.exists(),
+            "a buffered update/remove must not touch `apg/layers/**` before save"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before,
+            "a buffered update/remove must not create a commit before save"
+        );
+
+        // save removes the file in exactly one commit.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert!(
+            !node_path.exists(),
+            "save must remove the durable `doomed` node file"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before + 1,
+            "save must land exactly one new commit"
+        );
+        assert!(
+            !layers::read_existing_nodes(&wt_apg)
+                .unwrap()
+                .iter()
+                .any(|n| n.name == "doomed"),
+            "the durable store must no longer contain `doomed`"
+        );
+
+        // The DB agrees: no `Requirement` row for the removed FQN.
+        let count = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.doomed'}) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert!(
+            count.status.success(),
+            "routed query: {}",
+            String::from_utf8_lossy(&count.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&count.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("0"),
+            "the DB must agree that the removed node is gone"
+        );
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        testutil::remove(&repo);
+    }
+
+    /// feedback-18 (negative half): a node CREATED and REMOVED in the same
+    /// unsaved run was never durable, so it leaves no delete marker. A save over
+    /// the resulting empty buffer succeeds (a no-op), writes no node file, and
+    /// creates no commit — the add-then-rm nets to nothing on disk.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn session_rm_of_a_node_created_in_the_same_run_leaves_no_file() {
+        let (wt_apg, repo, wt) = mutation_fixture("session-rm-created");
+        let home = repo.root.join("home");
+        let session = testutil::start_session_process(&wt, &home);
+        let commits_before = testutil::commit_count(&wt);
+
+        let run = |args: &[&str], expected: &str| {
+            let out = testutil::ApgCommand::new(args)
+                .cwd(&wt)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg {args:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                expected,
+                "apg {args:?}"
+            );
+        };
+
+        run(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "ephemeral",
+                "--body",
+                "transient",
+            ],
+            "Added node requirements.requirement.ephemeral",
+        );
+        run(
+            &["node", "rm", "requirements", "requirement", "ephemeral"],
+            "Removed node requirements.requirement.ephemeral",
+        );
+
+        let node_path =
+            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "ephemeral");
+        assert!(
+            !node_path.exists(),
+            "an add-then-rm must never write a node file"
+        );
+
+        // The buffer nets to nothing: save is a no-op that still succeeds.
+        let save = testutil::spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        assert!(
+            !node_path.exists(),
+            "save must not materialize the removed ephemeral node"
+        );
+        assert_eq!(
+            testutil::commit_count(&wt),
+            commits_before,
+            "a no-op save must create no commit"
+        );
+
+        // The DB agrees: the added-then-removed node is absent.
+        let count = testutil::spawn_apg(
+            &[
+                "query",
+                "MATCH (n:Requirement {fqn: 'requirements.requirement.ephemeral'}) RETURN count(*)",
+            ],
+            &wt,
+        );
+        assert!(
+            count.status.success(),
+            "routed query: {}",
+            String::from_utf8_lossy(&count.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&count.stdout)
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("0"),
+            "the DB must agree the created-then-removed node is gone"
+        );
+
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        testutil::remove(&repo);
+    }
 }

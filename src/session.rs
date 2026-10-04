@@ -324,6 +324,18 @@ pub struct PendingChange {
     /// The pending node-file content to stage (`Some`), or the delete marker
     /// (`None`) when this identity's file is to be removed.
     pub content: Option<NodeFile>,
+    /// Whether this identity was backed by a durable (already-saved) node file
+    /// when it FIRST entered the buffer — NOT whether its file exists now
+    /// (the held DB carries the session's projected buffer too). Set once, at
+    /// first admission, from the DB-reconstructed durable base before this
+    /// identity ever appeared in the buffer, and preserved across later
+    /// updates to the same entry. It is what decides whether a `rm` keeps a
+    /// delete marker: deleting a node that was durable keeps the marker (its
+    /// file must be removed at save), while removing a node created earlier in
+    /// this unsaved run leaves no marker (no file was ever written). Without
+    /// it, a durable node that was first updated (buffering it) and then
+    /// removed would lose its delete marker and its file would survive save.
+    pub durable_before: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -809,10 +821,14 @@ impl Coordinator {
     ///    any earlier step leaves `self.buffer` unchanged and the DB
     ///    un-projected.
     ///
-    /// A delete of an identity that is only a pending buffered write (added
-    /// earlier in this unsaved run) nets to nothing on disk and drops the
-    /// pending write; a delete of an identity backed by the durable DB keeps a
-    /// delete marker so the next save removes its node file.
+    /// A delete of an identity that was DURABLE when it first entered the
+    /// buffer keeps a delete marker, so the next save removes its node file —
+    /// even when the same unsaved run already buffered an update to it (the
+    /// marker decision uses the entry's own `durable_before` flag, never the
+    /// held DB, which carries the session's projection). A delete of an
+    /// identity created earlier in this unsaved run (never durable) drops the
+    /// pending write instead: no file was ever written, so it nets to nothing
+    /// on disk.
     ///
     /// Returns the change's human message and its write-time warnings, so the
     /// caller can carry the warnings into the reply without them ever blocking
@@ -894,27 +910,39 @@ impl Coordinator {
         // (6) Only after the projection SUCCEEDS, commit the change to the
         // buffer — last write/delete for an identity wins.
         for (w, (layer, node_type, name)) in change.writes.iter().zip(&write_ids) {
-            self.upsert_buffer(*layer, node_type, name, Some(w.clone()));
-        }
-        for (layer, node_type, name, _path) in &delete_ids {
-            // "Already saved": the identity is backed by a durable node file.
-            // The held DB carries the session's projected buffer too, so a
-            // delete marker is kept only when the identity is NOT a pending
-            // buffered write — a node added earlier in this unsaved run has no
-            // node file yet, so add-then-rm nets to nothing on disk (drop the
-            // pending write rather than stage a delete for a file that was
-            // never written).
-            let pending_write = self.buffer.iter().any(|c| {
-                c.layer == layer.layer_dir()
-                    && c.node_type == *node_type
-                    && c.name == *name
-                    && c.content.is_some()
-            });
-            let in_db = db_nodes.iter().any(|n| {
+            // Record durability at FIRST admission only: an identity that has
+            // never been buffered is durable exactly when the held DB carries
+            // it (before this identity was ever projected, its DB row is the
+            // durable one). `upsert_buffer` preserves an existing entry's flag
+            // on a later write, so this computed value only seeds a new entry.
+            let durable_before = db_nodes.iter().any(|n| {
                 n.layer == layer.layer_dir() && n.node_type == *node_type && n.name == *name
             });
-            if in_db && !pending_write {
-                self.upsert_buffer(*layer, node_type, name, None);
+            self.upsert_buffer(*layer, node_type, name, Some(w.clone()), durable_before);
+        }
+        for (layer, node_type, name, _path) in &delete_ids {
+            // "Already saved": whether the identity was durable when it FIRST
+            // entered the buffer — its own buffered flag if it is already
+            // buffered (even as a write from an earlier update in this run),
+            // else its presence in the held DB (it has never been buffered, so
+            // its DB row is the durable one). A delete marker is kept exactly
+            // when the node was durable before; a node created earlier in this
+            // unsaved run and then removed leaves no marker (nets to nothing on
+            // disk).
+            let durable_before = self
+                .buffer
+                .iter()
+                .find(|c| {
+                    c.layer == layer.layer_dir() && c.node_type == *node_type && c.name == *name
+                })
+                .map(|c| c.durable_before)
+                .unwrap_or_else(|| {
+                    db_nodes.iter().any(|n| {
+                        n.layer == layer.layer_dir() && n.node_type == *node_type && n.name == *name
+                    })
+                });
+            if durable_before {
+                self.upsert_buffer(*layer, node_type, name, None, true);
             } else {
                 self.remove_buffer_entry(*layer, node_type, name);
             }
@@ -941,13 +969,17 @@ impl Coordinator {
     }
 
     /// Replace the buffered state for one identity (last write wins), or append
-    /// a new [`PendingChange`]. A replaced entry keeps its original position.
+    /// a new [`PendingChange`]. A replaced entry keeps its original position AND
+    /// its original [`PendingChange::durable_before`] — durability at first
+    /// admission never changes mid-run, so `durable_before` only seeds a newly
+    /// created entry.
     fn upsert_buffer(
         &mut self,
         layer: Layer,
         node_type: &str,
         name: &str,
         content: Option<NodeFile>,
+        durable_before: bool,
     ) {
         let layer_dir = layer.layer_dir();
         if let Some(entry) = self
@@ -964,6 +996,7 @@ impl Coordinator {
                 name: name.to_string(),
                 path,
                 content,
+                durable_before,
             });
         }
     }
