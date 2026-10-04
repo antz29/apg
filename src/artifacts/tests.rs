@@ -16,7 +16,12 @@ mod unit {
                 to: "solution.system.portal".into(),
                 properties: NodeProperties::default(),
             }),
-            Some(("Uses", "solution.person.alice", "solution.system.portal"))
+            Some((
+                "Uses",
+                "solution.person.alice",
+                "solution.system.portal",
+                Some(&NodeProperties::default())
+            ))
         );
         assert_eq!(
             edge_merge(&Record::Calls {
@@ -24,7 +29,12 @@ mod unit {
                 to: "domain.service.b".into(),
                 properties: NodeProperties::default(),
             }),
-            Some(("Calls", "domain.service.a", "domain.service.b"))
+            Some((
+                "Calls",
+                "domain.service.a",
+                "domain.service.b",
+                Some(&NodeProperties::default())
+            ))
         );
     }
 

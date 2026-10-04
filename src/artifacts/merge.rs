@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use lbug::Connection;
 
+use crate::layers::{NodeProperties, properties_json};
 use crate::load;
 use crate::schema::Record;
 
@@ -62,6 +63,12 @@ impl ArtifactDb {
     /// Re-merges one node record: `MERGE (n:Label {fqn}) SET props` (an
     /// upsert — idempotent, and updates props when the node pre-exists).
     /// `number` is the one INT64 column; every other prop is a string literal.
+    /// When `properties` is `Some` (a durable authored node record), the
+    /// canonical JSON of its full properties map is written to the
+    /// serialized-properties column — the same column the full-scan
+    /// `build_load_files` writes — so the session's incremental reingest is as
+    /// lossless as a fresh scan. Code and transient plan/feedback node records
+    /// have no such column and pass `None`.
     /// Runs on `conn` so the write shares the caller's transaction.
     fn merge_node(
         &self,
@@ -69,8 +76,9 @@ impl ArtifactDb {
         label: &str,
         fqn: &str,
         props: &[(&str, String)],
+        properties: Option<&NodeProperties>,
     ) -> anyhow::Result<()> {
-        let set = props
+        let mut set = props
             .iter()
             .map(|(k, v)| {
                 if *k == "number" {
@@ -79,8 +87,14 @@ impl ArtifactDb {
                     format!("n.{k} = {}", lit(v))
                 }
             })
-            .collect::<Vec<_>>()
-            .join(", ");
+            .collect::<Vec<_>>();
+        if let Some(properties) = properties {
+            set.push(format!(
+                "n.properties = {}",
+                lit(&properties_json(properties))
+            ));
+        }
+        let set = set.join(", ");
         conn.query(&format!(
             "MERGE (n:{label} {{fqn: {}}}) SET {set}",
             lit(fqn)
@@ -91,6 +105,14 @@ impl ArtifactDb {
     /// Re-merges one edge record. Endpoint labels come from `known` (nodes in
     /// this record set) or the code graph. A dangling endpoint is skipped.
     /// Runs on `conn` so the write shares the caller's transaction.
+    ///
+    /// When `properties` is `Some` (a durable authored edge record), the
+    /// canonical JSON of its full properties map is written to the rel table's
+    /// serialized-properties column — both halves, since the pairing invariant
+    /// stores one rel row — so the session's incremental reingest preserves
+    /// edge properties exactly like a fresh scan's `build_load_files`. The
+    /// transient `Reviews`/`Gates`/`Satisfies` rels have no such column and
+    /// pass `None`.
     ///
     /// The schema-pair guard (R3/R4): the Cypher MERGE is issued only when the
     /// rel table actually declares this `(from, to)` label pair. LadybugDB
@@ -113,6 +135,7 @@ impl ArtifactDb {
         from: &str,
         to: &str,
         known: &HashMap<String, &'static str>,
+        properties: Option<&NodeProperties>,
     ) -> anyhow::Result<()> {
         // Endpoint labels come from the record set being merged (`known`), the
         // code graph, or the live DB itself — a durable layer node (a
@@ -139,11 +162,22 @@ impl ArtifactDb {
             // records merged above, or code nodes in the graph). The one-shot
             // pattern MERGE `(a:.. {fqn})-[:R]->(b:.. {fqn})` fails when the
             // endpoints pre-exist (it re-attempts their creation → PK clash).
-            conn.query(&format!(
-                "MATCH (a:{a} {{fqn: {}}}), (b:{b} {{fqn: {}}}) MERGE (a)-[:{rel_table}]->(b)",
-                lit(from),
-                lit(to)
-            ))?;
+            // A durable authored edge binds the rel variable and SETs the
+            // serialized-properties column; an absent (transient) column keeps
+            // the plain two-endpoint MERGE.
+            match properties {
+                Some(properties) => conn.query(&format!(
+                    "MATCH (a:{a} {{fqn: {}}}), (b:{b} {{fqn: {}}}) MERGE (a)-[r:{rel_table}]->(b) SET r.properties = {}",
+                    lit(from),
+                    lit(to),
+                    lit(&properties_json(properties))
+                ))?,
+                None => conn.query(&format!(
+                    "MATCH (a:{a} {{fqn: {}}}), (b:{b} {{fqn: {}}}) MERGE (a)-[:{rel_table}]->(b)",
+                    lit(from),
+                    lit(to)
+                ))?,
+            };
         }
         Ok(())
     }
@@ -181,26 +215,39 @@ impl ArtifactDb {
             .collect();
         let mut known: HashMap<String, &'static str> = HashMap::new();
         for r in records {
-            if let Some((label, fqn, props)) = node_merge(r) {
+            if let Some((label, fqn, props, properties)) = node_merge(r) {
                 if matches!(r, Record::PlannedNode { .. }) && realized.contains(fqn) {
                     continue;
                 }
                 known.insert(fqn.to_string(), label);
-                self.merge_node(conn, label, fqn, &props)?;
+                self.merge_node(conn, label, fqn, &props, properties)?;
             }
         }
         for r in records {
-            if let Some((table, from, to)) = edge_merge(r) {
-                self.merge_edge(conn, table, from, to, &known)?;
+            if let Some((table, from, to, properties)) = edge_merge(r) {
+                self.merge_edge(conn, table, from, to, &known, properties)?;
             }
         }
         Ok(())
     }
 }
 
-/// The node-table label and MERGE properties for a node record.
+/// The node-table label and MERGE properties for a node record, plus the
+/// serialized-properties column payload when the table has one.
+///
+/// The last element is `Some` for the durable authored node tables (which gain
+/// the serialized-properties column, phase-4 task 12) and `None` for the code
+/// node tables and the transient plan/feedback node tables, which have no such
+/// column.
 #[allow(clippy::type_complexity)]
-fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, String)>)> {
+fn node_merge(
+    r: &Record,
+) -> Option<(
+    &'static str,
+    &str,
+    Vec<(&'static str, String)>,
+    Option<&NodeProperties>,
+)> {
     match r {
         Record::Requirement {
             fqn,
@@ -208,7 +255,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             title,
             body,
             feature,
-            ..
+            properties,
         } => Some((
             "Requirement",
             fqn,
@@ -218,6 +265,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("body", body.clone()),
                 ("feature", feature.clone()),
             ],
+            Some(properties),
         )),
         Record::PlannedNode { fqn, kind, .. } => Some((
             match kind.as_str() {
@@ -231,13 +279,18 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             },
             fqn,
             vec![("status", "planned".to_string())],
+            None,
         )),
         Record::Note {
-            fqn, body, kind, ..
+            fqn,
+            body,
+            kind,
+            properties,
         } => Some((
             "Note",
             fqn,
             vec![("body", body.clone()), ("kind", kind.clone())],
+            Some(properties),
         )),
         Record::Feedback {
             fqn,
@@ -252,6 +305,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("status", status.clone()),
                 ("disposition", disposition.clone()),
             ],
+            None,
         )),
         Record::Plan {
             fqn,
@@ -261,6 +315,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             "Plan",
             fqn,
             vec![("title", title.clone()), ("strategy", strategy.clone())],
+            None,
         )),
         Record::PlanPhase {
             fqn,
@@ -277,6 +332,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("deliverable", deliverable.clone()),
                 ("status", status.clone()),
             ],
+            None,
         )),
         Record::Task {
             fqn,
@@ -299,34 +355,47 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("target", target.clone()),
                 ("new_fqn", new_fqn.clone()),
             ],
+            None,
         )),
         Record::Stakeholder {
-            fqn, name, body, ..
+            fqn,
+            name,
+            body,
+            properties,
         } => Some((
             "Stakeholder",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
         )),
         Record::Entity {
-            fqn, name, body, ..
+            fqn,
+            name,
+            body,
+            properties,
         } => Some((
             "Entity",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
         )),
         Record::System {
-            fqn, name, body, ..
+            fqn,
+            name,
+            body,
+            properties,
         } => Some((
             "System",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
         )),
         Record::Container {
             fqn,
             name,
             kind,
             body,
-            ..
+            properties,
         } => Some((
             "Container",
             fqn,
@@ -335,20 +404,29 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("kind", kind.clone()),
                 ("body", body.clone()),
             ],
+            Some(properties),
         )),
         Record::Component {
-            fqn, name, body, ..
+            fqn,
+            name,
+            body,
+            properties,
         } => Some((
             "Component",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
         )),
         Record::User {
-            fqn, name, body, ..
+            fqn,
+            name,
+            body,
+            properties,
         } => Some((
             "User",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
         )),
         Record::Group {
             fqn,
@@ -356,7 +434,7 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
             attribute,
             root,
             body,
-            ..
+            properties,
         } => Some((
             "DomainGroup",
             fqn,
@@ -366,34 +444,47 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("root", root.clone()),
                 ("body", body.clone()),
             ],
+            Some(properties),
         )),
         Record::Value {
-            fqn, name, body, ..
+            fqn,
+            name,
+            body,
+            properties,
         } => Some((
             "Value",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
         )),
         Record::Service {
-            fqn, name, body, ..
+            fqn,
+            name,
+            body,
+            properties,
         } => Some((
             "Service",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
         )),
         Record::Person {
-            fqn, name, body, ..
+            fqn,
+            name,
+            body,
+            properties,
         } => Some((
             "Person",
             fqn,
             vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
         )),
         Record::Constraint {
             fqn,
             name,
             body,
             attaches_to,
-            ..
+            properties,
         } => Some((
             "Constraint",
             fqn,
@@ -402,12 +493,14 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
                 ("body", body.clone()),
                 ("attaches_to", attaches_to.clone()),
             ],
+            Some(properties),
         )),
         _ => None,
     }
 }
 
-/// The rel-table name and endpoints for an edge record.
+/// The rel-table name and endpoints for an edge record, plus the rel's
+/// serialized-properties column payload when the table has one.
 ///
 /// `Calls`/`Uses` are shared code rel tables: the same record kind carries the
 /// scanned Function→Function / Function→Struct / Struct→Struct edges and the
@@ -415,22 +508,70 @@ fn node_merge(r: &Record) -> Option<(&'static str, &str, Vec<(&'static str, Stri
 /// pairs `apg edge add` can author). The merge guard
 /// ([`rel_pair_allowed`]) admits the authored pairs; the scanned pairs never
 /// reach this merge (they come from the load path, not a record set).
-pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str)> {
+///
+/// The last element is `Some` for every durable authored rel table (the
+/// serialized-properties column, phase-4 task 13) and `None` for the transient
+/// `Reviews`/`Gates`/`Satisfies` rels, which carry no column.
+pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeProperties>)> {
     match r {
-        Record::Contains { from, to, .. } => Some(("Contains", from, to)),
-        Record::Calls { from, to, .. } => Some(("Calls", from, to)),
-        Record::Uses { from, to, .. } => Some(("Uses", from, to)),
-        Record::Details { from, to, .. } => Some(("Details", from, to)),
-        Record::Reviews { from, to } => Some(("Reviews", from, to)),
-        Record::DependsOn { from, to, .. } => Some(("DependsOn", from, to)),
-        Record::Gates { from, to } => Some(("Gates", from, to)),
-        Record::Satisfies { from, to } => Some(("Satisfies", from, to)),
-        Record::Drives { from, to, .. } => Some(("Drives", from, to)),
-        Record::Represents { from, to, .. } => Some(("Represents", from, to)),
-        Record::RealisedBy { from, to, .. } => Some(("RealisedBy", from, to)),
-        Record::SpecImplementedBy { from, to, .. } => Some(("SpecImplementedBy", from, to)),
-        Record::Publishes { from, to, .. } => Some(("Publishes", from, to)),
-        Record::Subscribes { from, to, .. } => Some(("Subscribes", from, to)),
+        Record::Contains {
+            from,
+            to,
+            properties,
+        } => Some(("Contains", from, to, Some(properties))),
+        Record::Calls {
+            from,
+            to,
+            properties,
+        } => Some(("Calls", from, to, Some(properties))),
+        Record::Uses {
+            from,
+            to,
+            properties,
+        } => Some(("Uses", from, to, Some(properties))),
+        Record::Details {
+            from,
+            to,
+            properties,
+        } => Some(("Details", from, to, Some(properties))),
+        Record::Reviews { from, to } => Some(("Reviews", from, to, None)),
+        Record::DependsOn {
+            from,
+            to,
+            properties,
+        } => Some(("DependsOn", from, to, Some(properties))),
+        Record::Gates { from, to } => Some(("Gates", from, to, None)),
+        Record::Satisfies { from, to } => Some(("Satisfies", from, to, None)),
+        Record::Drives {
+            from,
+            to,
+            properties,
+        } => Some(("Drives", from, to, Some(properties))),
+        Record::Represents {
+            from,
+            to,
+            properties,
+        } => Some(("Represents", from, to, Some(properties))),
+        Record::RealisedBy {
+            from,
+            to,
+            properties,
+        } => Some(("RealisedBy", from, to, Some(properties))),
+        Record::SpecImplementedBy {
+            from,
+            to,
+            properties,
+        } => Some(("SpecImplementedBy", from, to, Some(properties))),
+        Record::Publishes {
+            from,
+            to,
+            properties,
+        } => Some(("Publishes", from, to, Some(properties))),
+        Record::Subscribes {
+            from,
+            to,
+            properties,
+        } => Some(("Subscribes", from, to, Some(properties))),
         _ => None,
     }
 }
@@ -476,7 +617,7 @@ pub fn node_fqn(r: &Record) -> Option<&str> {
 /// MERGEs. The projection-equals-sources check (phase-05 task-9) uses it to
 /// derive the expected node set from the source record stream.
 pub fn node_label_fqn(r: &Record) -> Option<(&'static str, &str)> {
-    node_merge(r).map(|(label, fqn, _)| (label, fqn))
+    node_merge(r).map(|(label, fqn, _, _)| (label, fqn))
 }
 
 /// The endpoints of an edge record, if it is one.

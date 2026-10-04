@@ -1587,8 +1587,8 @@ mod e2e {
         let expected_edges: BTreeSet<(String, String, String)> = source_records
             .iter()
             .filter_map(apg::artifacts::edge_merge)
-            .filter(|(_, from, _)| metadata_fqns.contains(from))
-            .map(|(t, f, to)| (t.to_string(), f.to_string(), to.to_string()))
+            .filter(|(_, from, _, _)| metadata_fqns.contains(from))
+            .map(|(t, f, to, _)| (t.to_string(), f.to_string(), to.to_string()))
             .collect();
 
         // --- db → observed sets, scoped to the metadata labels/tables ---

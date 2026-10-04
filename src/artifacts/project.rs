@@ -42,7 +42,8 @@ pub(crate) fn transient_delta(before: &[Record], after: &[Record]) -> BTreeSet<S
     // source is itself transient) so the stale out-edge drops and the re-merge
     // restores the current edge set.
     let edge_key = |r: &Record| {
-        edge_merge(r).map(|(table, from, to)| (table.to_string(), from.to_string(), to.to_string()))
+        edge_merge(r)
+            .map(|(table, from, to, _)| (table.to_string(), from.to_string(), to.to_string()))
     };
     let before_edges: BTreeSet<(String, String, String)> =
         before.iter().filter_map(edge_key).collect();
