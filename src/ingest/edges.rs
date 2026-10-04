@@ -78,15 +78,21 @@ pub(crate) fn filter_edges(
 /// carries none, so the codec never drops an authored edge property).
 pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
     match r {
-        Record::Contains { from, to, properties } => {
-            write_edge_fields(w, 0, &from, &to, "", &properties)
-        }
-        Record::Calls { from, to, properties } => {
-            write_edge_fields(w, 1, &from, &to, "", &properties)
-        }
-        Record::Uses { from, to, properties } => {
-            write_edge_fields(w, 2, &from, &to, "", &properties)
-        }
+        Record::Contains {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 0, &from, &to, "", &properties),
+        Record::Calls {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 1, &from, &to, "", &properties),
+        Record::Uses {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 2, &from, &to, "", &properties),
         Record::UnresolvedCall {
             from,
             to,
@@ -95,39 +101,55 @@ pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
         Record::UnresolvedUse { from, to } => {
             write_edge_fields(w, 4, &from, &to, "", &NodeProperties::new())
         }
-        Record::Details { from, to, properties } => {
-            write_edge_fields(w, 5, &from, &to, "", &properties)
-        }
+        Record::Details {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 5, &from, &to, "", &properties),
         Record::Reviews { from, to } => {
             write_edge_fields(w, 6, &from, &to, "", &NodeProperties::new())
         }
-        Record::DependsOn { from, to, properties } => {
-            write_edge_fields(w, 7, &from, &to, "", &properties)
-        }
+        Record::DependsOn {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 7, &from, &to, "", &properties),
         Record::Gates { from, to } => {
             write_edge_fields(w, 8, &from, &to, "", &NodeProperties::new())
         }
         Record::Satisfies { from, to } => {
             write_edge_fields(w, 9, &from, &to, "", &NodeProperties::new())
         }
-        Record::Drives { from, to, properties } => {
-            write_edge_fields(w, 10, &from, &to, "", &properties)
-        }
-        Record::Represents { from, to, properties } => {
-            write_edge_fields(w, 11, &from, &to, "", &properties)
-        }
-        Record::RealisedBy { from, to, properties } => {
-            write_edge_fields(w, 12, &from, &to, "", &properties)
-        }
-        Record::SpecImplementedBy { from, to, properties } => {
-            write_edge_fields(w, 13, &from, &to, "", &properties)
-        }
-        Record::Publishes { from, to, properties } => {
-            write_edge_fields(w, 14, &from, &to, "", &properties)
-        }
-        Record::Subscribes { from, to, properties } => {
-            write_edge_fields(w, 15, &from, &to, "", &properties)
-        }
+        Record::Drives {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 10, &from, &to, "", &properties),
+        Record::Represents {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 11, &from, &to, "", &properties),
+        Record::RealisedBy {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 12, &from, &to, "", &properties),
+        Record::SpecImplementedBy {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 13, &from, &to, "", &properties),
+        Record::Publishes {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 14, &from, &to, "", &properties),
+        Record::Subscribes {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 15, &from, &to, "", &properties),
         other => unreachable!("non-edge record reached the edge spool: {other:?}"),
     }
 }
