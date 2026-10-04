@@ -4958,4 +4958,242 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-05 task-17 (1): a CORRUPT `.trans` plan file refuses `apg session
+    /// start` before any socket is bound, naming the offending file and the
+    /// remedy, and leaves the held `db.lbug` untouched.
+    ///
+    /// `project_with_db` leaves `.trans` with only `db.lbug`/`graph.jsonl`, so a
+    /// single malformed `.trans/plans/foo.jsonl` planted before start is the
+    /// only transient file the start-time seed enumerates. The seed reads it via
+    /// `specs::read_jsonl`, which fails loud, and — because the seed runs BEFORE
+    /// `UnixListener::bind` and its apply transaction — the refusal:
+    ///
+    ///   1. exits non-zero with stderr naming the file and the remedy;
+    ///   2. leaves no socket bound and no live session; and
+    ///   3. leaves the held DB logically unchanged — its full durable
+    ///      node-file reconstruction is identical and no partial transient row
+    ///      leaked. (A byte comparison is unusable: lbug rewrites `db.lbug` on
+    ///      open, so the test snapshots the DB's logical state instead.)
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn session_start_refuses_corrupt_trans_seed_and_leaves_db_unchanged() {
+        const COUNT_SEEDED: &str = "MATCH (n:Requirement {fqn: 'requirements.requirement.seeded'}) \
+             RETURN count(n)";
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("session-corrupt-trans-seed");
+        let home = repo.root.join("home");
+
+        // A committed durable requirement, scanned into the branch DB — the
+        // pre-existing node set the refused seed must leave untouched.
+        let mut seeded = node("requirements", "requirement", "seeded");
+        seeded.body = "seed body".to_string();
+        layers::write_node(&wt_apg, &seeded).unwrap();
+        testutil::wt_commit_paths(&wt, &["apg/layers"], "seed the durable node");
+        testutil::scan_checkout(&wt).unwrap();
+
+        let socket = apg::session::socket_path(&wt_apg);
+
+        // Precondition: the durable node is in the DB, no transient Feedback
+        // row exists, and no session socket exists. Capture the full durable
+        // node-file set reconstructed from the DB — the strongest logical
+        // snapshot the refused seed must leave unchanged.
+        let durable_before;
+        {
+            let opened = ArtifactDb::open(&wt_apg).unwrap();
+            assert_eq!(
+                opened
+                    .q(COUNT_SEEDED)
+                    .unwrap()
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("1"),
+                "the pre-existing durable node must be in the DB before the refusal"
+            );
+            assert_eq!(
+                opened
+                    .q("MATCH (f:Feedback) RETURN count(*)")
+                    .unwrap()
+                    .lines()
+                    .last()
+                    .map(str::trim),
+                Some("0"),
+                "no transient Feedback row may exist before the seed"
+            );
+            durable_before = opened.node_files_from_db().unwrap();
+        }
+        assert!(
+            !socket.exists(),
+            "the fixture must start with no session socket"
+        );
+
+        // A malformed plan file planted BEFORE start: the start-time seed
+        // enumerates `.trans/plans/*.jsonl` and reads it, so it must fail closed.
+        let plan_file = specs::plan_jsonl_path(&wt_apg, "foo");
+        std::fs::create_dir_all(plan_file.parent().unwrap()).unwrap();
+        std::fs::write(&plan_file, "garbage plan bytes {[(]} not jsonl\n").unwrap();
+
+        // `apg session start` must exit non-zero rather than bind and serve.
+        let refused = testutil::ApgCommand::new(&["session", "start"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !refused.status.success(),
+            "a corrupt .trans plan file must refuse `apg session start`: {}",
+            String::from_utf8_lossy(&refused.stdout)
+        );
+
+        // The refusal names the offending file AND the remedy.
+        let err = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            err.contains("foo.jsonl"),
+            "the refusal must name the offending file: {err}"
+        );
+        assert!(
+            err.contains("repair or remove"),
+            "the refusal must name the repair/remove remedy: {err}"
+        );
+        assert!(
+            err.contains("apg scan"),
+            "the refusal must name `apg scan` as the re-projection remedy: {err}"
+        );
+
+        // No socket bound, no live session.
+        assert!(
+            !socket.exists(),
+            "a refused start must leave no session socket behind"
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "a refused start leaves no live session"
+        );
+
+        // The held DB is logically unchanged by the refused seed: its full
+        // durable node-file reconstruction is identical, and no partial
+        // transient row leaked (the seed reads every file before it applies and
+        // applies through one transaction that rolls back on error).
+        let opened = ArtifactDb::open(&wt_apg).unwrap();
+        assert_eq!(
+            opened.node_files_from_db().unwrap(),
+            durable_before,
+            "the refused start must leave the held DB's durable node-file set unchanged"
+        );
+        assert_eq!(
+            opened
+                .q(COUNT_SEEDED)
+                .unwrap()
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("1"),
+            "the pre-existing durable node set must survive the refused seed"
+        );
+        assert_eq!(
+            opened
+                .q("MATCH (f:Feedback) RETURN count(*)")
+                .unwrap()
+                .lines()
+                .last()
+                .map(str::trim),
+            Some("0"),
+            "the refused seed must not leave a partial transient row"
+        );
+        drop(opened);
+
+        testutil::remove(&repo);
+    }
+
+    /// Phase-05 task-17 (2): ABSENT `.trans` plan files leave `apg session
+    /// start` a clean no-op — the seed enumerates only EXISTING files, so with
+    /// no `plans/*.jsonl` and no tier mirrors start succeeds normally and the
+    /// live session serves a routed read and a routed mutation.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn session_start_with_absent_trans_seed_is_a_clean_noop() {
+        const COUNT_CREATED: &str = "MATCH (n:Requirement {fqn: 'requirements.requirement.created'}) \
+             RETURN count(n)";
+
+        let (repo, wt, wt_apg) = testutil::project_with_db("session-absent-trans-seed");
+        let home = repo.root.join("home");
+
+        // The seed's enumerators see only existing files: this fixture carries
+        // no plan file and no tier mirror, so the seed is an empty no-op.
+        assert!(
+            specs::plan_files(&wt_apg).is_empty(),
+            "the fixture must start with no .trans plan files"
+        );
+        assert!(
+            specs::trans_mirror_files(&wt_apg).is_empty(),
+            "the fixture must start with no .trans tier mirrors"
+        );
+
+        // Absent `.trans` must not refuse start: the session comes up and serves.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "absent .trans plan files must leave start a clean no-op"
+        );
+
+        // A routed read observes the held DB.
+        let routed = |q: &str| -> String {
+            let out = spawn_apg(&["query", q], &wt);
+            assert!(
+                out.status.success(),
+                "routed query `{q}` failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap()
+        };
+        assert_eq!(
+            routed(COUNT_CREATED).lines().last().map(str::trim),
+            Some("0"),
+            "the fixture must start with the node absent"
+        );
+
+        // A routed mutation is admitted and immediately visible to a routed read.
+        let added = spawn_apg(
+            &[
+                "node",
+                "add",
+                "requirements",
+                "requirement",
+                "created",
+                "--body",
+                "created through a session started without .trans",
+            ],
+            &wt,
+        );
+        assert!(
+            added.status.success(),
+            "a routed node add must succeed: {}",
+            String::from_utf8_lossy(&added.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&added.stdout).trim(),
+            "Added node requirements.requirement.created"
+        );
+        assert_eq!(
+            routed(COUNT_CREATED).lines().last().map(str::trim),
+            Some("1"),
+            "the routed mutation must be visible through a routed read"
+        );
+
+        // Clean release: save (the single durability point) then end.
+        let save = spawn_apg(&["session", "save"], &wt);
+        assert!(
+            save.status.success(),
+            "{}",
+            String::from_utf8_lossy(&save.stderr)
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
 }
