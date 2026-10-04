@@ -730,16 +730,19 @@ pub fn write_project_with(
     // 6. Projection delta — applied only AFTER the durable commit
     //    (commit-then-project). The effective node set is read back from the
     //    just-written tree and the FQN delete set is the same
-    //    `projection_deletes`; the projection itself is the shared
-    //    [`project_only`] entry point (also used by the session's
-    //    projection-only path), so there is one projection implementation.
-    //    The direct path owns the two caller-side responsibilities
-    //    [`project_only`] used to carry: the no-DB skip (the projection applies
-    //    only when a query index exists — the files are the durable form
-    //    otherwise) and the code-identity source (the `graph.jsonl` export,
-    //    with the export-absent fallback seeding every `implemented-by` target
-    //    as planned so it records UNVALIDATED rather than aborting on a phantom
-    //    drift; the next scan re-validates).
+    //    `projection_deletes`; the direct path assembles its own record set —
+    //    `ingest_nodes` validates + converts the on-disk node set, then
+    //    `append_transient_records` re-merges the worktree's transient records
+    //    (the plan store + tier mirrors) — and hands the partial [`project_only`]
+    //    that delta (also used by the session's projection-only path, so there
+    //    is one projection implementation).
+    //    The direct path owns the caller-side responsibilities [`project_only`]
+    //    used to carry: the no-DB skip (the projection applies only when a query
+    //    index exists — the files are the durable form otherwise), the
+    //    code-identity source (the `graph.jsonl` export, with the export-absent
+    //    fallback seeding every `implemented-by` target as planned so it records
+    //    UNVALIDATED rather than aborting on a phantom drift; the next scan
+    //    re-validates), and the full transient re-merge.
     let nodes = read_existing_nodes(apg_root)?;
     let deletes = projection_deletes(apg_root, writes, deletes);
     if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
@@ -760,7 +763,14 @@ pub fn write_project_with(
                 }
             }
         }
-        project_only(apg_root, &nodes, &deletes, &scanned, &planned, project)?;
+        // The direct path assembles its own records: validate + convert the
+        // on-disk node set (`ingest_nodes`) and re-merge the worktree's
+        // transient records (`append_transient_records`) before handing the
+        // partial [`project_only`] its delta — the assembly `project_only` used
+        // to perform internally.
+        let mut records = ingest_nodes(&nodes, &scanned, &planned)?;
+        append_transient_records(apg_root, &mut records)?;
+        project_only(&deletes, &records, project)?;
     }
 
     // 7. Reconcile the DB's own `Scan` row to the SAME re-anchored state that
