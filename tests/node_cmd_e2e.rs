@@ -3691,4 +3691,89 @@ mod e2e {
 
         testutil::remove(&repo);
     }
+
+    /// Phase-02 task-4: a worktree with no `apg/.trans/db.lbug` cannot host a
+    /// session — a spawned candidate `apg session start` refuses, naming
+    /// `apg scan` as the remedy, and the refusal leaves nothing behind: no
+    /// socket bound and no extended `specs.lock` flock held. The proof is that
+    /// a subsequent hermetic scan (the test stand-in for `apg scan`) succeeds,
+    /// and a subsequent `apg session start` then succeeds and ends cleanly.
+    /// The refusal is raised by the DB open, which precedes the socket bind, so
+    /// a refused start is a side-effect-free no-op on the worktree.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
+    fn session_start_refuses_without_db_naming_scan() {
+        let (wt_apg, repo, wt) = node_store_fixture("session-no-db");
+        let home = repo.root.join("home");
+
+        // A durable node gives the later scan authored content to ingest.
+        // `write_project` commits the node file but skips its projection leg
+        // when `db.lbug` is absent, so the fixture stays DB-less — the exact
+        // state under test.
+        layers::write_project(
+            &wt_apg,
+            &[node("requirements", "requirement", "seeded")],
+            &[],
+        )
+        .unwrap();
+
+        let db = wt_apg.join(specs::TRANS).join("db.lbug");
+        let socket = apg::session::socket_path(&wt_apg);
+        assert!(!db.exists(), "fixture must start with no db.lbug");
+
+        // (a) The refusal: the candidate binary exits non-zero and its stderr
+        // names `apg scan`.
+        let refused = testutil::ApgCommand::new(&["session", "start"])
+            .cwd(&wt)
+            .env("HOME", home.to_str().unwrap())
+            .output();
+        assert!(
+            !refused.status.success(),
+            "session start must refuse an absent db.lbug"
+        );
+        let err = String::from_utf8_lossy(&refused.stderr);
+        assert!(
+            err.contains("apg scan"),
+            "the refusal must name `apg scan`: {err}"
+        );
+
+        // (b) Nothing left behind: no DB conjured, no socket bound, no live
+        // session.
+        assert!(!db.exists(), "a refused start must not create db.lbug");
+        assert!(
+            !socket.exists(),
+            "a refused start must leave no socket behind"
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "a refused start leaves no live session"
+        );
+
+        // (c) The extended flock is not still held: a subsequent scan (the
+        // hermetic stand-in for `apg scan`) succeeds and creates the DB the
+        // session needs.
+        testutil::scan_checkout(&wt).unwrap();
+        assert!(db.exists(), "the scan must create db.lbug");
+
+        // (d) A subsequent `apg session start` then succeeds — re-acquiring the
+        // extended flock proves the refused start released it — and ends
+        // cleanly.
+        let session = testutil::start_session_process(&wt, &home);
+        assert!(
+            apg::session::live_session(&wt_apg),
+            "the post-refusal session must be live"
+        );
+        let out = end_session(&wt, session);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !apg::session::live_session(&wt_apg),
+            "the session must be ended cleanly"
+        );
+
+        testutil::remove(&repo);
+    }
 }
