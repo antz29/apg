@@ -266,8 +266,19 @@ fn node_add_change(
 /// [--unset-property k]*` — body/properties only, edge-preserving: the
 /// identity (`layer`/`type`/`name`) and every out/in edge are immutable;
 /// properties MERGE with an explicit unset. Refuses an absent node.
+///
+/// The node's existence and base content resolve through `overlay` against the
+/// caller-supplied `base` node set (the session's
+/// `ArtifactDb::node_files_from_db`-reconstructed durable universe) via
+/// [`layers::LayersOverlay::over_base`]: a staged write yields its buffered
+/// content (its edges are kept), a staged delete marker reads as absent, and an
+/// unstaged identity yields the matching base node (or nothing when the base
+/// holds none). Pure map/list logic — it never reads `apg/layers/**` and never
+/// probes `node_file_path`, so it cannot observe a node file the caller's base
+/// does not carry. The refusal and the edge-preserving body/properties merge are
+/// applied over the resolved base rather than a fresh disk read.
 fn node_update_change(
-    apg_root: &Path,
+    base: &[NodeFile],
     args: &[String],
     overlay: &layers::LayersOverlay,
 ) -> anyhow::Result<Change> {
@@ -281,13 +292,14 @@ fn node_update_change(
     let layer = resolve_layer(&pos[0])?;
     let f = fqn(layer, &pos[1], &pos[2]);
     let body = p.get("body");
-    // Resolve the node's existence and base content through the overlay
-    // (phase-00 task-9): a node written earlier in the same unsaved run is the
-    // base (its buffered content and edges are kept), a staged delete marker
-    // means it is absent, and an unstaged identity falls back to the on-disk
-    // file. The refusal and the edge-preserving body/properties merge are
-    // applied over the resolved base rather than a fresh disk read.
-    let Some(mut updated) = overlay.read(apg_root, layer, &pos[1], &pos[2])? else {
+    // Resolve the node's existence and base content through the overlay against
+    // the caller-supplied base (task-13): a node written earlier in the same
+    // unsaved run is the base (its buffered content and edges are kept), a
+    // staged delete marker means it is absent, and an unstaged identity yields
+    // the matching base node (or nothing when the base holds none). The refusal
+    // and the edge-preserving body/properties merge are applied over the resolved
+    // base rather than a fresh disk read.
+    let Some(mut updated) = overlay.over_base(base, layer, &pos[1], &pos[2]) else {
         anyhow::bail!("node `{f}` does not exist — use `apg node add` to create it");
     };
     if let Some(body) = body.as_deref() {
