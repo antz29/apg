@@ -769,12 +769,26 @@ pub fn write_project_with(
 
 /// The projection-only half of [`write_project_with`]'s step 6 — the entry
 /// point the session's write-back buffer projects through at admission. Given
-/// the effective in-memory node set `nodes` and the exact FQN delete set
-/// `delete_fqns`, it computes the code universes from the export, builds the
-/// record stream from the in-memory nodes, appends the worktree transient
-/// record set, and applies the delta through the caller-supplied projection
-/// closure — with NO atomic node-file write, NO git commit, and NO
-/// guard/staleness re-check (the session owns the DB and its lifetime lock).
+/// the caller-supplied effective in-memory node set `nodes`, the exact FQN
+/// delete set `delete_fqns`, and the two caller-supplied code universes
+/// `scanned`/`planned`, it builds the record stream from the in-memory nodes,
+/// appends the worktree transient record set, and applies the delta through the
+/// caller-supplied projection closure — with NO atomic node-file write, NO git
+/// commit, and NO guard/staleness re-check (the session owns the DB and its
+/// lifetime lock).
+///
+/// This entry point performs NO admission file I/O of its own: it never probes
+/// `db.lbug`, never reads `apg/.trans/graph.jsonl`, and never re-reads
+/// `apg/layers/**`. The `implemented-by` refs are the in-memory `nodes`'
+/// out-edges; [`ingest_nodes`] classifies them against the supplied universes.
+/// The caller owns the code-identity source: the direct path
+/// ([`write_project_with`]) resolves `scanned`/`planned` from the `graph.jsonl`
+/// export (seeding `planned` from the on-disk nodes' `implemented-by` refs when
+/// the export is absent), while the session's admission passes the held
+/// database's
+/// [`code_universes_from_db`](crate::artifacts::ArtifactDb::code_universes_from_db).
+/// The no-DB skip is likewise the caller's: `write_project_with` gates on
+/// `db.lbug` (the session always holds a database).
 ///
 /// `delete_fqns` carries the same FQN semantics as [`projection_deletes`]: every
 /// touched/changed FQN (a DETACH drops its vanished incident edges) plus every
@@ -790,40 +804,13 @@ pub fn project_only(
     apg_root: &Path,
     nodes: &[NodeFile],
     delete_fqns: &BTreeSet<String>,
+    scanned: &BTreeSet<String>,
+    planned: &BTreeSet<String>,
     project: ProjectionApply<'_>,
 ) -> anyhow::Result<()> {
-    // Skipped when there is no query index yet, exactly as step 6 of
-    // `write_project_with` is (the session owns an open DB, so the file is
-    // present for its life).
-    if apg_root.join(TRANS_DIR).join("db.lbug").exists() {
-        let graph_jsonl = apg_root.join(TRANS_DIR).join("graph.jsonl");
-        let (scanned, mut planned) = artifacts::code_universes_from_export(apg_root)?;
-        if !graph_jsonl.exists() {
-            // No code-identity source: the code-FQN refs are recorded
-            // UNVALIDATED. Treat every implemented-by target as pending so the
-            // projection re-merge records them instead of rejecting them as
-            // drift. Cover both the on-disk nodes and the effective in-memory
-            // set (a buffered write may not be on disk yet, and a buffered
-            // delete may still be on disk). The next scan re-validates.
-            for n in read_existing_nodes(apg_root)? {
-                for oe in &n.out {
-                    if oe.kind == "implemented-by" {
-                        planned.insert(oe.target.clone());
-                    }
-                }
-            }
-            for n in nodes {
-                for oe in &n.out {
-                    if oe.kind == "implemented-by" {
-                        planned.insert(oe.target.clone());
-                    }
-                }
-            }
-        }
-        let mut records = ingest_nodes(nodes, &scanned, &planned)?;
-        append_transient_records(apg_root, &mut records)?;
-        project(delete_fqns, &records)?;
-    }
+    let mut records = ingest_nodes(nodes, scanned, planned)?;
+    append_transient_records(apg_root, &mut records)?;
+    project(delete_fqns, &records)?;
     Ok(())
 }
 
