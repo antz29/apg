@@ -790,51 +790,43 @@ pub fn write_project_with(
     Ok(())
 }
 
-/// The projection-only half of [`write_project_with`]'s step 6 — the entry
-/// point the session's write-back buffer projects through at admission. Given
-/// the caller-supplied effective in-memory node set `nodes`, the exact FQN
-/// delete set `delete_fqns`, and the two caller-supplied code universes
-/// `scanned`/`planned`, it builds the record stream from the in-memory nodes,
-/// appends the worktree transient record set, and applies the delta through the
-/// caller-supplied projection closure — with NO atomic node-file write, NO git
-/// commit, and NO guard/staleness re-check (the session owns the DB and its
-/// lifetime lock).
+/// The projection-only half of [`write_project_with`]'s step 6 — the general
+/// **partial-delta projection seam** the session's write-back buffer projects
+/// through at admission.
 ///
-/// This entry point performs NO admission file I/O of its own: it never probes
-/// `db.lbug`, never reads `apg/.trans/graph.jsonl`, and never re-reads
-/// `apg/layers/**`. The `implemented-by` refs are the in-memory `nodes`'
-/// out-edges; [`ingest_nodes`] classifies them against the supplied universes.
-/// The caller owns the code-identity source: the direct path
-/// ([`write_project_with`]) resolves `scanned`/`planned` from the `graph.jsonl`
-/// export (seeding `planned` from the on-disk nodes' `implemented-by` refs when
-/// the export is absent), while the session's admission passes the held
-/// database's
-/// [`code_universes_from_db`](crate::artifacts::ArtifactDb::code_universes_from_db).
-/// The no-DB skip is likewise the caller's: `write_project_with` gates on
-/// `db.lbug` (the session always holds a database).
+/// Callers supply `records` — a **partial** record set: the changed identities'
+/// node+out-edge records (via
+/// [`records_for_nodes`](crate::layers::tree::records_for_nodes)), extended with
+/// the incident in-edge records read from the held database — and `delete_fqns`
+/// — exactly the identities **THIS** mutation touched (never a cumulative
+/// buffer set). It applies that delta through the caller-supplied projection
+/// closure — with NO atomic node-file write, NO git commit, and NO
+/// guard/staleness re-check (the session owns the DB and its lifetime lock).
+///
+/// It performs NO admission file I/O of its own: it never reads `.trans`
+/// (the [`append_transient_records`] append it used to do is no longer called
+/// here), never probes `db.lbug`, never reads `apg/.trans/graph.jsonl`, and
+/// never re-reads `apg/layers/**`. Validation over the full base and the record
+/// build are the caller's: the caller validates with [`validate_change_over`]
+/// and builds the records with
+/// [`records_for_nodes`](crate::layers::tree::records_for_nodes).
+///
+/// The caller owns the code-identity source and the projection closure:
+/// [`write_project_with`] is the direct path (on-disk store + the `graph.jsonl`
+/// export), while the session's admission
+/// ([`Coordinator::apply_mutation`](crate::session::Coordinator::apply_mutation))
+/// projects the held database. It is the general partial-delta projection seam,
+/// not authoring-mutation-specific.
 ///
 /// `delete_fqns` carries the same FQN semantics as [`projection_deletes`]: every
-/// touched/changed FQN (a DETACH drops its vanished incident edges) plus every
-/// deleted FQN. It is supplied by the caller because the effective node set is
-/// in memory: `projection_deletes` derives its set from paths + identity, which
-/// does not apply to a buffered mutation.
-///
-/// The worktree transient record set is appended for the same reason
-/// [`write_project_with`] appends it: a changed-FQN DETACH takes any incident
-/// `Feedback -[:Reviews]-> <node>` edge with it, and a MERGE of the durable
-/// records alone cannot put it back.
+/// identity this mutation touched (a DETACH drops its vanished incident edges)
+/// plus every deleted FQN.
 pub fn project_only(
-    apg_root: &Path,
-    nodes: &[NodeFile],
     delete_fqns: &BTreeSet<String>,
-    scanned: &BTreeSet<String>,
-    planned: &BTreeSet<String>,
+    records: &[Record],
     project: ProjectionApply<'_>,
 ) -> anyhow::Result<()> {
-    let mut records = ingest_nodes(nodes, scanned, planned)?;
-    append_transient_records(apg_root, &mut records)?;
-    project(delete_fqns, &records)?;
-    Ok(())
+    project(delete_fqns, records)
 }
 
 /// The shared **plan-store-plus-tier-mirror** transient reader: appends the
