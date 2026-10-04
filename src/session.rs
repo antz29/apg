@@ -963,12 +963,7 @@ impl Coordinator {
     /// Serve a routed read against the session-held DB, rendered exactly like
     /// the direct `apg query` path.
     fn handle_query(&self, query: &str, json: bool) -> Reply {
-        let Some(db) = self.db.as_ref() else {
-            return Reply::Err {
-                message: "the live session has no db.lbug (run `apg scan` first)".to_string(),
-            };
-        };
-        match crate::render_query(&db.db, query, json) {
+        match crate::render_query(&self.db.db, query, json) {
             Ok(output) => Reply::Ok {
                 output,
                 warnings: Vec::new(),
