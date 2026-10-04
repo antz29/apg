@@ -625,12 +625,18 @@ fn edge_update_change(
 /// `apg edge rm <kind> <from> <to>` — drop the out-edge from the source and the
 /// in-edge from the target, one atomic mutation.
 ///
-/// Both halves resolve through `overlay`: the source out-half is read from the
-/// staged content first (so an edge added earlier in the same unsaved run is
-/// found and dropped from the buffered state), a staged delete marker reads as
-/// absent, and an unstaged identity falls through to the on-disk file.
+/// Both endpoints resolve through `overlay` against the caller-supplied `base`
+/// node set (the session's `ArtifactDb::node_files_from_db`-reconstructed
+/// durable universe) via [`layers::LayersOverlay::over_base`] and
+/// [`read_endpoint`]: the source out-half is read from the staged content first
+/// (so an edge added earlier in the same unsaved run is found and dropped from
+/// the buffered state), a staged delete marker reads as absent, and an
+/// unstaged identity yields the matching base node (or nothing when the base
+/// holds none). Pure map/list logic — it never reads `apg/layers/**` and never
+/// probes `node_file_path`, so it cannot observe a node file the caller's base
+/// does not carry.
 fn edge_rm_change(
-    apg_root: &Path,
+    base: &[NodeFile],
     args: &[String],
     overlay: &layers::LayersOverlay,
 ) -> anyhow::Result<Change> {
@@ -645,19 +651,16 @@ fn edge_rm_change(
 
     let (src_layer, src_type, src_name) = layers::parse_fqn(from)?;
     let mut source = overlay
-        .read(apg_root, src_layer, &src_type, &src_name)?
+        .over_base(base, src_layer, &src_type, &src_name)
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "no node file at {}",
-                layers::node_file_path(apg_root, src_layer, &src_type, &src_name).display()
-            )
+            anyhow::anyhow!("node `{from}` does not exist — use `apg node add` to create it")
         })?;
     source
         .out
         .retain(|oe| !(oe.kind == kind && oe.target == to));
 
     let mut writes = vec![source];
-    if let Some(mut target) = read_endpoint(apg_root, overlay, to)? {
+    if let Some(mut target) = read_endpoint(base, overlay, to) {
         target
             .in_edges
             .retain(|ie| !(ie.kind == kind && ie.source == from));
