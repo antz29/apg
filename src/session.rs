@@ -403,15 +403,20 @@ impl Coordinator {
     }
 
     /// Open the owned DB handle once (the amortized open) and emit the
-    /// observable open marker. `None` when there is no `db.lbug` yet.
-    fn open_owned_db(apg_root: &Path) -> anyhow::Result<Option<ArtifactDb>> {
+    /// observable open marker. A session only starts against an existing
+    /// `db.lbug`; an absent DB is a hard refusal naming `apg scan` as the
+    /// remedy, and the returned handle is the non-optional owned DB.
+    fn open_owned_db(apg_root: &Path) -> anyhow::Result<ArtifactDb> {
         let db_path = apg_root.join(specs::TRANS).join("db.lbug");
         if !db_path.exists() {
-            return Ok(None);
+            anyhow::bail!(
+                "{} does not exist — run `apg scan` first",
+                db_path.display()
+            );
         }
         let db = ArtifactDb::open(apg_root)?;
         eprintln!("{DB_OPEN_MARKER}");
-        Ok(Some(db))
+        Ok(db)
     }
 
     /// Classify a leftover session socket and recover from an unclean exit.
