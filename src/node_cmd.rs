@@ -469,11 +469,7 @@ fn node_rm_change(
 /// This is pure map/list logic — it never reads `apg/layers/**` and never probes
 /// `node_file_path`, so it cannot observe a node file the caller's base does not
 /// carry. A code FQN resolves to no node file. Infallible.
-fn read_endpoint(
-    base: &[NodeFile],
-    overlay: &layers::LayersOverlay,
-    f: &str,
-) -> Option<NodeFile> {
+fn read_endpoint(base: &[NodeFile], overlay: &layers::LayersOverlay, f: &str) -> Option<NodeFile> {
     match layers::parse_fqn(f) {
         Ok((layer, node_type, name)) => overlay.over_base(base, layer, &node_type, &name),
         Err(_) => None, // code FQN — no node file.

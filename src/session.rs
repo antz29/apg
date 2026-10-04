@@ -774,30 +774,45 @@ impl Coordinator {
     }
 
     /// Admit one routed durable mutation as a write-back change (phase-01
-    /// task-4, SPEC `cli-session-write-back-buffer`).
+    /// task-4, phase-02 task-1: DB-only admission, SPEC
+    /// `cli-session-write-back-buffer`).
     ///
-    /// The sequence, over the session's ONE owned DB handle:
+    /// The sequence runs ENTIRELY over the session's ONE owned DB handle plus
+    /// its in-memory write-back buffer: it reads NO `apg/layers/**` node file
+    /// and NO `apg/.trans/graph.jsonl`.
     ///
-    /// 1. Build a [`layers::LayersOverlay`] from the current buffer, then build
-    ///    the change with [`node_cmd::build_change_over`](crate::node_cmd::build_change_over)
-    ///    so its existence checks and read-modify-write resolve against the
-    ///    CUMULATIVE buffered state (an update/rm of a node written earlier in
-    ///    the same unsaved run applies over its buffered content).
+    /// 1. Reconstruct the durable node universe from the held DB
+    ///    ([`crate::artifacts::ArtifactDb::node_files_from_db`]) and fold the
+    ///    cumulative buffer over it
+    ///    ([`layers::LayersOverlay::apply_to_base`]) to get the effective node
+    ///    set. Build the change with
+    ///    [`node_cmd::build_change_over`](crate::node_cmd::build_change_over)
+    ///    over that base + overlay, so its existence checks and
+    ///    read-modify-write resolve against the CUMULATIVE buffered state (an
+    ///    update/rm of a node written earlier in the same unsaved run applies
+    ///    over its buffered content).
     /// 2. Validate the change against that cumulative base via
     ///    [`layers::write::validate_change_over`] — NOT the disk-only
-    ///    [`layers::write::validate_change`] — so an edge to a node added
-    ///    earlier in the run is accepted though its file is not on disk yet.
+    ///    [`layers::write::validate_change`]. The two code-FQN universes come
+    ///    from the same held DB
+    ///    ([`crate::artifacts::ArtifactDb::code_universes_from_db`]), so an
+    ///    `implemented-by` ref validates without opening a second handle or
+    ///    reading the export.
     /// 3. Stage the change into a tentative overlay and, from the effective
-    ///    buffered node set and the touched-FQN delete set, project it into the
-    ///    live `db.lbug` AT ADMISSION through [`layers::write::project_only`] —
-    ///    NO `apg/layers/**` write and NO commit.
+    ///    node set and the touched-FQN delete set, project it into the live
+    ///    `db.lbug` AT ADMISSION through [`layers::write::project_only`] and the
+    ///    owned handle's
+    ///    [`reingest_layers_on`](crate::artifacts::ArtifactDb::reingest_layers_on)
+    ///    — NO `apg/layers/**` write and NO commit.
     /// 4. Only after the projection SUCCEEDS, commit the change to
     ///    `self.buffer` (last write/delete for an identity wins). A failure at
     ///    any earlier step leaves `self.buffer` unchanged and the DB
     ///    un-projected.
     ///
-    /// `self.db` may be `None` when no `db.lbug` exists yet: the change is
-    /// still built, validated, and buffered, and the projection is skipped.
+    /// A delete of an identity that is only a pending buffered write (added
+    /// earlier in this unsaved run) nets to nothing on disk and drops the
+    /// pending write; a delete of an identity backed by the durable DB keeps a
+    /// delete marker so the next save removes its node file.
     ///
     /// Returns the change's human message and its write-time warnings, so the
     /// caller can carry the warnings into the reply without them ever blocking
@@ -807,22 +822,30 @@ impl Coordinator {
         kind: &str,
         args: &[String],
     ) -> anyhow::Result<(String, Vec<String>)> {
-        // (1) The cumulative buffered state as an overlay.
+        // (1) The durable node universe, reconstructed from the DB the session
+        //     already holds, plus the cumulative buffered state as an overlay.
+        //     No `apg/layers/**` node file is read.
+        let db_nodes = self.db.node_files_from_db()?;
         let overlay = self.overlay_from_buffer()?;
 
-        // (2) Build the change against the cumulative buffered state.
-        let change = crate::node_cmd::build_change_over(&self.apg_root, kind, args, &overlay)?;
+        // (2) The CUMULATIVE effective node set: the DB-reconstructed durable
+        //     universe with the buffered writes/delete markers folded in. Build
+        //     the change over it so existence checks and read-modify-write
+        //     resolve against buffered content.
+        let base = overlay.apply_to_base(&db_nodes);
+        let change =
+            crate::node_cmd::build_change_over(&base, &self.apg_root, kind, args, &overlay)?;
 
-        // The on-disk store and the cumulative base this change applies over.
-        let disk = layers::read_existing_nodes(&self.apg_root)?;
-        let base = overlay.apply_to_base(&disk);
-
-        // (3) Validate against the cumulative base, NOT the disk-only store.
+        // (3) The two code-reference universes from the same held DB handle —
+        //     validate against them, NOT a `graph.jsonl` export.
+        let (scanned, planned) = self.db.code_universes_from_db()?;
         layers::write::validate_change_over(
             &self.apg_root,
             &base,
             &change.writes,
             &change.deletes,
+            &scanned,
+            &planned,
         )?;
 
         // Resolve every identity this change touches BEFORE projecting, so the
@@ -843,7 +866,7 @@ impl Coordinator {
         }
 
         // (4) Stage the change into a TENTATIVE overlay and compute the
-        // effective buffered node set and the projection delete set (every
+        // effective node set and the projection delete set (every
         // touched/changed identity FQN ∪ every deleted FQN).
         let mut tentative = overlay.clone();
         for w in &change.writes {
@@ -852,37 +875,47 @@ impl Coordinator {
         for (layer, node_type, name, _) in &delete_ids {
             tentative.stage_delete(*layer, node_type, name);
         }
-        let effective_nodes = tentative.apply_to_base(&disk);
+        let effective_nodes = tentative.apply_to_base(&db_nodes);
         let delete_fqns = tentative.touched_fqns();
 
-        // Project the effective buffered state into the live db.lbug at
-        // admission. Skipped when no query index exists yet (the durable node
-        // files are the system of record); project_only also carries the
-        // graph.jsonl-absent fallback and the transient re-merge.
-        if let Some(db) = self.db.as_ref() {
-            layers::write::project_only(
-                &self.apg_root,
-                &effective_nodes,
-                &delete_fqns,
-                &|deletes, records| db.reingest_layers_on(deletes, records),
-            )?;
-        }
+        // (5) Project the effective node set into the live db.lbug at
+        //     admission through the session's OWNED handle — no `apg/layers/**`
+        //     write, no commit, no second DB open. The session always holds a
+        //     database, so there is no absent-DB branch.
+        layers::write::project_only(
+            &self.apg_root,
+            &effective_nodes,
+            &delete_fqns,
+            &scanned,
+            &planned,
+            &|deletes, records| self.db.reingest_layers_on(deletes, records),
+        )?;
 
-        // (5) Only after the projection SUCCEEDS, commit the change to the
+        // (6) Only after the projection SUCCEEDS, commit the change to the
         // buffer — last write/delete for an identity wins.
         for (w, (layer, node_type, name)) in change.writes.iter().zip(&write_ids) {
             self.upsert_buffer(*layer, node_type, name, Some(w.clone()));
         }
-        for (layer, node_type, name, path) in &delete_ids {
-            if path.exists() {
-                // A durable file backs this identity: keep a delete marker so
-                // the next save removes it.
+        for (layer, node_type, name, _path) in &delete_ids {
+            // "Already saved": the identity is backed by a durable node file.
+            // The held DB carries the session's projected buffer too, so a
+            // delete marker is kept only when the identity is NOT a pending
+            // buffered write — a node added earlier in this unsaved run has no
+            // node file yet, so add-then-rm nets to nothing on disk (drop the
+            // pending write rather than stage a delete for a file that was
+            // never written).
+            let pending_write = self.buffer.iter().any(|c| {
+                c.layer == layer.layer_dir()
+                    && c.node_type == *node_type
+                    && c.name == *name
+                    && c.content.is_some()
+            });
+            let in_db = db_nodes.iter().any(|n| {
+                n.layer == layer.layer_dir() && n.node_type == *node_type && n.name == *name
+            });
+            if in_db && !pending_write {
                 self.upsert_buffer(*layer, node_type, name, None);
             } else {
-                // The identity only ever existed in the buffer (added earlier
-                // in this unsaved run): add-then-rm nets to nothing on disk, so
-                // drop the pending write rather than leave a delete marker for
-                // a file that was never written.
                 self.remove_buffer_entry(*layer, node_type, name);
             }
         }
