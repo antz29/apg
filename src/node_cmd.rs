@@ -163,8 +163,12 @@ pub struct Change {
 
 /// Build the complete change for one `node`/`edge` mutation (the shared
 /// read-modify-write the direct command and the session coordinator both run).
+/// The direct path supplies `build_change_over` the on-disk node set as its base
+/// ([`layers::read_existing_nodes`]) with an empty overlay, preserving the
+/// direct path's existence checks and read-modify-write over `apg/layers/**`.
 pub fn build_change(apg_root: &Path, kind: &str, args: &[String]) -> anyhow::Result<Change> {
-    build_change_over(apg_root, kind, args, &layers::LayersOverlay::new())
+    let base = layers::read_existing_nodes(apg_root)?;
+    build_change_over(&base, apg_root, kind, args, &layers::LayersOverlay::new())
 }
 
 /// Buffer-aware twin of [`build_change`]: the same dispatch, but every arm
