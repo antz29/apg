@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "note",
   "name": "rust-libbin-defect",
-  "body": "A default lib+bin Cargo package's two crate roots carry distinct, stable module prefixes, subject to `requirements.constraint.rust-crate-fqn-distinct` and `requirements.constraint.rust-crate-fqn-stability`. `rust.apg-rustfrontend.identity.package_prefix_map` assigns the cargo package name as a module prefix when the package has exactly one local crate target and assigns per-target prefixes when the package has multiple crate targets; `rust.apg-rustfrontend.identity.crate_prefix` uses each target's prefix. A default lib+bin package (`[package] name = \"apg\"` → lib target `apg`, bin target `apg`) therefore renders its two crate roots under distinct module FQNs rather than sharing `rust.apg`, so `rust.apg.ingest.insert_node` never reaches its duplicate project-node-FQN arm.",
+  "body": "A default lib+bin Cargo package's two crate roots carry distinct, stable module prefixes, subject to `requirements.constraint.rust-crate-fqn-distinct` and `requirements.constraint.rust-crate-fqn-stability`. `rust.apg-rustfrontend.identity.package_prefix_map` assigns the cargo package name as a module prefix when the package has exactly one local crate target and assigns per-target prefixes when the package has multiple crate targets; `rust.apg-rustfrontend.identity.crate_prefix` uses each target's prefix. A default lib+bin package (`[package] name = \"apg\"` → lib target `apg`, bin target `apg`) renders two distinct crate-root module FQNs, and `rust.apg.ingest.insert_node` inserts each project node FQN once.",
   "properties": {},
   "out": [
     {
