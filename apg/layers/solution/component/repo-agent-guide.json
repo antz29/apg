@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "repo-agent-guide",
-  "body": "The apg repository's own agent guide `AGENTS.md` (present in the graph as a scanned File): the repo-level guidance agents read when working in this checkout. It is not part of the `opencode-suite/` distribution (not embedded via `include_str!`, not installed by `apg init`), so it is modelled separately from `solution.component.navigator-prompt-guidance`. It carries the file-tool guidance (\"Other tools\"; the \"Read those files with read, grep, or bash\" line) that must state the same graph-first qualifier as the installed navigator prompt, and the same in-graph / not-in-graph artifact-class boundary, which 0.17.0 shrinks on the not-in-graph side.",
+  "body": "The apg repository's own agent guide `AGENTS.md` (present in the graph as a scanned File): the repo-level guidance agents read when working in this checkout. It sits outside the `opencode-suite/` distribution (installed `apg init` embeds the suite via `include_str!`, while this guide is repo-local), so it is modelled separately from `solution.component.navigator-prompt-guidance`. It carries the file-tool guidance (\"Other tools\"; the \"Read those files with read, grep, or bash\" line) that states the same graph-first qualifier as the installed navigator prompt, and the same in-graph / out-of-graph artifact-class boundary.",
   "properties": {},
   "out": [
     {
@@ -13,18 +13,8 @@
   ],
   "in": [
     {
-      "kind": "realised-by",
-      "source": "domain.entity.graph-first-navigation",
-      "properties": {}
-    },
-    {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.repo-guide-container-choice",
       "properties": {}
     },
     {
@@ -33,8 +23,18 @@
       "properties": {}
     },
     {
+      "kind": "details",
+      "source": "solution.note.repo-guide-container-choice",
+      "properties": {}
+    },
+    {
       "kind": "realised-by",
       "source": "domain.entity.agent-scaffold-flow",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.graph-first-navigation",
       "properties": {}
     }
   ]

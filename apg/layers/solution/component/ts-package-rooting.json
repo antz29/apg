@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "ts-package-rooting",
-  "body": "The TS frontend's package/module discovery (`ts.apg-tsfrontend.discovery.discoverPackages`). It must name packages from their declared names / repo-relative base, never synthesise a root module named after the checkout directory, and must not re-emit a file under both its real package and a synthetic recursive root.",
+  "body": "The TS frontend's package/module discovery (`ts.apg-tsfrontend.discovery.discoverPackages`). It names packages from their declared names / repo-relative base, derives the root module name from the repository rather than the checkout directory, and emits a file under exactly one package.",
   "properties": {},
   "out": [
     {
@@ -23,13 +23,13 @@
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "source": "domain.entity.typescript-package",
+      "kind": "details",
+      "source": "solution.note.ts-package-rooting-module-move",
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "solution.note.ts-package-rooting-module-move",
+      "kind": "realised-by",
+      "source": "domain.entity.typescript-package",
       "properties": {}
     }
   ]

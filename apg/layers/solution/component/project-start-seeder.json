@@ -2,17 +2,17 @@
   "layer": "solution",
   "type": "component",
   "name": "project-start-seeder",
-  "body": "The `apg project start` branch-DB seeder: after the standard refusals it requires main's scan to be fresh for main's HEAD (refusing with `apg scan` guidance otherwise) and copies main's `apg/.trans` into the new worktree — no frontend scan.",
+  "body": "The `apg project start` branch-DB seeder: it requires main's scan to be fresh for main's HEAD (refusing with `apg scan` guidance otherwise) and copies main's `apg/.trans` into the new worktree in place of any frontend scan.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.project_cmd.start.project_start",
+      "target": "rust.apg.project_cmd.start.copy_trans_artifacts",
       "properties": {}
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.project_cmd.start.copy_trans_artifacts",
+      "target": "rust.apg.project_cmd.start.project_start",
       "properties": {}
     },
     {

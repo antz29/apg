@@ -2,54 +2,14 @@
   "layer": "solution",
   "type": "container",
   "name": "opencode-suite",
-  "body": "The `opencode-suite/` distribution — the `apg_*` tools and the shared `lib/apg.ts` plumbing, embedded into the apg binary via `include_str!` and installed by `apg init` into `~/.opencode/`. It is the consumer boundary of the graph: its curated tools read the scanned graph and return results to agents and editors, and it is where a stored repo-relative identity is resolved to an absolute path against the caller's project directory. This change-set is ordinary release work shipping with the next release; the already-installed copies (a project's `.opencode/` and the cross-project `~/.opencode/`, from the fixed 0.14.1 tooling) are not changed by it.",
+  "body": "The `opencode-suite/` distribution — the `apg_*` tools and the shared `lib/apg.ts` plumbing, embedded into the apg binary via `include_str!` and installed by `apg init` into `~/.opencode/`. It is the consumer boundary of the graph: its curated tools read the scanned graph and return results to agents and editors, and it is where a stored repo-relative identity is resolved to an absolute path against the caller's project directory. The already-installed copies (a project's `.opencode/` and the cross-project `~/.opencode/`) are owned by the installed tooling.",
   "properties": {
     "kind": "app"
   },
   "out": [
     {
       "kind": "contains",
-      "target": "solution.component.tool-path-resolution",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.navigator-prompt-guidance",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/tools/apg_plan_phases.ts",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/lib/apg.ts",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/lib/apg.test.ts",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/tests/boundary.e2e.test.ts",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.agent-fs-tool-suite",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.agent-fs-permission-grants",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.codebase-navigator-prompt",
+      "target": "solution.component.agent-builder-agents-md-hygiene",
       "properties": {}
     },
     {
@@ -59,22 +19,42 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.agent-fs-permission-grants",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.agent-fs-tool-suite",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cli-session-caller-guidance",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.cli-session-suite-tool",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.codebase-navigator-prompt",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.distributed-reviewer-prompt",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "solution.component.worktree-boundary-tests",
+      "target": "solution.component.navigator-prompt-guidance",
       "properties": {}
     },
     {
       "kind": "contains",
       "target": "solution.component.navigator-staged-flow-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.agent-builder-agents-md-hygiene",
       "properties": {}
     },
     {
@@ -89,12 +69,32 @@
     },
     {
       "kind": "contains",
-      "target": "solution.component.cli-session-suite-tool",
+      "target": "solution.component.tool-path-resolution",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "solution.component.cli-session-caller-guidance",
+      "target": "solution.component.worktree-boundary-tests",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/lib/apg.test.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/lib/apg.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tests/boundary.e2e.test.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_phases.ts",
       "properties": {}
     }
   ],
@@ -105,8 +105,8 @@
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "source": "domain.group.plan-tooling",
+      "kind": "details",
+      "source": "requirements.note.plan-tooling-scoping-decisions",
       "properties": {}
     },
     {
@@ -115,8 +115,8 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.plan-tooling-scoping-decisions",
+      "kind": "realised-by",
+      "source": "domain.group.plan-tooling",
       "properties": {}
     }
   ]

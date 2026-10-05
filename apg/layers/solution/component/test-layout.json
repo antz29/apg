@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "test-layout",
-  "body": "The test organization of the root crate: each source module's unit/int tests move to a sibling `tests.rs` (preserving the module path so the `…::tests::unit::` / `…::tests::int::` filters keep working), the e2e tests move to per-source-module top-level `tests/` crates sharing a `tests/common/mod.rs` harness, and the cargo aliases in `.cargo/config.toml` are updated to the new libtest path filters. The layout is chosen for cohesion and reuse — tests beside their module, shared fixtures in exactly one place — not to reduce any file's line count.",
+  "body": "The test organization of the root crate: each source module's unit/int tests live in a sibling `tests.rs` (preserving the module path so the `…::tests::unit::` / `…::tests::int::` filters select them), the e2e tests live in per-source-module top-level `tests/` crates sharing a `tests/common/mod.rs` harness, and the cargo aliases in `.cargo/config.toml` point at the libtest path filters. The layout serves cohesion and reuse — tests beside their module, shared fixtures in exactly one place — rather than any file's line count.",
   "properties": {},
   "out": [
     {
@@ -18,13 +18,8 @@
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "source": "domain.entity.test-tier",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "source": "domain.entity.test-harness",
+      "kind": "details",
+      "source": "requirements.note.frontends-are-separate-projects",
       "properties": {}
     },
     {
@@ -33,8 +28,13 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.frontends-are-separate-projects",
+      "kind": "realised-by",
+      "source": "domain.entity.test-harness",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.test-tier",
       "properties": {}
     }
   ]

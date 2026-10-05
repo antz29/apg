@@ -2,42 +2,17 @@
   "layer": "solution",
   "type": "component",
   "name": "scan-driver",
-  "body": "The scan orchestrator: `apg scan` and the `project start` path. It decides full vs incremental (`rust.apg.delta.full_scan_reason`), decides which frontends to spawn (`rust.apg.should_spawn_language`), splices cached/reused fragments (`rust.apg.ingest`, `rust.apg.cache.rebase`), and seeds a branch DB by copy (`rust.apg.splice`). Owns the \"start at an already-scanned commit is near-instant\" behaviour and the no-unfiltered-spawn fast path.",
+  "body": "The scan orchestrator: `apg scan` and the `project start` path. It decides full vs incremental (`rust.apg.delta.full_scan_reason`), decides which frontends to spawn (`rust.apg.should_spawn_language`), splices cached/reused fragments (`rust.apg.ingest`, `rust.apg.cache.rebase`), and seeds a branch DB by copy (`rust.apg.splice`). Owns the \"start at an already-scanned commit is near-instant\" behaviour and the fast path that spawns frontends selectively rather than unfiltered.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.project_cmd",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.delta.full_scan_reason",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.splice",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.frontends.should_spawn_language",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.scan.cmd_scan",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.project_cmd.start.project_start_at",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.cache.fragment.rebase",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.cache.manifest.CacheKey.compute",
       "properties": {}
     },
     {
@@ -47,7 +22,32 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.cache.manifest.CacheKey.compute",
+      "target": "rust.apg.delta.full_scan_reason",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.frontends.should_spawn_language",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.project_cmd.start.project_start_at",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.scan.cmd_scan",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.splice",
       "properties": {}
     }
   ],
