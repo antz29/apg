@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "user",
   "name": "source-contributor",
-  "body": "An engineer or agent that changes a module of the apg root crate — adding a feature, fixing a bug, or moving code — and must run the test suite to prove the change. They need the tests for the module they touched to be findable from that module, and the fast default gate (unit + int) to run without dragging in the slow, I/O-heavy e2e tier.",
+  "body": "An engineer or agent that changes a module of the apg root crate — adding a feature, fixing a bug, or moving code — and runs the test suite to prove the change. They rely on the tests for the module they touched being findable from that module, and on the fast default gate (unit + int) running with the slow, I/O-heavy e2e tier excluded.",
   "properties": {},
   "out": [
     {
