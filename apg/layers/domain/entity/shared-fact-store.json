@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "shared-fact-store",
-  "body": "The repo-wide delta/manifest store under `<git-common-dir>/apg/facts`, shared by every worktree and branch of the repository, against which the per-worktree local `db.lbug` is equated by content identity. A spec-only change-set can leave the shared store's recorded key unchanged while the local `graph.jsonl` was re-anchored by a durable commit, so the seed guard can admit a seed whose authored rows are stale — the defect's precondition.",
+  "body": "The repo-wide delta/manifest store under `<git-common-dir>/apg/facts`, shared by every worktree and branch of the repository, against which the per-worktree local `db.lbug` is equated by content identity. A spec-only change-set that leaves the shared store's recorded key unchanged while a durable commit re-anchors the local `graph.jsonl` yields a state where the seed guard admits a seed whose authored rows are stale.",
   "properties": {
     "kind": "entity"
   },

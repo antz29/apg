@@ -2,14 +2,14 @@
   "layer": "domain",
   "type": "entity",
   "name": "structural-format",
-  "body": "A text/config/data format the structural scanner claims and for which it emits structure: Markdown (`md`), shell (`sh`), YAML (`yaml`), JSON (`json`), TOML (`toml`), XML (`xml`), Dockerfile (`dockerfile`), Makefile (`makefile`), and the INI family (`.ini`/`.editorconfig`/`.gitconfig`/`.env`/`.properties`, id `ini`). Each has its own `lang_switch` id and emits its own structure (see `requirements.requirement.structural-format-structure`). Markdown keeps the pre-existing `md` id so its FQNs do not move.",
+  "body": "A text/config/data format the structural scanner claims and for which it emits structure: Markdown (`md`), shell (`sh`), YAML (`yaml`), JSON (`json`), TOML (`toml`), XML (`xml`), Dockerfile (`dockerfile`), Makefile (`makefile`), and the INI family (`.ini`/`.editorconfig`/`.gitconfig`/`.env`/`.properties`, id `ini`). Each carries its own `lang_switch` id and emits its own structure (see `requirements.requirement.structural-format-structure`). Markdown carries the `md` id, which holds its FQNs stable.",
   "properties": {
     "kind": "entity"
   },
   "out": [
     {
       "kind": "realised-by",
-      "target": "solution.container.structural-scanner",
+      "target": "solution.component.structural-claiming",
       "properties": {}
     },
     {
@@ -19,12 +19,12 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.structural-claiming",
+      "target": "solution.component.structural-stream-dispatch",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.structural-stream-dispatch",
+      "target": "solution.container.structural-scanner",
       "properties": {}
     }
   ],
@@ -36,17 +36,17 @@
     },
     {
       "kind": "drives",
-      "source": "requirements.requirement.structural-format-structure",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
       "source": "requirements.requirement.md-lang-id-preserved",
       "properties": {}
     },
     {
       "kind": "drives",
       "source": "requirements.requirement.structural-format-claiming",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.structural-format-structure",
       "properties": {}
     }
   ]
