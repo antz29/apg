@@ -2,16 +2,11 @@
   "layer": "domain",
   "type": "entity",
   "name": "engine-pin",
-  "body": "The exact engine version a frontend is built against, which sets the newest language construct that frontend can parse. Pinning it makes the language-version ceiling knowable. For TypeScript, C#, and Python the ceiling is the pin alone; for Go, Java, and Rust the ceiling is the user's installed toolchain (the type-checker is the toolchain), so the pin records that jointly. The bundled structural scanner and the C++ frontend are outside this pin concept's language-version sense: the structural formats impose no ceiling at all, and C++ records a content/ABI identity rather than a version.",
+  "body": "The exact engine version a frontend is built against, which sets the newest language construct that frontend parses. Pinning it makes the language-version ceiling knowable. For TypeScript, C#, and Python the ceiling is the pin alone; for Go, Java, and Rust the ceiling is the user's installed toolchain (the type-checker is the toolchain), so the pin records that jointly. The bundled structural scanner and the C++ frontend sit outside this pin concept's language-version sense: the structural formats lie beyond the language-version ceiling, and C++ records a content/ABI identity rather than a version.",
   "properties": {
     "kind": "entity"
   },
   "out": [
-    {
-      "kind": "realised-by",
-      "target": "solution.container.rust-frontend",
-      "properties": {}
-    },
     {
       "kind": "realised-by",
       "target": "solution.container.cpp-frontend",
@@ -34,12 +29,17 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.container.ts-frontend",
+      "target": "solution.container.py-frontend",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.container.py-frontend",
+      "target": "solution.container.rust-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.ts-frontend",
       "properties": {}
     }
   ],
