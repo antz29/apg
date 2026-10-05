@@ -14,7 +14,7 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.build_script_build.main",
+      "target": "build.rs",
       "properties": {}
     }
   ],
