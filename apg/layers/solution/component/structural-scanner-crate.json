@@ -28,11 +28,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "global.note.durable-spec-prose-reconcile-0-17",
-      "properties": {}
-    },
-    {
       "kind": "realised-by",
       "source": "domain.entity.structural-scanner",
       "properties": {}
