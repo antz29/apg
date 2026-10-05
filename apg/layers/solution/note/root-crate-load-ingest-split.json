@@ -2,22 +2,17 @@
   "layer": "solution",
   "type": "note",
   "name": "root-crate-load-ingest-split",
-  "body": "Wave D of the multi-wave task-19 decomposition (no behaviour change). src/load.rs is decomposed into load/{parquet,tables,export} — nothing stays in load/mod.rs. src/ingest.rs is decomposed into ingest/{identity,blacklist,render,edges}. The ingest CORE deliberately STAYS in ingest/mod.rs (ingest_records, claim, ingest, opt, spec_node, insert_node, finalize_graph, IngestOptions, Reuse, IngestReport) so its durable spine identities (rust.apg.ingest.ingest_records, rust.apg.ingest.claim) keep resolving; the module FQNs rust.apg.ingest and rust.apg.load are likewise preserved by mod.rs. The 5 implemented-by edges for functions that move are re-pointed to the post-split FQNs; the module-level edges and the two edges targeting core units are left untouched.",
+  "body": "Wave D of the multi-wave task-19 decomposition (behaviour unchanged). `src/load.rs` is decomposed into `load/{parquet,tables,export}`, with `load/mod.rs` holding the module declarations. `src/ingest.rs` is decomposed into `ingest/{identity,blacklist,render,edges}`. The ingest core stays in `ingest/mod.rs` (`ingest_records`, `claim`, `ingest`, `opt`, `spec_node`, `insert_node`, `finalize_graph`, `IngestOptions`, `Reuse`, `IngestReport`), so its durable spine identities (`rust.apg.ingest.ingest_records`, `rust.apg.ingest.claim`) keep resolving, and the module FQNs `rust.apg.ingest` and `rust.apg.load` stay via `mod.rs`. The 5 `implemented-by` edges for functions that move target the post-split FQNs; the module-level edges and the two edges targeting core units stay.",
   "properties": {},
   "out": [
     {
       "kind": "details",
-      "target": "rust.apg.load.parquet",
+      "target": "rust.apg.ingest.blacklist",
       "properties": {}
     },
     {
       "kind": "details",
-      "target": "rust.apg.load.tables",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.load.export",
+      "target": "rust.apg.ingest.edges",
       "properties": {}
     },
     {
@@ -27,17 +22,22 @@
     },
     {
       "kind": "details",
-      "target": "rust.apg.ingest.blacklist",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "rust.apg.ingest.render",
       "properties": {}
     },
     {
       "kind": "details",
-      "target": "rust.apg.ingest.edges",
+      "target": "rust.apg.load.export",
+      "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.load.parquet",
+      "properties": {}
+    },
+    {
+      "kind": "details",
+      "target": "rust.apg.load.tables",
       "properties": {}
     }
   ],

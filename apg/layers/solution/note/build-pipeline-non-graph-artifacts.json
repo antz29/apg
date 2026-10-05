@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "build-pipeline-non-graph-artifacts",
-  "body": "The build-toolchain pins live in artifacts the code graph does not model at 0.16.1 — `.github/workflows/release.yml` (YAML) and the split `Formula/apg-*.rb` (Ruby) — so no implemented-by edge can target them, and the plan, not the code graph, owns their edits; `rust.build_script_build` (build.rs) is the graph-visible half of the pipeline. This premise narrows with 0.17.0: the bundled structural scanner graphs `release.yml` (yaml) and `install.sh` (sh), and `Cargo.toml` (toml), so from the next binary onward those become targetable. Ruby (`Formula/*.rb`, pending `apg-ruby`) has no frontend, so it is not symbol-graphed — but it is still graphed as a residual `misc` `File` node (a `File` node with no Module/Struct/Function facts), so it too becomes targetable from the next binary onward; only paths the config scope and the standard exclusions remove have no node at all. For the 0.17.0 change-set itself the premise still holds — see `solution.note.structural-scanner-oroboros` — and the plan carries the formula/installer edits as non-graph maintainer tasks.",
+  "body": "Build-toolchain pins live in tracked files the structural scanner graphs: `.github/workflows/release.yml` (YAML), `install.sh` (sh), and `Cargo.toml` (toml) carry `File` nodes (`code_type = 'config'`), so each is an `implemented-by`-targetable identity. `rust.build_script_build` (build.rs) is the graph-visible half of the pipeline. Ruby (`Formula/*.rb`, the pending `apg-ruby` frontend) carries a residual `misc` `File` node lacking Module/Struct/Function facts, so the formula edits ride as non-graph maintainer tasks in the plan.",
   "properties": {},
   "out": [
     {
