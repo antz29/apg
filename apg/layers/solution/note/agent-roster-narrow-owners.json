@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "agent-roster-narrow-owners",
-  "body": "`solution.component.distributed-agent-install` owns the distributed-agent embed/install/upgrade surface in the binary and the help-text roster; `solution.component.distributed-reviewer-prompt` owns the new reviewer prompt file; `solution.component.agent-roster-docs` owns the roster docs. It is distinct from `solution.component.agent-fs-install-registry`, which owns the fs-tools surface: overlapping component ownership of one file is established practice here (`solution.component.codebase-navigator-prompt` and `solution.component.navigator-prompt-guidance` both share `opencode-suite/agents/codebase-navigator.md`).",
+  "body": "`solution.component.distributed-agent-install` owns the distributed-agent embed/install/upgrade surface in the binary and the help-text roster; `solution.component.distributed-reviewer-prompt` owns the reviewer prompt file; `solution.component.agent-roster-docs` owns the roster docs. `solution.component.distributed-agent-install` is distinct from `solution.component.agent-fs-install-registry`, which owns the fs-tools surface; `solution.component.codebase-navigator-prompt` and `solution.component.navigator-prompt-guidance` both share `opencode-suite/agents/codebase-navigator.md`.",
   "properties": {},
   "out": [
     {

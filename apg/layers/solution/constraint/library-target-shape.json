@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "library-target-shape",
-  "body": "A first-party crate whose tests call its internals needs a **library target** (a lib surface) so those tests can live outside the production module tree: the crate's `src/lib.rs` (its lib root) declares the `mod` tree and the crate-internal API, and its binary entry point is a thin wrapper that calls into the library. The rule is general, not a root-crate-only list: every first-party crate that carries inline tests requiring white-box access gets a lib target — today the root `apg` crate, `structlib` and `pylib`. The surface is a **mechanical** move: it exposes the existing crate-internal items the tests reach, with no API redesign, no behaviour change, and no FQN change, per `global.constraint.behaviour-preserving-refactor`. No production logic may be duplicated between the library and the binary, and moving a unit into the library must not change its behaviour or its FQN.",
+  "body": "A first-party crate whose tests call its internals exposes a library target: the crate's `src/lib.rs` lib root declares the `mod` tree and the crate-internal API, and its binary entry point calls into the library. Every first-party crate whose tests require white-box access to its internals carries a lib target — the root `apg` crate, `structlib`, and `pylib`. The library exposes the crate-internal items the tests reach with the same FQNs and behaviour as the binary, and no production logic is duplicated between the library and the binary.",
   "properties": {},
   "out": [],
   "in": []
