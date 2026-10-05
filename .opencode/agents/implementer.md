@@ -446,7 +446,7 @@ reviewer:    apg_review_reject <f>                               → status = op
   **`build-implementer`**. If a build input needs changing, that is a task for
   `build-implementer`, not you.
 - **`opencode-suite/`** is in-tree product source: the suite tools/lib and the
-  distributed-agent templates, embedded in `src/main.rs` via `include_str!`.
+  distributed-agent templates, embedded in `src/install.rs` via `include_str!`.
   When a task calls for it you edit it like any other product source (your
   grant covers it, worktree-mirrored). **`.opencode/` remains off-limits** —
   you never edit this repo's generated agents or opencode config.
