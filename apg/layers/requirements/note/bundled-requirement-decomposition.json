@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "note",
   "name": "bundled-requirement-decomposition",
-  "body": "`requirements.requirement.reviewer-upgrade-removal-guide` addresses the upgrade friction of a repo that already carries a repo-local `implementation-phase-reviewer.md`; it is one requirement alongside the reviewer-distribution requirement `requirements.requirement.reviewer-is-distributed-not-generated`, and its manual-removal instruction is separately testable user-facing behaviour (`APG_UPGRADE_DOC` plus the `upgrade_doc_covers_version_field_gate_and_fix_steps` needle). It is parented under `requirements.user.apg-upgrader`, and `reviewer-is-distributed-not-generated` is parented under `requirements.stakeholder.agent-suite-maintainer`, so the `contains` hierarchy is a tree.",
+  "body": "`requirements.requirement.reviewer-upgrade-removal-guide` states user-facing upgrade behaviour: `APG_UPGRADE_DOC` carries the manual-removal step for a repo-local `implementation-phase-reviewer.md`, and the `upgrade_doc_covers_version_field_gate_and_fix_steps` needle covers it. The requirement is parented under `requirements.user.apg-upgrader`; the reviewer-distribution requirement `requirements.requirement.reviewer-is-distributed-not-generated` is parented under `requirements.stakeholder.agent-suite-maintainer`.",
   "properties": {},
   "out": [
     {
