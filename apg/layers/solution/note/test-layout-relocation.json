@@ -2,17 +2,17 @@
   "layer": "solution",
   "type": "note",
   "name": "test-layout-relocation",
-  "body": "The relocation in detail. Sibling tests: `#[cfg(test)] mod tests;` in each source module points at `src/<module>/tests.rs`, keeping the module path (`rust.apg.plan_cmd.tests.e2e`) so the existing tier filters and graph queries still resolve. Top-level e2e: one integration crate per source module (`tests/main_e2e.rs`, `tests/plan_cmd_e2e.rs`, `tests/git_e2e.rs`, …) with a shared `tests/common/mod.rs`; each e2e test keeps `#[ignore = \"e2e tier: …; run via cargo test-e2e\"]`. White-box dependency: 268 of 310 e2e tests call crate-internal functions, and `testutil` is `#[cfg(test)] mod testutil;` in `main.rs` today — it must become part of the library surface (or be re-homed into the shared `common` harness) for the integration crates to compile. Handoff: `src/lib.rs` and `tests/**` do not exist in the branch graph, so this component's `implemented-by` targets (`rust.apg`, `rust.apg.testutil`) are the existing modules it will re-home; the plan-writer declares the new files as planned nodes and points `implemented-by` at them once they exist.",
+  "body": "Sibling tests: each source module carries `#[cfg(test)] mod tests;` pointing at `src/<module>/tests.rs`, which keeps the module path (`rust.apg.plan_cmd.tests.e2e`) so the tier filters and graph queries resolve. Top-level e2e: one integration crate per source module (`tests/main_e2e.rs`, `tests/plan_cmd_e2e.rs`, `tests/git_e2e.rs`, …) shares `tests/common/mod.rs`; each e2e test carries `#[ignore = \"e2e tier: …; run via cargo test-e2e\"]`. White-box dependency: 268 of 310 e2e tests call crate-internal functions, and `testutil` is part of the library surface (or the shared `common` harness) so the integration crates compile. This component's `implemented-by` targets are the existing modules `rust.apg` and `rust.apg.testutil`; `src/lib.rs` and `tests/**` are the planned file nodes that re-home them.",
   "properties": {},
   "out": [
     {
       "kind": "details",
-      "target": "solution.component.test-layout",
+      "target": "solution.component.library-surface",
       "properties": {}
     },
     {
       "kind": "details",
-      "target": "solution.component.library-surface",
+      "target": "solution.component.test-layout",
       "properties": {}
     }
   ],
