@@ -53,11 +53,6 @@
       "kind": "contains",
       "source": "requirements.stakeholder.frontend-maintainer",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.structural-file-graphing-reconciliation",
-      "properties": {}
     }
   ]
 }

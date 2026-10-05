@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "distributed-reviewer-deferred-edge",
-  "body": "`solution.component.distributed-reviewer-prompt` —implemented-by→ `opencode-suite/agents/implementation-phase-reviewer.md` (a planned File node under `agent-builder-roster-cleanup/plan`, status `planned`) and → `rust.main_e2e.e2e.installed_agent_prompts_state_file_access_read_guard`, the read-guard coherence test whose five-prompt list the change-set extends to include `implementation-phase-reviewer.md` (the distributed-reviewer requirement, AC 8).",
+  "body": "`solution.component.distributed-reviewer-prompt` —implemented-by→ `opencode-suite/agents/implementation-phase-reviewer.md` and → `rust.main_e2e.e2e.installed_agent_prompts_state_file_access_read_guard`, the read-guard coherence test whose prompt list includes `implementation-phase-reviewer.md` (the distributed-reviewer requirement's acceptance criterion).",
   "properties": {},
   "out": [
     {

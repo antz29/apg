@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "java-collector-class-move",
-  "body": "`solution.component.java-package-hierarchy` —implemented-by→ `java.Collector.emitPkgHierarchy`. The Java frontend decomposition places `Collector` as a top-level class, so its method renders `java.Collector.emitPkgHierarchy`, and the component body cites that FQN. The edge targets the planned `java.Collector.emitPkgHierarchy` implementation node, pending the decomposition.",
+  "body": "`solution.component.java-package-hierarchy` —implemented-by→ `java.Collector.emitPkgHierarchy`. `Collector` is a top-level class in the Java frontend, so its method renders `java.Collector.emitPkgHierarchy`, and the component body cites that FQN.",
   "properties": {},
   "out": [
     {
