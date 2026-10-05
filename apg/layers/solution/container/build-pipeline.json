@@ -11,6 +11,11 @@
       "kind": "contains",
       "target": "solution.component.structural-build-staging",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.build_script_build",
+      "properties": {}
     }
   ],
   "in": [
