@@ -7,42 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.apg.plan_cmd.envelope",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.plan_cmd.authoring",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.plan_cmd.status",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.plan_cmd.verify",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.plan_cmd.render",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "rust.apg.project_cmd.start",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.project_cmd.merge",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.project_cmd.delete",
       "properties": {}
     }
   ],

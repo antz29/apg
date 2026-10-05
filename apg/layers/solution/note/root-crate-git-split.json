@@ -7,22 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.apg.git.commit",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.git.identity",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "rust.apg.git.state",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.git.time",
       "properties": {}
     }
   ],

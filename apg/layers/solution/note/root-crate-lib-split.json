@@ -7,37 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.apg.frontends",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "rust.apg.install",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.logging",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.pipeline",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.query",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.scan",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.warm",
       "properties": {}
     }
   ],

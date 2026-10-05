@@ -7,37 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "rust.apg.ingest.blacklist",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.ingest.edges",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "rust.apg.ingest.identity",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.ingest.render",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.load.export",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.load.parquet",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "rust.apg.load.tables",
       "properties": {}
     }
   ],
