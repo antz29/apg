@@ -18,11 +18,6 @@
       "kind": "contains",
       "source": "requirements.stakeholder.spec-author",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.details-target-reconciliation",
-      "properties": {}
     }
   ]
 }

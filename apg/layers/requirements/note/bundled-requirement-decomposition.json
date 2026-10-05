@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "note",
   "name": "bundled-requirement-decomposition",
-  "body": "The brief bundles two requirements. The coordinator-removal concern is one atomic requirement. The reviewer-distribution concern is the distribution requirement plus the distinct migration requirement `requirements.requirement.reviewer-upgrade-removal-guide`, whose manual-removal instruction is separately testable user-facing behaviour (`APG_UPGRADE_DOC` plus the `upgrade_doc_covers_version_field_gate_and_fix_steps` needle). The migration requirement is parented under `requirements.user.apg-upgrader` rather than under the distribution requirement, so the `contains` hierarchy stays a tree.",
+  "body": "`requirements.requirement.reviewer-upgrade-removal-guide` is distinct from the reviewer-distribution requirement `requirements.requirement.reviewer-is-distributed-not-generated`: it addresses the upgrade friction of a repo that already carries a repo-local `implementation-phase-reviewer.md`, and its manual-removal instruction is separately testable user-facing behaviour (`APG_UPGRADE_DOC` plus the `upgrade_doc_covers_version_field_gate_and_fix_steps` needle). It is parented under `requirements.user.apg-upgrader`, and `reviewer-is-distributed-not-generated` is parented under `requirements.stakeholder.agent-suite-maintainer`; the `contains` hierarchy stays a tree.",
   "properties": {},
   "out": [
     {

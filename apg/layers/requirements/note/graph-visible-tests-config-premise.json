@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "note",
   "name": "graph-visible-tests-config-premise",
-  "body": "The requirement `requirements.requirement.graph-visible-tests` states apg's own relocated tests (`src/<module>/tests.rs`, top-level `tests/**`) classify as `test` code in apg's own graph, observable through `apg query`. `apg/config.json` carries `{\"default\":\"src\",\"types\":[],\"version\":\"0.17.0\"}`; a present config replaces the built-in per-language defaults (`src/classify.rs::classify_code_type` iterates `cfg.types` then returns `cfg.default`), so code records classify `src` and the types list holds zero `test` rule. Populating `apg/config.json`'s `types` with a `test` rule covering the relocated layout (globs `**/tests.rs` and `tests/**`) satisfies the requirement. The bundled structural scanner graphs tracked config/manifest artifacts, so `apg/config.json` is a `File` node with `code_type = 'config'` (likewise `Cargo.toml`, `.cargo/config.toml`, `rust-toolchain.toml`, `scripts/gate.sh`), and the phase-03 edit targets that file by FQN.",
+  "body": "`apg/config.json` carries a `test` rule in its `types` list covering the relocated layout, so a scan of this repo classifies the relocated tests as `test`; a present config replaces the built-in per-language defaults (`src/classify.rs::classify_code_type` iterates `cfg.types` then returns `cfg.default`). The bundled structural scanner graphs tracked config/manifest artifacts, so `apg/config.json` is a `File` node with `code_type = 'config'` (likewise `Cargo.toml`, `.cargo/config.toml`, `rust-toolchain.toml`, `scripts/gate.sh`).",
   "properties": {},
   "out": [
     {

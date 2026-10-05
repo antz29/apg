@@ -68,11 +68,6 @@
       "kind": "contains",
       "source": "requirements.stakeholder.multi-user-repo-team",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.identity-defect-inventory",
-      "properties": {}
     }
   ]
 }

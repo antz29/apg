@@ -33,11 +33,6 @@
       "kind": "contains",
       "source": "requirements.requirement.portable-graph-identity",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.base-is-git-toplevel",
-      "properties": {}
     }
   ]
 }

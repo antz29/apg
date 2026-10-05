@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "note",
   "name": "every-tracked-file-graphed-spine-narrowing",
-  "body": "`requirements.requirement.every-tracked-file-graphed` drives `domain.group.structural-file-graphing`, which is `realised-by` `solution.container.structural-scanner`; that spine is the correct coverage for the requirement. `domain.entity.source-file` is prior change-set work, `realised-by` `solution.component.identity-layer`, whose `implemented-by` set (`rust.apg.git`, `rust.apg.git.repo_rel`, `rust.apg.ingest`, `rust.apg.ingest.root_module_fqn`, `rust.apg.load`, `rust.apg.load.write_graph_jsonl`) stays outside this change-set; a drive from `every-tracked-file-graphed` to `source-file` makes the verify gate demand tasks over untouched prior code. `requirements.requirement.repo-relative-file-identity` and `requirements.requirement.portable-graph-identity` keep their drives to `domain.entity.source-file`.",
+  "body": "`requirements.requirement.every-tracked-file-graphed` drives `domain.group.structural-file-graphing`, which is `realised-by` `solution.container.structural-scanner`. `domain.entity.source-file` is `realised-by` `solution.component.identity-layer`, whose `implemented-by` set is `rust.apg.git`, `rust.apg.git.identity.repo_rel`, `rust.apg.ingest`, `rust.apg.ingest.identity.root_module_fqn`, `rust.apg.load`, and `rust.apg.load.export.write_graph_jsonl`. `requirements.requirement.repo-relative-file-identity` and `requirements.requirement.portable-graph-identity` drive `domain.entity.source-file`.",
   "properties": {},
   "out": [
     {
