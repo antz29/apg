@@ -2,14 +2,24 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "portable-graph-identity",
-  "body": "The program graph's identity must be a function of the repository content and the commit, not of the checkout location, the scan root, or the user who ran the scan. A graph built by one user in one checkout at a commit must be valid — same node identities, same edges — for another user in another checkout of the same commit, whether that is a fresh clone at a different absolute path or another worktree of the same repository.\n\nToday a File node's fqn IS its absolute path (`rust.apg.load` — write_graph_jsonl: \"A File node's fqn IS its absolute path\"), so two users mint disjoint identities for the same bytes and graphs cannot be shared or copied. The cache layer already assumes the portable model (Manifest paths are checkout-relative; `rust.apg.cache.rebase` re-bases stored absolute fqns onto the reading worktree); this requirement promotes that assumption to the whole graph.\n\nAcceptance criteria:\n- Two clean checkouts of the same commit produce graphs that are identical apart from the recorded scan root of each scan.\n- Every File/Module/Struct/Function fqn for a given source file is equal in both graphs.\n- No node identity embeds a checkout's absolute path or the basename of a checkout directory.\n- This must hold when the two scans are given different scan roots (e.g. `apg scan <repo>` vs `apg scan <repo>/subdir`).",
+  "body": "The program graph's identity is a function of the repository content and the commit, free of the checkout location, the scan root, and the user who ran the scan. A graph built by one user in one checkout at a commit is valid — same node identities, same edges — for another user in another checkout of the same commit, whether that is a fresh clone at a different absolute path or another worktree of the same repository.\n\nThe cache layer's portable model (Manifest paths are checkout-relative; `rust.apg.cache.rebase` re-bases stored absolute fqns onto the reading worktree) holds for the whole graph: a File node's fqn is its repo-relative path, so two users' graphs share identities for the same bytes.\n\nAcceptance criteria:\n- Two clean checkouts of the same commit produce graphs that are identical apart from the recorded scan root of each scan.\n- Every File/Module/Struct/Function fqn for a given source file is equal in both graphs.\n- Zero node identity embeds a checkout's absolute path or the basename of a checkout directory.\n- This holds when the two scans are given different scan roots (e.g. `apg scan <repo>` vs `apg scan <repo>/subdir`).",
   "properties": {
     "feature": "graph-identity"
   },
   "out": [
     {
       "kind": "contains",
-      "target": "requirements.requirement.repo-relative-file-identity",
+      "target": "requirements.requirement.absolute-paths-at-tool-boundary",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.classification-config-in-cache-key",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.fast-project-start",
       "properties": {}
     },
     {
@@ -19,12 +29,12 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.no-self-ingestion",
+      "target": "requirements.requirement.java-default-package-identity",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.java-default-package-identity",
+      "target": "requirements.requirement.no-self-ingestion",
       "properties": {}
     },
     {
@@ -34,22 +44,7 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.fast-project-start",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.value.canonical-file-identity",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "target": "domain.entity.source-file",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.absolute-paths-at-tool-boundary",
+      "target": "requirements.requirement.repo-relative-file-identity",
       "properties": {}
     },
     {
@@ -58,8 +53,13 @@
       "properties": {}
     },
     {
-      "kind": "contains",
-      "target": "requirements.requirement.classification-config-in-cache-key",
+      "kind": "drives",
+      "target": "domain.entity.source-file",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.canonical-file-identity",
       "properties": {}
     }
   ],
@@ -67,11 +67,6 @@
     {
       "kind": "contains",
       "source": "requirements.stakeholder.multi-user-repo-team",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.walk-up-trans-marker",
       "properties": {}
     },
     {
@@ -87,6 +82,11 @@
     {
       "kind": "details",
       "source": "requirements.note.relative-in-graph-absolute-at-tools",
+      "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.walk-up-trans-marker",
       "properties": {}
     }
   ]
