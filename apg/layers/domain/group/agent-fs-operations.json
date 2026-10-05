@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "agent-fs-operations",
-  "body": "The subdomain of an agent performing a filesystem mutation — delete, move, or copy — within the surface it owns. This is a capability contract, not a blanket grant: the operation's meaning is inseparable from the per-path scope the agent was given, so the subdomain gathers both the operation and its scope. It is what a plan `deletes`/`renames`/`moves` task exercises, and it is deliberately distinct from the graph's own node/edge mutation surface (`apg node rm` / `apg edge rm`), which mutates graph nodes rather than files.",
+  "body": "The subdomain of an agent performing a filesystem mutation — delete, move, or copy — within the surface it owns. This is a bounded capability contract: the operation's meaning is inseparable from the per-path scope the agent holds, so the subdomain gathers both the operation and its scope. It is what a plan `deletes`/`renames`/`moves` task exercises, and it is distinct from the graph's own node/edge mutation surface (`apg node rm` / `apg edge rm`), which mutates graph nodes rather than files.",
   "properties": {
     "attribute": "core",
     "root": "agent-fs-operation"
@@ -15,12 +15,17 @@
     },
     {
       "kind": "contains",
-      "target": "domain.value.permission-scope",
+      "target": "domain.entity.main-integration",
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "target": "solution.component.agent-fs-tool-suite",
+      "kind": "contains",
+      "target": "domain.entity.worktree-write-boundary",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.permission-scope",
       "properties": {}
     },
     {
@@ -34,13 +39,8 @@
       "properties": {}
     },
     {
-      "kind": "contains",
-      "target": "domain.entity.worktree-write-boundary",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.entity.main-integration",
+      "kind": "realised-by",
+      "target": "solution.component.agent-fs-tool-suite",
       "properties": {}
     }
   ],

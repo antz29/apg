@@ -2,13 +2,23 @@
   "layer": "domain",
   "type": "value",
   "name": "permission-scope",
-  "body": "The per-path scope under which an agent's write (edit or filesystem operation) is permitted: the agent's EFFECTIVE `permission.edit` rule set — its ALLOW and DENY entries — resolved in one frame with the path being written, where an allow entry grants the path, a deny entry revokes it, the LAST matching entry wins, and a path matched by no entry is refused (deny-by-default). The fs tools (`apg_rm`/`apg_mv`/`apg_cp`) enforce exactly this scope, so a filesystem operation can never touch a path the `edit` permission denies. For a CODE-WRITER the scope is WORKTREE-ROOTED — its globs name `apg/.worktrees/*/<glob>` paths only, never a main-checkout path — so the grant covers exactly the project worktree the agent mutates and main stays read-only to it. The only scopes that reach the main checkout belong to the carve-outs of `global.constraint.worktree-isolation` (the agent-builder's `.opencode/agents/**`; the optional release-agent's per-repo release artefacts). It is the agent's owned surface expressed for path matching — narrow by construction (deny-by-default, exactly the source/config/test globs the role owns), never a blanket capability. A path outside the scope, or one a later deny revokes, is refused.",
+  "body": "The per-path scope under which an agent's write (edit or filesystem operation) is permitted: the agent's EFFECTIVE `permission.edit` rule set — its ALLOW and DENY entries — resolved in one frame with the path being written, where an allow entry grants the path, a deny entry revokes it, the LAST matching entry wins, and a path matched by zero entries is refused (deny-by-default). The fs tools (`apg_rm`/`apg_mv`/`apg_cp`) enforce exactly this scope, so a filesystem operation cannot reach a path the `edit` permission denies. For a CODE-WRITER the scope is WORKTREE-ROOTED — its globs name `apg/.worktrees/*/<glob>` paths only, with a main-checkout path outside them — so the grant covers exactly the project worktree the agent mutates and main stays read-only to it. The only scopes that reach the main checkout belong to the carve-outs of `global.constraint.worktree-isolation` (the agent-builder's `.opencode/agents/**`; the optional release-agent's per-repo release artefacts). It is the agent's owned surface expressed for path matching — narrow by construction (deny-by-default, exactly the source/config/test globs the role owns), a bounded capability. A path outside the scope, or one a later deny revokes, is refused.",
   "properties": {},
   "out": [],
   "in": [
     {
       "kind": "contains",
       "source": "domain.group.agent-fs-operations",
+      "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.fs-scope-deny-mirror",
+      "properties": {}
+    },
+    {
+      "kind": "details",
+      "source": "requirements.note.worktree-write-scope-decisions",
       "properties": {}
     },
     {
@@ -19,16 +29,6 @@
     {
       "kind": "drives",
       "source": "requirements.requirement.code-writer-worktree-only-writes",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.worktree-write-scope-decisions",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.fs-scope-deny-mirror",
       "properties": {}
     }
   ]

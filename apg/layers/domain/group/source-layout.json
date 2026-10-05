@@ -2,14 +2,24 @@
   "layer": "domain",
   "type": "group",
   "name": "source-layout",
-  "body": "The decomposition of apg's first-party source: how production source is divided into cohesive modules across the root crate and the eight frontend crates, how its tests are organized into tiers and where they live, and the library surface that makes the crate-internal API reachable from tests outside the declaring module. These are the structural concerns the cleanup decomposes and restructures — the layout is chosen for cohesion and reuse, never to satisfy a line count.",
+  "body": "The decomposition of apg's first-party source: how production source is divided into cohesive modules across the root crate and the eight frontend crates, how its tests are organized into tiers and where they live, and the library surface that makes the crate-internal API reachable from tests outside the declaring module. The layout is chosen for cohesion and reuse rather than a line count.",
   "properties": {
     "attribute": "core"
   },
   "out": [
     {
       "kind": "contains",
+      "target": "domain.entity.library-surface",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.entity.source-module",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.test-harness",
       "properties": {}
     },
     {
@@ -19,27 +29,27 @@
     },
     {
       "kind": "contains",
-      "target": "domain.entity.library-surface",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.entity.test-harness",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "domain.value.module-size-signal",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.container.structural-scanner",
+      "target": "solution.container.cpp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.csharp-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.go-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.java-frontend",
       "properties": {}
     },
     {
@@ -54,22 +64,12 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.container.cpp-frontend",
+      "target": "solution.container.scanner-cli",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.container.java-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.go-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.csharp-frontend",
+      "target": "solution.container.structural-scanner",
       "properties": {}
     },
     {
@@ -81,7 +81,7 @@
   "in": [
     {
       "kind": "drives",
-      "source": "requirements.requirement.tier-separable-tests",
+      "source": "requirements.requirement.decomposed-source-modules",
       "properties": {}
     },
     {
@@ -91,7 +91,7 @@
     },
     {
       "kind": "drives",
-      "source": "requirements.requirement.decomposed-source-modules",
+      "source": "requirements.requirement.tier-separable-tests",
       "properties": {}
     }
   ]

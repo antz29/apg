@@ -2,18 +2,18 @@
   "layer": "domain",
   "type": "value",
   "name": "module-size-signal",
-  "body": "The indicative size of a first-party source file — roughly 400 lines of production code — used as a SIGNAL for decomposition review, never as a target. A file above the signal is a prompt to inspect whether its responsibilities are cohesive and whether it should be split; the number itself is not an acceptance threshold, and a change that splits a file to fall under it without improving cohesion is a violation of the decomposition law. Test code is accounted separately and does not count against the signal.",
+  "body": "The indicative size of a first-party source file — roughly 400 lines of production code — used as a SIGNAL for decomposition review rather than a target. A file above the signal prompts inspection of whether its responsibilities are cohesive and of whether a split serves them; the number itself stands apart from any acceptance threshold, and a change that splits a file to fall under it while cohesion stays flat violates the decomposition law. Test code is accounted separately and lies outside the signal's accounting.",
   "properties": {},
   "out": [],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.decomposed-source-modules",
+      "kind": "contains",
+      "source": "domain.group.source-layout",
       "properties": {}
     },
     {
-      "kind": "contains",
-      "source": "domain.group.source-layout",
+      "kind": "drives",
+      "source": "requirements.requirement.decomposed-source-modules",
       "properties": {}
     }
   ]
