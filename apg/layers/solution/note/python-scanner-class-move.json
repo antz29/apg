@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "python-scanner-class-move",
-  "body": "`solution.component.python-module-identity` —implemented-by→ `rust.pyfrontend.scanner.Scanner.module_fqn_for`. The pylib decomposition (plan `apg-cleanup`, phase-04 task-5) splits the crate into cohesive modules, so the moved scanner units gain a module segment: the scanner lives in `src/pylib/scanner.rs` and its method renders `rust.pyfrontend.scanner.Scanner.module_fqn_for`. The preserved flat FQNs are the `rust.pyfrontend` module, `parse_args`, `run`, `Args`, `usage`, `read_target_set`, and `ensure_artifact_dir`.",
+  "body": "The Python frontend's scanner unit is `rust.pyfrontend.scanner.Scanner.module_fqn_for`, declared in `src/pylib/scanner.rs`, and its identity helper is `rust.pyfrontend.identity.dotted_identity`. The module `rust.pyfrontend` and the units `parse_args`, `run`, `Args`, `usage`, `read_target_set`, and `ensure_artifact_dir` live in the crate root and keep their flat FQNs.",
   "properties": {},
   "out": [
     {

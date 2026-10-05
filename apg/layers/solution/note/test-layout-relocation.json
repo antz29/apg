@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "test-layout-relocation",
-  "body": "Sibling tests: each source module carries `#[cfg(test)] mod tests;` pointing at `src/<module>/tests.rs`, which keeps the module path (`rust.apg.plan_cmd.tests.e2e`) so the tier filters and graph queries resolve. Top-level e2e: one integration crate per source module (`tests/main_e2e.rs`, `tests/plan_cmd_e2e.rs`, `tests/git_e2e.rs`, …) shares `tests/common/mod.rs`; each e2e test carries `#[ignore = \"e2e tier: …; run via cargo test-e2e\"]`. White-box dependency: 268 of 310 e2e tests call crate-internal functions, and `testutil` is part of the library surface (or the shared `common` harness) so the integration crates compile. This component's `implemented-by` targets are the existing modules `rust.apg` and `rust.apg.testutil`; `src/lib.rs` and `tests/**` are the planned file nodes that re-home them.",
+  "body": "Each source module carries `#[cfg(test)] mod tests;` pointing at `src/<module>/tests.rs`, preserving the module path (e.g. `rust.apg.plan_cmd.tests.unit`) so the tier filters and graph queries resolve. Each source module's e2e tests live in a top-level integration crate (`tests/main_e2e.rs`, `tests/plan_cmd_e2e.rs`, `tests/git_e2e.rs`, …) sharing `tests/common/mod.rs`, and each e2e test carries `#[ignore = \"e2e tier: …; run via cargo test-e2e\"]`. The e2e tests call crate-internal functions, so `testutil` is part of the library surface for the integration crates to compile.",
   "properties": {},
   "out": [
     {

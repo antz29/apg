@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "root-crate-cache-split",
-  "body": "Wave F of the multi-wave task-19 root-crate decomposition (behaviour-preserving, CLI unchanged). `src/cache.rs` is decomposed into `src/cache/{manifest,fragment,factstore}.rs`; `src/cache/mod.rs` holds the module declarations and re-exports, with the file-level `#![allow(dead_code)]` in `mod.rs`. `src/cache/tests.rs` stays put, so the test module FQN `rust.apg.cache.tests` stays, and the module FQN `rust.apg.cache` stays via `mod.rs`. The single durable edge `solution.component.scan-driver` —implemented-by→ `rust.apg.cache.fragment.rebase` names the free fn `rebase` in `fragment.rs`. The container-level edge `solution.container.scanner-cli` —implemented-by→ `rust.apg.cache` and the `solution.component.scan-driver` —implemented-by→ `rust.apg.splice` edge stay.",
+  "body": "The `cache` module is organized as `src/cache/manifest.rs`, `src/cache/fragment.rs`, and `src/cache/factstore.rs` under `src/cache/mod.rs`, which holds the module declarations, the re-exports, and the file-level `#![allow(dead_code)]`. The module FQN `rust.apg.cache` anchors the submodules, and the test module is `rust.apg.cache.tests`. The free function `rebase` is `rust.apg.cache.fragment.rebase`, the `implemented-by` target of `solution.component.scan-driver`.",
   "properties": {},
   "out": [
     {

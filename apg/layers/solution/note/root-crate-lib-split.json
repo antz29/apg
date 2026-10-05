@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "note",
   "name": "root-crate-lib-split",
-  "body": "The root crate's library target `src/lib.rs` (module FQN `rust.apg`) is decomposed into 7 sibling modules — `logging`, `frontends`, `warm`, `scan`, `pipeline`, `query`, `install` — each in its own `src/<name>.rs` sibling file beside `src/lib.rs`. The layout is flat; a nested crate root (e.g. `src/scan/mod.rs`) breaks the `include_str!(\"../opencode-suite/...\")` paths that `src/lib.rs` uses relative to its own directory. 44 units move out of the crate root into these modules; the 6 crate-root units `main`, `help_text`, `print_help`, `session_cmd`, `find_apg_root`, and `find_or_create_apg_root` keep their FQNs in the crate root. This wave 1 of a 4-wave task-19 decomposition of the root crate; the other 11 files follow in later waves. The seven durable `implemented-by` edges that referenced the moved unit FQNs target the post-split FQNs.",
+  "body": "The root crate's library target `src/lib.rs` (module FQN `rust.apg`) is organized as 7 sibling modules — `logging`, `frontends`, `warm`, `scan`, `pipeline`, `query`, and `install` — each in its own `src/<name>.rs` file beside `src/lib.rs`. The layout is flat: a nested crate root (e.g. `src/scan/mod.rs`) breaks the `include_str!(\"../opencode-suite/...\")` paths that `src/lib.rs` uses relative to its own directory. The crate-root units `main`, `help_text`, `print_help`, `session_cmd`, `find_apg_root`, and `find_or_create_apg_root` live in the crate root.",
   "properties": {},
   "out": [
     {
