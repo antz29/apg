@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "project-start-seed",
-  "body": "The seed of a project branch's program graph: a verbatim copy of the main checkout's current scan (`apg/.trans`), valid without re-assembly because file/module identity is repo-relative, so the same content at the same commit names the same nodes in every checkout.",
+  "body": "The seed of a project branch's program graph: a verbatim copy of the main checkout's current scan (`apg/.trans`), valid in place because file/module identity is repo-relative, so the same content at the same commit names the same nodes in every checkout.",
   "properties": {
     "kind": "entity"
   },
@@ -15,13 +15,13 @@
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.fast-project-start",
+      "kind": "details",
+      "source": "domain.note.project-start-seed-kind-correction",
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "domain.note.project-start-seed-kind-correction",
+      "kind": "drives",
+      "source": "requirements.requirement.fast-project-start",
       "properties": {}
     }
   ]

@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "release-agent-flow",
-  "body": "The optional, per-repo release path: a repo may have the `agent-builder` scaffold a generated `release-agent` — a hidden subagent that is the ONLY generated agent granted `git push`/`git tag` (as `ask`, so every push/tag command prompts for explicit human approval) plus write access to the repo's release artefacts ON THE MAIN CHECKOUT (releases are made from main; no worktree mirror). That main-write set is determined PER REPO: the agent-builder analyses what the repo's release touches and recommends the set, confirmed via the coordinator interview — it is never a fixed list. The `codebase-navigator` tasks the release-agent ONLY after capturing explicit user consent. Approval surfaces both at dispatch (the navigator's consent) and per command (the `ask` grant). Every other generated agent gets no push/tag grant at all. The release-agent is the deliberate carve-out from the recurring \"push/tag remain human-approved acts\" law and one of the two agent carve-outs of `global.constraint.worktree-isolation`. The binary never pushes or tags (git2 only) and `scripts/release.sh` never pushes — the agent may run the script and then push/tag itself.",
+  "body": "The optional, per-repo release path: a repo may have the `agent-builder` scaffold a generated `release-agent` — a hidden subagent that is the ONLY generated agent granted `git push`/`git tag` (as `ask`, so every push/tag command prompts for explicit human approval) plus write access to the repo's release artefacts ON THE MAIN CHECKOUT (releases are made from main alone). That main-write set is determined PER REPO: the agent-builder analyses what the repo's release touches and recommends the set, confirmed via the coordinator interview, rather than a fixed list. The `codebase-navigator` tasks the release-agent ONLY after capturing explicit user consent. Approval surfaces both at dispatch (the navigator's consent) and per command (the `ask` grant). Push/tag grants belong to the release-agent alone among generated agents. The release-agent is the deliberate carve-out from the recurring \"push/tag remain human-approved acts\" law and one of the two agent carve-outs of `global.constraint.worktree-isolation`. The binary performs git operations through git2 only, and `scripts/release.sh` stops at the commit boundary — the agent may run the script and then push/tag itself.",
   "properties": {
     "kind": "entity"
   },
@@ -14,12 +14,12 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.codebase-navigator-prompt",
+      "target": "solution.component.agent-roster-docs",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.agent-roster-docs",
+      "target": "solution.component.codebase-navigator-prompt",
       "properties": {}
     },
     {
@@ -35,16 +35,6 @@
       "properties": {}
     },
     {
-      "kind": "drives",
-      "source": "requirements.requirement.agent-builder-optional-release-agent",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.push-tag-human-approved-release-only",
-      "properties": {}
-    },
-    {
       "kind": "details",
       "source": "requirements.note.push-tag-human-approved-correction",
       "properties": {}
@@ -52,6 +42,16 @@
     {
       "kind": "details",
       "source": "requirements.note.worktree-write-scope-decisions",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.agent-builder-optional-release-agent",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.push-tag-human-approved-release-only",
       "properties": {}
     }
   ]

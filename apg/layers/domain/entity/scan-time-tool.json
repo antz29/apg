@@ -2,14 +2,14 @@
   "layer": "domain",
   "type": "entity",
   "name": "scan-time-tool",
-  "body": "A tool that must be resolvable on PATH when `apg scan` runs for a language to be scanned: `go`, `cargo`/`rustc`, `java`, or `node`. Its absence is a preflight failure naming the tool — never a silent skip and never an empty graph.",
+  "body": "A tool that is resolvable on PATH when `apg scan` runs for a language to be scanned: `go`, `cargo`/`rustc`, `java`, or `node`. Its absence is a preflight failure naming the tool rather than a silent skip or an empty graph.",
   "properties": {
     "kind": "entity"
   },
   "out": [
     {
       "kind": "realised-by",
-      "target": "solution.container.scanner-cli",
+      "target": "solution.component.scan-time-preflight",
       "properties": {}
     },
     {
@@ -19,22 +19,22 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.container.rust-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
       "target": "solution.container.java-frontend",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.container.ts-frontend",
+      "target": "solution.container.rust-frontend",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.scan-time-preflight",
+      "target": "solution.container.scanner-cli",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.ts-frontend",
       "properties": {}
     }
   ],
