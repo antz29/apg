@@ -11,31 +11,6 @@
       "kind": "contains",
       "target": "solution.component.structural-build-staging",
       "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "build.rs",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": ".github/workflows/release.yml",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.build_script_build.main",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "Formula/scanner.rb",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.build_script_build.build_frontends",
-      "properties": {}
     }
   ],
   "in": [
