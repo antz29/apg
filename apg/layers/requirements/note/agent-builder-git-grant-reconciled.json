@@ -12,16 +12,6 @@
     },
     {
       "kind": "details",
-      "target": "requirements.constraint.agent-changes-always-on-main",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.requirement.agent-builder-main-flow",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "solution.component.agent-builder-prompt",
       "properties": {}
     }

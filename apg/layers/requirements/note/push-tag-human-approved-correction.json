@@ -17,11 +17,6 @@
     },
     {
       "kind": "details",
-      "target": "requirements.requirement.agent-builder-optional-release-agent",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.requirement.push-tag-human-approved-release-only",
       "properties": {}
     },

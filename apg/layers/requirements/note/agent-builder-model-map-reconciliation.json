@@ -17,27 +17,7 @@
     },
     {
       "kind": "details",
-      "target": "domain.entity.main-integration",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "global.constraint.worktree-isolation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.constraint.agent-builder-model-map-scope",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.constraint.agent-changes-always-on-main",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.requirement.agent-builder-main-flow",
       "properties": {}
     },
     {

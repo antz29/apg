@@ -17,11 +17,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.worktree-write-scope-decisions",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "source": "requirements.requirement.agent-fs-write-operations",
       "properties": {}

@@ -21,17 +21,7 @@
     },
     {
       "kind": "details",
-      "source": "requirements.note.push-tag-human-approved-correction",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "source": "requirements.note.release-agent-amendment-decision",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.worktree-write-scope-decisions",
       "properties": {}
     }
   ]

@@ -7,25 +7,14 @@
   "out": [
     {
       "kind": "details",
-      "target": "global.constraint.test-tier-boundaries",
+      "target": "global.constraint.no-real-project-test",
       "properties": {}
     },
     {
       "kind": "details",
       "target": "global.constraint.self-contained-tests",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "global.constraint.no-real-project-test",
-      "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "details",
-      "source": "global.note.durable-spec-prose-reconcile-0-17",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

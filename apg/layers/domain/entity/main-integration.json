@@ -30,16 +30,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.agent-builder-model-map-reconciliation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.worktree-write-scope-decisions",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "source": "requirements.requirement.navigator-no-unguarded-main-git",
       "properties": {}

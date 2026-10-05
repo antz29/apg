@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "details",
-      "target": "global.constraint.worktree-isolation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.constraint.agent-builder-agents-md-hygiene",
       "properties": {}
     },

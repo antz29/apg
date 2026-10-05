@@ -8,22 +8,7 @@
   "in": [
     {
       "kind": "details",
-      "source": "requirements.note.worktree-write-scope-decisions",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "source": "global.note.fix-worktree-isolation-carve-out-count",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.agent-builder-model-map-reconciliation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.agent-builder-agents-md-hygiene",
       "properties": {}
     }
   ]
