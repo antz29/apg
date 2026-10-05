@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "java-package-hierarchy",
-  "body": "The Java frontend's package-hierarchy emission (`java.Collector.emitPkgHierarchy`). It must not return early on the empty (default) package: default-package sources need a root module so the File has a module parent and top-level classes get a non-leading-dot identity reachable by module-based tools.",
+  "body": "The Java frontend's package-hierarchy emission (`java.Collector.emitPkgHierarchy`). It emits a root module for the empty (default) package as for every other package: default-package sources need a root module so the File has a module parent and top-level classes get a non-leading-dot identity reachable by module-based tools.",
   "properties": {},
   "out": [
     {
@@ -23,13 +23,13 @@
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "source": "domain.entity.java-package",
+      "kind": "details",
+      "source": "solution.note.java-collector-class-move",
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "solution.note.java-collector-class-move",
+      "kind": "realised-by",
+      "source": "domain.entity.java-package",
       "properties": {}
     }
   ]
