@@ -2,19 +2,19 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-read-your-writes",
-  "body": "A read routed through a live session observes every buffered mutation at the point of admission, saved or pending. With the session absent, the read opens the database directly and returns the last saved state.\n\nACCEPTANCE:\n- With a live session, `apg query` observes a node or edge accepted moments earlier and yet unsaved.\n- With the session absent, the same query reads the last saved state from `db.lbug` without opening a session.",
+  "body": "A read routed through a live session observes every buffered mutation at the point of admission, saved or pending. With the session absent, the read opens the database directly and returns the last saved state.\n\nACCEPTANCE:\n- With a live session, `apg query` observes a node or edge accepted moments earlier and yet unsaved.\n- With the session absent, the same query reads the last saved state from `db.lbug` by opening that database directly.",
   "properties": {
     "feature": "cli-session-substrate"
   },
   "out": [
     {
       "kind": "drives",
-      "target": "domain.service.cli-session-routing",
+      "target": "domain.entity.cli-session-buffer",
       "properties": {}
     },
     {
       "kind": "drives",
-      "target": "domain.entity.cli-session-buffer",
+      "target": "domain.service.cli-session-routing",
       "properties": {}
     }
   ],
