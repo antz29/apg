@@ -7,22 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "domain.entity.classification-config",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "domain.value.cache-key",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.requirement.classification-config-in-cache-key",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.cache-classification-key",
       "properties": {}
     }
   ],

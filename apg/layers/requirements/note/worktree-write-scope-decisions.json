@@ -7,16 +7,6 @@
   "out": [
     {
       "kind": "details",
-      "target": "domain.constraint.worktree-only-write-scope",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "domain.entity.worktree-write-boundary",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.constraint.code-writer-scope-worktree-only",
       "properties": {}
     }

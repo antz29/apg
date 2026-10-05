@@ -20,11 +20,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.plan-tooling-scoping-decisions",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "source": "requirements.requirement.plan-phases-project-scoping",
       "properties": {}

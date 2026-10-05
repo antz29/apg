@@ -11,11 +11,5 @@
       "properties": {}
     }
   ],
-  "in": [
-    {
-      "kind": "details",
-      "source": "requirements.note.agent-suite-persona-rationale",
-      "properties": {}
-    }
-  ]
+  "in": []
 }

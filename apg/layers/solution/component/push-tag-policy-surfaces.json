@@ -43,11 +43,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.push-tag-human-approved-correction",
-      "properties": {}
-    },
-    {
       "kind": "realised-by",
       "source": "domain.entity.release-agent-flow",
       "properties": {}

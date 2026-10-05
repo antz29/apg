@@ -7,37 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "domain.entity.plan-phases-tool",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "domain.group.plan-tooling",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "domain.value.project-requirement-scope",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.constraint.plan-tooling-change-boundary",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.requirement.plan-phases-project-scoping",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.constraint.suite-is-product-source",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.container.opencode-suite",
       "properties": {}
     }
   ],

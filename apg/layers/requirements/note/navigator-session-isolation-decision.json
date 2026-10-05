@@ -7,22 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "domain.entity.subagent-session-isolation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.constraint.subagent-sessions-isolated",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.requirement.navigator-session-isolation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.navigator-isolation-coherence-test",
       "properties": {}
     }
   ],

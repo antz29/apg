@@ -15,11 +15,6 @@
   ],
   "in": [
     {
-      "kind": "details",
-      "source": "requirements.note.details-target-reconciliation",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "source": "requirements.requirement.details-target-set-consistency",
       "properties": {}

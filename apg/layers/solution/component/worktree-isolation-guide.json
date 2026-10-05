@@ -18,11 +18,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.agent-builder-model-map-reconciliation",
-      "properties": {}
-    },
-    {
       "kind": "realised-by",
       "source": "domain.entity.main-integration",
       "properties": {}

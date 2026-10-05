@@ -20,11 +20,6 @@
   ],
   "in": [
     {
-      "kind": "details",
-      "source": "requirements.note.navigator-scan-permission-decision",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "source": "requirements.requirement.navigator-scan-permission",
       "properties": {}

@@ -12,11 +12,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.cache-key-classification-folding",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "source": "requirements.requirement.classification-config-in-cache-key",
       "properties": {}

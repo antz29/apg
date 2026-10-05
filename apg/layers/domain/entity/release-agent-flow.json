@@ -35,11 +35,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.push-tag-human-approved-correction",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "source": "requirements.requirement.agent-builder-optional-release-agent",
       "properties": {}

@@ -7,27 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "domain.entity.agent-model-map",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "domain.entity.agent-scaffold-flow",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.constraint.agent-builder-model-map-scope",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.requirement.agent-builder-model-map",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.worktree-isolation-guide",
       "properties": {}
     }
   ],

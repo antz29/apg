@@ -7,27 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "domain.entity.release-agent-flow",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.constraint.push-tag-release-agent-carve-out",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.requirement.push-tag-human-approved-release-only",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.push-tag-policy-surfaces",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.constraint.agent-builder-roster-truthful",
       "properties": {}
     }
   ],

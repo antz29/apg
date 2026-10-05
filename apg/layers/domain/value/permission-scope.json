@@ -12,11 +12,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.fs-scope-deny-mirror",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "source": "requirements.requirement.agent-fs-write-operations",
       "properties": {}

@@ -7,36 +7,6 @@
   "out": [
     {
       "kind": "details",
-      "target": "domain.constraint.fs-operation-scope-enforced",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "domain.value.permission-scope",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.constraint.agent-fs-per-path-permission",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.agent-fs-permission-grants",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "ts.apg-opencode-suite.lib.apg.agentFsGlobs",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "ts.apg-opencode-suite.lib.apg.editAllowGlobs",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "ts.apg-opencode-suite.lib.apg.fsScopeDecision",
       "properties": {}
     }

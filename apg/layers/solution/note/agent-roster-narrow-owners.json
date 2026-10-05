@@ -7,11 +7,6 @@
   "out": [
     {
       "kind": "details",
-      "target": "solution.component.agent-roster-docs",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "solution.component.distributed-agent-install",
       "properties": {}
     }

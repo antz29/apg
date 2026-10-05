@@ -20,11 +20,6 @@
   ],
   "in": [
     {
-      "kind": "details",
-      "source": "requirements.note.navigator-session-isolation-decision",
-      "properties": {}
-    },
-    {
       "kind": "drives",
       "source": "requirements.requirement.navigator-session-isolation",
       "properties": {}

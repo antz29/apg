@@ -7,22 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "domain.entity.scan-authorization",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.constraint.scan-consent-via-permission",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.requirement.navigator-scan-permission",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.navigator-scan-permission-coherence-test",
       "properties": {}
     }
   ],

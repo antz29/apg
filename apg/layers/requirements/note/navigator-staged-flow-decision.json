@@ -7,22 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "domain.entity.staged-delivery-process",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.constraint.navigator-staged-flow-stated",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "requirements.requirement.navigator-staged-flow",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.navigator-staged-flow-prompt",
       "properties": {}
     }
   ],
