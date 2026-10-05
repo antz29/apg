@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "cli-session-buffer",
-  "body": "The pending change set of a live session: the cumulative in-memory node-file writes and deletes accepted since the previous save. A node's current content is the buffer's pending entry for a node the session changed earlier in the run, and the live database's entry for a node the session has not changed; the live database is held open by the session for its whole life. The buffer and the live database together hold every field a node file carries. A save makes the buffer durable and empties it; an abort discards it. A mutation is built against the cumulative buffer, so a later change composes over every earlier pending change. Removing a node that was durable — backed by a node file saved before it first entered the buffer — removes its node file at save, even when the same unsaved run updated it or changed its edges first; a node added and then removed within one unsaved run leaves no node file and no delete.",
+  "body": "The pending change set of a live session: the cumulative in-memory node-file writes and deletes accepted since the previous save. A node's current content is the buffer's pending entry for a node the session changed earlier in the run, and the live database's entry for a node outside the session's changes; the live database is held open by the session for its whole life. The buffer and the live database together hold every field a node file carries. A save makes the buffer durable and empties it; an abort discards it. A mutation is built against the cumulative buffer, so a later change composes over every earlier pending change. Removing a durable node — backed by a node file saved before its first buffer entry — removes its node file at save, even when the same unsaved run updated it or changed its edges first; a node added and then removed within one unsaved run leaves neither a node file nor a delete behind.",
   "properties": {
     "kind": "entity"
   },
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "domain.group.cli-session",
-      "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.cli-session-write-back-buffer",
       "properties": {}
     },
     {
@@ -42,6 +37,11 @@
     {
       "kind": "drives",
       "source": "requirements.requirement.cli-session-single-writer-receive-order",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.cli-session-write-back-buffer",
       "properties": {}
     }
   ]
