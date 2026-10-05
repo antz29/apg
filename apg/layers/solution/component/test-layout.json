@@ -19,11 +19,6 @@
     },
     {
       "kind": "details",
-      "source": "requirements.note.frontends-are-separate-projects",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "source": "solution.note.test-layout-relocation",
       "properties": {}
     },

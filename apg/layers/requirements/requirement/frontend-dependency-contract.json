@@ -56,16 +56,6 @@
     },
     {
       "kind": "details",
-      "source": "requirements.note.frontend-audit-reconciliation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.frontend-dependency-contract-reconciliation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "source": "requirements.note.frontend-dependency-matrix",
       "properties": {}
     }

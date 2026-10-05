@@ -17,16 +17,6 @@
     },
     {
       "kind": "details",
-      "target": "requirements.requirement.fast-project-start",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.requirement.graph-first-navigation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "solution.component.details-target-validation",
       "properties": {}
     }

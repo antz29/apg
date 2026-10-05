@@ -23,16 +23,6 @@
       "kind": "details",
       "source": "requirements.note.git-file-write-options-reconciled",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.navigator-branch-grant-reconciled",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.worktree-write-scope-decisions",
-      "properties": {}
     }
   ]
 }

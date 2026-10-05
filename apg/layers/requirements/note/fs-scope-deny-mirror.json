@@ -22,22 +22,7 @@
     },
     {
       "kind": "details",
-      "target": "requirements.requirement.agent-fs-write-operations",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.requirement.code-writer-worktree-only-writes",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "solution.component.agent-fs-permission-grants",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.agent-fs-tool-suite",
       "properties": {}
     },
     {

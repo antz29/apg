@@ -73,21 +73,6 @@
       "kind": "details",
       "source": "requirements.note.identity-defect-inventory",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.refinement-per-defect-domain",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.relative-in-graph-absolute-at-tools",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.walk-up-trans-marker",
-      "properties": {}
     }
   ]
 }

@@ -14,16 +14,6 @@
       "kind": "details",
       "target": "requirements.requirement.navigator-no-unguarded-main-git",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.agent-builder-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.codebase-navigator-prompt",
-      "properties": {}
     }
   ],
   "in": []

@@ -18,8 +18,8 @@
       "properties": {}
     },
     {
-      "kind": "realised-by",
-      "source": "domain.entity.source-module",
+      "kind": "details",
+      "source": "solution.note.library-surface-non-graph-artifacts",
       "properties": {}
     },
     {
@@ -28,13 +28,8 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "solution.note.test-layout-relocation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.library-surface-non-graph-artifacts",
+      "kind": "realised-by",
+      "source": "domain.entity.source-module",
       "properties": {}
     }
   ]

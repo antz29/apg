@@ -44,17 +44,7 @@
     },
     {
       "kind": "details",
-      "source": "requirements.note.fs-scope-deny-mirror",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "source": "solution.note.agent-fs-planned-units",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.worktree-write-scope-owners",
       "properties": {}
     },
     {

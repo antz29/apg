@@ -7,32 +7,7 @@
   "out": [
     {
       "kind": "details",
-      "target": "solution.component.agent-builder-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.agent-fs-permission-grants",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.agent-fs-tool-suite",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.codebase-navigator-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "solution.component.worktree-boundary-tests",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.worktree-isolation-guide",
       "properties": {}
     }
   ],

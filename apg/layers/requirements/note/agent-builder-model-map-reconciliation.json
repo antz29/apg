@@ -27,11 +27,6 @@
     },
     {
       "kind": "details",
-      "target": "solution.component.agent-builder-prompt",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "target": "solution.component.worktree-isolation-guide",
       "properties": {}
     }

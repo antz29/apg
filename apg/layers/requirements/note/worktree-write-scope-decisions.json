@@ -19,21 +19,6 @@
       "kind": "details",
       "target": "requirements.constraint.code-writer-scope-worktree-only",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.requirement.agent-fs-write-operations",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.requirement.code-writer-worktree-only-writes",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "requirements.requirement.navigator-no-unguarded-main-git",
-      "properties": {}
     }
   ],
   "in": []

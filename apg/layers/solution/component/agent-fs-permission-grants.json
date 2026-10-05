@@ -23,11 +23,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "solution.note.worktree-write-scope-owners",
-      "properties": {}
-    },
-    {
       "kind": "realised-by",
       "source": "domain.entity.agent-fs-operation",
       "properties": {}

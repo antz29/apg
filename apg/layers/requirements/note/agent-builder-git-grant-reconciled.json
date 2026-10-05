@@ -9,11 +9,6 @@
       "kind": "details",
       "target": "opencode-suite/agents/agent-builder.md",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "target": "solution.component.agent-builder-prompt",
-      "properties": {}
     }
   ],
   "in": []

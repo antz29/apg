@@ -21,37 +21,7 @@
     },
     {
       "kind": "details",
-      "source": "requirements.note.details-target-reconciliation",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.fix-md-module-naming",
-      "properties": {}
-    },
-    {
-      "kind": "details",
       "source": "requirements.note.graph-first-artifact-class-shrink",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.graph-first-baseline-correction",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.graph-first-test-fqn-repoint",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.graph-first-test-pending",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.repo-guide-container-choice",
       "properties": {}
     }
   ]

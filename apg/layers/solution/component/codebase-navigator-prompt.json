@@ -18,36 +18,6 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "requirements.note.git-file-write-options-reconciled",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.navigator-branch-grant-reconciled",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.navigator-scan-permission-decision",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.navigator-session-isolation-decision",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.navigator-task-cadence-decision",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.worktree-write-scope-owners",
-      "properties": {}
-    },
-    {
       "kind": "realised-by",
       "source": "domain.entity.agent-scaffold-flow",
       "properties": {}
