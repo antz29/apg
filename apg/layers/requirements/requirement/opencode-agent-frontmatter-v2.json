@@ -1,0 +1,23 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "opencode-agent-frontmatter-v2",
+  "body": "Every distributed agent template `opencode-suite/agents/*.md` carries opencode 2.x frontmatter. The V1 `permission:` map becomes the ordered `permissions:` array of `{ action, resource, effect }` rules, evaluated in order with the last matching rule deciding; the action names follow opencode 2.x (`shell` in place of `bash`, `subagent` in place of `task`, `edit` in place of `write`/`patch`), and the per-tool grants over the apg suite and the opencode built-ins carry over as action entries. The `mode`, `hidden`, and `description` keys carry over.\n\nEach template's grant set keeps its meaning:\n- the `codebase-navigator` holds the `subagent` allowlist (the distributed suite agents, the `*-implementer` agents, the release-agent) and the apg-suite tool grants;\n- the `agent-builder` holds its main-checkout `edit` grants (`.opencode/agents/**`, `opencode.json`, `AGENTS.md`) and its exact read-only git verb set plus `git add`/`git commit`;\n- the `implementation-phase-reviewer` holds its read-only apg-suite, plan-read, and review grants, with the `question`/edit/scan/authoring grants absent (`domain.entity.distributed-agent-set`).\n\nAcceptance criteria: every `opencode-suite/agents/*.md` file carries a `permissions` array whose entries name opencode 2.x actions and carry the agent's own grant set; the V1 `permission` map is absent from every template; each agent's effective grants equal the V1 set they replace; `opencode-suite/agents/agent-builder.md`'s main-checkout `edit` grants and read-only git verb set are preserved.",
+  "properties": {
+    "feature": "opencode-2x-support"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.opencode-permission-rule-set",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.opencode-2x-support",
+      "properties": {}
+    }
+  ]
+}

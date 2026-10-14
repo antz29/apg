@@ -1,0 +1,28 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "opencode-docs-v2",
+  "body": "`README.md` and `AGENTS.md` state the opencode 2.x dependency. `README.md` names opencode 2.x as the chat-plugin dependency, states that `apg init` installs the plugin into the opencode 2.x plugin discovery location under `~/.opencode/`, and keeps the restart-opencode-after-init note. `AGENTS.md` states the same install layout in its `apg init` and suite sections (the plugin directory under `~/.opencode/`, the shared lib, the seven distributed agents) and the `@opencode/plugin` dependency.\n\nAcceptance criteria: `README.md` and `AGENTS.md` name opencode 2.x and the `@opencode/plugin` dependency; both describe the `plugins/` install location under `~/.opencode/`; the restart-opencode-after-init note survives.",
+  "properties": {
+    "feature": "opencode-2x-support"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.value.opencode-plugin-api",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.opencode-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.opencode-2x-support",
+      "properties": {}
+    }
+  ]
+}

@@ -96,6 +96,21 @@
       "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_plan_phases.ts",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.opencode-lib-context",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.opencode-agent-templates",
+      "properties": {}
     }
   ],
   "in": [
@@ -112,6 +127,11 @@
     {
       "kind": "realised-by",
       "source": "domain.group.plan-tooling",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.opencode-integration",
       "properties": {}
     }
   ]

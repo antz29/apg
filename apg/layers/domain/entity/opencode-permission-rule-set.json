@@ -1,0 +1,33 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "opencode-permission-rule-set",
+  "body": "An agent's opencode 2.x permission model: one ordered `permissions` array of `{ action, resource, effect }` rules, evaluated in order with the last matching rule deciding, in place of the V1 per-tool `permission` map. The action names carry opencode 2.x's vocabulary (`shell` where V1 used `bash`, `subagent` where V1 used `task`, `edit` where V1 used `write`/`patch`), and the per-tool grants over the apg suite and the opencode built-ins appear as action entries. The ordered rule set makes precedence and exceptions explicit: a later rule overrides an earlier one, so an allow broadened by a later deny narrows again. Each distributed and generated agent carries one such rule set.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.opencode-agent-templates",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.opencode-agent-frontmatter-v2",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.opencode-generated-agent-shape-v2",
+      "properties": {}
+    }
+  ]
+}

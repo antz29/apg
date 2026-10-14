@@ -1,0 +1,30 @@
+{
+  "layer": "domain",
+  "type": "value",
+  "name": "opencode-plugin-api",
+  "body": "The `@opencode/plugin` package the apg opencode suite depends on and targets: the opencode 2.x plugin API a plugin definition is built from. The package version is the interface contract between the installed suite and the opencode release it runs on, so the dependency name and version travel together with the plugin files and the install registry that delivers them.",
+  "properties": {},
+  "out": [],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.opencode-plugin-api-v2",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.opencode-suite-install-v2",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.opencode-docs-v2",
+      "properties": {}
+    }
+  ]
+}

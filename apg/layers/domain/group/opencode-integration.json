@@ -1,0 +1,54 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "opencode-integration",
+  "body": "The apg opencode integration as the opencode 2.x extension surface: the plugin definition each suite tool is expressed as, the tool registration the definition adds to the tool domain, and the ordered permission rule set each agent carries. It is the opencode-2.x counterpart of the agent-roster and agent-fs-operations groups: those describe which agents exist and what paths they may touch, while this group describes how the suite and its agents attach to the opencode 2.x plugin runtime.",
+  "properties": {
+    "attribute": "supporting",
+    "root": "opencode-plugin-definition"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.opencode-plugin-definition",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.opencode-tool-registration",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.opencode-permission-rule-set",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.opencode-plugin-api",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.opencode-2x-support",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.opencode-docs-v2",
+      "properties": {}
+    }
+  ]
+}

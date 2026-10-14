@@ -1,0 +1,41 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "opencode-lib-context",
+  "body": "The shared plumbing's opencode 2.x context adaptation: `opencode-suite/lib/apg.ts`'s `ToolContext` sources the project location from the plugin context (`ctx.location.directory`, `ctx.location.project`) in place of the V1 `{ directory, worktree }` tool context, and keeps the tool's own optional `directory` argument authoritative for the project-root walk-up (`ts.apg-opencode-suite.lib.apg.findApgRoot`) and the stored-identity rebasing (`requirements.requirement.absolute-paths-at-tool-boundary`). The acting agent's edit-scope readers (`ts.apg-opencode-suite.lib.apg.readAgentEditGlobs`, `ts.apg-opencode-suite.lib.apg.editAllowGlobs`, `ts.apg-opencode-suite.lib.apg.agentFsGlobs`) source the scope through the opencode 2.x agent/permission surface; the pure `ts.apg-opencode-suite.lib.apg.fsScopeDecision` boundary+ordered-match semantics are unchanged, pinned by the plugin-free unit test.\n\nimplemented-by: `opencode-suite/lib/apg.ts`, `ts.apg-opencode-suite.lib.apg.ToolContext`, `ts.apg-opencode-suite.lib.apg.readAgentEditGlobs`, `opencode-suite/lib/apg.test.ts`.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/lib/apg.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-opencode-suite.lib.apg.ToolContext",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-opencode-suite.lib.apg.readAgentEditGlobs",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/lib/apg.test.ts",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.opencode-tool-registration",
+      "properties": {}
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "layer": "requirements",
+  "type": "constraint",
+  "name": "opencode-v2-support-window",
+  "body": "Law (prose; assessed by review): the apg opencode integration targets opencode 2.x. The suite plugin uses the `@opencode/plugin` API and the shipped agent templates and repo `opencode.json` adopt the 2.x native shape. A V1-only opencode runtime sits outside the support window: the plugin implementation is a single 2.x implementation, and a dual V1/V2 default export (the documented `Plugin.define(...)` + `server()` spread) is not part of the product. opencode 2.x reads legacy V1 configuration, so a repo's pre-existing V1 config and legacy agent frontmatter keep loading while that repo migrates; the shipped product source states the 2.x native shape. The plugin package dependency (`@opencode/plugin`) and the V2 plugin discovery directory under `~/.opencode/` are the interface to the target runtime.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

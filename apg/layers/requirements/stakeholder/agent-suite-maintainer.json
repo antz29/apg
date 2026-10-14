@@ -24,6 +24,11 @@
       "kind": "contains",
       "target": "requirements.requirement.reviewer-is-distributed-not-generated",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.opencode-2x-support",
+      "properties": {}
     }
   ],
   "in": [

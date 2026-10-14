@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "opencode-install-layout",
+  "body": "The binary's opencode 2.x install surface in `rust.apg.install` (`src/install.rs`): the embedded plugin registry (one `(filename, include_str!(...))` row per tool file, single-sourced from `opencode-suite/tools/`), installed by `install_suite` into the opencode 2.x plugin discovery directory under `~/.opencode/` (`plugins/`); `OPENCODE_PACKAGE_JSON` naming the `@opencode/plugin` dependency; the `cmd_init` `npm install` trigger checking the `@opencode/plugin` module under `node_modules`; and the stale-prune covering the retired `tools/apg_*.ts` namespace so an upgraded `~/.opencode/` ends at the V2 plugin set. The shared lib (`~/.opencode/lib/apg.ts`), the upgrade guide, and the seven distributed agents install unchanged, and the duplicate-install warning (`rust.apg.install.duplicate_install_files`) keeps its loud, delete-nothing behaviour (`solution.constraint.duplicate-install-warning-preserved`).\n\nimplemented-by: `rust.apg.install` (module) and the install-assertion e2e `rust.main_e2e.e2e.suite_installs_node_edge_project_tools_and_retires_spec_invariant`, which the change-set extends to assert the plugin files and the `@opencode/plugin` dependency.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.install",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.main_e2e.e2e.suite_installs_node_edge_project_tools_and_retires_spec_invariant",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    }
+  ]
+}

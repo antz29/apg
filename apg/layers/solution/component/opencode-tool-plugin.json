@@ -1,0 +1,36 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "opencode-tool-plugin",
+  "body": "The suite's opencode 2.x tool plugins: one plugin per tool file under `opencode-suite/tools/`, each default-exporting `Plugin.define({ id, setup(ctx) })` imported from `@opencode/plugin` and registering its one tool through `ctx.tool.transform(editor => editor.add({ name, description, input, execute }))`. The definition carries the tool's name, description, a JSON-Schema `input` object, and an `execute` returning `{ content }`; the `execute` closes over the plugin `setup(ctx)` context (and the tool's own optional `directory` argument) for the shared lib's project location. The suite keeps its existing one-file-per-tool layout, so the tool file names and the shared-lib import path survive the port and the install registry stays file-shaped. Product source in `solution.container.opencode-suite`; the package dependency (`opencode-suite/package.json`) moves to `@opencode/plugin`. `implementation-by` anchors on the `ts.apg-opencode-suite` module (the graph-resolvable anchor for the whole package source, whose `tools/` files this component owns) plus the package manifest.\n\nimplemented-by: `ts.apg-opencode-suite` (module) and `opencode-suite/package.json`.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "ts.apg-opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/package.json",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.opencode-plugin-definition",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.opencode-tool-registration",
+      "properties": {}
+    }
+  ]
+}
