@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "suite-is-product-source",
-  "body": "`opencode-suite/**` is product source: the tools and the shared lib are embedded into the `apg` binary via `include_str!` in `rust.apg.install` (`src/install.rs`, whose `SUITE_TOOLS` table carries the `apg_plan_phases.ts` entry) and installed by `apg init` into `~/.opencode/`. The repo's own `.opencode/**` are consumer artifacts regenerated out-of-band from the installed release and are never edited here. Satisfaction is assessed by review.",
+  "body": "`opencode-suite/**` is product source: the tool files and the shared lib are embedded into the `apg` binary via `include_str!` in `rust.apg.install` (`src/install.rs`, whose plugin registry carries the `apg_plan_phases.ts` entry) and installed by `apg init` into `~/.config/opencode/plugins/` (the tool plugins) and `~/.config/opencode/lib/apg.ts` (the shared lib). The repo's own `.opencode/**` are consumer artifacts regenerated out-of-band from the installed release and are never edited here. Satisfaction is assessed by review.",
   "properties": {},
   "out": [],
   "in": []

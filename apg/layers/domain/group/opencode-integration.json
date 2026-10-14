@@ -10,17 +10,17 @@
   "out": [
     {
       "kind": "contains",
+      "target": "domain.entity.opencode-permission-rule-set",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.entity.opencode-plugin-definition",
       "properties": {}
     },
     {
       "kind": "contains",
       "target": "domain.entity.opencode-tool-registration",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.entity.opencode-permission-rule-set",
       "properties": {}
     },
     {
@@ -36,6 +36,16 @@
     {
       "kind": "realised-by",
       "target": "solution.container.scanner-cli",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.opencode-install-layout",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.opencode-docs",
       "properties": {}
     }
   ],

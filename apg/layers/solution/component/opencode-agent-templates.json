@@ -2,9 +2,14 @@
   "layer": "solution",
   "type": "component",
   "name": "opencode-agent-templates",
-  "body": "The distributed agent templates' opencode 2.x frontmatter and generation shape: every file under `opencode-suite/agents/` carries the ordered `permissions` array of `{ action, resource, effect }` rules with opencode 2.x action names (`shell`, `subagent`, `edit`), and the `agent-builder` template generates the same shape for the agents it scaffolds and for the repo-root `opencode.json` model map (`agents` key, `provider/model#variant` join). The grant semantics carry over: the `codebase-navigator`'s `subagent` allowlist and apg-suite grants, the `agent-builder`'s main-checkout `edit` grants and its exact read-only git verb set plus `git add`/`git commit`, the reviewer's read-only grants, the code-writer worktree-only `edit` globs and fs-tool path scope, the release-agent's per-repo main write set and its `git push`/`git tag` `ask` grant, and the push/tag policy of `requirements.constraint.push-tag-release-agent-carve-out`.\n\nThis component is the opencode-2.x frontmatter/generation owner across the seven template files; the per-agent semantic owners (`solution.component.codebase-navigator-prompt`, `solution.component.agent-builder-prompt`, `solution.component.agent-fs-permission-grants`, `solution.component.distributed-reviewer-prompt`, `solution.component.agent-roster-docs`) keep their concerns, and their V1 frontmatter spellings become this component's `permissions` arrays. Product source in `solution.container.opencode-suite`; the repo's own `.opencode/agents/**` are consumer artifacts regenerated out-of-band after the release.\n\nimplemented-by: `opencode-suite/agents/codebase-navigator.md`, `opencode-suite/agents/spec-writer.md`, `opencode-suite/agents/plan-writer.md`, `opencode-suite/agents/spec-review.md`, `opencode-suite/agents/plan-review.md`, `opencode-suite/agents/implementation-phase-reviewer.md`, `opencode-suite/agents/agent-builder.md`.",
+  "body": "The distributed agent templates' opencode 2.x frontmatter and generation shape: every file under `opencode-suite/agents/` carries the ordered `permissions` array of `{ action, resource, effect }` rules with opencode 2.x action names (`shell`, `subagent`, `edit`), and the `agent-builder` template generates the same shape for the agents it scaffolds and for the repo-root `opencode.json` model map (`agents` key, `provider/model#variant` join). The grant semantics: the `codebase-navigator`'s `subagent` dispatch rules and apg-suite grants, the `agent-builder`'s main-checkout `edit` rules and its exact read-only git verb set plus `git add`/`git commit`, the reviewer's read-only grants, the code-writer worktree-only `edit` globs and fs-tool path scope, the release-agent's per-repo main write set and its `git push`/`git tag` `ask` rule, and the push/tag policy of `requirements.constraint.push-tag-release-agent-carve-out`.\n\nThis component is the opencode-2.x frontmatter/generation owner across the seven template files; the per-agent semantic owners (`solution.component.codebase-navigator-prompt`, `solution.component.agent-builder-prompt`, `solution.component.agent-fs-permission-grants`, `solution.component.distributed-reviewer-prompt`, `solution.component.agent-roster-docs`) keep their concerns, and this component carries their frontmatter `permissions` arrays. Product source in `solution.container.opencode-suite`; the repo's own `.opencode/agents/**` are consumer artifacts regenerated out-of-band after the release.\n\nimplemented-by: `opencode-suite/agents/codebase-navigator.md`, `opencode-suite/agents/spec-writer.md`, `opencode-suite/agents/plan-writer.md`, `opencode-suite/agents/spec-review.md`, `opencode-suite/agents/plan-review.md`, `opencode-suite/agents/implementation-phase-reviewer.md`, `opencode-suite/agents/agent-builder.md`.",
   "properties": {},
   "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/agent-builder.md",
+      "properties": {}
+    },
     {
       "kind": "implemented-by",
       "target": "opencode-suite/agents/codebase-navigator.md",
@@ -12,7 +17,12 @@
     },
     {
       "kind": "implemented-by",
-      "target": "opencode-suite/agents/spec-writer.md",
+      "target": "opencode-suite/agents/implementation-phase-reviewer.md",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/plan-review.md",
       "properties": {}
     },
     {
@@ -27,17 +37,7 @@
     },
     {
       "kind": "implemented-by",
-      "target": "opencode-suite/agents/plan-review.md",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/agents/implementation-phase-reviewer.md",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "opencode-suite/agents/agent-builder.md",
+      "target": "opencode-suite/agents/spec-writer.md",
       "properties": {}
     }
   ],

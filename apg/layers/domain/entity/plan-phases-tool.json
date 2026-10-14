@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "plan-phases-tool",
-  "body": "The `apg_plan_phases` suite tool (`opencode-suite/tools/apg_plan_phases.ts`): it reports plan-phase health for one project — phases lacking tasks, phases done but under review, `Gates` cycles, unsatisfied requirements, and requirements satisfied by more than one phase. Its top-level logic is a default-exported `tool({...})` and it declares one named function, `detectCycle` (`ts.apg-opencode-suite.tools.apg_plan_phases.detectCycle`). Its requirement findings are scoped to the current project/branch rather than the global layers store.",
+  "body": "The `apg_plan_phases` suite tool (`opencode-suite/tools/apg_plan_phases.ts`): it reports plan-phase health for one project — phases lacking tasks, phases done but under review, `Gates` cycles, unsatisfied requirements, and requirements satisfied by more than one phase. It is an opencode 2.x plugin whose default export is `Plugin.define({ id, setup })`, and its `setup` registers the tool through `ctx.tool.transform`. It declares one named function, `detectCycle` (`ts.apg-opencode-suite.tools.apg_plan_phases.detectCycle`). Its requirement findings are scoped to the current project/branch rather than the global layers store.",
   "properties": {
     "kind": "entity"
   },

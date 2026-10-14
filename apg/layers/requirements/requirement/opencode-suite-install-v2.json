@@ -2,19 +2,19 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "opencode-suite-install-v2",
-  "body": "`apg init` installs the opencode 2.x suite. In addition to the shared lib, the upgrade guide, and the seven distributed agents, it installs the tool plugins into the opencode 2.x plugin discovery directory under `~/.opencode/` (`plugins/`) — the location opencode 2.x discovers local plugins from — and writes `~/.opencode/package.json` with the `@opencode/plugin` dependency, running `npm install` in `~/.opencode/` when that dependency is missing from `node_modules`. The install is idempotent (`rust.apg.install.write_if_changed`) and prunes stale apg-owned plugin files the way it prunes stale `tools/apg_*.ts` files, so a `~/.opencode/` carried over from a V1 install ends at the V2 plugin set.\n\nThe install surface keeps its other properties: the duplicate-install warning quietens nothing (a project `.opencode/` file that duplicates an installed suite file still draws the loud warning, and `apg init` deletes nothing — `solution.constraint.duplicate-install-warning-preserved`), and the distributed-agent embed/install/prune surface (`solution.component.distributed-agent-install`) is unchanged in membership.\n\nAcceptance criteria: `rust.apg.install`'s embedded-file registry carries the tool plugins and installs them into the `plugins/` directory under the install root; `OPENCODE_PACKAGE_JSON` names the `@opencode/plugin` dependency; the `npm install` trigger checks for `@opencode/plugin` under `node_modules`; the stale-prune covers the retired `tools/apg_*.ts` namespace; the duplicate-install warning behaviour is unchanged.",
+  "body": "`apg init` installs the opencode 2.x suite. In addition to the shared lib, the upgrade guide, and the seven distributed agents, it installs the tool plugins into the opencode 2.x plugin location `~/.config/opencode/plugins/` under the global opencode config directory, and writes `~/.config/opencode/package.json` with the `@opencode/plugin` dependency, running `npm install` under `~/.config/opencode/` when that dependency is missing from `node_modules`. The installed plugin files load under opencode 2.x from that location (through the `plugins` config entry or the discovery directory to which the global config directory resolves). The install is idempotent (`rust.apg.install.write_if_changed`) and prunes apg-owned files outside the plugin set, so an install root carried over from a V1 layout ends at the V2 plugin set.\n\nThe install surface keeps its other properties: the duplicate-install warning quietens nothing (a project `.opencode/` file that duplicates an installed suite file still draws the loud warning, and `apg init` deletes nothing — `solution.constraint.duplicate-install-warning-preserved`), and the distributed-agent embed/install/prune surface (`solution.component.distributed-agent-install`) is unchanged in membership.\n\nAcceptance criteria: `rust.apg.install`'s embedded-file registry carries the tool plugins and installs them into `~/.config/opencode/plugins/`; `OPENCODE_PACKAGE_JSON` names the `@opencode/plugin` dependency; the `npm install` trigger checks for `@opencode/plugin` under `node_modules`; the stale-prune covers the apg-owned files outside the plugin set; the duplicate-install warning behaviour is unchanged.",
   "properties": {
     "feature": "opencode-2x-support"
   },
   "out": [
     {
       "kind": "drives",
-      "target": "domain.value.opencode-plugin-api",
+      "target": "domain.entity.opencode-plugin-definition",
       "properties": {}
     },
     {
       "kind": "drives",
-      "target": "domain.entity.opencode-plugin-definition",
+      "target": "domain.value.opencode-plugin-api",
       "properties": {}
     }
   ],

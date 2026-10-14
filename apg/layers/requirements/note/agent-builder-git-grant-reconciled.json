@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "note",
   "name": "agent-builder-git-grant-reconciled",
-  "body": "The `agent-builder` reads git through the genuinely read-only grants `git status *`, `git log *`, `git branch --show-current`, `git remote -v`, `git remote show *`, and `git ls-files *`. Its git mutation is `git add *` and `git commit *`. Push and tag operations belong to the optional `release-agent` as an ask. `requirements.requirement.agent-builder-main-flow`, `requirements.constraint.agent-changes-always-on-main`, and `solution.component.agent-builder-prompt` state this same read-only pattern set. The spine stays `requirements.user.navigator-agent` ⊃ `requirements.requirement.agent-builder-main-flow` —drives→ `domain.entity.agent-scaffold-flow` —realised-by→ `solution.component.agent-builder-prompt` —implemented-by→ `opencode-suite/agents/agent-builder.md`.",
+  "body": "The `agent-builder` reads git through the genuinely read-only grants `git status *`, `git log *`, `git branch --show-current`, `git remote -v`, `git remote show *`, and `git ls-files *`. Its git mutation is `git add *` and `git commit *`. Push and tag operations belong to the optional `release-agent` as an ask. `--output=<file>` is forbidden on every granted git verb: `git log *` admits the output-redirect form, so the agent-builder logs to stdout alone.",
   "properties": {},
   "out": [
     {
