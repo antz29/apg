@@ -30,12 +30,7 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.container.scanner-cli",
+      "target": "solution.component.opencode-docs",
       "properties": {}
     },
     {
@@ -45,7 +40,12 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.opencode-docs",
+      "target": "solution.container.opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.container.scanner-cli",
       "properties": {}
     }
   ],
@@ -58,6 +58,11 @@
     {
       "kind": "drives",
       "source": "requirements.requirement.opencode-docs-v2",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.opencode-suite-install-v2",
       "properties": {}
     }
   ]
