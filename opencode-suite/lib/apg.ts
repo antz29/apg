@@ -356,18 +356,6 @@ function assertFailureReason(err: unknown): string {
   return err === undefined ? "permission denied" : String(err)
 }
 
-/**
- * Extracts the YAML frontmatter body (between the leading `---` fences) from an
- * agent config file, or `null` when the file is not a fenced-frontmatter doc.
- */
-function frontmatter(text: string): string | null {
-  const lines = text.split("\n")
-  if (lines[0]?.trim() !== "---") return null
-  const end = lines.indexOf("---", 1)
-  if (end < 0) return null
-  return lines.slice(1, end).join("\n")
-}
-
 /** Leading-space count of a line (indentation depth). */
 function indentOf(line: string): number {
   return line.length - line.trimStart().length
