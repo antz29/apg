@@ -374,36 +374,6 @@ function indentOf(line: string): number {
 }
 
 /**
- * The `permission.edit` rules from an agent's frontmatter `permission` block —
- * the agent's write scope. Extracts the `edit:` mapping (a line whose only
- * content is `edit:` under `permission:`) and collects EVERY child entry
- * spelled `"<glob>": allow` or `"<glob>": deny` (quoted or bare key) IN FILE
- * ORDER, as ordered `{ glob, allow }` entries. Both kinds survive — allow
- * entries grant, deny entries revoke, and their order is the precedence a
- * last-matching-rule decision applies (a later entry overrides an earlier one,
- * so duplicates are preserved, not deduped). Returns `[]` (fail-closed) when
- * the body carries no `edit:` block.
- */
-export function editAllowGlobs(frontmatterBody: string): { glob: string; allow: boolean }[] {
-  const lines = frontmatterBody.split("\n")
-  const start = lines.findIndex((l) => /^\s+edit:\s*$/.test(l))
-  if (start < 0) return []
-  const baseIndent = indentOf(lines[start])
-  const rules: { glob: string; allow: boolean }[] = []
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i]
-    if (line.trim() === "") continue
-    if (indentOf(line) <= baseIndent) break
-    const m = /^\s+(?:"([^"]+)"|'([^']+)'|(\S+?)):\s*(allow|deny)\s*$/.exec(line)
-    if (m) {
-      const glob = m[1] ?? m[2] ?? m[3]
-      rules.push({ glob, allow: m[4] === "allow" })
-    }
-  }
-  return rules
-}
-
-/**
  * The rebase-column set for one row of `apg_find_symbol`'s result, whose
  * columns are `kind, n.fqn, n.path, n.start_line, n.end_line`.
  *
