@@ -13,7 +13,7 @@
 //! (the user's code_type rules untouched), and scaffolds the layout. Patch
 //! versions never matter: `0.10.3` and `0.10.99` layouts are both fine for a
 //! `0.10.4` binary. Full upgrade instructions ship as a suite doc
-//! (`~/.opencode/lib/apg-upgrade.md`, installed by `apg init`); the block
+//! (`~/.config/opencode/lib/apg-upgrade.md`, installed by `apg init`); the block
 //! text points at it.
 
 use std::path::{Path, PathBuf};
@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 pub const VERSION_FIELD: &str = "version";
 
 /// The suite doc the block text points at (installed by `apg init` into
-/// `~/.opencode/lib/` alongside the shared `apg.ts` plumbing).
-pub const UPGRADE_DOC: &str = "~/.opencode/lib/apg-upgrade.md";
+/// `~/.config/opencode/lib/` alongside the shared `apg.ts` plumbing).
+pub const UPGRADE_DOC: &str = "~/.config/opencode/lib/apg-upgrade.md";
 
 /// `apg/config.json` under a layout root.
 fn config_path(apg_root: &Path) -> PathBuf {
