@@ -119,14 +119,15 @@ The project builds a single `apg` binary (package `apg`):
   binary-managed `version` field + gitignored `.trans/`), scaffold the repo
   `.gitignore` for `apg/.trans/` and `apg/.worktrees/` (added if
   missing, other lines untouched), and install (or update, where contents
-  differ) the opencode apg tool suite into `~/.opencode/tools/` +
-  `~/.opencode/lib/` plus the **seven distributed agents** — `codebase-navigator`,
+  differ) the opencode apg tool suite into `~/.config/opencode/plugins/` +
+  `~/.config/opencode/lib/` (with the plugin's `package.json` beside them)
+  plus the **seven distributed agents** — `codebase-navigator`,
   `spec-writer`, `plan-writer`, `spec-review`, `plan-review`, `agent-builder`,
-  `implementation-phase-reviewer` — into `~/.opencode/agents/`. Project-specific
-  implementer/reviewer agents are installed into the project's
+  `implementation-phase-reviewer` — into `~/.config/opencode/agents/`.
+  Project-specific implementer/reviewer agents are installed into the project's
   `.opencode/agents/` by the **`agent-builder`** agent, never by init. If the
   project's `.opencode/` holds files that duplicate the installed suite
-  (`~/.opencode/`), init prints a **loud warning** listing
+  (`~/.config/opencode/`), init prints a **loud warning** listing
   them — it never deletes anything.
 - `apg scan [dir] [--language L[,L...]] [--exclude-path G]* [--module M]* [--no-build-scripts]
   [blacklist...]`
@@ -183,7 +184,7 @@ The project builds a single `apg` binary (package `apg`):
 - `apg --version`, `apg --help`.
 
 `apg init` also installs the **apg opencode tool suite** into the user-level
-`~/.opencode/` (single-sourced from this repo's `opencode-suite/`, embedded in
+`~/.config/opencode/` (single-sourced from this repo's `opencode-suite/`, embedded in
 `src/install.rs` via `include_str!`): `apg_scan`, `apg_query`, plus curated
 abstractions over common lookups — `apg_find_symbol`, `apg_modules`,
 `apg_module_files`, `apg_module_structs`, `apg_file_units`, `apg_file_path`,
@@ -199,11 +200,21 @@ filesystem tools `apg_rm` / `apg_mv` / `apg_cp` (remove/move/copy that
 self-enforce the acting agent's granted path scope and the project/worktree
 boundary).
 Shared plumbing
-lives in `~/.opencode/lib/apg.ts`
+lives in `~/.config/opencode/lib/apg.ts`
 (root discovery, `apg query`/`apg project`/`apg node`/`apg edge`/`apg session`/`apg plan`/`apg review` subprocess,
-Cypher literal escaping). All suite
+Cypher literal escaping). The suite's plugin dependency is `@opencode/plugin`
+(opencode 2.x), installed with `bun install` (the suite's lockfile is
+`bun.lock`); `apg init` writes the plugin's `package.json` naming that
+dependency and runs `bun install` if needed. All suite
 tools take an optional `codeType` (default: all code); exact-FQN tools hint
 when a lookup comes up empty (overloads carry `(params)` suffixes).
+
+The suite targets opencode **2.x** and installs at the opencode 2.x global
+config root `~/.config/opencode/`; `apg init` neither reads nor writes the V1
+user-level root. Each apg release line supports exactly one opencode major:
+**apg 0.21.x** pairs with opencode **v1** only, and **apg 0.22.x** pairs with
+opencode **v2** only — the `~/.config/opencode/` layout and the
+`@opencode/plugin` dependency belong to the 0.22.x line.
 
 The `apg` binary is brew-installable via split formulae (tap
 `https://github.com/antz29/apg.git`): the base `scanner` formula (the binary
@@ -409,8 +420,8 @@ FQN rendering. See *The installed binary is the contract* above.
    ```
 
 3. **Init with an isolated HOME** so the suite install `apg init` performs
-   lands in a scratch `~/.opencode` instead of your real one, then commit the
-   scaffold:
+   lands in a scratch `~/.config/opencode` instead of your real one, then commit
+   the scaffold:
 
    ```sh
    HOME=/tmp/apg-home "$BIN" init .   # writes apg/config.json at the binary's version
@@ -725,8 +736,9 @@ asserted by the binary.
   never as a task in a feature change-set, and never by pointing a candidate
   build at the apg repo. **The regenerate-after-RELEASE follow-up** is: cut the
   release → install the released binary → re-run `apg init` (writes the current
-  version + suite) → **restart opencode** (to load the new/updated suite and
-  agents) → dispatch `agent-builder` **on the main checkout** to regenerate the
+  version + suite into `~/.config/opencode/`) → **restart opencode** (to load
+  the new/updated suite and agents) → dispatch `agent-builder` **on the main
+  checkout** to regenerate the
   repo's own `.opencode/agents/**`. Regeneration follows a **release**, never an
   `apg project merge`. A change-set that changes the agent-builder template
   edits `opencode-suite/agents/**` (product source, embedded via `include_str!`);
@@ -761,7 +773,7 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   located node also carries `start_line`/`end_line`, **1-based inclusive line
   numbers**; use them (not byte offsets) when joining against diffs, hunks, or
   anything line-oriented.
-- `path` is the **repo-relative source-file identity** — the `/`-separated path from the git toplevel (or the scan root outside a repo), the same identity as a `File` FQN, never an absolute checkout path (the absolute path is reconstructed at the suite-tool boundary). Read those files with `read`, `grep`, or `bash` (resolving the relative path against the project directory) to **confirm and anchor** a graph result (open the file at its `start_line`/`end_line`) or to read artifacts the graph does not model — never to discover a fact the graph carries.
+- `path` is the **repo-relative source-file identity** — the `/`-separated path from the git toplevel (or the scan root outside a repo), the same identity as a `File` FQN, never an absolute checkout path (the absolute path is reconstructed at the suite-tool boundary). Read those files with `read`, `grep`, or `shell` (resolving the relative path against the project directory) to **confirm and anchor** a graph result (open the file at its `start_line`/`end_line`) or to read artifacts the graph does not model — never to discover a fact the graph carries.
 
 ### Fidelity & noise
 
@@ -786,7 +798,7 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
 
 ### Other tools
 
-- `read`, `grep`, `glob`, `bash` — standard file operations. They **confirm and
+- `read`, `grep`, `glob`, `shell` — standard file operations. They **confirm and
   anchor** a graph result (open the returned `path` at its
   `start_line`/`end_line`) or read artifacts the graph does not model — they
   do not discover graph facts. For ANY code or structure question — discovery
@@ -805,6 +817,6 @@ An `apg/config.json` at the project root **replaces** the defaults. Shape:
   `node_modules` prunes). The graph-first ordering above is unchanged: for a
   fact either class carries, query first.
 - Extract byte ranges with: `dd if=<file> bs=1 skip=<start> count=<end-start> 2>/dev/null`
-- Use `rg` (ripgrep) in bash for fast content search **of artifacts the graph
-  does not model** — for in-graph facts, a graph query comes first.
-- `task` — spawn sub-agents for complex multi-file exploration.
+- Use `rg` (ripgrep) via the `shell` tool for fast content search **of artifacts
+  the graph does not model** — for in-graph facts, a graph query comes first.
+- `subagent` — spawn sub-agents for complex multi-file exploration.
