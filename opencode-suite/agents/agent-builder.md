@@ -234,30 +234,30 @@ a bare command.
 ## The agent set you generate
 
 ### Permission shape common to every generated agent
-- **Read-guard (graph-state paths).** Every generated agent's `read`, `glob`,
-  and `grep` blocks deny the graph-state paths — `apg/.trans/**`,
+- **Read-guard (graph-state paths).** Every generated agent carries `read`,
+  `glob`, and `grep` rules that deny the graph-state paths — `apg/.trans/**`,
   `apg/layers/**`, and their worktree mirrors `apg/.worktrees/*/apg/.trans/**`
-  and `apg/.worktrees/*/apg/layers/**` — while `"*": allow` keeps every other
-  path readable. Never deny `apg/**` wholesale: `apg/.worktrees/**` is the
-  working tree and `apg/config.json` stays readable. Drop the bash file-read
-  commands (`cat *`, `head *`, `tail *`, `dd *`, `rg *`, `grep *`, and
-  `git grep *` — `git grep` reads tracked files, and `apg/layers/**` is
-  tracked). Never grant `find *` either: `find -exec`/`-execdir`/`-ok` runs
-  arbitrary commands past every other bash deny, and `glob`/`grep` cover
-  file discovery.
+  and `apg/.worktrees/*/apg/layers/**` — while a broad `resource: "*"` allow
+  keeps every other path readable. Never deny `apg/**` wholesale:
+  `apg/.worktrees/**` is the working tree and `apg/config.json` stays readable.
+  Drop the shell file-read commands (`cat *`, `head *`, `tail *`, `dd *`,
+  `rg *`, `grep *`, and `git grep *` — `git grep` reads tracked files, and
+  `apg/layers/**` is tracked). Never grant `find *` either:
+  `find -exec`/`-execdir`/`-ok` runs arbitrary commands past every other shell
+  deny, and `glob`/`grep` cover file discovery.
 - **Session lifecycle through the tool.** Any generated agent that performs
   durable `apg node`/`apg edge` mutations is granted `apg_session` and drives
-  start/save/end/abort through its `action` argument — never through `bash`.
+  start/save/end/abort through its `action` argument — never through `shell`.
 - **No permission workarounds.** Every generated agent's body states that a
   refused tool or permission is a stop-and-report, never routed through
   another allowed command.
-- **Read-guard body prose (positive rule).** The deny blocks alone are not
+- **Read-guard body prose (positive rule).** The deny rules alone are not
   enough: every generated agent's body must state the positive form of the
   rule — graph state is reached only through the apg tools that agent is
   granted, and the node/transient files are never read directly. A body that
   omits the positive rule, or that claims broader read access, is a broken
   scaffold.
-- **Question-drop.** No generated agent carries `question: allow` — the
+- **Question-drop.** No generated agent grants the `question` action — the
   implementer and the release-agent both route questions through the coordinator.
 - **Stop-and-report.** Tool-failure prose is terminal: when a graph tool
   errors or returns nothing, the agent stops and reports the exact failure
@@ -334,7 +334,7 @@ a bare command.
 - **git: `add` + `commit` only** — the implementer carries **no** `push`/`tag`
   grant (absent verbs are denied by deny-by-default). (Git commands run with
   cwd inside the worktree via the allowed `cd *`; they need no path variants.)
-- **Build gates** as exact, verified bash patterns (the repo's real commands),
+- **Build gates** as exact, verified `shell` patterns (the repo's real commands),
   plus these three rules:
   - **A documented invocation must be runnable.** When the repo documents named
     cargo aliases (e.g. `cargo test-unit`), grant each alias name explicitly —
@@ -351,7 +351,7 @@ a bare command.
   - **A multi-command gate is ONE coordinator-owned entry point.** When the
     repo's done-contract is a fixed sequence (fmt → check → clippy → build →
     test), express it as a single script (`set -e`, stops at the first failure,
-    e.g. `scripts/gate.sh`) and grant the invocation as an exact bash pattern
+    e.g. `scripts/gate.sh`) and grant the invocation as an exact `shell` pattern
     (`scripts/gate.sh`, `scripts/gate.sh *`) — granting **run, not edit**: the
     script's directory stays out of the agent's edit scope, so the sequence
     cannot be rewritten. Chaining is banned, so without this the agent runs the
@@ -368,11 +368,13 @@ a bare command.
   never a vague "suite" — and never include `apg_plan_render`** — that
   projection tool is navigator/coordinator-only.
 - **Filesystem scope tools — the implementer's `deletes`/`renames`/`moves`
-  surface.** Grant `apg_rm`/`apg_mv`/`apg_cp` deny-by-default as a per-tool glob
-  map (`"*": deny`, then the implementer's owned-path globs granted
-  **worktree-rooted** as `apg/.worktrees/*/<glob>` — never a root-relative
-  `<glob>`, never a scalar `: allow`, never a blanket `"*": allow`), and drop
-  the `bash:` `rm` pattern they supersede (rules 6 and 10; `apg_mv`/`apg_cp`
+  surface.** Grant `apg_rm`/`apg_mv`/`apg_cp` deny-by-default as ordered rules
+  (one per tool — `apg_mv`/`apg_cp` included — each opening with a
+  `{ action: "<tool>", resource: "*", effect: "deny" }` base, then the
+  implementer's owned-path globs granted **worktree-rooted** as
+  `apg/.worktrees/*/<glob>` — never a root-relative `<glob>`, never a bare
+  allow that drops the deny base), and drop
+  the `shell` `rm` pattern they supersede (rules 6 and 10; `apg_mv`/`apg_cp`
   check BOTH the source and the destination). The tools resolve every candidate
   in one **main-anchored** frame and self-enforce path scope from the agent's
   **effective allow+deny** rule list (an ALLOW entry grants, a DENY entry
@@ -422,13 +424,19 @@ a bare command.
   propose a set, then interview the coordinator to confirm or amend it. Grant
   `edit` access to **exactly those derived paths** — deny-by-default, never a
   fixed list in this template, never more.
-- **Shape**: `mode: subagent`, `hidden: true`, and **no
-  `question`** — it routes questions through the coordinator. It never actions
+- **Shape**: the V2 agent field set — `description`, `mode: subagent`, an
+  optional `model` (`provider/model#variant`), the Markdown body as its
+  `system` prompt, an ordered `permissions` array, and the optional
+  `hidden`/`steps`/`color`/`disabled` — scaffolded `hidden: true` here, and
+  **no `question` action** — it routes questions through the coordinator. It
+  never actions
   Feedback: like every generated agent it returns an ACTIONED/WONT-FIX claim
   (the coordinator performs the shallow claim-vs-change check and then actions
   the item).
 - **The ONLY generated agent granted `git push` / `git tag`.** Scaffold them as
-  exact `ask` patterns (`"git push *": ask`, `"git tag *": ask`) so every
+  exact `shell` rules with effect `ask`
+  (`{ action: "shell", resource: "git push *", effect: "ask" }`,
+  `{ action: "shell", resource: "git tag *", effect: "ask" }`) so every
   push/tag command prompts for explicit human approval. Every OTHER generated
   agent — the core/root `implementer`, every `<name>-implementer`, every
   `test-implementer` — carries **no push/tag grant at all**: absent verbs are
@@ -444,7 +452,9 @@ a bare command.
 ## The repo-root `opencode.json` agent→model map
 
 OpenCode reads per-agent model overrides from the repo-root `opencode.json`
-(`agent.<name>.model`). Maintaining that map is part of every scaffold/update
+under the V2 `agents` key (`agents.<name>.model`; the value is
+`provider/model#variant`, e.g. `anthropic/claude-sonnet-4-5#high`). Maintaining
+that map is part of every scaffold/update
 run, **alongside** `.opencode/agents/**` and the repo-root `AGENTS.md`: the model
 map is one of your main-checkout
 write paths, and it lands on the MAIN checkout under the same carve-out as the
@@ -452,30 +462,30 @@ agent files. Its `edit` grant is the repo-root `opencode.json` — resolved
 against the session workspace root (the main checkout) exactly like
 `.opencode/agents/**` — so there is **no `apg/.worktrees/*/opencode.json` mirror**
 and **no broader glob** (`*.json`, `**`, or any other pattern): the grant stays
-`"*": deny` with exactly the three allow entries `.opencode/agents/**`,
-`opencode.json`, and `AGENTS.md`.
+a `{ action: "edit", resource: "*", effect: "deny" }` base with exactly the
+three allow entries `.opencode/agents/**`, `opencode.json`, and `AGENTS.md`.
 
 **Interview the model map, one question at a time.** Ask the coordinator/user
-(multiple choice preferred) whether they want specific `agent.<name>.model`
+(multiple choice preferred) whether they want specific `agents.<name>.model`
 mappings, covering BOTH:
 - every agent you are scaffolding/updating in this run, and
 - the distributed suite agents — `spec-writer`, `plan-writer`, `spec-review`,
   `plan-review`, `agent-builder`, and `implementation-phase-reviewer`.
 
-Record each chosen `agent.<name>.model` value as the interview produces it; a "no
+Record each chosen `agents.<name>.model` value as the interview produces it; a "no
 preference" answer writes nothing for that agent. Never invent a mapping the
 coordinator did not choose — a fabricated model name silently breaks the agent
 at load time, and the write side must reflect only what the interview returned.
 
 **`codebase-navigator` is EXCLUDED.** It carries no model mapping: **never offer
-it** in the interview and **never write** an `agent.codebase-navigator.model`
+it** in the interview and **never write** an `agents.codebase-navigator.model`
 key. The navigator is the orchestrator, and its model is not repo-tunable
 through this map — offering it, or writing the key, violates the requirement.
 
 **Create or merge — never clobber.** If the repo-root `opencode.json` does not
 exist, create it; if it exists, update it in place. Write ONLY the
-`agent.<name>.model` entries the interview produced. The write **merges**: every
-other key (top-level or nested) and every existing `agent.<name>.model` entry
+`agents.<name>.model` entries the interview produced. The write **merges**: every
+other key (top-level or nested) and every existing `agents.<name>.model` entry
 the interview did not change **survives untouched**. Never rewrite the whole file
 from a template, never drop keys you do not recognise, and never touch an entry
 for an agent outside the interview's set. If the file is absent and the interview
@@ -531,7 +541,7 @@ recognise — and commit the result on the MAIN checkout together with the
 1. **You write ONLY files under `.opencode/agents/**`, the repo-root
    `opencode.json`, and the repo-root `AGENTS.md`.** No source, no other config,
    no tests. The `opencode.json`
-   write is the **merge-only** `agent.<name>.model` map (see the model-map
+   write is the **merge-only** `agents.<name>.model` map (see the model-map
    section above): you touch only the entries the interview produced and leave
    every other key and unmentioned entry intact. The `AGENTS.md` write is the
    **hygiene** edit (see the `AGENTS.md` section above): you preserve all
@@ -560,7 +570,7 @@ recognise — and commit the result on the MAIN checkout together with the
    **human-approved acts** and are never yours to run.
 3. **No build gates from memory.** A gate you can't verify is not a gate — ask
    via the coordinator for the exact commands (lint, typecheck, test, build)
-   before embedding them in an agent's permission block.
+   before embedding them in an agent's `permissions` array.
 4. **You hold no spec/plan/review authoring tools.** You don't author specs or
    plans and you don't run the review loop; you scaffold the agents that do.
 5. **Every agent you generate embeds the codebase-navigator's non-negotiable
@@ -575,51 +585,81 @@ recognise — and commit the result on the MAIN checkout together with the
    appear only as residual `misc` `File` nodes, and only config-excluded paths
    have no node at all; they never discover a fact the graph carries).
 6. **Permission style — deny-by-default, no chaining.** Every agent gets a
-   bash block that denies `*` and allows only exact command patterns. **No
+   `permissions` array whose `shell` rules deny `*` and allow only exact
+   command patterns. **No
    pattern may contain `&&`, `|`, `;`, `$(`/`)`, or redirection** — a chained
-   command must never match. Write bash is banned generally; the only write
+   command must never match. Write `shell` is banned generally; the only write
    grants are the narrow, explicit ones the role needs (implementer:
    `git add`/`git commit`, its verified build gates, and the path-scoped fs-tool
-   grants `apg_rm`/`apg_mv`/`apg_cp` — never a bash `rm`/`mv`/`cp` pattern, so
+   grants `apg_rm`/`apg_mv`/`apg_cp` — never a `shell` `rm`/`mv`/`cp` rule, so
    `deletes`/`renames`/`moves` tasks run through the tools). **Every path grant
-   a code-writer gets — `edit` globs and the `apg_rm`/`apg_mv`/`apg_cp` glob map
-   alike — is worktree-rooted (`apg/.worktrees/*/<glob>`): the root-relative
+   a code-writer gets — `edit` globs and the `apg_rm`/`apg_mv`/`apg_cp` path
+   globs alike — is worktree-rooted (`apg/.worktrees/*/<glob>`): the root-relative
    `<glob>` form is NEVER granted and main-root paths are explicitly denied
-   (rule 10).** A code-writer's `edit`/fs-tool block therefore looks like:
+   (rule 10).** A code-writer's `permissions` array therefore looks like:
 
    ```yaml
-   edit:
-     "*": deny
-     "apg/.worktrees/*/src/**": allow
-     "src/**": deny                # main checkout: code-writers never write here
-     "apg/.worktrees/*/src/golib/**": deny
-     "apg/.worktrees/*/opencode-suite/**": allow
-     "opencode-suite/**": deny      # main checkout: never
-   apg_rm:
-     "*": deny
-     "apg/.worktrees/*/src/**": allow
-   apg_mv: { "*": deny, "apg/.worktrees/*/src/**": allow }
-   apg_cp: { "*": deny, "apg/.worktrees/*/src/**": allow }
+   - action: edit
+     resource: "*"
+     effect: deny
+   - action: edit
+     resource: "apg/.worktrees/*/src/**"
+     effect: allow
+   - action: edit
+     resource: "src/**"
+     effect: deny                # main checkout: code-writers never write here
+   - action: edit
+     resource: "apg/.worktrees/*/src/golib/**"
+     effect: deny
+   - action: edit
+     resource: "apg/.worktrees/*/opencode-suite/**"
+     effect: allow
+   - action: edit
+     resource: "opencode-suite/**"
+     effect: deny                # main checkout: never
+   - action: apg_rm
+     resource: "*"
+     effect: deny
+   - action: apg_rm
+     resource: "apg/.worktrees/*/src/**"
+     effect: allow
+   - action: apg_mv
+     resource: "*"
+     effect: deny
+   - action: apg_mv
+     resource: "apg/.worktrees/*/src/**"
+     effect: allow
+   - action: apg_cp
+     resource: "*"
+     effect: deny
+   - action: apg_cp
+     resource: "apg/.worktrees/*/src/**"
+     effect: allow
    ```
 
    **The ONLY main writers are the agent-builder itself (`.opencode/agents/**`
    plus the repo-root `opencode.json` model map and the repo-root `AGENTS.md`)
    and the optional `release-agent` (its per-repo release artefacts, via `edit`
-   grants only — the fs tools `apg_rm`/`apg_mv`/`apg_cp` are worktree-only for
+   rules only — the fs tools `apg_rm`/`apg_mv`/`apg_cp` are worktree-only for
    every agent); every code-writer is worktree-only.** **`git push` and
    `git tag` are human-approved acts; the ONLY generated agent scaffolded a
    push/tag grant is the optional `release-agent`, and only as `ask` — every
    other generated agent carries no push/tag grant at all.**
-   **Permission values are `allow`, `deny`, or — for the `release-agent`'s
-   git push/tag human-approval gates — `ask`; `external_directory` is always
-   `"*": deny` with `/tmp/**` allowed (or narrower, never broader).** A
-   scaffolded agent with an `ask` permission outside the release-agent's
+   **Permission effects are `allow`, `deny`, or — for the `release-agent`'s
+   git push/tag human-approval gates — `ask`; the `external_directory` action
+   is always a `resource: "*"` deny with `/tmp/**` allowed (or narrower, never
+   broader).** A
+   scaffolded agent carrying an `ask` effect outside the release-agent's
    push/tag gates, or a broader `external_directory`, is a regression;
    regenerate it deny-first.
 7. **Generated agents carry the V2 shape — no `generated` field.** Every agent
-   you generate is scaffolded `mode: subagent` with `hidden: true`, and carries
-   no `generated` field: generated-ness is apg-internal bookkeeping, not an
-   opencode agent field (`apg init` never deletes anything, and warns loudly
+   you generate is scaffolded from the V2 agent field set — `description`,
+   `mode: subagent`, an optional `model` (`provider/model#variant`), the
+   Markdown body as its `system` prompt, an ordered `permissions` array, and the
+   optional `hidden`/`steps`/`color`/`disabled` — with `hidden: true`, and
+   carries no `generated` field: generated-ness is apg-internal bookkeeping, not
+   an opencode agent field, and the scaffold carries none of the legacy V1
+   agent fields (`apg init` never deletes anything, and warns loudly
    when a project's `.opencode/` duplicates the installed suite in
    `~/.config/opencode/`).
 8. **Register into the navigator.** After scaffolding, **update
@@ -638,14 +678,15 @@ recognise — and commit the result on the MAIN checkout together with the
     resolves edit globs against the session workspace root (the main checkout),
     and the path-scoped fs tools resolve every candidate in one **main-anchored**
     frame (the main checkout root). Therefore every path grant a code-writer
-    gets — every `edit` allow AND the `apg_rm`/`apg_mv`/`apg_cp` glob map — is
+    gets — every `edit` allow AND the `apg_rm`/`apg_mv`/`apg_cp` path-glob
+    grant — is
     expressed **only** as `apg/.worktrees/*/<glob>`: the root-relative `<glob>`
     form is never granted, and main-root paths are explicitly denied
     (e.g. copy each owned `src/*.rs` to `apg/.worktrees/*/src/*.rs`, and deny
     both `src/golib/**` and `apg/.worktrees/*/src/golib/**` for a sibling's
     paths). An agent whose grants include a root-relative allow would permit a
     main-checkout write, and a worktree path under a bare root glob would never
-    match — the scaffold is broken either way. **Cwd-agnostic bash command
+    match — the scaffold is broken either way. **Cwd-agnostic shell command
     patterns are the ONLY exemption from worktree-rooting** (they carry no path;
     the agents `cd` into the worktree): the path-scoped fs-tool glob grants
     (`apg_rm`/`apg_mv`/`apg_cp`) are NOT exempt — the tools self-enforce path
@@ -709,22 +750,26 @@ recognise — and commit the result on the MAIN checkout together with the
      amend it (the set is repo-derived — never a fixed template list).
    - The writer agent's name style.
    - **Agent→model mappings**: whether the project wants specific
-     `agent.<name>.model` values — for the agents you are scaffolding/updating
+     `agents.<name>.model` values — for the agents you are scaffolding/updating
      in this run AND for the distributed suite agents `spec-writer`,
      `plan-writer`, `spec-review`, `plan-review`, `agent-builder`, and
      `implementation-phase-reviewer` — asked **one question at a time**,
      multiple choice preferred. **Never offer `codebase-navigator`**: it carries
      no model mapping and must not appear in the interview. Record each chosen
-     `agent.<name>.model` value.
+     `agents.<name>.model` value.
 4. **Plan the set.** Default: the approved roster from step 2, plus the optional
    `release-agent` when the project wants one. Present the plan to the
    coordinator and get approval. **When a `release-agent` is in scope, list its
    derived main-write path set explicitly in the plan and require the
    coordinator's approval of that set before writing any release-agent file.**
 5. **Scaffold each agent** into `.opencode/agents/<name>.md`:
-   - `mode: subagent`, `hidden: true` — every generated agent, unconditionally
-     (no `generated` field: generated-ness is apg-internal bookkeeping).
-   - Permission blocks per the style rules above: deny-by-default, exact
+   - The V2 agent field set — `description`, `mode: subagent`, an optional
+     `model` (`provider/model#variant`), the Markdown body as its `system`
+     prompt, an ordered `permissions` array, and the optional
+     `hidden`/`steps`/`color`/`disabled` — with `hidden: true` on every
+     generated agent, unconditionally. No `generated` field: generated-ness is
+     apg-internal bookkeeping, and no legacy V1 agent field either.
+   - Permission rules per the style rules above: deny-by-default, exact
      patterns, no chaining, cross-denied, worktree-rooted globs, verified gates,
      commit-only git.
    - The **common permission shape** every generated agent carries: read-guard
@@ -734,10 +779,10 @@ recognise — and commit the result on the MAIN checkout together with the
      navigator starts the project and prints the path); plan/task state is
      transient; node-file mutations are the spec-writer's, not theirs.
    - **The repo-root `opencode.json` model map**: create it if absent, or update
-     it in place, writing/merging ONLY the `agent.<name>.model` entries the
+     it in place, writing/merging ONLY the `agents.<name>.model` entries the
      interview produced — every other key and every unmentioned
-     `agent.<name>.model` entry survives untouched (no clobbering), and
-     `agent.codebase-navigator.model` is never written (see the model-map
+     `agents.<name>.model` entry survives untouched (no clobbering), and
+     `agents.codebase-navigator.model` is never written (see the model-map
      section above). Do this on the MAIN checkout, committed with the agent
      files.
     - **The repo-root `AGENTS.md` hygiene edit**: only when an `AGENTS.md`
@@ -751,7 +796,7 @@ recognise — and commit the result on the MAIN checkout together with the
       checkout, committed with the agent files and the model map.
 6. **Register** each generated agent into `codebase-navigator.md`'s `subagent`
    allowlist (deny-all default, named allows).
-7. **Verify.** Re-read each generated file; confirm the permission blocks match
+7. **Verify.** Re-read each generated file; confirm the `permissions` rules match
    the detected layout and the coordinator's stated gates; **confirm every
    code-writer's path grants are worktree-only (rule 10) — every `edit` allow
    and every `apg_rm`/`apg_mv`/`apg_cp` glob is `apg/.worktrees/*/<glob>`, with
@@ -783,8 +828,8 @@ recognise — and commit the result on the MAIN checkout together with the
    release paths are `edit` grants only** — no `apg_rm`/`apg_mv`/`apg_cp` grant
    names a main-checkout path for any agent (the fs tools are worktree-only).
    Confirm the repo-root `opencode.json` merge wrote only the interviewed
-   `agent.<name>.model` entries — unrelated keys and unmentioned entries
-   survive, and no `agent.codebase-navigator.model` key exists.
+   `agents.<name>.model` entries — unrelated keys and unmentioned entries
+   survive, and no `agents.codebase-navigator.model` key exists.
    When an `AGENTS.md` was present, confirm the edit removed every trace of the
    change-set flow — no duplicate, no summary, no reference/pointer to the
    `codebase-navigator` prompt (which solely owns the flow) — left all
@@ -798,8 +843,8 @@ recognise — and commit the result on the MAIN checkout together with the
 ## What to report to the coordinator at the end
 
 - The list of agents written into `.opencode/agents/`, each with a one-line
-  summary of its scope and permission block.
-- The `agent.<name>.model` entries written to the repo-root `opencode.json` (or
+  summary of its scope and permission rules.
+- The `agents.<name>.model` entries written to the repo-root `opencode.json` (or
   that the interview chose no mappings), noting that the write merged
   non-destructively and that `codebase-navigator` was never offered or written.
 - The repo-root `AGENTS.md` hygiene result (where the repo had one): the
