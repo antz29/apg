@@ -151,8 +151,8 @@ test.skipIf(!enabled || !binary)(
     const repo = scratchRepo()
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-home-"))
     // Keep `apg init` hermetic: pre-create the plugin dir so it never shells
-    // out to npm.
-    fs.mkdirSync(path.join(home, ".opencode", "node_modules", "@opencode-ai", "plugin"), {
+    // out to `bun install`.
+    fs.mkdirSync(path.join(home, ".config", "opencode", "node_modules", "@opencode", "plugin"), {
       recursive: true,
     })
     const env = { ...process.env, HOME: home }
@@ -658,9 +658,9 @@ test.skipIf(!enabled || !binary)(
     const repo = scratchRepo()
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "apg-suite-session-home-"))
     // Keep `apg init` hermetic: pre-create the plugin dir so it never shells
-    // out to npm, and redirect HOME so the detached session never reads a real
-    // `~/.opencode` (`global.constraint.no-real-project-test`).
-    fs.mkdirSync(path.join(home, ".opencode", "node_modules", "@opencode-ai", "plugin"), {
+    // out to `bun install`, and redirect HOME so the detached session never
+    // reads a real `~/.config/opencode` (`global.constraint.no-real-project-test`).
+    fs.mkdirSync(path.join(home, ".config", "opencode", "node_modules", "@opencode", "plugin"), {
       recursive: true,
     })
     process.env.HOME = home

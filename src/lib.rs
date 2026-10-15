@@ -78,7 +78,7 @@ USAGE:
                               repo .gitignore for the apg layout entries,
                               install/update the opencode apg tool suite + seven
                               distributed agents + the upgrade guide in
-                              ~/.opencode/, and warn loudly about project
+                              ~/.config/opencode/, and warn loudly about project
                               .opencode/ files that duplicate the installed
                               suite (never deletes)
   apg scan [dir] [options]    Scan a project; writes apg/.trans/db.lbug and
