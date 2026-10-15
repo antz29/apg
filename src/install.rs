@@ -448,19 +448,22 @@ pub fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
     Ok(pruned)
 }
 
-/// Installs (or updates) the apg suite into `opencode_dir`: every `SUITE_TOOLS`
-/// file, the shared lib, the upgrade guide, and the seven distributed agents —
+/// Installs (or updates) the apg suite into the V2 `opencode_dir` layout: every
+/// `SUITE_TOOLS` plugin file into `plugins/`, the shared lib + upgrade guide
+/// into `lib/` (beside the plugins, outside opencode's plugin discovery), the
+/// seven distributed agents into `agents/`, and `package.json` at the root —
 /// each written only when missing or changed — then prunes stale apg-owned
 /// files. Returns `(files written/updated, files pruned)`. `cmd_init` calls it
-/// against `~/.opencode`; tests call it against a temp dir. The package.json
-/// scaffold is only written when absent (never clobbered). The embedded
-/// agent/tool prose it delivers carries the coordinator-mediated feedback
-/// cycle: the owning writer returns an ACTIONED/WONT-FIX claim and the
+/// against `~/.config/opencode/`; tests call it against a temp dir. The
+/// package.json scaffold is only written when absent (never clobbered). The
+/// embedded agent/tool prose it delivers carries the coordinator-mediated
+/// feedback cycle: the owning writer returns an ACTIONED/WONT-FIX claim and the
 /// coordinator performs the shallow claim-vs-change check and then actions the
 /// item (`apg_review_action`).
 pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
-    let tools_dir = opencode_dir.join("tools");
-    std::fs::create_dir_all(&tools_dir)?;
+    // opencode 2.x discovers its tool plugins in `plugins/`.
+    let plugins_dir = opencode_dir.join("plugins");
+    std::fs::create_dir_all(&plugins_dir)?;
     let agents_dir = opencode_dir.join("agents");
     std::fs::create_dir_all(&agents_dir)?;
 
@@ -470,24 +473,26 @@ pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
     }
     let mut updated = 0usize;
     for (name, content) in SUITE_TOOLS {
-        if write_if_changed(&tools_dir.join(name), content)? {
+        if write_if_changed(&plugins_dir.join(name), content)? {
             updated += 1;
         }
     }
+    // The shared lib + upgrade guide live in `lib/`, beside the plugins,
+    // outside opencode's plugin discovery.
     let lib_dir = opencode_dir.join("lib");
     std::fs::create_dir_all(&lib_dir)?;
     if write_if_changed(&lib_dir.join("apg.ts"), APG_LIB)? {
         updated += 1;
     }
     // The upgrade guide the R10 gate's block text points at (task-4).
-    // Best-effort with a warning: an unwritable ~/.opencode must not fail
-    // init (mirrors the npm-install failure handling below).
+    // Best-effort with a warning: an unwritable ~/.config/opencode must not
+    // fail init (mirrors the npm-install failure handling below).
     let upgrade_doc_path = lib_dir.join("apg-upgrade.md");
     match write_if_changed(&upgrade_doc_path, APG_UPGRADE_DOC) {
         Ok(true) => updated += 1,
         Ok(false) => {}
         Err(e) => eprintln!(
-            "warning: could not install the upgrade guide into {} ({e}); the version-gate block text points at ~/.opencode/lib/apg-upgrade.md — re-run `apg init` once the location is writable",
+            "warning: could not install the upgrade guide into {} ({e}); the version-gate block text points at ~/.config/opencode/lib/apg-upgrade.md — re-run `apg init` once the location is writable",
             upgrade_doc_path.display()
         ),
     }
