@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "distributed-agent-set",
-  "body": "The agents `apg init` installs into `~/.config/opencode/agents/` from `opencode-suite/agents/**`, embedded into the binary via `include_str!` and single-sourced from the repo: `codebase-navigator`, `spec-writer`, `plan-writer`, `spec-review`, `plan-review`, `agent-builder`, and `implementation-phase-reviewer`. Membership follows repo-agnosticism: a distributed agent lacks a repo-specific build grant and works independently of the repo's paths, gates, and edit scopes. Distributed agents sit outside the agent-builder's generated set (that boundary distinguishes agent-builder output from the distributed core); generated-ness is apg-internal bookkeeping, not an opencode agent field. `implementation-phase-reviewer` belongs to the distributed set rather than the generated set.",
+  "body": "The agents `apg init` installs into `~/.config/opencode/agents/` from `opencode-suite/agents/**`, embedded into the binary via `include_str!` and single-sourced from the repo: `codebase-navigator`, `spec-writer`, `plan-writer`, `spec-review`, `plan-review`, `agent-builder`, and `implementation-phase-reviewer`. Membership follows repo-agnosticism: a distributed agent lacks a repo-specific build grant and works independently of the repo's paths, gates, and edit scopes. Distributed agents sit outside the agent-builder's generated set (that boundary distinguishes agent-builder output from the distributed core); the `generated` field is absent from the opencode agent frontmatter, generated-ness living in apg-internal bookkeeping. `implementation-phase-reviewer` belongs to the distributed set rather than the generated set.",
   "properties": {
     "kind": "entity"
   },
