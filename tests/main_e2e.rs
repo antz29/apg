@@ -3065,7 +3065,7 @@ mod e2e {
         // `action` argument (never bash), and no distributed agent grants
         // `find *` — `find -exec` runs arbitrary commands past every bash deny.
         assert!(
-            session_tool.contains(r#"enum(["start", "save", "end", "abort"])"#),
+            session_tool.contains(r#"enum: ["start", "save", "end", "abort"]"#),
             "apg_session.ts must expose the start/save/end/abort actions"
         );
         for name in [
