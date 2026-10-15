@@ -404,26 +404,6 @@ export function editAllowGlobs(frontmatterBody: string): { glob: string; allow: 
 }
 
 /**
- * Reads one agent config file and returns its `permission.edit` rules — the
- * ordered `{ glob, allow }` entries `editAllowGlobs` collects (BOTH allow and
- * deny, in FILE ORDER, duplicates preserved) — or `null` when the file does not
- * exist / cannot be read. A doc that is not fenced-frontmatter returns the
- * fail-closed `[]`, as does a fenced doc with no `edit:` block (via
- * `editAllowGlobs`), so a caller refuses every path rather than allowing one by
- * default.
- */
-function readAgentEditGlobs(file: string): { glob: string; allow: boolean }[] | null {
-  if (!existsSync(file)) return null
-  try {
-    const fm = frontmatter(readFileSync(file, "utf8"))
-    if (fm === null) return []
-    return editAllowGlobs(fm)
-  } catch {
-    return null
-  }
-}
-
-/**
  * The rebase-column set for one row of `apg_find_symbol`'s result, whose
  * columns are `kind, n.fqn, n.path, n.start_line, n.end_line`.
  *
