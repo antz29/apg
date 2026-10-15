@@ -134,7 +134,7 @@ fn winb_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
     let repo_dir = base.join("repo");
     let home = base.join("home");
     std::fs::create_dir_all(&home).unwrap();
-    std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+    std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin")).unwrap();
     scratch_repo_init(&repo_dir);
     std::fs::write(repo_dir.join("go.mod"), "module scratch\n\ngo 1.21\n").unwrap();
     for (rel, body) in files {
@@ -416,14 +416,14 @@ fn md_frontend_records(repo_dir: &Path) -> Vec<apg::schema::Record> {
 
 /// A scratch git repo for the Markdown acceptance fixture: the caller's
 /// files, an isolated HOME (the suite dependency dir pre-created so `apg
-/// init` never shells out to npm), `apg init`, and both commits. Returns
+/// init` never shells out to bun install), `apg init`, and both commits. Returns
 /// `(base, repo_dir, home)`.
 fn md_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf) {
     let base = std::env::temp_dir().join(format!("apg-md-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let repo_dir = base.join("repo");
     let home = base.join("home");
-    std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+    std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin")).unwrap();
     scratch_repo_init(&repo_dir);
     for (rel, body) in files {
         let p = repo_dir.join(rel);
@@ -584,8 +584,8 @@ fn java_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf
     let home = base.join("home");
     std::fs::create_dir_all(&home).unwrap();
     // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
-    // it never shells out to npm.
-    std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+    // it never shells out to bun install.
+    std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin")).unwrap();
     scratch_repo_init(&repo_dir);
     for (rel, body) in files {
         let p = repo_dir.join(rel);
@@ -952,7 +952,7 @@ fn js_scratch_owned(tag: &str, files: &[(&str, String)]) -> (PathBuf, PathBuf, P
     let _ = std::fs::remove_dir_all(&base);
     let repo_dir = base.join("repo");
     let home = base.join("home");
-    std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+    std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin")).unwrap();
     scratch_repo_init(&repo_dir);
     for (rel, body) in files {
         let p = repo_dir.join(rel);
@@ -1279,14 +1279,14 @@ fn py_frontend_records(repo_dir: &Path) -> Vec<apg::schema::Record> {
 
 /// A scratch git repo for a Python fixture: the caller's files, an isolated
 /// HOME (the suite dependency dir pre-created so `apg init` never shells
-/// out to npm), a committed `apg init`, and both commits. Returns
+/// out to bun install), a committed `apg init`, and both commits. Returns
 /// `(base, repo_dir, home)`.
 fn py_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf) {
     let base = std::env::temp_dir().join(format!("apg-py-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let repo_dir = base.join("repo");
     let home = base.join("home");
-    std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+    std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin")).unwrap();
     scratch_repo_init(&repo_dir);
     for (rel, body) in files {
         let p = repo_dir.join(rel);
@@ -1318,7 +1318,7 @@ fn py_incremental_scratch(tag: &str, files: &[(&str, &str)]) -> (PathBuf, PathBu
     let repo_dir = base.join("repo");
     let home = base.join("home");
     std::fs::create_dir_all(&home).unwrap();
-    std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+    std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin")).unwrap();
     scratch_repo_init(&repo_dir);
     for (rel, body) in files {
         let p = repo_dir.join(rel);
@@ -1730,12 +1730,12 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&proj);
         let _ = std::fs::remove_dir_all(&user);
         std::fs::create_dir_all(proj.join("agents")).unwrap();
-        std::fs::create_dir_all(proj.join("tools")).unwrap();
-        std::fs::create_dir_all(user.join("tools")).unwrap();
+        std::fs::create_dir_all(proj.join("plugins")).unwrap();
+        std::fs::create_dir_all(user.join("plugins")).unwrap();
         std::fs::create_dir_all(user.join("agents")).unwrap();
         // Duplicate: same relative path exists in both.
-        std::fs::write(proj.join("tools").join("apg_query.ts"), "x").unwrap();
-        std::fs::write(user.join("tools").join("apg_query.ts"), "x").unwrap();
+        std::fs::write(proj.join("plugins").join("apg_query.ts"), "x").unwrap();
+        std::fs::write(user.join("plugins").join("apg_query.ts"), "x").unwrap();
         // Project-only (a generated agent): not a duplicate.
         std::fs::write(proj.join("agents").join("implementer.md"), "x").unwrap();
         // User-only (a core agent): not a duplicate.
@@ -1743,7 +1743,7 @@ mod e2e {
         // node_modules trees + dep manifests exist in both but are not shadows.
         let shared_dep = proj
             .join("node_modules")
-            .join("@opencode-ai")
+            .join("@opencode")
             .join("plugin")
             .join("dist")
             .join("index.js");
@@ -1751,14 +1751,14 @@ mod e2e {
         std::fs::write(&shared_dep, "x").unwrap();
         std::fs::create_dir_all(
             user.join("node_modules")
-                .join("@opencode-ai")
+                .join("@opencode")
                 .join("plugin")
                 .join("dist"),
         )
         .unwrap();
         std::fs::write(
             user.join("node_modules")
-                .join("@opencode-ai")
+                .join("@opencode")
                 .join("plugin")
                 .join("dist")
                 .join("index.js"),
@@ -1774,7 +1774,7 @@ mod e2e {
         std::fs::write(user.join(".gitignore"), "node_modules\n").unwrap();
         let dupes = duplicate_install_files(&proj, &user);
         assert_eq!(dupes.len(), 1);
-        assert!(dupes.contains(&proj.join("tools").join("apg_query.ts")));
+        assert!(dupes.contains(&proj.join("plugins").join("apg_query.ts")));
         let _ = std::fs::remove_dir_all(&proj);
         let _ = std::fs::remove_dir_all(&user);
     }
@@ -1798,14 +1798,14 @@ mod e2e {
     fn prune_stale_suite_removes_apg_files_preserves_others() {
         let dir = std::env::temp_dir().join(format!("apg-prune-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        std::fs::create_dir_all(dir.join("plugins")).unwrap();
         std::fs::create_dir_all(dir.join("agents")).unwrap();
         // Stale apg tool (no longer in the suite): pruned.
-        std::fs::write(dir.join("tools").join("apg_oldtool.ts"), "x").unwrap();
+        std::fs::write(dir.join("plugins").join("apg_oldtool.ts"), "x").unwrap();
         // Current apg tool: kept.
-        std::fs::write(dir.join("tools").join("apg_query.ts"), "x").unwrap();
+        std::fs::write(dir.join("plugins").join("apg_query.ts"), "x").unwrap();
         // Non-apg tool: preserved.
-        std::fs::write(dir.join("tools").join("my_custom_tool.ts"), "x").unwrap();
+        std::fs::write(dir.join("plugins").join("my_custom_tool.ts"), "x").unwrap();
         // A current distributed agent: kept.
         std::fs::write(dir.join("agents").join("codebase-navigator.md"), "x").unwrap();
         // A user's own agent: preserved.
@@ -1813,9 +1813,9 @@ mod e2e {
 
         let pruned = prune_stale_suite(&dir).unwrap();
         assert_eq!(pruned, 1);
-        assert!(!dir.join("tools").join("apg_oldtool.ts").exists());
-        assert!(dir.join("tools").join("apg_query.ts").exists());
-        assert!(dir.join("tools").join("my_custom_tool.ts").exists());
+        assert!(!dir.join("plugins").join("apg_oldtool.ts").exists());
+        assert!(dir.join("plugins").join("apg_query.ts").exists());
+        assert!(dir.join("plugins").join("my_custom_tool.ts").exists());
         assert!(dir.join("agents").join("codebase-navigator.md").exists());
         assert!(dir.join("agents").join("my-reviewer.md").exists());
         let _ = std::fs::remove_dir_all(&dir);
@@ -1832,8 +1832,8 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
         // A stale pre-rewrite tool already present in the target: pruned by
         // the install (the old `apg spec`/`apg invariant` surfaces are gone).
-        std::fs::create_dir_all(dir.join("tools")).unwrap();
-        std::fs::write(dir.join("tools").join("apg_spec.ts"), "stale").unwrap();
+        std::fs::create_dir_all(dir.join("plugins")).unwrap();
+        std::fs::write(dir.join("plugins").join("apg_spec.ts"), "stale").unwrap();
 
         let (updated, pruned) = install_suite(&dir).unwrap();
         assert!(updated > 0, "a fresh install writes files");
@@ -1850,11 +1850,11 @@ mod e2e {
             "apg_cp.ts",
             "apg_spec_lint.ts",
         ] {
-            let p = dir.join("tools").join(name);
+            let p = dir.join("plugins").join(name);
             assert!(p.exists(), "{name} must install");
             let content = std::fs::read_to_string(&p).unwrap();
             assert!(
-                content.contains("@opencode-ai/plugin"),
+                content.contains("@opencode/plugin"),
                 "{name} must be a real tool file"
             );
         }
@@ -1867,7 +1867,7 @@ mod e2e {
             "apg_plan_apply.ts",
         ] {
             assert!(
-                !dir.join("tools").join(name).exists(),
+                !dir.join("plugins").join(name).exists(),
                 "{name} must not install"
             );
         }
@@ -1909,7 +1909,7 @@ mod e2e {
                 "retired {name} must not be embedded"
             );
             assert!(
-                !dir.join("tools").join(name).exists(),
+                !dir.join("plugins").join(name).exists(),
                 "retired {name} must not install"
             );
         }
@@ -1918,13 +1918,14 @@ mod e2e {
         // apg_plan_add also creates the plan (no `kind`); node/edge expose
         // update/rm.
         for name in ["apg_plan_add.ts", "apg_node.ts", "apg_edge.ts"] {
-            let content = std::fs::read_to_string(dir.join("tools").join(name)).unwrap();
+            let content = std::fs::read_to_string(dir.join("plugins").join(name)).unwrap();
             assert!(
                 content.contains("\"update\"") && content.contains("\"rm\""),
                 "{name} must expose the update/rm actions"
             );
         }
-        let plan_add = std::fs::read_to_string(dir.join("tools").join("apg_plan_add.ts")).unwrap();
+        let plan_add =
+            std::fs::read_to_string(dir.join("plugins").join("apg_plan_add.ts")).unwrap();
         assert!(
             plan_add.contains("\"plan\"") && plan_add.contains("--force"),
             "apg_plan_add.ts is the plan add/update/rm wrapper"
@@ -3744,7 +3745,7 @@ mod e2e {
     /// binary-locating helper (`ApgCommand`) — no nested `cargo build`. Each
     /// spawned child gets its own isolated `HOME` via `Command::env` (edition
     /// 2024 forbids process-wide `env::set_var`, and `apg init` installs the
-    /// suite into `$HOME/.opencode`). A real source file is committed BEFORE
+    /// suite into `$HOME/.config/opencode`). A real source file is committed BEFORE
     /// scanning so `auto_detect_languages` selects just the Go frontend. The
     /// project context is established with `apg project start`, the live session
     /// is started with a real `apg session start` process, and every
@@ -3760,9 +3761,10 @@ mod e2e {
         let home = base.join("home");
         std::fs::create_dir_all(&home).unwrap();
         // Pre-create the opencode dependency dir so `apg init` never shells out
-        // to npm (`cmd_init` skips npm when this path already exists) — keeps
+        // to bun install (`cmd_init` skips bun install when this path already exists) — keeps
         // the test hermetic and fast.
-        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
         let home_s = home.to_str().unwrap().to_string();
 
         // A fresh real git repo with a committed Go source file + manifest
@@ -4195,8 +4197,9 @@ mod e2e {
         let home = base.join("home");
         std::fs::create_dir_all(&home).unwrap();
         // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
-        // it never shells out to npm.
-        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        // it never shells out to bun install.
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
         let home_s = home.to_str().unwrap().to_string();
 
         scratch_repo_init(&repo_dir);
@@ -5201,8 +5204,9 @@ mod e2e {
         let home = base.join("home");
         std::fs::create_dir_all(&home).unwrap();
         // Keep `apg init` hermetic/fast: pre-create the opencode plugin dir so
-        // it never shells out to npm.
-        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        // it never shells out to bun install.
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
         let home_s = home.to_str().unwrap().to_string();
 
         scratch_repo_init(&repo_dir);
@@ -7626,7 +7630,8 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         let home = base.join("home");
-        std::fs::create_dir_all(home.join(".opencode/node_modules/@opencode-ai/plugin")).unwrap();
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
 
         // A scratch git repo carrying a real Go source and a versioned `apg/`
         // layout at the binary's own version, so a scan reaches the frontend
