@@ -405,20 +405,23 @@ fn is_dep_manifest(name: Option<&std::ffi::OsStr>) -> bool {
     )
 }
 
-/// Prune stale apg-managed files from the user-level install (`~/.opencode/`):
-/// `tools/apg_*.ts` (the `apg_` prefix is the apg namespace) and the known
-/// distributed agent names that a newer release removed from the suite. Anything
-/// not owned by apg (a user's own tools/agents) is preserved. `apg init` already
-/// overwrites edited suite files via `write_if_changed`, so removing the same
-/// owned set is consistent. Returns the number of files pruned.
+/// Prune stale apg-managed files from the user-level install
+/// (`~/.config/opencode/`): `plugins/apg_*.ts` (the `apg_` prefix is the apg
+/// namespace) and the known distributed agent names that a newer release
+/// removed from the suite. The prune is scoped to the `~/.config/opencode/`
+/// root alone — it never reads or writes anything under `~/.opencode/`.
+/// Anything not owned by apg (a user's own plugins/agents) is preserved.
+/// `apg init` already overwrites edited suite files via `write_if_changed`, so
+/// removing the same owned set is consistent. Returns the number of files
+/// pruned.
 pub fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
     let current_tools: std::collections::HashSet<&str> =
         SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
     let current_agents: std::collections::HashSet<&str> = AGENTS.iter().map(|(n, _)| *n).collect();
     let mut pruned = 0;
 
-    let tools_dir = opencode_dir.join("tools");
-    if let Ok(entries) = std::fs::read_dir(&tools_dir) {
+    let plugins_dir = opencode_dir.join("plugins");
+    if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
         for e in entries.flatten() {
             let p = e.path();
             let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
