@@ -60,22 +60,40 @@ export function apgBinary(): string {
   return process.env.APG_BINARY || "apg"
 }
 
-/** Walks up from the session dirs looking for the project's `apg/.trans/db.lbug`.
- *  In a project worktree this resolves to the worktree's OWN `apg/` (and its
- *  branch DB) — never the main checkout's — so the tools work unchanged with
- *  cwd inside the worktree.
+/** Walks up looking for the project's `apg/.trans/db.lbug`. In a project
+ *  worktree this resolves to the worktree's OWN `apg/` (and its branch DB) —
+ *  never the main checkout's — so the tools work unchanged with cwd inside the
+ *  worktree.
+ *
+ *  The walk-up START comes from the plugin instance's V2 load location
+ *  (`context.location`, captured from `ctx.location` at `setup`):
+ *  `location.directory`, then `location.project.directory`, then
+ *  `location.project.canonical` when present, then `process.cwd()`. The V1
+ *  `context.directory`/`context.worktree` fields are never read.
  *
  *  `directory` (the tools' optional arg) is the caller's project directory and
  *  is AUTHORITATIVE: when given, the walk-up starts there and only there, so
  *  the returned project root is the caller's checkout — the base the curated
  *  tools rebase stored repo-relative identities onto
  *  (`requirements.requirement.absolute-paths-at-tool-boundary`) — never a
- *  project the session merely happens to have cwd in. The context/cwd dirs are
- *  fallbacks only when no `directory` is given. */
+ *  project the session merely happens to have cwd in. The load-location/cwd
+ *  dirs are fallbacks only when no `directory` is given. */
 export function findApgRoot(context: ToolContext, directory?: string): string | null {
+  // Read the V2 load location's project `canonical` path, which the shared
+  // `ToolContext` type does not name yet — widen it locally so the shared type
+  // stays untouched (`directory`/`worktree` remain for the not-yet-ported
+  // readers `mainCheckoutRoot`/`agentFsGlobs`).
+  const location = context.location as
+    | { directory?: string; project?: { id: string; directory?: string; canonical?: string } }
+    | undefined
   const starts = directory
     ? [directory]
-    : [context.directory, process.cwd(), context.worktree]
+    : [
+        location?.directory,
+        location?.project?.directory,
+        location?.project?.canonical,
+        process.cwd(),
+      ]
   for (const s of starts) {
     if (!s) continue
     let dir = s
