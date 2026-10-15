@@ -2,12 +2,12 @@
   "layer": "requirements",
   "type": "user",
   "name": "navigator-agent",
-  "body": "The distributed `codebase-navigator` agent (installed by `apg init` into `~/.opencode/agents/`) acting as the coordinator of a project worktree: it runs scans, dispatches one plan task at a time to its owning implementer, quick-verifies each returned commit, and performs the merge act on human approval. It uses the suite's plan/review tooling (`apg_plan_*`, `apg_review_*`) and the mutation surface, all of which are refused unless the branch graph is fresh. Its interest is a prompt whose implementation-flow text is executable under that guard — an ordering of commit, scan, and mark-done that the guard actually admits.",
+  "body": "The distributed `codebase-navigator` agent (installed by `apg init` into `~/.config/opencode/agents/`) acting as the coordinator of a project worktree: it runs scans, dispatches one plan task at a time to its owning implementer, quick-verifies each returned commit, and performs the merge act on human approval. It uses the suite's plan/review tooling (`apg_plan_*`, `apg_review_*`) and the mutation surface, all of which are refused unless the branch graph is fresh. Its interest is a prompt whose implementation-flow text is executable under that guard — an ordering of commit, scan, and mark-done that the guard actually admits.",
   "properties": {},
   "out": [
     {
       "kind": "contains",
-      "target": "requirements.requirement.navigator-task-cadence",
+      "target": "requirements.requirement.agent-builder-agents-md-hygiene",
       "properties": {}
     },
     {
@@ -17,12 +17,12 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.navigator-session-isolation",
+      "target": "requirements.requirement.agent-builder-model-map",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.navigator-scan-permission",
+      "target": "requirements.requirement.navigator-agent-builder-surface-coherence",
       "properties": {}
     },
     {
@@ -32,7 +32,12 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.agent-builder-model-map",
+      "target": "requirements.requirement.navigator-scan-permission",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.navigator-session-isolation",
       "properties": {}
     },
     {
@@ -42,12 +47,7 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.agent-builder-agents-md-hygiene",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.navigator-agent-builder-surface-coherence",
+      "target": "requirements.requirement.navigator-task-cadence",
       "properties": {}
     },
     {

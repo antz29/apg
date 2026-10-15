@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "agent-file-migration",
-  "body": "The migration of a repo's local `.opencode/agents/**` files across a move of the distribution boundary. When a distributed agent shares a name with a local file in a repo, the repo holds a duplicate; `apg init` reports the duplicate loudly while deleting nothing; the user removes the local copy by hand. The layout-upgrade guide (`~/.config/opencode/lib/apg-upgrade.md`) documents the migration; removal of the local copy stays a manual act. The distribution boundary moves across releases while a repo's local files persist.",
+  "body": "The migration of a repo's local `.opencode/agents/**` files across a move of the distribution boundary. When a distributed agent shares a name with a local file in a repo, the repo holds a duplicate; the distributed agents install under the global opencode config directory at `~/.config/opencode/agents/`, and when a repo's local `.opencode/agents/` file shares a name with one of them, `apg init` reports the duplicate loudly while deleting nothing; the user removes the local copy by hand. The layout-upgrade guide (`~/.config/opencode/lib/apg-upgrade.md`) documents the migration; removal of the local copy stays a manual act. The distribution boundary moves across releases while a repo's local files persist.",
   "properties": {
     "kind": "entity"
   },

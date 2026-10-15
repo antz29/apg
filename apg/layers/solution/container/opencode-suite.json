@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "opencode-suite",
-  "body": "The `opencode-suite/` distribution — the `apg_*` tools and the shared `lib/apg.ts` plumbing, embedded into the apg binary via `include_str!` and installed by `apg init` into `~/.opencode/`. It is the consumer boundary of the graph: its curated tools read the scanned graph and return results to agents and editors, and it is where a stored repo-relative identity is resolved to an absolute path against the caller's project directory. The already-installed copies (a project's `.opencode/` and the cross-project `~/.opencode/`) are owned by the installed tooling.",
+  "body": "The `opencode-suite/` distribution — the `apg_*` tools and the shared `lib/apg.ts` plumbing, embedded into the apg binary via `include_str!` and installed by `apg init` into `~/.config/opencode/`. It is the consumer boundary of the graph: its curated tools read the scanned graph and return results to agents and editors, and it is where a stored repo-relative identity is resolved to an absolute path against the caller's project directory. The already-installed copies (a project's `.opencode/` and the cross-project `~/.config/opencode/`) are owned by the installed tooling.",
   "properties": {
     "kind": "app"
   },
@@ -59,6 +59,21 @@
     },
     {
       "kind": "contains",
+      "target": "solution.component.opencode-agent-templates",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.opencode-lib-context",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.opencode-tool-plugin",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "solution.component.plan-review-prompt",
       "properties": {}
     },
@@ -96,21 +111,6 @@
       "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_plan_phases.ts",
       "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.opencode-tool-plugin",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.opencode-lib-context",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.opencode-agent-templates",
-      "properties": {}
     }
   ],
   "in": [
@@ -126,12 +126,12 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.plan-tooling",
+      "source": "domain.group.opencode-integration",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.opencode-integration",
+      "source": "domain.group.plan-tooling",
       "properties": {}
     }
   ]
