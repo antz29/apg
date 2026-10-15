@@ -356,11 +356,6 @@ function assertFailureReason(err: unknown): string {
   return err === undefined ? "permission denied" : String(err)
 }
 
-/** Leading-space count of a line (indentation depth). */
-function indentOf(line: string): number {
-  return line.length - line.trimStart().length
-}
-
 /**
  * The rebase-column set for one row of `apg_find_symbol`'s result, whose
  * columns are `kind, n.fqn, n.path, n.start_line, n.end_line`.
