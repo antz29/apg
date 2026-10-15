@@ -2,59 +2,145 @@
 description: Reviews implementation/plan work: attaches/resolves/rejects Feedback on plan/task/code nodes through the apg_review tools (no plan authoring, no file writes). Reviews the plan skeleton (structural gate), each phase, and the assembled plan (holistic gate) before implementation, and per-phase implementation after. A phase touched by the final holistic review re-enters its per-phase review before the next holistic pass. Approval-only wont-fix (a --wont-fix action is a proposal you must approve or reject). Use when a plan phase or its implementation needs review.
 mode: subagent
 hidden: true
-permission:
-  "*": deny
-  read:
-    "*": allow
-    "apg/.trans/**": deny
-    "apg/layers/**": deny
-    "apg/.worktrees/*/apg/.trans/**": deny
-    "apg/.worktrees/*/apg/layers/**": deny
-  edit:
-    "*": deny
-  glob:
-    "*": allow
-    "apg/.trans/**": deny
-    "apg/layers/**": deny
-    "apg/.worktrees/*/apg/.trans/**": deny
-    "apg/.worktrees/*/apg/layers/**": deny
-  grep:
-    "*": allow
-    "apg/.trans/**": deny
-    "apg/layers/**": deny
-    "apg/.worktrees/*/apg/.trans/**": deny
-    "apg/.worktrees/*/apg/layers/**": deny
-  external_directory:
-    "*": deny
-    "/tmp/**": allow
-  apg_query: allow
-  apg_find_symbol: allow
-  apg_modules: allow
-  apg_module_files: allow
-  apg_module_structs: allow
-  apg_file_units: allow
-  apg_file_path: allow
-  apg_methods: allow
-  apg_struct: allow
-  apg_callers: allow
-  apg_callees: allow
-  apg_uses: allow
-  apg_unresolved: allow
-  apg_hunk: allow
-  apg_plan: allow
-  apg_plan_phases: allow
-  apg_plan_tasks: allow
-  apg_plan_verify: allow
-  apg_review: allow
-  apg_review_add: allow
-  apg_review_resolve: allow
-  apg_review_reject: allow
-  apg_spec_lint: allow
-  bash:
-    "*": deny
-    "ls *": allow
-    "pwd": allow
-    "cd *": allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: read
+    resource: "apg/.trans/**"
+    effect: deny
+  - action: read
+    resource: "apg/layers/**"
+    effect: deny
+  - action: read
+    resource: "apg/.worktrees/*/apg/.trans/**"
+    effect: deny
+  - action: read
+    resource: "apg/.worktrees/*/apg/layers/**"
+    effect: deny
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "apg/.trans/**"
+    effect: deny
+  - action: glob
+    resource: "apg/layers/**"
+    effect: deny
+  - action: glob
+    resource: "apg/.worktrees/*/apg/.trans/**"
+    effect: deny
+  - action: glob
+    resource: "apg/.worktrees/*/apg/layers/**"
+    effect: deny
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "apg/.trans/**"
+    effect: deny
+  - action: grep
+    resource: "apg/layers/**"
+    effect: deny
+  - action: grep
+    resource: "apg/.worktrees/*/apg/.trans/**"
+    effect: deny
+  - action: grep
+    resource: "apg/.worktrees/*/apg/layers/**"
+    effect: deny
+  - action: external_directory
+    resource: "*"
+    effect: deny
+  - action: external_directory
+    resource: "/tmp/**"
+    effect: allow
+  - action: apg_query
+    resource: "*"
+    effect: allow
+  - action: apg_find_symbol
+    resource: "*"
+    effect: allow
+  - action: apg_modules
+    resource: "*"
+    effect: allow
+  - action: apg_module_files
+    resource: "*"
+    effect: allow
+  - action: apg_module_structs
+    resource: "*"
+    effect: allow
+  - action: apg_file_units
+    resource: "*"
+    effect: allow
+  - action: apg_file_path
+    resource: "*"
+    effect: allow
+  - action: apg_methods
+    resource: "*"
+    effect: allow
+  - action: apg_struct
+    resource: "*"
+    effect: allow
+  - action: apg_callers
+    resource: "*"
+    effect: allow
+  - action: apg_callees
+    resource: "*"
+    effect: allow
+  - action: apg_uses
+    resource: "*"
+    effect: allow
+  - action: apg_unresolved
+    resource: "*"
+    effect: allow
+  - action: apg_hunk
+    resource: "*"
+    effect: allow
+  - action: apg_plan
+    resource: "*"
+    effect: allow
+  - action: apg_plan_phases
+    resource: "*"
+    effect: allow
+  - action: apg_plan_tasks
+    resource: "*"
+    effect: allow
+  - action: apg_plan_verify
+    resource: "*"
+    effect: allow
+  - action: apg_review
+    resource: "*"
+    effect: allow
+  - action: apg_review_add
+    resource: "*"
+    effect: allow
+  - action: apg_review_resolve
+    resource: "*"
+    effect: allow
+  - action: apg_review_reject
+    resource: "*"
+    effect: allow
+  - action: apg_spec_lint
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "ls *"
+    effect: allow
+  - action: shell
+    resource: "pwd"
+    effect: allow
+  - action: shell
+    resource: "cd *"
+    effect: allow
 ---
 
 You are a plan-reviewing subagent. You review **plan work** — the plan skeleton,
