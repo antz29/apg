@@ -363,10 +363,13 @@ fn write_if_changed(path: &Path, content: &str) -> std::io::Result<bool> {
 }
 
 /// Files in a project's local `.opencode/` that duplicate the user-level
-/// install (`~/.opencode/`): the same relative path exists in both. A project
-/// `.opencode/` should hold only project-specific agents (agent-builder
-/// generated); a copy of a suite tool or core agent there shadows the installed
-/// version, so `apg init` warns loudly about it — it never deletes anything.
+/// install (`~/.config/opencode/`): the same relative path exists in both. A
+/// project `.opencode/` should hold only project-specific agents (agent-builder
+/// generated); a copy of a V2 install location there — `plugins/`, `agents/`,
+/// `lib/`, or `package.json` — shadows the installed version, so `apg init`
+/// warns loudly about it (the warning is printed by `cmd_init`) — it never
+/// deletes anything. Dep-manifest names (`package.json`, `package-lock.json`,
+/// `bun.lock`, `.gitignore`) are excluded by `is_dep_manifest`.
 pub fn duplicate_install_files(project_opencode: &Path, user_opencode: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, project: &Path, user: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
