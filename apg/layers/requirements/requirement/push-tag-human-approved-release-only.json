@@ -18,11 +18,6 @@
       "kind": "contains",
       "source": "requirements.stakeholder.agent-suite-maintainer",
       "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.push-tag-human-approved-correction",
-      "properties": {}
     }
   ]
 }
