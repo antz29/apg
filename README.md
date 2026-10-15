@@ -43,7 +43,7 @@ Scanner (per language / structural) → Rust ingestor → apg/.trans/db.lbug + a
 
 - macOS (brew) or Linux (curl installer)
 - [Homebrew](https://brew.sh/) (for the brew install)
-- [opencode](https://opencode.ai) (for the chat plugin)
+- [opencode](https://opencode.ai) **2.x** (for the chat plugin — the plugin depends on `@opencode/plugin`)
 
 The `scanner` formula builds the `apg` binary and ships the bundled
 **structural scanner** (`structfrontend`); the per-language frontends are
@@ -88,6 +88,7 @@ ceiling.
 | C# (`apg-csharp`) | .NET SDK (`net9.0`) + NuGet | none (self-contained single-file) | Roslyn `Microsoft.CodeAnalysis.CSharp 4.12.0` |
 | Python (`apg-py`) | stable Rust + network (git-pinned Ruff/ty crates) | none (filesystem markers, never shells out) | Ruff/ty tag `0.16.6` (`salsa 0.27`) |
 | Structural (`structfrontend`, in base `scanner`) | stable Rust + crates.io | none (self-contained binary, never shells out) | `serde` / `serde_json` / `unicode-normalization` 0.1 (no language-version ceiling) |
+| opencode chat plugin (`apg init`) | `bun install` (`@opencode/plugin`) | opencode 2.x (tool plugins into `~/.config/opencode/plugins/`) | `@opencode/plugin` (opencode 2.x plugin API) |
 
 ## Install (Homebrew)
 
@@ -188,10 +189,11 @@ Sets up the project:
   binary-managed `version` field) and the gitignored `apg/.trans/`,
   scaffolds the repo `.gitignore` for `apg/.trans/` and `apg/.worktrees/`
   (added if missing, other lines untouched),
-- installs the **apg tool suite** into `~/.opencode/tools/` (query tools +
-  `apg_scan` + the spec/plan/review suite, shared plumbing in `~/.opencode/lib/`)
-  and writes `~/.opencode/package.json` + runs `npm install` if needed,
-- installs the **seven distributed agents** into `~/.opencode/agents/`:
+- installs the **apg tool suite** into `~/.config/opencode/plugins/` (query tools +
+  `apg_scan` + the spec/plan/review suite, shared plumbing in
+  `~/.config/opencode/lib/`) and writes `~/.config/opencode/package.json` naming
+  the `@opencode/plugin` dependency + runs `bun install` if needed,
+- installs the **seven distributed agents** into `~/.config/opencode/agents/`:
   `codebase-navigator`, `spec-writer`, `plan-writer`, `spec-review`,
   `plan-review`, `agent-builder`, and `implementation-phase-reviewer`.
 
@@ -199,7 +201,7 @@ The suite installs the first time and is then kept in sync (files are
 re-written only when their contents change), so running `apg init` again after
 upgrading `apg` updates the tools and agents where required.
 
-Installing to `~/.opencode/` makes the tools and agents available to every
+Installing to `~/.config/opencode/` makes the tools and agents available to every
 project's opencode session (not just this one). Project-specific implementer and
 reviewer agents are installed into the project's `.opencode/agents/` by the
 `agent-builder` agent, never by init. If the project's `.opencode/` holds files
@@ -210,6 +212,13 @@ dispatches only after explicit user consent, and the only agent granted
 push/tag (as `ask`). The plugin and agents are auto-discovered by opencode.
 **Restart opencode** after running `apg init` so the tools and agents are
 available in chat.
+
+The suite targets opencode **2.x** and installs at the opencode 2.x global
+config root `~/.config/opencode/`; `apg init` neither reads nor writes the V1
+user-level root. Each apg release line supports exactly one opencode major:
+**apg 0.21.x** pairs with opencode **v1** only, and **apg 0.22.x** pairs with
+opencode **v2** only — the `~/.config/opencode/` layout and the
+`@opencode/plugin` dependency belong to the 0.22.x line.
 
 ### 2. `apg scan [dir] [options]`
 
@@ -256,7 +265,8 @@ Query syntax: `MATCH`/`RETURN` only (no raw SQL). `ORDER BY`, `LIMIT`,
 
 ## Querying from opencode
 
-`apg init` installs the **apg tool suite**. In an opencode session, ask the
+`apg init` installs the **apg tool suite** as an opencode **2.x** plugin (into
+`~/.config/opencode/plugins/`). In an opencode session, ask the
 agent to explore the graph directly — it will pick the right tool:
 
 > *"List the methods of the `Transaction` type in `sdk/go`."*
@@ -614,7 +624,7 @@ src/tslib/           TypeScript scanner (official TypeScript compiler, Node)
 src/csharplib/       C# scanner (Roslyn; separate build)
 src/pylib/           Python scanner (Astral ty/Ruff engine; separate Cargo project)
 src/structlib/       bundled structural scanner — Markdown + shell/YAML/JSON/TOML/XML/Dockerfile/Makefile/INI + residual misc (standalone non-workspace Rust crate; absorbs the retired src/mdlib)
-opencode-suite/      install template for `apg init` (tools/, lib/, agents/; embedded in src/main.rs)
+opencode-suite/      install template for `apg init` (plugins/, lib/, agents/; embedded in src/main.rs)
 install.sh           curl | sh installer for Linux (prebuilt release tarballs)
 Formula/scanner.rb     apg binary (ingestor + query CLI) + bundled structural scanner
 Formula/apg-go.rb      Go scanner frontend
