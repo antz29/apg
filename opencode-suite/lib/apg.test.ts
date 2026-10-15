@@ -6,6 +6,7 @@
 import { test, expect } from "bun:test"
 
 import {
+  type ToolContext,
   lit,
   csvToRows,
   projectOf,
@@ -17,7 +18,6 @@ import {
   findSymbolRebaseColumns,
   scopeProjectRequirements,
   fsScopeDecision,
-  editAllowGlobs,
   REQUIREMENT_FQN_PREFIX,
   NO_DB_ERROR,
   QUERY_FAILED_PREFIX,
@@ -204,234 +204,193 @@ test("a requirement Satisfied by another project's phase is not over-satisfied b
   expect(foreign.unsatisfied).toEqual([])
 })
 
-// agent-fs-tools phase-01.task-7: the PURE self-enforcement core for the fs
-// tools. `fsScopeDecision` is side-effect-free (no fs, no process, no db), so
-// it lives in the `bun test` unit tier; the real-fs application path is the
-// opt-in boundary e2e. Two INDEPENDENT tests, both required to allow.
-test("fsScopeDecision allows a path matched by a granted glob inside the boundary", () => {
-  const d = fsScopeDecision("/repo", "/repo/src/a.rs", ["src/*.rs"])
+// opencode-2x-support phase-01.task-5: the V2 fs-scope decision. `fsScopeDecision`
+// no longer re-derives an agent's edit grants (the retired `editAllowGlobs`
+// parser): it asserts an operation's resolved path(s) through opencode 2.x's
+// permission engine (`ctx.permission.assert`, the `edit` action) and reduces the
+// outcome to `{ allowed, reason }`. It is side-effect-free — no fs, no process,
+// no db, and the `assert` is a pure in-memory stub — so it lives in the `bun
+// test` unit tier; the real-fs application path and the `findApgRoot` /
+// `mainCheckoutRoot` root resolution are the opt-in boundary e2e.
+//
+// `permission.assert` is never imported from `@opencode/plugin` here: it is a
+// structurally-typed `{ assert }` seam the tools pass through, so a stub models
+// opencode's decision (resolve = allow, reject = deny) with no live opencode 2.x.
+
+/** A faked opencode 2.x tool-executor context — the V2 shape
+ *  `{ agent, sessionID, messageID, id }` (no V1 `directory`/`worktree`). */
+function v2Context(overrides: Partial<ToolContext> = {}): ToolContext {
+  return { agent: "implementer", sessionID: "s1", messageID: "m1", id: "c1", ...overrides }
+}
+
+/** A stubbed `ctx.permission` whose single `assert` either resolves (allow) or
+ *  throws/rejects the given error (deny), capturing every args object it was
+ *  called with so a test can assert on the constructed call. */
+function stubPermission(reject?: unknown): {
+  permission: { assert: (args: unknown) => Promise<void> }
+  calls: unknown[]
+} {
+  const calls: unknown[] = []
+  const permission = {
+    assert: async (args: unknown): Promise<void> => {
+      calls.push(args)
+      if (reject !== undefined) throw reject
+    },
+  }
+  return { permission, calls }
+}
+
+/** An opencode-like stub that evaluates the WHOLE resource set of a single call
+ *  and denies when ANY resource is in `deniedPaths` — the any-deny precedence
+ *  opencode applies across a call's resources. Used to model a denied source vs
+ *  a denied destination of one `apg_mv`/`apg_cp`. */
+function scopeDenyingPaths(deniedPaths: readonly string[]): {
+  permission: { assert: (args: unknown) => Promise<void> }
+  calls: unknown[]
+} {
+  const calls: unknown[] = []
+  const permission = {
+    assert: async (args: unknown): Promise<void> => {
+      calls.push(args)
+      const { resources } = args as { resources: readonly string[] }
+      const hit = resources.find((r) => deniedPaths.includes(r))
+      if (hit !== undefined) throw new Error(`path denied: ${hit}`)
+    },
+  }
+  return { permission, calls }
+}
+
+// FAIL-CLOSED — no permission surface, or one whose `assert` is not a function.
+
+test("fsScopeDecision fail-closes when the permission surface is absent", async () => {
+  const ctx = v2Context()
+  const missing = await fsScopeDecision(undefined, ctx, ["/repo/src/a.rs"])
+  expect(missing.allowed).toBe(false)
+  expect(missing.reason).toContain("opencode permission surface unavailable")
+})
+
+test("fsScopeDecision fail-closes when permission.assert is undefined", async () => {
+  const noAssert = {
+    assert: undefined as unknown as (args: unknown) => Promise<void>,
+  }
+  const d = await fsScopeDecision(noAssert, v2Context(), ["/repo/src/a.rs"])
+  expect(d.allowed).toBe(false)
+  expect(d.reason).toContain("opencode permission surface unavailable")
+})
+
+// ALLOW / DENY — the assert outcome reduced to the decision.
+
+test("fsScopeDecision allows when permission.assert resolves", async () => {
+  const { permission } = stubPermission()
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"])
   expect(d.allowed).toBe(true)
-  expect(d.globMatched).toBe(true)
-  expect(d.inBoundary).toBe(true)
-  expect(d.relativePath).toBe("src/a.rs")
   expect(d.reason).toBe(null)
 })
 
-test("fsScopeDecision refuses a path outside the granted globs", () => {
-  const d = fsScopeDecision("/repo", "/repo/build/x.rs", ["src/*.rs"])
+test("fsScopeDecision refuses with the thrown error's message", async () => {
+  const { permission } = stubPermission(new Error("path is outside the granted scope"))
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"])
   expect(d.allowed).toBe(false)
-  expect(d.globMatched).toBe(false)
-  expect(d.inBoundary).toBe(true)
-  expect(d.reason).toContain("granted globs")
+  expect(d.reason).toBe("path is outside the granted scope")
 })
 
-test("fsScopeDecision refuses a ..-escaping path even when a glob would match", () => {
-  const d = fsScopeDecision("/repo", "/repo/../etc/passwd", ["**/*"])
+test("fsScopeDecision extracts reason from a rejection carrying only a reason field", async () => {
+  // A rejected permission prompt surfaces as a Tool.Error-shaped object whose
+  // refusal lives on `reason`, not `message`.
+  const { permission } = stubPermission({ reason: "denied by the user prompt" })
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"])
   expect(d.allowed).toBe(false)
-  expect(d.globMatched).toBe(false)
-  expect(d.inBoundary).toBe(false)
-  expect(d.reason).toContain("boundary")
+  expect(d.reason).toBe("denied by the user prompt")
 })
 
-test("fsScopeDecision resolves a relative candidate against projectRoot", () => {
-  const d = fsScopeDecision("/repo", "src/deep/b.rs", ["**/*.rs"])
+test("fsScopeDecision refuses a rejected promise (async deny)", async () => {
+  const permission = {
+    assert: (_args: unknown): Promise<void> => Promise.reject(new Error("async deny")),
+  }
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs"])
+  expect(d.allowed).toBe(false)
+  expect(d.reason).toBe("async deny")
+})
+
+// ASSERT-ARGS CONSTRUCTION — the call built from the V2 context.
+
+test("fsScopeDecision builds the assert args from the V2 context", async () => {
+  const ctx = v2Context({ agent: "implementer", sessionID: "s1", messageID: "m1", id: "c1" })
+  const { permission, calls } = stubPermission()
+  const resources = ["/repo/src/a.rs", "/repo/src/b.rs"]
+  await fsScopeDecision(permission, ctx, resources)
+
+  expect(calls).toHaveLength(1)
+  const args = calls[0] as Record<string, unknown>
+  expect(args.action).toBe("edit")
+  // Passed through unchanged (same array identity), not copied/rebased.
+  expect(args.resources).toBe(resources)
+  expect(args.sessionID).toBe("s1")
+  const source = args.source as Record<string, unknown>
+  expect(source.type).toBe("tool")
+  expect(source.messageID).toBe("m1")
+  expect(source.id).toBe("c1")
+  expect(args.agent).toBe("implementer")
+  expect("save" in args).toBe(false)
+})
+
+test("fsScopeDecision omits agent when the context agent is empty", async () => {
+  // An absent agent lets opencode default to the session's agent.
+  const { permission, calls } = stubPermission()
+  await fsScopeDecision(permission, v2Context({ agent: "" }), ["/repo/src/a.rs"])
+  const args = calls[0] as Record<string, unknown>
+  expect("agent" in args).toBe(false)
+})
+
+test("fsScopeDecision omits save when absent or empty and passes a non-empty save through", async () => {
+  const absent = stubPermission()
+  await fsScopeDecision(absent.permission, v2Context(), ["/repo/src/a.rs"])
+  expect("save" in (absent.calls[0] as Record<string, unknown>)).toBe(false)
+
+  const empty = stubPermission()
+  await fsScopeDecision(empty.permission, v2Context(), ["/repo/src/a.rs"], [])
+  expect("save" in (empty.calls[0] as Record<string, unknown>)).toBe(false)
+
+  const populated = stubPermission()
+  const save = ["/repo/src/**"]
+  await fsScopeDecision(populated.permission, v2Context(), ["/repo/src/a.rs"], save)
+  expect((populated.calls[0] as Record<string, unknown>).save).toBe(save)
+})
+
+// MULTI-RESOURCE (mv/cp both-paths) — BOTH paths in ONE assert call, so a denied
+// source OR a denied destination refuses the whole operation.
+
+test("fsScopeDecision asserts both mv/cp paths in one call and allows when neither is denied", async () => {
+  const { permission, calls } = scopeDenyingPaths([])
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs", "/repo/dst/b.rs"])
   expect(d.allowed).toBe(true)
-  expect(d.relativePath).toBe("src/deep/b.rs")
-})
-
-test("fsScopeDecision: `*` does not cross /, `**` does, `**/` matches zero dirs", () => {
-  expect(fsScopeDecision("/repo", "/repo/src/deep/a.rs", ["src/*.rs"]).allowed).toBe(false)
-  expect(fsScopeDecision("/repo", "/repo/src/deep/a.rs", ["src/**/*.rs"]).allowed).toBe(true)
-  expect(fsScopeDecision("/repo", "/repo/a.rs", ["**/*.rs"]).allowed).toBe(true)
-})
-
-// worktree-write-scope phase-01.task-7: the PURE main-anchored decision. When
-// the caller supplies `project` (a worktree name, or `null` from the main
-// checkout) `fsScopeDecision` resolves grants and candidate against the MAIN
-// root and structurally refuses any candidate that lands in the main checkout —
-// a root glob may match and `allowed` still stays false. Still side-effect-free
-// (no fs/git/process), so it lives in the `bun test` unit tier.
-test("fsScopeDecision (main-anchored) refuses a main-checkout path even when a root glob matches", () => {
-  const d = fsScopeDecision(
-    "/main",
-    "/main/opencode-suite/lib/apg.test.ts",
-    ["opencode-suite/lib/apg.test.ts"],
-    "proj",
-  )
-  expect(d.allowed).toBe(false)
-  expect(d.inBoundary).toBe(true)
-  // The root glob DOES match — the refusal is the worktree rule, not the glob.
-  expect(d.globMatched).toBe(true)
-  expect(d.reason).toBe("path resolves into the main checkout")
-  // A `null` project (the caller is in the main checkout) refuses the same way.
-  const fromMain = fsScopeDecision(
-    "/main",
-    "/main/src/a.rs",
-    ["src/*.rs"],
-    null,
-  )
-  expect(fromMain.globMatched).toBe(true)
-  expect(fromMain.allowed).toBe(false)
-  expect(fromMain.reason).toBe("path resolves into the main checkout")
-})
-
-test("fsScopeDecision (main-anchored) allows a worktree path under an owned apg/.worktrees/*/<glob> grant", () => {
-  const d = fsScopeDecision(
-    "/main",
-    "/main/apg/.worktrees/proj/opencode-suite/lib/apg.test.ts",
-    ["apg/.worktrees/*/opencode-suite/**/*.ts"],
-    "proj",
-  )
-  expect(d.allowed).toBe(true)
-  expect(d.inBoundary).toBe(true)
-  expect(d.globMatched).toBe(true)
   expect(d.reason).toBe(null)
-  expect(d.relativePath).toBe(
-    "apg/.worktrees/proj/opencode-suite/lib/apg.test.ts",
-  )
-  // A `null` project accepts ANY project worktree that matches a granted glob.
-  const anyWorktree = fsScopeDecision(
-    "/main",
-    "/main/apg/.worktrees/proj/opencode-suite/lib/apg.test.ts",
-    ["apg/.worktrees/*/opencode-suite/**/*.ts"],
-    null,
-  )
-  expect(anyWorktree.allowed).toBe(true)
-  expect(anyWorktree.reason).toBe(null)
-})
-
-test("fsScopeDecision (main-anchored) refuses an unowned worktree path", () => {
-  // A sibling project's worktree is not under THIS project's worktree.
-  const sibling = fsScopeDecision(
-    "/main",
-    "/main/apg/.worktrees/other/opencode-suite/lib/apg.test.ts",
-    ["apg/.worktrees/proj/opencode-suite/**"],
-    "proj",
-  )
-  expect(sibling.allowed).toBe(false)
-  expect(sibling.inBoundary).toBe(true)
-  expect(sibling.reason).toBe("path resolves into the main checkout")
-  // Inside the owned worktree but outside the granted globs: refused for the
-  // glob, not the worktree rule.
-  const unownedGlob = fsScopeDecision(
-    "/main",
-    "/main/apg/.worktrees/proj/src/a.rs",
-    ["apg/.worktrees/proj/opencode-suite/**"],
-    "proj",
-  )
-  expect(unownedGlob.allowed).toBe(false)
-  expect(unownedGlob.globMatched).toBe(false)
-  expect(unownedGlob.reason).toBe(
-    "path is not within the acting agent's granted globs",
-  )
-})
-
-test("fsScopeDecision (main-anchored) refuses a .. or absolute escape even when a glob would match", () => {
-  const absolute = fsScopeDecision("/main", "/etc/passwd", ["**/*"], "proj")
-  expect(absolute.allowed).toBe(false)
-  expect(absolute.inBoundary).toBe(false)
-  expect(absolute.reason).toBe("path escapes the project/worktree boundary")
-  const dotdot = fsScopeDecision(
-    "/main",
-    "/main/apg/.worktrees/proj/../../../../etc/passwd",
-    ["apg/.worktrees/*/**"],
-    "proj",
-  )
-  expect(dotdot.allowed).toBe(false)
-  expect(dotdot.inBoundary).toBe(false)
-  expect(dotdot.globMatched).toBe(false)
-  expect(dotdot.reason).toBe("path escapes the project/worktree boundary")
-})
-
-// worktree-write-scope phase-04.task-10: the PURE last-matching-rule semantics
-// of `fsScopeDecision` over ORDERED `{ glob, allow }` rules (BOTH allow and
-// deny, in FILE ORDER). Still side-effect-free (no fs/git/process/db), so these
-// stay in the `bun test` unit tier. A bare string entry is the legacy ALLOW
-// rule, so the older cases above keep working.
-test("fsScopeDecision: a later deny overrides an earlier broad allow", () => {
-  // `**/*` grants everything; the later `secret/**` deny revokes that subtree.
-  // A path matching BOTH rules is refused because the LAST matching rule is the
-  // deny — the broad allow must not win just by appearing.
-  const rules = [
-    { glob: "**/*", allow: true },
-    { glob: "secret/**", allow: false },
-  ]
-  const denied = fsScopeDecision("/repo", "/repo/secret/x.rs", rules)
-  expect(denied.allowed).toBe(false)
-  expect(denied.globMatched).toBe(true)
-  expect(denied.reason).toBe("path is not within the acting agent's granted globs")
-  // A path the deny does not match stays granted by the earlier allow.
-  const granted = fsScopeDecision("/repo", "/repo/src/a.rs", rules)
-  expect(granted.allowed).toBe(true)
-  expect(granted.globMatched).toBe(true)
-  expect(granted.reason).toBe(null)
-})
-
-test("fsScopeDecision: a deny followed by a later allow is allowed (last match wins)", () => {
-  // The bug this pins: a naive "deny-anywhere-wins" implementation refuses
-  // `src/a.rs` because SOME deny rule matched. The deny is EARLIER than the
-  // allow, so the LAST matching rule (the allow) must win.
-  const rules = [
-    { glob: "**/*", allow: false },
-    { glob: "src/**/*.rs", allow: true },
-  ]
-  const d = fsScopeDecision("/repo", "/repo/src/a.rs", rules)
-  expect(d.allowed).toBe(true)
-  expect(d.globMatched).toBe(true)
-  expect(d.inBoundary).toBe(true)
-  expect(d.reason).toBe(null)
-})
-
-test("fsScopeDecision: a path matched by no rule is refused (deny-by-default)", () => {
-  // An empty scope refuses everything.
-  const empty = fsScopeDecision("/repo", "/repo/src/a.rs", [])
-  expect(empty.allowed).toBe(false)
-  expect(empty.globMatched).toBe(false)
-  expect(empty.reason).toBe("path is not within the acting agent's granted globs")
-  // A non-empty scope still refuses a path no rule mentions.
-  const rules = [
-    { glob: "**/*.rs", allow: true },
-    { glob: "build/**", allow: false },
-  ]
-  const unmatched = fsScopeDecision("/repo", "/repo/docs/readme.md", rules)
-  expect(unmatched.allowed).toBe(false)
-  expect(unmatched.globMatched).toBe(false)
-  expect(unmatched.reason).toBe("path is not within the acting agent's granted globs")
-})
-
-// The parser half: `editAllowGlobs` must keep BOTH allow and deny entries in
-// FILE ORDER — the ordered `{ glob, allow }` list's order and membership, not an
-// allow-only projection and not a reordered (allow-then-deny) group.
-test("editAllowGlobs keeps both allow and deny entries in file order", () => {
-  const body = [
-    "permission:",
-    "  edit:",
-    '    "src/**": allow',
-    '    "src/secret/**": deny',
-    '    "src/public/**": allow',
-  ].join("\n")
-  expect(editAllowGlobs(body)).toEqual([
-    { glob: "src/**", allow: true },
-    { glob: "src/secret/**", allow: false },
-    { glob: "src/public/**", allow: true },
+  expect(calls).toHaveLength(1)
+  expect((calls[0] as Record<string, unknown>).resources).toEqual([
+    "/repo/src/a.rs",
+    "/repo/dst/b.rs",
   ])
 })
 
-// A deny that appears FIRST must not be hoisted or dropped: order is precedence,
-// so the parser preserves it verbatim (and duplicates are kept, not deduped).
-test("editAllowGlobs preserves a leading deny and duplicate entries verbatim", () => {
-  const body = [
-    "permission:",
-    "  edit:",
-    '    "**/*": deny',
-    '    "src/**": allow',
-    '    "src/**": allow',
-  ].join("\n")
-  expect(editAllowGlobs(body)).toEqual([
-    { glob: "**/*", allow: false },
-    { glob: "src/**", allow: true },
-    { glob: "src/**", allow: true },
+test("fsScopeDecision refuses when a mv/cp SOURCE is denied", async () => {
+  const { permission, calls } = scopeDenyingPaths(["/repo/src/a.rs"])
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs", "/repo/dst/b.rs"])
+  expect(d.allowed).toBe(false)
+  expect(d.reason).toBe("path denied: /repo/src/a.rs")
+  // Both paths still reached the single call — the deny is opencode's across the set.
+  expect((calls[0] as Record<string, unknown>).resources).toEqual([
+    "/repo/src/a.rs",
+    "/repo/dst/b.rs",
   ])
 })
 
-
+test("fsScopeDecision refuses when a mv/cp DESTINATION is denied", async () => {
+  const { permission, calls } = scopeDenyingPaths(["/repo/dst/b.rs"])
+  const d = await fsScopeDecision(permission, v2Context(), ["/repo/src/a.rs", "/repo/dst/b.rs"])
+  expect(d.allowed).toBe(false)
+  expect(d.reason).toBe("path denied: /repo/dst/b.rs")
+  expect((calls[0] as Record<string, unknown>).resources).toEqual([
+    "/repo/src/a.rs",
+    "/repo/dst/b.rs",
+  ])
+})
