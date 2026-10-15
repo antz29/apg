@@ -2433,6 +2433,7 @@ mod e2e {
             "apg init",
             "major.minor",
             "apg-upgrade.md",
+            "~/.config/opencode/lib/apg-upgrade.md",
             "implementation-phase-reviewer",
         ] {
             assert!(
