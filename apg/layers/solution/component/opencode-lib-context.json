@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "opencode-lib-context",
-  "body": "The shared plumbing's opencode 2.x context adaptation: `opencode-suite/lib/apg.ts` sources the plugin's load location from the plugin context (`ctx.location.directory`, `ctx.location.project`) and keeps the tool's own optional `directory` argument authoritative for the project-root walk-up (`ts.apg-opencode-suite.lib.apg.findApgRoot`) and the stored-identity rebasing (`requirements.requirement.absolute-paths-at-tool-boundary`). The pure `ts.apg-opencode-suite.lib.apg.fsScopeDecision` decision resolves a path's boundary in one frame, pinned by the plugin-free unit test. The acting agent's identity and its effective `edit` scope come from the opencode 2.x tool executor context and its permission surface — the mechanism `requirements.constraint.agent-fs-per-path-permission` states — and an unresolvable acting agent refuses every path.\n\nimplemented-by: `opencode-suite/lib/apg.ts`, `ts.apg-opencode-suite.lib.apg.ToolContext`, `ts.apg-opencode-suite.lib.apg.readAgentEditGlobs`, `opencode-suite/lib/apg.test.ts`.",
+  "body": "The shared plumbing's opencode 2.x context adaptation: `opencode-suite/lib/apg.ts` sources the plugin's load location from the plugin context (`ctx.location.directory`, `ctx.location.project`) and keeps the tool's own optional `directory` argument authoritative for the project-root walk-up (`ts.apg-opencode-suite.lib.apg.findApgRoot`) and the stored-identity rebasing (`requirements.requirement.absolute-paths-at-tool-boundary`). The pure `ts.apg-opencode-suite.lib.apg.fsScopeDecision` decision resolves a path's boundary in one frame, pinned by the plugin-free unit test.\n\nThe `ts.apg-opencode-suite.lib.apg.ToolContext` interface models the opencode 2.x tool executor context — the caller-identity fields `agent` (the acting agent's ID), `sessionID`, `messageID`, and `id`, plus `progress` and `signal`. The acting agent's identity and its effective `edit` scope come from that executor context and opencode 2.x's permission surface through `ctx.permission.assert` with the `edit` action — the mechanism `requirements.constraint.agent-fs-per-path-permission` states — and an unresolvable acting agent refuses every path.\n\nimplemented-by: `opencode-suite/lib/apg.ts`, `ts.apg-opencode-suite.lib.apg.ToolContext`, `opencode-suite/lib/apg.test.ts`.",
   "properties": {},
   "out": [
     {
@@ -18,11 +18,6 @@
     {
       "kind": "implemented-by",
       "target": "ts.apg-opencode-suite.lib.apg.ToolContext",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "ts.apg-opencode-suite.lib.apg.readAgentEditGlobs",
       "properties": {}
     }
   ],
