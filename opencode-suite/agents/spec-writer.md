@@ -2,55 +2,133 @@
 description: Writes a graph-native spec as durable node files: authors the 4-tier taxonomy (tier 1 Stakeholder/User/Requirement, tier 2 Group/Entity/Value/Service + constraints, tier 3 System/Container/Component/Person) and the spine edges through the apg_node/apg_edge tools (no file writes). Use when the user wants to turn an idea or feature request into a spec, materialize a proposed graph structure, or reconcile a spec to an implementation.
 mode: subagent
 hidden: true
-permission:
-  "*": deny
-  read:
-    "*": allow
-    "apg/.trans/**": deny
-    "apg/layers/**": deny
-    "apg/.worktrees/*/apg/.trans/**": deny
-    "apg/.worktrees/*/apg/layers/**": deny
-  edit:
-    "*": deny
-  glob:
-    "*": allow
-    "apg/.trans/**": deny
-    "apg/layers/**": deny
-    "apg/.worktrees/*/apg/.trans/**": deny
-    "apg/.worktrees/*/apg/layers/**": deny
-  grep:
-    "*": allow
-    "apg/.trans/**": deny
-    "apg/layers/**": deny
-    "apg/.worktrees/*/apg/.trans/**": deny
-    "apg/.worktrees/*/apg/layers/**": deny
-  external_directory:
-    "*": deny
-    "/tmp/**": allow
-  apg_query: allow
-  apg_find_symbol: allow
-  apg_modules: allow
-  apg_module_files: allow
-  apg_module_structs: allow
-  apg_file_units: allow
-  apg_file_path: allow
-  apg_methods: allow
-  apg_struct: allow
-  apg_callers: allow
-  apg_callees: allow
-  apg_uses: allow
-  apg_unresolved: allow
-  apg_hunk: allow
-  apg_node: allow
-  apg_edge: allow
-  apg_session: allow
-  apg_review: allow
-  apg_spec_lint: allow
-  bash:
-    "*": deny
-    "ls *": allow
-    "pwd": allow
-    "cd *": allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: read
+    resource: "apg/.trans/**"
+    effect: deny
+  - action: read
+    resource: "apg/layers/**"
+    effect: deny
+  - action: read
+    resource: "apg/.worktrees/*/apg/.trans/**"
+    effect: deny
+  - action: read
+    resource: "apg/.worktrees/*/apg/layers/**"
+    effect: deny
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "apg/.trans/**"
+    effect: deny
+  - action: glob
+    resource: "apg/layers/**"
+    effect: deny
+  - action: glob
+    resource: "apg/.worktrees/*/apg/.trans/**"
+    effect: deny
+  - action: glob
+    resource: "apg/.worktrees/*/apg/layers/**"
+    effect: deny
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "apg/.trans/**"
+    effect: deny
+  - action: grep
+    resource: "apg/layers/**"
+    effect: deny
+  - action: grep
+    resource: "apg/.worktrees/*/apg/.trans/**"
+    effect: deny
+  - action: grep
+    resource: "apg/.worktrees/*/apg/layers/**"
+    effect: deny
+  - action: external_directory
+    resource: "*"
+    effect: deny
+  - action: external_directory
+    resource: "/tmp/**"
+    effect: allow
+  - action: apg_query
+    resource: "*"
+    effect: allow
+  - action: apg_find_symbol
+    resource: "*"
+    effect: allow
+  - action: apg_modules
+    resource: "*"
+    effect: allow
+  - action: apg_module_files
+    resource: "*"
+    effect: allow
+  - action: apg_module_structs
+    resource: "*"
+    effect: allow
+  - action: apg_file_units
+    resource: "*"
+    effect: allow
+  - action: apg_file_path
+    resource: "*"
+    effect: allow
+  - action: apg_methods
+    resource: "*"
+    effect: allow
+  - action: apg_struct
+    resource: "*"
+    effect: allow
+  - action: apg_callers
+    resource: "*"
+    effect: allow
+  - action: apg_callees
+    resource: "*"
+    effect: allow
+  - action: apg_uses
+    resource: "*"
+    effect: allow
+  - action: apg_unresolved
+    resource: "*"
+    effect: allow
+  - action: apg_hunk
+    resource: "*"
+    effect: allow
+  - action: apg_node
+    resource: "*"
+    effect: allow
+  - action: apg_edge
+    resource: "*"
+    effect: allow
+  - action: apg_session
+    resource: "*"
+    effect: allow
+  - action: apg_review
+    resource: "*"
+    effect: allow
+  - action: apg_spec_lint
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "ls *"
+    effect: allow
+  - action: shell
+    resource: "pwd"
+    effect: allow
+  - action: shell
+    resource: "cd *"
+    effect: allow
 ---
 
 You are a spec-writing subagent. You turn a project idea or feature request into a
