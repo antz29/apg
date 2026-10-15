@@ -2,55 +2,133 @@
 description: Reviews a graph-native spec (the durable authored nodes): attaches/resolves/rejects Feedback on spec nodes through the apg_review tools (no authoring, no file writes). Reviews the 4-tier spec (Requirements, Domain, Solution, spine) against the code graph. Use when a spec needs review feedback.
 mode: subagent
 hidden: true
-permission:
-  "*": deny
-  read:
-    "*": allow
-    "apg/.trans/**": deny
-    "apg/layers/**": deny
-    "apg/.worktrees/*/apg/.trans/**": deny
-    "apg/.worktrees/*/apg/layers/**": deny
-  edit:
-    "*": deny
-  glob:
-    "*": allow
-    "apg/.trans/**": deny
-    "apg/layers/**": deny
-    "apg/.worktrees/*/apg/.trans/**": deny
-    "apg/.worktrees/*/apg/layers/**": deny
-  grep:
-    "*": allow
-    "apg/.trans/**": deny
-    "apg/layers/**": deny
-    "apg/.worktrees/*/apg/.trans/**": deny
-    "apg/.worktrees/*/apg/layers/**": deny
-  external_directory:
-    "*": deny
-    "/tmp/**": allow
-  apg_query: allow
-  apg_find_symbol: allow
-  apg_modules: allow
-  apg_module_files: allow
-  apg_module_structs: allow
-  apg_file_units: allow
-  apg_file_path: allow
-  apg_methods: allow
-  apg_struct: allow
-  apg_callers: allow
-  apg_callees: allow
-  apg_uses: allow
-  apg_unresolved: allow
-  apg_hunk: allow
-  apg_review: allow
-  apg_spec_lint: allow
-  apg_review_add: allow
-  apg_review_resolve: allow
-  apg_review_reject: allow
-  bash:
-    "*": deny
-    "ls *": allow
-    "pwd": allow
-    "cd *": allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: read
+    resource: "apg/.trans/**"
+    effect: deny
+  - action: read
+    resource: "apg/layers/**"
+    effect: deny
+  - action: read
+    resource: "apg/.worktrees/*/apg/.trans/**"
+    effect: deny
+  - action: read
+    resource: "apg/.worktrees/*/apg/layers/**"
+    effect: deny
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "apg/.trans/**"
+    effect: deny
+  - action: glob
+    resource: "apg/layers/**"
+    effect: deny
+  - action: glob
+    resource: "apg/.worktrees/*/apg/.trans/**"
+    effect: deny
+  - action: glob
+    resource: "apg/.worktrees/*/apg/layers/**"
+    effect: deny
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "apg/.trans/**"
+    effect: deny
+  - action: grep
+    resource: "apg/layers/**"
+    effect: deny
+  - action: grep
+    resource: "apg/.worktrees/*/apg/.trans/**"
+    effect: deny
+  - action: grep
+    resource: "apg/.worktrees/*/apg/layers/**"
+    effect: deny
+  - action: external_directory
+    resource: "*"
+    effect: deny
+  - action: external_directory
+    resource: "/tmp/**"
+    effect: allow
+  - action: apg_query
+    resource: "*"
+    effect: allow
+  - action: apg_find_symbol
+    resource: "*"
+    effect: allow
+  - action: apg_modules
+    resource: "*"
+    effect: allow
+  - action: apg_module_files
+    resource: "*"
+    effect: allow
+  - action: apg_module_structs
+    resource: "*"
+    effect: allow
+  - action: apg_file_units
+    resource: "*"
+    effect: allow
+  - action: apg_file_path
+    resource: "*"
+    effect: allow
+  - action: apg_methods
+    resource: "*"
+    effect: allow
+  - action: apg_struct
+    resource: "*"
+    effect: allow
+  - action: apg_callers
+    resource: "*"
+    effect: allow
+  - action: apg_callees
+    resource: "*"
+    effect: allow
+  - action: apg_uses
+    resource: "*"
+    effect: allow
+  - action: apg_unresolved
+    resource: "*"
+    effect: allow
+  - action: apg_hunk
+    resource: "*"
+    effect: allow
+  - action: apg_review
+    resource: "*"
+    effect: allow
+  - action: apg_spec_lint
+    resource: "*"
+    effect: allow
+  - action: apg_review_add
+    resource: "*"
+    effect: allow
+  - action: apg_review_resolve
+    resource: "*"
+    effect: allow
+  - action: apg_review_reject
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "ls *"
+    effect: allow
+  - action: shell
+    resource: "pwd"
+    effect: allow
+  - action: shell
+    resource: "cd *"
+    effect: allow
 ---
 
 You are a spec-reviewing subagent. You review a **graph-native spec** — the
