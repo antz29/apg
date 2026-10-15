@@ -44,12 +44,12 @@ export interface ToolContext {
   /** The plugin instance's load location, captured from `ctx.location` at
    *  `setup` — the V2 source of the project root (`ctx.location.directory` /
    *  `ctx.location.project`), replacing the V1 `directory`/`worktree`. */
-  location?: { directory?: string; project?: { id: string; directory?: string } }
+  location?: { directory?: string; project?: { id: string; directory?: string; canonical?: string } }
   /**
    * V1 load-location members (`@opencode-ai/plugin`'s tool context), kept
-   * OPTIONAL only so the not-yet-ported readers — `findApgRoot`,
-   * `mainCheckoutRoot`, `agentFsGlobs` — keep compiling until phase-01 tasks
-   * 2/4/6 source the root from `location` instead.
+   * OPTIONAL only so the not-yet-ported reader `agentFsGlobs` keeps compiling
+   * until phase-01 task 4 sources the root from `location` instead. The ported
+   * readers (`findApgRoot`, `mainCheckoutRoot`) source the root from `location`.
    */
   directory?: string
   worktree?: string
@@ -79,19 +79,12 @@ export function apgBinary(): string {
  *  project the session merely happens to have cwd in. The load-location/cwd
  *  dirs are fallbacks only when no `directory` is given. */
 export function findApgRoot(context: ToolContext, directory?: string): string | null {
-  // Read the V2 load location's project `canonical` path, which the shared
-  // `ToolContext` type does not name yet — widen it locally so the shared type
-  // stays untouched (`directory`/`worktree` remain for the not-yet-ported
-  // readers `mainCheckoutRoot`/`agentFsGlobs`).
-  const location = context.location as
-    | { directory?: string; project?: { id: string; directory?: string; canonical?: string } }
-    | undefined
   const starts = directory
     ? [directory]
     : [
-        location?.directory,
-        location?.project?.directory,
-        location?.project?.canonical,
+        context.location?.directory,
+        context.location?.project?.directory,
+        context.location?.project?.canonical,
         process.cwd(),
       ]
   for (const s of starts) {
@@ -119,6 +112,14 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
  * `project` is the linked worktree's name `<project>`, or `null` when the
  * caller is in the main checkout itself.
  *
+ * The START directory comes from the plugin instance's V2 load location
+ * (`context.location`, captured from `ctx.location` at `setup`):
+ * `location.directory`, then `location.project.directory`, then
+ * `location.project.canonical` when present, then `process.cwd()`. The V1
+ * `context.directory`/`context.worktree` fields are never read. An explicit
+ * `directory` arg (the tools' optional project dir) is AUTHORITATIVE: when
+ * given, the start is that path and only that path.
+ *
  * Resolution is canonical-first and path-first: the caller's directory is made
  * absolute and symlink-resolved, then the documented
  * `<main>/apg/.worktrees/<project>` layout (`apg project start`'s worktree
@@ -136,7 +137,14 @@ export async function mainCheckoutRoot(
   context: ToolContext,
   directory?: string,
 ): Promise<{ root: string; project: string | null } | null> {
-  const starts = directory ? [directory] : [context.directory, process.cwd(), context.worktree]
+  const starts = directory
+    ? [directory]
+    : [
+        context.location?.directory,
+        context.location?.project?.directory,
+        context.location?.project?.canonical,
+        process.cwd(),
+      ]
   for (const s of starts) {
     if (!s) continue
     // Canonicalise so relative/trailing-slash/symlinked spellings of the same
