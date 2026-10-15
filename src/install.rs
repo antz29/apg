@@ -335,14 +335,15 @@ const DEFAULT_CONFIG_JSON: &str = r#"{
 }
 "#;
 
-/// The user-level opencode config dir: `~/.opencode`. `apg init` installs the
-/// tool suite here (not into the project dir) so it's available to every
-/// project's opencode session; tool discovery is project-root based, so the
-/// global install works across all projects.
+/// The user-level opencode config dir: `~/.config/opencode` — the opencode 2.x
+/// global config dir. `apg init` installs the tool suite here (not into the
+/// project dir) so it's available to every project's opencode session; tool
+/// discovery is project-root based, so the global install works across all
+/// projects. `apg init` neither reads nor writes the V1 `~/.opencode/` root.
 fn user_opencode_dir() -> anyhow::Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
-        .map(|h| h.join(".opencode"))
+        .map(|h| h.join(".config").join("opencode"))
         .ok_or_else(|| anyhow::anyhow!("could not determine home directory (set $HOME)"))
 }
 
