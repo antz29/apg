@@ -514,7 +514,7 @@ pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
 /// `apg init [dir]`: create the committed `apg/` layout (config.json carrying
 /// the binary-managed layout `version` + `.trans/` + the project-worktrees
 /// dir), install (or update) the opencode apg tool suite + the seven
-/// distributed agents + the upgrade guide into `~/.opencode/`, scaffold the
+/// distributed agents + the upgrade guide into `~/.config/opencode/`, scaffold the
 /// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
 /// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`
 /// files that duplicate the installed suite (never deletes anything).
@@ -555,18 +555,18 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
 
     if !opencode_dir
         .join("node_modules")
-        .join("@opencode-ai")
+        .join("@opencode")
         .join("plugin")
         .exists()
     {
-        let status = Command::new("npm")
+        let status = Command::new("bun")
             .arg("install")
             .current_dir(&opencode_dir)
             .status();
         match status {
             Ok(s) if s.success() => {}
             _ => eprintln!(
-                "warning: could not npm install in {}; run `npm install` there for the plugin import to resolve.",
+                "warning: could not bun install in {}; run `bun install` there for the plugin import to resolve.",
                 opencode_dir.display()
             ),
         }
