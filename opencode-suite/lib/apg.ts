@@ -6,10 +6,19 @@
 // template. This module owns the project-root discovery, the subprocess call,
 // and Cypher string-literal escaping (so structured args can never break out
 // of or inject into a query).
+//
+// The suite targets opencode 2.x's plugin model: a tool is registered through
+// `Plugin.define({ id, setup(ctx) })`, whose `setup` context supplies the
+// plugin load location (`ctx.location`) and the permission engine
+// (`ctx.permission`); a registered tool's `execute(input, context)` receives
+// the executor context carrying the caller identity (`agent`, `sessionID`,
+// `messageID`, `id`) plus `progress`/`signal`. The plumbing reads ONLY those V2
+// sources: the project root resolves from `ctx.location` (never a V1 load-path
+// field), and fs scope is asserted through `ctx.permission.assert` (never by
+// re-deriving an agent's edit grants here).
 
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync } from "node:fs"
 import net from "node:net"
-import { homedir } from "node:os"
 import path from "node:path"
 
 /**
@@ -42,17 +51,9 @@ export interface ToolContext {
   /** Aborts cancellable work (the context's `signal`). */
   signal?: AbortSignal
   /** The plugin instance's load location, captured from `ctx.location` at
-   *  `setup` — the V2 source of the project root (`ctx.location.directory` /
-   *  `ctx.location.project`), replacing the V1 `directory`/`worktree`. */
+   *  `setup` — the source of the project root (`ctx.location.directory` /
+   *  `ctx.location.project`). */
   location?: { directory?: string; project?: { id: string; directory?: string; canonical?: string } }
-  /**
-   * V1 load-location members (`@opencode-ai/plugin`'s tool context), kept
-   * OPTIONAL only so the not-yet-ported reader `agentFsGlobs` keeps compiling
-   * until phase-01 task 4 sources the root from `location` instead. The ported
-   * readers (`findApgRoot`, `mainCheckoutRoot`) source the root from `location`.
-   */
-  directory?: string
-  worktree?: string
 }
 
 /** The apg binary to spawn: APG_BINARY env override, default "apg" on PATH. */
@@ -68,8 +69,8 @@ export function apgBinary(): string {
  *  The walk-up START comes from the plugin instance's V2 load location
  *  (`context.location`, captured from `ctx.location` at `setup`):
  *  `location.directory`, then `location.project.directory`, then
- *  `location.project.canonical` when present, then `process.cwd()`. The V1
- *  `context.directory`/`context.worktree` fields are never read.
+ *  `location.project.canonical` when present, then `process.cwd()` — the only
+ *  context source read.
  *
  *  `directory` (the tools' optional arg) is the caller's project directory and
  *  is AUTHORITATIVE: when given, the walk-up starts there and only there, so
@@ -115,10 +116,10 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
  * The START directory comes from the plugin instance's V2 load location
  * (`context.location`, captured from `ctx.location` at `setup`):
  * `location.directory`, then `location.project.directory`, then
- * `location.project.canonical` when present, then `process.cwd()`. The V1
- * `context.directory`/`context.worktree` fields are never read. An explicit
- * `directory` arg (the tools' optional project dir) is AUTHORITATIVE: when
- * given, the start is that path and only that path.
+ * `location.project.canonical` when present, then `process.cwd()` — the only
+ * context source read. An explicit `directory` arg (the tools' optional
+ * project dir) is AUTHORITATIVE: when given, the start is that path and only
+ * that path.
  *
  * Resolution is canonical-first and path-first: the caller's directory is made
  * absolute and symlink-resolved, then the documented
@@ -245,7 +246,8 @@ export function resolveProjectPath(projectDir: string, value: string): string {
 // owns. The opencode tool-level grant is just the callability gate; the real
 // per-path boundary is asserted through opencode 2.x's OWN permission engine —
 // `ctx.permission.assert(...)` with the `edit` action and the resolved target
-// path(s) as `resources` — rather than by parsing agent frontmatter here.
+// path(s) as `resources` — rather than by re-deriving the agent's edit grants
+// here.
 // `fsScopeDecision` is the thin, fail-closed wrapper over that assert: it
 // passes ALL of an operation's paths in ONE call, so opencode's
 // any-deny/else-any-ask/else-allow resolution across the resource set decides
