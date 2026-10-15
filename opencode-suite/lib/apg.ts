@@ -12,16 +12,47 @@ import net from "node:net"
 import { homedir } from "node:os"
 import path from "node:path"
 
+/**
+ * The context the suite's shared plumbing reads, assembled by each tool from
+ * two opencode 2.x sources before it calls into the lib:
+ *
+ *  - the V2 **tool-executor context** — the second argument to a registered
+ *    tool's `execute(input, context)` — which carries the caller identity
+ *    `agent` (the acting agent's ID), `sessionID`, `messageID`, and `id`, plus
+ *    `progress` and `signal`; and
+ *  - the plugin instance's **load location**, captured from the plugin context
+ *    (`ctx.location`) at `setup` and merged with the executor context — the
+ *    `directory` the plugin loaded in and its `project`.
+ *
+ * Typed structurally here so this module never imports `@opencode/plugin` at
+ * runtime: the tools pass the real fields and the plugin-free unit/e2e tiers
+ * supply a faked context.
+ */
 export interface ToolContext {
-  directory: string
-  worktree: string
+  /** The acting agent's ID (the tool-executor context's `agent`). */
+  agent: string
+  /** The session ID (the tool-executor context's `sessionID`). */
+  sessionID: string
+  /** The tool-call message ID (the tool-executor context's `messageID`). */
+  messageID: string
+  /** The tool call's ID (the tool-executor context's `id`). */
+  id: string
+  /** Reports progress for a long-running tool call (the context's `progress`). */
+  progress?: (status: unknown) => void | Promise<void>
+  /** Aborts cancellable work (the context's `signal`). */
+  signal?: AbortSignal
+  /** The plugin instance's load location, captured from `ctx.location` at
+   *  `setup` — the V2 source of the project root (`ctx.location.directory` /
+   *  `ctx.location.project`), replacing the V1 `directory`/`worktree`. */
+  location?: { directory?: string; project?: { id: string; directory?: string } }
   /**
-   * The acting agent's NAME, as carried on opencode's v1 tool context
-   * (`@opencode-ai/plugin` `ToolContext.agent`). Typed structurally here so
-   * this module never imports the plugin at runtime — the tools receive the
-   * real field, the plugin-free unit/e2e tiers simply omit it.
+   * V1 load-location members (`@opencode-ai/plugin`'s tool context), kept
+   * OPTIONAL only so the not-yet-ported readers — `findApgRoot`,
+   * `mainCheckoutRoot`, `agentFsGlobs` — keep compiling until phase-01 tasks
+   * 2/4/6 source the root from `location` instead.
    */
-  agent?: string
+  directory?: string
+  worktree?: string
 }
 
 /** The apg binary to spawn: APG_BINARY env override, default "apg" on PATH. */
