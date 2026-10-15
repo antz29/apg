@@ -2154,14 +2154,14 @@ mod e2e {
 
     /// The navigator's permission grants and dispatch/isolation protocol are
     /// embedded in the shipped prose: the navigator holds the
-    /// `apg_review_action` grant and the user-gated `apg_scan: ask` grant (no
-    /// agent grants `apg_scan: allow`, and the removed in-prompt scan-consent
-    /// ritual must stay absent while the stale-graph refresh intent remains),
-    /// and carries the dispatch protocol (dispatch one open item to its owning
-    /// writer → receive the single ACTIONED/WONT-FIX claim → shallow
-    /// claim-vs-change check → action or re-dispatch); the two reviewer prompts
-    /// and the `apg_review_action` tool point the action step at the
-    /// coordinator, never the writer.
+    /// `apg_review_action` grant and the user-gated `ask`-effect `apg_scan`
+    /// grant (no agent grants `apg_scan` `allow`, and the removed in-prompt
+    /// scan-consent ritual must stay absent while the stale-graph refresh
+    /// intent remains), and carries the dispatch protocol (dispatch one open
+    /// item to its owning writer → receive the single ACTIONED/WONT-FIX claim
+    /// → shallow claim-vs-change check → action or re-dispatch); the two
+    /// reviewer prompts and the `apg_review_action` tool point the action step
+    /// at the coordinator, never the writer.
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn coordinator_agent_carries_review_action_and_dispatch_prose() {
@@ -2173,12 +2173,27 @@ mod e2e {
                 .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
         }
 
+        // The V2 `permissions:` frontmatter is an ORDERED array: each grant is a
+        // three-line list entry (`- action: <tool>`, `resource: <glob>`,
+        // `effect: <effect>`). Return the effect granted to `action` in
+        // `content` — the entry's own `effect:` value. The V1 scalar form
+        // (`apg_review_action: allow`) no longer exists, so the action and its
+        // effect must be read from the same ordered entry.
+        fn granted_effect<'a>(content: &'a str, action: &str) -> Option<&'a str> {
+            let marker = format!("- action: {action}\n");
+            let start = content.find(&marker)? + marker.len();
+            let entry = &content[start..];
+            let at = entry.find("effect: ")? + "effect: ".len();
+            entry[at..].split_whitespace().next()
+        }
+
         // The navigator is the coordinator: it gains the action grant in its
         // permission frontmatter and the dispatch-protocol prose.
         let navigator = agent("codebase-navigator.md");
-        assert!(
-            navigator.contains("apg_review_action: allow"),
-            "the navigator prompt must hold the apg_review_action grant"
+        assert_eq!(
+            granted_effect(navigator, "apg_review_action"),
+            Some("allow"),
+            "the navigator prompt must grant `action: apg_review_action` with `effect: allow`"
         );
         for needle in [
             "coordinator",
@@ -2201,16 +2216,19 @@ mod e2e {
         // the old in-prompt consent ritual was removed. The stale-graph intent
         // is retained — an out-of-date graph is refreshed by running
         // `apg_scan`, whose now-`ask` permission is the user-facing gate.
-        assert!(
-            navigator.contains("apg_scan: ask"),
-            "the navigator prompt must grant `apg_scan: ask` so a scan is user-gated"
+        assert_eq!(
+            granted_effect(navigator, "apg_scan"),
+            Some("ask"),
+            "the navigator prompt must grant `action: apg_scan` with `effect: ask` so a scan is user-gated"
         );
-        // The grant moved to `ask`; no agent in the embedded set may still
-        // claim `apg_scan: allow` (that would silently lift the user gate).
+        // The grant moved to `ask`; no agent in the embedded set may grant
+        // `action: apg_scan` with `effect: allow` (that would silently lift the
+        // user gate).
         for (name, content) in AGENTS {
-            assert!(
-                !content.contains("apg_scan: allow"),
-                "{name} must not grant `apg_scan: allow` — the scan grant is `ask`"
+            assert_ne!(
+                granted_effect(content, "apg_scan"),
+                Some("allow"),
+                "{name} must not grant `action: apg_scan` with `effect: allow` — the scan grant is `ask`"
             );
         }
         // The removed consent ritual: the permission now lives in the
@@ -2245,10 +2263,10 @@ mod e2e {
         // of the source, so a needle crossing a `**` boundary mid-phrase would
         // never match).
         for needle in [
-            // (1) fresh, isolated session; no `task_id`; one dispatch = one
+            // (1) fresh, isolated session; no `subagent_id`; one dispatch = one
             // self-contained unit of work; a new task is always a new dispatch.
             "**Session isolation (the law)**",
-            "isolated subagent session — no `task_id`",
+            "isolated subagent session — no `subagent_id`",
             "self-contained unit of work",
             "starting a new task is always a new",
             "never a resume",
