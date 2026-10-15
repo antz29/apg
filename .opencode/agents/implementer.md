@@ -133,6 +133,11 @@ permission:
     "cargo test-int *": allow
     "cargo test-e2e": allow
     "cargo test-e2e *": allow
+    "bun --version": allow
+    "bun add *": allow
+    "bun install": allow
+    "bun install *": allow
+    "bun remove *": allow
     "bun test": allow
     "bun test *": allow
     "node --test": allow
