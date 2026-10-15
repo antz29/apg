@@ -12,11 +12,12 @@ use std::process::Command;
 
 use crate::{git, specs, version_gate};
 
-/// The opencode tool suite that `apg init` installs into `~/.opencode/`. Each
-/// entry is a file under `tools/` (auto-discovered by opencode from
-/// `~/.opencode/tools/*.ts`), single-sourced from this repo's `opencode-suite/`.
-/// The files shell out to `apg query` / `apg scan` (on PATH) from the project
-/// root; see `opencode-suite/lib/apg.ts` for the shared plumbing.
+/// The opencode tool suite that `apg init` installs into `~/.config/opencode/`.
+/// Each entry is a file under `plugins/` (opencode 2.x plugin discovery under
+/// `~/.config/opencode/plugins/`), single-sourced from this repo's
+/// `opencode-suite/`. The files shell out to `apg query` / `apg scan` (on PATH)
+/// from the project root; see `opencode-suite/lib/apg.ts` for the shared
+/// plumbing.
 pub const SUITE_TOOLS: &[(&str, &str)] = &[
     (
         "apg_query.ts",
@@ -180,12 +181,13 @@ pub const SUITE_TOOLS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Shared helper module used by the suite tools (`lib/apg.ts`), installed by
-/// `apg init` alongside the tools.
+/// Shared helper module used by the suite plugins (`lib/apg.ts`), installed by
+/// `apg init` under `~/.config/opencode/lib/` beside the plugins (outside
+/// opencode's plugin discovery).
 pub const APG_LIB: &str = include_str!("../opencode-suite/lib/apg.ts");
 
 /// The layout-upgrade guide that `apg init` installs into
-/// `~/.opencode/lib/apg-upgrade.md` next to the shared lib: version-field
+/// `~/.config/opencode/lib/apg-upgrade.md` next to the shared lib: version-field
 /// meaning, mismatch detection, upgrade steps (re-run init → re-scan),
 /// common-issue fixes. The R10 version gate's block text points at it.
 ///
@@ -194,7 +196,7 @@ pub const APG_LIB: &str = include_str!("../opencode-suite/lib/apg.ts");
 /// it like `APG_LIB` above.
 pub const APG_UPGRADE_DOC: &str = r#"# apg layout upgrades — the `apg/config.json` version field
 
-This guide is installed by `apg init` at `~/.opencode/lib/apg-upgrade.md`;
+This guide is installed by `apg init` at `~/.config/opencode/lib/apg-upgrade.md`;
 the version gate's block text points here.
 
 ## What the `version` field is
@@ -241,7 +243,7 @@ a repo never created by `apg init` has no versioned layout at all.
    duplicate-install warning. That warning is correct — `apg init` never
    deletes anything — so **manually remove** the local
    `.opencode/agents/implementation-phase-reviewer.md` (the installed copy in
-   `~/.opencode/agents/` now shadows it), then re-run `apg init`.
+   `~/.config/opencode/agents/` now shadows it), then re-run `apg init`.
 
 ## Common issues
 
@@ -268,15 +270,15 @@ a repo never created by `apg init` has no versioned layout at all.
 "#;
 
 /// The `codebase-navigator.md` agent file that `apg init` installs into
-/// `~/.opencode/`. Auto-discovered by opencode from `~/.opencode/agents/*.md`;
-/// configured to use the apg suite tools and to guide the user through running
-/// `apg scan` on the CLI (there is no in-chat scan tool). Single-sourced from
-/// the repo's own agent file.
+/// `~/.config/opencode/`. Auto-discovered by opencode from
+/// `~/.config/opencode/agents/*.md`; configured to use the apg suite tools and
+/// to guide the user through running `apg scan` on the CLI (there is no in-chat
+/// scan tool). Single-sourced from the repo's own agent file.
 const CODEBASE_NAVIGATOR_AGENT: &str =
     include_str!("../opencode-suite/agents/codebase-navigator.md");
 
 /// The seven distributed agents that `apg init` installs into
-/// `~/.opencode/agents/` (SPEC R13/R15): the navigator plus the six
+/// `~/.config/opencode/agents/` (SPEC R13/R15): the navigator plus the six
 /// spec/plan/review/builder agents — including the `implementation-phase-reviewer`
 /// — single-sourced from the repo's `opencode-suite/agents/`.
 pub const AGENTS: &[(&str, &str)] = &[
@@ -308,7 +310,7 @@ pub const AGENTS: &[(&str, &str)] = &[
 ];
 
 /// The seven distributed agent filenames — the apg-owned names in
-/// `~/.opencode/agents/`. `apg init` prunes any of these that a newer release
+/// `~/.config/opencode/agents/`. `apg init` prunes any of these that a newer release
 /// dropped from the suite (a user's own same-named agent is the accepted edge).
 const KNOWN_AGENT_FILES: &[&str] = &[
     "codebase-navigator.md",
@@ -320,11 +322,11 @@ const KNOWN_AGENT_FILES: &[&str] = &[
     "agent-builder.md",
 ];
 
-/// The `package.json` written by `apg init` into `~/.opencode/` when none
-/// exists, so the tool files' `@opencode-ai/plugin` import resolves.
+/// The `package.json` written by `apg init` into `~/.config/opencode/` when
+/// none exists, so the plugin files' `@opencode/plugin` import resolves.
 const OPENCODE_PACKAGE_JSON: &str = r#"{
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.20"
+    "@opencode/plugin": "2.0.29"
   }
 }
 "#;
