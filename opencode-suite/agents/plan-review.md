@@ -251,9 +251,14 @@ Then review **every changed spec node** semantically against the rules:
    constraint declares its scope through its layer and names no node —
    `attaches-to` is not part of the model
    (`global.constraint.spec-constraint-scope`).
-3. **R3 — at most one note.** A node holds at most one note, deepening what is.
-4. **R4 — `details` names exactly one node.** A note's `details` edge names
-   exactly one node.
+3. **R3 — at most one note, implementation-only.** A note attaches only to
+   implementation-layer code and deepens the single code identity it explains;
+   that code holds at most one note. A note in the requirements, domain,
+   solution, or global layer is a violation
+   (`global.constraint.note-implementation-only`).
+4. **R4 — `details` names exactly one code FQN.** A note's `details` edge names
+   exactly one target: the single code FQN the note deepens
+   (`global.constraint.note-details-shape`).
 5. **R5 — timeless truth.** A spec node states timeless truth: the reality it
    defines.
 
@@ -298,4 +303,9 @@ at write time (`domain.constraint.details-canonical-target-set`).
 - Acceptance criteria and verification items for the phase; seam contracts carried by notes.
 - Unresolved feedback left over from earlier review rounds.
 - **Structural/holistic checks**: no `Gates` cycles, no phase without tasks, consistent kind/tier classification.
+- **Notes are implementation-only (R3/R4)**: any note in the requirements,
+  domain, solution, or global layer is a **blocking** violation of
+  `global.constraint.note-implementation-only`; a note attaches only to
+  implementation-layer code and its `details` names exactly one code FQN
+  (`global.constraint.note-details-shape`).
 - **R1–R5 (the durable-spec rules)**: run `apg_spec_lint` first, then review every changed spec node against the rules in *The durable-spec rules (R1–R5)* — history content is a blocking finding whose fix is delete/rewrite.
