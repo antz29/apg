@@ -2,11 +2,16 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "reviewer-senior-review-discipline",
-  "body": "The implementation-phase reviewer applies the senior-review discipline, ordering concerns correct, safe, load, tested, fast and lean, requiring a concrete case per finding, and turning each blocking or advisory finding into review Feedback.",
+  "body": "The reviewer reports to the coordinator a \"What this change does:\" summary followed by blocking, advisory and optional findings, each with a concrete case and its smallest fix, and turns each blocking or advisory finding into review Feedback.",
   "properties": {
     "feature": "agent-discipline"
   },
   "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.reviewer-reviews-the-phase-under-review",
+      "properties": {}
+    },
     {
       "kind": "drives",
       "target": "domain.entity.senior-review-finding",
@@ -15,11 +20,6 @@
     {
       "kind": "drives",
       "target": "domain.value.review-severity",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "requirements.requirement.reviewer-reviews-the-phase-under-review",
       "properties": {}
     }
   ],
