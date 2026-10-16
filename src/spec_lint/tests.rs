@@ -129,4 +129,80 @@ mod unit {
             "a non-note node must never trip the note-confinement rule"
         );
     }
+
+    /// The details-shape rule (`global.constraint.note-details-shape`,
+    /// `domain.constraint.details-canonical-target-set`) is the pure helper
+    /// [`details_shape_errors`]: a note whose `details` edge names exactly one
+    /// **code** FQN yields no error, while a note with zero or two-plus details
+    /// edges, or whose single details target is an authored-node FQN (any
+    /// layer, including another note), yields exactly one error naming the
+    /// code-FQN requirement.
+    ///
+    /// The helper is pure over in-memory `NodeFile`s — the only unit under test
+    /// (assembly of the error strings) — so the test is `unit`, never `e2e`,
+    /// even though the production caller [`lint`] is I/O-bound.
+    #[test]
+    fn details_shape_errors_requires_exactly_one_code_fqn_target() {
+        use crate::testutil::{node, out_edge};
+
+        fn note(name: &str, targets: &[&str]) -> NodeFile {
+            let mut n = node("implementation", "note", name);
+            n.out = targets.iter().map(|t| out_edge("details", t)).collect();
+            n
+        }
+
+        // One code FQN target is the sanctioned shape — no error.
+        assert!(
+            details_shape_errors(&[note("deepens-lint", &["rust.apg.spec_lint.lint"])]).is_empty(),
+            "a note with exactly one code FQN details target must pass"
+        );
+
+        // Zero details edges is off-model — one error naming the code-FQN rule.
+        let zero = details_shape_errors(&[note("no-target", &[])]);
+        assert_eq!(
+            zero.len(),
+            1,
+            "a note with no details edge must be one error"
+        );
+        assert!(
+            zero[0].contains("code FQN"),
+            "the error must name the code-FQN requirement: {}",
+            zero[0]
+        );
+
+        // Two details edges is off-model — one error naming the code-FQN rule.
+        let two = details_shape_errors(&[note(
+            "two-targets",
+            &[
+                "rust.apg.spec_lint.lint",
+                "rust.apg.spec_lint.wording_warning",
+            ],
+        )]);
+        assert_eq!(
+            two.len(),
+            1,
+            "a note with two details edges must be one error"
+        );
+        assert!(
+            two[0].contains("code FQN"),
+            "the error must name the code-FQN requirement: {}",
+            two[0]
+        );
+
+        // A single authored-node target (any layer, including another note) is
+        // off-model — one error naming the code-FQN rule.
+        for authored in ["requirements.requirement.r1", "requirements.note.n2"] {
+            let errors = details_shape_errors(&[note("authored-target", &[authored])]);
+            assert_eq!(
+                errors.len(),
+                1,
+                "an authored details target `{authored}` must be one error"
+            );
+            assert!(
+                errors[0].contains("code FQN"),
+                "the error must name the code-FQN requirement: {}",
+                errors[0]
+            );
+        }
+    }
 }
