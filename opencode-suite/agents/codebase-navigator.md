@@ -440,11 +440,11 @@ identity). The six layers:
 
 | layer | types |
 |---|---|
-| `requirements` | `stakeholder`, `user`, `requirement`, `note`, `constraint` |
-| `domain` | `group`, `entity` (kind `entity`\|`event`), `value`, `service`, `note`, `constraint` |
-| `solution` | `system`, `container` (kind `app`\|`service`\|`db`\|`queue`), `component`, `person`, `note`, `constraint` |
-| `implementation` | `note`, `constraint` (attach-only — the real nodes are scanned code) |
-| `global` | `constraint`, `note` (the laws) |
+| `requirements` | `stakeholder`, `user`, `requirement`, `constraint` |
+| `domain` | `group`, `entity` (kind `entity`\|`event`), `value`, `service`, `constraint` |
+| `solution` | `system`, `container` (kind `app`\|`service`\|`db`\|`queue`), `component`, `person`, `constraint` |
+| `implementation` | `note`, `constraint` (attach-only — `note` attaches only to implementation-layer code; the real nodes are scanned code) |
+| `global` | `constraint` (the laws) |
 
 Constraints are **prose**: the binary validates structure at write time;
 whether the prose holds is assessed by review, never executed. The spine
@@ -465,7 +465,7 @@ Authored edge kinds (SPEC §3.3): `contains`, `drives`, `realised-by`,
 | Group / Entity / Value / Service | fqn, body, kind/attribute (metadata) | Tier 2 — the what (domain) |
 | System / Container / Component / Person | fqn, body, kind (metadata) | Tier 3 — the how (C4 solution) |
 | Constraint        | fqn, body                               | Prose laws; a constraint's layer is its scope (global or a tier) |
-| Note              | fqn, body                               | Deepens the non-note node or code it explains; `details` names exactly one node (R3/R4) |
+| Note              | fqn, body                               | Implementation-layer only: deepens the single code FQN it explains; `details` names exactly one code FQN (R3/R4) |
 | Plan / PlanPhase / Task | fqn, title/strategy/number/deliverable, tier/status | The transient plan (`<project>/plan…`) |
 | Feedback          | fqn, body, status, disposition          | A review item (open/actioned/resolved) — transient |
 
@@ -613,12 +613,16 @@ The spec the writer authors states what **is** (the durable-spec rules R1–R5):
    constraint declares its scope through its layer and names no node —
    `attaches-to` is not part of the model
    (`global.constraint.spec-constraint-scope`).
-3. **R3 — at most one note.** A node has at most one note, and that note
-   deepens the node's definition of what is.
-4. **R4 — `details` names exactly one node.** A note's `details` edge names
-   exactly one node. A Note-to-Note `details` pair is a structural rule the
-   write surface and `apg_spec_lint` both check — the write surface refuses a
-   new pair at write time
+3. **R3 — at most one note, implementation-only.** A note attaches only to
+   implementation-layer code and deepens the single code identity it explains;
+   that code holds at most one note. A note in the requirements, domain,
+   solution, or global layer is a violation
+   (`global.constraint.note-implementation-only`).
+4. **R4 — `details` names exactly one code FQN.** A note's `details` edge names
+   exactly one target: the single code FQN the note deepens
+   (`global.constraint.note-details-shape`). A Note-to-Note `details` pair is a
+   structural rule the write surface and `apg_spec_lint` both check — the write
+   surface refuses a new pair at write time
    (`domain.constraint.details-canonical-target-set`) and the linter reports
    existing violations.
 5. **R5 — timeless truth.** A spec node states timeless truth: the reality it
@@ -626,8 +630,9 @@ The spec the writer authors states what **is** (the durable-spec rules R1–R5):
 
 **WRITER RULES.** The spec-writer authors a positive, present-tense definition
 of what is; places a negative rule in a constraint whose layer is its scope
-(global or a tier); gives a node at most one note deepening what is, with a
-`details` edge naming exactly one node; and authors timeless truth. A
+(global or a tier); gives an implementation-layer code node at most one note
+deepening the code it explains, with a `details` edge naming exactly one code
+FQN; and authors timeless truth. A
 superseded statement is updated or removed; a rejected alternative, a
 change-log, a decision/reconciliation/correction/provenance note, and
 time-relative wording that ages ("today", "now", "no longer", "currently",
@@ -852,9 +857,9 @@ decomposition into `requirements.requirement.<name>` nodes (grouped by
 `feature` metadata), the tier-2 domain nodes (`group`/`entity`/`value`/
 `service`), the tier-3 solution nodes (`system`/`container`/`component`/
 `person`), the **spine** edges (`drives` → `realised-by` → `implemented-by`),
-`constraint` nodes for the laws, `note` nodes that deepen a node's definition
-(at most one per node, R3/R4), and `depends-on`/`contains` edges. Not-yet-built
-code is not a spec placeholder:
+`constraint` nodes for the laws, `note` nodes that deepen implementation-layer
+code (at most one per code identity, R3/R4), and `depends-on`/`contains` edges.
+Not-yet-built code is not a spec placeholder:
 the spec's solution tier ends at `implemented-by` code FQNs that resolve in
 the graph, and tier-4 additions are declared as **planned Implementation
 nodes by the plan-writer at plan time**.
