@@ -205,4 +205,91 @@ mod unit {
             );
         }
     }
+
+    /// The tier-1-3 body-budget rule
+    /// (`requirements.requirement.spec-body-budget`) is the pure helper
+    /// [`body_budget_errors`]: a node in a tier-1-3 layer
+    /// (`requirements`/`domain`/`solution`) whose body is **at most**
+    /// [`TIER_BODY_BUDGET`] (244) **characters** passes, a body one character
+    /// over budget yields exactly one error naming the node FQN, its character
+    /// count and the budget, and a non-tier node (`global`/`implementation`) is
+    /// never subject to the budget however long its body.
+    ///
+    /// The helper is pure over in-memory `NodeFile`s — the only unit under test
+    /// (assembly of the error strings) — so the test is `unit`, never `e2e`,
+    /// even though the production caller [`lint`] is I/O-bound.
+    #[test]
+    fn body_budget_errors_caps_tier_1_3_bodies_at_244_chars() {
+        use crate::testutil::node;
+
+        fn with_body(layer: &str, node_type: &str, name: &str, body: String) -> NodeFile {
+            let mut n = node(layer, node_type, name);
+            n.body = body;
+            n
+        }
+
+        // One representative node per tier-1-3 layer.
+        let tier_1_3 = [
+            ("requirements", "requirement"),
+            ("domain", "entity"),
+            ("solution", "container"),
+        ];
+
+        // A body of exactly the budget is "at most 244" — no error.
+        for (layer, node_type) in tier_1_3 {
+            let at_budget = with_body(layer, node_type, "at-budget", "a".repeat(TIER_BODY_BUDGET));
+            assert!(
+                body_budget_errors(&[at_budget]).is_empty(),
+                "a `{layer}` body of exactly {TIER_BODY_BUDGET} chars is at budget and must pass"
+            );
+        }
+
+        // One character over budget — exactly one error naming the node, its
+        // character count and the budget.
+        for (layer, node_type) in tier_1_3 {
+            let over = with_body(
+                layer,
+                node_type,
+                "over-budget",
+                "a".repeat(TIER_BODY_BUDGET + 1),
+            );
+            let errors = body_budget_errors(&[over]);
+            assert_eq!(
+                errors.len(),
+                1,
+                "a `{layer}` body of {} chars is over budget and must be one error",
+                TIER_BODY_BUDGET + 1
+            );
+            assert!(
+                errors[0].contains(&format!("{layer}.{node_type}.over-budget")),
+                "the error must name the offending node FQN: {}",
+                errors[0]
+            );
+            assert!(
+                errors[0].contains(&(TIER_BODY_BUDGET + 1).to_string()),
+                "the error must name the body's character count: {}",
+                errors[0]
+            );
+            assert!(
+                errors[0].contains(&TIER_BODY_BUDGET.to_string()),
+                "the error must name the budget: {}",
+                errors[0]
+            );
+        }
+
+        // The rule is tier-1-3 only: a non-tier node with a far-over-budget
+        // body is never subject to it.
+        for (layer, node_type) in [("global", "constraint"), ("implementation", "note")] {
+            let over = with_body(
+                layer,
+                node_type,
+                "off-tier",
+                "a".repeat(TIER_BODY_BUDGET + 100),
+            );
+            assert!(
+                body_budget_errors(&[over]).is_empty(),
+                "a non-tier `{layer}` node is not subject to the body budget"
+            );
+        }
+    }
 }
