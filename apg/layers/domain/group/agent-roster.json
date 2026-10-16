@@ -27,6 +27,11 @@
       "kind": "contains",
       "target": "domain.entity.release-agent-flow",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.agent-roster-docs",
+      "properties": {}
     }
   ],
   "in": []
