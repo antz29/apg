@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "frontend-dependency-contract",
-  "body": "Each of the seven apg language frontends (Go, Java, C++, Rust, TypeScript/JavaScript, C#, Python) plus the bundled structural scanner (Markdown, shell, YAML, JSON, TOML, XML, Dockerfile, Makefile, INI) has its dependency contract stated in the durable spec: (a) its build-time dependencies, (b) its scan-time dependencies (what is present on PATH when a user runs `apg scan`), and (c) the pinned engine whose version sets the language-version ceiling. The declaration is attached to that scanner's solution container, whose body names the code units that carry each dependency, so \"\"to scan X you need Y and Z\"\" is answerable and traceable from the spec. The contract is declarative: delivery is the container bodies plus the durable dependency-matrix note, and the change-set's code delta is the documentation update claimed by `solution.component.frontend-dependency-docs` (README.md / AGENTS.md). The per-language frontend containers and the build pipeline carry their dependency declarations and zero `implemented-by` claims — frontend and build code stay untouched, and their absence from the code-coverage surface is deliberate, keeping `modifies` tasks for untouched code out of the verify gate; the bundled structural scanner added in 0.17.0 carries `implemented-by` claims, since it is new code. The container set spans the seven frontends plus the bundle, with the separate Markdown frontend retired into the bundled structural scanner.",
+  "body": "Each apg language frontend and the bundled structural scanner states its build-time dependencies, its scan-time dependencies, and the pinned engine whose version sets its language-version ceiling, attached to that scanner's solution container.",
   "properties": {
     "feature": "frontend-dependencies"
   },
@@ -52,11 +52,6 @@
     {
       "kind": "contains",
       "source": "requirements.stakeholder.frontend-maintainer",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.frontend-dependency-matrix",
       "properties": {}
     }
   ]

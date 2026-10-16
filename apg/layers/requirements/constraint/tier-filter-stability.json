@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "tier-filter-stability",
-  "body": "The four documented cargo invocations select the tiers they name: `cargo test` (the default gate) selects the unit and int tiers only and does not reach an e2e test; `cargo test-unit` selects only `tests::unit::`; `cargo test-int` selects only `tests::int::`; `cargo test-e2e` selects only the `#[ignore]`d `e2e::` tier. A unit or int test outside a `tests::unit::` / `tests::int::` path, or an e2e test reachable by a plain `cargo test`, is a violation.",
+  "body": "The four documented test invocations select the tiers they name, and a unit or int test outside its tier path, or an end-to-end test reachable by a plain test run, is a violation.",
   "properties": {},
   "out": [],
   "in": []

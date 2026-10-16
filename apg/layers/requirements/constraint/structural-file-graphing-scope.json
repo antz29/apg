@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "structural-file-graphing-scope",
-  "body": "A scan must emit a File node for every Git-tracked file except those the standard exclusions remove (`.git`, `target`, `node_modules`, `.gitignore`, `--exclude-path`) or the config scope narrows away; no tracked file may be silently unclaimed, and no file may be claimed twice.",
+  "body": "A scan emits a file node for every git-tracked file except those the standard exclusions remove or the config scope narrows away, no tracked file silently unclaimed and no file claimed twice.",
   "properties": {},
   "out": [],
   "in": []

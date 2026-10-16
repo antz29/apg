@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "scan-time-tool-actionable",
-  "body": "A missing scan-time toolchain must fail with an error that names the tool and the language and states how to install it. It must never be silent, must never panic, and must not cause the language to be scanned as an empty graph.",
+  "body": "A missing scan-time toolchain fails with an error naming the tool and the language and stating how to install it, never silently, never by panicking, and never by scanning the language as an empty graph.",
   "properties": {},
   "out": [],
   "in": []

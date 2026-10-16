@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "user",
   "name": "apg-upgrader",
-  "body": "A person who upgrades an existing apg installation by re-running `apg init` on a repo that already has a `.opencode/agents/` directory. When the suite distributes a file their repo already has (the `implementation-phase-reviewer.md`), `apg init` warns about the duplicate and leaves deletion to them; they rely on an explicit, findable instruction telling them to remove their local copy by hand, so the warning is a migration prompt rather than an unexplained nuisance.",
+  "body": "A person who upgrades an existing apg installation by re-running apg init on a repository that already carries local agents, and who relies on an explicit instruction to remove a duplicated local agent copy.",
   "properties": {},
   "out": [
     {

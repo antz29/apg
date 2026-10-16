@@ -2,16 +2,11 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "cli-session-crash-recovery",
-  "body": "A session socket that answers a connect and a Ping is a live session; a present socket that fails to answer marks an unclean exit. On that detection the derived index is discarded and rebuilt from the on-disk node files by a forced scan, and the stale socket is reclaimed. The node files are the system of record; `db.lbug` is a derived index.\n\nACCEPTANCE:\n- A present socket that fails a connect plus Ping is detected as an unclean exit at session start, at the scan freshness fast path, at `apg query`, and at `signal_end`.\n- On detection the derived `db.lbug` is discarded and rebuilt from `apg/layers/**` by a forced scan, and the stale socket is removed.\n- A scan that meets an unclean-exit socket rebuilds the index rather than serving or skipping over phantom projections.",
+  "body": "A socket that answers a connect and a ping marks a live session, and a present socket that fails to answer marks an unclean exit whose derived index is discarded and rebuilt from the on-disk node files.",
   "properties": {
     "feature": "cli-session-substrate"
   },
   "out": [
-    {
-      "kind": "drives",
-      "target": "domain.value.cli-session-socket",
-      "properties": {}
-    },
     {
       "kind": "drives",
       "target": "domain.entity.cli-session-coordinator",
@@ -20,6 +15,11 @@
     {
       "kind": "drives",
       "target": "domain.group.cli-session",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.value.cli-session-socket",
       "properties": {}
     }
   ],

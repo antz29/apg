@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "structural-file-graphing",
-  "body": "The program graph covers every tracked file in a scanned repository, including the files a per-language code frontend leaves unclaimed. Each frontend emits a `file` record for the files it claims; shell, YAML, JSON, TOML, XML, Dockerfile, Makefile, INI, Ruby and plain-text files gain a `File` node and serve as a task target or an `implemented-by` target. The durable spec's spine reaches packaging/config surfaces, the verify gate's derived solution coverage sees them, and graph-first navigation maintains an explicit \"unclaimed by any frontend\" artifact class. One bundled structural scanner delivers this requirement: it emits a `File` node for every tracked file it claims plus the structure of the text formats, ships in the base package with zero scan-time dependency, and decomposes into the sub-requirements below.",
+  "body": "The program graph covers every tracked file in a scanned repository, including the files a per-language code frontend leaves unclaimed, through one bundled structural scanner.",
   "properties": {
     "feature": "structural-graphing"
   },

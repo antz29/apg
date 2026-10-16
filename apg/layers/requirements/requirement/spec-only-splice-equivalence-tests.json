@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "spec-only-splice-equivalence-tests",
-  "body": "The e2e suite isolates the SPEC-ONLY case: (a) an `apg project merge` e2e with a spec-only change-set that asserts the merged authored/transient nodes reach main's DB; (b) a splice e2e that seeds authored/transient rows and asserts a spec-only delta agrees with a full rebuild (spliced `db.lbug` equals a full rebuild, or the splice is refused).\n\nObservable completion: both tests exist in the e2e tier (`tests/project_cmd_e2e.rs`, `tests/splice_e2e.rs`), carry the `#[ignore = \"e2e tier: …\"]` marker, and distinguish the fix from the pre-fix code. `rust.project_cmd_e2e.e2e.merge_round_trip_start_mutate_verify_merge_rebuild` adds code (Widget) and rescans the branch, so the store advances and the seed guard mismatches — it exercises the code path only. `rust.splice_e2e.e2e.spliced_and_full_rebuild_agree_on_every_table_count` and `rust.splice_e2e.e2e.delta_application_matches_a_full_rebuild` use the code-only `rust.splice_e2e.fixture_graph`, whose authored tables are empty in both DBs, making the authored-table equality vacuous.",
+  "body": "The end-to-end suite isolates the spec-only case with a project-merge test asserting the merged authored nodes reach main's database and a splice test asserting a spec-only delta agrees with a full rebuild or is refused.",
   "properties": {
     "feature": "splice-equivalence"
   },
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "requirements.requirement.spec-only-merge-leaves-main-db-stale",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.splice-equivalence-tests-are-code-only",
       "properties": {}
     }
   ]

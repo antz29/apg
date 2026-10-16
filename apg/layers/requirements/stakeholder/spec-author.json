@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "stakeholder",
   "name": "spec-author",
-  "body": "A person or agent with an interest in the durable spec's coherence: they author spec nodes and edges through `apg node add` / `apg edge add` (from inside a project worktree) and read them back through `apg_query`. Their interest is that the write surface and the graph projection share one edge vocabulary, and every edge the write surface accepts appears in the graph projection.",
+  "body": "A person or agent who authors the durable spec's nodes and edges through the write surface and reads them back through the graph, whose interest is one shared edge vocabulary between the write surface and the graph projection.",
   "properties": {},
   "out": [
     {
@@ -12,12 +12,12 @@
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.durable-spec-states-what-is",
+      "target": "requirements.requirement.deterministic-spec-lint",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "requirements.requirement.deterministic-spec-lint",
+      "target": "requirements.requirement.durable-spec-states-what-is",
       "properties": {}
     }
   ],

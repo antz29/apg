@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "testable-library-surface",
-  "body": "The root crate exposes a library surface so white-box tests live outside the source module that declares the code under test, and so production code is decomposed into cohesive modules that both the binary and the tests reuse. 268 of the 310 e2e tests call crate-internal functions directly (testutil builders, `ingest::ingest`, `cache::CacheKey::compute`, `layers::read_node_file`, `plan_cmd::plan_verify_at`, …), and `#[cfg(test)] mod testutil;` in `main.rs` is invisible to integration crates — the e2e tests move to a top-level `tests/` crate once `src/lib.rs` owns the module tree and `src/main.rs` becomes a thin binary that calls into it.",
+  "body": "The root crate exposes a library surface so white-box tests live outside the source module that declares the code under test, and production code decomposes into cohesive modules the binary and the tests reuse.",
   "properties": {
     "feature": "test-layout"
   },
@@ -27,11 +27,6 @@
     {
       "kind": "contains",
       "source": "requirements.user.source-contributor",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.source-layout-decisions",
       "properties": {}
     }
   ]

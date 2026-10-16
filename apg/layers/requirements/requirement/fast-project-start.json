@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "fast-project-start",
-  "body": "`apg project start` is near-instant when the main checkout's scan is current for main's HEAD. After the unchanged refusals (in-worktree, unborn/detached main, version gate, dirty main), start checks whether the main checkout's scan is fresh for main's HEAD (`git::is_fresh` over the main layout root) — the guard is `!is_fresh`, because `git::is_stale` alone returns false for an absent `db.lbug`/`graph.jsonl`, so it detects a missing scan only through `!is_fresh`. For a stale or missing scan, start REFUSES with guidance to run `apg scan` in the main checkout first. For a fresh scan, start creates the branch + worktree (off the default branch, unchanged) and copies the main checkout's `apg/.trans` artifacts into the new worktree's `apg/.trans`, with zero scan and zero frontend spawns. This is correct with zero re-assembly because the graph stores repo-relative paths (`path`/File FQN are repo-relative, rather than worktree-absolute), so main's DB is valid verbatim in the worktree; the worktree's tree equals main's HEAD, so the recorded content identity still matches.\n\nAcceptance criteria:\n- Starting a project when main's scan is stale or missing refuses, and the refusal tells the user to run `apg scan` in the main checkout.\n- Starting a project when main's scan is fresh for main's HEAD spawns zero frontend processes.\n- The resulting branch DB contains the same code nodes and edges as a full scan of main's HEAD under the same effective scan configuration (the blacklist stays outside the cache key, so a recorded config mismatch is undetectable from the store — see the cache-key note).\n- The copy completes with zero full-tree walk of the source files.\n- Correctness is preserved because main's scan is valid verbatim in the new worktree (repo-relative paths; the worktree's tree equals main's HEAD).",
+  "body": "A project start creates the branch and worktree and copies main's scan artefacts with zero scan and zero frontend spawns when that scan is current, and refuses with guidance when it is stale or missing.",
   "properties": {
     "feature": "start-performance"
   },
@@ -22,11 +22,6 @@
     {
       "kind": "contains",
       "source": "requirements.requirement.portable-graph-identity",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.blacklist-not-in-cache-key",
       "properties": {}
     }
   ]

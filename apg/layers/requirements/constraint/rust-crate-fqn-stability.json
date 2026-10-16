@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "constraint",
   "name": "rust-crate-fqn-stability",
-  "body": "Rust module FQNs are stable: a Rust package with a single local crate target, a lib-only package, or a bin-only package renders its module FQNs as the cargo package name; only a package with multiple crate targets carries per-target prefixes. A package's resolvable module and symbol FQNs are preserved; renaming a resolvable FQN is a violation.",
+  "body": "Rust module identities are stable, a package's resolvable module and symbol identities are preserved, and renaming a resolvable identity is a violation.",
   "properties": {},
   "out": [],
   "in": []

@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "frontend-rooting-from-repo-base",
-  "body": "Every frontend's package/module identity is derived from the repository-relative base, rather than from the basename of the checkout directory it runs in, and each source file is emitted under one module identity. Concretely: a TS repo's root module identity is independent of the checkout name, so a checkout-basename module (`ts.cosanima-1.0.0` or `ts.fix-module-identity`) has zero admissibility even when build outputs live outside the named packages; and a file inside a named workspace package is emitted once, under that package.\n\nAcceptance criteria:\n- A scan of a worktree contains only modules whose names are independent of the worktree/checkout directory basename.\n- Each source file appears under exactly one module identity.\n- A file shared by two worktrees has the same module identity in both graphs.",
+  "body": "Every frontend's package and module identity derives from the repository-relative base rather than the checkout-directory basename, and each source file is emitted under exactly one module identity.",
   "properties": {
     "feature": "graph-identity"
   },

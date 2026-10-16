@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "frontend-dependency-docs",
-  "body": "README.md (and the pipeline section of AGENTS.md) documents the frontend dependency contract. The set is seven per-language frontends (`apg-go`, `apg-java`, `apg-cpp`, `apg-rust`, `apg-ts`, `apg-csharp`, `apg-py`) plus the bundled structural scanner; Markdown lives in the base and `apg-md` retires. The docs name all seven frontend formulae and the bundled structural scanner; cover each scanner's sources (including `src/structlib` absorbing `src/mdlib`); state the scan-time dependencies per frontend; and describe the base build accurately (links a prebuilt static `liblbug` and `openssl@3`, with zero `cmake`/bundled LadybugDB). Acceptance: a reader can determine, per frontend and for the bundled structural scanner, the build-time deps, the scan-time deps, and the engine pin from README.md; the intro/Features language lists and the project layout cover the seven frontends, the bundled scanner, and their sources (including `src/structlib` and the retired `src/mdlib`).",
+  "body": "The user documentation records the frontend dependency contract, naming all seven per-language frontends and the bundled structural scanner with their sources, scan-time dependencies, and the base build's accurate shape.",
   "properties": {
     "feature": "frontend-dependencies"
   },

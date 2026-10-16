@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "navigator-agent-builder-surface-coherence",
-  "body": "The distributed `codebase-navigator` prompt `opencode-suite/agents/codebase-navigator.md` accounts for the `agent-builder`'s main-write surface by REFERENCE over RESTATEMENT: it points at the agent-builder's own definition (`opencode-suite/agents/agent-builder.md`) as the authoritative enumeration of that surface, and states only what the NAVIGATOR needs operationally.\n\nThe navigator prompt points at the agent-builder's own definition for the full surface, carrying the reference instead of a subset that ages. (Symmetry: the agents-md hygiene law's process-ownership rule makes the navigator the sole owner of the canonical change-set process; the agent-builder owns the enumeration of its own write surface.)\n\nRequired behaviour:\n- REFERENCE OVER RESTATEMENT: the navigator prompt points at the agent-builder's own definition for the surface enumeration.\n- NAVIGATOR-OPERATIONAL: it states what the navigator does — when code-writer agents are missing or outdated it tasks the `agent-builder` on the MAIN checkout, the agent-builder commits there, then the navigator rebases the project worktree onto main, re-scans the worktree, and the user restarts opencode and reconnects before implementation continues.\n- SURFACE COVERAGE: that delegation covers the repo-root `AGENTS.md` hygiene and the `opencode.json` agent→model map ALONGSIDE the `.opencode/agents/**` scaffold, so the navigator knows the maintenance spans all three carve-out-1 paths.\n- SCOPING: the main-checkout scoping names all three carve-out-1 paths (the `.opencode/agents/**` scaffold, the `opencode.json` model map, and the repo-root `AGENTS.md` hygiene), retains the optional consented `release-agent` as the other agent carve-out, and states the agent carve-out count as two.\n\nAcceptance criteria:\n- The prompt states the full surface at every spot: the agent-builder's write grant/surface spans the `.opencode/agents/**` scaffold, the `opencode.json` model map, and the repo-root `AGENTS.md` hygiene.\n- The prompt references the agent-builder's own definition for the full surface, and states the delegation covers the `.opencode/agents/**` scaffold, the `opencode.json` model map, and the repo-root `AGENTS.md` hygiene.\n- The on-main → commit → rebase-worktree → re-scan → user-restart-opencode flow is stated, and the main-checkout mutation boundary scopes to the binary's node/edge/plan/review mutations, free of the delegation.\n- Scope is the one product-source file `opencode-suite/agents/codebase-navigator.md`; `opencode-suite/agents/agent-builder.md`, `AGENTS.md`, and the repo's own `.opencode/agents/**` sit outside this requirement.",
+  "body": "The distributed navigator prompt accounts for the agent-builder's main-write surface by pointing at the agent-builder's own definition and stating only what the navigator needs operationally.",
   "properties": {
     "feature": "agent-builder-agents-md"
   },
@@ -17,11 +17,6 @@
     {
       "kind": "contains",
       "source": "requirements.user.navigator-agent",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.navigator-agent-builder-surface-reconciliation",
       "properties": {}
     }
   ]

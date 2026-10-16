@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "classification-config-in-cache-key",
-  "body": "The graph-affecting classification-config identity of apg/config.json (its default code type, its ordered types rules, and its structural scope) folds into the global scan cache key (domain.value.cache-key), so a classification-config change forces a full load rather than silently reusing cached code_type values.\n\nRationale: code_type is computed at ingest from a record's path + apg/config.json (rust.apg.classify.classify_code_type); a full load alone reclassifies. The cache key (rust.apg.cache.manifest.CacheKey.compute) folds binary version + JSONL schema/format + ingestor projection rules + the scan config (languages / excludes / modules), while the classification config stays outside it, so a apg/config.json edit leaves stale classifications in the incremental / splice / warm paths. That is a correctness bug in the released binary.\n\nAcceptance criteria:\n- Equal classification configs produce equal keys; identical configs render identical config digests.\n- Each graph-affecting field moves the key: the default code type; each types rule's name, globs, names, and the rule ORDER (the first matching rule wins); the structural scope's include, exclude, and code_type; and absence vs presence (of the config, and of its structural section), distinguished by a distinct stable sentinel for a missing config.\n- Languages, excludes, and modules continue to move the key independently of the classification component.\n- The binary-managed version field is excluded from the classification digest (the binary's own version is folded into the key separately), so editing version alone leaves the key steady.\n- A classification-config change forces a full load (a cache-key drift / full-scan reason), free of a silent reuse of cached code_type values.\n\nScope: this is the classification-config sibling of the scan blacklist, which stays outside the cache key (the scan-blacklist cache-key note) and remains out of scope here (non-goal). Zero scan-behaviour change beyond cache invalidation.",
+  "body": "The graph-affecting classification-config identity of the scan configuration folds into the global scan cache key, so a classification-config change forces a full load rather than reusing cached code-type values.",
   "properties": {
     "feature": "graph-identity"
   },
@@ -22,11 +22,6 @@
     {
       "kind": "contains",
       "source": "requirements.requirement.portable-graph-identity",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "requirements.note.cache-key-classification-folding",
       "properties": {}
     }
   ]

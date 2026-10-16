@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "no-self-ingestion",
-  "body": "The scanner keeps its own caches and build outputs out of the graph. The shared Go build cache lives under the git-common-dir (`.git/apg/facts/go/<cache-key>`); Go writes a generated `_testmain` into it, and that scratch file stays out of the graph as a package File, as do its generated `init`/`main` functions. `target/**` (staged frontends, cargo build outputs) stays out of the scan as source, and `.gitignore`d build trees are excluded by default.\n\nThe graph carries zero File under `.git/` or `target/`, in particular zero `go.apg/gofrontend.test.init#<basename>` / `.main` and zero target-frontend File such as `target/debug/frontends/tsfrontend/scanner.mjs` or `target/debug/build/apg-*/out/tsfrontend-build/scanner.js`.\n\nAcceptance criteria:\n- Zero File fqn under `.git/` or `target/` appears in the graph.\n- The Go frontend emits zero function from a generated `_testmain` scratch file.\n- The count of `target/**` Files in the graph is zero, in both main and worktrees.",
+  "body": "The scanner keeps its own caches and build outputs out of the graph, so no file under the repository's git directory or build tree appears in the graph.",
   "properties": {
     "feature": "scan-hygiene"
   },
