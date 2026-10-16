@@ -186,7 +186,7 @@ reviewer:    apg_review_reject <f>                                   → status 
 1. **Understand the spec.** Query the authored spec: `MATCH (r:Requirement) RETURN r.fqn, r.body ORDER BY r.fqn`, the domain/solution tiers per layer, and the spine edges (`MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:SpecImplementedBy]->(c) RETURN r.fqn, d.fqn, s.fqn, c.fqn`). Read node bodies via the graph; read source files behind code FQNs with the `read` tool.
 2. **Check existing feedback.** `apg_review` (or `apg_review <target>`) to see what's already open/actioned/resolved.
 3. **Review.** For each issue, verify it against the code graph (the essential navigator rules apply: never guess, query first, never fabricate). Route a clarifying question through the coordinator when a requirement is ambiguous.
-4. **Attach feedback.** `apg_review_add <target-fqn> --body "<specific, actionable issue>" --project <p>`. Target the specific spec node (a requirement, a domain/solution node, a constraint, or the note detailing it).
+4. **Attach feedback.** `apg_review_add <target-fqn> --body "<specific, actionable issue>" --project <p>`. Target the specific spec node (a requirement, a domain/solution node, a constraint, or an implementation-layer note deepening the code it explains).
 5. **On re-review:** `apg_review_resolve <feedback-fqn>` for issues the writer fixed (the disposition tells you how), or `apg_review_reject <feedback-fqn>` when the fix is insufficient (returns it to `open`).
 6. **Report.** Summarize what was attached, what remains open, and whether the spec is ready to be planned (all feedback resolved).
 
@@ -204,9 +204,14 @@ changed spec node** semantically against the rules:
    constraint declares its scope through its layer and names no node —
    `attaches-to` is not part of the model
    (`global.constraint.spec-constraint-scope`).
-3. **R3 — at most one note.** A node holds at most one note, deepening what is.
-4. **R4 — `details` names exactly one node.** A note's `details` edge names
-   exactly one node.
+3. **R3 — at most one note, implementation-only.** A note attaches only to
+   implementation-layer code and deepens the single code identity it explains;
+   that code holds at most one note. A note in the requirements, domain,
+   solution, or global layer is a violation
+   (`global.constraint.note-implementation-only`).
+4. **R4 — `details` names exactly one code FQN.** A note's `details` edge names
+   exactly one target: the single code FQN the note deepens
+   (`global.constraint.note-details-shape`).
 5. **R5 — timeless truth.** A spec node states timeless truth: the reality it
    defines.
 
@@ -227,6 +232,6 @@ at write time (`domain.constraint.details-canonical-target-set`).
 - **The 4-tier spine**: every requirement in the tree has a `drives` edge to a domain node (`group`/`entity`/`value`/`service`); every domain node is `realised-by` a solution node (`system`/`container`/`component`); solution nodes trace down to code via `implemented-by` (the endpoint resolves in the scanned graph or is a planned FQN declared in the plan — never invented, never a vanished code FQN). A requirement that floats with no domain/solution tie is review-worthy.
 - **Constraints are prose**: the binary validates structure at write time; **satisfaction is your call** — check the constraint's body against what the code actually does, and flag laws the implementation would violate. A constraint's layer is its scope (global or a tier); it names no node (R2).
 - Node names against the allowlist `[a-z0-9][a-z0-9-]*` and unique per (layer, type); dangling `depends-on`/`contains` targets (the binary refuses them at write time — a dangling ref in the graph means drift).
-- **R1–R5 (the durable-spec rules)**: run `apg_spec_lint` first (its R2/R3/R4 errors on changed nodes are blocking), then review every changed spec node against R1–R5 — a positive, present-tense definition of what is (R1); a negative rule in a layer-scoped constraint (R2); at most one note deepening what is (R3); a note's `details` naming exactly one node (R4); timeless truth (R5). History content — superseded wording, a change-log, a rejected alternative, a decision/reconciliation/correction/provenance note, or a note about another note or a past state — is a blocking finding whose fix is delete/rewrite.
+- **R1–R5 (the durable-spec rules)**: run `apg_spec_lint` first (its R2/R3/R4 errors on changed nodes are blocking), then review every changed spec node against R1–R5 — a positive, present-tense definition of what is (R1); a negative rule in a layer-scoped constraint (R2); at most one note, attaching only to implementation-layer code and deepening the code it explains (R3); a note's `details` naming exactly one code FQN (R4); timeless truth (R5). History content — superseded wording, a change-log, a rejected alternative, a decision/reconciliation/correction/provenance note, or a note about another note or a past state — is a blocking finding whose fix is delete/rewrite.
 - Contradictions between sections; scope that doesn't fit one phased plan.
 - Concrete, implementation-ready wording suitable for a plan-writer.
