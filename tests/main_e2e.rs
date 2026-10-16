@@ -2332,6 +2332,43 @@ mod e2e {
             !tool.contains("Only the writer side does this"),
             "the apg_review_action tool must not say only the writer actions"
         );
+
+        // The ungranted plan-note surface
+        // (`requirements.requirement.no-plan-note-grant`): the plan-note surface
+        // is banned outright, so no agent in the embedded set may grant
+        // `apg_plan_note` as a permission entry — the ordered-rule frontmatter
+        // carries no `- action: apg_plan_note` entry anywhere.
+        for (name, content) in AGENTS {
+            assert!(
+                granted_effect(content, "apg_plan_note").is_none(),
+                "{name} must not grant `action: apg_plan_note` — no agent holds the banned plan-note surface"
+            );
+        }
+        // …and the agent-builder template states the generated-agent grant shape
+        // never includes `apg_plan_note`, alongside the existing `apg_plan_render`
+        // exclusion (so a scaffolded agent inherits neither).
+        let builder = agent("agent-builder.md");
+        for needle in ["apg_plan_render", "apg_plan_note"] {
+            assert!(
+                builder.contains(needle),
+                "agent-builder.md must state the generated-agent grant shape never includes `{needle}`"
+            );
+        }
+
+        // The done-only navigator cadence
+        // (`requirements.requirement.navigator-cadence-marks-done-only`): the
+        // navigator's mark-done cadence names `apg_plan_done`/`apg_plan_undone`
+        // and the prompt carries no `apg_plan_note` literal at all.
+        for needle in ["apg_plan_done", "apg_plan_undone"] {
+            assert!(
+                navigator.contains(needle),
+                "the navigator prompt must name `{needle}` in its mark-done cadence"
+            );
+        }
+        assert!(
+            !navigator.contains("apg_plan_note"),
+            "the navigator prompt must carry no `apg_plan_note` literal — its cadence marks done only"
+        );
     }
 
     /// The coordinator-mediated cycle's writer side is read-only: the embedded
