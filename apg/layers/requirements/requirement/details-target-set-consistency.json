@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "details-target-set-consistency",
-  "body": "The durable spec's details edge refuses a note-to-note pair at write time, matching the graph projection's deliberate note omission, while admitting every other authored node and code target.",
+  "body": "The durable spec's details edge refuses a note-to-note pair at write time and admits a code target only, the implementation-layer code identity the note deepens.",
   "properties": {
     "feature": "durable-spec-integrity"
   },

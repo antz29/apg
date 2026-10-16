@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "details-edge",
-  "body": "The durable spec's details edge kind: an annotation attaching a note to the single thing it explains, its target either an authored node or a code identity, with a note target excluded.",
+  "body": "The durable spec's details edge kind: an annotation attaching a note to the single implementation-layer code identity it explains, its target a code identity, with a note target excluded.",
   "properties": {
     "kind": "entity"
   },

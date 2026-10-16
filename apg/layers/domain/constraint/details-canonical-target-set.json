@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "constraint",
   "name": "details-canonical-target-set",
-  "body": "The details edge's one canonical rule is that a note target is excluded, enforced by the write surface refusing the pair and the projection omitting it, with no closed-set or no-loss claim.",
+  "body": "The details edge's one canonical rule is that the target is a single implementation-layer code identity, enforced by the write surface refusing any other target and the projection carrying exactly that one.",
   "properties": {},
   "out": [],
   "in": []

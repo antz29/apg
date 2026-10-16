@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "spec-truth",
-  "body": "The target-truth content of a durable spec statement: the positive, affirmative definition a tier node states of what is, in the present tense, deepened by at most one note.",
+  "body": "The target-truth content of a durable spec statement: the positive, affirmative definition a tier node states of what is, in the present tense.",
   "properties": {
     "kind": "entity"
   },

@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "details-target-validation",
-  "body": "The write-surface validation of the details edge: it requires a note source, refuses a note target, and accepts every other authored node and any code identity, implementing the edge's canonical target set.",
+  "body": "The write-surface validation of the details edge: it requires a note source, refuses a note target, and accepts a code identity only, implementing the edge's code-only target set.",
   "properties": {},
   "out": [
     {

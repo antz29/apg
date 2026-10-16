@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "durable-spec-states-what-is",
-  "body": "A durable spec states what is, and the spec rules govern every APG instance's durable tier 1-3 nodes, their notes and constraints, and the distributed agent suite that authors and reviews them.",
+  "body": "A durable spec states what is, and the spec rules govern every APG instance's durable tier 1-3 nodes and constraints, the notes on implementation-layer code, and the distributed agent suite that authors and reviews them.",
   "properties": {
     "feature": "spec-principles"
   },
