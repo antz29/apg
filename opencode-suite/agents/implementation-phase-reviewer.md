@@ -391,9 +391,14 @@ changed spec node** semantically against the rules:
    constraint declares its scope through its layer and names no node —
    `attaches-to` is not part of the model
    (`global.constraint.spec-constraint-scope`).
-3. **R3 — at most one note.** A node holds at most one note, deepening what is.
-4. **R4 — `details` names exactly one node.** A note's `details` edge names
-   exactly one node.
+3. **R3 — at most one note, implementation-only.** A note attaches only to
+   implementation-layer code and deepens the single code identity it explains;
+   that code holds at most one note. A note in the requirements, domain,
+   solution, or global layer is a violation
+   (`global.constraint.note-implementation-only`).
+4. **R4 — `details` names exactly one code FQN.** A note's `details` edge names
+   exactly one target: the single code FQN the note deepens
+   (`global.constraint.note-details-shape`).
 5. **R5 — timeless truth.** A spec node states timeless truth: the reality it
    defines.
 
