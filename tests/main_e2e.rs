@@ -1968,6 +1968,76 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The init success line reports each population's count against its OWN
+    /// total. The pre-fix `install_suite` folded the 40 suite files and the 7
+    /// agents into one counter, so a fresh `apg init` printed
+    /// `installed/updated 47 of 40 suite files + 7 agents`. A fresh install
+    /// writes every file, so each count equals its own population's total; a
+    /// re-run against the same isolated HOME writes nothing and reports both
+    /// populations already up to date.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/isolated HOME/spawned apg/fs writes); run via cargo test-e2e"]
+    fn init_report_line_counts_suite_files_and_agents_separately() {
+        let suite_total = SUITE_TOOLS.len() + 2;
+        let agent_total = AGENTS.len();
+
+        let base = std::env::temp_dir().join(format!("apg-init-report-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        // Isolated HOME with the suite dependency dir pre-created so `apg init`
+        // never shells out to `bun install`.
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let run_init = || {
+            let out = testutil::ApgCommand::new(&["init", "."])
+                .cwd(&repo_dir)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg init failed in {}: {}{}",
+                repo_dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+
+        // Fresh install: every suite file and agent is written, and each count
+        // is printed against its own population's total.
+        let fresh = run_init();
+        let expected_fresh = format!(
+            "installed/updated {suite_total} of {suite_total} suite files + {agent_total} of {agent_total} agents"
+        );
+        assert!(
+            fresh.contains(&expected_fresh),
+            "fresh `apg init` must report each count against its own total (`{expected_fresh}`); got:\n{fresh}"
+        );
+        // The regression: the suite-file count must never fold in the agents
+        // and so print against the suite total (`{suite_total + agent_total} of {suite_total}`).
+        let folded = format!("{} of {suite_total} suite files", suite_total + agent_total);
+        assert!(
+            !fresh.contains(&folded),
+            "the suite-file count must not fold in the agents; got:\n{fresh}"
+        );
+
+        // Re-run against the SAME isolated HOME: everything is already current.
+        let rerun = run_init();
+        let expected_rerun =
+            format!("{suite_total} suite files + {agent_total} agents already up to date");
+        assert!(
+            rerun.contains(&expected_rerun),
+            "a re-run must report both populations already up to date (`{expected_rerun}`); got:\n{rerun}"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// The read-guard prose holds for exactly the six prompts this change
     /// touches: the four distributed agents rewritten by read-guard-prose
     /// (spec-review/spec-writer/plan-writer/plan-review), the newly distributed
