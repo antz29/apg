@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "opencode-docs",
-  "body": "The opencode-2.x dependency documentation: it names the plugin dependency and the global config install locations and states the release-to-opencode version pairing and the post-init restart note.",
+  "body": "The opencode-2.x dependency documentation: it names the plugin dependency, the global config install locations, the release-to-opencode pairing and the post-init restart note, and the six-layer spec table with its code-FQN-only details edge.",
   "properties": {},
   "out": [
     {

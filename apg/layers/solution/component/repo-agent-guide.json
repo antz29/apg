@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "repo-agent-guide",
-  "body": "The repository's own agent guide: the repo-local guidance agents read in this checkout, carrying the file-tool guidance and the in-graph and outside-the-graph artifact-class boundary.",
+  "body": "The repository's own agent guide: the repo-local guidance agents read in this checkout, carrying the file-tool guidance, the in-graph and outside-the-graph artifact-class boundary, and the durable-spec layer table.",
   "properties": {},
   "out": [
     {

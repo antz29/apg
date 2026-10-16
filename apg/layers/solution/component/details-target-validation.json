@@ -2,12 +2,17 @@
   "layer": "solution",
   "type": "component",
   "name": "details-target-validation",
-  "body": "The write-surface validation of the details edge: it requires a note source, refuses a note target, and accepts a code identity only, implementing the edge's code-only target set.",
+  "body": "The code-only details edge: the write surface requires a note source, refuses every authored-node target and accepts a code FQN only, and the spec lint's R4 rule requires exactly one code target.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
       "target": "rust.apg.layers.validate.validate_edge",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.spec_lint.lint",
       "properties": {}
     }
   ],

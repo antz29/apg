@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "ungranted-plan-note",
-  "body": "The ungranted plan-note tool: the distributed agent templates and the agent-builder's generated-grant shape omit it, and the navigator's cadence prose drops its reference.",
+  "body": "The ungranted plan-note tool: the distributed agent templates and the agent-builder's generated-grant shape omit it, and the navigator's cadence prose names the plan-done and plan-undone tools alone.",
   "properties": {},
   "out": [
     {
