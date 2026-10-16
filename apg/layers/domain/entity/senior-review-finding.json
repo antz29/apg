@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "senior-review-finding",
-  "body": "A finding a reviewer raises on a change: a concrete case with its smallest fix, graded must-fix, should-fix, or nice-to-have, and ordered behind correctness, safety, load, tests, speed and leanness.",
+  "body": "A finding a reviewer raises on a change: a concrete case with its smallest fix, graded blocking, advisory, or optional, and ordered behind correctness, safety, load, tests, speed and leanness.",
   "properties": {
     "kind": "entity"
   },

@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "reviewer-senior-review-discipline",
-  "body": "The implementation-phase reviewer prompt's senior-review discipline: it orders concerns correct, safe, load, tested, fast and lean, requires a concrete case per finding, and translates must-fix and should-fix findings into review Feedback.",
+  "body": "The implementation-phase reviewer prompt's senior-review discipline: it orders concerns correct, safe, load, tested, fast and lean, requires a concrete case per finding, and translates blocking and advisory findings into review Feedback.",
   "properties": {},
   "out": [
     {

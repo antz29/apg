@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "review-severity",
-  "body": "The graded severity of a review finding: must-fix, should-fix, or nice-to-have, where the first two become review Feedback and the third is an optional suggestion.",
+  "body": "The graded severity of a review finding: blocking, advisory, or optional, where the blocking and advisory grades become review Feedback and the optional grade is a suggestion.",
   "properties": {},
   "out": [],
   "in": [

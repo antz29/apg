@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "ponytail-level-is-ultra",
-  "body": "The implementer's Ponytail discipline is one fixed ultra level that pushes back to the navigator on any request part beyond the need, with no level switch, session state, or user-facing mode command.",
+  "body": "The implementer's Ponytail discipline is a single fixed ultra level that pushes back to the navigator on any request part beyond the need, applied across the whole task.",
   "properties": {
     "feature": "agent-discipline"
   },
