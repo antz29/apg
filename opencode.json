@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "agent": {
+  "agents": {
     "agent-builder": { "model": "github-copilot/claude-opus-5.5" },
     "implementation-phase-reviewer": { "model": "github-copilot/claude-opus-5.5" },
     "plan-review": { "model": "github-copilot/claude-opus-5.5" },
