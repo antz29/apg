@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "plan-tooling",
-  "body": "The plan/review suite tooling subdomain: the `apg_*` tools that read a project's transient plan (phases, tasks, `Gates`) together with the durable spec and report plan health to the writer/reviewer agents. This change-set's concern is `apg_plan_phases` reporting its requirement findings against the current project/branch's scope rather than every requirement in the layers store.",
+  "body": "The plan-tooling subdomain: the suite tools that read a project's transient plan together with the durable spec and report plan health to the writer and reviewer agents.",
   "properties": {
     "attribute": "supporting"
   },

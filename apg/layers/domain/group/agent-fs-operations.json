@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "agent-fs-operations",
-  "body": "The subdomain of an agent performing a filesystem mutation — delete, move, or copy — within the surface it owns. This is a bounded capability contract: the operation's meaning is inseparable from the per-path scope the agent holds, so the subdomain gathers both the operation and its scope. It is what a plan `deletes`/`renames`/`moves` task exercises, and it is distinct from the graph's own node/edge mutation surface (`apg node rm` / `apg edge rm`), which mutates graph nodes rather than files.",
+  "body": "The subdomain of an agent mutating files in the surface it owns: the delete, move, and copy operations together with the per-path scope that gives each one meaning.",
   "properties": {
     "attribute": "core",
     "root": "agent-fs-operation"

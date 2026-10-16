@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "cli-session",
-  "body": "The CLI session domain: the caller-controlled-durability transaction substrate over the worktree's durable spec store. A session owns the worktree database and lock exclusively, admits durable node/edge mutations into an in-memory buffer projected into the live index, makes the buffer durable at a save, routes reads to see pending changes, and rebuilds the derived index from the on-disk node files after an unclean exit. Its aggregate root is the session coordinator.",
+  "body": "The caller-controlled-durability transaction over the worktree's durable spec store, where a session owns the worktree database, buffers durable mutations until a save, and lets routed reads observe pending changes.",
   "properties": {
     "attribute": "core",
     "root": "cli-session-coordinator"
@@ -10,17 +10,17 @@
   "out": [
     {
       "kind": "contains",
-      "target": "domain.entity.cli-session-coordinator",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
       "target": "domain.entity.cli-session-buffer",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "domain.value.cli-session-socket",
+      "target": "domain.entity.cli-session-coordinator",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.write-time-advisory",
       "properties": {}
     },
     {
@@ -30,7 +30,7 @@
     },
     {
       "kind": "contains",
-      "target": "domain.entity.write-time-advisory",
+      "target": "domain.value.cli-session-socket",
       "properties": {}
     },
     {
@@ -40,7 +40,7 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.cli-session-routing",
+      "target": "solution.component.cli-session-docs",
       "properties": {}
     },
     {
@@ -55,14 +55,14 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.cli-session-docs",
+      "target": "solution.component.cli-session-routing",
       "properties": {}
     }
   ],
   "in": [
     {
       "kind": "drives",
-      "source": "requirements.requirement.cli-session-substrate",
+      "source": "requirements.requirement.cli-session-crash-recovery",
       "properties": {}
     },
     {
@@ -71,13 +71,8 @@
       "properties": {}
     },
     {
-      "kind": "details",
-      "source": "domain.note.cli-session-boundary",
-      "properties": {}
-    },
-    {
       "kind": "drives",
-      "source": "requirements.requirement.cli-session-crash-recovery",
+      "source": "requirements.requirement.cli-session-substrate",
       "properties": {}
     }
   ]

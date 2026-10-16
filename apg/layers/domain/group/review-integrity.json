@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "review-integrity",
-  "body": "The review-integrity group is the branch-local review state of a change-set: the Feedback items a project carries, the targets they reference, the status lifecycle, and the process that drives each item to a terminal decision.",
+  "body": "The branch-local review state of a change-set: the review items a project carries, the targets they reference, the status lifecycle, and the process that drives each item to a terminal decision.",
   "properties": {
     "attribute": "core"
   },
@@ -14,17 +14,22 @@
     },
     {
       "kind": "contains",
+      "target": "domain.entity.removal-feedback-notice",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.entity.reviewed-target-reference",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "domain.value.review-status",
+      "target": "domain.service.feedback-lifecycle",
       "properties": {}
     },
     {
       "kind": "contains",
-      "target": "domain.service.feedback-lifecycle",
+      "target": "domain.value.review-status",
       "properties": {}
     },
     {
@@ -34,7 +39,7 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.review-record-retention",
+      "target": "solution.component.feedback-projection",
       "properties": {}
     },
     {
@@ -44,17 +49,12 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.verify-feedback-stage",
+      "target": "solution.component.review-record-retention",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.feedback-projection",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.entity.removal-feedback-notice",
+      "target": "solution.component.verify-feedback-stage",
       "properties": {}
     }
   ],

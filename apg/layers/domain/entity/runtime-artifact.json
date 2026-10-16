@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "runtime-artifact",
-  "body": "A file produced by the toolchain rather than authored by the repository: Go's generated `_testmain` in the shared build cache under the git-common-dir, and staged/build outputs under `target/**`. A runtime artifact is toolchain output, distinct from authored source content, and takes neither a source-file identity nor a module parent in the graph.",
+  "body": "A file produced by the toolchain rather than authored by the repository — a generated test main in the shared build cache or a staged build output — which takes neither a source-file identity nor a module parent.",
   "properties": {
     "kind": "entity"
   },

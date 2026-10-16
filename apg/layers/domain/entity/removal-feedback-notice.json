@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "removal-feedback-notice",
-  "body": "A removal-feedback notice is the warning `apg node rm` reports when it removes a node that outstanding Feedback items review. It names each open or actioned item and the reviewed-target FQN, and the removal proceeds with every affected record and reviewed-target reference left intact.",
+  "body": "The warning a node removal reports when it removes a node that outstanding review items review, naming each item and its reviewed-target identity while leaving every record intact.",
   "properties": {
     "kind": "entity"
   },
@@ -15,11 +15,6 @@
   ],
   "in": [
     {
-      "kind": "drives",
-      "source": "requirements.requirement.node-rm-warns-on-outstanding-feedback",
-      "properties": {}
-    },
-    {
       "kind": "contains",
       "source": "domain.group.review-integrity",
       "properties": {}
@@ -27,6 +22,11 @@
     {
       "kind": "drives",
       "source": "requirements.requirement.cli-session-warning-visibility",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.node-rm-warns-on-outstanding-feedback",
       "properties": {}
     }
   ]

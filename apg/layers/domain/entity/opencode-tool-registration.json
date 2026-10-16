@@ -2,19 +2,19 @@
   "layer": "domain",
   "type": "entity",
   "name": "opencode-tool-registration",
-  "body": "A suite tool registered on the opencode 2.x tool domain through a synchronous transform editor: the editor adds a definition carrying a name, a description, a JSON-Schema input, and an execute that returns structured content. A transform is a replayable state edit — its callback is synchronous and free of one-time side effects — and registrations stay active for the plugin's lifetime, disposed when the plugin unloads. A later transform sees earlier changes and may update, replace, or remove them. The suite registers one tool per plugin definition.",
+  "body": "A suite tool registered on the opencode 2.x tool domain through a synchronous replayable transform that adds a definition carrying a name, a description, an input schema, and an execute.",
   "properties": {
     "kind": "entity"
   },
   "out": [
     {
       "kind": "realised-by",
-      "target": "solution.component.opencode-tool-plugin",
+      "target": "solution.component.opencode-lib-context",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.opencode-lib-context",
+      "target": "solution.component.opencode-tool-plugin",
       "properties": {}
     }
   ],

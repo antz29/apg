@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "plan-coverage",
-  "body": "The coverage rule of the plan-verify gate: the obligation set is exactly the changed `implemented-by` claims of the branch's durable-spec delta, and each affected code FQN is touched by a plan task. The same delta scopes the requirement gate: every requirement added or changed in the delta is `Satisfies`'d by at least one plan phase. Coverage is verb-agnostic, counts a `renames`/`moves` destination, and compares code FQNs by language-agnostic identity. An in-scope solution node whose `implemented-by` claim is absent is reported as an absent-claims warning.",
+  "body": "The coverage rule of the plan-verify gate: the obligation set is the change-set delta's changed implementation claims, each affected code identity touched by a plan task, with the same delta scoping the requirement gate.",
   "properties": {
     "kind": "entity"
   },

@@ -2,17 +2,17 @@
   "layer": "domain",
   "type": "service",
   "name": "cli-session-routing",
-  "body": "The session routing service: how a durable mutation and a read reach a live session. A mutation routes to the session's buffer and live-index projection while a session is live, and a read routed through the session observes pending changes. With the session absent, a read opens the database directly and returns the last saved state.",
+  "body": "The session routing service: a durable mutation reaches the live session's buffer and index projection while a session is live, and a read through the session observes pending changes while a direct read observes the last saved state.",
   "properties": {},
   "out": [
     {
       "kind": "realised-by",
-      "target": "solution.component.cli-session-routing",
+      "target": "solution.component.cli-session-caller-guidance",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.cli-session-caller-guidance",
+      "target": "solution.component.cli-session-routing",
       "properties": {}
     }
   ],
@@ -24,12 +24,12 @@
     },
     {
       "kind": "drives",
-      "source": "requirements.requirement.cli-session-required-for-durable-mutations",
+      "source": "requirements.requirement.cli-session-read-your-writes",
       "properties": {}
     },
     {
       "kind": "drives",
-      "source": "requirements.requirement.cli-session-read-your-writes",
+      "source": "requirements.requirement.cli-session-required-for-durable-mutations",
       "properties": {}
     }
   ]

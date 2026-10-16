@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "module-size-signal",
-  "body": "The indicative size of a first-party source file — roughly 400 lines of production code — used as a SIGNAL for decomposition review rather than a target. A file above the signal prompts inspection of whether its responsibilities are cohesive and of whether a split serves them; the number itself stands apart from any acceptance threshold, and a change that splits a file to fall under it while cohesion stays flat violates the decomposition law. Test code is accounted separately and lies outside the signal's accounting.",
+  "body": "The indicative size of a first-party source file, roughly four hundred production lines, used as a signal for decomposition review rather than a target, with test code accounted separately.",
   "properties": {},
   "out": [],
   "in": [

@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "structural-scanner",
-  "body": "The bundled scanner artifact that graphs the structural formats: one self-contained Rust crate (`src/structlib`, absorbing `src/mdlib`) building one binary (`structfrontend`), shipped in the base apg package rather than as a per-format formula. It claims the files outside every code frontend's claim, runs with zero scan-time dependencies, and carries zero language-version ceiling; it is distinct from the per-language code frontends in `domain.entity.frontend-artifact`.",
+  "body": "The bundled scanner artifact that graphs the structural formats: one self-contained crate building one binary, shipped in the base package, running with zero scan-time dependencies and imposing zero language-version ceiling.",
   "properties": {
     "kind": "entity"
   },

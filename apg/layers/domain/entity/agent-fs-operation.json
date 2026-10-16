@@ -2,14 +2,14 @@
   "layer": "domain",
   "type": "entity",
   "name": "agent-fs-operation",
-  "body": "A single filesystem mutation an agent performs while implementing a plan task: delete (rm), move/rename (mv), or copy (cp). Its identity is the operation together with its source path and, for mv/cp, its destination path. It is the capability the implementer roles need — as distinct from any particular tool that exposes it — and it is always scoped: an operation is only meaningful against a path the agent owns. Domain-side, it is what a plan `deletes`/`renames`/`moves` task exercises.",
+  "body": "A single filesystem mutation an agent performs while implementing a plan task: a delete, move, or copy, identified by the operation together with its source path and, for a move or copy, its destination.",
   "properties": {
     "kind": "entity"
   },
   "out": [
     {
       "kind": "realised-by",
-      "target": "solution.component.agent-fs-tool-suite",
+      "target": "solution.component.agent-fs-install-registry",
       "properties": {}
     },
     {
@@ -19,7 +19,7 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.agent-fs-install-registry",
+      "target": "solution.component.agent-fs-tool-suite",
       "properties": {}
     }
   ],

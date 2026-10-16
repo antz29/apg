@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "plan-verification",
-  "body": "The plan-verification subdomain of the `apg plan verify` coherence gate: its derived-coverage stage, the requirement-satisfies gate over the same merge-base delta, and the durable-spec delta both are computed from. Its concern is that a project's plan covers exactly the durable-spec delta: every changed `implemented-by` claim and every delta-added or changed requirement.",
+  "body": "The plan-verification subdomain of the coherence gate: the requirement-satisfies gate and the derived-coverage stage, both computed from a project's durable-spec delta.",
   "properties": {
     "attribute": "core"
   },
@@ -14,17 +14,17 @@
     },
     {
       "kind": "contains",
+      "target": "domain.entity.plan-review-verdict",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "domain.value.change-set-spec-delta",
       "properties": {}
     },
     {
       "kind": "realised-by",
       "target": "solution.component.plan-coverage-check",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.entity.plan-review-verdict",
       "properties": {}
     }
   ],

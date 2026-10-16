@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "source-layout",
-  "body": "The decomposition of apg's first-party source: how production source is divided into cohesive modules across the root crate and the eight frontend crates, how its tests are organized into tiers and where they live, and the library surface that makes the crate-internal API reachable from tests outside the declaring module. The layout is chosen for cohesion and reuse rather than a line count.",
+  "body": "The decomposition of apg's first-party source: production source divided into cohesive modules across the root crate and the frontend crates, tests organized into tiers, and a library surface reachable from outside a module.",
   "properties": {
     "attribute": "core"
   },

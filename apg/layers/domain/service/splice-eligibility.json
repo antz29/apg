@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "service",
   "name": "splice-eligibility",
-  "body": "The decision of whether to build the DB incrementally (win-C splice) or from scratch (full load): try the splice when the seed provably represents the assembled graph; otherwise run the full load. The service's evidence spans the code content identity and the authored/transient row set, so its verdict is the same across change-sets that touch code and change-sets that touch only the spec.",
+  "body": "The decision of whether to build the database incrementally or from scratch: the splice runs when the seed provably represents the assembled graph's code and authored rows, and the full load runs otherwise.",
   "properties": {},
   "out": [
     {

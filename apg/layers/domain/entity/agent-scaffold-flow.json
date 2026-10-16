@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "agent-scaffold-flow",
-  "body": "The lifecycle by which a repo's code-writer agents are created or updated while a change-set is in flight. The flow is anchored on the MAIN CHECKOUT rather than the project worktree, because an agent is a consumer artifact the running opencode session loads from the main checkout / `~/.config/opencode/agents/`: the agent-builder's main-write grants (`.opencode/agents/**` and the repo's `opencode.json` agent→model map) resolve against the session workspace root, and a worktree mirror of an agent stays absent. The flow is: implementation is blocked because an agent is missing or outdated → the navigator delegates to the agent-builder on the main checkout → the agent-builder writes `.opencode/agents/**` and `opencode.json` and commits there → the navigator rebases the project worktree onto main → re-scans → the user restarts opencode before implementation resumes.\n\nIt exists because the binary's guarded node/edge/plan/review mutations keep main free of mutation while agent definition lives on the default branch by nature; the flow bridges the two. It is distinct from `domain.entity.task-execution-cadence` (the ordering for mutating a plan under the branch graph's staleness guard): this is the ordering for putting an agent in place so implementation can proceed at all.",
+  "body": "The lifecycle by which a repository's code-writer agents are created or updated while a change-set is in flight, anchored on the main checkout because a running session loads agents from there.",
   "properties": {
     "kind": "entity"
   },

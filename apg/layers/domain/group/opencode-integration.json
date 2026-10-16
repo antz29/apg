@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "opencode-integration",
-  "body": "The apg opencode integration as the opencode 2.x extension surface: the plugin definition each suite tool is expressed as, the tool registration the definition adds to the tool domain, and the ordered permission rule set each agent carries. It is the opencode-2.x counterpart of the agent-roster and agent-fs-operations groups: those describe which agents exist and what paths they may touch, while this group describes how the suite and its agents attach to the opencode 2.x plugin runtime.",
+  "body": "The apg opencode integration as the opencode 2.x extension surface: the plugin definition each suite tool is expressed as, the tool registration it adds, and the permission rules each agent carries.",
   "properties": {
     "attribute": "supporting",
     "root": "opencode-plugin-definition"

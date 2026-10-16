@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "opencode-plugin-definition",
-  "body": "An opencode 2.x plugin definition: a stable `id`, an async `setup(ctx)` that registers the plugin's extensions, and the cleanup function `setup` returns. Plugin storage is scoped by the id, and the id names the plugin in status and diagnostics; the id is unique across the suite, and the suite's id for a tool plugin is its tool's effective name (for example `apg_query`, `apg_rm`). The context `setup` receives is both the opencode client and the plugin extension API, with operations grouped by domain and the plugin's load location exposed as `ctx.location.directory` and `ctx.location.project`. The suite expresses each tool as one plugin definition, so a tool's extension surface is its own definition.",
+  "body": "An opencode 2.x plugin definition: a stable identity, an asynchronous setup that registers the plugin's extensions, and the cleanup the setup returns, with storage scoped by the identity.",
   "properties": {
     "kind": "entity"
   },

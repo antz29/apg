@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "misc-residual-format",
-  "body": "The residual structural format: the bucket that claims whatever the code frontends and the explicit format streams leave unclaimed (`LICENSE`, dotfiles, fixtures, binaries). Its definition is by exclusion, so it shrinks as formats are added and stays open to whatever remains. A value rather than an entity: it marks the complement of the claimed formats, holding position rather than identity or lifecycle.",
+  "body": "The residual structural format: the bucket claiming whatever the code frontends and the explicit format streams leave unclaimed, defined by exclusion so it shrinks as formats are added.",
   "properties": {},
   "out": [],
   "in": [

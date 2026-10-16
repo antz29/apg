@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "value",
   "name": "cli-session-socket",
-  "body": "The session socket: the filesystem rendezvous a live session binds and the marker of a session's life. A socket that answers a connect and a Ping marks a live session; a present socket that fails to answer marks an unclean exit whose derived index is rebuilt from the node files. A separate session lock file is absent; the socket itself is the crash marker.",
+  "body": "The session socket: the filesystem rendezvous a live session binds and the marker of its life, where a socket that answers marks a live session and a silent socket marks an unclean exit.",
   "properties": {},
   "out": [],
   "in": [
@@ -13,12 +13,12 @@
     },
     {
       "kind": "drives",
-      "source": "requirements.requirement.cli-session-lifecycle-exclusivity",
+      "source": "requirements.requirement.cli-session-crash-recovery",
       "properties": {}
     },
     {
       "kind": "drives",
-      "source": "requirements.requirement.cli-session-crash-recovery",
+      "source": "requirements.requirement.cli-session-lifecycle-exclusivity",
       "properties": {}
     }
   ]

@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "java-package",
-  "body": "The package identity a Java source file is attributed to, including the degenerate default (empty) package. A compilation unit whose `package` declaration is empty still carries a stable, reachable module identity: the default package preserves the module record, keeping the File reachable and rendering its top-level classes with a leading dot. This is the Java instance of module-identity.",
+  "body": "The package identity a Java source file is attributed to, including the degenerate default package, which preserves a module record and keeps the file reachable.",
   "properties": {
     "kind": "entity"
   },

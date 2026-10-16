@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "release-agent-flow",
-  "body": "The optional, per-repo release path: a repo may have the `agent-builder` scaffold a generated `release-agent` — a hidden subagent that is the ONLY generated agent granted `git push`/`git tag` (as `ask`, so every push/tag command prompts for explicit human approval) plus write access to the repo's release artefacts ON THE MAIN CHECKOUT (releases are made from main alone). That main-write set is determined PER REPO: the agent-builder analyses what the repo's release touches and recommends the set, confirmed via the coordinator interview, rather than a fixed list. The `codebase-navigator` dispatches the release-agent through the `subagent` tool ONLY after capturing explicit user consent. Approval surfaces both at dispatch (the navigator's consent) and per command (the `ask` grant). Push/tag grants belong to the release-agent alone among generated agents. The release-agent is the deliberate carve-out from the recurring \"push/tag remain human-approved acts\" law and one of the two agent carve-outs of `global.constraint.worktree-isolation`. The binary performs git operations through git2 only, and `scripts/release.sh` stops at the commit boundary — the agent may run the script and then push/tag itself.",
+  "body": "The optional per-repo release path: a generated release agent, the sole generated agent granted push and tag behind explicit human approval, with write access to the repository's main-checkout release artefacts.",
   "properties": {
     "kind": "entity"
   },

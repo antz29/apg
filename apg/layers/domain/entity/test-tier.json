@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "test-tier",
-  "body": "The verification depth of a test — unit, int, or e2e — defined by `global.constraint.test-tier-boundaries`. A test's tier is a property of its body (real I/O makes it e2e); the layout lets each tier be selected independently by a libtest path filter.",
+  "body": "The verification depth of a test — unit, integration, or end-to-end — defined by the test's body, with the layout letting each tier be selected by a path filter.",
   "properties": {
     "kind": "entity"
   },

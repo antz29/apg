@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "seed-equivalence-guard",
-  "body": "The eligibility check that admits the splice when the local seed provably matches the shared recorded scan. The seed's own recorded content-identity key equals the shared record's key, and a missing key on either side makes the seed ineligible; a refusal hands the caller to the full load, the correctness reference. The guard additionally requires that the assembled graph's durable-layer and transient rows are already represented in the seed, so a spec-only change-set that omits them is refused rather than publishing a diverged DB.",
+  "body": "The eligibility check that admits the splice when the local seed provably matches the shared recorded scan, requiring both a matching content-identity key and the assembled durable and transient rows already in the seed.",
   "properties": {
     "kind": "entity"
   },

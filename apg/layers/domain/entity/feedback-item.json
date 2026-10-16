@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "feedback-item",
-  "body": "A Feedback item is a single review remark attached to a project: its FQN (`<project>/feedback-<n>`), its body, and its status. The item lives in the project's transient review set independent of whether its reviewed target exists.",
+  "body": "A single review remark attached to a project: its identity, its body, and its status, living in the project's transient review set independent of whether its reviewed target exists.",
   "properties": {
     "kind": "entity"
   },
@@ -19,12 +19,12 @@
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.verify-feedback-stage",
+      "target": "solution.component.review-record-retention",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "target": "solution.component.review-record-retention",
+      "target": "solution.component.verify-feedback-stage",
       "properties": {}
     }
   ],

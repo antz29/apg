@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "group",
   "name": "graph-identity",
-  "body": "The identity model of the program graph: how a repository's source content is named so that the same content at the same commit has the same name for every user and in every checkout. Core domain concept of this change-set; its aggregate root is the canonical identity of a source file.",
+  "body": "The identity model of the program graph: how repository content is named so that the same content at the same commit carries the same name in every checkout and for every user.",
   "properties": {
     "attribute": "core",
     "root": "canonical-file-identity"
@@ -10,32 +10,7 @@
   "out": [
     {
       "kind": "contains",
-      "target": "domain.value.repo-relative-path",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.value.canonical-file-identity",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.value.module-identity",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "domain.entity.source-file",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.identity-layer",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
-      "target": "solution.component.scan-driver",
+      "target": "domain.entity.classification-config",
       "properties": {}
     },
     {
@@ -50,7 +25,12 @@
     },
     {
       "kind": "contains",
-      "target": "domain.entity.typescript-package",
+      "target": "domain.entity.rust-crate-target",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.source-file",
       "properties": {}
     },
     {
@@ -60,7 +40,7 @@
     },
     {
       "kind": "contains",
-      "target": "domain.entity.rust-crate-target",
+      "target": "domain.entity.typescript-package",
       "properties": {}
     },
     {
@@ -70,14 +50,34 @@
     },
     {
       "kind": "contains",
-      "target": "domain.entity.classification-config",
+      "target": "domain.value.canonical-file-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.module-identity",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.repo-relative-path",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.identity-layer",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.scan-driver",
       "properties": {}
     }
   ],
   "in": [
     {
       "kind": "drives",
-      "source": "requirements.requirement.repo-relative-file-identity",
+      "source": "requirements.requirement.absolute-paths-at-tool-boundary",
       "properties": {}
     },
     {
@@ -97,7 +97,7 @@
     },
     {
       "kind": "drives",
-      "source": "requirements.requirement.absolute-paths-at-tool-boundary",
+      "source": "requirements.requirement.repo-relative-file-identity",
       "properties": {}
     }
   ]

@@ -2,7 +2,7 @@
   "layer": "domain",
   "type": "entity",
   "name": "main-integration",
-  "body": "The integration of a change-set into main: the single, gated act by which a project branch's work reaches the main checkout — `apg project merge <name>` (verify gate → merge → main rebuild → self-clean). Change-set integration runs through this gated act alone; raw git (merge/checkout/switch/worktree add-remove on main) sits outside agent change-set integration. The git scope covers the NAVIGATOR's raw git use only — the navigator's sole branch-state-mutating raw git command is rebasing the project worktree onto main, run inside the worktree. Other agents' main writes are separate, explicit carve-outs outside change-set integration: the `agent-builder` commits `.opencode/agents/**` and the repo's `opencode.json` agent→model map on main, and the optional `release-agent` (user-consented) performs `git push`/`git tag` as `ask`.",
+  "body": "The integration of a change-set into main: the single gated act by which a project branch's work reaches the main checkout, with raw git use and the carve-out roles' main writes sitting outside it.",
   "properties": {
     "kind": "entity"
   },
@@ -22,11 +22,6 @@
     {
       "kind": "contains",
       "source": "domain.group.agent-fs-operations",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "domain.note.fix-main-integration-scope-and-parent",
       "properties": {}
     },
     {
