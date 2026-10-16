@@ -2509,6 +2509,68 @@ mod e2e {
         }
     }
 
+    /// Phase-04 (e2e): the embedded agent-prompt templates state the change-set's
+    /// three disciplines — the `agent-builder.md` implementer Ponytail discipline
+    /// (fixed level `ultra`, and the `NOTE:`-line shortcut exception in place of
+    /// an inline `shortcut:` comment), the `implementation-phase-reviewer.md`
+    /// senior-review discipline (`What this change does:` summary + the
+    /// blocking/advisory/optional finding groups + the note-review duty that the
+    /// reviewer reviews an implementation-layer `Note` attached to a graph node),
+    /// and the `codebase-navigator.md` `NOTE:` intake + implementation-layer Note
+    /// authoring grant (`apg_node`/`apg_edge`). The needles are pinned as
+    /// literals, not read back from the prompts, and asserted per prompt.
+    #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn ponytail_discipline_and_note_authoring_stated_in_agent_prompts() {
+        fn agent(name: &str) -> &'static str {
+            AGENTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+        }
+
+        for (name, needles) in [
+            (
+                "agent-builder.md",
+                &[
+                    "Ponytail",
+                    "fixed level: `ultra`",
+                    "Shortcut exception (BINDING).",
+                    "`NOTE: <text>`",
+                    "`shortcut:`",
+                ][..],
+            ),
+            (
+                "implementation-phase-reviewer.md",
+                &[
+                    "What this change does:",
+                    "blocking / advisory / optional",
+                    "Note review (implementation-phase reviewer only).",
+                    "implementation-layer `Note` attached to a graph node",
+                ][..],
+            ),
+            (
+                "codebase-navigator.md",
+                &[
+                    "action: apg_node",
+                    "action: apg_edge",
+                    "Implementer shortcut notes (`NOTE:` intake)",
+                    "implementation-layer `Note`",
+                    "apg_node`/`apg_edge`",
+                ][..],
+            ),
+        ] {
+            let prompt = agent(name);
+            for needle in needles {
+                assert!(
+                    prompt.contains(needle),
+                    "{name} must carry the discipline prose {needle:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn scaffold_gitignore_adds_layout_entries_once() {
