@@ -149,11 +149,12 @@ fn orphan_notes(db: &ArtifactDb) -> i64 {
 /// keys and empty-valued keys; the `Entity` carries `kind = event` (a durable
 /// key the `Entity` table has no dedicated column for, so only the
 /// serialized-properties column can carry it); and edges — with their own
-/// properties — of every durable authored kind. Every authored edge appears in
-/// BOTH endpoint files with identical properties (the pairing invariant),
-/// except `implemented-by`, whose code target (`go.fixture.mod.Store`, the
-/// scanned struct `testutil::project_with_db` provides) has no node file to
-/// hold the in half.
+/// properties — of every durable authored kind. Every AUTHORED edge appears in
+/// BOTH endpoint files with identical properties (the pairing invariant). The
+/// two code-targeted kinds are the exception: `implemented-by` and `details`
+/// both name a code identity (`go.fixture.mod.Store`, the scanned struct
+/// `testutil::project_with_db` provides), so only the source's out half exists —
+/// a code node has no file to hold the in half.
 fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
     use layers::{InEdge, NodeFile, OutEdge};
 
@@ -276,7 +277,9 @@ fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
             "design",
             "a design note",
             props(&[("kind", "background"), ("tag", "d"), ("empty-meta", "")]),
-            vec![out("details", "solution.container.api", props(&[]))],
+            // `details` names a single CODE identity (a code endpoint is
+            // pairing-exempt), never an authored node.
+            vec![out("details", "go.fixture.mod.Store", props(&[]))],
             vec![],
         ),
         node(
@@ -410,7 +413,6 @@ fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
             vec![
                 inc("realised-by", "domain.entity.order", props(&[])),
                 inc("contains", "solution.system.platform", props(&[])),
-                inc("details", "implementation.note.design", props(&[])),
             ],
         ),
         node(
@@ -1356,7 +1358,9 @@ mod e2e {
     /// typed property keys (`Requirement` `id`/`feature`, `Note` `kind`,
     /// `Container` `kind`, `Group` `attribute`/`root`, `Constraint`
     /// `attaches-to` → the `attaches-to` property), and BOTH halves of every
-    /// durable authored edge. Phase 4 added the serialized-properties column, so
+    /// AUTHORED-pair edge. The code-targeted edge kinds (`implemented-by`,
+    /// `details`) carry only the source's out half — a code identity has no
+    /// node file. Phase 4 added the serialized-properties column, so
     /// the authored `drives` edge property now round-trips on both halves; the
     /// exact full-fidelity round-trip (arbitrary keys, `Entity` `kind`, the
     /// session's incremental merge path) is pinned by phase 4's own e2e task.
@@ -1397,7 +1401,7 @@ mod e2e {
             body: "the checkout flow".to_string(),
             properties: props(&[("id", "REQ-1"), ("feature", "feature-checkout")]),
             out: vec![out_edge("drives", "domain.group.core", drives_props())],
-            in_edges: vec![in_edge("details", "implementation.note.note-1", props(&[]))],
+            in_edges: Vec::new(),
         };
         let note = layers::NodeFile {
             layer: "implementation".to_string(),
@@ -1405,11 +1409,9 @@ mod e2e {
             name: "note-1".to_string(),
             body: "a note".to_string(),
             properties: props(&[("kind", "background")]),
-            out: vec![out_edge(
-                "details",
-                "requirements.requirement.checkout",
-                props(&[]),
-            )],
+            // `details` names a single CODE identity (a code endpoint is
+            // pairing-exempt): only this source's out half exists.
+            out: vec![out_edge("details", "go.fixture.mod.Store", props(&[]))],
             in_edges: Vec::new(),
         };
         let group = layers::NodeFile {
@@ -1557,9 +1559,10 @@ mod e2e {
         let implemented_out = out(&c, "implemented-by", "go.fixture.mod.Store");
         assert!(implemented_out.properties.is_empty());
 
-        // Both halves of `details`.
-        out(&n, "details", "requirements.requirement.checkout");
-        incoming(&r, "details", "implementation.note.note-1");
+        // `details` to a code identity: only the note's out half (mirrors
+        // `implemented-by` — a code endpoint has no node file).
+        let details_out = out(&n, "details", "go.fixture.mod.Store");
+        assert!(details_out.properties.is_empty());
 
         testutil::remove(&repo);
     }
