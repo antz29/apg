@@ -13,8 +13,8 @@ class ApgCpp < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.22.2"
-    rebuild 70
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "8cf32f2e7ecd9f0e1179867f883c53220566a41ad95c4b37f9a1463abd11349f"
+    rebuild 71
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "43fcc0fea97aecca4e2f6f56d961bdf9d8edb1b9a96a9411737c9e332244603a"
   end
 
   depends_on "scanner"
