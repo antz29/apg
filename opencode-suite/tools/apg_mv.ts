@@ -9,6 +9,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) =>
       editor.add({
         name: "apg_mv",
+        options: { codemode: false },
         description:
           "Move/rename a filesystem path inside the acting agent's granted globs. Resolves BOTH source and destination against the caller's project `directory`, then asserts the acting agent's `edit` permission on the resolved source and destination through opencode's permission engine — fail-closed: a missing permission surface or any denied path refuses the move, and nothing is moved. Then a plain fs rename (no git).",
         input: {

@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_review_reject",
+        options: { codemode: false },
         description:
           "A reviewer rejects an actioned review item (`apg review reject <feedback-fqn>`): reopens it (status back to open, disposition rejected) so the writer must rework. Only the reviewer side does this.",
         input: {

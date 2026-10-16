@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_session",
+        options: { codemode: false },
         description:
           "Drive the live apg session lifecycle for the project's worktree: `action` = start (default) | save | end | abort. `start`: `apg session start` is a blocking foreground coordinator (it holds the worktree's apg/.trans/db.lbug and the extended specs.lock flock for its whole life and serves routed mutations/reads over a Unix socket), so this tool spawns it DETACHED, waits until its socket answers live, then returns while the session keeps running; durable `apg node`/`apg edge` mutations and `apg query` reads then route through the session (seeing unsaved buffered changes). `save`: `apg session save` — flush the whole buffer in one atomic `apg/layers/**` write and exactly one commit (a noop over an empty buffer). `end`: `apg session end` — release the DB/lock/socket; refuses while the buffer is dirty (save or abort first). `abort`: `apg session abort` — discard the buffer and release the session. The caller owns the whole lifecycle: start → mutate → save → end. Note `apg_spec_lint` reads the durable files, so lint after `save`.",
         input: {

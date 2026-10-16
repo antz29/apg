@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_plan_note",
+        options: { codemode: false },
         description:
           "Attach a task note: `apg plan note <project> <task-fqn> --body …`. An implementer records a concern or deviation that arose during execution. The note serializes into the transient plan JSONL (branch-local, survives until the verify gate) and is surfaced to the human at the merge handoff.",
         input: {

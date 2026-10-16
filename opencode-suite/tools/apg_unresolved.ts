@@ -8,6 +8,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_unresolved",
+        options: { codemode: false },
         description:
           "Show unresolved references for a symbol or a whole file: calls and type uses the scanner could not resolve to a project symbol. Pass fqn for one unit, or path for every unit in a file.",
         input: {

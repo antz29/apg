@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_callees",
+        options: { codemode: false },
         description:
           "Find every function the given function calls (outgoing Calls edges). Use to trace a function's dependencies or expand its call tree.",
         input: {

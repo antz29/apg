@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_struct",
+        options: { codemode: false },
         description:
           "Show a struct/class/interface/enum: its file location and line range, plus any nested structs it directly contains.",
         input: {

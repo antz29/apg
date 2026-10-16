@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_project",
+        options: { codemode: false },
         description:
           "Project lifecycle. `start <name>` — run from the MAIN checkout: creates the project worktree at <main>/apg/.worktrees/<name>, a branch off the repo's default branch, and seeds the branch DB by copying the main checkout's current scan (run `apg scan` on main first — start refuses a stale or missing scan); the binary prints the worktree path and sessions then operate with cwd INSIDE that worktree (walk-up discovery finds the worktree's own apg/). `verify <name>` — the pre-merge coherence gate (`apg plan verify`): every planned node realized, all feedback resolved, derived solution coverage holds; read-only. `merge <name>` — run from the MAIN checkout: verify gate → merge the project branch → rebuild main's graph unguarded. Main is never a mutation place.",
         input: {

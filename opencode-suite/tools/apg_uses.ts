@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_uses",
+        options: { codemode: false },
         description:
           "Follow Uses edges (type references) for a symbol. direction=out lists the types a function/struct uses; direction=in lists who uses a struct. Note: calls to a struct's methods appear as Calls, not Uses.",
         input: {

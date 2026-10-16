@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_callers",
+        options: { codemode: false },
         description:
           "Find every function that calls the given function (incoming Calls edges). Include the caller's location so you can jump to each call site.",
         input: {

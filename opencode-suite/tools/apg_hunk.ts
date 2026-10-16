@@ -8,6 +8,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_hunk",
+        options: { codemode: false },
         description:
           "Find the structs and functions that overlap a line range in one file. Use to map a diff hunk or review comment (startLine..endLine, inclusive) to the units it touches. Works with file line numbers, not byte offsets.",
         input: {

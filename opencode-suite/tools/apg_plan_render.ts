@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_plan_render",
+        options: { codemode: false },
         description:
           "Render a plan as PLAN.md-style markdown from the graph: `apg plan render <project> [--out -]`. Default writes apg/.trans/plans/<project>.md (gitignored); pass out=stdout to print it. The render is a projection — never edit it back into the graph.",
         input: {

@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_plan_done",
+        options: { codemode: false },
         description:
           "Mark a plan task done: `apg plan done <project> <task-fqn>`. The implementer's assertion ONLY — no promotion, no code-graph verification (the plan's planned nodes stay declared until the verify gate's coherence check). Use apg_plan_undone to reverse.",
         input: {

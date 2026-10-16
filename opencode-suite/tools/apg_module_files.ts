@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_module_files",
+        options: { codemode: false },
         description:
           "List the source files in a module (package/directory), with their line counts. Each file's fqn is its absolute path; use apg_file_units to see what a file contains.",
         input: {

@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_spec_lint",
+        options: { codemode: false },
         description:
           "Run the deterministic, read-only durable-spec lint (`apg spec lint`) from the project root and return its report. Reports the mechanical R2/R3/R4 rule violations and the change-set delta gates as ERRORS (a non-zero exit) and the tier-1-3 wording advisories as non-blocking warnings — the deterministic pre-pass the plan-review and spec-review passes run before their semantic review. Reads the durable node files, the merge-base git tree, and the transient plan store; never writes. `lint` is the only subcommand.",
         input: {

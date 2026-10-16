@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_find_symbol",
+        options: { codemode: false },
         description:
           "Search the project's code graph for symbols whose FQN contains a string. Returns matching Modules, Files, Structs, and Functions with their locations. Use to look up an exact FQN when you only know part of a name.",
         input: {

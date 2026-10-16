@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_methods",
+        options: { codemode: false },
         description:
           "List the methods and functions of a struct/class/interface/enum (its Struct -> Function containment), with file locations and line ranges.",
         input: {

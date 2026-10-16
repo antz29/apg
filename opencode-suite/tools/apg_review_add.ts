@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_review_add",
+        options: { codemode: false },
         description:
           "Attach review feedback to an artifact node (`apg review add <target-fqn> --body ... [--project <p>]`): a durable layer node (`<layer>.<type>.<name>`, e.g. requirements.requirement.place-order), a plan/phase/task FQN (`<project>/plan…`), or a code FQN. Creates an open Feedback. Feedback is transient — it routes into the branch's apg/.trans mirror (plan targets into the plan store, durable/code targets into the tier mirror) and dies with the branch. The target must exist in the graph; durable-layer and code targets need --project to route the feedback.",
         input: {

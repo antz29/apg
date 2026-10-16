@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_modules",
+        options: { codemode: false },
         description:
           "List the Module nodes in the project (packages for Java, modules for Go/C++, namespaces for C++). Optionally filter by FQN prefix.",
         input: {

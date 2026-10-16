@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_review_resolve",
+        options: { codemode: false },
         description:
           "A reviewer resolves an actioned review item (`apg review resolve <feedback-fqn>`): terminal — status becomes resolved and the item no longer blocks the phase-complete milestone or the verify/merge gate. Only the reviewer side does this; writers cannot resolve their own feedback.",
         input: {

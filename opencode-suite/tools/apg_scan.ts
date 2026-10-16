@@ -25,6 +25,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_scan",
+        options: { codemode: false },
         description:
           "Rebuild the project's LadybugDB graph database (apg/.trans/db.lbug + apg/.trans/graph.jsonl) by running the apg scanner + ingestor pipeline. Run this when source files have changed and the graph is stale.",
         input: {

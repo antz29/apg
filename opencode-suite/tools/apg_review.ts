@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_review",
+        options: { codemode: false },
         description:
           "List review feedback: every Feedback with its status/disposition and the node it reviews, or filtered to one target (`apg review list [<target-fqn>]`). Feedback is transient (branch-local apg/.trans mirrors); read-only.",
         input: {

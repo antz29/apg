@@ -9,6 +9,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) =>
       editor.add({
         name: "apg_rm",
+        options: { codemode: false },
         description:
           "Remove filesystem path(s) inside the acting agent's granted globs. Resolves every path against the caller's project `directory`, then asserts the acting agent's `edit` permission on ALL resolved paths through opencode's permission engine in ONE call — fail-closed: a missing permission surface or any denied path refuses the removal, and nothing is removed. Then a plain fs unlink (no git). Set `recursive` to remove a directory tree.",
         input: {

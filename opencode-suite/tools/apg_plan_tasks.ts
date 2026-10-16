@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_plan_tasks",
+        options: { codemode: false },
         description:
           "List a plan's tasks with phase, kind (owning role), tier (verification depth, test only), status, the Task→Implementation verb (creates/modifies/deletes/renames/moves) with its target FQN(s), and the new FQN for renames/moves. The implementation checklist view.",
         input: {

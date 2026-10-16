@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_module_structs",
+        options: { codemode: false },
         description:
           "List every struct/class/interface/enum declared anywhere under a module (two hops through its files). Use for 'all types in a package' style questions.",
         input: {

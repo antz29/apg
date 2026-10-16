@@ -7,6 +7,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_plan",
+        options: { codemode: false },
         description:
           "Plan overview: each plan project with its strategy, phase table (number, title, deliverable, satisfied requirements), and per-phase task progress (done/total). Plans are transient — they live under apg/.trans/plans/<project>.jsonl and never commit.",
         input: {

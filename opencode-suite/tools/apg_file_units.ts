@@ -8,6 +8,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) => {
       editor.add({
         name: "apg_file_units",
+        options: { codemode: false },
         description:
           "List everything declared in a source file (structs and functions) with their line ranges. Use as the file-scoped view for reviews.",
         input: {

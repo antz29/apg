@@ -9,6 +9,7 @@ export default Plugin.define({
     await ctx.tool.transform((editor) =>
       editor.add({
         name: "apg_cp",
+        options: { codemode: false },
         description:
           "Copy a filesystem path inside the acting agent's granted globs. Resolves the source and destination against the caller's project `directory`, then asserts the acting agent's `edit` permission on the resolved source and destination through opencode's permission engine — fail-closed: a missing permission surface or any denied path refuses the copy, and nothing is copied. Then a plain fs copy (no git).",
         input: {
