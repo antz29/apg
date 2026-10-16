@@ -1,0 +1,23 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "phase-review-scope",
+  "body": "The scope a phase review covers: the phase's own code, the code it touches, the tests, and the plan and spec it implements.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.reviewer-senior-review-discipline",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.reviewer-reviews-the-phase-under-review",
+      "properties": {}
+    }
+  ]
+}

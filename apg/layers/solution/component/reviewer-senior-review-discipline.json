@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "source": "domain.entity.senior-review-finding",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.phase-review-scope",
+      "properties": {}
     }
   ]
 }

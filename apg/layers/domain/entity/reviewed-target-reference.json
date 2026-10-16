@@ -48,11 +48,6 @@
       "kind": "drives",
       "source": "requirements.requirement.reviewer-reviews-notes",
       "properties": {}
-    },
-    {
-      "kind": "drives",
-      "source": "requirements.requirement.reviewer-reviews-the-phase-under-review",
-      "properties": {}
     }
   ]
 }
