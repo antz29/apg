@@ -81,6 +81,10 @@ pub(crate) fn tier_body_warning(
 ///   (`global.constraint.spec-constraint-scope`);
 /// - **R3** — a node holds at most one note (two notes detailing one target);
 /// - **R4** — each note's `details` edge names exactly one non-note node;
+/// - **the note-confinement rule** — a note attaches only to
+///   implementation-layer code, so a `note` node in the requirements, domain,
+///   solution, or global layer is a violation
+///   (`global.constraint.note-implementation-only`);
 /// - **the delta gates** — every `implemented-by` claim the change-set delta
 ///   adds, re-points, or removes is touched by a plan task, and every
 ///   requirement the delta adds or changes is `Satisfies`'d by a plan phase.
@@ -172,6 +176,22 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
         if names_a_note {
             errors.push(format!(
                 "R4: note `{note}` details another note (`{target}`) — a note's details edge names exactly one non-note node"
+            ));
+        }
+    }
+
+    // The note-confinement rule (`global.constraint.note-implementation-only`)
+    // — a note attaches only to implementation-layer code, so a `note` node in
+    // the requirements, domain, solution, or global layer is a violation.
+    // `read_existing_nodes` reads only durable layer files (plans holds no note
+    // type and is never serialized under `apg/layers/`), so any note whose
+    // layer is not `implementation` is off-model.
+    for n in &nodes {
+        if n.node_type == "note" && n.layer != "implementation" {
+            errors.push(format!(
+                "note `{}` is in layer `{}` — a note attaches only to implementation-layer code (global.constraint.note-implementation-only)",
+                fqn_of(n),
+                n.layer
             ));
         }
     }
