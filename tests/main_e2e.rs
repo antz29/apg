@@ -1835,8 +1835,20 @@ mod e2e {
         std::fs::create_dir_all(dir.join("plugins")).unwrap();
         std::fs::write(dir.join("plugins").join("apg_spec.ts"), "stale").unwrap();
 
-        let (updated, pruned) = install_suite(&dir).unwrap();
-        assert!(updated > 0, "a fresh install writes files");
+        let (suite_files, agents, pruned) = install_suite(&dir).unwrap();
+        // The two populations are counted separately: each fresh-install count
+        // matches its own population's total (40 suite files vs 7 agents), so a
+        // mixed counter would fail one of these against the other's total.
+        assert_eq!(
+            suite_files,
+            SUITE_TOOLS.len() + 2,
+            "a fresh install writes every suite file (plugins + lib + guide)"
+        );
+        assert_eq!(
+            agents,
+            AGENTS.len(),
+            "a fresh install writes every agent, counted separately from suite files"
+        );
         assert_eq!(pruned, 1, "the retired apg_spec.ts is pruned");
 
         for name in [

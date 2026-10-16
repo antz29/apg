@@ -459,14 +459,15 @@ pub fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
 /// into `lib/` (beside the plugins, outside opencode's plugin discovery), the
 /// seven distributed agents into `agents/`, and `package.json` at the root —
 /// each written only when missing or changed — then prunes stale apg-owned
-/// files. Returns `(files written/updated, files pruned)`. `cmd_init` calls it
+/// files. Returns `(suite files written/updated, agents written/updated, files
+/// pruned)` — the two populations counted separately. `cmd_init` calls it
 /// against `~/.config/opencode/`; tests call it against a temp dir. The
 /// package.json scaffold is only written when absent (never clobbered). The
 /// embedded agent/tool prose it delivers carries the coordinator-mediated
 /// feedback cycle: the owning writer returns an ACTIONED/WONT-FIX claim and the
 /// coordinator performs the shallow claim-vs-change check and then actions the
 /// item (`apg_review_action`).
-pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
+pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize, usize)> {
     // opencode 2.x discovers its tool plugins in `plugins/`.
     let plugins_dir = opencode_dir.join("plugins");
     std::fs::create_dir_all(&plugins_dir)?;
@@ -477,10 +478,10 @@ pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
     if !pkg_path.exists() {
         std::fs::write(&pkg_path, OPENCODE_PACKAGE_JSON)?;
     }
-    let mut updated = 0usize;
+    let mut suite_files = 0usize;
     for (name, content) in SUITE_TOOLS {
         if write_if_changed(&plugins_dir.join(name), content)? {
-            updated += 1;
+            suite_files += 1;
         }
     }
     // The shared lib + upgrade guide live in `lib/`, beside the plugins,
@@ -488,27 +489,28 @@ pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
     let lib_dir = opencode_dir.join("lib");
     std::fs::create_dir_all(&lib_dir)?;
     if write_if_changed(&lib_dir.join("apg.ts"), APG_LIB)? {
-        updated += 1;
+        suite_files += 1;
     }
     // The upgrade guide the R10 gate's block text points at (task-4).
     // Best-effort with a warning: an unwritable ~/.config/opencode must not
     // fail init (mirrors the npm-install failure handling below).
     let upgrade_doc_path = lib_dir.join("apg-upgrade.md");
     match write_if_changed(&upgrade_doc_path, APG_UPGRADE_DOC) {
-        Ok(true) => updated += 1,
+        Ok(true) => suite_files += 1,
         Ok(false) => {}
         Err(e) => eprintln!(
             "warning: could not install the upgrade guide into {} ({e}); the version-gate block text points at ~/.config/opencode/lib/apg-upgrade.md — re-run `apg init` once the location is writable",
             upgrade_doc_path.display()
         ),
     }
+    let mut agents = 0usize;
     for (name, content) in AGENTS {
         if write_if_changed(&agents_dir.join(name), content)? {
-            updated += 1;
+            agents += 1;
         }
     }
     let pruned = prune_stale_suite(opencode_dir)?;
-    Ok((updated, pruned))
+    Ok((suite_files, agents, pruned))
 }
 
 /// `apg init [dir]`: create the committed `apg/` layout (config.json carrying
@@ -551,7 +553,7 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     version_gate::ensure_config_version(&apg_dir, env!("CARGO_PKG_VERSION"))?;
 
     let opencode_dir = user_opencode_dir()?;
-    let (updated, pruned) = install_suite(&opencode_dir)?;
+    let (suite_files, agents, pruned) = install_suite(&opencode_dir)?;
 
     if !opencode_dir
         .join("node_modules")
@@ -572,7 +574,7 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    if updated == 0 {
+    if suite_files == 0 && agents == 0 {
         println!(
             "Initialized apg/ (config.json v{} + .trans/ + .worktrees/); {} suite files + {} agents already up to date in {}",
             env!("CARGO_PKG_VERSION"),
@@ -582,10 +584,11 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
         );
     } else {
         println!(
-            "Initialized apg/ (config.json v{} + .trans/ + .worktrees/) and installed/updated {} of {} suite files + {} agents in {}",
+            "Initialized apg/ (config.json v{} + .trans/ + .worktrees/) and installed/updated {} of {} suite files + {} of {} agents in {}",
             env!("CARGO_PKG_VERSION"),
-            updated,
+            suite_files,
             SUITE_TOOLS.len() + 2,
+            agents,
             AGENTS.len(),
             opencode_dir.display()
         );
