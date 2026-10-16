@@ -2,9 +2,10 @@
 //! classifier.
 //!
 //! `apg spec lint` is the read-only, whole-durable-spec integrity check that
-//! sits beside review. It reports the mechanical R2/R3/R4 violations and the
-//! spec-delta gates as **errors**, and emits non-blocking advisory wording
-//! warnings for tier-1-3 node bodies a reviewer is likely to reject.
+//! sits beside review. It reports the mechanical R2/R3/R4 violations, the
+//! tier-1-3 body-budget rule, and the spec-delta gates as **errors**, and emits
+//! non-blocking advisory wording warnings for tier-1-3 node bodies a reviewer
+//! is likely to reject.
 //!
 //! The delta arm reuses phase 1's merge-base durable-spec delta
 //! (`crate::plan_cmd::change_set_spec_delta` / `SpecDelta`) and its
@@ -151,6 +152,44 @@ pub(crate) fn details_shape_errors(nodes: &[NodeFile]) -> Vec<String> {
     errors
 }
 
+/// The authored tier-1-3 body budget, in **characters** — never bytes —
+/// (`requirements.requirement.spec-body-budget`): one present-tense sentence
+/// of at most 244 characters. Single source of truth for the rule's threshold
+/// and its message.
+pub(crate) const TIER_BODY_BUDGET: usize = 244;
+
+/// The tier-1-3 body-budget rule (`requirements.requirement.spec-body-budget`):
+/// every authored body in a tier-1-3 layer (`requirements`/`domain`/`solution`)
+/// is one sentence of at most [`TIER_BODY_BUDGET`] **characters** (not bytes),
+/// so a body over budget yields one blocking error naming the node, its
+/// character count, and the budget.
+///
+/// The requirement scopes the budget to the tier ("every authored requirement,
+/// domain, and solution node body"), not to a node type, and states no
+/// exemption. The wording advisory's constraint carve-out is about a
+/// constraint's negative *wording* (`global.constraint.spec-timelessness`), not
+/// its *length*, so a layer-scoped constraint is included here — a negative
+/// rule is still one sentence within the same budget. Pure — no I/O — so the
+/// unit tier pins it over in-memory [`NodeFile`]s; [`lint`] feeds it the nodes
+/// it read from the durable layer files. `pub(crate)` — the lint's single
+/// source of truth for the rule, never a public unit.
+pub(crate) fn body_budget_errors(nodes: &[NodeFile]) -> Vec<String> {
+    let fqn_of =
+        |n: &NodeFile| crate::layers::fqn(crate::layers::layer_of(&n.layer), &n.node_type, &n.name);
+    nodes
+        .iter()
+        .filter(|n| matches!(n.layer.as_str(), "requirements" | "domain" | "solution"))
+        .map(|n| (n, n.body.chars().count()))
+        .filter(|(_, chars)| *chars > TIER_BODY_BUDGET)
+        .map(|(n, chars)| {
+            format!(
+                "body budget: `{}` body is {chars} characters — an authored tier-1-3 body is one sentence of at most {TIER_BODY_BUDGET} characters (requirements.requirement.spec-body-budget)",
+                fqn_of(n)
+            )
+        })
+        .collect()
+}
+
 /// The whole-durable-spec deterministic check. Returns `(errors, advisories)`:
 /// the blocking rule/delta-gate violations first, the non-blocking tier-1-3
 /// wording advisories second. Read-only — it reads the durable node files, the
@@ -169,6 +208,11 @@ pub(crate) fn details_shape_errors(nodes: &[NodeFile]) -> Vec<String> {
 ///   implementation-layer code, so a `note` node in the requirements, domain,
 ///   solution, or global layer is a violation
 ///   (`global.constraint.note-implementation-only`);
+/// - **the tier-1-3 body budget** — an authored body in the requirements,
+///   domain, or solution layer is one sentence of at most
+///   [`TIER_BODY_BUDGET`] characters (counted in characters, never bytes), so
+///   an over-budget body is a violation
+///   (`requirements.requirement.spec-body-budget`);
 /// - **the delta gates** — every `implemented-by` claim the change-set delta
 ///   adds, re-points, or removes is touched by a plan task, and every
 ///   requirement the delta adds or changes is `Satisfies`'d by a plan phase.
@@ -242,6 +286,13 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
     // type and is never serialized under `apg/layers/`), so any note whose
     // layer is not `implementation` is off-model.
     errors.extend(note_confinement_errors(&nodes));
+
+    // The tier-1-3 body budget (`requirements.requirement.spec-body-budget`) —
+    // every authored requirement/domain/solution body is one sentence of at
+    // most [`TIER_BODY_BUDGET`] characters (counted in characters). The pure
+    // helper is the single source of truth, unit-pinned in
+    // `src/spec_lint/tests.rs`.
+    errors.extend(body_budget_errors(&nodes));
 
     // Advisories — tier-1-3 bodies a reviewer is likely to reject (R1/R5). The
     // shared [`tier_body_warning`] selection exempts a constraint: a negative
