@@ -406,9 +406,8 @@ mod unit {
     }
 
     /// Every §3.3 edge kind accepts at least one valid (source, target) shape:
-    /// each matrix row, both code-exempt kinds (`implemented-by` with a code
-    /// FQN target, `details` from a note in every authoring layer to any
-    /// target), and the `represents` pair.
+    /// each matrix row, both code-exempt kinds (`implemented-by` and `details`,
+    /// each with a code-FQN target), and the `represents` pair.
     #[test]
     fn every_edge_kind_accepts_a_valid_shape() {
         let ok: &[(&str, &str, &str)] = &[
@@ -476,17 +475,9 @@ mod unit {
             ("represents", "domain.entity.e1", "solution.person.p1"),
             (
                 "details",
-                "requirements.note.n1",
-                "requirements.requirement.r1",
-            ),
-            ("details", "domain.note.n1", "domain.entity.e1"),
-            ("details", "solution.note.n1", "solution.system.sys1"),
-            (
-                "details",
                 "implementation.note.n1",
-                "requirements.requirement.r1",
+                "apg.artifacts.write_jsonl_and_reingest",
             ),
-            ("details", "global.note.n1", "requirements.requirement.r1"),
         ];
         for &(kind, src, dst) in ok {
             assert!(
@@ -573,75 +564,71 @@ mod unit {
         }
     }
 
-    /// `details` accepts any target — authored OR code — except a `note`
-    /// (a Note-to-Note pair has no durable edge), and enforces that the source
-    /// is a `note` (spanning every authoring layer).
+    /// `details` accepts a code-FQN target only — any authored-node target (a
+    /// `note` included) is refused — and enforces that the source is a `note`
+    /// (a note lives only in the implementation layer).
     #[test]
     fn details_refuses_note_target_and_enforces_note_source() {
-        // Every other authored node target — any layer — plus a code FQN is
-        // accepted.
+        // A code FQN target is exempt (not parsed as an authored node) — the
+        // only accepted `details` target shape.
+        assert!(
+            validate_edge(
+                "details",
+                "implementation.note.n1",
+                "apg.artifacts.write_jsonl_and_reingest"
+            )
+            .is_ok(),
+            "a code FQN details target must be accepted"
+        );
+        // Every authored-node target — any layer, a `note` included — is
+        // refused, naming the kind, source, and target.
         for target in [
             "requirements.stakeholder.sh1",
             "requirements.user.u1",
             "requirements.requirement.r1",
             "requirements.constraint.c1",
+            "requirements.note.n2",
             "domain.group.g1",
             "domain.entity.e1",
             "domain.value.v1",
             "domain.service.svc1",
             "domain.constraint.c1",
+            "domain.note.n2",
             "solution.system.sys1",
             "solution.container.ct1",
             "solution.component.cp1",
             "solution.person.p1",
             "solution.constraint.c1",
-            "implementation.constraint.c1",
-            "global.constraint.c1",
-            // A code FQN target is exempt (not parsed).
-            "apg.artifacts.write_jsonl_and_reingest",
-        ] {
-            assert!(
-                validate_edge("details", "requirements.note.n1", target).is_ok(),
-                "details target {target} must be accepted"
-            );
-        }
-        for src in [
-            "requirements.note.n1",
-            "domain.note.n1",
-            "solution.note.n1",
-            "implementation.note.n1",
-            "global.note.n1",
-        ] {
-            assert!(
-                validate_edge("details", src, "requirements.requirement.r1").is_ok(),
-                "{src} must be a valid details source"
-            );
-        }
-        // A `note` target in any layer is refused, naming the kind, source and
-        // target.
-        for target in [
-            "requirements.note.n2",
-            "domain.note.n2",
             "solution.note.n2",
+            "implementation.constraint.c1",
             "implementation.note.n2",
+            "global.constraint.c1",
             "global.note.n2",
         ] {
-            let msg = validate_edge("details", "requirements.note.n1", target)
+            let msg = validate_edge("details", "implementation.note.n1", target)
                 .unwrap_err()
                 .to_string();
             assert!(msg.contains("details"), "must name kind: {msg}");
             assert!(
-                msg.contains("requirements.note.n1"),
+                msg.contains("implementation.note.n1"),
                 "must name source: {msg}"
             );
             assert!(msg.contains(target), "must name target: {msg}");
         }
+        // A `note` source is a valid details source (the source check is
+        // type-based; `validate_node` confines a note to the implementation
+        // layer).
+        assert!(
+            validate_edge("details", "implementation.note.n1", "apg.main").is_ok(),
+            "an implementation-layer note must be a valid details source"
+        );
+        // A non-note source is refused, naming the kind and source.
         for src in [
             "requirements.requirement.r1",
             "domain.entity.e1",
             "solution.system.sys1",
         ] {
-            let msg = validate_edge("details", src, "requirements.requirement.r1")
+            let msg = validate_edge("details", src, "apg.main")
                 .unwrap_err()
                 .to_string();
             assert!(msg.contains("details"), "{msg}");

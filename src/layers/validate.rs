@@ -243,8 +243,8 @@ pub fn validate_trees_acyclic(
 /// (`contains` plan tiers, `gates`, `satisfies`, the Task→Implementation
 /// verbs) and `reviews` are §5 **transient** kinds — not here (phase 4). The
 /// matrix rows cover the nine two-authored-endpoint kinds; `implemented-by`
-/// (code-FQN target) and `details` (any-node target) have a code-exempt
-/// endpoint and are special-cased in [`validate_edge`].
+/// and `details` (both a code-FQN target) have a code-exempt endpoint and are
+/// special-cased in [`validate_edge`].
 pub(crate) const EDGE_KINDS: [&str; 11] = [
     "contains",
     "drives",
@@ -413,10 +413,10 @@ pub fn validate_edges(edges: &[(&str, &str, &str)]) -> anyhow::Result<()> {
 /// Validate one `(kind, source, target)` edge against the SPEC §3.3 matrix.
 /// The source of every §3.3 edge is an authored node — parsed first, so a
 /// malformed source FQN or unknown layer is a dangling-reference write-time
-/// error for every kind. `implemented-by` (code-FQN target) and `details`
-/// (any target node except a `note`) have a code-exempt **target**: only their
-/// source is validated here; code-FQN validation against the scanned graph is
-/// task-10 ([`validate_code_refs`]). For every other kind, both endpoints must parse
+/// error for every kind. `implemented-by` and `details` (both a code-FQN
+/// target) have a code-exempt **target**: only their source is validated here;
+/// code-FQN validation against the scanned graph is task-10
+/// ([`validate_code_refs`]). For every other kind, both endpoints must parse
 /// as authored-node FQNs and the (layer, type) shape must match a matrix row.
 pub(crate) fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::Result<()> {
     let (src_layer, src_type, _src_name) = parse_fqn(source)?;
@@ -435,25 +435,22 @@ pub(crate) fn validate_edge(kind: &str, source: &str, target: &str) -> anyhow::R
             }
             Ok(())
         }
-        // details: Note (any layer) → any node, authored OR code, EXCEPT a
-        // `note` target. The graph projection deliberately omits Note from its
-        // Details target list (`load::tables::spec_rel_pairs`), so a
-        // Note-to-Note pair would be accepted here and then silently dropped —
-        // refuse it with an actionable error instead. The target is still not
-        // validated against the scanned graph: a target that does not parse as
-        // an authored-node FQN (a code FQN) stays exempt.
+        // details: Note → a single code identity. The target must NOT parse as
+        // an authored-node FQN: a `details` edge names exactly one code FQN
+        // (`global.constraint.note-details-shape`), so any authored target — a
+        // `note` included, since a note parses as authored — is refused. A
+        // non-parsing target is a code FQN and stays exempt from the
+        // scanned-graph check here ([`validate_code_refs`] owns it).
         "details" => {
             if src_type.as_str() != "note" {
                 anyhow::bail!(
-                    "`details` source `{source}` must be a `note` (any layer), not {}.{src_type}",
+                    "`details` source `{source}` must be a `note` (a note lives only in the implementation layer), not {}.{src_type}",
                     src_layer.layer_dir()
                 );
             }
-            if let Ok((_dst_layer, dst_type, _dst_name)) = parse_fqn(target)
-                && dst_type.as_str() == "note"
-            {
+            if parse_fqn(target).is_ok() {
                 anyhow::bail!(
-                    "`details` target `{target}` from source `{source}` must not be a `note` — a Note-to-Note `details` pair has no durable edge"
+                    "`details` target `{target}` from source `{source}` must be a code identity, not an authored node — a `details` edge names exactly one code FQN"
                 );
             }
             Ok(())
