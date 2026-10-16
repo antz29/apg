@@ -70,6 +70,28 @@ pub(crate) fn tier_body_warning(
     }
 }
 
+/// The note-confinement rule (`global.constraint.note-implementation-only`):
+/// a `note` attaches only to implementation-layer code, so every `note` node
+/// whose layer is not `implementation` yields one error string naming the
+/// rule. Pure — no I/O — so the unit tier pins it over in-memory [`NodeFile`]s;
+/// [`lint`] feeds it the nodes it read from the durable layer files.
+/// `pub(crate)` — the lint's single source of truth for the rule, never a
+/// public unit.
+pub(crate) fn note_confinement_errors(nodes: &[NodeFile]) -> Vec<String> {
+    nodes
+        .iter()
+        .filter(|n| n.node_type == "note" && n.layer != "implementation")
+        .map(|n| {
+            let fqn =
+                crate::layers::fqn(crate::layers::layer_of(&n.layer), &n.node_type, &n.name);
+            format!(
+                "note `{}` is in layer `{}` — a note attaches only to implementation-layer code (global.constraint.note-implementation-only)",
+                fqn, n.layer
+            )
+        })
+        .collect()
+}
+
 /// The whole-durable-spec deterministic check. Returns `(errors, advisories)`:
 /// the blocking rule/delta-gate violations first, the non-blocking tier-1-3
 /// wording advisories second. Read-only — it reads the durable node files, the
@@ -186,15 +208,7 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
     // `read_existing_nodes` reads only durable layer files (plans holds no note
     // type and is never serialized under `apg/layers/`), so any note whose
     // layer is not `implementation` is off-model.
-    for n in &nodes {
-        if n.node_type == "note" && n.layer != "implementation" {
-            errors.push(format!(
-                "note `{}` is in layer `{}` — a note attaches only to implementation-layer code (global.constraint.note-implementation-only)",
-                fqn_of(n),
-                n.layer
-            ));
-        }
-    }
+    errors.extend(note_confinement_errors(&nodes));
 
     // Advisories — tier-1-3 bodies a reviewer is likely to reject (R1/R5). The
     // shared [`tier_body_warning`] selection exempts a constraint: a negative

@@ -68,4 +68,65 @@ mod unit {
             );
         }
     }
+
+    /// The note-confinement rule (`global.constraint.note-implementation-only`)
+    /// is the pure helper [`note_confinement_errors`]: a `note` in the
+    /// requirements, domain, solution or global layer yields exactly one error
+    /// naming the rule and the offending layer, an `implementation`-layer note
+    /// yields none, and a non-`note` node in any layer yields none.
+    ///
+    /// The helper is pure over in-memory `NodeFile`s — the only unit under test
+    /// (assembly of the error strings) — so the test is `unit`, never `e2e`,
+    /// even though the production caller [`lint`] is I/O-bound.
+    #[test]
+    fn note_confinement_errors_confines_notes_to_implementation() {
+        fn note_in(layer: &str) -> NodeFile {
+            NodeFile {
+                layer: layer.to_string(),
+                node_type: "note".to_string(),
+                name: format!("{layer}-note"),
+                body: String::new(),
+                properties: Default::default(),
+                out: Vec::new(),
+                in_edges: Vec::new(),
+            }
+        }
+
+        // A note in any non-implementation layer is one error naming the rule.
+        for layer in ["requirements", "domain", "solution", "global"] {
+            let errors = note_confinement_errors(&[note_in(layer)]);
+            assert_eq!(errors.len(), 1, "a `{layer}` note must be one error");
+            assert!(
+                errors[0].contains("global.constraint.note-implementation-only"),
+                "the error must name the rule: {}",
+                errors[0]
+            );
+            assert!(
+                errors[0].contains(&format!("layer `{layer}`")),
+                "the error must name the offending layer: {}",
+                errors[0]
+            );
+        }
+
+        // The implementation layer is the note's sanctioned home.
+        assert!(
+            note_confinement_errors(&[note_in("implementation")]).is_empty(),
+            "an implementation-layer note must pass"
+        );
+
+        // A non-note node in any layer never trips the note-confinement rule.
+        let requirement = NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "requirement".to_string(),
+            name: "place-order".to_string(),
+            body: String::new(),
+            properties: Default::default(),
+            out: Vec::new(),
+            in_edges: Vec::new(),
+        };
+        assert!(
+            note_confinement_errors(&[requirement]).is_empty(),
+            "a non-note node must never trip the note-confinement rule"
+        );
+    }
 }
