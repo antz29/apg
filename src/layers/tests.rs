@@ -77,6 +77,30 @@ mod unit {
         assert_eq!(Layer::Global.node_types(), &["constraint"]);
     }
 
+    /// Note confinement in the catalog
+    /// (`global.constraint.note-implementation-only`): a `note` type is listed
+    /// in NO layer but implementation, and implementation is exactly the
+    /// attach-only `["note", "constraint"]` pair.
+    #[test]
+    fn note_is_listed_only_in_the_implementation_layer() {
+        for layer in Layer::ALL {
+            let has_note = layer.node_types().contains(&"note");
+            if layer == Layer::Implementation {
+                assert!(has_note, "implementation must host the attach-only `note`");
+                assert_eq!(
+                    Layer::Implementation.node_types(),
+                    &["note", "constraint"],
+                    "implementation is exactly the attach-only pair"
+                );
+            } else {
+                assert!(
+                    !has_note,
+                    "{layer:?} must not list a `note` type — notes are implementation-only"
+                );
+            }
+        }
+    }
+
     /// The durable tree constant is exactly the catalog projection over the
     /// non-transient layers (plans has no durable dir; implementation's
     /// attach-only dirs are durable) — the durable dir list matches the
@@ -180,6 +204,35 @@ mod unit {
         // rule is then what fires.
         let err = validate_node(Layer::Domain, "entity", "customer", &props, &empty).unwrap_err();
         assert!(err.to_string().contains("requires"), "{err}");
+    }
+
+    /// `validate_node` enforces note confinement
+    /// (`global.constraint.note-implementation-only`): a `note` node is refused
+    /// in requirements/domain/solution/global — and in plans, which hosts no
+    /// note type — naming the confinement law; the implementation layer is the
+    /// one layer that accepts it.
+    #[test]
+    fn validate_node_confines_note_to_the_implementation_layer() {
+        let empty = BTreeSet::new();
+        let props = BTreeMap::new();
+        for layer in [
+            Layer::Requirements,
+            Layer::Domain,
+            Layer::Solution,
+            Layer::Global,
+            Layer::Plans,
+        ] {
+            let err = validate_node(layer, "note", "x", &props, &empty).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("global.constraint.note-implementation-only"),
+                "{layer:?} must refuse a note naming the confinement law: {err}"
+            );
+        }
+        assert!(
+            validate_node(Layer::Implementation, "note", "x", &props, &empty).is_ok(),
+            "implementation is the one layer that accepts a note"
+        );
     }
 
     /// Entity requires `kind` ∈ {entity, event} — the spec's only "requires".
