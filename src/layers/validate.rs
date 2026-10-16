@@ -261,10 +261,10 @@ pub(crate) const EDGE_KINDS: [&str; 11] = [
 
 /// One SPEC §3.3 matrix row: `(kind, source-layer, source-types,
 /// target-layer, target-types)`. Each endpoint is a (layer, type) pair: a type
-/// maps to a unique layer except `note`/`constraint` (which span the authoring
-/// layers — but neither is a matrix endpoint, so the layer+type granularity
-/// here is unambiguous). Source/target type sets are subsets of
-/// [`Layer::node_types`].
+/// maps to a unique layer except `constraint`, which spans the layer-scoped
+/// tiers (a `note`, by contrast, lives only in the implementation layer) — but
+/// neither is a matrix endpoint, so the layer+type granularity here is
+/// unambiguous. Source/target type sets are subsets of [`Layer::node_types`].
 pub(crate) type MatrixRow = (
     &'static str,
     Layer,

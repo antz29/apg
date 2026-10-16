@@ -21,11 +21,11 @@
 //!
 //! ```text
 //! apg/layers/                         (durable — one file per node)
-//!   requirements/{stakeholder,user,requirement,note,constraint}/
-//!   domain/{group,entity,value,service,note,constraint}/
-//!   solution/{system,container,component,person,note,constraint}/
+//!   requirements/{stakeholder,user,requirement,constraint}/
+//!   domain/{group,entity,value,service,constraint}/
+//!   solution/{system,container,component,person,constraint}/
 //!   implementation/{note,constraint}/ (attach-only — the real nodes are scanned code)
-//!   global/{constraint,note}/
+//!   global/{constraint}/
 //! apg/.trans/                         (gitignored — mirrors the structure)
 //!   plans/                            (the plan, per branch; tier dir of plan nodes)
 //!   requirements/ domain/ solution/ implementation/ global/   (feedback mirrors)
