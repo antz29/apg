@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "splice-db-equals-full-rebuild-for-all-tables",
-  "body": "A scan's database and its graph export are two renderings of one assembled graph and agree for every table, authored and transient rows exactly as for code, and a splice that would diverge declines to publish.",
+  "body": "A scan's database and its graph export are two renderings of one assembled graph and agree for every table, authored and transient rows exactly as for code, and a divergent splice yields to the full load.",
   "properties": {
     "feature": "splice-equivalence"
   },

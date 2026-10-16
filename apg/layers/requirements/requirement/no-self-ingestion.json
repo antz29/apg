@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "no-self-ingestion",
-  "body": "The scanner keeps its own caches and build outputs out of the graph, so no file under the repository's git directory or build tree appears in the graph.",
+  "body": "The scanner keeps its own caches and build outputs out of the graph, confining the graph to tracked source outside the repository's git directory and build tree.",
   "properties": {
     "feature": "scan-hygiene"
   },

@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "requirement",
   "name": "agent-builder-drops-optional-coordinator",
-  "body": "The distributed agent-builder generates an implementer-only roster — the core implementer, per-subsystem implementers, and tiered test-implementers — and carries no optional coordinator agent.",
+  "body": "The distributed agent-builder generates an implementer-only roster: the core implementer, per-subsystem implementers, and tiered test-implementers, each scaffolded as a subagent.",
   "properties": {
     "feature": "agent-builder-roster-cleanup"
   },
