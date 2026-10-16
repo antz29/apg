@@ -385,11 +385,11 @@ project prefix. Six layers:
 
 | layer | node types |
 |---|---|
-| `requirements` | `stakeholder`, `user`, `requirement`, `note`, `constraint` |
-| `domain` | `group` (core/supporting/generic), `entity` (`entity`/`event`), `value`, `service`, `note`, `constraint` |
-| `solution` | `system`, `container` (app/service/db/queue), `component`, `person`, `note`, `constraint` |
-| `implementation` | `note`, `constraint` (attach-only — the real nodes are scanned code) |
-| `global` | `constraint`, `note` (the laws) |
+| `requirements` | `stakeholder`, `user`, `requirement`, `constraint` |
+| `domain` | `group` (core/supporting/generic), `entity` (`entity`/`event`), `value`, `service`, `constraint` |
+| `solution` | `system`, `container` (app/service/db/queue), `component`, `person`, `constraint` |
+| `implementation` | `note`, `constraint` (attach-only — a note attaches only to implementation-layer code and its `details` edge names exactly one code FQN) |
+| `global` | `constraint` (the laws) |
 | `plans` (transient) | `PlanPhase`, `Task`, planned Implementation nodes — `.trans/plans/` only |
 
 Node files carry both halves of every edge (the out half in the source's file,
