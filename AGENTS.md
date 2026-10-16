@@ -651,8 +651,8 @@ The workspace has a LadybugDB graph database at `apg/.trans/db.lbug` containing 
   the authored `implemented-by` kind: System/Container/Component → code),
   `Calls` (Service→Service), `Publishes`/`Subscribes` (Service → event
   Entity), `DependsOn` (Requirement→Requirement), `Uses` (Person→System),
-  `Represents` (User→Entity, Entity→Person), `Details` (Note→any node but
-  `Note`, or a code FQN).
+  `Represents` (User→Entity, Entity→Person), `Details` (a note → exactly one
+  code FQN — the single implementation-layer code identity the note deepens).
   Transient: `Gates` (PlanPhase→PlanPhase), `Satisfies` (PlanPhase→
   Requirement), `Reviews` (Feedback→any). Dependency and `contains` trees are
   acyclic; a dangling FQN is a write-time error (see the layers section
@@ -678,11 +678,11 @@ matching in in the target's); a pairing mismatch fails at scan. The six layers:
 
 | layer | types |
 |---|---|
-| `requirements` | `stakeholder`, `user`, `requirement`, `note`, `constraint` |
-| `domain` | `group` (attribute core/supporting/generic, optional `root`), `entity` (kind `entity`\|`event`), `value`, `service`, `note`, `constraint` |
-| `solution` | `system`, `container` (kind app/service/db/queue), `component`, `person`, `note`, `constraint` |
+| `requirements` | `stakeholder`, `user`, `requirement`, `constraint` |
+| `domain` | `group` (attribute core/supporting/generic, optional `root`), `entity` (kind `entity`\|`event`), `value`, `service`, `constraint` |
+| `solution` | `system`, `container` (kind app/service/db/queue), `component`, `person`, `constraint` |
 | `implementation` | `note`, `constraint` (attach-only — the real nodes are scanned code) |
-| `global` | `constraint`, `note` (the laws) |
+| `global` | `constraint` (the laws) |
 | `plans` (transient) | `PlanPhase`, `Task`, planned Implementation nodes — `.trans/plans/` only |
 
 **Constraints are prose**: the binary validates structure + references at write
@@ -696,7 +696,8 @@ The **spine** threads the tiers end to end:
 scanned graph: resolves → real; planned → pending, not an error; gone →
 drift, an error), `calls`, `publishes`/`subscribes` (Service → event Entity),
 `depends-on`, `uses` (Person → System), `represents` (User → Entity, Entity →
-Person), `details` (Note → any node but `Note`, or a code FQN). Any requirement
+Person), `details` (a note → exactly one code FQN — the single
+implementation-layer code identity the note deepens). Any requirement
 traces down to the code that
 implements it; any code traces up to the why. A requirement is `delivered`
 when review concludes the spine reaches it — satisfaction is by review, not
@@ -781,13 +782,12 @@ route).
   and every `"type":"details"` record whose `from` contains `.note-` from
   `apg/.trans/plans/<project>.jsonl` (back it up first), then `apg_scan` the
   worktree.
-- **Current state.** The graph has no plan notes right now — the only `Note`
-  nodes are legitimate spec notes (`solution.note.variants-from-load-expansion`,
-  `requirements.note.layout-composition-resolution`,
-  `requirements.note.self-nesting-depth`, `requirements.note.native-display-paths`).
-  The failure condition (`MATCH (n:Note) WHERE n.fqn STARTS WITH '<project>/'`
-  non-zero) is not present — the ban is simply respected proactively, which is
-  the intended posture.
+- **Current state.** The graph has no plan notes right now — nor any spec
+  `Note` at all: under `global.constraint.note-implementation-only` a note lives
+  only in the implementation layer (attach-only). The failure condition
+  (`MATCH (n:Note) WHERE n.fqn STARTS WITH '<project>/'` non-zero) is not
+  present — the ban is simply respected proactively, which is the intended
+  posture.
 
 ### `Struct.code_type` / `Function.code_type`
 
