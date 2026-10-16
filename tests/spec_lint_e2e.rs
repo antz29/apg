@@ -104,22 +104,26 @@ mod e2e {
             );
         };
 
-        // R3 — two notes both detailing the same non-note node (paired halves).
-        run(&["node", "add", "domain", "value", "thing"]);
+        // R3 — two implementation-layer notes both detailing the same code node
+        // (paired halves): notes are confined to the implementation layer and a
+        // note deepens exactly one code FQN
+        // (`global.constraint.note-details-shape`), so both notes detail the
+        // scanned `go.fixture.mod.Store` and the node holds two notes.
         for name in ["first", "second"] {
-            run(&["node", "add", "requirements", "note", name]);
-            let from = format!("requirements.note.{name}");
+            run(&["node", "add", "implementation", "note", name]);
+            let from = format!("implementation.note.{name}");
             run(&[
                 "edge",
                 "add",
                 "details",
                 from.as_str(),
-                "domain.value.thing",
+                "go.fixture.mod.Store",
             ]);
         }
 
-        // R4 — a note whose `details` names no node (zero out-edges).
-        run(&["node", "add", "requirements", "note", "orphan"]);
+        // R4 — an implementation-layer note whose `details` names no node
+        // (zero out-edges).
+        run(&["node", "add", "implementation", "note", "orphan"]);
 
         // Delta gates — with no plan store the whole branch spec is the
         // merge-base delta (an empty base degenerates to the branch spec): this
@@ -167,9 +171,10 @@ mod e2e {
             "R2",
             "requirements.constraint.bad-scope",
             "R3",
-            "domain.value.thing",
+            "go.fixture.mod.Store",
+            "implementation.note.first",
             "R4",
-            "requirements.note.orphan",
+            "implementation.note.orphan",
             "delta gate",
             "requirements.requirement.uncovered",
             "solution.system.claim",
@@ -516,9 +521,11 @@ mod e2e {
 
         // `edge add details <note> <constraint>` targeting it also SUCCEEDS: the
         // constraint's in-half write carries its unchanged `attaches-to`. The
-        // edge's note endpoint is added earlier in the same unsaved run, so the
-        // admission resolves it against the cumulative buffered state.
-        let out = run(&["node", "add", "requirements", "note", "audit"]);
+        // edge's note endpoint is an implementation-layer note (notes are
+        // confined to the implementation layer), added earlier in the same
+        // unsaved run, so the admission resolves it against the cumulative
+        // buffered state.
+        let out = run(&["node", "add", "implementation", "note", "audit"]);
         assert!(
             out.status.success(),
             "the details source note must be authorable: {}",
@@ -528,7 +535,7 @@ mod e2e {
             "edge",
             "add",
             "details",
-            "requirements.note.audit",
+            "implementation.note.audit",
             "requirements.constraint.legacy",
         ]);
         assert!(
