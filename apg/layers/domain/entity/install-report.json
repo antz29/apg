@@ -1,0 +1,33 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "install-report",
+  "body": "The summary apg init prints after installing the suite: the number of suite files and the number of agents written or updated, each count compared against its own population's total.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.init-install-report",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.init-reports-suite-file-count",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "source": "domain.group.opencode-integration",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.init-reports-agent-count",
+      "properties": {}
+    }
+  ]
+}

@@ -21,6 +21,16 @@
       "kind": "drives",
       "target": "domain.value.opencode-plugin-api",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.init-reports-suite-file-count",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.init-reports-agent-count",
+      "properties": {}
     }
   ],
   "in": [

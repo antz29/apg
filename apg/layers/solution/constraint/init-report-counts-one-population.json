@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "init-report-counts-one-population",
+  "body": "Every count in the apg init report compares a written-or-updated count against the total of the same population it counted: the suite-file clause against the suite-file total, the agent clause against the distributed-agent total.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

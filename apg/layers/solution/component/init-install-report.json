@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "init-install-report",
+  "body": "The apg init success-line report surface: it counts the suite files and the distributed agents written or updated separately and prints each count against its own population's total.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.install.cmd_init",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.install.install_suite",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.install-report",
+      "properties": {}
+    }
+  ]
+}

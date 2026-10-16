@@ -1,0 +1,23 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "init-reports-agent-count",
+  "body": "apg init's success line reports the distributed agents it wrote or updated against the distributed-agent total, as a count separate from the suite files.",
+  "properties": {
+    "feature": "init-install-report"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.install-report",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.opencode-suite-install-v2",
+      "properties": {}
+    }
+  ]
+}
