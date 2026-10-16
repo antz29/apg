@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "stakeholder",
   "name": "agent-suite-maintainer",
-  "body": "A person or agent who owns the DISTRIBUTION BOUNDARY of the apg opencode agent suite: which agents `apg init` installs into `~/.opencode/agents/` from `opencode-suite/agents/**`, and which each repo generates for itself with the `agent-builder`. Their interest is an honest boundary: every generated option the suite distributes is one it supports (the optional `coordinator` is dead), and repo-agnostic agents (`implementation-phase-reviewer`) are distributed rather than regenerated per repo. The boundary is product source — the distributed templates are embedded in the binary via `include_str!` — and the repo's own `.opencode/agents/**` are consumer artifacts outside the hand-edit path of a boundary change.",
+  "body": "A person or agent who owns the DISTRIBUTION BOUNDARY of the apg opencode agent suite: which agents `apg init` installs into `~/.config/opencode/agents/` from `opencode-suite/agents/**`, and which each repo generates for itself with the `agent-builder`. Their interest is an honest boundary: every generated option the suite distributes is one it supports (the optional `coordinator` is dead), and repo-agnostic agents (`implementation-phase-reviewer`) are distributed rather than regenerated per repo. The boundary is product source — the distributed templates are embedded in the binary via `include_str!` — and the repo's own `.opencode/agents/**` are consumer artifacts outside the hand-edit path of a boundary change.",
   "properties": {},
   "out": [
     {
@@ -13,6 +13,11 @@
     {
       "kind": "contains",
       "target": "requirements.requirement.agent-builder-optional-release-agent",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.opencode-2x-support",
       "properties": {}
     },
     {

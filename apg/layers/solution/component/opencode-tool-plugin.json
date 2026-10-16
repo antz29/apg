@@ -1,0 +1,221 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "opencode-tool-plugin",
+  "body": "The suite's opencode 2.x tool plugins: one plugin per tool file under `opencode-suite/tools/`, each default-exporting `Plugin.define({ id, setup(ctx) })` imported from `@opencode/plugin` and registering its one tool through a synchronous `ctx.tool.transform(editor => editor.add({ name, description, input, options, execute }))`. The definition carries the tool's name, description, a JSON-Schema `input` object, and an `execute(input, context)` returning `{ content }`; the `execute` closes over the plugin `setup(ctx)` context (and the tool's own optional `directory` argument) for the shared lib's load location. Each plugin's `id` is its tool's effective name (for example `apg_query`, `apg_rm`), unique across the suite. The suite holds one file per tool, so the install registry is file-shaped. Product source in `solution.container.opencode-suite`; `opencode-suite/package.json` depends on `@opencode/plugin`.\n\nimplemented-by: every `opencode-suite/tools/*.ts` plugin file and `opencode-suite/package.json`.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/package.json",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_callees.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_callers.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_cp.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_edge.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_file_path.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_file_units.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_find_symbol.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_hunk.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_methods.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_module_files.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_module_structs.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_modules.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_mv.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_node.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_add.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_complete.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_done.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_note.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_phases.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_render.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_tasks.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_undone.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_plan_verify.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_project.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_query.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_review.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_review_action.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_review_add.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_review_reject.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_review_resolve.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_rm.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_scan.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_session.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_spec_lint.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_struct.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_unresolved.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/tools/apg_uses.ts",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.opencode-plugin-definition",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.opencode-tool-registration",
+      "properties": {}
+    }
+  ]
+}

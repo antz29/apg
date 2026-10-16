@@ -12,11 +12,12 @@ use std::process::Command;
 
 use crate::{git, specs, version_gate};
 
-/// The opencode tool suite that `apg init` installs into `~/.opencode/`. Each
-/// entry is a file under `tools/` (auto-discovered by opencode from
-/// `~/.opencode/tools/*.ts`), single-sourced from this repo's `opencode-suite/`.
-/// The files shell out to `apg query` / `apg scan` (on PATH) from the project
-/// root; see `opencode-suite/lib/apg.ts` for the shared plumbing.
+/// The opencode tool suite that `apg init` installs into `~/.config/opencode/`.
+/// Each entry is a file under `plugins/` (opencode 2.x plugin discovery under
+/// `~/.config/opencode/plugins/`), single-sourced from this repo's
+/// `opencode-suite/`. The files shell out to `apg query` / `apg scan` (on PATH)
+/// from the project root; see `opencode-suite/lib/apg.ts` for the shared
+/// plumbing.
 pub const SUITE_TOOLS: &[(&str, &str)] = &[
     (
         "apg_query.ts",
@@ -180,12 +181,13 @@ pub const SUITE_TOOLS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Shared helper module used by the suite tools (`lib/apg.ts`), installed by
-/// `apg init` alongside the tools.
+/// Shared helper module used by the suite plugins (`lib/apg.ts`), installed by
+/// `apg init` under `~/.config/opencode/lib/` beside the plugins (outside
+/// opencode's plugin discovery).
 pub const APG_LIB: &str = include_str!("../opencode-suite/lib/apg.ts");
 
 /// The layout-upgrade guide that `apg init` installs into
-/// `~/.opencode/lib/apg-upgrade.md` next to the shared lib: version-field
+/// `~/.config/opencode/lib/apg-upgrade.md` next to the shared lib: version-field
 /// meaning, mismatch detection, upgrade steps (re-run init → re-scan),
 /// common-issue fixes. The R10 version gate's block text points at it.
 ///
@@ -194,7 +196,7 @@ pub const APG_LIB: &str = include_str!("../opencode-suite/lib/apg.ts");
 /// it like `APG_LIB` above.
 pub const APG_UPGRADE_DOC: &str = r#"# apg layout upgrades — the `apg/config.json` version field
 
-This guide is installed by `apg init` at `~/.opencode/lib/apg-upgrade.md`;
+This guide is installed by `apg init` at `~/.config/opencode/lib/apg-upgrade.md`;
 the version gate's block text points here.
 
 ## What the `version` field is
@@ -241,7 +243,7 @@ a repo never created by `apg init` has no versioned layout at all.
    duplicate-install warning. That warning is correct — `apg init` never
    deletes anything — so **manually remove** the local
    `.opencode/agents/implementation-phase-reviewer.md` (the installed copy in
-   `~/.opencode/agents/` now shadows it), then re-run `apg init`.
+   `~/.config/opencode/agents/` now shadows it), then re-run `apg init`.
 
 ## Common issues
 
@@ -268,15 +270,15 @@ a repo never created by `apg init` has no versioned layout at all.
 "#;
 
 /// The `codebase-navigator.md` agent file that `apg init` installs into
-/// `~/.opencode/`. Auto-discovered by opencode from `~/.opencode/agents/*.md`;
-/// configured to use the apg suite tools and to guide the user through running
-/// `apg scan` on the CLI (there is no in-chat scan tool). Single-sourced from
-/// the repo's own agent file.
+/// `~/.config/opencode/`. Auto-discovered by opencode from
+/// `~/.config/opencode/agents/*.md`; configured to use the apg suite tools and
+/// to guide the user through running `apg scan` on the CLI (there is no in-chat
+/// scan tool). Single-sourced from the repo's own agent file.
 const CODEBASE_NAVIGATOR_AGENT: &str =
     include_str!("../opencode-suite/agents/codebase-navigator.md");
 
 /// The seven distributed agents that `apg init` installs into
-/// `~/.opencode/agents/` (SPEC R13/R15): the navigator plus the six
+/// `~/.config/opencode/agents/` (SPEC R13/R15): the navigator plus the six
 /// spec/plan/review/builder agents — including the `implementation-phase-reviewer`
 /// — single-sourced from the repo's `opencode-suite/agents/`.
 pub const AGENTS: &[(&str, &str)] = &[
@@ -308,7 +310,7 @@ pub const AGENTS: &[(&str, &str)] = &[
 ];
 
 /// The seven distributed agent filenames — the apg-owned names in
-/// `~/.opencode/agents/`. `apg init` prunes any of these that a newer release
+/// `~/.config/opencode/agents/`. `apg init` prunes any of these that a newer release
 /// dropped from the suite (a user's own same-named agent is the accepted edge).
 const KNOWN_AGENT_FILES: &[&str] = &[
     "codebase-navigator.md",
@@ -320,11 +322,11 @@ const KNOWN_AGENT_FILES: &[&str] = &[
     "agent-builder.md",
 ];
 
-/// The `package.json` written by `apg init` into `~/.opencode/` when none
-/// exists, so the tool files' `@opencode-ai/plugin` import resolves.
+/// The `package.json` written by `apg init` into `~/.config/opencode/` when
+/// none exists, so the plugin files' `@opencode/plugin` import resolves.
 const OPENCODE_PACKAGE_JSON: &str = r#"{
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.20"
+    "@opencode/plugin": "2.0.29"
   }
 }
 "#;
@@ -335,14 +337,15 @@ const DEFAULT_CONFIG_JSON: &str = r#"{
 }
 "#;
 
-/// The user-level opencode config dir: `~/.opencode`. `apg init` installs the
-/// tool suite here (not into the project dir) so it's available to every
-/// project's opencode session; tool discovery is project-root based, so the
-/// global install works across all projects.
+/// The user-level opencode config dir: `~/.config/opencode` — the opencode 2.x
+/// global config dir. `apg init` installs the tool suite here (not into the
+/// project dir) so it's available to every project's opencode session; tool
+/// discovery is project-root based, so the global install works across all
+/// projects. `apg init` neither reads nor writes the V1 `~/.opencode/` root.
 fn user_opencode_dir() -> anyhow::Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
-        .map(|h| h.join(".opencode"))
+        .map(|h| h.join(".config").join("opencode"))
         .ok_or_else(|| anyhow::anyhow!("could not determine home directory (set $HOME)"))
 }
 
@@ -360,10 +363,13 @@ fn write_if_changed(path: &Path, content: &str) -> std::io::Result<bool> {
 }
 
 /// Files in a project's local `.opencode/` that duplicate the user-level
-/// install (`~/.opencode/`): the same relative path exists in both. A project
-/// `.opencode/` should hold only project-specific agents (agent-builder
-/// generated); a copy of a suite tool or core agent there shadows the installed
-/// version, so `apg init` warns loudly about it — it never deletes anything.
+/// install (`~/.config/opencode/`): the same relative path exists in both. A
+/// project `.opencode/` should hold only project-specific agents (agent-builder
+/// generated); a copy of a V2 install location there — `plugins/`, `agents/`,
+/// `lib/`, or `package.json` — shadows the installed version, so `apg init`
+/// warns loudly about it (the warning is printed by `cmd_init`) — it never
+/// deletes anything. Dep-manifest names (`package.json`, `package-lock.json`,
+/// `bun.lock`, `.gitignore`) are excluded by `is_dep_manifest`.
 pub fn duplicate_install_files(project_opencode: &Path, user_opencode: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, project: &Path, user: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -402,20 +408,23 @@ fn is_dep_manifest(name: Option<&std::ffi::OsStr>) -> bool {
     )
 }
 
-/// Prune stale apg-managed files from the user-level install (`~/.opencode/`):
-/// `tools/apg_*.ts` (the `apg_` prefix is the apg namespace) and the known
-/// distributed agent names that a newer release removed from the suite. Anything
-/// not owned by apg (a user's own tools/agents) is preserved. `apg init` already
-/// overwrites edited suite files via `write_if_changed`, so removing the same
-/// owned set is consistent. Returns the number of files pruned.
+/// Prune stale apg-managed files from the user-level install
+/// (`~/.config/opencode/`): `plugins/apg_*.ts` (the `apg_` prefix is the apg
+/// namespace) and the known distributed agent names that a newer release
+/// removed from the suite. The prune is scoped to the `~/.config/opencode/`
+/// root alone — it never reads or writes anything under `~/.opencode/`.
+/// Anything not owned by apg (a user's own plugins/agents) is preserved.
+/// `apg init` already overwrites edited suite files via `write_if_changed`, so
+/// removing the same owned set is consistent. Returns the number of files
+/// pruned.
 pub fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
     let current_tools: std::collections::HashSet<&str> =
         SUITE_TOOLS.iter().map(|(n, _)| *n).collect();
     let current_agents: std::collections::HashSet<&str> = AGENTS.iter().map(|(n, _)| *n).collect();
     let mut pruned = 0;
 
-    let tools_dir = opencode_dir.join("tools");
-    if let Ok(entries) = std::fs::read_dir(&tools_dir) {
+    let plugins_dir = opencode_dir.join("plugins");
+    if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
         for e in entries.flatten() {
             let p = e.path();
             let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
@@ -445,19 +454,22 @@ pub fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
     Ok(pruned)
 }
 
-/// Installs (or updates) the apg suite into `opencode_dir`: every `SUITE_TOOLS`
-/// file, the shared lib, the upgrade guide, and the seven distributed agents —
+/// Installs (or updates) the apg suite into the V2 `opencode_dir` layout: every
+/// `SUITE_TOOLS` plugin file into `plugins/`, the shared lib + upgrade guide
+/// into `lib/` (beside the plugins, outside opencode's plugin discovery), the
+/// seven distributed agents into `agents/`, and `package.json` at the root —
 /// each written only when missing or changed — then prunes stale apg-owned
 /// files. Returns `(files written/updated, files pruned)`. `cmd_init` calls it
-/// against `~/.opencode`; tests call it against a temp dir. The package.json
-/// scaffold is only written when absent (never clobbered). The embedded
-/// agent/tool prose it delivers carries the coordinator-mediated feedback
-/// cycle: the owning writer returns an ACTIONED/WONT-FIX claim and the
+/// against `~/.config/opencode/`; tests call it against a temp dir. The
+/// package.json scaffold is only written when absent (never clobbered). The
+/// embedded agent/tool prose it delivers carries the coordinator-mediated
+/// feedback cycle: the owning writer returns an ACTIONED/WONT-FIX claim and the
 /// coordinator performs the shallow claim-vs-change check and then actions the
 /// item (`apg_review_action`).
 pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
-    let tools_dir = opencode_dir.join("tools");
-    std::fs::create_dir_all(&tools_dir)?;
+    // opencode 2.x discovers its tool plugins in `plugins/`.
+    let plugins_dir = opencode_dir.join("plugins");
+    std::fs::create_dir_all(&plugins_dir)?;
     let agents_dir = opencode_dir.join("agents");
     std::fs::create_dir_all(&agents_dir)?;
 
@@ -467,24 +479,26 @@ pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
     }
     let mut updated = 0usize;
     for (name, content) in SUITE_TOOLS {
-        if write_if_changed(&tools_dir.join(name), content)? {
+        if write_if_changed(&plugins_dir.join(name), content)? {
             updated += 1;
         }
     }
+    // The shared lib + upgrade guide live in `lib/`, beside the plugins,
+    // outside opencode's plugin discovery.
     let lib_dir = opencode_dir.join("lib");
     std::fs::create_dir_all(&lib_dir)?;
     if write_if_changed(&lib_dir.join("apg.ts"), APG_LIB)? {
         updated += 1;
     }
     // The upgrade guide the R10 gate's block text points at (task-4).
-    // Best-effort with a warning: an unwritable ~/.opencode must not fail
-    // init (mirrors the npm-install failure handling below).
+    // Best-effort with a warning: an unwritable ~/.config/opencode must not
+    // fail init (mirrors the npm-install failure handling below).
     let upgrade_doc_path = lib_dir.join("apg-upgrade.md");
     match write_if_changed(&upgrade_doc_path, APG_UPGRADE_DOC) {
         Ok(true) => updated += 1,
         Ok(false) => {}
         Err(e) => eprintln!(
-            "warning: could not install the upgrade guide into {} ({e}); the version-gate block text points at ~/.opencode/lib/apg-upgrade.md — re-run `apg init` once the location is writable",
+            "warning: could not install the upgrade guide into {} ({e}); the version-gate block text points at ~/.config/opencode/lib/apg-upgrade.md — re-run `apg init` once the location is writable",
             upgrade_doc_path.display()
         ),
     }
@@ -500,7 +514,7 @@ pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize)> {
 /// `apg init [dir]`: create the committed `apg/` layout (config.json carrying
 /// the binary-managed layout `version` + `.trans/` + the project-worktrees
 /// dir), install (or update) the opencode apg tool suite + the seven
-/// distributed agents + the upgrade guide into `~/.opencode/`, scaffold the
+/// distributed agents + the upgrade guide into `~/.config/opencode/`, scaffold the
 /// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
 /// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`
 /// files that duplicate the installed suite (never deletes anything).
@@ -541,18 +555,18 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
 
     if !opencode_dir
         .join("node_modules")
-        .join("@opencode-ai")
+        .join("@opencode")
         .join("plugin")
         .exists()
     {
-        let status = Command::new("npm")
+        let status = Command::new("bun")
             .arg("install")
             .current_dir(&opencode_dir)
             .status();
         match status {
             Ok(s) if s.success() => {}
             _ => eprintln!(
-                "warning: could not npm install in {}; run `npm install` there for the plugin import to resolve.",
+                "warning: could not bun install in {}; run `bun install` there for the plugin import to resolve.",
                 opencode_dir.display()
             ),
         }

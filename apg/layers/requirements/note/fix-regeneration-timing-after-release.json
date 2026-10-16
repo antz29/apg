@@ -2,7 +2,7 @@
   "layer": "requirements",
   "type": "note",
   "name": "fix-regeneration-timing-after-release",
-  "body": "The repo's own `.opencode/agents/**` are consumer artifacts of the agent-builder product source. Regeneration runs on main in this order: install the released binary, run `apg init` (which installs the agent-builder template into `~/.opencode/agents/`), restart opencode, then dispatch the agent-builder on main. The agent-builder template is product source embedded through `include_str!`, so it reaches `~/.opencode/agents/` through an installed binary's `apg init`, per `AGENTS.md`'s installed-binary contract. `requirements.requirement.code-writer-worktree-only-writes` states this regeneration order.",
+  "body": "The repo's own `.opencode/agents/**` are consumer artifacts of the agent-builder product source. Regeneration runs on main in this order: install the released binary, run `apg init` (which installs the agent-builder template into `~/.config/opencode/agents/`), restart opencode, then dispatch the agent-builder on main. The agent-builder template is product source embedded through `include_str!`, so it reaches `~/.config/opencode/agents/` through an installed binary's `apg init`, per `AGENTS.md`'s installed-binary contract. `requirements.requirement.code-writer-worktree-only-writes` states this regeneration order.",
   "properties": {},
   "out": [
     {

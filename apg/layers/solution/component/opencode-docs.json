@@ -1,0 +1,31 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "opencode-docs",
+  "body": "The opencode 2.x dependency documentation: `README.md`'s dependency line, `apg init` section, and querying-from-opencode section, and `AGENTS.md`'s CLI section. Both name opencode 2.x and the `@opencode/plugin` dependency, state the install locations under the global opencode config directory `~/.config/opencode/` — the plugin directory `~/.config/opencode/plugins/`, the shared lib beside it, and the seven distributed agents at `~/.config/opencode/agents/` — and state the apg-release-to-opencode version pairing (`requirements.constraint.opencode-v2-support-window`: the apg 0.21.x line supports opencode v1, the apg 0.22.x line supports opencode v2), keeping the restart-opencode-after-init note.\n\nA NARROW owner distinct from `solution.component.agent-roster-docs` (the roster count and the push/tag user-doc half) and `solution.component.frontend-dependency-docs` (the frontend dependency contract): this component owns the opencode-2.x-dependency and version-pairing statements alone.\n\nimplemented-by: `README.md` and `AGENTS.md`.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "AGENTS.md",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "README.md",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.opencode-integration",
+      "properties": {}
+    }
+  ]
+}

@@ -6,22 +6,54 @@
 // template. This module owns the project-root discovery, the subprocess call,
 // and Cypher string-literal escaping (so structured args can never break out
 // of or inject into a query).
+//
+// The suite targets opencode 2.x's plugin model: a tool is registered through
+// `Plugin.define({ id, setup(ctx) })`, whose `setup` context supplies the
+// plugin load location (`ctx.location`) and the permission engine
+// (`ctx.permission`); a registered tool's `execute(input, context)` receives
+// the executor context carrying the caller identity (`agent`, `sessionID`,
+// `messageID`, `id`) plus `progress`/`signal`. The plumbing reads ONLY those V2
+// sources: the project root resolves from `ctx.location` (never a V1 load-path
+// field), and fs scope is asserted through `ctx.permission.assert` (never by
+// re-deriving an agent's edit grants here).
 
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync } from "node:fs"
 import net from "node:net"
-import { homedir } from "node:os"
 import path from "node:path"
 
+/**
+ * The context the suite's shared plumbing reads, assembled by each tool from
+ * two opencode 2.x sources before it calls into the lib:
+ *
+ *  - the V2 **tool-executor context** — the second argument to a registered
+ *    tool's `execute(input, context)` — which carries the caller identity
+ *    `agent` (the acting agent's ID), `sessionID`, `messageID`, and `id`, plus
+ *    `progress` and `signal`; and
+ *  - the plugin instance's **load location**, captured from the plugin context
+ *    (`ctx.location`) at `setup` and merged with the executor context — the
+ *    `directory` the plugin loaded in and its `project`.
+ *
+ * Typed structurally here so this module never imports `@opencode/plugin` at
+ * runtime: the tools pass the real fields and the plugin-free unit/e2e tiers
+ * supply a faked context.
+ */
 export interface ToolContext {
-  directory: string
-  worktree: string
-  /**
-   * The acting agent's NAME, as carried on opencode's v1 tool context
-   * (`@opencode-ai/plugin` `ToolContext.agent`). Typed structurally here so
-   * this module never imports the plugin at runtime — the tools receive the
-   * real field, the plugin-free unit/e2e tiers simply omit it.
-   */
-  agent?: string
+  /** The acting agent's ID (the tool-executor context's `agent`). */
+  agent: string
+  /** The session ID (the tool-executor context's `sessionID`). */
+  sessionID: string
+  /** The tool-call message ID (the tool-executor context's `messageID`). */
+  messageID: string
+  /** The tool call's ID (the tool-executor context's `id`). */
+  id: string
+  /** Reports progress for a long-running tool call (the context's `progress`). */
+  progress?: (status: unknown) => void | Promise<void>
+  /** Aborts cancellable work (the context's `signal`). */
+  signal?: AbortSignal
+  /** The plugin instance's load location, captured from `ctx.location` at
+   *  `setup` — the source of the project root (`ctx.location.directory` /
+   *  `ctx.location.project`). */
+  location?: { directory?: string; project?: { id: string; directory?: string; canonical?: string } }
 }
 
 /** The apg binary to spawn: APG_BINARY env override, default "apg" on PATH. */
@@ -29,22 +61,33 @@ export function apgBinary(): string {
   return process.env.APG_BINARY || "apg"
 }
 
-/** Walks up from the session dirs looking for the project's `apg/.trans/db.lbug`.
- *  In a project worktree this resolves to the worktree's OWN `apg/` (and its
- *  branch DB) — never the main checkout's — so the tools work unchanged with
- *  cwd inside the worktree.
+/** Walks up looking for the project's `apg/.trans/db.lbug`. In a project
+ *  worktree this resolves to the worktree's OWN `apg/` (and its branch DB) —
+ *  never the main checkout's — so the tools work unchanged with cwd inside the
+ *  worktree.
+ *
+ *  The walk-up START comes from the plugin instance's V2 load location
+ *  (`context.location`, captured from `ctx.location` at `setup`):
+ *  `location.directory`, then `location.project.directory`, then
+ *  `location.project.canonical` when present, then `process.cwd()` — the only
+ *  context source read.
  *
  *  `directory` (the tools' optional arg) is the caller's project directory and
  *  is AUTHORITATIVE: when given, the walk-up starts there and only there, so
  *  the returned project root is the caller's checkout — the base the curated
  *  tools rebase stored repo-relative identities onto
  *  (`requirements.requirement.absolute-paths-at-tool-boundary`) — never a
- *  project the session merely happens to have cwd in. The context/cwd dirs are
- *  fallbacks only when no `directory` is given. */
+ *  project the session merely happens to have cwd in. The load-location/cwd
+ *  dirs are fallbacks only when no `directory` is given. */
 export function findApgRoot(context: ToolContext, directory?: string): string | null {
   const starts = directory
     ? [directory]
-    : [context.directory, process.cwd(), context.worktree]
+    : [
+        context.location?.directory,
+        context.location?.project?.directory,
+        context.location?.project?.canonical,
+        process.cwd(),
+      ]
   for (const s of starts) {
     if (!s) continue
     let dir = s
@@ -70,6 +113,14 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
  * `project` is the linked worktree's name `<project>`, or `null` when the
  * caller is in the main checkout itself.
  *
+ * The START directory comes from the plugin instance's V2 load location
+ * (`context.location`, captured from `ctx.location` at `setup`):
+ * `location.directory`, then `location.project.directory`, then
+ * `location.project.canonical` when present, then `process.cwd()` — the only
+ * context source read. An explicit `directory` arg (the tools' optional
+ * project dir) is AUTHORITATIVE: when given, the start is that path and only
+ * that path.
+ *
  * Resolution is canonical-first and path-first: the caller's directory is made
  * absolute and symlink-resolved, then the documented
  * `<main>/apg/.worktrees/<project>` layout (`apg project start`'s worktree
@@ -80,14 +131,22 @@ export function findApgRoot(context: ToolContext, directory?: string): string | 
  * Returns `null` when nothing resolves (no git repository).
  *
  * Real I/O (fs + git), so it is covered by the opt-in suite e2e, never the
- * side-effect-free unit tier; the PURE `fsScopeDecision` takes the resolved
- * root as its frame and stays pure.
+ * side-effect-free unit tier; the fs tools resolve the main root here and
+ * canonicalise the operative path(s) before asserting them through opencode's
+ * permission engine (`fsScopeDecision`).
  */
 export async function mainCheckoutRoot(
   context: ToolContext,
   directory?: string,
 ): Promise<{ root: string; project: string | null } | null> {
-  const starts = directory ? [directory] : [context.directory, process.cwd(), context.worktree]
+  const starts = directory
+    ? [directory]
+    : [
+        context.location?.directory,
+        context.location?.project?.directory,
+        context.location?.project?.canonical,
+        process.cwd(),
+      ]
   for (const s of starts) {
     if (!s) continue
     // Canonicalise so relative/trailing-slash/symlinked spellings of the same
@@ -131,9 +190,9 @@ export async function mainCheckoutRoot(
  * — a destination like `<worktree>/src/new.rs` stays comparable to the resolved
  * frame, while a symlink anywhere on the existing prefix (a `directory` spelled
  * through one, or a worktree-internal link pointing into the main checkout) is
- * followed to its real target and judged on it. This is what keeps the fs
- * tools' candidate and root comparisons in ONE frame; `fsScopeDecision` stays
- * pure and I/O-free.
+ * followed to its real target and judged on it. This keeps the fs tools'
+ * candidate and root comparisons in ONE frame, and the path asserted through
+ * opencode's permission engine is that same canonical path.
  *
  * Real I/O (fs), so it is covered by the opt-in suite e2e, never the pure unit
  * tier.
@@ -185,297 +244,118 @@ export function resolveProjectPath(projectDir: string, value: string): string {
 // `apg_cp.ts`) SELF-ENFORCE per-path scope so a code-writer implementer can
 // implement plan `deletes`/`renames`/`moves` tasks only inside the surface it
 // owns. The opencode tool-level grant is just the callability gate; the real
-// boundary is decided here. The DECISION is PURE (`fsScopeDecision`: no fs, no
-// process, no db) so the side-effect-free `bun test` unit tier covers it; the
-// acting-agent permission read (`agentFsGlobs`) is real file I/O, covered by
-// the opt-in suite e2e. This module stays PLUGIN-FREE — the acting agent name
-// arrives as a plain string on the tool context, so nothing here imports
-// `@opencode-ai/plugin` at runtime.
+// per-path boundary is asserted through opencode 2.x's OWN permission engine —
+// `ctx.permission.assert(...)` with the `edit` action and the resolved target
+// path(s) as `resources` — rather than by re-deriving the agent's edit grants
+// here.
+// `fsScopeDecision` is the thin, fail-closed wrapper over that assert: it
+// passes ALL of an operation's paths in ONE call, so opencode's
+// any-deny/else-any-ask/else-allow resolution across the resource set decides
+// the operation, and it turns an assert rejection into a decision so the
+// contract stays testable against a stubbed `permission.assert`. This module
+// stays PLUGIN-FREE — `permission` is a structurally-typed `{ assert }` seam
+// and the acting agent name arrives as a plain string on the tool context, so
+// nothing here imports `@opencode/plugin` at runtime.
 //
-// MAIN-ANCHORED FRAME: the granted globs are written against the session
-// workspace root (the MAIN checkout) — a code-writer's grants are
-// `apg/.worktrees/*/<glob>` — so the decision resolves both the grants and the
-// candidate against that one main root and structurally refuses any candidate
-// that resolves into the main checkout (outside every project worktree). The
-// main root is discovered by `mainCheckoutRoot` and handed in as an argument,
-// and every candidate is canonicalised into that same frame by the
+// MAIN-ANCHORED FRAME: the acting agent's `edit` grants are written against the
+// session workspace root (a code-writer's grants are
+// `apg/.worktrees/*/<glob>`), and opencode evaluates that agent's whole
+// effective `edit` rule set for the asserted path. The main root is discovered
+// by `mainCheckoutRoot`, and every operative path is canonicalised by the
 // `canonicalPath` I/O helper (which follows symlinks, resolving the deepest
-// existing ancestor for a not-yet-existing destination) BEFORE the decision;
-// `fsScopeDecision` itself stays pure.
+// existing ancestor for a not-yet-existing destination) BEFORE it is asserted,
+// so the resource opencode matches is the one on disk.
 
-/** The outcome of checking one candidate path against one acting agent's
- *  grants. `allowed` requires the resolved path to stay inside the frame root
- *  (`inBoundary`: no `..`/absolute escape), to land in a project worktree
- *  rather than the main checkout in main-anchored mode, and to match a granted
- *  glob (`globMatched`). `reason` is the human-readable refusal, or `null` when
- *  allowed. */
+/** The outcome of asserting one operation's resources against opencode 2.x's
+ *  permission engine. `allowed` is true when `permission.assert` resolved for
+ *  every resource (opencode applies its any-deny/else-any-ask/else-allow
+ *  precedence across the whole resource set within ONE call); `reason` carries
+ *  the refusal when the assert threw/rejected or when the permission surface
+ *  was absent (fail-closed), and is `null` when allowed. */
 export interface FsScopeDecision {
   allowed: boolean
-  /** `candidate`, resolved and expressed relative to the frame root (the main
-   *  checkout root in main-anchored mode) in `/`-form — the spelling the
-   *  granted globs match. */
-  relativePath: string
-  /** True when `relativePath` matched at least one rule (allow or deny). A
-   *  main-checkout path can match a root rule yet still be refused by the
-   *  worktree rule. */
-  globMatched: boolean
-  /** True when the resolved path stays inside the frame root (no `..`/absolute
-   *  escape). */
-  inBoundary: boolean
-  /** Why the path was refused, or `null` when `allowed`. */
   reason: string | null
 }
 
 /**
- * Compiles one path glob to an anchored RegExp. A single star matches within a
- * path segment; a double star crosses path separators; a question mark matches
- * one non-separator character. A double star immediately followed by a
- * separator also matches the zero-directory case (so the Rust-file doublestar
- * pattern matches a bare basename). Every other metacharacter is escaped
- * literally. Globs match slash-separated relative paths.
- */
-const globToRegExp = (glob: string): RegExp => {
-  let re = ""
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i]
-    if (c === "*") {
-      if (glob[i + 1] === "*") {
-        i++
-        if (glob[i + 1] === "/") {
-          i++
-          re += "(?:.*/)?"
-        } else {
-          re += ".*"
-        }
-      } else {
-        re += "[^/]*"
-      }
-    } else if (c === "?") {
-      re += "[^/]"
-    } else if ("\\^$.|+()[]{}".includes(c)) {
-      re += "\\" + c
-    } else {
-      re += c
-    }
-  }
-  return new RegExp("^" + re + "$")
-}
-
-/** True when a `/`-separated relative path matches a path glob. */
-const globMatch = (glob: string, relativePath: string): boolean =>
-  globToRegExp(glob).test(relativePath)
-
-/**
- * The PURE filesystem scope decision. No fs, no process, no db, no git — safe
- * for the side-effect-free `bun test` unit tier, and the direct, plugin-free
- * target of the opt-in suite e2e (`opencode-suite/tests/boundary.e2e.test.ts`).
+ * The fail-closed, testable fs-scope decision: assert an fs operation's target
+ * path(s) against opencode 2.x's permission engine and reduce the outcome to
+ * `{ allowed, reason }`.
  *
- * - `mainRoot` — the frame root; `candidatePath` (absolute, or relative to it)
- *   is resolved against it. In main-anchored mode this is the MAIN checkout
- *   root (discovered by `mainCheckoutRoot`), the same root opencode resolves an
- *   agent's path-scoped grants against, so a worktree-rooted grant matches
- *   exactly the worktree path it names.
- * - `grantedRules` — the acting agent's granted path scope as the ordered
- *   `{ glob, allow }` rules `agentFsGlobs` reads from its permission block
- *   (BOTH allow and deny, in FILE ORDER, duplicates preserved). A bare glob
- *   string is still accepted for pre-flip callers (the legacy allow-only list
- *   the unit tests pass). A literal argument here so the decision never depends
- *   on the plugin context.
- * - `project` — the acting worktree's project name `<p>` (or `null` when the
- *   caller is in the main checkout). Passing it puts the decision in
- *   MAIN-ANCHORED mode: the candidate must resolve under
- *   `<mainRoot>/apg/.worktrees/<p>/` (a `null` project accepts any project
- *   worktree), so a path that resolves into the main checkout is refused
- *   structurally — independent of the globs. Omitting it keeps the legacy
- *   single-root decision for a pure, non-worktree caller.
+ * - `permission` — the plugin's `ctx.permission`, a structurally-typed
+ *   `{ assert }` seam (never an `@opencode/plugin` import). Passed in so the
+ *   decision never depends on a runtime plugin type and the unit tier can drive
+ *   it against a stub.
+ * - `context` — the V2 tool-executor context; `sessionID`/`agent`/`messageID`/
+ *   `id` build the assert's caller identity.
+ * - `resources` — the resolved ABSOLUTE path(s) the operation touches. ALL of
+ *   an operation's paths are asserted in ONE call, so opencode's
+ *   any-deny/else-any-ask/else-allow precedence across the whole set decides it:
+ *   an `apg_mv`/`apg_cp` whose source is allowed but whose destination is denied
+ *   is refused.
+ * - `save` — the patterns opencode stores when the user chooses "always allow".
+ *   Omitted from the call when empty.
  *
- * Two INDEPENDENT structural tests, both required: the resolved path must stay
- * inside `mainRoot` (`inBoundary` — a `..`/absolute escape is refused even when
- * a rule would match), and — in main-anchored mode — must land in a project
- * worktree, not the main checkout (refused with `path resolves into the main
- * checkout` even when a root rule matches). The rule decision then runs over
- * the main-root-relative `/`-form: the LAST matching rule wins — an ALLOW entry
- * grants, a DENY entry revokes, and a path matched by NO entry is refused
- * (deny-by-default). `globMatched` reports whether ANY rule matched (allow or
- * deny). This function is PURE and resolves LEXICALLY only (no fs): callers
- * canonicalise the frame root
- * and each candidate with the `canonicalPath` I/O helper first, so both sides
- * share ONE symlink-resolved frame — a `directory` spelled through a symlink and
- * a worktree-internal symlink pointing into the main checkout are judged on
- * their real target, never the caller's textual spelling.
- */
-export function fsScopeDecision(
-  mainRoot: string,
-  candidatePath: string,
-  grantedRules: readonly ({ glob: string; allow: boolean } | string)[],
-  project?: string | null,
-): FsScopeDecision {
-  const rootAbs = path.resolve(mainRoot)
-  const candidateAbs = path.isAbsolute(candidatePath)
-    ? path.resolve(candidatePath)
-    : path.resolve(rootAbs, candidatePath)
-  const rel = path.relative(rootAbs, candidateAbs)
-  const inBoundary = rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))
-  const relativePath = rel.split(path.sep).join("/")
-
-  // Main-anchored mode is active whenever the caller supplies `project`
-  // (a worktree name, or `null` from the main checkout); `undefined` keeps the
-  // legacy single-root decision. A write must land in a project worktree —
-  // never the main checkout — so the structural worktree test runs before the
-  // glob test and cannot be satisfied away by a root glob.
-  const mainAnchored = project !== undefined
-  const worktreePrefix = project ? `apg/.worktrees/${project}/` : null
-  const inWorktree = !mainAnchored
-    ? true
-    : worktreePrefix !== null
-      ? relativePath.startsWith(worktreePrefix)
-      : /^apg\/\.worktrees\/[^/]+\//.test(relativePath)
-
-  // Normalise the ordered rules: a bare string is a legacy ALLOW rule (the
-  // pre-flip callers and the allow-only unit tests), while an object carries its
-  // own `allow`/`deny`. The decision is the LAST MATCHING rule — an ALLOW entry
-  // grants, a DENY entry revokes, and a path matched by NO entry is refused
-  // (deny-by-default). Order is precedence, so duplicates are preserved.
-  const rules = grantedRules.map((rule) =>
-    typeof rule === "string" ? { glob: rule, allow: true } : rule,
-  )
-  // `globMatched` is the legacy "did any rule match" flag the tests read; the
-  // ALLOW/DENY verdict is which rule matched LAST.
-  const matching = inBoundary ? rules.filter((r) => globMatch(r.glob, relativePath)) : []
-  const globMatched = matching.length > 0
-  const lastMatch = matching[matching.length - 1]
-  const allowed = inBoundary && inWorktree && lastMatch?.allow === true
-  const reason = allowed
-    ? null
-    : !inBoundary
-      ? "path escapes the project/worktree boundary"
-      : !inWorktree
-        ? "path resolves into the main checkout"
-        : "path is not within the acting agent's granted globs"
-  return { allowed, relativePath, globMatched, inBoundary, reason }
-}
-
-/**
- * Extracts the YAML frontmatter body (between the leading `---` fences) from an
- * agent config file, or `null` when the file is not a fenced-frontmatter doc.
- */
-function frontmatter(text: string): string | null {
-  const lines = text.split("\n")
-  if (lines[0]?.trim() !== "---") return null
-  const end = lines.indexOf("---", 1)
-  if (end < 0) return null
-  return lines.slice(1, end).join("\n")
-}
-
-/** Leading-space count of a line (indentation depth). */
-function indentOf(line: string): number {
-  return line.length - line.trimStart().length
-}
-
-/**
- * The `permission.edit` rules from an agent's frontmatter `permission` block —
- * the agent's write scope. Extracts the `edit:` mapping (a line whose only
- * content is `edit:` under `permission:`) and collects EVERY child entry
- * spelled `"<glob>": allow` or `"<glob>": deny` (quoted or bare key) IN FILE
- * ORDER, as ordered `{ glob, allow }` entries. Both kinds survive — allow
- * entries grant, deny entries revoke, and their order is the precedence a
- * last-matching-rule decision applies (a later entry overrides an earlier one,
- * so duplicates are preserved, not deduped). Returns `[]` (fail-closed) when
- * the body carries no `edit:` block.
- */
-export function editAllowGlobs(frontmatterBody: string): { glob: string; allow: boolean }[] {
-  const lines = frontmatterBody.split("\n")
-  const start = lines.findIndex((l) => /^\s+edit:\s*$/.test(l))
-  if (start < 0) return []
-  const baseIndent = indentOf(lines[start])
-  const rules: { glob: string; allow: boolean }[] = []
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i]
-    if (line.trim() === "") continue
-    if (indentOf(line) <= baseIndent) break
-    const m = /^\s+(?:"([^"]+)"|'([^']+)'|(\S+?)):\s*(allow|deny)\s*$/.exec(line)
-    if (m) {
-      const glob = m[1] ?? m[2] ?? m[3]
-      rules.push({ glob, allow: m[4] === "allow" })
-    }
-  }
-  return rules
-}
-
-/**
- * Reads one agent config file and returns its `permission.edit` rules — the
- * ordered `{ glob, allow }` entries `editAllowGlobs` collects (BOTH allow and
- * deny, in FILE ORDER, duplicates preserved) — or `null` when the file does not
- * exist / cannot be read. A doc that is not fenced-frontmatter returns the
- * fail-closed `[]`, as does a fenced doc with no `edit:` block (via
- * `editAllowGlobs`), so a caller refuses every path rather than allowing one by
- * default.
- */
-function readAgentEditGlobs(file: string): { glob: string; allow: boolean }[] | null {
-  if (!existsSync(file)) return null
-  try {
-    const fm = frontmatter(readFileSync(file, "utf8"))
-    if (fm === null) return []
-    return editAllowGlobs(fm)
-  } catch {
-    return null
-  }
-}
-
-/**
- * Resolves the ACTING agent (from the plain `context.agent` string the opencode
- * tool context carries) to its granted path scope — returned as the ordered
- * `{ glob, allow }` rules (BOTH allow and deny, in FILE ORDER, duplicates
- * preserved) so the tools and `fsScopeDecision` receive the whole rule list, not
- * just the allow-side projection. There is no permission field
- * on the tool context, so the rules are read from the agent's config file —
- * markdown with a fenced YAML frontmatter whose `permission.edit` block lists
- * the agent's path grants.
+ * The assert args are built from `context`: `sessionID`, `source`
+ * (`{ type: "tool", messageID, id }`), `action: "edit"`, and `resources`.
+ * `agent` is included only when `context.agent` is non-empty, so an absent agent
+ * lets opencode default to the session's agent.
  *
- * An agent's config is authored on the MAIN checkout (agents are created and
- * committed there; there is no per-worktree `.opencode/agents` mirror), so the
- * main checkout root is the authoritative frame. A caller resolves it with
- * `mainCheckoutRoot(context, directory)` and passes `frame.root` as `mainRoot`:
- * the config is then read from `<mainRoot>/.opencode/agents/<agent>.md` and the
- * caller's `directory` is NOT consulted, so the resolved grants are identical
- * for every spelling of that directory (relative, trailing slash, symlink). The
- * rules are returned VERBATIM — already main-root-relative, the worktree-rooted
- * `apg/.worktrees/<project>/<glob>` forms `fsScopeDecision` matches against in
- * its main-anchored mode; the reader never rewrites them.
+ * FAIL-CLOSED: a missing `permission` (or `assert`) refuses with a clear reason,
+ * and an `assert` that throws/rejects (a `deny` rule, or a rejected prompt —
+ * a `Tool.Error` carrying the reason) refuses with the thrown error's reason.
+ * An allowed assert resolves to `{ allowed: true, reason: null }`.
  *
- * With no `mainRoot` the legacy search is kept so an existing caller is
- * unaffected: the caller's own directories (`directory`, `context.directory`,
- * `context.worktree`), then the globally-installed suite
- * (`~/.opencode/agents/<agent>.md`, where `apg init` installs the distributed
- * agents). Returns `[]` when no agent name is present or no config resolves, so
- * a caller refuses every path rather than allowing one by default.
- *
- * Real file I/O, so it is covered by the opt-in suite e2e, never the pure unit
- * tier. It stays plugin-free: the name is a structural field, not a plugin type.
+ * `fsScopeDecision` awaits `permission.assert`, which in production performs
+ * real permission evaluation (and, on `ask`, a user prompt); the unit tier
+ * drives it against a stubbed `assert` (pure in-memory) and the live behaviour
+ * is covered by the opt-in suite e2e
+ * (`opencode-suite/tests/boundary.e2e.test.ts`).
  */
-export function agentFsGlobs(
+export async function fsScopeDecision(
+  permission: { assert: (args: unknown) => Promise<void> } | undefined,
   context: ToolContext,
-  directory?: string,
-  mainRoot?: string | null,
-): { glob: string; allow: boolean }[] {
-  const name = context.agent
-  if (!name) return []
-  // A resolved main root is the whole search frame: the agent file lives on main
-  // and its grants are written against that root. Without one, keep the legacy
-  // caller-directory search so an existing 2-argument caller still works.
-  const roots = (mainRoot ? [mainRoot] : [directory, context.directory, context.worktree]).filter(
-    (p): p is string => typeof p === "string" && p.length > 0,
-  )
-  for (const root of roots) {
-    const rules = readAgentEditGlobs(path.join(root, ".opencode", "agents", `${name}.md`))
-    if (rules !== null) return rules
+  resources: readonly string[],
+  save?: readonly string[],
+): Promise<FsScopeDecision> {
+  if (!permission || typeof permission.assert !== "function") {
+    return {
+      allowed: false,
+      reason: "opencode permission surface unavailable (fail-closed): refusing every path",
+    }
   }
-  const home = process.env.HOME || homedir()
-  if (home) {
-    const rules = readAgentEditGlobs(path.join(home, ".opencode", "agents", `${name}.md`))
-    if (rules !== null) return rules
+  const args: {
+    sessionID: string
+    agent?: string
+    source: { type: "tool"; messageID: string; id: string }
+    action: "edit"
+    resources: readonly string[]
+    save?: readonly string[]
+  } = {
+    sessionID: context.sessionID,
+    source: { type: "tool", messageID: context.messageID, id: context.id },
+    action: "edit",
+    resources,
   }
-  return []
+  if (context.agent) args.agent = context.agent
+  if (save && save.length > 0) args.save = save
+  try {
+    await permission.assert(args)
+    return { allowed: true, reason: null }
+  } catch (err) {
+    return { allowed: false, reason: assertFailureReason(err) }
+  }
+}
+
+/** The refusal reason from a `permission.assert` rejection: the thrown error's
+ *  `message`, else a `Tool.Error`'s `reason` field, else its string form. */
+function assertFailureReason(err: unknown): string {
+  if (err && typeof err === "object") {
+    const e = err as { message?: unknown; reason?: unknown }
+    if (typeof e.message === "string" && e.message.length > 0) return e.message
+    if (typeof e.reason === "string" && e.reason.length > 0) return e.reason
+  }
+  return err === undefined ? "permission denied" : String(err)
 }
 
 /**
