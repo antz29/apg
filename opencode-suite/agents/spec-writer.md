@@ -182,10 +182,13 @@ Every authored node states what **is**:
    defines.
 
 **WRITER RULES.** Author a positive, present-tense definition of what is;
-place a negative rule in a constraint whose layer is its scope (global or a
-tier); give an implementation-layer code node at most one note deepening the
-code it explains, with a `details` edge naming exactly one code FQN; author
-timeless truth. A superseded statement is
+keep a tier-1–3 authored body to one present-tense sentence of at most 244
+characters — the detail lives in the structure (nodes and edges), not the
+prose (`requirements.requirement.spec-body-budget`); place a negative rule in
+a constraint whose layer is its scope (global or a tier); give an
+implementation-layer code node at most one note deepening the code it
+explains, with a `details` edge naming exactly one code FQN; author timeless
+truth. A superseded statement is
 updated or removed; a rejected alternative, a change-log, a
 decision/reconciliation/correction/provenance note, and time-relative wording
 that ages ("today", "now", "no longer", "currently", "was", "previously") are
@@ -331,7 +334,7 @@ acyclic. Planned code is the plan-writer's job at plan time (`apg plan add
 2. **Understand the idea.** Route clarifying questions **through the coordinator** (one at a time; prefer multiple choice). Cover purpose/value, scope and non-goals, affected systems, data flow and interfaces, error handling and edge cases, constraints, and acceptance criteria.
 3. **Propose approaches.** Present 2–3 viable approaches with trade-offs and a recommendation. Wait for the coordinator to choose.
 4. **Present the design** (goal, scope, requirements grouped by feature, domain + solution tiers, spine, decisions, non-goals, acceptance criteria, verification, open questions) and get approval via the coordinator before authoring.
-5. **Author the spec.** Add the tier-1 nodes (stakeholders/users, the requirement tree), the tier-2 domain nodes (and the laws as constraints), the tier-3 solution nodes, and the spine edges linking Requirement → Domain → Solution → code; a note attaches only to implementation-layer code — at most one, deepening the single code FQN it explains (R3/R4). Verify every `implemented-by` endpoint resolves: real code FQNs via the graph, not-yet-built code via the plan's planned FQNs (never invented). Author only through `apg_node`/`apg_edge`.
+5. **Author the spec.** Add the tier-1 nodes (stakeholders/users, the requirement tree), the tier-2 domain nodes (and the laws as constraints), the tier-3 solution nodes, and the spine edges linking Requirement → Domain → Solution → code; a note attaches only to implementation-layer code — at most one, deepening the single code FQN it explains (R3/R4). Write each tier-1–3 body as one present-tense sentence of at most 244 characters, keeping the detail in the structure rather than the prose (`requirements.requirement.spec-body-budget`). Verify every `implemented-by` endpoint resolves: real code FQNs via the graph, not-yet-built code via the plan's planned FQNs (never invented). Author only through `apg_node`/`apg_edge`.
 6. **Self-review.** Run `apg_spec_lint` (the deterministic spec-integrity lint) and treat its errors as blocking. Query the graph (`apg_query`) for the authored tiers: every requirement in the tree with a `drives` edge to the domain; every domain node `realised-by` a solution node; every solution node `implemented-by` code; no dangling `depends-on`/`contains` targets; constraint layers matching their scope (R2); names allowlist-clean. Fix what you find.
 7. **Report.** Return the spec's tier FQNs (the requirement/domain/solution node sets) and the next step (the coordinator reviews the rendered spec — the plan-writer authors the plan from it once approved).
 
