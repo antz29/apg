@@ -366,7 +366,9 @@ a bare command.
   `apg_plan_phases`, `apg_plan_tasks`, plus the codebase-navigator rules
   embedded in the body. **Enumerate every generated agent's grant explicitly —
   never a vague "suite" — and never include `apg_plan_render`** — that
-  projection tool is navigator/coordinator-only.
+  projection tool is navigator/coordinator-only — **nor `apg_plan_note`** — the
+  banned plan-note tool poisons the whole durable-spec write surface, so no
+  generated agent is ever granted it.
 - **Filesystem scope tools — the implementer's `deletes`/`renames`/`moves`
   surface.** Grant `apg_rm`/`apg_mv`/`apg_cp` deny-by-default as ordered rules
   (one per tool — `apg_mv`/`apg_cp` included — each opening with a
@@ -394,7 +396,8 @@ a bare command.
 - Same grant shape as the implementer (the explicit read-only apg suite
   enumeration above, the plan read tools `apg_plan`/`apg_plan_phases`/
   `apg_plan_tasks`, `apg_plan_done`/`apg_plan_undone`, read-only `apg_review`,
-  git add+commit, verified gates — **never `apg_plan_render`**), **including the
+  git add+commit, verified gates — **never `apg_plan_render`, never
+  `apg_plan_note`**), **including the
   worktree-only rule**: every test glob is granted only as
   `apg/.worktrees/*/<glob>`, and every deny is expressed worktree-rooted too —
   no root-relative allow. Like the implementer, it never actions Feedback — it
@@ -447,7 +450,8 @@ a bare command.
 - It otherwise follows the **common permission shape** (read-guard denies on
   the graph-state paths, no `question`, stop-and-report tool-failure prose,
   no-internals body). Its apg-tool grant stays an explicit enumeration and
-  **never includes `apg_plan_render`**.
+  **never includes `apg_plan_render`** — nor `apg_plan_note`, the banned
+  plan-note tool.
 
 ## The repo-root `opencode.json` agent→model map
 
@@ -809,7 +813,8 @@ recognise — and commit the result on the MAIN checkout together with the
    paths in the body);
    confirm every generated agent's apg-tool grant is the explicit role
    enumeration and **never includes `apg_plan_render`** (the projection tool is
-   navigator/coordinator-only), regenerating any agent that still carries it;
+   navigator/coordinator-only) **nor `apg_plan_note`** (the banned plan-note
+   tool), regenerating any agent that still carries either;
    confirm every generated body states the positive read-guard rule — graph
    state is reached only through the apg tools the agent is granted, and the
    node/transient files are never read directly — and **fail a generated agent
