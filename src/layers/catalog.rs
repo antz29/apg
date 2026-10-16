@@ -48,7 +48,7 @@ pub enum Layer {
     Plans,
     /// Tier 5 — the code in the branch (scanned, never serialized).
     Implementation,
-    /// The laws (constraints over the whole graph) and notes on them.
+    /// The laws (constraints over the whole graph).
     Global,
 }
 
@@ -87,22 +87,17 @@ impl Layer {
     /// Implementation node** can declare (schema.rs `planned_node`; they live
     /// as records under `.trans/plans/`, never as node files).
     /// Implementation: only the attach-only `note`/`constraint` files — the
-    /// layer's real nodes are the scanned code.
+    /// layer's real nodes are the scanned code. A `note` attaches only to
+    /// implementation-layer code (a note in requirements/domain/solution/global
+    /// is a violation), so `note` is listed in no other layer.
     pub const fn node_types(self) -> &'static [&'static str] {
         match self {
-            Layer::Requirements => &["stakeholder", "user", "requirement", "note", "constraint"],
-            Layer::Domain => &["group", "entity", "value", "service", "note", "constraint"],
-            Layer::Solution => &[
-                "system",
-                "container",
-                "component",
-                "person",
-                "note",
-                "constraint",
-            ],
+            Layer::Requirements => &["stakeholder", "user", "requirement", "constraint"],
+            Layer::Domain => &["group", "entity", "value", "service", "constraint"],
+            Layer::Solution => &["system", "container", "component", "person", "constraint"],
             Layer::Plans => &["plan-phase", "task", "module", "file", "struct", "function"],
             Layer::Implementation => &["note", "constraint"],
-            Layer::Global => &["constraint", "note"],
+            Layer::Global => &["constraint"],
         }
     }
 
@@ -130,25 +125,18 @@ impl Layer {
 pub const LAYERS_TREE: &[(&str, &[&str])] = &[
     (
         "requirements",
-        &["stakeholder", "user", "requirement", "note", "constraint"],
+        &["stakeholder", "user", "requirement", "constraint"],
     ),
     (
         "domain",
-        &["group", "entity", "value", "service", "note", "constraint"],
+        &["group", "entity", "value", "service", "constraint"],
     ),
     (
         "solution",
-        &[
-            "system",
-            "container",
-            "component",
-            "person",
-            "note",
-            "constraint",
-        ],
+        &["system", "container", "component", "person", "constraint"],
     ),
     ("implementation", &["note", "constraint"]),
-    ("global", &["constraint", "note"]),
+    ("global", &["constraint"]),
 ];
 
 /// The `.trans` tree (SPEC §4.1/§5): every layer dir under the transient

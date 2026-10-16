@@ -7,8 +7,8 @@ mod unit {
     use super::*;
 
     /// The catalog is the SPEC §3.1 table: per-layer dirs and node types,
-    /// verbatim (global holds constraint before note; implementation holds
-    /// only the attach-only pair).
+    /// verbatim (a note is confined to the implementation layer; implementation
+    /// holds only the attach-only pair).
     #[test]
     fn catalog_matches_the_spec_table() {
         let rows: Vec<(&str, &[&str])> = Layer::ALL
@@ -20,29 +20,22 @@ mod unit {
             vec![
                 (
                     "requirements",
-                    &["stakeholder", "user", "requirement", "note", "constraint"][..]
+                    &["stakeholder", "user", "requirement", "constraint"][..]
                 ),
                 (
                     "domain",
-                    &["group", "entity", "value", "service", "note", "constraint"][..]
+                    &["group", "entity", "value", "service", "constraint"][..]
                 ),
                 (
                     "solution",
-                    &[
-                        "system",
-                        "container",
-                        "component",
-                        "person",
-                        "note",
-                        "constraint"
-                    ][..]
+                    &["system", "container", "component", "person", "constraint"][..]
                 ),
                 (
                     "plans",
                     &["plan-phase", "task", "module", "file", "struct", "function"][..]
                 ),
                 ("implementation", &["note", "constraint"][..]),
-                ("global", &["constraint", "note"][..]),
+                ("global", &["constraint"][..]),
             ]
         );
     }
@@ -76,12 +69,12 @@ mod unit {
     }
 
     /// Implementation holds exactly the attach-only types; global holds the
-    /// laws (constraint) and the notes on them.
+    /// laws (constraint) only.
     #[test]
     fn implementation_is_attach_only() {
         assert_eq!(Layer::Implementation.storage(), StoragePolicy::ScannedCode);
         assert_eq!(Layer::Implementation.node_types(), &["note", "constraint"]);
-        assert_eq!(Layer::Global.node_types(), &["constraint", "note"]);
+        assert_eq!(Layer::Global.node_types(), &["constraint"]);
     }
 
     /// The durable tree constant is exactly the catalog projection over the
