@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "opencode-suite",
-  "body": "The `opencode-suite/` distribution — the `apg_*` tools and the shared `lib/apg.ts` plumbing, embedded into the apg binary via `include_str!` and installed by `apg init` into `~/.config/opencode/`. It is the consumer boundary of the graph: its curated tools read the scanned graph and return results to agents and editors, and it is where a stored repo-relative identity is resolved to an absolute path against the caller's project directory. The already-installed copies (a project's `.opencode/` and the cross-project `~/.config/opencode/`) are owned by the installed tooling.",
+  "body": "The opencode suite distribution: the apg tools and shared plumbing, embedded into the binary and installed by apg init, forming the consumer boundary that resolves stored repo-relative identities against a caller's project directory.",
   "properties": {
     "kind": "app"
   },

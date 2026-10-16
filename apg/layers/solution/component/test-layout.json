@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "test-layout",
-  "body": "The test organization of the root crate: each source module's unit/int tests live in a sibling `tests.rs` (preserving the module path so the `…::tests::unit::` / `…::tests::int::` filters select them), the e2e tests live in per-source-module top-level `tests/` crates sharing a `tests/common/mod.rs` harness, and the cargo aliases in `.cargo/config.toml` point at the libtest path filters. The layout serves cohesion and reuse — tests beside their module, shared fixtures in exactly one place — rather than any file's line count.",
+  "body": "The test organization of the root crate: each module's unit and integration tests in a sibling file, its end-to-end tests in a per-module top-level integration crate, and the cargo aliases pointing at the libtest filters.",
   "properties": {},
   "out": [
     {
@@ -15,11 +15,6 @@
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.test-layout-relocation",
       "properties": {}
     },
     {

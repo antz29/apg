@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "library-target-shape",
-  "body": "A first-party crate whose tests call its internals exposes a library target: the crate's `src/lib.rs` lib root declares the `mod` tree and the crate-internal API, and its binary entry point calls into the library. Every first-party crate whose tests require white-box access to its internals carries a lib target — the root `apg` crate, `structlib`, and `pylib`. The library exposes the crate-internal items the tests reach with the same FQNs and behaviour as the binary, and no production logic is duplicated between the library and the binary.",
+  "body": "A first-party crate whose tests call its internals exposes a library target that declares the module tree and crate-internal API, with its binary calling into the library and no production logic duplicated.",
   "properties": {},
   "out": [],
   "in": []

@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "structural-scanner-crate",
-  "body": "The `src/structlib` crate and its `structfrontend` binary: the single self-contained Rust artifact that walks a checkout, claims the structural files, and streams their `File`/`Struct`/`contains` records. It absorbs the `src/mdlib` Markdown frontend, so the `md` stream id for Markdown is served by `structlib` (the Markdown parser lives in `rust.structfrontend.md`). Scan-time deps are none, its runtime is self-contained, and its engine pin is its crates.",
+  "body": "The structural scanner crate and its binary: the single self-contained artifact that walks a checkout, claims the structural files, and streams their file, struct, and containment records with zero scan-time dependencies.",
   "properties": {},
   "out": [
     {

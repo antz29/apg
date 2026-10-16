@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "cpp-frontend",
-  "body": "The C++ frontend artifact (`src/cpplib/main.cpp` plus the vendored tree-sitter runtime and tree-sitter-cpp grammar, `cppfrontend`), built with gcc/g++ and zero network. Build-time deps: `gcc` (`-std=c11`) and `g++` (`-std=c++17`); the grammar and runtime are vendored. Scan-time deps: zero — a native self-contained binary. Engine pin: the vendored tree-sitter language ABI **v15** (`TREE_SITTER_LANGUAGE_VERSION 15`, min-compatible v13, in `src/cpplib/vendor/tree-sitter/lib/include/tree_sitter/api.h`) together with the vendored tree-sitter-cpp grammar content itself (`src/cpplib/vendor/tree-sitter-cpp/src/parser.c` + `scanner.c`). The vendored grammar is pinned by content and ABI: a grammar update is detected as a change to the vendored sources rather than a version bump. The language-version ceiling is therefore the grammar as vendored in this tree.",
+  "body": "The C++ frontend artifact: build-time gcc and g++ with a vendored tree-sitter runtime and grammar, zero scan-time tools, and an engine pin of the vendored tree-sitter language ABI v15 with the grammar's content.",
   "properties": {
     "kind": "app"
   },

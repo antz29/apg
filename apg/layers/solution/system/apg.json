@@ -2,42 +2,12 @@
   "layer": "solution",
   "type": "system",
   "name": "apg",
-  "body": "The apg program-graph tool: it scans a repository's source with per-language frontends, resolves canonical identities in the ingestor, and serves the graph to agents through the suite tools and the durable spec tiers. Beyond the per-language code frontends it contains the bundled structural scanner, which graphs every tracked text/config/packaging file, and the build pipeline that stages them.",
+  "body": "The apg program-graph tool: it scans a repository's source with per-language frontends, resolves canonical identities in the ingestor, and serves the graph to agents through the suite tools and the durable spec tiers.",
   "properties": {},
   "out": [
     {
       "kind": "contains",
-      "target": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.container.ts-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.container.go-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.container.java-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.container.py-frontend",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.container.rust-frontend",
+      "target": "solution.container.build-pipeline",
       "properties": {}
     },
     {
@@ -52,12 +22,42 @@
     },
     {
       "kind": "contains",
-      "target": "solution.container.build-pipeline",
+      "target": "solution.container.go-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.java-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.py-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.rust-frontend",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.scanner-cli",
       "properties": {}
     },
     {
       "kind": "contains",
       "target": "solution.container.structural-scanner",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.container.ts-frontend",
       "properties": {}
     }
   ],

@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "scanner-cli",
-  "body": "The `apg` binary: the scan driver and ingestor (`src/main.rs`, `src/ingest.rs`, `src/load.rs`), the shared fact cache (`src/cache.rs`), the delta/freshness logic (`src/delta.rs`), git identity (`src/git.rs`), and the project lifecycle (`src/project_cmd.rs`, `src/splice.rs`). It owns canonical identity resolution, scan hygiene, and the project-start seeding path.",
+  "body": "The apg binary: the scan driver and ingestor, the fact and delta machinery, git identity, and the project lifecycle, owning canonical identity resolution, scan hygiene, and the project-start seeding path.",
   "properties": {
     "kind": "app"
   },
@@ -100,6 +100,16 @@
     {
       "kind": "contains",
       "target": "solution.component.node-removal-feedback-notice",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.opencode-docs",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.opencode-install-layout",
       "properties": {}
     },
     {
@@ -221,16 +231,6 @@
       "kind": "implemented-by",
       "target": "rust.apg.splice",
       "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.opencode-install-layout",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "target": "solution.component.opencode-docs",
-      "properties": {}
     }
   ],
   "in": [
@@ -251,12 +251,12 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.source-layout",
+      "source": "domain.group.opencode-integration",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.opencode-integration",
+      "source": "domain.group.source-layout",
       "properties": {}
     }
   ]

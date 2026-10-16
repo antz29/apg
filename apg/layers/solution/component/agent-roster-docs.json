@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "agent-roster-docs",
-  "body": "The roster/upgrade documentation surfaces: `AGENTS.md` and `README.md`. Both state the distributed set as SEVEN agents including `implementation-phase-reviewer`, and `AGENTS.md` lists `implementation-phase-reviewer` solely among the distributed agents rather than among the agents the `agent-builder` generates — only `*-implementer` agents are generated.\n\nThis component carries the user-doc half of the release law: `README.md` states \"…verify → merge → unguarded main rebuild. Push/tag remain human-approved\", consistent with `requirements.requirement.push-tag-human-approved-release-only`.\n\nA NARROW owner distinct from `solution.component.repo-agent-guide` (also `AGENTS.md`) and `solution.component.frontend-dependency-docs` (`README.md` + `AGENTS.md`): those components are anchored to other concerns (the file-tool guidance; the frontend dependency contract), and reusing `frontend-dependency-docs` pulls its frontend-contract concern into this spine. This component is the repo guide plus the user README, rather than the `opencode-suite/` distribution itself.",
+  "body": "The roster and release documentation surfaces: the agent guide and the user readme, both stating the distributed agent set as seven and the human-approved push and tag policy.",
   "properties": {},
   "out": [
     {

@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "container",
   "name": "csharp-frontend",
-  "body": "The C# frontend artifact (`src/csharplib/Program.cs`, `csharpfrontend`), published as a self-contained single-file binary. Build-time deps: a .NET SDK plus NuGet. Scan-time deps: none — the published binary carries its runtime and resolves references from its own trusted platform assemblies (`GetDefaultMetadataReferences`). Engine pin: Roslyn `Microsoft.CodeAnalysis.CSharp(.Workspaces) 4.12.0`, parsed at `LanguageVersion.Latest`, so the ceiling is the pinned Roslyn's maximum.",
+  "body": "The C# frontend artifact: build-time a .NET SDK plus NuGet, zero scan-time tools, and an engine pin of Roslyn Microsoft.CodeAnalysis.CSharp 4.12.0 at its latest language version.",
   "properties": {
     "kind": "app"
   },
@@ -21,22 +21,22 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.entity.frontend-artifact",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
       "source": "domain.entity.engine-pin",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.source-layout",
+      "source": "domain.entity.frontend-artifact",
       "properties": {}
     },
     {
       "kind": "realised-by",
       "source": "domain.entity.source-module",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.source-layout",
       "properties": {}
     }
   ]

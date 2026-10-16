@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "verify-feedback-stage",
-  "body": "The verify feedback stage reads a project's transient review files and counts every Feedback record by status, refusing the plan verify gate on every open or actioned record.",
+  "body": "The verify feedback stage reads a project's transient review files and counts every feedback record by status, refusing the plan verify gate on every open or actioned record.",
   "properties": {},
   "out": [
     {
@@ -19,12 +19,12 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.review-integrity",
+      "source": "domain.entity.feedback-item",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "source": "domain.entity.feedback-item",
+      "source": "domain.group.review-integrity",
       "properties": {}
     }
   ]

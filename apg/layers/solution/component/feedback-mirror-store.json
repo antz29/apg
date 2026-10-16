@@ -2,12 +2,12 @@
   "layer": "solution",
   "type": "component",
   "name": "feedback-mirror-store",
-  "body": "The feedback mirror store is the gitignored `.trans/plans/<project>.jsonl` and `.trans/<tier>/<project>.jsonl` file set that holds a project's Feedback records and their Reviews target references, together with the enumerators that resolve a project's six transient files and the writer that appends a new record pair.",
+  "body": "The feedback mirror store: the transient file set holding a project's feedback records and their reviewed-target references, with the enumerators that resolve them and the writer that appends a record pair.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.specs.transient_feedback_path",
+      "target": "rust.apg.review_cmd.write_transient_feedback",
       "properties": {}
     },
     {
@@ -17,7 +17,7 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.review_cmd.write_transient_feedback",
+      "target": "rust.apg.specs.transient_feedback_path",
       "properties": {}
     }
   ],
@@ -29,17 +29,17 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.review-integrity",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
       "source": "domain.entity.feedback-item",
       "properties": {}
     },
     {
       "kind": "realised-by",
       "source": "domain.entity.reviewed-target-reference",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.review-integrity",
       "properties": {}
     }
   ]

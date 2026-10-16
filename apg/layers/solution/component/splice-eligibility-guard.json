@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "splice-eligibility-guard",
-  "body": "The win-C eligibility decision and its seed-equivalence guard: `rust.apg.pipeline.try_splice_build` decides splice vs full load; `rust.apg.splice.seed.seed_checked`, `rust.apg.splice.seed.seed_key_matches` and `rust.apg.splice.seed.recorded_content_key` are the content-identity equivalence check, and `rust.apg.splice.seed.seed` performs the whole-file seed. The guard folds the assembled graph's durable-layer/transient rows into a digest through `rust.apg.splice.seed.assembled_authored_identity`, folds the seed DB's matching rows through `rust.apg.splice.seed.seed_authored_identity`, admits the splice when the two digests compare equal, and reports a difference as `rust.apg.splice.seed.SeedFallback::UnrepresentedAuthored` with a full load.",
+  "body": "The splice-eligibility decision and its seed-equivalence guard: it folds the assembled graph's authored rows and the seed database's matching rows into digests, admits the splice when they compare equal, and falls back to a full load otherwise.",
   "properties": {},
   "out": [
     {
@@ -12,7 +12,7 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.splice.seed.seed_checked",
+      "target": "rust.apg.splice.seed.SeedFallback",
       "properties": {}
     },
     {
@@ -27,14 +27,19 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.splice.seed.SeedFallback",
+      "target": "rust.apg.splice.seed.seed_checked",
       "properties": {}
     }
   ],
   "in": [
     {
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
+      "properties": {}
+    },
+    {
       "kind": "realised-by",
-      "source": "domain.group.splice-equivalence",
+      "source": "domain.entity.durable-layer-node-set",
       "properties": {}
     },
     {
@@ -49,27 +54,17 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.entity.durable-layer-node-set",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
       "source": "domain.entity.shared-fact-store",
       "properties": {}
     },
     {
       "kind": "realised-by",
+      "source": "domain.group.splice-equivalence",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
       "source": "domain.service.splice-eligibility",
-      "properties": {}
-    },
-    {
-      "kind": "contains",
-      "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.reconcile-splice-eligibility-guard",
       "properties": {}
     }
   ]

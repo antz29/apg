@@ -2,12 +2,17 @@
   "layer": "solution",
   "type": "component",
   "name": "cli-session-lifecycle-guards",
-  "body": "The session lifecycle guards: the checks that keep the session the exclusive owner of the worktree database. `rust.apg.scan.cmd_scan` and `rust.apg.project_cmd.merge.project_merge_at` refuse while a session is live so the caller saves and ends first. The content-identity freshness predicate `rust.apg.git.state.is_fresh` and the shared freshness fast path in `rust.apg.pipeline.run_pipeline` consult the session socket, so a socket that is present but fails a connect plus Ping is detected as an unclean exit and the derived index is discarded and rebuilt from `apg/layers/**` ahead of a scan.",
+  "body": "The session lifecycle guards: the checks that keep a session the exclusive owner of the worktree database, refusing scan and merge while it is live and treating a socket that fails a connect as an unclean exit.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.scan.cmd_scan",
+      "target": "rust.apg.git.state.is_fresh",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.pipeline.run_pipeline",
       "properties": {}
     },
     {
@@ -17,12 +22,7 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.git.state.is_fresh",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.pipeline.run_pipeline",
+      "target": "rust.apg.scan.cmd_scan",
       "properties": {}
     }
   ],

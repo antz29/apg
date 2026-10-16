@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "scan-time-preflight",
-  "body": "The scan driver's preflight: before spawning a language's frontend, it checks that the language's scan-time tools are resolvable on PATH and fails with an actionable error naming the missing tool. The preflight logic is `rust.apg.frontends.scan_time_preflight`, invoked from the frontend spawn path `rust.apg.frontends.spawn_frontend`, which assembles the command and calls `Command::spawn`. `available_languages` probes installed frontend artifacts, a distinct question (artifact present versus toolchain present).",
+  "body": "The scan driver's preflight: before spawning a language's frontend it checks that the language's scan-time tools resolve on the path and fails with an actionable error naming the missing tool.",
   "properties": {},
   "out": [
     {
@@ -20,11 +20,6 @@
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.scan-time-preflight-code-correction",
       "properties": {}
     },
     {

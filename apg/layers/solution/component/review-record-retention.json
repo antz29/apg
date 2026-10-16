@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "review-record-retention",
-  "body": "Review-record retention keeps a Feedback record in its transient file until a reviewer closes it: a status update rewrites the record in place, and a removed reviewed target leaves the record in place with its target reference.",
+  "body": "Review-record retention keeps a feedback record in its transient file until a reviewer closes it, with a status update rewriting it in place and a removed target leaving it with its reference.",
   "properties": {},
   "out": [
     {
@@ -24,12 +24,12 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.review-integrity",
+      "source": "domain.entity.feedback-item",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "source": "domain.entity.feedback-item",
+      "source": "domain.group.review-integrity",
       "properties": {}
     },
     {

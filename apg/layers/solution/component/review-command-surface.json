@@ -2,9 +2,14 @@
   "layer": "solution",
   "type": "component",
   "name": "review-command-surface",
-  "body": "The review command surface is `apg review add|action|resolve|reject|list`: it appends items, updates status, and reports a project's full review set with each item's status, disposition, and reviewed-target FQN, marking items whose target is absent from the layer store and the code graph.",
+  "body": "The review command surface: it appends review items, updates their status, and reports a project's full review set with each item's status, disposition, and reviewed-target identity.",
   "properties": {},
   "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.review_cmd.apply_review_add",
+      "properties": {}
+    },
     {
       "kind": "implemented-by",
       "target": "rust.apg.review_cmd.cmd_review",
@@ -13,11 +18,6 @@
     {
       "kind": "implemented-by",
       "target": "rust.apg.review_cmd.review_list",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.review_cmd.apply_review_add",
       "properties": {}
     }
   ],
@@ -29,17 +29,17 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.review-integrity",
-      "properties": {}
-    },
-    {
-      "kind": "realised-by",
       "source": "domain.entity.feedback-item",
       "properties": {}
     },
     {
       "kind": "realised-by",
       "source": "domain.entity.reviewed-target-reference",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.group.review-integrity",
       "properties": {}
     },
     {

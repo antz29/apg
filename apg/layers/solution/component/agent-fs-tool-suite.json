@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "agent-fs-tool-suite",
-  "body": "The agent filesystem tool suite: `apg_rm`, `apg_mv`, `apg_cp` (`opencode-suite/tools/apg_rm.ts`, `apg_mv.ts`, `apg_cp.ts`) plus the shared `opencode-suite/lib/apg.ts` plumbing. Each tool takes the caller's `directory` plus the operation's path(s), resolves the target path against that directory in one consistent frame, performs a plain filesystem operation, and confines scope by asserting the `edit` action with the resolved target path as the resource through opencode 2.x's permission engine — the mechanism `requirements.constraint.agent-fs-per-path-permission` states. A deny or a rejection refuses the operation (fail-closed), and `external_directory` governs an out-of-worktree path.\n\nFor `requirements.requirement.code-writer-worktree-only-writes`, the tool resolves the candidate against the caller-supplied `directory` and asserts it against the session root, so the frames agree; a code-writer path that resolves into the main checkout (outside every project worktree) is refused whatever `directory` is passed. The tool files are in scope where the shared lib's path-resolution helper lives. DRY per `global.constraint.decomposition-quality`; installed by `apg init` as plugins (`solution.component.agent-fs-install-registry`).\n\nFor `requirements.note.fs-scope-deny-mirror`, opencode evaluates the acting agent's whole effective `edit` rule set (allow AND deny) for the asserted path, in order with the LAST matching entry winning — the ordered combination of the lower-priority configuration, the global rules, and the agent's own rules last — so a deny rule the `edit` action honours refuses the fs operation too. The unit/int tier pins the allow-success and deny-refusal cases against a faked V2 tool context; the boundary e2e pins the acting-agent scope.\n\nimplemented-by: `opencode-suite/lib/apg.ts`, `ts.apg-opencode-suite.lib.apg.fsScopeDecision`, and the three tool files.",
+  "body": "The agent filesystem tool suite: the remove, move, and copy tools plus the shared plumbing, each resolving its target against the caller's directory and confining scope by asserting the edit action.",
   "properties": {},
   "out": [
     {
@@ -35,11 +35,6 @@
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.agent-fs-planned-units",
       "properties": {}
     },
     {

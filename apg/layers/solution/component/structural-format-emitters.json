@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "structural-format-emitters",
-  "body": "The per-format structure emitters inside the scanner: one emitter per format that turns a parsed file into the format's `Struct`/`contains` records — Markdown headings (`rust.structfrontend.md.build_doc` / `rust.structfrontend.md.parse_headings`), shell functions, YAML keys/jobs/steps, JSON keys, TOML tables/keys, XML elements, Dockerfile stages and instructions, Makefile targets/variables/includes, INI sections/keys. `misc` emits `File` only. The component's other anchors are the scanner's scope-walk helper (`rust.structfrontend.discovery.walk`) and its source line-index helper (`rust.structfrontend.lines.line_count`).",
+  "body": "The per-format structure emitters inside the structural scanner: one emitter per format turning a parsed file into that format's struct and containment records, with the residual format emitting a file node alone.",
   "properties": {},
   "out": [
     {
@@ -17,12 +17,12 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.structfrontend.md.parse_headings",
+      "target": "rust.structfrontend.md.build_doc",
       "properties": {}
     },
     {
       "kind": "implemented-by",
-      "target": "rust.structfrontend.md.build_doc",
+      "target": "rust.structfrontend.md.parse_headings",
       "properties": {}
     }
   ],
@@ -35,11 +35,6 @@
     {
       "kind": "realised-by",
       "source": "domain.entity.structural-format",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.structural-format-emitters-module-move",
       "properties": {}
     }
   ]

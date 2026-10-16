@@ -2,12 +2,17 @@
   "layer": "solution",
   "type": "component",
   "name": "identity-layer",
-  "body": "The ingestor-side component that resolves a source file's canonical identity from the repository-relative base and renders every fqn from it: the File fqn, the language root, and the module/scope rooting. It reads the git toplevel (`rust.apg.git`) and writes the relative identity into the graph (`rust.apg.load`) and the exported jsonl (`rust.apg.ingest.root_module_fqn`). Owns the repo-relative identity of files and modules; absolute paths are reconstructed only in the suite-tool layer.",
+  "body": "The ingestor-side identity layer: it resolves a source file's canonical identity from the repository-relative base and renders the file, language-root, and module identities from it, keeping absolute paths for the suite-tool boundary.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.load",
+      "target": "rust.apg.git",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.git.identity.repo_rel",
       "properties": {}
     },
     {
@@ -17,22 +22,17 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.git",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
       "target": "rust.apg.ingest.identity.root_module_fqn",
       "properties": {}
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.load.export.write_graph_jsonl",
+      "target": "rust.apg.load",
       "properties": {}
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.git.identity.repo_rel",
+      "target": "rust.apg.load.export.write_graph_jsonl",
       "properties": {}
     }
   ],
@@ -44,12 +44,12 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.graph-identity",
+      "source": "domain.entity.source-file",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "source": "domain.entity.source-file",
+      "source": "domain.group.graph-identity",
       "properties": {}
     }
   ]

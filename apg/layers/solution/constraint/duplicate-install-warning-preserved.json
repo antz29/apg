@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "constraint",
   "name": "duplicate-install-warning-preserved",
-  "body": "`apg init`'s duplicate-install warning is preserved in full: when a repo's `.opencode/` holds a file that duplicates a file the suite installs under the global opencode config directory `~/.config/opencode/` — `implementation-phase-reviewer.md` among them — `apg init` prints the loud warning listing the duplicate and deletes nothing. The detection concerns the documented V2 locations: a project `.opencode/` file and the installed copies under `~/.config/opencode/`. The upgrade guide (`APG_UPGRADE_DOC`) documents the manual removal of a duplicated local reviewer. Suppressing the warning for any such file, or auto-deleting it, is a violation. Satisfaction is assessed by review.",
+  "body": "apg init prints its loud duplicate-install warning listing every repo file that duplicates a suite file under the global opencode config directory, and deletes nothing.",
   "properties": {},
   "out": [],
   "in": []

@@ -2,17 +2,17 @@
   "layer": "solution",
   "type": "component",
   "name": "feedback-projection",
-  "body": "The feedback projection is the branch DB's Feedback and Reviews projection: a full scan and a durable write-through each merge the project's transient record set into `db.lbug`, recording every Feedback node and each reviewed-target reference it resolves.",
+  "body": "The feedback projection: a full scan and a durable write-through each merge the project's transient record set into the branch database, carrying every feedback node and each reviewed-target reference.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
-      "target": "rust.apg.ingest.finalize_graph",
+      "target": "rust.apg.artifacts.db.ArtifactDb.merge_edge",
       "properties": {}
     },
     {
       "kind": "implemented-by",
-      "target": "rust.apg.artifacts.db.ArtifactDb.merge_edge",
+      "target": "rust.apg.ingest.finalize_graph",
       "properties": {}
     },
     {
@@ -34,12 +34,12 @@
     },
     {
       "kind": "realised-by",
-      "source": "domain.group.review-integrity",
+      "source": "domain.entity.reviewed-target-reference",
       "properties": {}
     },
     {
       "kind": "realised-by",
-      "source": "domain.entity.reviewed-target-reference",
+      "source": "domain.group.review-integrity",
       "properties": {}
     }
   ]

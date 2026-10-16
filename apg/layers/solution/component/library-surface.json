@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "library-surface",
-  "body": "The root crate's library target: `src/lib.rs` owns the module tree and exposes the crate-internal API the tests reach, and `src/main.rs` becomes a thin binary that calls into it. It realises the `library-surface` and `source-module` domain entities and is the prerequisite for moving the e2e tests into a top-level `tests/` integration crate.",
+  "body": "The root crate's library target: it owns the module tree and exposes the crate-internal API the tests reach, with the binary a thin entry point that calls into the library.",
   "properties": {},
   "out": [
     {
@@ -15,11 +15,6 @@
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.library-surface-non-graph-artifacts",
       "properties": {}
     },
     {

@@ -2,14 +2,9 @@
   "layer": "solution",
   "type": "component",
   "name": "structural-stream-dispatch",
-  "body": "The scan-driver and ingestor wiring that makes the structural streams first-class: the driver lists the structural language ids, resolves the `structfrontend` command, and spawns it under the existing per-stream `lang_switch` contract (`rust.apg.available_languages`, `rust.apg.frontend_cmd`, `rust.apg.spawn_frontend`); the ingestor roots each structural module under its stream id and renders its `Struct` records' FQNs (`rust.apg.ingest.ingest_records`, `rust.apg.ingest.root_module_fqn`) and classifies its records (`rust.apg.classify.builtin_code_type`).",
+  "body": "The scan-driver and ingestor wiring that makes the structural streams first-class: the driver lists and spawns the structural language under the per-stream language contract, and the ingestor roots and classifies its records.",
   "properties": {},
   "out": [
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.ingest.ingest_records",
-      "properties": {}
-    },
     {
       "kind": "implemented-by",
       "target": "rust.apg.classify.builtin_code_type",
@@ -34,6 +29,11 @@
       "kind": "implemented-by",
       "target": "rust.apg.ingest.identity.root_module_fqn",
       "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.ingest.ingest_records",
+      "properties": {}
     }
   ],
   "in": [
@@ -45,11 +45,6 @@
     {
       "kind": "realised-by",
       "source": "domain.entity.structural-format",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.structural-stream-dispatch-render-function-reconciliation",
       "properties": {}
     }
   ]

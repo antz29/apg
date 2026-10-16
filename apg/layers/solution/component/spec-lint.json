@@ -2,12 +2,17 @@
   "layer": "solution",
   "type": "component",
   "name": "spec-lint",
-  "body": "The `apg spec lint` binary subcommand and its `apg_spec_lint` suite tool: the deterministic spec-integrity check over the whole durable spec (R2/R3/R4 and the delta gates) plus the shared wording-warning classifier that the linter and the `apg node add` / `apg node update` write surface both call. The `apg spec` subcommand dispatches from `rust.apg.main`. The write-surface warning hooks are `rust.apg.node_cmd.node_add_change` and `rust.apg.node_cmd.node_update_change`; the suite registry is `src/install.rs`.",
+  "body": "The spec-lint subcommand and its suite tool: the deterministic check over the durable spec's structural rules and change-set gates, plus the wording-warning classifier the write surface and the linter share.",
   "properties": {},
   "out": [
     {
       "kind": "implemented-by",
-      "target": "src/install.rs",
+      "target": "opencode-suite/tools/apg_spec_lint.ts",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.main",
       "properties": {}
     },
     {
@@ -37,24 +42,19 @@
     },
     {
       "kind": "implemented-by",
-      "target": "opencode-suite/tools/apg_spec_lint.ts",
-      "properties": {}
-    },
-    {
-      "kind": "implemented-by",
-      "target": "rust.apg.main",
+      "target": "src/install.rs",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "realised-by",
-      "source": "domain.entity.spec-lint",
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
       "properties": {}
     },
     {
-      "kind": "contains",
-      "source": "solution.container.scanner-cli",
+      "kind": "realised-by",
+      "source": "domain.entity.spec-lint",
       "properties": {}
     }
   ]

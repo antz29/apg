@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "distributed-reviewer-prompt",
-  "body": "The distributed `implementation-phase-reviewer` agent prompt file `opencode-suite/agents/implementation-phase-reviewer.md` (product source embedded into the `apg` binary via `include_str!` in `rust.apg.install`'s `AGENTS` table and installed by `apg init` into `~/.config/opencode/agents/`), the product-source peer of the repo's own consumer artifact `.opencode/agents/implementation-phase-reviewer.md` (read for the grant shape and body; that consumer copy is a consumer artifact). Frontmatter `mode: subagent` and `hidden: true`; the grants are the read-only apg suite, the plan read tools, and `apg_review`/`apg_review_add`/`apg_review_resolve`/`apg_review_reject` + `apg_plan_complete`, with `question`, edit, scan, done/undone/note, authoring and `apg_plan_render` all absent; the body carries the positive read-guard rule and stop-and-report.\n\nDeliberately a NARROW owner: the file gets its own component, and the broad `solution.component.navigator-prompt-guidance` spans the two existing prompt files and is realised-by the unrelated `domain.entity.graph-first-navigation`. It is product source in `solution.container.opencode-suite`; the repo's own `.opencode/agents/**` are consumer artifacts.\n\nimplemented-by: (1) the file `opencode-suite/agents/implementation-phase-reviewer.md`, declared as a planned File node by `agent-builder-roster-cleanup/plan` and pending until the implementer creates it (the deferred edge; see `solution.note.distributed-reviewer-deferred-edge`); and (2) the read-guard coherence test `rust.main_e2e.e2e.installed_agent_prompts_state_file_access_read_guard`, which asserts this prompt's read-guard (its five-prompt list names `implementation-phase-reviewer.md`).",
+  "body": "The distributed implementation-phase reviewer prompt: a hidden subagent carrying the read-only apg suite, the plan read tools, the review tools, and the read-guard body.",
   "properties": {},
   "out": [
     {
@@ -20,11 +20,6 @@
     {
       "kind": "contains",
       "source": "solution.container.opencode-suite",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.distributed-reviewer-deferred-edge",
       "properties": {}
     },
     {

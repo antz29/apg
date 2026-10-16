@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "distributed-agent-install",
-  "body": "The binary's distributed-agent embed, install, and upgrade surface.\n\nIn `rust.apg.install` (`src/install.rs`): the `AGENTS` table carries one `(filename, include_str!…)` row per distributed agent — seven rows, `implementation-phase-reviewer.md` among them; the `KNOWN_AGENT_FILES` prune list carries the seven apg-owned agent filenames, `implementation-phase-reviewer.md` among them; the doc comments on those consts read seven distributed agents; and `APG_UPGRADE_DOC` carries the reviewer-distribution note — the upgrade section announcing `implementation-phase-reviewer.md`, the duplicate-install warning a repo-local copy triggers, and the manual-removal re-run steps.\n\nIn `rust.apg.main`: the doc comment reads seven distributed agents (`AGENTS`) delivered by `apg init`.\n\nIn `rust.apg.help_text`: the `apg --help` text's `apg init` blurb carries the distributed-agent roster and reads seven distributed agents.\n\nIn the e2e needle surface: `rust.main_e2e.e2e.upgrade_doc_covers_version_field_gate_and_fix_steps` pins the reviewer-removal needle in `APG_UPGRADE_DOC`; `rust.main_e2e.e2e.acceptance_node_edge_surface_is_transparent_and_pinned_in_help_tools_and_agents` pins the `implementation-phase-reviewer` prompt among its help/tools/agents assertions.\n\nIt is distinct from `solution.component.agent-fs-install-registry`, which anchors on `rust.apg.install` and owns the `SUITE_TOOLS` fs-tools registry surface, while this component owns the distributed-agent `AGENTS`/`KNOWN_AGENT_FILES` entry surface; `rust.apg.plan_cmd.verify.coverage_check` maps each requirement's coverage to the module its component edits.",
+  "body": "The binary's distributed-agent embed, install, and upgrade surface: the agent table, the prune list, the upgrade guide's reviewer note, and the help roster, all stating seven distributed agents.",
   "properties": {},
   "out": [
     {
@@ -35,11 +35,6 @@
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.agent-roster-narrow-owners",
       "properties": {}
     },
     {

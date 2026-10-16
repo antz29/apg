@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "plan-review-prompt",
-  "body": "The plan-review agent prompt `opencode-suite/agents/plan-review.md` — a product-source file embedded into the `apg` binary via `include_str!` and installed by `apg init` into `~/.config/opencode/agents/`. It carries the plan-review agent's two passes over a plan against the change-set delta.\n\nPass 1 (coverage): the prompt runs the binary's delta coverage check (`apg plan verify`) on a fresh branch scan. The refusal's `coverage incomplete:` clause names each uncovered FQN; each entry is a blocking gap attached to its owning phase or task. The returned empty-claims list is informational, and an absent `coverage incomplete:` clause means coverage holds.\n\nPass 2 (semantic per-node review, less-code bias): `deletes` over `modifies` over `creates`, with fewer planned nodes; a removed solution node or `implemented-by` edge pairs with a `deletes` task for the code it pointed at, and a keep or modify carries a justification in a task note.\n\nIts implemented-by is exactly `opencode-suite/agents/plan-review.md`. Product source lives in `solution.container.opencode-suite`.",
+  "body": "The plan-review prompt: it carries two passes over a plan against the change-set delta, a coverage pass driven by the binary's verify refusal and a semantic per-node pass biased toward fewer changes.",
   "properties": {},
   "out": [
     {

@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "repo-agent-guide",
-  "body": "The apg repository's own agent guide `AGENTS.md` (present in the graph as a scanned File): the repo-level guidance agents read when working in this checkout. It sits outside the `opencode-suite/` distribution (installed `apg init` embeds the suite via `include_str!`, while this guide is repo-local), so it is modelled separately from `solution.component.navigator-prompt-guidance`. It carries the file-tool guidance (\"Other tools\"; the \"Read those files with read, grep, or bash\" line) that states the same graph-first qualifier as the installed navigator prompt, and the same in-graph / out-of-graph artifact-class boundary.",
+  "body": "The repository's own agent guide: the repo-local guidance agents read in this checkout, carrying the file-tool guidance and the in-graph and outside-the-graph artifact-class boundary.",
   "properties": {},
   "out": [
     {
@@ -15,11 +15,6 @@
     {
       "kind": "contains",
       "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.repo-guide-container-choice",
       "properties": {}
     },
     {

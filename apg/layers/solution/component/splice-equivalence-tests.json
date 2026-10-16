@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "splice-equivalence-tests",
-  "body": "The e2e equivalence surface: `tests/splice_e2e.rs`'s fixture, seed/table oracles and publish path, and `tests/project_cmd_e2e.rs`'s merge round trip. The fixture graph carries authored/transient rows, and the surface exercises a spec-only splice delta against a full rebuild, a database seeded with a dropped authored row across a durable commit, and a spec-only merge round trip whose main `db.lbug` carries the merged authored row.",
+  "body": "The end-to-end equivalence surface: the splice fixture, oracles, and publish path and the merge round trip, exercising a spec-only delta against a full rebuild and a seed with a dropped authored row.",
   "properties": {},
   "out": [
     {
@@ -12,19 +12,19 @@
     },
     {
       "kind": "implemented-by",
-      "target": "rust.splice_e2e.e2e.spec_only_delta_cannot_diverge_from_full_rebuild",
+      "target": "rust.splice_e2e.e2e.diverged_authored_rows_are_not_fast_pathed",
       "properties": {}
     },
     {
       "kind": "implemented-by",
-      "target": "rust.splice_e2e.e2e.diverged_authored_rows_are_not_fast_pathed",
+      "target": "rust.splice_e2e.e2e.spec_only_delta_cannot_diverge_from_full_rebuild",
       "properties": {}
     }
   ],
   "in": [
     {
-      "kind": "realised-by",
-      "source": "domain.group.splice-equivalence",
+      "kind": "contains",
+      "source": "solution.container.scanner-cli",
       "properties": {}
     },
     {
@@ -33,13 +33,8 @@
       "properties": {}
     },
     {
-      "kind": "contains",
-      "source": "solution.container.scanner-cli",
-      "properties": {}
-    },
-    {
-      "kind": "details",
-      "source": "solution.note.reconcile-splice-equivalence-tests",
+      "kind": "realised-by",
+      "source": "domain.group.splice-equivalence",
       "properties": {}
     }
   ]

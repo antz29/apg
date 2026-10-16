@@ -2,7 +2,7 @@
   "layer": "solution",
   "type": "component",
   "name": "project-start-seeder",
-  "body": "The `apg project start` branch-DB seeder: it requires main's scan to be fresh for main's HEAD (refusing with `apg scan` guidance otherwise) and copies main's `apg/.trans` into the new worktree in place of any frontend scan.",
+  "body": "The project-start branch-database seeder: it requires main's scan to be fresh for main's head and copies main's transient database into the new worktree in place of a frontend scan.",
   "properties": {},
   "out": [
     {
