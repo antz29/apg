@@ -2438,6 +2438,41 @@ mod e2e {
         }
     }
 
+    /// Phase-02 tasks 4/5 (e2e): the embedded `spec-writer.md` and
+    /// `spec-review.md` prompts state the note-confinement model — a note
+    /// attaches only to implementation-layer code and its `details` edge names
+    /// exactly one code FQN — naming both laws
+    /// (`global.constraint.note-implementation-only` and
+    /// `global.constraint.note-details-shape`). The needles are pinned as
+    /// literals, not read back from the prompts, and asserted for BOTH the
+    /// authoring (spec-writer) and reviewing (spec-review) prompt.
+    #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn spec_prompts_state_note_implementation_only_confinement() {
+        fn agent(name: &str) -> &'static str {
+            AGENTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+        }
+
+        for name in ["spec-writer.md", "spec-review.md"] {
+            let prompt = agent(name);
+            for needle in [
+                "global.constraint.note-implementation-only",
+                "global.constraint.note-details-shape",
+                "implementation-layer code",
+                "exactly one code FQN",
+            ] {
+                assert!(
+                    prompt.contains(needle),
+                    "{name} must carry the note-confinement prose {needle:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn scaffold_gitignore_adds_layout_entries_once() {
