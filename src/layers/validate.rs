@@ -48,7 +48,9 @@ pub(crate) fn valid_name(name: &str) -> bool {
 /// - the name matches the allowlist `[a-z0-9][a-z0-9-]*` — refused, never
 ///   sanitized;
 /// - the type exists in its layer — case-sensitive exact match against the
-///   catalog's lowercase type spellings ([`Layer::node_types`]);
+///   catalog's lowercase type spellings ([`Layer::node_types`]); a `note`
+///   outside the implementation layer is refused, naming the note-confinement
+///   law `global.constraint.note-implementation-only`;
 /// - kind attributes when the property is present: `Entity` **requires**
 ///   `kind` ∈ {entity, event} (the spec's only "requires"); `Group` takes
 ///   `attribute` ∈ {core, supporting, generic} and an optional `root`
@@ -75,6 +77,17 @@ pub fn validate_node(
         );
     }
     let types = layer.node_types();
+    // The note-confinement law (`global.constraint.note-implementation-only`):
+    // a note attaches only to implementation-layer code, so a note node in any
+    // other layer (requirements/domain/solution/global — and plans, which holds
+    // no note type) is refused here, ahead of the generic catalog check, so the
+    // refusal names the rule rather than "type `note` does not exist in layer".
+    if node_type == "note" && layer != Layer::Implementation {
+        anyhow::bail!(
+            "a `note` attaches only to implementation-layer code — `{}.note.{name}` is a violation of `global.constraint.note-implementation-only` (notes are confined to the implementation layer)",
+            layer.layer_dir()
+        );
+    }
     if !types.contains(&node_type) {
         anyhow::bail!(
             "type `{node_type}` does not exist in layer `{}` — allowed types: {}",
