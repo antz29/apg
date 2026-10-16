@@ -124,9 +124,9 @@ fn db_at(dir: &Path) {
     // same authored rows `tree_authored_identity` assembles (the phase-2
     // authored/transient reconciliation `is_fresh` enforces), or every mutation
     // is refused "graph is stale". One node per file-backed tier (SPEC §3.1): a
-    // requirements requirement + note, a domain entity, a solution system, and a
-    // global constraint — so reviews of every tier route to their own `.trans`
-    // mirror.
+    // requirements requirement, an implementation note, a domain entity, a
+    // solution system, and a global constraint — so reviews of every tier route
+    // to their own `.trans` mirror.
     let apg_root = dir.join(specs::LAYOUT);
     write_layer_node(
         &apg_root,
@@ -135,7 +135,13 @@ fn db_at(dir: &Path) {
         "timer",
         "x",
     );
-    write_layer_node(&apg_root, layers::Layer::Requirements, "note", "design", "");
+    write_layer_node(
+        &apg_root,
+        layers::Layer::Implementation,
+        "note",
+        "design",
+        "",
+    );
     write_layer_node(&apg_root, layers::Layer::Domain, "entity", "order", "");
     write_layer_node(&apg_root, layers::Layer::Solution, "system", "checkout", "");
     write_layer_node(&apg_root, layers::Layer::Global, "constraint", "law", "");
@@ -518,7 +524,7 @@ mod e2e {
         let (apg_root, repo, _wt) = fixture("note-roundtrip");
 
         let p = parse_args(&[
-            "requirements.note.design".to_string(),
+            "implementation.note.design".to_string(),
             "--body".to_string(),
             "note review".to_string(),
             "--project".to_string(),
@@ -537,25 +543,25 @@ mod e2e {
             .unwrap()
             .to_string();
         assert!(
-            out.contains("requirements.note.design"),
+            out.contains("implementation.note.design"),
             "note reviews edge dropped: {out}"
         );
         drop(db);
 
-        // Both halves live in the requirements tier mirror (the reviewed
+        // Both halves live in the implementation tier mirror (the reviewed
         // node's tier), not the plan store.
         let mirror = apg_root
             .join(specs::TRANS)
-            .join("requirements")
+            .join("implementation")
             .join("foo.jsonl");
         let recs = specs::read_jsonl(&mirror).unwrap();
         assert!(
             recs.iter().any(|r| matches!(
                 r,
                 Record::Reviews { from, to }
-                    if from == "foo/feedback-1" && to == "requirements.note.design"
+                    if from == "foo/feedback-1" && to == "implementation.note.design"
             )),
-            "the note review must land in the requirements tier mirror"
+            "the note review must land in the implementation tier mirror"
         );
 
         testutil::remove(&repo);
