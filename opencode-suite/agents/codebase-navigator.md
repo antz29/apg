@@ -95,12 +95,6 @@ permissions:
   - action: apg_plan_tasks
     resource: "*"
     effect: allow
-  - action: apg_plan_done
-    resource: "*"
-    effect: allow
-  - action: apg_plan_undone
-    resource: "*"
-    effect: allow
   - action: apg_plan_render
     resource: "*"
     effect: allow
