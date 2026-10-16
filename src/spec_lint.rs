@@ -92,6 +92,65 @@ pub(crate) fn note_confinement_errors(nodes: &[NodeFile]) -> Vec<String> {
         .collect()
 }
 
+/// The details-shape rule (`global.constraint.note-details-shape`,
+/// `domain.constraint.details-canonical-target-set`): each `note`'s `details`
+/// edge names exactly one target, and that target is a single **code** identity
+/// — the code FQN the note deepens. An authored-node target is off-model: a
+/// note target is refused (`global.constraint.note-implementation-only`
+/// confines notes to implementation-layer code), and any other authored FQN
+/// (`crate::layers::parse_fqn(target).is_ok()`) is off-model too because a
+/// `details` edge names a code FQN, never a spec node — the same shape the
+/// write surface's `validate_edge` enforces. One error string per violation;
+/// pure — no I/O — so the unit tier pins it over in-memory [`NodeFile`]s;
+/// [`lint`] feeds it the nodes it read from the durable layer files.
+/// `pub(crate)` — the lint's single source of truth for the rule, never a
+/// public unit.
+pub(crate) fn details_shape_errors(nodes: &[NodeFile]) -> Vec<String> {
+    let fqn_of =
+        |n: &NodeFile| crate::layers::fqn(crate::layers::layer_of(&n.layer), &n.node_type, &n.name);
+    let note_fqns: BTreeSet<String> = nodes
+        .iter()
+        .filter(|n| n.node_type == "note")
+        .map(&fqn_of)
+        .collect();
+
+    let mut errors: Vec<String> = Vec::new();
+    for n in nodes {
+        if n.node_type != "note" {
+            continue;
+        }
+        let note = fqn_of(n);
+        let details: Vec<&str> = n
+            .out
+            .iter()
+            .filter(|e| e.kind == "details")
+            .map(|e| e.target.as_str())
+            .collect();
+        if details.len() != 1 {
+            errors.push(format!(
+                "R4: note `{note}` has {} `details` edge(s) — a note's details edge names exactly one code FQN",
+                details.len()
+            ));
+            continue;
+        }
+        let target = details[0];
+        let names_a_note = note_fqns.contains(target)
+            || crate::layers::parse_fqn(target)
+                .map(|(_, node_type, _)| node_type == "note")
+                .unwrap_or(false);
+        if names_a_note {
+            errors.push(format!(
+                "R4: note `{note}` details another note (`{target}`) — a note's details edge names exactly one code FQN, not another note"
+            ));
+        } else if crate::layers::parse_fqn(target).is_ok() {
+            errors.push(format!(
+                "R4: note `{note}` details authored node `{target}` — a note's details edge names exactly one code FQN, not an authored node"
+            ));
+        }
+    }
+    errors
+}
+
 /// The whole-durable-spec deterministic check. Returns `(errors, advisories)`:
 /// the blocking rule/delta-gate violations first, the non-blocking tier-1-3
 /// wording advisories second. Read-only — it reads the durable node files, the
@@ -102,7 +161,10 @@ pub(crate) fn note_confinement_errors(nodes: &[NodeFile]) -> Vec<String> {
 ///   constraint carrying `attaches-to` is a violation
 ///   (`global.constraint.spec-constraint-scope`);
 /// - **R3** — a node holds at most one note (two notes detailing one target);
-/// - **R4** — each note's `details` edge names exactly one non-note node;
+/// - **R4** — each note's `details` edge names exactly one **code** identity:
+///   the single code FQN the note deepens, never another note and never any
+///   authored-node FQN (`global.constraint.note-details-shape`,
+///   `domain.constraint.details-canonical-target-set`);
 /// - **the note-confinement rule** — a note attaches only to
 ///   implementation-layer code, so a `note` node in the requirements, domain,
 ///   solution, or global layer is a violation
@@ -125,11 +187,6 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
 
     let fqn_of =
         |n: &NodeFile| crate::layers::fqn(crate::layers::layer_of(&n.layer), &n.node_type, &n.name);
-    let note_fqns: BTreeSet<String> = nodes
-        .iter()
-        .filter(|n| n.node_type == "note")
-        .map(&fqn_of)
-        .collect();
 
     // R2 — every constraint's scope is its layer; a constraint names no node,
     // so the off-model `attaches-to` property is a violation.
@@ -171,36 +228,12 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
         }
     }
 
-    // R4 — each note's `details` edge names exactly one non-note node.
-    for n in &nodes {
-        if n.node_type != "note" {
-            continue;
-        }
-        let note = fqn_of(n);
-        let details: Vec<&str> = n
-            .out
-            .iter()
-            .filter(|e| e.kind == "details")
-            .map(|e| e.target.as_str())
-            .collect();
-        if details.len() != 1 {
-            errors.push(format!(
-                "R4: note `{note}` has {} `details` edge(s) — a note's details edge names exactly one node",
-                details.len()
-            ));
-            continue;
-        }
-        let target = details[0];
-        let names_a_note = note_fqns.contains(target)
-            || crate::layers::parse_fqn(target)
-                .map(|(_, node_type, _)| node_type == "note")
-                .unwrap_or(false);
-        if names_a_note {
-            errors.push(format!(
-                "R4: note `{note}` details another note (`{target}`) — a note's details edge names exactly one non-note node"
-            ));
-        }
-    }
+    // R4 — each note's `details` edge names exactly one **code** identity: the
+    // single code FQN the note deepens, never another note and never any
+    // authored-node FQN (`global.constraint.note-details-shape`,
+    // `domain.constraint.details-canonical-target-set`). The pure helper is the
+    // single source of truth, unit-pinned in `src/spec_lint/tests.rs`.
+    errors.extend(details_shape_errors(&nodes));
 
     // The note-confinement rule (`global.constraint.note-implementation-only`)
     // — a note attaches only to implementation-layer code, so a `note` node in
