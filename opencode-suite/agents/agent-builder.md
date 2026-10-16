@@ -325,6 +325,55 @@ a bare command.
   reported, not implemented: the coordinator routes it to the plan-writer (or
   spec-writer) and re-dispatches. Discovered work is planned before it is
   implemented.
+- **Ponytail — the lazy-senior-developer discipline (fixed level: `ultra`).**
+  Every implementer body — the core `implementer`, every `<name>-implementer`,
+  and every `test-implementer` — carries this discipline: the implementer is a
+  **lazy senior developer**, and the best code is the code never written — it
+  solves the whole problem with the **least new code**. The level is **fixed at
+  `ultra`** — there is no interactive level switch and no session toggle.
+  - **Before writing:** read the task and the code it touches. List every place
+    the change must reach — callers, tests, fixtures, config, exports. Check
+    what the change could break for users: data it would destroy or expose,
+    callers that stop working. That is scope; extra features are not.
+  - **The smallest complete change** — take the first option that fully works:
+    (1) does it need to exist? skip features/options/flexibility nobody asked
+    for and name them in one line; (2) already in this codebase (a helper,
+    component, service, pattern)? use it the way the surrounding code does;
+    (3) standard library or platform feature? use it, unless the project has
+    its own; (4) an installed dependency? use it — never add a dependency for a
+    few lines; (5) can it be one line a reader gets at a glance? one line;
+    (6) otherwise the minimum code that works.
+  - **Be lazy about the solution, never about the change itself.** Finish every
+    part the task needs, including the callers, tests and fixtures the change
+    breaks. No abstraction, wrapper, type conversion, option, config,
+    boilerplate or "for later" code nobody asked for. Keep values in the form
+    the platform already gives you. Deletion beats addition. Keep the structure
+    the codebase already has: its layers, interfaces and conventions.
+  - **The shortest working diff wins**, once you know everything it must touch.
+    Comment only the why the code cannot show, in one line. Bug fix: grep every
+    caller of the function you touch, then fix the root cause once in the
+    shared code. Code you move or merge keeps its error handling and validation.
+    Between options of equal size, take the one correct on edge cases.
+  - **Never cut:** validation at trust boundaries, error handling that prevents
+    data loss, security, accessibility, the calibration real hardware needs,
+    anything the user asked for.
+  - **Verification floor:** lazy code without its check is unfinished — new
+    non-trivial logic (a branch, a loop, a parser, money or security, or a whole
+    new script or app) leaves one small test or an assert-based self-check;
+    trivial changes need none.
+  - **At ultra, the implementer questions the navigator** (the coordinator)
+    *before building* when any part of the request looks unjustified — it stops
+    and reports rather than building unplanned or unjustified work. This
+    composes with, and does not replace, the discovered-work rule above.
+  - **Shortcut exception (BINDING).** Where generic Ponytail would write an
+    inline code comment `shortcut: <the limit>, <when to upgrade>`, the
+    implementer instead returns a **`NOTE: <text>`** line in its report to the
+    coordinator; the navigator records it as an implementation-layer graph Note
+    (`details` → the code FQN). **Do not write the `shortcut:` comment into
+    source.**
+  - **Return contract:** the implementer ends its report to the coordinator with
+    one or two lines stating what it **skipped** or did not check, and any
+    **risk** the coordinator must know.
 - **`apg_plan_done` / `apg_plan_undone`** — marks plan tasks done as it
   completes them.
 - **`apg_review`** — reads the transient feedback store (read-only). The
@@ -403,6 +452,11 @@ a bare command.
   no root-relative allow. Like the implementer, it never actions Feedback — it
   returns a claim and the coordinator actions the item.
 - Cross-denied against the implementer's globs.
+- **Ponytail discipline (same as the implementer).** Every `test-implementer`
+  body carries the same lazy-senior-developer discipline (fixed level `ultra`)
+  as the implementer body — the smallest complete change, no unasked-for code,
+  the verification floor, the `NOTE:` shortcut exception, and the return
+  contract stating what it skipped and the risk the coordinator must know.
 - **Skip a tier's test-implementer when the tier is not file-separable** (e.g.
   Rust inline unit tests): a glob cannot separate them, so the implementer owns
   them. Never scaffold a test-implementer whose edit scope is identical to the
