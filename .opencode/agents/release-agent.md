@@ -54,6 +54,10 @@ permission:
     "scripts/gate.sh *": allow
     "scripts/release.sh *": allow
     "gh release view *": allow
+    "bun install": allow
+    "bun install *": allow
+    "bun test": allow
+    "bun test *": allow
     "git tag *": ask
     "git push *": ask
   apg_query: allow
@@ -140,7 +144,12 @@ git trick to reach a denied path or verb).
 2. **Bump the version** on the four guarded surfaces: `Cargo.toml`,
    `Cargo.lock` (the `apg` package entry), the `RELEASE_VERSION` const in
    `tests/main_e2e.rs`, and README.md's `apg X.Y.x` / `--version X.Y.x` pins.
-3. **Gate green:** `scripts/gate.sh --e2e`. If it fails, stop and report.
+3. **Gate green.** First ensure the suite's dependencies are installed: the
+   gate's `bun test` step (opencode-suite) needs `@opencode/plugin`, and
+   `opencode-suite/node_modules` is untracked and absent/stale on a fresh or
+   clean main. Run `bun install` inside `opencode-suite/` (`cd opencode-suite`,
+   then `bun install`) before the gate. Then run `scripts/gate.sh --e2e`. If it
+   fails, stop and report.
 4. **Commit the release content.** Run `git add` on the changed surfaces, then
    `git commit`. This commit is the **release HEAD**.
 5. **`scripts/release.sh X.Y.Z`.** It re-runs the gate, rewrites every
