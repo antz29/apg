@@ -248,10 +248,12 @@ fn tier_edge(
 
 /// The re-materialized apg-projects tiers in the layers model: tier 1
 /// (stakeholder/user + the 20 requirements R1–R20 with their depends-on
-/// edges, AC constraints, background/design notes), tier 2 (the
+/// edges, AC constraints), tier 2 (the
 /// change-sets domain: group/entities/events/value + the four domain laws
 /// as constraints), tier 3 (the apg-cli C4 solution: system + five
-/// containers with `implemented-by` code refs), threaded through the
+/// containers with `implemented-by` code refs), plus the
+/// implementation-layer notes (each detailing exactly one code FQN —
+/// notes are confined to the implementation layer), threaded through the
 /// strictly sequential spine (Requirement —Drives→ Domain —RealisedBy→
 /// Solution —ImplementedBy→ code). Bodies are condensed from
 /// plans/SPEC-apg-projects.md §1–6 and the old-model bootstrap
@@ -438,7 +440,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         &mut nodes,
         &mut idx,
         nf(
-            "requirements",
+            "implementation",
             "note",
             "bootstrap-dogfood",
             "This session is the bootstrap dogfood: branch/worktree created manually because `apg project start` does not exist yet; from the next feature onward the binary handles it. This change-set is standalone (SPEC §6).",
@@ -449,7 +451,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         &mut nodes,
         &mut idx,
         nf(
-            "requirements",
+            "implementation",
             "note",
             "worktree-safety",
             "The fixed worktree location <main>/apg/.worktrees/<project> is a gitignored path INSIDE the main checkout — tested and verified safe; the test worktree apg/.worktrees/test stays until before shipping; cleanup deletes no branch (SPEC §2.1/§6).",
@@ -460,7 +462,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         &mut nodes,
         &mut idx,
         nf(
-            "requirements",
+            "implementation",
             "note",
             "write-through-regression",
             "Regression target (bootstrap note-18): a node rewrite must preserve/rewrite ALL incident edges — never drop them silently. The old-model body-upsert did exactly that; the 2.0 atomic write-through (R16, §4.1) is the fix.",
@@ -712,28 +714,28 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
             .out
             .push(out_e("implemented-by", IMPL_FQNS[i]));
     }
-    // details: notes attach to the nodes they explain.
-    tier_edge(
-        &mut nodes,
-        &idx,
-        "details",
-        "requirements.note.bootstrap-dogfood",
-        "requirements.requirement.r20",
-    );
-    tier_edge(
-        &mut nodes,
-        &idx,
-        "details",
-        "requirements.note.worktree-safety",
-        "domain.entity.project",
-    );
-    tier_edge(
-        &mut nodes,
-        &idx,
-        "details",
-        "requirements.note.write-through-regression",
-        "domain.constraint.pairwise-edge-matching",
-    );
+    // details: an implementation-layer note attaches to the code it explains
+    // (`global.constraint.note-implementation-only`): notes live only in the
+    // implementation layer, and each `details` edge names exactly one non-note
+    // node — here a scanned CODE FQN (`global.constraint.note-details-shape`).
+    // A code endpoint has no node file, so only the note's out-half exists; the
+    // pairing check parses-and-skips a code target.
+    for (note, code) in [
+        (
+            "implementation.note.bootstrap-dogfood",
+            "go.fixture.mod.ProjectStart",
+        ),
+        (
+            "implementation.note.worktree-safety",
+            "go.fixture.mod.MutationGuard",
+        ),
+        (
+            "implementation.note.write-through-regression",
+            "go.fixture.mod.LayersSerializer",
+        ),
+    ] {
+        nodes[idx[note]].out.push(out_e("details", code));
+    }
 
     nodes
 }
@@ -809,9 +811,9 @@ fn expected_tier_fqns() -> Vec<String> {
         "requirements.constraint.ac-start-one-command".to_string(),
         "requirements.constraint.ac-refusals-name-fix".to_string(),
         "requirements.constraint.ac-membership-names-half".to_string(),
-        "requirements.note.bootstrap-dogfood".to_string(),
-        "requirements.note.worktree-safety".to_string(),
-        "requirements.note.write-through-regression".to_string(),
+        "implementation.note.bootstrap-dogfood".to_string(),
+        "implementation.note.worktree-safety".to_string(),
+        "implementation.note.write-through-regression".to_string(),
         "domain.group.change-sets".to_string(),
         "domain.entity.project".to_string(),
         "domain.entity.graph-node".to_string(),
@@ -1800,28 +1802,31 @@ mod e2e {
         // 2b. mutations — the `apg node add`-equivalent (the exact node_cmd
         // shape through layers::write_project) against the walk-up root:
         // membership guard -> validate -> atomic write -> auto-commit -> DB
-        // re-merge, and a fresh query sees the new node.
-        layers::write_project(
-            &resolved,
-            &[nf(
-                "requirements",
-                "note",
-                "dogfood-log",
-                "The task-4 dogfood node: authored through the apg node add-equivalent surface with cwd inside the worktree.",
-                &[("kind", "background")],
-            )],
-            &[],
-        )
-        .unwrap();
+        // re-merge, and a fresh query sees the new node. The note lives in the
+        // implementation layer (`global.constraint.note-implementation-only`)
+        // and names exactly one scanned CODE FQN via `details`
+        // (`global.constraint.note-details-shape`) — a code endpoint has no
+        // node file, so only the note's out-half exists.
+        let mut dogfood_note = nf(
+            "implementation",
+            "note",
+            "dogfood-log",
+            "The task-4 dogfood node: authored through the apg node add-equivalent surface with cwd inside the worktree.",
+            &[("kind", "background")],
+        );
+        dogfood_note
+            .out
+            .push(out_e("details", "go.fixture.mod.Store"));
+        layers::write_project(&resolved, &[dogfood_note], &[]).unwrap();
         let node_file = wt_apg
             .join(layers::LAYERS_DIR)
-            .join("requirements")
+            .join("implementation")
             .join("note")
             .join("dogfood-log.json");
         assert!(node_file.exists(), "{} must exist", node_file.display());
         let db = artifacts::ArtifactDb::open(&resolved).unwrap();
         assert!(
-            db.has_node("requirements.note.dogfood-log"),
+            db.has_node("implementation.note.dogfood-log"),
             "the mutation's DB re-merge must make the new node visible to a fresh query"
         );
         drop(db);
@@ -1835,7 +1840,7 @@ mod e2e {
                 .unwrap()
                 .tree()
                 .unwrap()
-                .get_path(Path::new("apg/layers/requirements/note/dogfood-log.json"))
+                .get_path(Path::new("apg/layers/implementation/note/dogfood-log.json"))
                 .is_ok(),
             "the node file must be committed on the project branch"
         );
@@ -1903,7 +1908,7 @@ mod e2e {
         for f in expected_tier_fqns() {
             assert!(db.has_node(&f), "branch DB must hold tier node `{f}`");
         }
-        assert!(db.has_node("requirements.note.dogfood-log"));
+        assert!(db.has_node("implementation.note.dogfood-log"));
         for f in [
             "round-trip/plan",
             "round-trip/plan.phase-01",
@@ -1917,7 +1922,8 @@ mod e2e {
         }
         // The spine is real in the branch DB: 20 drives edges, the
         // domain→solution realised-by hop, the 5 implemented-by claims onto
-        // scanned structs, and the User→Requirement contains tree.
+        // scanned structs, the User→Requirement contains tree, and the four
+        // implementation-layer notes each detailing one scanned struct.
         let count = |q: &str| -> i64 {
             db.q(q)
                 .unwrap()
@@ -1945,8 +1951,8 @@ mod e2e {
             20
         );
         assert_eq!(
-            count("MATCH (:Note)-[:Details]->(:Requirement) RETURN count(*)"),
-            1
+            count("MATCH (:Note)-[:Details]->(:Struct) RETURN count(*)"),
+            4
         );
         drop(db);
         assert_eq!(
@@ -1979,7 +1985,7 @@ mod e2e {
         );
         assert!(
             repo.root
-                .join("apg/layers/requirements/note/dogfood-log.json")
+                .join("apg/layers/implementation/note/dogfood-log.json")
                 .exists(),
             "the merged main checkout carries the dogfood node"
         );
@@ -1991,7 +1997,7 @@ mod e2e {
         for f in [
             "requirements.requirement.r1",
             "requirements.requirement.r20",
-            "requirements.note.dogfood-log",
+            "implementation.note.dogfood-log",
             "domain.group.change-sets",
             "solution.system.apg-cli",
             "solution.container.project-commands",
