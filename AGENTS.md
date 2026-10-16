@@ -168,7 +168,8 @@ The project builds a single `apg` binary (package `apg`):
   edge-preserving, and sets/replaces a phase's `Satisfies`/`Gates` via
   `--satisfies`/`--prereq`), `rm`
   (`<project>|phase|task|planned [--force]`; refuses while dependents exist),
-  `done`/`undone` (assertion-only), `note` (task notes), `complete`
+  `done`/`undone` (assertion-only), `note` (task notes — **banned**, see
+  *Plan notes are banned* below), `complete`
   (milestone-only), `render`, `verify` (the pre-merge coherence gate; the
   binary applies nothing).
 - `apg project <sub> …` — project contexts (worktrees, git2-operated):
@@ -731,6 +732,50 @@ asserted by the binary.
   `apg project merge`. A change-set that changes the agent-builder template
   edits `opencode-suite/agents/**` (product source, embedded via `include_str!`);
   it does not regenerate the repo's own agents.
+
+### Plan notes are banned
+
+**Never call `apg_plan_note`** (and never create a plan `Note` by any other
+route).
+
+- **The mechanism.** `apg plan note` stores a plan note in the graph under a
+  **project-prefixed** FQN (e.g. `typed-records/plan.note-1`), but every durable
+  spec write (`apg_node` / `apg_edge add|update|rm`) validates **all** `Note`
+  nodes against the spec FQN form `<layer>.<type>.<name>` — and
+  `typed-records/plan.note-1` does not match that form. The write refuses with:
+
+  ```
+  apg: Note `typed-records/plan.note-1`: `typed-records/plan.note-1` is not a
+  node FQN of the form <layer>.<type>.<name>
+  ```
+
+- **Why it is catastrophic, not cosmetic.** The validation is **not scoped to
+  the note's target**. Once a single plan note exists, every spec mutation in the
+  worktree is refused, whatever node it targets — one plan note poisons the
+  entire durable-spec write surface for that worktree, so spec-writer,
+  plan-writer, and any other authoring agent all become unable to write.
+- **The rules.**
+  - **NEVER** call `apg_plan_note`, and never create a plan `Note` by any other
+    route.
+  - Record a deviation / concern / decision / commit hash in your **returned
+    report to the coordinator** instead — the coordinator carries it into the
+    final human-gate summary. Don't store it in the plan.
+  - `apg_plan_done` is fine and is still how a task is marked done (call it with
+    `directory=` set to the worktree).
+  - If a plan note already exists and spec writes are refused with that message —
+    **stop and tell the coordinator**; don't work around it.
+- **Recovery** (coordinator/builder only). Plan files are transient and
+  gitignored, so recovery changes no commit: delete every `"type":"note"` record
+  and every `"type":"details"` record whose `from` contains `.note-` from
+  `apg/.trans/plans/<project>.jsonl` (back it up first), then `apg_scan` the
+  worktree.
+- **Current state.** The graph has no plan notes right now — the only `Note`
+  nodes are legitimate spec notes (`solution.note.variants-from-load-expansion`,
+  `requirements.note.layout-composition-resolution`,
+  `requirements.note.self-nesting-depth`, `requirements.note.native-display-paths`).
+  The failure condition (`MATCH (n:Note) WHERE n.fqn STARTS WITH '<project>/'`
+  non-zero) is not present — the ban is simply respected proactively, which is
+  the intended posture.
 
 ### `Struct.code_type` / `Function.code_type`
 
