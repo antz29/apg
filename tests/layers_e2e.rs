@@ -1453,7 +1453,7 @@ mod e2e {
         let mut checkout = node("domain", "service", "checkout");
         let mut portal = node("solution", "system", "portal");
         let mut alice = node("solution", "person", "alice");
-        let mut notes = node("global", "note", "notes");
+        let mut notes = node("implementation", "note", "notes");
 
         // contains: User ⊃ Requirement
         user.out
@@ -1496,11 +1496,12 @@ mod e2e {
         portal
             .in_edges
             .push(in_edge("uses", "solution.person.alice"));
-        // details: Note → Requirement
-        notes
-            .out
-            .push(out_edge("details", "requirements.requirement.timer"));
-        timer.in_edges.push(in_edge("details", "global.note.notes"));
+        // details: an implementation-layer note attaches to the code it
+        // explains (`global.constraint.note-implementation-only`) — notes live
+        // only in the implementation layer, so the `details` edge names the
+        // scanned code node (like `implemented-by`, a code endpoint has no node
+        // file, so only the note's out-half exists).
+        notes.out.push(out_edge("details", "go.fixture.mod.Store"));
 
         write_project(
             &wt_apg,
