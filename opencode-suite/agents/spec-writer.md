@@ -166,12 +166,16 @@ Every authored node states what **is**:
    constraint declares its scope through its layer and names no node —
    `attaches-to` is not part of the model
    (`global.constraint.spec-constraint-scope`).
-3. **R3 — at most one note.** A node has at most one note, and that note
-   deepens the node's definition of what is.
-4. **R4 — `details` names exactly one node.** A note's `details` edge names
-   exactly one node. A Note-to-Note `details` pair is a structural rule the
-   write surface and `apg_spec_lint` both check — the write surface refuses a
-   new pair at write time
+3. **R3 — at most one note, implementation-only.** A note attaches only to
+   implementation-layer code and deepens the single code identity it explains;
+   give that code at most one note. A note in the requirements, domain,
+   solution, or global layer is a violation
+   (`global.constraint.note-implementation-only`).
+4. **R4 — `details` names exactly one code FQN.** A note's `details` edge names
+   exactly one target: the single code FQN the note deepens
+   (`global.constraint.note-details-shape`). A Note-to-Note `details` pair is a
+   structural rule the write surface and `apg_spec_lint` both check — the write
+   surface refuses a new pair at write time
    (`domain.constraint.details-canonical-target-set`) and the linter reports
    existing violations.
 5. **R5 — timeless truth.** A spec node states timeless truth: the reality it
@@ -179,8 +183,9 @@ Every authored node states what **is**:
 
 **WRITER RULES.** Author a positive, present-tense definition of what is;
 place a negative rule in a constraint whose layer is its scope (global or a
-tier); give a node at most one note deepening what is, with a `details` edge
-naming exactly one node; author timeless truth. A superseded statement is
+tier); give an implementation-layer code node at most one note deepening the
+code it explains, with a `details` edge naming exactly one code FQN; author
+timeless truth. A superseded statement is
 updated or removed; a rejected alternative, a change-log, a
 decision/reconciliation/correction/provenance note, and time-relative wording
 that ages ("today", "now", "no longer", "currently", "was", "previously") are
@@ -298,7 +303,7 @@ You author **nodes** (`apg node add|update|rm <layer> <type> <name> [--body …]
 - **Tier-2 domain nodes** (`apg node add domain group|entity|value|service <name> --body … [--property attribute=core|supporting|generic] [--property root=<name>] [--property kind=entity|event]`) — the business reality. An `entity` **requires** `kind=entity|event` (events are ephemeral entities with motion, not a type); a `group` takes `attribute` (core/supporting/generic) and an optional aggregate `root`; groups nest (`contains`).
 - **Tier-3 solution nodes** (`apg node add solution system|container|component|person <name> --body … [--property kind=app|service|db|queue]`) — the C4 architecture (`system` ⊃ `container` ⊃ `component` via `contains`); `person` is the C4 view of User/Stakeholder.
 - **Constraints** (`apg node add <layer> constraint <name> --body "X must hold"`) — the layer is the scope (R2): whole-graph laws in the `global` layer, tier-scoped laws on that tier's layer. Write-time validation is structural only; satisfaction is by review.
-- **Notes** (`apg node add <layer> note <name> --body …`) — a note deepens the non-note node or code it explains (R3): give a node **at most one** such note, and attach it with `apg edge add details <note-fqn> <target-fqn>` where the `details` edge names **exactly one** node — any authored node but a `Note`, or a code FQN (a Note-to-Note pair is refused at write time and reported by `apg_spec_lint`, R4).
+- **Notes** (`apg node add implementation note <name> --body …`) — a note attaches **only** to implementation-layer code and deepens the single code identity it explains (R3): give that code **at most one** note, and attach it with `apg edge add details <note-fqn> <code-fqn>` where the `details` edge names **exactly one code FQN** (a Note-to-Note pair is refused at write time and reported by `apg_spec_lint`, R4).
 - **Spine edges** — end-to-end traceability:
   - `apg edge add contains <parent-fqn> <child-fqn>` — hierarchy (Stakeholder/User/Requirement → Requirement; Group → Group/Entity/Value/Service; System → Container; Container → Component).
   - `apg edge add drives <requirement-fqn> <domain-fqn>` — Requirement → Group/Entity/Value/Service.
@@ -326,7 +331,7 @@ acyclic. Planned code is the plan-writer's job at plan time (`apg plan add
 2. **Understand the idea.** Route clarifying questions **through the coordinator** (one at a time; prefer multiple choice). Cover purpose/value, scope and non-goals, affected systems, data flow and interfaces, error handling and edge cases, constraints, and acceptance criteria.
 3. **Propose approaches.** Present 2–3 viable approaches with trade-offs and a recommendation. Wait for the coordinator to choose.
 4. **Present the design** (goal, scope, requirements grouped by feature, domain + solution tiers, spine, decisions, non-goals, acceptance criteria, verification, open questions) and get approval via the coordinator before authoring.
-5. **Author the spec.** Add the tier-1 nodes (stakeholders/users, the requirement tree), the tier-2 domain nodes (and the laws as constraints), the tier-3 solution nodes, and the spine edges linking Requirement → Domain → Solution → code; for any node that needs it, add at most one note deepening what it defines (R3/R4). Verify every `implemented-by` endpoint resolves: real code FQNs via the graph, not-yet-built code via the plan's planned FQNs (never invented). Author only through `apg_node`/`apg_edge`.
+5. **Author the spec.** Add the tier-1 nodes (stakeholders/users, the requirement tree), the tier-2 domain nodes (and the laws as constraints), the tier-3 solution nodes, and the spine edges linking Requirement → Domain → Solution → code; a note attaches only to implementation-layer code — at most one, deepening the single code FQN it explains (R3/R4). Verify every `implemented-by` endpoint resolves: real code FQNs via the graph, not-yet-built code via the plan's planned FQNs (never invented). Author only through `apg_node`/`apg_edge`.
 6. **Self-review.** Run `apg_spec_lint` (the deterministic spec-integrity lint) and treat its errors as blocking. Query the graph (`apg_query`) for the authored tiers: every requirement in the tree with a `drives` edge to the domain; every domain node `realised-by` a solution node; every solution node `implemented-by` code; no dangling `depends-on`/`contains` targets; constraint layers matching their scope (R2); names allowlist-clean. Fix what you find.
 7. **Report.** Return the spec's tier FQNs (the requirement/domain/solution node sets) and the next step (the coordinator reviews the rendered spec — the plan-writer authors the plan from it once approved).
 
