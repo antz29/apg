@@ -414,16 +414,19 @@ mod e2e {
     /// exercised under mandatory-session: a NEW constraint carrying
     /// `attaches-to` is REFUSED by the session coordinator's admission
     /// validation with no node file left behind; an EXISTING attached
-    /// constraint stays authorable (`node update` of its body and `edge add
-    /// details <note> <constraint>` targeting it both succeed, because its
-    /// `attaches-to` value is unchanged); and a NEW constraint WITHOUT
-    /// `attaches-to` (a plain tier-scoped `domain.constraint.*`) SUCCEEDS and
-    /// lands its file.
+    /// constraint stays authorable (`node update` of its body succeeds,
+    /// because its `attaches-to` value is unchanged); and a NEW constraint
+    /// WITHOUT `attaches-to` (a plain tier-scoped `domain.constraint.*`)
+    /// SUCCEEDS and lands its file.
     ///
-    /// Every durable `node`/`edge` write is routed through one live
-    /// `apg session start` and staged in its write-back buffer; `apg session
-    /// save` is the single durability point the file/read-back assertions below
-    /// observe.
+    /// No sub-scenario exercises an edge targeting the constraint: under the
+    /// code-only `details` model no durable edge kind admits an authored
+    /// constraint as an endpoint, so the former `details <note> <constraint>`
+    /// half-write is no longer expressible and the note it required is dropped.
+    ///
+    /// Every durable `node` write is routed through one live `apg session
+    /// start` and staged in its write-back buffer; `apg session save` is the
+    /// single durability point the file/read-back assertions below observe.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
     fn new_constraint_attaches_to_is_refused() {
@@ -453,9 +456,8 @@ mod e2e {
         testutil::scan_checkout(&wt).unwrap();
 
         // Durable mutations are mandatory-session: one live `apg session start`
-        // owns the DB AND the write-back buffer, so every `node`/`edge` write
-        // below is forwarded to it and staged (NON-durable until `apg session
-        // save`).
+        // owns the DB AND the write-back buffer, so every `node` write below is
+        // forwarded to it and staged (NON-durable until `apg session save`).
         let session = testutil::start_session_process(&wt, &home);
         assert!(
             apg::session::live_session(&apg_root),
@@ -519,31 +521,6 @@ mod e2e {
             String::from_utf8_lossy(&out.stderr)
         );
 
-        // `edge add details <note> <constraint>` targeting it also SUCCEEDS: the
-        // constraint's in-half write carries its unchanged `attaches-to`. The
-        // edge's note endpoint is an implementation-layer note (notes are
-        // confined to the implementation layer), added earlier in the same
-        // unsaved run, so the admission resolves it against the cumulative
-        // buffered state.
-        let out = run(&["node", "add", "implementation", "note", "audit"]);
-        assert!(
-            out.status.success(),
-            "the details source note must be authorable: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let out = run(&[
-            "edge",
-            "add",
-            "details",
-            "implementation.note.audit",
-            "requirements.constraint.legacy",
-        ]);
-        assert!(
-            out.status.success(),
-            "edge add details to an existing attached constraint must succeed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-
         // The positive case: a NEW constraint WITHOUT `attaches-to` is ADMITTED
         // — the refusal targets only a newly-added attached constraint, never
         // every new constraint.
@@ -557,8 +534,8 @@ mod e2e {
         );
 
         // The single durability point: `apg session save` flushes the buffered
-        // set (the legacy update, the note, the edge halves, the plain law)
-        // into node files in one commit.
+        // set (the legacy update and the plain law) into node files in one
+        // commit.
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),
