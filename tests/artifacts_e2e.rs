@@ -271,7 +271,7 @@ fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
             )],
         ),
         node(
-            "requirements",
+            "implementation",
             "note",
             "design",
             "a design note",
@@ -410,7 +410,7 @@ fn lossless_authored_nodes() -> Vec<layers::NodeFile> {
             vec![
                 inc("realised-by", "domain.entity.order", props(&[])),
                 inc("contains", "solution.system.platform", props(&[])),
-                inc("details", "requirements.note.design", props(&[])),
+                inc("details", "implementation.note.design", props(&[])),
             ],
         ),
         node(
@@ -1397,10 +1397,10 @@ mod e2e {
             body: "the checkout flow".to_string(),
             properties: props(&[("id", "REQ-1"), ("feature", "feature-checkout")]),
             out: vec![out_edge("drives", "domain.group.core", drives_props())],
-            in_edges: vec![in_edge("details", "requirements.note.note-1", props(&[]))],
+            in_edges: vec![in_edge("details", "implementation.note.note-1", props(&[]))],
         };
         let note = layers::NodeFile {
-            layer: "requirements".to_string(),
+            layer: "implementation".to_string(),
             node_type: "note".to_string(),
             name: "note-1".to_string(),
             body: "a note".to_string(),
@@ -1511,7 +1511,7 @@ mod e2e {
             props(&[("id", "REQ-1"), ("feature", "feature-checkout")])
         );
 
-        let n = find("requirements", "note", "note-1");
+        let n = find("implementation", "note", "note-1");
         assert_eq!(n.body, "a note");
         assert_eq!(n.properties, props(&[("kind", "background")]));
 
@@ -1559,7 +1559,7 @@ mod e2e {
 
         // Both halves of `details`.
         out(&n, "details", "requirements.requirement.checkout");
-        incoming(&r, "details", "requirements.note.note-1");
+        incoming(&r, "details", "implementation.note.note-1");
 
         testutil::remove(&repo);
     }
