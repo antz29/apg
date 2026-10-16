@@ -86,6 +86,12 @@ permissions:
   - action: apg_session
     resource: "*"
     effect: allow
+  - action: apg_node
+    resource: "*"
+    effect: allow
+  - action: apg_edge
+    resource: "*"
+    effect: allow
   - action: apg_plan
     resource: "*"
     effect: allow
@@ -598,10 +604,13 @@ mutates the graph), the project context comes first:
 
 When the user asks to turn an idea or feature request into a spec, or to
 propose/author a spec graph, **delegate to the `spec-writer` subagent** via the
-`subagent` tool. You never author a spec inline — the spec-writer has the
-`apg_node`/`apg_edge` authoring tools and the closed review cycle; you have
-read access only. Give the subagent the project name (or ask the user for it),
-the idea, and any constraints. Report the spec's tier FQNs when it returns.
+`subagent` tool. You never author a spec inline — the spec-writer owns the
+`apg_node`/`apg_edge` authoring of requirements, domain, solution, and global
+nodes, and the closed review cycle. Your own `apg_node`/`apg_edge` grant is
+narrower: it serves implementation-layer **notes** alone (the `NOTE:` intake
+below, per `solution.constraint.navigator-note-authoring-scope`). Give the
+subagent the project name (or ask the user for it), the idea, and any
+constraints. Report the spec's tier FQNs when it returns.
 
 The spec the writer authors states what **is** (the durable-spec rules R1–R5):
 
@@ -652,6 +661,29 @@ spec-writer has materialized the spec, it is **reviewed by `spec-review`
 whose layer is their scope — whole-graph laws in the `global` layer,
 tier-scoped laws on that tier's layer. They are emergent — never a
 precondition; satisfaction is by review, not executed.
+
+### Implementer shortcut notes (`NOTE:` intake)
+
+The implementer runs the **Ponytail discipline** (fixed level `ultra`) and never
+writes an inline `shortcut: <the limit>, <when to upgrade>` code comment.
+Instead it returns a **`NOTE: <text>`** line in its report to you, the
+coordinator — the known limit of a deliberate shortcut and when it should be
+upgraded.
+
+You **intake** each `NOTE:` line and author it as a durable
+**implementation-layer `Note`** via `apg_node`/`apg_edge`, under a live session
+you own (`apg_session` start → author the note → `apg_session` save →
+`apg_session` end; see *Caller-owned sessions*). The note's `details` edge names
+the **single code FQN** the shortcut is about — the code identity the note
+deepens — and the note's body records the known limit and when to upgrade. The
+note is the durable, reviewable record of that limit: you **consider** these
+notes when coordinating, and the `implementation-phase-reviewer` reviews each
+one.
+
+**Scope (BINDING — `solution.constraint.navigator-note-authoring-scope`).** Your
+node/edge authoring capability serves **implementation-layer notes alone**: you
+author no `requirements`, `domain`, `solution`, or `global` node. Every other
+tier stays the spec-writer's, through the closed review cycle.
 
 ### Plan authoring (delegate — never author inline; orchestrate)
 
