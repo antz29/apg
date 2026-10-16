@@ -2473,6 +2473,42 @@ mod e2e {
         }
     }
 
+    /// Phase-03 tasks 2/3 (e2e): the embedded `spec-writer.md` and
+    /// `spec-review.md` prompts state the structure-over-prose body budget — a
+    /// tier-1–3 authored body is one present-tense sentence of at most 244
+    /// characters, with the detail living in the structure (nodes and edges)
+    /// rather than the prose — naming the law
+    /// `requirements.requirement.spec-body-budget`. The `apg_spec_lint`
+    /// over-budget body is the enforcing mechanism; the prompts carry the rule.
+    /// The needles are pinned as literals, not read back from the prompts, and
+    /// asserted for BOTH the authoring (spec-writer) and reviewing
+    /// (spec-review) prompt.
+    #[test]
+    #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
+    fn spec_prompts_state_body_budget_rule() {
+        fn agent(name: &str) -> &'static str {
+            AGENTS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, c)| *c)
+                .unwrap_or_else(|| panic!("{name} is in the embedded AGENTS set"))
+        }
+
+        for name in ["spec-writer.md", "spec-review.md"] {
+            let prompt = agent(name);
+            for needle in [
+                "requirements.requirement.spec-body-budget",
+                "one present-tense sentence",
+                "244 characters",
+            ] {
+                assert!(
+                    prompt.contains(needle),
+                    "{name} must carry the body-budget prose {needle:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     #[ignore = "e2e tier: real I/O (repo files/scratch repo/spawned apg/db.lbug); run via cargo test-e2e"]
     fn scaffold_gitignore_adds_layout_entries_once() {
