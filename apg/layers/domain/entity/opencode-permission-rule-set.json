@@ -11,6 +11,11 @@
       "kind": "realised-by",
       "target": "solution.component.opencode-agent-templates",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.ungranted-plan-note",
+      "properties": {}
     }
   ],
   "in": [
@@ -27,6 +32,11 @@
     {
       "kind": "drives",
       "source": "requirements.requirement.opencode-generated-agent-shape-v2",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.no-plan-note-grant",
       "properties": {}
     }
   ]

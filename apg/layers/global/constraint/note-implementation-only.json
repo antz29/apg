@@ -1,0 +1,9 @@
+{
+  "layer": "global",
+  "type": "constraint",
+  "name": "note-implementation-only",
+  "body": "A note attaches only to implementation-layer code and deepens the single code identity it explains; a note in the requirements, domain, solution, or global layer is a violation.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

@@ -64,6 +64,11 @@
       "kind": "drives",
       "source": "requirements.requirement.opencode-suite-install-v2",
       "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
     }
   ]
 }

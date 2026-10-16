@@ -1,0 +1,28 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "notes-implementation-only",
+  "body": "A durable note attaches only to implementation-layer code, while the requirements, domain, solution, and global layers carry their detail in structure and body.",
+  "properties": {
+    "feature": "spec-model-enforcement"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.group.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.spec-lint",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    }
+  ]
+}

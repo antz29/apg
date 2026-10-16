@@ -1,0 +1,46 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "note-layer-confinement",
+  "body": "The note-layer confinement: the layer catalog admitting a note in the implementation layer alone, the write-time type check, the spec lint's confinement rule, and the spec-writer and spec-review prompts.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.spec_lint.lint",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.layers.catalog.Layer.node_types",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "rust.apg.layers.validate.validate_node",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/spec-writer.md",
+      "properties": {}
+    },
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/spec-review.md",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "realised-by",
+      "source": "domain.group.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.spec-lint",
+      "properties": {}
+    }
+  ]
+}

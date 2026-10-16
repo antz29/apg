@@ -1,0 +1,28 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "spec-body-budget",
+  "body": "Every authored requirement, domain, and solution node body is one present-tense sentence of at most 244 characters, and detail lives in the structure rather than the prose.",
+  "properties": {
+    "feature": "spec-model-enforcement"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.group.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.spec-lint",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    }
+  ]
+}

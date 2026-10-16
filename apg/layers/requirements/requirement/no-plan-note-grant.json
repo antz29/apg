@@ -1,0 +1,33 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "no-plan-note-grant",
+  "body": "Every agent the suite installs and every agent the agent-builder generates omits the banned plan-note tool from its grant set, while the tool's plugin stays installed.",
+  "properties": {
+    "feature": "spec-model-enforcement"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.navigator-cadence-marks-done-only",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.opencode-permission-rule-set",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.entity.generated-agent-set",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    }
+  ]
+}

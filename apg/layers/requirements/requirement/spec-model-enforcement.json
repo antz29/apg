@@ -1,0 +1,43 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "spec-model-enforcement",
+  "body": "The product enforces the durable spec's authoring model: a tier-1-3 body is one present-tense sentence within the character budget, a note attaches only to implementation-layer code, and every agent's grant set omits the plan-note tool.",
+  "properties": {
+    "feature": "spec-model-enforcement"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.no-plan-note-grant",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.notes-implementation-only",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.spec-body-budget",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.spec-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.opencode-integration",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.stakeholder.spec-author",
+      "properties": {}
+    }
+  ]
+}

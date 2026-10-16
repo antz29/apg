@@ -26,12 +26,37 @@
       "kind": "realised-by",
       "target": "solution.component.spec-principles-prompts",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.spec-body-budget",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.note-layer-confinement",
+      "properties": {}
     }
   ],
   "in": [
     {
       "kind": "drives",
       "source": "requirements.requirement.durable-spec-states-what-is",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.spec-model-enforcement",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.notes-implementation-only",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.spec-body-budget",
       "properties": {}
     }
   ]
