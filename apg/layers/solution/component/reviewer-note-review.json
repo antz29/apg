@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "reviewer-note-review",
+  "body": "The implementation-phase reviewer prompt's note-review duty: it reviews each implementation-layer Note attached to a graph node and attaches review Feedback to it.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/implementation-phase-reviewer.md",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.reviewed-target-reference",
+      "properties": {}
+    }
+  ]
+}

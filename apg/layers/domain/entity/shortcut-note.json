@@ -1,0 +1,38 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "shortcut-note",
+  "body": "A shortcut an implementer takes with a known limit, recorded as a durable implementation-layer Note whose details edge names the single code identity the shortcut is about.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.agent-builder-implementer-ponytail",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.navigator-note-authoring",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.implementer-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.ponytail-shortcut-reported-not-commented",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.navigator-authors-shortcut-notes",
+      "properties": {}
+    }
+  ]
+}

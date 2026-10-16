@@ -9,6 +9,16 @@
       "kind": "contains",
       "target": "requirements.requirement.feedback-survives-target-removal",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.reviewer-senior-review-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.reviewer-reviews-notes",
+      "properties": {}
     }
   ],
   "in": []

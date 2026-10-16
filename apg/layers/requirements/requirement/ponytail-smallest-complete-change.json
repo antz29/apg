@@ -1,0 +1,23 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ponytail-smallest-complete-change",
+  "body": "The implementer takes the smallest change that fully works: reuse codebase, standard-library and installed-dependency facilities, skip unrequested features, keep the existing structure, and fix a bug's root cause once in shared code.",
+  "properties": {
+    "feature": "agent-discipline"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.implementer-change-discipline",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.implementer-ponytail-discipline",
+      "properties": {}
+    }
+  ]
+}

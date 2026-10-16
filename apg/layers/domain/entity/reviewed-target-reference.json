@@ -21,6 +21,11 @@
       "kind": "realised-by",
       "target": "solution.component.review-command-surface",
       "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.reviewer-note-review",
+      "properties": {}
     }
   ],
   "in": [
@@ -37,6 +42,11 @@
     {
       "kind": "drives",
       "source": "requirements.requirement.review-list-shows-orphaned-feedback",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.reviewer-reviews-notes",
       "properties": {}
     }
   ]

@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "reviewer-senior-review-discipline",
+  "body": "The implementation-phase reviewer prompt's senior-review discipline: it orders concerns correct, safe, load, tested, fast and lean, requires a concrete case per finding, and translates must-fix and should-fix findings into review Feedback.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/implementation-phase-reviewer.md",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.senior-review-finding",
+      "properties": {}
+    }
+  ]
+}

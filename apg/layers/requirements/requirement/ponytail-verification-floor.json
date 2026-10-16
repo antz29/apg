@@ -1,0 +1,23 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ponytail-verification-floor",
+  "body": "The implementer keeps validation at trust boundaries, error handling that prevents data loss, security, accessibility, hardware calibration and every requested behavior, and leaves one test or self-check for new non-trivial logic.",
+  "properties": {
+    "feature": "agent-discipline"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.implementer-change-discipline",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.implementer-ponytail-discipline",
+      "properties": {}
+    }
+  ]
+}

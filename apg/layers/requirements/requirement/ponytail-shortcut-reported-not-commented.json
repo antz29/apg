@@ -1,0 +1,23 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ponytail-shortcut-reported-not-commented",
+  "body": "An implementer records a shortcut with its known limit as a NOTE line in its return-to-coordinator report rather than an inline source comment.",
+  "properties": {
+    "feature": "agent-discipline"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.shortcut-note",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.implementer-ponytail-discipline",
+      "properties": {}
+    }
+  ]
+}

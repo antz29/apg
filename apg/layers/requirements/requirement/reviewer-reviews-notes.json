@@ -1,0 +1,23 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "reviewer-reviews-notes",
+  "body": "The implementation-phase reviewer reviews each implementation-layer Note attached to a graph node and attaches review Feedback to it.",
+  "properties": {
+    "feature": "agent-discipline"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.reviewed-target-reference",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.user.reviewer",
+      "properties": {}
+    }
+  ]
+}

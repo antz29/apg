@@ -56,6 +56,16 @@
       "kind": "realised-by",
       "target": "solution.component.verify-feedback-stage",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.senior-review-finding",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.review-severity",
+      "properties": {}
     }
   ],
   "in": [

@@ -1,0 +1,9 @@
+{
+  "layer": "solution",
+  "type": "constraint",
+  "name": "navigator-note-authoring-scope",
+  "body": "The navigator's durable-authoring capability serves implementation-layer notes alone: the navigator authors no requirements, domain, solution, or global node.",
+  "properties": {},
+  "out": [],
+  "in": []
+}

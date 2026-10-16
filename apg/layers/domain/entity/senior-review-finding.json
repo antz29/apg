@@ -1,0 +1,28 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "senior-review-finding",
+  "body": "A finding a reviewer raises on a change: a concrete case with its smallest fix, graded must-fix, should-fix, or nice-to-have, and ordered behind correctness, safety, load, tests, speed and leanness.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.reviewer-senior-review-discipline",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.review-integrity",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.reviewer-senior-review-discipline",
+      "properties": {}
+    }
+  ]
+}

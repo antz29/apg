@@ -54,6 +54,11 @@
       "kind": "contains",
       "target": "requirements.requirement.plan-coverage-scoped-to-change-set-delta",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.navigator-authors-shortcut-notes",
+      "properties": {}
     }
   ],
   "in": []

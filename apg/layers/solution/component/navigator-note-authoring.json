@@ -1,0 +1,26 @@
+{
+  "layer": "solution",
+  "type": "component",
+  "name": "navigator-note-authoring",
+  "body": "The navigator prompt's shortcut-note surface: it receives each implementer-reported NOTE line and, under a live session, authors it as an implementation-layer Note whose details edge names the single code identity it is about.",
+  "properties": {},
+  "out": [
+    {
+      "kind": "implemented-by",
+      "target": "opencode-suite/agents/codebase-navigator.md",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "solution.container.opencode-suite",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "source": "domain.entity.shortcut-note",
+      "properties": {}
+    }
+  ]
+}

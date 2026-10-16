@@ -1,0 +1,43 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "implementer-ponytail-discipline",
+  "body": "Every implementer and test-implementer the agent-builder generates carries the Ponytail lazy-senior-developer discipline in its system prompt through the agent-builder's implementer-body section.",
+  "properties": {
+    "feature": "agent-discipline"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ponytail-level-is-ultra",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ponytail-smallest-complete-change",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ponytail-verification-floor",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "requirements.requirement.ponytail-shortcut-reported-not-commented",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "target": "domain.group.implementer-discipline",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.user.code-writer-agent",
+      "properties": {}
+    }
+  ]
+}

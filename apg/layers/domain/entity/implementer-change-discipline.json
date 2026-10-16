@@ -1,0 +1,33 @@
+{
+  "layer": "domain",
+  "type": "entity",
+  "name": "implementer-change-discipline",
+  "body": "The discipline an implementer applies when turning a plan task into committed code: a scope pass over every place the change reaches, the smallest fully-working change, and an untrimmed trust-boundary and verification floor.",
+  "properties": {
+    "kind": "entity"
+  },
+  "out": [
+    {
+      "kind": "realised-by",
+      "target": "solution.component.agent-builder-implementer-ponytail",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "domain.group.implementer-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.ponytail-smallest-complete-change",
+      "properties": {}
+    },
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.ponytail-verification-floor",
+      "properties": {}
+    }
+  ]
+}

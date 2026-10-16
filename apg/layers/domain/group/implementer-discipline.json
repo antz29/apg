@@ -1,0 +1,38 @@
+{
+  "layer": "domain",
+  "type": "group",
+  "name": "implementer-discipline",
+  "body": "The implementer's change discipline: the scope pass over everywhere a change reaches, the smallest fully-working change, the fixed ultra level, the trust-boundary and verification floor, and the shortcut note recorded instead of a source comment.",
+  "properties": {
+    "attribute": "supporting"
+  },
+  "out": [
+    {
+      "kind": "contains",
+      "target": "domain.entity.implementer-change-discipline",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.value.ponytail-level",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "domain.entity.shortcut-note",
+      "properties": {}
+    },
+    {
+      "kind": "realised-by",
+      "target": "solution.component.agent-builder-implementer-ponytail",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "drives",
+      "source": "requirements.requirement.implementer-ponytail-discipline",
+      "properties": {}
+    }
+  ]
+}

@@ -111,6 +111,26 @@
       "kind": "implemented-by",
       "target": "opencode-suite/tools/apg_plan_phases.ts",
       "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.navigator-note-authoring",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.agent-builder-implementer-ponytail",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.reviewer-note-review",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
+      "target": "solution.component.reviewer-senior-review-discipline",
+      "properties": {}
     }
   ],
   "in": [
