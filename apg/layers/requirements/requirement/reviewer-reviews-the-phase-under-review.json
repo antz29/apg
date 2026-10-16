@@ -1,0 +1,23 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "reviewer-reviews-the-phase-under-review",
+  "body": "The implementation-phase reviewer reviews the phase under review — its code, the code it touches, the tests, and the plan and spec it implements — in place of a user-named report.",
+  "properties": {
+    "feature": "agent-discipline"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.reviewed-target-reference",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.reviewer-senior-review-discipline",
+      "properties": {}
+    }
+  ]
+}

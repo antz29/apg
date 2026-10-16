@@ -14,6 +14,11 @@
     },
     {
       "kind": "contains",
+      "target": "requirements.requirement.ponytail-shortcut-reported-not-commented",
+      "properties": {}
+    },
+    {
+      "kind": "contains",
       "target": "requirements.requirement.ponytail-smallest-complete-change",
       "properties": {}
     },
@@ -23,13 +28,13 @@
       "properties": {}
     },
     {
-      "kind": "contains",
-      "target": "requirements.requirement.ponytail-shortcut-reported-not-commented",
+      "kind": "drives",
+      "target": "domain.group.implementer-discipline",
       "properties": {}
     },
     {
-      "kind": "drives",
-      "target": "domain.group.implementer-discipline",
+      "kind": "contains",
+      "target": "requirements.requirement.ponytail-return-states-skipped-and-risk",
       "properties": {}
     }
   ],

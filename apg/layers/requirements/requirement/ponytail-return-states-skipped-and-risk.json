@@ -1,0 +1,23 @@
+{
+  "layer": "requirements",
+  "type": "requirement",
+  "name": "ponytail-return-states-skipped-and-risk",
+  "body": "An implementer ends its return-to-coordinator report with the parts it skipped or left unchecked and the risk the navigator needs to know.",
+  "properties": {
+    "feature": "agent-discipline"
+  },
+  "out": [
+    {
+      "kind": "drives",
+      "target": "domain.entity.implementer-change-discipline",
+      "properties": {}
+    }
+  ],
+  "in": [
+    {
+      "kind": "contains",
+      "source": "requirements.requirement.implementer-ponytail-discipline",
+      "properties": {}
+    }
+  ]
+}
