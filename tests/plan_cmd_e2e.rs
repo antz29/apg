@@ -782,10 +782,13 @@ mod e2e {
         // until `apg session save`. A direct DB read therefore diverges from
         // the saved tree — exactly the state the short-circuit must not read as
         // stale.
+        // A note lives only in the implementation layer
+        // (`global.constraint.note-implementation-only`), so the buffered
+        // durable add is an implementation-layer note.
         let buffered = testutil::ApgCommand::new(&[
             "node",
             "add",
-            "requirements",
+            "implementation",
             "note",
             "buffered",
             "--body",
