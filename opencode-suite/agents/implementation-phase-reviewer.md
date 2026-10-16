@@ -451,8 +451,10 @@ load in the repo and judge scale against it, stating the load you assumed.
 **Check before reporting.** A finding needs a concrete case — "this input or
 situation leads to this wrong result". No case, no finding: re-read the lines
 and confirm the caller exists, the value can really be empty, the code really
-is unused. A `shortcut:`-marked code comment that names its own limit is a
-**decision, not a finding** (unless the expected load already crosses it).
+is unused. A shortcut recorded as an implementation-layer `Note` that names its
+own limit is a **decision, not a finding** (unless the expected load already
+crosses it); an inline `shortcut:` comment in the diff is itself a finding —
+the limit belongs in a `NOTE:` line the navigator authors as a Note.
 Propose the smallest fix that works, preferring fixes that delete code. No
 style taste, no "consider", no vague worries.
 
