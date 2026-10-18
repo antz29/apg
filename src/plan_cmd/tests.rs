@@ -577,12 +577,12 @@ mod unit {
     }
 
     /// Coverage is scoped to the merge-base delta, never to spine
-    /// reachability: `coverage_check` does not walk the Requirement `Drives`
-    /// Domain `RealisedBy` Solution `ImplementedBy` code spine, and the phase
-    /// `Satisfies` set never widens the implemented-by obligation set — it
-    /// ONLY discharges the delta's added-or-changed requirements. A delta
-    /// claim reached by no spine is still required; an unchanged pre-existing
-    /// claim is exempt however the spine runs.
+    /// reachability: `coverage_check` does not walk the Requirement `drives`
+    /// Service / Component `realises` Service / `implemented-by` code spine,
+    /// and the phase `Satisfies` set never widens the implemented-by obligation
+    /// set — it ONLY discharges the delta's added-or-changed requirements. A
+    /// delta claim reached by no spine is still required; an unchanged
+    /// pre-existing claim is exempt however the spine runs.
     #[test]
     fn coverage_delta_exempts_unchanged_nodes_and_ignores_spine() {
         // `r` is a delta requirement (the Satisfies-gate input); the sole

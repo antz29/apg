@@ -571,10 +571,14 @@ impl Coordinator {
         msg
     }
 
-    /// `apg session save`: make the whole buffered set durable. The buffered
-    /// [`PendingChange`]s are collected into the node-file `writes` (those with
-    /// `content: Some(node)`) and `deletes` (those with `content: None`, by
-    /// their destination `path`), flushed ATOMICALLY to
+    /// `apg session save`: make the whole buffered set durable. Before anything
+    /// is written, the ENTIRE buffered model (the durable base with the buffer
+    /// folded over it) passes the shared whole-model validator
+    /// ([`layers::write::validate_save_model`], SPEC §8.1) — an inconsistent
+    /// model refuses the save with the buffer left dirty. Otherwise the
+    /// buffered [`PendingChange`]s are collected into the node-file `writes`
+    /// (those with `content: Some(node)`) and `deletes` (those with
+    /// `content: None`, by their destination `path`), flushed ATOMICALLY to
     /// `apg/layers/<layer>/<type>/<name>.json` with exactly ONE git commit
     /// ([`layers::write::write_through_with_deletes`]), then the staleness
     /// gate's recorded `scan_meta` is re-anchored ([`git::reanchor_scan_meta`],
@@ -589,6 +593,18 @@ impl Coordinator {
             println!("Session saved: no pending changes");
             return Ok(());
         }
+
+        // SPEC §8.1 — the whole-model save boundary: validate the ENTIRE
+        // buffered model before anything becomes durable. The effective set is
+        // the ON-DISK base (the last saved node-file store) with the write-back
+        // buffer folded over it — exactly the set this save is about to make
+        // durable. Admission stays per-mutation, so intermediate construction
+        // is legal and only save enforces the whole-model minimums. A violation
+        // refuses the save BEFORE any write or commit and leaves the buffer
+        // dirty, so the caller can complete the model or abort.
+        let base = layers::write::read_existing_nodes(&self.apg_root)?;
+        let effective = self.overlay_from_buffer()?.apply_to_base(&base);
+        layers::write::validate_save_model(&effective)?;
 
         let mut writes: Vec<NodeFile> = Vec::new();
         let mut deletes: Vec<PathBuf> = Vec::new();

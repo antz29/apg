@@ -510,20 +510,37 @@ fn node_merge(
             vec![("name", name.clone()), ("body", body.clone())],
             Some(properties),
         )),
+        Record::Actor {
+            fqn,
+            name,
+            body,
+            properties,
+        } => Some((
+            "Actor",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
+        )),
+        Record::Role {
+            fqn,
+            name,
+            body,
+            properties,
+        } => Some((
+            "Role",
+            fqn,
+            vec![("name", name.clone()), ("body", body.clone())],
+            Some(properties),
+        )),
         Record::Constraint {
             fqn,
             name,
             body,
-            attaches_to,
             properties,
         } => Some((
             "Constraint",
             fqn,
-            vec![
-                ("name", name.clone()),
-                ("body", body.clone()),
-                ("attaches_to", attaches_to.clone()),
-            ],
+            vec![("name", name.clone()), ("body", body.clone())],
             Some(properties),
         )),
         _ => None,
@@ -535,8 +552,8 @@ fn node_merge(
 ///
 /// `Calls`/`Uses` are shared code rel tables: the same record kind carries the
 /// scanned Function→Function / Function→Struct / Struct→Struct edges and the
-/// authored Service→Service `calls` / Person→System `uses` edges (the only
-/// pairs `apg edge add` can author). The merge guard
+/// authored Service→Service / Actor→Service `calls` and Person→Component `uses`
+/// edges (the only pairs `apg edge add` can author). The merge guard
 /// ([`rel_pair_allowed`]) admits the authored pairs; the scanned pairs never
 /// reach this merge (they come from the load path, not a record set).
 ///
@@ -566,11 +583,6 @@ pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeP
             properties,
         } => Some(("Details", from, to, Some(properties))),
         Record::Reviews { from, to } => Some(("Reviews", from, to, None)),
-        Record::DependsOn {
-            from,
-            to,
-            properties,
-        } => Some(("DependsOn", from, to, Some(properties))),
         Record::Gates { from, to } => Some(("Gates", from, to, None)),
         Record::Satisfies { from, to } => Some(("Satisfies", from, to, None)),
         Record::Drives {
@@ -583,11 +595,6 @@ pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeP
             to,
             properties,
         } => Some(("Represents", from, to, Some(properties))),
-        Record::RealisedBy {
-            from,
-            to,
-            properties,
-        } => Some(("RealisedBy", from, to, Some(properties))),
         Record::SpecImplementedBy {
             from,
             to,
@@ -603,6 +610,31 @@ pub fn edge_merge(r: &Record) -> Option<(&'static str, &str, &str, Option<&NodeP
             to,
             properties,
         } => Some(("Subscribes", from, to, Some(properties))),
+        Record::Requires {
+            from,
+            to,
+            properties,
+        } => Some(("Requires", from, to, Some(properties))),
+        Record::Reads {
+            from,
+            to,
+            properties,
+        } => Some(("Reads", from, to, Some(properties))),
+        Record::Writes {
+            from,
+            to,
+            properties,
+        } => Some(("Writes", from, to, Some(properties))),
+        Record::IsRole {
+            from,
+            to,
+            properties,
+        } => Some(("IsRole", from, to, Some(properties))),
+        Record::Realises {
+            from,
+            to,
+            properties,
+        } => Some(("Realises", from, to, Some(properties))),
         _ => None,
     }
 }
@@ -639,6 +671,8 @@ pub fn node_fqn(r: &Record) -> Option<&str> {
         | Record::Value { fqn, .. }
         | Record::Service { fqn, .. }
         | Record::Person { fqn, .. }
+        | Record::Actor { fqn, .. }
+        | Record::Role { fqn, .. }
         | Record::Constraint { fqn, .. } => Some(fqn),
         _ => None,
     }
@@ -663,15 +697,18 @@ pub fn edge_endpoints(r: &Record) -> Option<(&str, &str)> {
         | Record::Uses { from, to, .. }
         | Record::Details { from, to, .. }
         | Record::Reviews { from, to }
-        | Record::DependsOn { from, to, .. }
         | Record::Gates { from, to }
         | Record::Satisfies { from, to }
         | Record::Drives { from, to, .. }
         | Record::Represents { from, to, .. }
-        | Record::RealisedBy { from, to, .. }
         | Record::SpecImplementedBy { from, to, .. }
         | Record::Publishes { from, to, .. }
-        | Record::Subscribes { from, to, .. } => Some((from, to)),
+        | Record::Subscribes { from, to, .. }
+        | Record::Requires { from, to, .. }
+        | Record::Reads { from, to, .. }
+        | Record::Writes { from, to, .. }
+        | Record::IsRole { from, to, .. }
+        | Record::Realises { from, to, .. } => Some((from, to)),
         _ => None,
     }
 }
@@ -692,9 +729,8 @@ pub fn remove_node(records: &mut Vec<Record>, fqn: &str) {
 
 /// The path `to → … → from` that would close a dependency cycle if the edge
 /// `from → to` were added over the edges selected by `is_edge`, or `None` if
-/// the graph stays acyclic. Used to reject requirement DependsOn and phase
-/// Gates cycles at write time — a requirement that (transitively) depends on
-/// itself makes "delivered when its dependencies are delivered" circular.
+/// the graph stays acyclic. Used to reject phase Gates cycles and containment
+/// cycles at write time.
 pub fn cycle_closing_path(
     records: &[Record],
     from: &str,

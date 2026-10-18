@@ -92,19 +92,30 @@ fn newer_minor_version() -> String {
 
 /// Authors the durable spec as a node file under `apg/layers/` (the
 /// new-model store) rather than the retired `apg/specs/` JSONL: one
-/// requirement node, written through the node-file mutation funnel (guard →
-/// validate → atomic write → commit → re-merge).
+/// requirement node rooted in a User through `requires` (the minimum a
+/// whole-model merge-strength check accepts), written through the node-file
+/// mutation funnel (guard → validate → atomic write → commit → re-merge).
 fn write_spec_node(wt_apg: &Path) {
-    let node = layers::NodeFile {
-        layer: "requirements".to_string(),
-        node_type: "requirement".to_string(),
-        name: "timer".to_string(),
-        body: "A workitem can be started".to_string(),
-        properties: std::collections::BTreeMap::from([("id".to_string(), "R1".to_string())]),
-        out: Vec::new(),
-        in_edges: Vec::new(),
-    };
-    layers::write_project(wt_apg, &[node], &[]).unwrap();
+    let mut requirement = nf(
+        "requirements",
+        "requirement",
+        "timer",
+        "A workitem can be started",
+        &[("id", "R1")],
+    );
+    requirement
+        .in_edges
+        .push(in_e("requires", "requirements.user.agent"));
+    let mut user = nf(
+        "requirements",
+        "user",
+        "agent",
+        "The codebase agent that starts workitems.",
+        &[],
+    );
+    user.out
+        .push(out_e("requires", "requirements.requirement.timer"));
+    layers::write_project(wt_apg, &[requirement, user], &[]).unwrap();
 }
 
 /// A plan whose single task plans `fixture.mod.Widget` (not yet real
@@ -247,15 +258,16 @@ fn tier_edge(
 }
 
 /// The re-materialized apg-projects tiers in the layers model: tier 1
-/// (stakeholder/user + the 20 requirements R1–R20 with their depends-on
-/// edges, AC constraints), tier 2 (the
+/// (stakeholder/user + the 20 requirements R1–R20 with their `contains`
+/// decomposition edges, AC constraints), tier 2 (the
 /// change-sets domain: group/entities/events/value + the four domain laws
 /// as constraints), tier 3 (the apg-cli C4 solution: system + five
-/// containers with `implemented-by` code refs), plus the
+/// containers, each with a component that realises the change-set-records
+/// service and is `implemented-by` its code FQN), plus the
 /// implementation-layer notes (each detailing exactly one code FQN —
 /// notes are confined to the implementation layer), threaded through the
-/// strictly sequential spine (Requirement —Drives→ Domain —RealisedBy→
-/// Solution —ImplementedBy→ code). Bodies are condensed from
+/// strictly sequential spine (Requirement —drives→ Service ←realises—
+/// Component —implemented-by→ code). Bodies are condensed from
 /// plans/SPEC-apg-projects.md §1–6 and the old-model bootstrap
 /// apg/specs/apg-projects.jsonl — the lossy mapping is the spec-writer's
 /// judgement (SPEC §4.1 "re-materialize instead").
@@ -352,12 +364,12 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         (
             "R13",
             "tier-model",
-            "Spine strictly sequential — no tier skips (lint): Stakeholder ⊃ Requirement —Drives→ Domain —RealisedBy→ Solution —ImplementedBy→ code. Write-time edge-kind validation matrix (§3.3): contains/drives/realised-by/implemented-by/calls/publishes/subscribes/depends-on/uses/represents/details with their exact source/target shapes. Node rules: name allowlist [a-z0-9][a-z0-9-]* (refuse, never sanitize); type must exist in its layer; Entity requires kind; Group takes core/supporting/generic + optional root; Container takes app/service/db/queue; FQN = <layer>.<type>.<name>; names unique per (layer, type); contains/depends-on trees acyclic; dangling FQN references are write-time errors. Source: SPEC-apg-projects.md §3.2 + §3.3.",
+            "Spine strictly sequential — no tier skips (lint): Stakeholder/User —requires→ Requirement —contains→ Requirement —drives→ Service ←realises— Component —implemented-by→ code. Write-time relationship catalogue (§4): requires/contains/drives/realises/is-role/reads/writes/calls/publishes/subscribes/uses/represents/implemented-by with their exact source/target shapes and cardinalities. Node rules: name allowlist [a-z0-9][a-z0-9-]* (refuse, never sanitize); type must exist in its layer; Entity requires kind; Group takes core/supporting/generic + optional root; Container takes app/service/db/queue; FQN = <layer>.<type>.<name>; names unique per (layer, type); contains trees acyclic; dangling FQN references are write-time errors. Source: SPEC.md §4.",
         ),
         (
             "R14",
             "tier-model",
-            "Coupling is DERIVED, never stored: A and B are coupled iff a service/event edge chain connects them. The DDD context-map flavors (direct/published/translated/shared/coevolving) are EDGE ATTRIBUTES on calls/publishes/subscribes — never node types, never Group→Group edges. Constraints are PROSE (\"X must hold\") over things that EXIST: the binary validates structure and references at write time; global constraints guard the whole graph; local constraints attach to any tier-1–3 node; SATISFACTION IS ASSESSED BY REVIEW, never executed. Source: SPEC-apg-projects.md §3.1 + §3.3.",
+            "Coupling is DERIVED, never stored: A and B are coupled iff a service/event edge chain connects them. The DDD context-map flavors (direct/published/translated/shared/coevolving) are EDGE ATTRIBUTES on calls/publishes/subscribes — never node types, never Group→Group edges. Constraints are PROSE (\"X must hold\") over things that EXIST: the binary validates structure and references at write time; a constraint's layer declares its scope (a requirements/domain/solution constraint binds that tier); SATISFACTION IS ASSESSED BY REVIEW, never executed. Source: SPEC.md §4 + §7.1.",
         ),
         (
             "R15",
@@ -372,7 +384,7 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         (
             "R17",
             "serialization",
-            "No migration: legacy apg/specs/*.jsonl and apg/notes/ are NOT read; the version gate blocks old layouts; re-materialize instead — the lossy mapping is the spec-writer's judgement, not a converter's. The old `apg spec` / `apg invariant` command surfaces and the old-model graph vocabulary are removed from the binary — node kinds are exactly the §3.1 catalog plus the code kinds and the transient plan/review kinds; edge kinds are exactly the §3.3 matrix plus the §5 plan/feedback edges. Source: SPEC-apg-projects.md §4.1.",
+            "No migration: legacy apg/specs/*.jsonl and apg/notes/ are NOT read; the version gate blocks old layouts; re-materialize instead — the lossy mapping is the spec-writer's judgement, not a converter's. The old `apg spec` / `apg invariant` command surfaces and the old-model graph vocabulary are removed from the binary — node kinds are exactly the §3.2 vocabulary plus the code kinds and the transient plan/review kinds; edge kinds are exactly the §4 relationship catalogue plus the §5 plan/feedback edges. Source: SPEC-apg-projects.md §4.1.",
         ),
         (
             "R18",
@@ -487,6 +499,17 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         &mut idx,
         nf(
             "domain",
+            "service",
+            "change-set-records",
+            "The change-set bookkeeping behaviour: recording project membership, node-file writes, and the pairwise-edge invariants every mutation must hold (SPEC §4).",
+            &[],
+        ),
+    );
+    tier_push(
+        &mut nodes,
+        &mut idx,
+        nf(
+            "domain",
             "entity",
             "project",
             "The change-set container created by `apg project start <name>`: a git worktree at <main>/apg/.worktrees/<project> on a branch named after the project — branch name == project name is the membership mechanism — off the repo's DEFAULT branch (SPEC §2.1).",
@@ -537,6 +560,22 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
             &[],
         ),
     );
+    for (name, body) in [
+        (
+            "project-name",
+            "A project's branch-name identity — branch name == project name is the membership mechanism (SPEC §2.1).",
+        ),
+        (
+            "start-command",
+            "The command that creates a project context: `apg project start <name>` (SPEC §2.1).",
+        ),
+        (
+            "node-file-path",
+            "A node file's path under apg/layers/: <layer>/<type>/<name>.json (SPEC §3.3/§4.1).",
+        ),
+    ] {
+        tier_push(&mut nodes, &mut idx, nf("domain", "value", name, body, &[]));
+    }
     for (name, body) in [
         (
             "mutation-requires-project",
@@ -607,17 +646,56 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
             nf("solution", "container", name, body, &[("kind", kind)]),
         );
     }
+    // --- Roles: the architectural classification of each container and its
+    // component (SPEC §3.3/§4.4: exactly one `is-role` target each).
+    for (name, body) in [
+        (
+            "command-surface",
+            "The command-surface role: the project command entry points.",
+        ),
+        (
+            "guard",
+            "The enforcement role: the membership and pre-merge coherence guards.",
+        ),
+        (
+            "serializer",
+            "The persistence role: the node-file serializer and auto-commit.",
+        ),
+        (
+            "bridge",
+            "The bridge role: the transient tier-4 plan bridge.",
+        ),
+        (
+            "version-gate",
+            "The scaffolding role: init scaffolding and the version gate.",
+        ),
+    ] {
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf("solution", "role", name, body, &[]),
+        );
+    }
 
-    // --- The spine + trees (paired both halves, SPEC §3.2/§3.3) ----
+    // --- The spine + trees (paired both halves, SPEC §4) ----
     let req_fqns: Vec<String> = (1..=20)
         .map(|i| format!("requirements.requirement.r{i}"))
         .collect();
-    // contains: User ⊃ every Requirement.
+    // requires: User → every Requirement.
     for r in &req_fqns {
-        tier_edge(&mut nodes, &idx, "contains", "requirements.user.agent", r);
+        tier_edge(&mut nodes, &idx, "requires", "requirements.user.agent", r);
     }
-    // depends-on (SPEC §5 source ordering; the R8→R6/R7 pair mirrors the
-    // bootstrap feedback-1 resolution).
+    // requires: the Stakeholder roots the rollout requirement (every
+    // Stakeholder/User requires at least one Requirement, SPEC §4.1).
+    tier_edge(
+        &mut nodes,
+        &idx,
+        "requires",
+        "requirements.stakeholder.maintainer",
+        "requirements.requirement.r20",
+    );
+    // contains: the requirement decomposition (SPEC §4.1 source ordering; the
+    // R8→R6/R7 pair mirrors the bootstrap feedback-1 resolution).
     for (from, to) in [
         ("r2", "r1"),
         ("r3", "r1"),
@@ -635,22 +713,28 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
         tier_edge(
             &mut nodes,
             &idx,
-            "depends-on",
+            "contains",
             &format!("requirements.requirement.{from}"),
             &format!("requirements.requirement.{to}"),
         );
     }
-    // drives: every Requirement → the change-sets domain group.
+    // drives: every Requirement → the change-set-records domain service.
     for r in &req_fqns {
-        tier_edge(&mut nodes, &idx, "drives", r, "domain.group.change-sets");
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "drives",
+            r,
+            "domain.service.change-set-records",
+        );
     }
-    // contains: the change-sets group hosts its entities/events/value.
+    // contains: the change-sets group hosts its service and entities.
     for (name, node_type) in [
+        ("change-set-records", "service"),
         ("project", "entity"),
         ("graph-node", "entity"),
         ("project-started", "entity"),
         ("node-file-written", "entity"),
-        ("node-name", "value"),
     ] {
         tier_edge(
             &mut nodes,
@@ -660,28 +744,22 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
             &format!("domain.{node_type}.{name}"),
         );
     }
-    // realised-by: Domain → Solution (the strictly sequential spine).
-    tier_edge(
-        &mut nodes,
-        &idx,
-        "realised-by",
-        "domain.group.change-sets",
-        "solution.system.apg-cli",
-    );
-    tier_edge(
-        &mut nodes,
-        &idx,
-        "realised-by",
-        "domain.entity.project",
-        "solution.container.project-commands",
-    );
-    tier_edge(
-        &mut nodes,
-        &idx,
-        "realised-by",
-        "domain.entity.graph-node",
-        "solution.container.layers-serializer",
-    );
+    // contains: an Entity owns its Value(s) (SPEC §4.2 — every Entity owns at
+    // least one Value).
+    for (entity, value) in [
+        ("graph-node", "node-name"),
+        ("project", "project-name"),
+        ("project-started", "start-command"),
+        ("node-file-written", "node-file-path"),
+    ] {
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "contains",
+            &format!("domain.entity.{entity}"),
+            &format!("domain.value.{value}"),
+        );
+    }
     // contains: System ⊃ the five Containers.
     for c in [
         "project-commands",
@@ -698,8 +776,10 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
             &format!("solution.container.{c}"),
         );
     }
-    // implemented-by: Solution → code FQNs (code-exempt — spec-side only,
-    // validated against the scanned graph at write time and at scan).
+    // Each Container contains one Component; the Component realises the
+    // change-set-records service and is `implemented-by` its scanned code FQN
+    // (the external boundary — code-exempt, spec-side only, validated against
+    // the scanned graph at write time and at scan).
     for (i, container) in [
         "project-commands",
         "mutation-guard",
@@ -710,9 +790,57 @@ fn apg_projects_tier_nodes() -> Vec<NodeFile> {
     .iter()
     .enumerate()
     {
-        nodes[idx[&format!("solution.container.{container}")]]
+        let component = format!("{container}-impl");
+        tier_push(
+            &mut nodes,
+            &mut idx,
+            nf(
+                "solution",
+                "component",
+                &component,
+                "The implementation component behind its container (SPEC §3.1).",
+                &[],
+            ),
+        );
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "contains",
+            &format!("solution.container.{container}"),
+            &format!("solution.component.{component}"),
+        );
+        tier_edge(
+            &mut nodes,
+            &idx,
+            "realises",
+            &format!("solution.component.{component}"),
+            "domain.service.change-set-records",
+        );
+        nodes[idx[&format!("solution.component.{component}")]]
             .out
             .push(out_e("implemented-by", IMPL_FQNS[i]));
+    }
+    // is-role: each Container and its Component classify under exactly one Role
+    // (SPEC §4.4 — a Role may classify several architectural elements).
+    for (container, role) in [
+        ("project-commands", "command-surface"),
+        ("mutation-guard", "guard"),
+        ("layers-serializer", "serializer"),
+        ("plan-bridge", "bridge"),
+        ("init-version-gate", "version-gate"),
+    ] {
+        for source in [
+            format!("solution.container.{container}"),
+            format!("solution.component.{container}-impl"),
+        ] {
+            tier_edge(
+                &mut nodes,
+                &idx,
+                "is-role",
+                &source,
+                &format!("solution.role.{role}"),
+            );
+        }
     }
     // details: an implementation-layer note attaches to the code it explains
     // (`global.constraint.note-implementation-only`): notes live only in the
@@ -1533,8 +1661,8 @@ mod e2e {
         let add = testutil::ApgCommand::new(&[
             "node",
             "add",
-            "requirements",
-            "requirement",
+            "solution",
+            "role",
             "timer",
             "--body",
             "A workitem can be started",
@@ -1551,8 +1679,7 @@ mod e2e {
         );
         // The add is BUFFERED: no node file and no commit until save.
         assert!(
-            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "timer")
-                .exists(),
+            !layers::node_file_path(&wt_apg, layers::Layer::Solution, "role", "timer").exists(),
             "a buffered add must not write a node file before save"
         );
 
@@ -1593,7 +1720,7 @@ mod e2e {
             foo_tip
                 .tree()
                 .unwrap()
-                .get_path(Path::new("apg/layers/requirements/requirement/timer.json"))
+                .get_path(Path::new("apg/layers/solution/role/timer.json"))
                 .is_ok(),
             "spec node file must be committed on the project branch"
         );
@@ -1661,7 +1788,7 @@ mod e2e {
         // The main checkout carries the merged content (the spec node file).
         assert!(
             repo.root
-                .join("apg/layers/requirements/requirement/timer.json")
+                .join("apg/layers/solution/role/timer.json")
                 .exists()
         );
         assert!(repo.is_clean(), "merged main must be clean");
@@ -1670,7 +1797,7 @@ mod e2e {
         // merged spec; the transient plan did not cross the merge.
         let main_apg = repo.apg_root();
         let db = artifacts::ArtifactDb::open(&main_apg).unwrap();
-        assert!(db.has_node("requirements.requirement.timer"));
+        assert!(db.has_node("solution.role.timer"));
         assert!(db.has_node(format!("{MOD_FQN}.Store").as_str()));
         assert!(db.has_node(format!("{MOD_FQN}.Widget").as_str()));
         assert!(!db.has_node("foo/plan"), "transient plans never reach main");
@@ -1921,8 +2048,8 @@ mod e2e {
             );
         }
         // The spine is real in the branch DB: 20 drives edges, the
-        // domain→solution realised-by hop, the 5 implemented-by claims onto
-        // scanned structs, the User→Requirement contains tree, and the four
+        // Component→Service realises hop, the 5 implemented-by claims onto
+        // scanned structs, the User→Requirement requires tree, and the four
         // implementation-layer notes each detailing one scanned struct.
         let count = |q: &str| -> i64 {
             db.q(q)
@@ -1935,19 +2062,19 @@ mod e2e {
                 .unwrap_or(0)
         };
         assert_eq!(
-            count("MATCH (:Requirement)-[:Drives]->(:DomainGroup) RETURN count(*)"),
+            count("MATCH (:Requirement)-[:Drives]->(:Service) RETURN count(*)"),
             20
         );
         assert_eq!(
-            count("MATCH (:DomainGroup)-[:RealisedBy]->(:System) RETURN count(*)"),
-            1
-        );
-        assert_eq!(
-            count("MATCH (:Container)-[:SpecImplementedBy]->(:Struct) RETURN count(*)"),
+            count("MATCH (:Component)-[:Realises]->(:Service) RETURN count(*)"),
             5
         );
         assert_eq!(
-            count("MATCH (:User)-[:Contains]->(:Requirement) RETURN count(*)"),
+            count("MATCH (:Component)-[:SpecImplementedBy]->(:Struct) RETURN count(*)"),
+            5
+        );
+        assert_eq!(
+            count("MATCH (:User)-[:Requires]->(:Requirement) RETURN count(*)"),
             20
         );
         assert_eq!(
@@ -2013,6 +2140,176 @@ mod e2e {
         );
         drop(db);
         assert!(!git::is_stale(&main_apg), "main's scan_meta must be fresh");
+        testutil::remove(&repo);
+    }
+
+    // ------------------------------------------------------------------
+    // SPEC §8.2/§9.2: the sole deferred obligation ends at the merge act.
+    // Plan verification tolerates a Component with no `implemented-by` claim;
+    // merge-strength validation does not — the whole-model check refuses
+    // BEFORE the branch is merged and the main graph rebuilt.
+    // ------------------------------------------------------------------
+
+    #[test]
+    #[ignore = "e2e tier: real I/O (worktree/branch/merge/rebuild); run via cargo test-e2e"]
+    fn merge_strength_refuses_a_component_without_an_implemented_by_claim() {
+        let _guard = testutil::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        fn start_scan_locked(dir: &Path) -> anyhow::Result<()> {
+            testutil::scan_checkout_locked(dir)
+        }
+        let repo = Repo::new("merge-strength");
+        repo.write(
+            "code/seed.scan.jsonl",
+            &testutil::code_payload(MOD, FILE, &["Store"]),
+        );
+        repo.commit_all("seed code");
+        start_scan_locked(&repo.root).unwrap();
+
+        let wt = project_start_at(&repo.apg_root(), "strength").unwrap();
+        let wt_apg = wt.join(specs::LAYOUT);
+
+        // A whole-model-consistent solution tier EXCEPT the Component's code
+        // claim — the one obligation plan verify defers: owner → requirement →
+        // service ← component, with System ⊃ Container ⊃ Component and the
+        // Container/Component `is-role` classification.
+        let mut nodes: Vec<NodeFile> = Vec::new();
+        let mut idx: BTreeMap<String, usize> = BTreeMap::new();
+        for n in [
+            nf(
+                "requirements",
+                "stakeholder",
+                "owner",
+                "The stakeholder that owns the requirement.",
+                &[],
+            ),
+            nf(
+                "requirements",
+                "requirement",
+                "r1",
+                "A workitem can be started.",
+                &[],
+            ),
+            nf(
+                "domain",
+                "group",
+                "g",
+                "The domain boundary for workitems.",
+                &[("attribute", "core")],
+            ),
+            nf("domain", "service", "s", "The workitem service.", &[]),
+            nf(
+                "solution",
+                "system",
+                "sys",
+                "The system that hosts the workitem service.",
+                &[],
+            ),
+            nf(
+                "solution",
+                "container",
+                "c",
+                "The application container.",
+                &[("kind", "app")],
+            ),
+            nf(
+                "solution",
+                "component",
+                "comp",
+                "The component behind the container.",
+                &[],
+            ),
+            nf("solution", "role", "app", "The application role.", &[]),
+        ] {
+            tier_push(&mut nodes, &mut idx, n);
+        }
+        for (kind, from, to) in [
+            (
+                "requires",
+                "requirements.stakeholder.owner",
+                "requirements.requirement.r1",
+            ),
+            ("contains", "domain.group.g", "domain.service.s"),
+            ("drives", "requirements.requirement.r1", "domain.service.s"),
+            ("contains", "solution.system.sys", "solution.container.c"),
+            (
+                "contains",
+                "solution.container.c",
+                "solution.component.comp",
+            ),
+            ("realises", "solution.component.comp", "domain.service.s"),
+            ("is-role", "solution.container.c", "solution.role.app"),
+            ("is-role", "solution.component.comp", "solution.role.app"),
+        ] {
+            tier_edge(&mut nodes, &idx, kind, from, to);
+        }
+        layers::write_project(&wt_apg, &nodes, &[]).unwrap();
+
+        // Plan verify is green: the added requirement is Satisfies'd, and a
+        // claim-less solution node is only the gate's `no_claims` warning.
+        let plan_path = wt_apg
+            .join(specs::TRANS)
+            .join("plans")
+            .join("strength.jsonl");
+        artifacts::write_jsonl_and_reingest(
+            &wt_apg,
+            &plan_path,
+            "strength",
+            &[
+                Record::Plan {
+                    fqn: "strength/plan".into(),
+                    title: "Merge-strength plan".into(),
+                    strategy: String::new(),
+                },
+                Record::PlanPhase {
+                    fqn: "strength/plan.phase-01".into(),
+                    number: 1,
+                    title: "P1".into(),
+                    deliverable: "the merged model".into(),
+                    status: "pending".into(),
+                },
+                Record::Contains {
+                    from: "strength/plan".into(),
+                    to: "strength/plan.phase-01".into(),
+                    properties: layers::NodeProperties::default(),
+                },
+                Record::Satisfies {
+                    from: "strength/plan.phase-01".into(),
+                    to: "requirements.requirement.r1".into(),
+                },
+            ],
+        )
+        .unwrap();
+        plan_cmd::plan_verify_at(&wt_apg, "strength").unwrap();
+
+        // The merge act refuses at merge strength — the whole model lacks the
+        // Component's exactly-one real scanned-code claim.
+        let main_repo = git2::Repository::open(&repo.root).unwrap();
+        let main_tip_before = main_repo.head().unwrap().peel_to_commit().unwrap().id();
+        let err =
+            project_merge_at(&repo.apg_root(), "strength", Some(&start_scan_locked)).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("merge-strength"), "{msg}");
+        assert!(msg.contains("solution.component.comp"), "{msg}");
+        assert!(msg.contains("no `implemented-by` claim"), "{msg}");
+        assert_eq!(
+            main_repo.head().unwrap().peel_to_commit().unwrap().id(),
+            main_tip_before,
+            "a merge-strength refusal must not move the main checkout"
+        );
+        assert!(
+            wt.is_dir(),
+            "a merge-strength refusal must leave the worktree in place"
+        );
+        assert!(
+            main_repo.find_worktree("strength").is_ok(),
+            "a merge-strength refusal must leave the worktree registered"
+        );
+        assert!(
+            main_repo
+                .find_branch("strength", git2::BranchType::Local)
+                .is_ok(),
+            "a merge-strength refusal must leave the project branch in place"
+        );
         testutil::remove(&repo);
     }
 
@@ -2462,7 +2759,7 @@ mod e2e {
     #[ignore = "e2e tier: real I/O (scratch repo/spawned apg/live session/db.lbug); run via cargo test-e2e"]
     fn merge_spec_only_lands_authored_rows_in_main_db() {
         let req_fqn = "requirements.requirement.timer";
-        let val_fqn = "domain.value.tick";
+        let svc_fqn = "domain.service.tick-svc";
 
         // A real scratch git repo with Go sources + a versioned `apg/` layout,
         // driven by the REAL candidate binary (the frontends resolve relative
@@ -2525,24 +2822,62 @@ mod e2e {
             "node add requirement: {}",
             String::from_utf8_lossy(&add_req.stderr)
         );
-        let add_val = warm_run(
+        let add_svc = warm_run(
             &wt,
             &home,
             &[
-                "node", "add", "domain", "value", "tick", "--body", "One tick",
+                "node", "add", "domain", "service", "tick-svc", "--body", "One tick",
             ],
         );
         assert!(
-            add_val.status.success(),
-            "node add value: {}",
-            String::from_utf8_lossy(&add_val.stderr)
+            add_svc.status.success(),
+            "node add service: {}",
+            String::from_utf8_lossy(&add_svc.stderr)
         );
-        let add_edge = warm_run(&wt, &home, &["edge", "add", "drives", req_fqn, val_fqn]);
+        let add_edge = warm_run(&wt, &home, &["edge", "add", "drives", req_fqn, svc_fqn]);
         assert!(
             add_edge.status.success(),
             "edge add: {}",
             String::from_utf8_lossy(&add_edge.stderr)
         );
+        // Keep the model whole-model-valid (SPEC §8.1): the new Requirement is
+        // rooted by a Stakeholder, and the new Service is owned by a leaf Group.
+        for args in [
+            vec![
+                "node",
+                "add",
+                "requirements",
+                "stakeholder",
+                "owner",
+                "--body",
+                "the owner",
+            ],
+            vec![
+                "node",
+                "add",
+                "domain",
+                "group",
+                "billing",
+                "--body",
+                "the billing group",
+            ],
+            vec![
+                "edge",
+                "add",
+                "requires",
+                "requirements.stakeholder.owner",
+                req_fqn,
+            ],
+            vec!["edge", "add", "contains", "domain.group.billing", svc_fqn],
+        ] {
+            let argv: Vec<&str> = args.clone();
+            let out = warm_run(&wt, &home, &argv);
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
 
         let save = warm_run(&wt, &home, &["session", "save"]);
         assert!(
@@ -2651,8 +2986,8 @@ mod e2e {
             "main's db.lbug must carry the merged authored requirement (the splice dropped it)"
         );
         assert!(
-            db.has_node(val_fqn),
-            "main's db.lbug must carry the merged authored value"
+            db.has_node(svc_fqn),
+            "main's db.lbug must carry the merged authored service"
         );
         let count = |q: &str| -> i64 {
             db.q(q)
@@ -2666,7 +3001,7 @@ mod e2e {
         };
         assert_eq!(
             count(&format!(
-                "MATCH (:Requirement {{fqn: '{req_fqn}'}})-[:Drives]->(:Value {{fqn: '{val_fqn}'}}) RETURN count(*)"
+                "MATCH (:Requirement {{fqn: '{req_fqn}'}})-[:Drives]->(:Service {{fqn: '{svc_fqn}'}}) RETURN count(*)"
             )),
             1,
             "main's db.lbug must carry the merged authored drives edge"

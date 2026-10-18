@@ -5,6 +5,27 @@ use super::*;
 /// git or process (`global.constraint.test-tier-boundaries`).
 mod unit {
     use super::*;
+    use crate::layers::{Context, Layer};
+    use crate::testutil::{out_edge, valid_model};
+
+    /// Drop one out-edge from the named fixture node (the matching in half is
+    /// irrelevant here: these tests exercise the pure cardinality/matrix
+    /// validators, never the file-pairing invariant).
+    fn without_edge(
+        nodes: &mut [NodeFile],
+        layer: &str,
+        node_type: &str,
+        name: &str,
+        kind: &str,
+        target: &str,
+    ) {
+        nodes
+            .iter_mut()
+            .find(|n| n.layer == layer && n.node_type == node_type && n.name == name)
+            .unwrap_or_else(|| panic!("fixture node {layer}.{node_type}.{name} is missing"))
+            .out
+            .retain(|e| !(e.kind == kind && e.target == target));
+    }
 
     /// `wording_warning` flags the three word classes a reviewer is likely to
     /// reject in a tier-1-3 node body — negation (`not`/`never`/`no`),
@@ -291,5 +312,272 @@ mod unit {
                 "a non-tier `{layer}` node is not subject to the body budget"
             );
         }
+    }
+
+    /// `--tier` parsing (SPEC §9.4): the approved scopes resolve to their
+    /// layers, omission is all tiers, and every usage error the spec names —
+    /// unknown flag, repeated `--tier`, missing/invalid value, and unexpected
+    /// positional argument — is refused. `implementation` is outside the
+    /// tier-1-3 document, so it is a usage error rather than a silent no-op.
+    #[test]
+    fn tier_flag_parses_the_approved_scope_and_refuses_usage_errors() {
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(parse_lint_args(&args(&[])).unwrap(), None);
+        for (value, layer) in [
+            ("requirements", Layer::Requirements),
+            ("domain", Layer::Domain),
+            ("solution", Layer::Solution),
+        ] {
+            assert_eq!(
+                parse_lint_args(&args(&["--tier", value])).unwrap(),
+                Some(layer)
+            );
+        }
+
+        for bad in [
+            &["--tier"][..],
+            &["--tier", "implementation"],
+            &["--tier", "bogus"],
+            &["--tier", "domain", "--tier", "solution"],
+            &["--bogus"],
+            &["extra"],
+            &["--tier", "domain", "extra"],
+        ] {
+            let err = parse_lint_args(&args(bad)).unwrap_err().to_string();
+            assert!(
+                err.contains("usage:"),
+                "`{bad:?}` must be a usage error, got: {err}"
+            );
+        }
+    }
+
+    /// Scope is separate from context (SPEC §9.2): a domain cardinality
+    /// violation is reported by all-tier and domain lint, and is invisible to
+    /// requirements lint; a requirements violation is the mirror image. The
+    /// complete fixture passes every scope.
+    #[test]
+    fn tier_scope_hides_other_tiers_violations() {
+        assert!(model_errors(&valid_model(), None, Context::Lint).is_empty());
+        for scope in [Layer::Requirements, Layer::Domain, Layer::Solution] {
+            assert!(
+                model_errors(&valid_model(), Some(scope), Context::Lint).is_empty(),
+                "the complete model must pass the `{}` scope",
+                scope.layer_dir()
+            );
+        }
+
+        // Domain: a Service with no driving Requirement.
+        let mut domain_broken = valid_model();
+        without_edge(
+            &mut domain_broken,
+            "requirements",
+            "requirement",
+            "place-order",
+            "drives",
+            "domain.service.place-order",
+        );
+        let domain_rule = "Service `domain.service.place-order` is driven by no Requirement";
+        assert!(
+            model_errors(&domain_broken, None, Context::Lint)
+                .iter()
+                .any(|e| e.contains(domain_rule)),
+            "all-tier lint must report the domain violation"
+        );
+        assert!(
+            model_errors(&domain_broken, Some(Layer::Domain), Context::Lint)
+                .iter()
+                .any(|e| e.contains(domain_rule)),
+            "domain lint must report the domain violation"
+        );
+        assert!(
+            model_errors(&domain_broken, Some(Layer::Requirements), Context::Lint).is_empty(),
+            "requirements lint must not report a domain cardinality violation"
+        );
+
+        // Requirements: a User requiring no Requirement.
+        let mut requirements_broken = valid_model();
+        without_edge(
+            &mut requirements_broken,
+            "requirements",
+            "user",
+            "customer",
+            "requires",
+            "requirements.requirement.place-order",
+        );
+        let requirements_rule = "`requirements.user.customer` requires no Requirement";
+        assert!(
+            model_errors(&requirements_broken, None, Context::Lint)
+                .iter()
+                .any(|e| e.contains(requirements_rule)),
+            "all-tier lint must report the requirements violation"
+        );
+        assert!(
+            model_errors(
+                &requirements_broken,
+                Some(Layer::Requirements),
+                Context::Lint
+            )
+            .iter()
+            .any(|e| e.contains(requirements_rule)),
+            "requirements lint must report the requirements violation"
+        );
+        assert!(
+            model_errors(&requirements_broken, Some(Layer::Domain), Context::Lint).is_empty(),
+            "domain lint must not report a requirements cardinality violation"
+        );
+    }
+
+    /// The shared mechanical validator set surfaces through lint (SPEC §9.1):
+    /// [`model_errors`] reports the SPEC §4 matrix's refusal for an invalid
+    /// edge shape — with the identical message the write path's
+    /// [`validate_edges`] produces — and a dangling authored endpoint.
+    #[test]
+    fn shared_matrix_and_endpoint_existence_errors_surface() {
+        let mut bad_shape = valid_model();
+        bad_shape
+            .iter_mut()
+            .find(|n| n.layer == "requirements" && n.name == "place-order")
+            .unwrap()
+            .out
+            .push(out_edge("drives", "domain.group.ordering"));
+
+        let direct = validate_edges(&[(
+            "drives",
+            "requirements.requirement.place-order",
+            "domain.group.ordering",
+        )])
+        .unwrap_err()
+        .to_string();
+        assert!(
+            model_errors(&bad_shape, None, Context::Lint).contains(&direct),
+            "lint must report the write path's matrix message verbatim: {direct}"
+        );
+
+        let mut dangling = valid_model();
+        dangling
+            .iter_mut()
+            .find(|n| n.layer == "requirements" && n.name == "place-order")
+            .unwrap()
+            .out
+            .push(out_edge("drives", "domain.service.missing"));
+        assert!(
+            model_errors(&dangling, None, Context::Lint)
+                .iter()
+                .any(
+                    |e| e.contains("edge `drives` endpoint `domain.service.missing`")
+                        && e.contains("dangling authored reference")
+                ),
+            "lint must report a dangling authored endpoint"
+        );
+    }
+
+    /// The event-only `publishes`/`subscribes` target rule (SPEC §9.1) reaches
+    /// lint through the SAME shared validator the write path runs: a Service
+    /// that `publishes` a plain `Entity (kind: entity)` is reported by
+    /// [`model_errors`] with the identical message
+    /// [`validate_assembled_rules`] produces.
+    #[test]
+    fn event_only_publish_target_is_reported_with_the_write_path_message() {
+        use crate::layers::validate_assembled_rules;
+
+        let mut model = valid_model();
+        model
+            .iter_mut()
+            .find(|n| n.layer == "domain" && n.node_type == "service" && n.name == "place-order")
+            .unwrap()
+            .out
+            .push(out_edge("publishes", "domain.entity.order"));
+
+        let assembled: BTreeMap<String, &NodeFile> = model
+            .iter()
+            .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
+            .collect();
+        let universe: BTreeSet<(Layer, String, String)> =
+            assembled.keys().filter_map(|f| parse_fqn(f).ok()).collect();
+        let write_path = validate_assembled_rules(&assembled, &universe)
+            .unwrap_err()
+            .to_string();
+
+        let errors = model_errors(&model, None, Context::Lint);
+        assert!(
+            write_path.contains("must be an Entity with kind `event`"),
+            "the write path must refuse a non-event publish target: {write_path}"
+        );
+        assert!(
+            errors.contains(&write_path),
+            "lint must report the write path's event-target message verbatim: {write_path}\n{errors:?}"
+        );
+    }
+
+    /// Scoped lint flags a dangling authored endpoint on an in-scope edge (the
+    /// SPEC §9.2 "drift" reading): endpoint existence is structural, not a
+    /// "downstream completeness" question, so a `--tier requirements` run
+    /// reports `requirement drives domain.service.missing` even though the
+    /// absent Service is a downstream-tier node.
+    #[test]
+    fn requirements_scope_flags_a_dangling_drives_target() {
+        let mut dangling = valid_model();
+        dangling
+            .iter_mut()
+            .find(|n| n.layer == "requirements" && n.name == "place-order")
+            .unwrap()
+            .out
+            .push(out_edge("drives", "domain.service.missing"));
+
+        let errors = model_errors(&dangling, Some(Layer::Requirements), Context::Lint);
+        assert!(
+            errors.iter().any(
+                |e| e.contains("edge `drives` endpoint `domain.service.missing`")
+                    && e.contains("dangling authored reference")
+            ),
+            "requirements scope must flag the dangling authored endpoint as drift: {errors:?}"
+        );
+    }
+
+    /// The sole deferred obligation (SPEC §8.2/§9.2): a Component's missing
+    /// `implemented-by` claim is permitted in the `Save` and `Lint` contexts
+    /// and is an error under `MergeStrength`; one present claim satisfies
+    /// merge strength, and more than one is an error in every context.
+    #[test]
+    fn implemented_by_presence_depends_on_context_not_scope() {
+        let model = valid_model();
+        for context in [Context::Save, Context::Lint] {
+            assert!(
+                model_errors(&model, None, context).is_empty(),
+                "a missing Component claim is deferred under {context:?}"
+            );
+        }
+        assert!(
+            model_errors(&model, Some(Layer::Solution), Context::MergeStrength)
+                .iter()
+                .any(|e| e.contains("has no `implemented-by` claim")),
+            "merge strength must refuse a missing Component code link"
+        );
+
+        let mut linked = valid_model();
+        linked
+            .iter_mut()
+            .find(|n| n.layer == "solution" && n.name == "order-handler")
+            .unwrap()
+            .out
+            .push(out_edge("implemented-by", "rust.apg.main"));
+        assert!(
+            model_errors(&linked, None, Context::MergeStrength).is_empty(),
+            "one present claim satisfies merge strength"
+        );
+
+        linked
+            .iter_mut()
+            .find(|n| n.layer == "solution" && n.name == "order-handler")
+            .unwrap()
+            .out
+            .push(out_edge("implemented-by", "rust.apg.spec_lint.lint"));
+        assert!(
+            model_errors(&linked, None, Context::Lint)
+                .iter()
+                .any(|e| e.contains("carries 2 `implemented-by` claims")),
+            "more than one claim is an error even under ordinary lint"
+        );
     }
 }

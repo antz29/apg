@@ -256,21 +256,21 @@ fn with_authored_row(mut g: Graph) -> Graph {
     req.feature = Some("the feature".into());
     g.nodes.insert("requirements.requirement.req".into(), req);
     g.nodes.insert(
-        "domain.entity.task".into(),
+        "domain.service.task".into(),
         Node {
-            kind: NodeKind::Entity,
+            kind: NodeKind::Service,
             ..Node::default()
         },
     );
     g.drives.insert((
         "requirements.requirement.req".into(),
-        "domain.entity.task".into(),
+        "domain.service.task".into(),
     ));
     g
 }
 
 /// [`with_authored_row`] plus the `Scan` row the seed guard's content-key check
-/// reads — a realistic seed side: one `Requirement` (`req`), its `Entity`, and a
+/// reads — a realistic seed side: one `Requirement` (`req`), its `Service`, and a
 /// `Drives` edge, built at content key `oldkey`.
 fn seeded_authored_graph(base: Graph) -> Graph {
     let mut g = with_authored_row(base);
@@ -296,7 +296,7 @@ fn with_authored_delta(base: Graph) -> Graph {
     g.nodes.insert("requirements.requirement.req2".into(), req2);
     g.drives.insert((
         "requirements.requirement.req2".into(),
-        "domain.entity.task".into(),
+        "domain.service.task".into(),
     ));
     g
 }
@@ -1408,7 +1408,7 @@ mod e2e {
             row_counts(&db)
         };
         assert_eq!(full_counts.get("Requirement"), Some(&2));
-        assert_eq!(full_counts.get("Entity"), Some(&1));
+        assert_eq!(full_counts.get("Service"), Some(&1));
         assert_eq!(full_counts.get("Drives"), Some(&2));
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1447,10 +1447,12 @@ mod e2e {
         let wt = repo.start_project("foo");
         let apg_root = wt.join(apg::specs::LAYOUT);
 
-        // 1. The checkout carries an authored Requirement. Commit it so the
-        //    worktree is clean, then scan: `db.lbug` and `graph.jsonl` carry the
-        //    authored row and the scan_meta records the clean HEAD.
-        let req = apg::layers::NodeFile {
+        // 1. The checkout carries an authored Requirement (rooted by a
+        //    Stakeholder — the minimal whole-model-valid base, SPEC §8.1).
+        //    Commit it so the worktree is clean, then scan: `db.lbug` and
+        //    `graph.jsonl` carry the authored rows and the scan_meta records the
+        //    clean HEAD.
+        let mut req = apg::layers::NodeFile {
             layer: "requirements".to_string(),
             node_type: "requirement".to_string(),
             name: "req".to_string(),
@@ -1459,16 +1461,38 @@ mod e2e {
             out: Vec::new(),
             in_edges: Vec::new(),
         };
+        req.in_edges.push(apg::layers::InEdge {
+            kind: "requires".to_string(),
+            source: "requirements.stakeholder.owner".to_string(),
+            properties: BTreeMap::new(),
+        });
+        let owner = apg::layers::NodeFile {
+            layer: "requirements".to_string(),
+            node_type: "stakeholder".to_string(),
+            name: "owner".to_string(),
+            body: "the owner".to_string(),
+            properties: BTreeMap::new(),
+            out: vec![apg::layers::OutEdge {
+                kind: "requires".to_string(),
+                target: "requirements.requirement.req".to_string(),
+                properties: BTreeMap::new(),
+            }],
+            in_edges: Vec::new(),
+        };
         let req_path = apg::layers::node_file_path(
             &apg_root,
             apg::layers::Layer::Requirements,
             "requirement",
             "req",
         );
+        apg::layers::write_node(&apg_root, &owner).unwrap();
         apg::layers::write_node(&apg_root, &req).unwrap();
         testutil::wt_commit_paths(
             &wt,
-            &["apg/layers/requirements/requirement/req.json"],
+            &[
+                "apg/layers/requirements/requirement/req.json",
+                "apg/layers/requirements/stakeholder/owner.json",
+            ],
             "author requirement",
         );
         testutil::scan_checkout(&wt).unwrap();
@@ -1498,6 +1522,23 @@ mod e2e {
             add.status.success(),
             "routed node add: {}",
             String::from_utf8_lossy(&add.stderr)
+        );
+        // Root `req2` under `req` (via `contains` decomposition), keeping the
+        // buffered model whole-model-valid at save (SPEC §8.1).
+        let root = testutil::ApgCommand::new(&[
+            "edge",
+            "add",
+            "contains",
+            "requirements.requirement.req",
+            "requirements.requirement.req2",
+        ])
+        .cwd(&wt)
+        .env("HOME", home.to_str().unwrap())
+        .output();
+        assert!(
+            root.status.success(),
+            "routed edge add: {}",
+            String::from_utf8_lossy(&root.stderr)
         );
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(

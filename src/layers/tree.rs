@@ -27,10 +27,10 @@ use super::validate_assembled_rules;
 /// - [`check_edge_pairing`] over every node file — an in/out edge in one file
 ///   without the matching out/in edge (same source, kind, target, AND
 ///   properties) in the other endpoint's file is refused (R16 AC).
-/// - [`validate_assembled_rules`] over the assembled set — contains/depends-on
-///   trees acyclic ([`validate_trees_acyclic`]) and `publishes`/`subscribes`
-///   targets are `Entity (kind: event)` ([`validate_event_targets`]) (SPEC
-///   §3.3 property rules).
+/// - [`validate_assembled_rules`] over the assembled set — `contains` trees
+///   acyclic ([`validate_trees_acyclic`]) and `publishes`/`subscribes`
+///   targets are `Entity (kind: event)` ([`validate_event_targets`]) (SPEC §4
+///   property rules).
 /// - [`validate_code_refs`] on every `implemented-by` target against
 ///   `scanned_code` (the code FQNs the just-run scan produced) and `planned`
 ///   (the plan's planned-node FQNs, from `.trans`): resolves → real; planned →
@@ -112,7 +112,7 @@ pub fn ingest_nodes(
     nodes.sort_by(|a, b| (&a.layer, &a.node_type, &a.name).cmp(&(&b.layer, &b.node_type, &b.name)));
 
     // The assembled identity universe + FQN → node map: the constraint check
-    // and the property-aware §3.3 rules both resolve against them.
+    // and the property-aware §4 rules both resolve against them.
     let universe: BTreeSet<(Layer, String, String)> = nodes
         .iter()
         .map(|n| (layer_of(&n.layer), n.node_type.clone(), n.name.clone()))
@@ -125,8 +125,8 @@ pub fn ingest_nodes(
     // 1. Pairwise in/out symmetry across ALL node files (R16 AC).
     check_edge_pairing(&nodes)?;
 
-    // 2. Property-aware §3.3 rules over the assembled set: contains/depends-on
-    // trees acyclic, and publishes/subscribes targets are Entity (kind: event).
+    // 2. Property-aware §4 rules over the assembled set: `contains` trees
+    // acyclic, and publishes/subscribes targets are Entity (kind: event).
     validate_assembled_rules(&assembled, &universe)?;
 
     // 3. `implemented-by` code refs against the scanned graph + planned nodes.
@@ -208,9 +208,8 @@ pub(crate) fn layer_of(layer_dir: &str) -> Layer {
 
 /// Convert one node file into its new-model node record. `f` is the derived
 /// FQN (`<layer>.<type>.<name>`); `properties` carries the §3.1 attributes
-/// (entity/container `kind`, group `attribute`/`root`, constraint
-/// `attaches-to`, a requirement's metadata `id`/`feature`) — short ids are
-/// metadata, never identity.
+/// (entity/container `kind`, group `attribute`/`root`, a requirement's
+/// metadata `id`/`feature`) — short ids are metadata, never identity.
 fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record> {
     let name = n.name.clone();
     let body = n.body.clone();
@@ -250,7 +249,6 @@ fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record>
             fqn: f.to_string(),
             name,
             body,
-            attaches_to: prop("attaches-to"),
             properties,
         },
         "group" => Record::Group {
@@ -304,15 +302,27 @@ fn node_record(f: &str, node_type: &str, n: &NodeFile) -> anyhow::Result<Record>
             body,
             properties,
         },
+        "actor" => Record::Actor {
+            fqn: f.to_string(),
+            name,
+            body,
+            properties,
+        },
+        "role" => Record::Role {
+            fqn: f.to_string(),
+            name,
+            body,
+            properties,
+        },
         other => anyhow::bail!("unknown node type `{other}` in layer `{}`", n.layer),
     })
 }
 
 /// Convert one out-edge into its new-model edge record. `from` is the source
-/// node's derived FQN. The §3.3 kebab kinds map to the new-model records
-/// (`realised-by` → `RealisedBy`, `implemented-by` → `SpecImplementedBy`);
-/// `contains`/`drives`/`calls`/`uses`/`represents`/`details`/`depends-on` map
-/// to the shared records the ingestor routes by endpoint node-kind.
+/// node's derived FQN. The §4 kebab kinds map to the new-model records
+/// (`implemented-by` → `SpecImplementedBy`); `contains`/`drives`/`calls`/
+/// `uses`/`represents`/`details` map to the shared records the ingestor routes
+/// by endpoint node-kind.
 fn edge_record(
     from: &str,
     kind: &str,
@@ -332,11 +342,6 @@ fn edge_record(
             properties,
         },
         "drives" => Record::Drives {
-            from,
-            to,
-            properties,
-        },
-        "realised-by" => Record::RealisedBy {
             from,
             to,
             properties,
@@ -361,11 +366,6 @@ fn edge_record(
             to,
             properties,
         },
-        "depends-on" => Record::DependsOn {
-            from,
-            to,
-            properties,
-        },
         "uses" => Record::Uses {
             from,
             to,
@@ -377,6 +377,31 @@ fn edge_record(
             properties,
         },
         "details" => Record::Details {
+            from,
+            to,
+            properties,
+        },
+        "requires" => Record::Requires {
+            from,
+            to,
+            properties,
+        },
+        "reads" => Record::Reads {
+            from,
+            to,
+            properties,
+        },
+        "writes" => Record::Writes {
+            from,
+            to,
+            properties,
+        },
+        "is-role" => Record::IsRole {
+            from,
+            to,
+            properties,
+        },
+        "realises" => Record::Realises {
             from,
             to,
             properties,

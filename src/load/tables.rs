@@ -127,10 +127,17 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     let mut person_name = Vec::new();
     let mut person_body = Vec::new();
     let mut person_props = Vec::new();
+    let mut actor_fqn = Vec::new();
+    let mut actor_name = Vec::new();
+    let mut actor_body = Vec::new();
+    let mut actor_props = Vec::new();
+    let mut role_fqn = Vec::new();
+    let mut role_name = Vec::new();
+    let mut role_body = Vec::new();
+    let mut role_props = Vec::new();
     let mut constraint_fqn = Vec::new();
     let mut constraint_name = Vec::new();
     let mut constraint_body = Vec::new();
-    let mut constraint_attaches_to = Vec::new();
     let mut constraint_props = Vec::new();
 
     for (fqn, node) in &graph.nodes {
@@ -293,11 +300,22 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 person_body.push(node.body.clone().unwrap_or_default());
                 person_props.push(properties_json(&node.properties));
             }
+            NodeKind::Actor => {
+                actor_fqn.push(fqn.clone());
+                actor_name.push(node.name.clone().unwrap_or_default());
+                actor_body.push(node.body.clone().unwrap_or_default());
+                actor_props.push(properties_json(&node.properties));
+            }
+            NodeKind::Role => {
+                role_fqn.push(fqn.clone());
+                role_name.push(node.name.clone().unwrap_or_default());
+                role_body.push(node.body.clone().unwrap_or_default());
+                role_props.push(properties_json(&node.properties));
+            }
             NodeKind::Constraint => {
                 constraint_fqn.push(fqn.clone());
                 constraint_name.push(node.name.clone().unwrap_or_default());
                 constraint_body.push(node.body.clone().unwrap_or_default());
-                constraint_attaches_to.push(node.attaches_to.clone().unwrap_or_default());
                 constraint_props.push(properties_json(&node.properties));
             }
         }
@@ -521,12 +539,29 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
         ],
     )?;
     write_parquet(
+        &dir.join("actor.parquet"),
+        &[
+            ("fqn", Col::Str(actor_fqn)),
+            ("name", Col::Str(actor_name)),
+            ("body", Col::Str(actor_body)),
+            ("properties", Col::Str(actor_props)),
+        ],
+    )?;
+    write_parquet(
+        &dir.join("role.parquet"),
+        &[
+            ("fqn", Col::Str(role_fqn)),
+            ("name", Col::Str(role_name)),
+            ("body", Col::Str(role_body)),
+            ("properties", Col::Str(role_props)),
+        ],
+    )?;
+    write_parquet(
         &dir.join("constraint.parquet"),
         &[
             ("fqn", Col::Str(constraint_fqn)),
             ("name", Col::Str(constraint_name)),
             ("body", Col::Str(constraint_body)),
-            ("attaches_to", Col::Str(constraint_attaches_to)),
             ("properties", Col::Str(constraint_props)),
         ],
     )?;
@@ -571,10 +606,12 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
 
     let mut calls_fn = (Vec::new(), Vec::new());
     let mut calls_svc = (Vec::new(), Vec::new());
+    let mut calls_actor = (Vec::new(), Vec::new());
     for (a, b) in &graph.calls {
         let dst = match graph.nodes[a].kind {
             NodeKind::Function => &mut calls_fn,
             NodeKind::Service => &mut calls_svc,
+            NodeKind::Actor => &mut calls_actor,
             _ => unreachable!("unvalidated calls edge"),
         };
         dst.0.push(a.clone());
@@ -625,13 +662,16 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             "Calls" => Some("calls"),
             "Uses" => Some("uses"),
             "Details" => Some("details"),
-            "DependsOn" => Some("depends-on"),
             "Drives" => Some("drives"),
             "Represents" => Some("represents"),
-            "RealisedBy" => Some("realised-by"),
             "SpecImplementedBy" => Some("implemented-by"),
             "Publishes" => Some("publishes"),
             "Subscribes" => Some("subscribes"),
+            "Requires" => Some("requires"),
+            "Reads" => Some("reads"),
+            "Writes" => Some("writes"),
+            "IsRole" => Some("is-role"),
+            "Realises" => Some("realises"),
             _ => None,
         }
     };
@@ -683,6 +723,7 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
     rel_props("contains_struct_fn.parquet", "contains", c_sf.0, c_sf.1)?;
     rel_props("calls_fn.parquet", "calls", calls_fn.0, calls_fn.1)?;
     rel_props("calls_svc.parquet", "calls", calls_svc.0, calls_svc.1)?;
+    rel_props("calls_actor.parquet", "calls", calls_actor.0, calls_actor.1)?;
     rel_props("uses_fn.parquet", "uses", u_fn.0, u_fn.1)?;
     rel_props("uses_struct.parquet", "uses", u_st.0, u_st.1)?;
     rel_props("uses_person.parquet", "uses", u_person.0, u_person.1)?;
@@ -746,14 +787,6 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                     }
                 }
             }
-            "DependsOn" => {
-                for (a, b) in &graph.depends_on {
-                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
-                        fa.push(a.clone());
-                        fb.push(b.clone());
-                    }
-                }
-            }
             "Satisfies" => {
                 for (a, b) in &graph.satisfies {
                     if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
@@ -779,14 +812,6 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
                 }
             }
             // New-model §3.3 spec edges (apg-projects).
-            "RealisedBy" => {
-                for (a, b) in &graph.realised_by {
-                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
-                        fa.push(a.clone());
-                        fb.push(b.clone());
-                    }
-                }
-            }
             "SpecImplementedBy" => {
                 for (a, b) in &graph.spec_implemented_by {
                     if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
@@ -805,6 +830,47 @@ pub fn build_load_files(graph: &Graph, dir: &Path) -> anyhow::Result<()> {
             }
             "Subscribes" => {
                 for (a, b) in &graph.subscribes {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            // Target-model §4 relationships (schema-rework).
+            "Requires" => {
+                for (a, b) in &graph.requires {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Reads" => {
+                for (a, b) in &graph.reads {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Writes" => {
+                for (a, b) in &graph.writes {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "IsRole" => {
+                for (a, b) in &graph.is_role {
+                    if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
+                        fa.push(a.clone());
+                        fb.push(b.clone());
+                    }
+                }
+            }
+            "Realises" => {
+                for (a, b) in &graph.realises {
                     if graph.nodes[a].kind == from && graph.nodes[b].kind == to {
                         fa.push(a.clone());
                         fb.push(b.clone());
@@ -841,17 +907,15 @@ fn contains_pairs() -> Vec<(NodeKind, NodeKind)> {
         (Struct, Function),
         (Plan, PlanPhase),
         (PlanPhase, Task),
-        // New-model §3.3 `contains` rows (apg-projects): the requirements tree
-        // (Stakeholder/User/Requirement ⊃ Requirement), the plain-named domain
-        // hierarchy (Group ⊃ Group/Entity/Value/Service), and the solution
+        // New-model §3.3 `contains` rows (apg-projects): the requirement tree
+        // (Requirement ⊃ Requirement), the plain-named domain hierarchy
+        // (Group ⊃ Group/Entity/Service and Entity ⊃ Value), and the solution
         // hierarchy (System ⊃ Container ⊃ Component).
-        (Stakeholder, Requirement),
-        (User, Requirement),
         (Requirement, Requirement),
         (Group, Group),
         (Group, Entity),
-        (Group, Value),
         (Group, Service),
+        (Entity, Value),
         (System, Container),
         (Container, Component),
     ]
@@ -923,28 +987,27 @@ pub(crate) fn spec_rel_pairs() -> Vec<(&'static str, NodeKind, NodeKind)> {
     // `Details` list above.
     v.push(("Reviews", Feedback, Note));
     v.push(("Gates", PlanPhase, PlanPhase));
-    v.push(("DependsOn", Requirement, Requirement));
     v.push(("Satisfies", PlanPhase, Requirement));
-    // Spine edges (§3.3). `drives` runs Requirement → Group/Entity/Value/
-    // Service; `represents` runs User → Entity and Entity → Person.
-    for to in [Group, Entity, Value, Service] {
-        v.push(("Drives", Requirement, to));
-    }
-    v.push(("Represents", User, Entity));
-    v.push(("Represents", Entity, Person));
-    for from in [Group, Entity, Service] {
-        for to in [System, Container, Component] {
-            v.push(("RealisedBy", from, to));
-        }
-    }
-    for from in [System, Container, Component] {
-        v.push(("SpecImplementedBy", from, Module));
-        v.push(("SpecImplementedBy", from, File));
-        v.push(("SpecImplementedBy", from, Struct));
-        v.push(("SpecImplementedBy", from, Function));
+    // Target-model §4 (schema-rework). `requires` roots a Requirement in a
+    // Stakeholder/User; `drives` runs Requirement → Service; `represents` runs
+    // Actor → User and Person → Actor; `implemented-by` runs Component → code;
+    // `subscribes` runs Service/Actor → Entity.
+    v.push(("Requires", Stakeholder, Requirement));
+    v.push(("Requires", User, Requirement));
+    v.push(("Drives", Requirement, Service));
+    v.push(("Represents", Actor, User));
+    v.push(("Represents", Person, Actor));
+    for to in [Module, File, Struct, Function] {
+        v.push(("SpecImplementedBy", Component, to));
     }
     v.push(("Publishes", Service, Entity));
     v.push(("Subscribes", Service, Entity));
+    v.push(("Subscribes", Actor, Entity));
+    v.push(("Reads", Service, Entity));
+    v.push(("Writes", Service, Entity));
+    v.push(("IsRole", Container, Role));
+    v.push(("IsRole", Component, Role));
+    v.push(("Realises", Component, Service));
     v
 }
 
@@ -980,21 +1043,24 @@ fn kind_slug(k: NodeKind) -> &'static str {
         NodeKind::Value => "value",
         NodeKind::Service => "service",
         NodeKind::Person => "person",
+        NodeKind::Actor => "actor",
+        NodeKind::Role => "role",
         NodeKind::Constraint => "constraint",
     }
 }
 
 /// The rel-table pairs only the write-through merge guard needs: the authored
-/// `calls` (Service→Service) and `uses` (Person→System) edges share the code
-/// rel tables `Calls`/`Uses`, whose parquet files and COPY statements are
-/// written by the explicit code-rel branches in `build_load_files`/`copy_from`
-/// (`calls_svc.parquet`, `uses_person.parquet`). They must NOT join
-/// [`spec_rel_pairs`]: that enumeration feeds `build_load_files` and
-/// `copy_from`, so a second entry would double-write those files and emit
-/// duplicate COPY statements.
-const AUTHORED_REL_PAIRS: [(&str, &str, &str); 2] = [
+/// `calls` (Service→Service, Actor→Service) and `uses` (Person→Component) edges
+/// share the code rel tables `Calls`/`Uses`, whose parquet files and COPY
+/// statements are written by the explicit code-rel branches in
+/// `build_load_files`/`copy_from` (`calls_svc.parquet`, `calls_actor.parquet`,
+/// `uses_person.parquet`). They must NOT join [`spec_rel_pairs`]: that
+/// enumeration feeds `build_load_files` and `copy_from`, so a second entry
+/// would double-write those files and emit duplicate COPY statements.
+const AUTHORED_REL_PAIRS: [(&str, &str, &str); 3] = [
     ("Calls", "Service", "Service"),
-    ("Uses", "Person", "System"),
+    ("Calls", "Actor", "Service"),
+    ("Uses", "Person", "Component"),
 ];
 
 /// Every `(rel_table, from_label, to_label)` triple the DB schema declares —
@@ -1048,6 +1114,8 @@ pub fn node_labels() -> &'static [&'static str] {
         "Value",
         "Service",
         "Person",
+        "Actor",
+        "Role",
         "Constraint",
     ]
 }
@@ -1093,13 +1161,15 @@ pub fn label_of(k: NodeKind) -> &'static str {
         NodeKind::Value => "Value",
         NodeKind::Service => "Service",
         NodeKind::Person => "Person",
+        NodeKind::Actor => "Actor",
+        NodeKind::Role => "Role",
         NodeKind::Constraint => "Constraint",
     }
 }
 
 /// Creates the LadybugDB schema (SPEC §7, R1/R2/R20/R21): the five code node
-/// tables, the thirteen spec/plan node tables, and the rel tables (Contains
-/// extended with spec/plan pairs, plus the nine spec/plan rel tables).
+/// tables, the spec/plan node tables, and the rel tables (Contains extended
+/// with spec/plan pairs, plus the per-kind spec/plan rel tables).
 pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query("CREATE NODE TABLE Module(fqn STRING PRIMARY KEY, status STRING)")?;
     conn.query("CREATE NODE TABLE Language(fqn STRING PRIMARY KEY)")?;
@@ -1163,7 +1233,13 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
         "CREATE NODE TABLE Person(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
     )?;
     conn.query(
-        "CREATE NODE TABLE Constraint(fqn STRING PRIMARY KEY, name STRING, body STRING, attaches_to STRING, properties STRING)",
+        "CREATE NODE TABLE Actor(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Role(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE NODE TABLE Constraint(fqn STRING PRIMARY KEY, name STRING, body STRING, properties STRING)",
     )?;
     // The durable authored rel tables gain the serialized-properties column.
     // `Contains`/`Calls`/`Uses` are shared with scanned code rows; those carry
@@ -1171,13 +1247,13 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     // (`Reviews`/`Gates`/`Satisfies`) and the code-only
     // `UnresolvedCall`/`UnresolvedUse` stay uncolumned.
     conn.query(
-        "CREATE REL TABLE Contains(FROM Language TO Module, FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM Stakeholder TO Requirement, FROM User TO Requirement, FROM Requirement TO Requirement, FROM DomainGroup TO DomainGroup, FROM DomainGroup TO Entity, FROM DomainGroup TO Value, FROM DomainGroup TO Service, FROM System TO Container, FROM Container TO Component, properties STRING)",
+        "CREATE REL TABLE Contains(FROM Language TO Module, FROM Module TO Module, FROM Module TO File, FROM File TO Struct, FROM File TO Function, FROM Struct TO Struct, FROM Struct TO Function, FROM Plan TO PlanPhase, FROM PlanPhase TO Task, FROM Requirement TO Requirement, FROM DomainGroup TO DomainGroup, FROM DomainGroup TO Entity, FROM DomainGroup TO Service, FROM Entity TO Value, FROM System TO Container, FROM Container TO Component, properties STRING)",
     )?;
     conn.query(
-        "CREATE REL TABLE Calls(FROM Function TO Function, FROM Service TO Service, properties STRING)",
+        "CREATE REL TABLE Calls(FROM Function TO Function, FROM Service TO Service, FROM Actor TO Service, properties STRING)",
     )?;
     conn.query(
-        "CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct, FROM Person TO System, properties STRING)",
+        "CREATE REL TABLE Uses(FROM Function TO Struct, FROM Struct TO Struct, FROM Person TO Component, properties STRING)",
     )?;
     conn.query(
         "CREATE REL TABLE UnresolvedCall(FROM Function TO UnresolvedTarget, target_type STRING)",
@@ -1191,23 +1267,28 @@ pub fn create_schema(conn: &Connection) -> anyhow::Result<()> {
     conn.query(
         "CREATE REL TABLE Reviews(FROM Feedback TO Module, FROM Feedback TO Function, FROM Feedback TO Struct, FROM Feedback TO File, FROM Feedback TO Requirement, FROM Feedback TO Plan, FROM Feedback TO PlanPhase, FROM Feedback TO Task, FROM Feedback TO Stakeholder, FROM Feedback TO Entity, FROM Feedback TO System, FROM Feedback TO Container, FROM Feedback TO Component, FROM Feedback TO User, FROM Feedback TO DomainGroup, FROM Feedback TO Value, FROM Feedback TO Service, FROM Feedback TO Person, FROM Feedback TO Constraint, FROM Feedback TO Note)",
     )?;
-    conn.query("CREATE REL TABLE DependsOn(FROM Requirement TO Requirement, properties STRING)")?;
     conn.query("CREATE REL TABLE Gates(FROM PlanPhase TO PlanPhase)")?;
     conn.query("CREATE REL TABLE Satisfies(FROM PlanPhase TO Requirement)")?;
+    conn.query("CREATE REL TABLE Drives(FROM Requirement TO Service, properties STRING)")?;
     conn.query(
-        "CREATE REL TABLE Drives(FROM Requirement TO DomainGroup, FROM Requirement TO Entity, FROM Requirement TO Value, FROM Requirement TO Service, properties STRING)",
+        "CREATE REL TABLE Represents(FROM Actor TO User, FROM Person TO Actor, properties STRING)",
     )?;
     conn.query(
-        "CREATE REL TABLE Represents(FROM User TO Entity, FROM Entity TO Person, properties STRING)",
-    )?;
-    conn.query(
-        "CREATE REL TABLE RealisedBy(FROM DomainGroup TO System, FROM DomainGroup TO Container, FROM DomainGroup TO Component, FROM Entity TO System, FROM Entity TO Container, FROM Entity TO Component, FROM Service TO System, FROM Service TO Container, FROM Service TO Component, properties STRING)",
-    )?;
-    conn.query(
-        "CREATE REL TABLE SpecImplementedBy(FROM System TO Module, FROM System TO File, FROM System TO Struct, FROM System TO Function, FROM Container TO Module, FROM Container TO File, FROM Container TO Struct, FROM Container TO Function, FROM Component TO Module, FROM Component TO File, FROM Component TO Struct, FROM Component TO Function, properties STRING)",
+        "CREATE REL TABLE SpecImplementedBy(FROM Component TO Module, FROM Component TO File, FROM Component TO Struct, FROM Component TO Function, properties STRING)",
     )?;
     conn.query("CREATE REL TABLE Publishes(FROM Service TO Entity, properties STRING)")?;
-    conn.query("CREATE REL TABLE Subscribes(FROM Service TO Entity, properties STRING)")?;
+    conn.query(
+        "CREATE REL TABLE Subscribes(FROM Service TO Entity, FROM Actor TO Entity, properties STRING)",
+    )?;
+    conn.query(
+        "CREATE REL TABLE Requires(FROM Stakeholder TO Requirement, FROM User TO Requirement, properties STRING)",
+    )?;
+    conn.query("CREATE REL TABLE Reads(FROM Service TO Entity, properties STRING)")?;
+    conn.query("CREATE REL TABLE Writes(FROM Service TO Entity, properties STRING)")?;
+    conn.query(
+        "CREATE REL TABLE IsRole(FROM Container TO Role, FROM Component TO Role, properties STRING)",
+    )?;
+    conn.query("CREATE REL TABLE Realises(FROM Component TO Service, properties STRING)")?;
     Ok(())
 }
 
@@ -1237,7 +1318,7 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         conn.query(&stmt)?;
         Ok(())
     };
-    let stmts: [(&str, String); 38] = [
+    let stmts: [(&str, String); 41] = [
         (
             "module.parquet",
             format!(r#"COPY Module FROM "{}""#, p("module.parquet")),
@@ -1338,6 +1419,14 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
             format!(r#"COPY Person FROM "{}""#, p("person.parquet")),
         ),
         (
+            "actor.parquet",
+            format!(r#"COPY Actor FROM "{}""#, p("actor.parquet")),
+        ),
+        (
+            "role.parquet",
+            format!(r#"COPY Role FROM "{}""#, p("role.parquet")),
+        ),
+        (
             "constraint.parquet",
             format!(r#"COPY Constraint FROM "{}""#, p("constraint.parquet")),
         ),
@@ -1398,6 +1487,13 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
             ),
         ),
         (
+            "calls_actor.parquet",
+            format!(
+                r#"COPY Calls FROM "{}" (from="Actor", to="Service")"#,
+                p("calls_actor.parquet")
+            ),
+        ),
+        (
             "uses_fn.parquet",
             format!(
                 r#"COPY Uses FROM "{}" (from="Function", to="Struct")"#,
@@ -1414,7 +1510,7 @@ pub fn copy_from(conn: &Connection, dir: &Path) -> anyhow::Result<()> {
         (
             "uses_person.parquet",
             format!(
-                r#"COPY Uses FROM "{}" (from="Person", to="System")"#,
+                r#"COPY Uses FROM "{}" (from="Person", to="Component")"#,
                 p("uses_person.parquet")
             ),
         ),

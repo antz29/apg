@@ -1,16 +1,20 @@
-//! `apg project merge` — verify gate → merge → main rebuild → self-cleanup.
+//! `apg project merge` — verify gate → merge-strength validation → merge →
+//! main rebuild → self-cleanup.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::artifacts::parse_args;
 use crate::git;
+use crate::layers::{self, NodeFile};
 use crate::plan_cmd;
 use crate::specs;
 
 use super::require_apg_root;
 use super::start::{ScanFn, real_scan};
 
-/// `apg project merge <name>` — verify gate → merge → main rebuild.
+/// `apg project merge <name>` — verify gate → merge-strength validation →
+/// merge → main rebuild.
 pub(crate) fn project_merge(args: &[String]) -> anyhow::Result<()> {
     let p = parse_args(args);
     let Some(name) = p.positional.first() else {
@@ -24,10 +28,10 @@ pub(crate) fn project_merge(args: &[String]) -> anyhow::Result<()> {
 
 /// Core of `project merge` (split for tests). The default `rebuild` is a real
 /// unguarded `apg scan` of the main checkout; tests override it. After the
-/// verify gate → merge → rebuild succeed, the merged project cleans up after
-/// itself: its worktree is removed and its branch deleted (self-cleanup;
-/// never the default branch). Any refusal or failure before the success path
-/// leaves both untouched.
+/// verify gate → merge-strength validation → merge → rebuild succeed, the
+/// merged project cleans up after itself: its worktree is removed and its
+/// branch deleted (self-cleanup; never the default branch). Any refusal or
+/// failure before the success path leaves both untouched.
 pub fn project_merge_at(
     main_apg_root: &Path,
     name: &str,
@@ -120,6 +124,15 @@ pub fn project_merge_at(
     }
     plan_cmd::plan_verify_at(&wt_apg, name)?;
 
+    // Merge-strength validation (SPEC §8.2/§9.2): plan verification deliberately
+    // permits a missing Component `implemented-by` claim; the merge act is where
+    // that deferral ends. Validate the whole branch model under
+    // `Context::MergeStrength` — every Component carries exactly one claim — and
+    // require every `implemented-by` target to be REAL scanned code. Refuse
+    // before the merge rewrites the default branch or the rebuild replaces the
+    // branch graph.
+    merge_strength_check(&wt_apg, name)?;
+
     // Merge the project branch into the default branch (git2, from the main
     // checkout): fast-forward when the default has not moved, otherwise a
     // merge commit. Conflicts are a hard refusal with a manual fix line.
@@ -173,4 +186,51 @@ pub fn project_merge_at(
     git::remove_worktree(&identity.main_root, name)?;
     git::delete_branch(&identity.main_root, name)?;
     Ok(())
+}
+
+/// The merge-strength validation the merge act enforces (SPEC §8.2/§9.2): the
+/// sole deferred obligation — a Component's `implemented-by` claim — becomes a
+/// hard requirement, and every claim must name **real scanned** code.
+///
+/// Runs [`layers::validate_cardinalities`] over the whole durable branch model
+/// with [`layers::Context::MergeStrength`] (presence + at-most-one), then
+/// [`layers::validate_code_refs`] over every `implemented-by` target with an
+/// EMPTY planned universe: an export-scanned FQN is `Real`, while a
+/// planned/pending target — which `apg plan verify` tolerates — is drift at
+/// merge. The branch's `graph.jsonl` export is the code universe, so no database
+/// is opened. Pure read; refuses with every violation listed.
+fn merge_strength_check(wt_apg: &Path, name: &str) -> anyhow::Result<()> {
+    let _lock = crate::artifacts::acquire_spec_lock(wt_apg)?;
+    let nodes = layers::read_existing_nodes(wt_apg)?;
+    let assembled: BTreeMap<String, &NodeFile> = nodes
+        .iter()
+        .map(|n| {
+            (
+                layers::fqn(layers::layer_of(&n.layer), &n.node_type, &n.name),
+                n,
+            )
+        })
+        .collect();
+    let mut problems =
+        layers::validate_cardinalities(&assembled, None, layers::Context::MergeStrength);
+
+    let (scanned, _planned) = crate::artifacts::code_universes_from_export(wt_apg)?;
+    let refs: Vec<&str> = nodes
+        .iter()
+        .flat_map(|n| n.out.iter())
+        .filter(|e| e.kind == "implemented-by")
+        .map(|e| e.target.as_str())
+        .collect();
+    // Realness only: passing no planned universe makes a pending (planned-only)
+    // target drift — merge strength requires real scanned code, not a promise.
+    if let Err(err) = layers::validate_code_refs(&refs, &scanned, &BTreeSet::new()) {
+        problems.push(err.to_string());
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "refused: merge-strength validation failed for `{name}` — the whole model must be consistent before merge (SPEC §8.2), with every Component claiming exactly one real scanned-code `implemented-by` target: {}",
+        problems.join("; ")
+    )
 }

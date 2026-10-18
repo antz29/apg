@@ -38,9 +38,7 @@ pub mod render;
 pub use identity::*;
 
 pub(crate) use blacklist::is_blacklisted;
-pub(crate) use edges::{
-    EdgeReader, filter_edges, is_solution_kind, kind_is, valid_contains_pair, write_edge,
-};
+pub(crate) use edges::{EdgeReader, filter_edges, kind_is, valid_contains_pair, write_edge};
 pub(crate) use identity::{root_edge_endpoint, root_module_endpoint, rooted_scope};
 pub(crate) use render::{FuncDecl, render_function_fqns};
 
@@ -126,9 +124,10 @@ fn insert_node(graph: &mut Graph, fqn: String, node: Node) {
         Some(existing) if existing.kind == NodeKind::UnresolvedTarget => {}
         // Scanner-replace (GraphModel-SPEC.md / PlanExecution-SPEC.md): a
         // present (scanned) node at an FQN a `planned` node holds supersedes
-        // the planned placeholder. Edges are FQN-keyed, so incident edges
-        // (`Anchors`, `ImplementedBy`, `Builds`, `Details`, `Contains`) re-point
-        // to the real node automatically.
+        // the planned placeholder. Edges are FQN-keyed, so every incident edge
+        // — the `Contains` hierarchy, the spine (`drives`/`realises`/
+        // `implemented-by`/`requires`/`represents`), and `details`/`reviews` —
+        // re-points to the real node automatically.
         Some(existing)
             if existing.status.as_deref() == Some("planned") && node.status.is_none() =>
         {
@@ -837,11 +836,10 @@ fn ingest_records(
                         ..spec_node(NodeKind::Person)
                     },
                 ),
-                Record::Constraint {
+                Record::Actor {
                     fqn,
                     name,
                     body,
-                    attaches_to,
                     properties,
                 } => insert_node(
                     &mut graph,
@@ -849,7 +847,36 @@ fn ingest_records(
                     Node {
                         name: Some(name),
                         body: opt(body),
-                        attaches_to: opt(attaches_to),
+                        properties,
+                        ..spec_node(NodeKind::Actor)
+                    },
+                ),
+                Record::Role {
+                    fqn,
+                    name,
+                    body,
+                    properties,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
+                        properties,
+                        ..spec_node(NodeKind::Role)
+                    },
+                ),
+                Record::Constraint {
+                    fqn,
+                    name,
+                    body,
+                    properties,
+                } => insert_node(
+                    &mut graph,
+                    fqn,
+                    Node {
+                        name: Some(name),
+                        body: opt(body),
                         properties,
                         ..spec_node(NodeKind::Constraint)
                     },
@@ -1273,25 +1300,6 @@ fn ingest_records(
                     }
                     graph.reviews.insert((a, b));
                 }
-                Record::DependsOn {
-                    from,
-                    to,
-                    properties,
-                } => {
-                    let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, &lang, opts)
-                        || is_blacklisted(&b, None, &lang, opts)
-                    {
-                        skipped += 1;
-                        continue;
-                    }
-                    if !properties.is_empty() {
-                        graph
-                            .edge_properties
-                            .insert(("depends-on", a.clone(), b.clone()), properties);
-                    }
-                    graph.depends_on.insert((a, b));
-                }
                 Record::Gates { from, to } => {
                     let (a, b) = (resolve(&from), resolve(&to));
                     if is_blacklisted(&a, None, &lang, opts)
@@ -1352,25 +1360,6 @@ fn ingest_records(
                     graph.represents.insert((a, b));
                 }
                 // New-model §3.3 spec edges (apg-projects).
-                Record::RealisedBy {
-                    from,
-                    to,
-                    properties,
-                } => {
-                    let (a, b) = (resolve(&from), resolve(&to));
-                    if is_blacklisted(&a, None, &lang, opts)
-                        || is_blacklisted(&b, None, &lang, opts)
-                    {
-                        skipped += 1;
-                        continue;
-                    }
-                    if !properties.is_empty() {
-                        graph
-                            .edge_properties
-                            .insert(("realised-by", a.clone(), b.clone()), properties);
-                    }
-                    graph.realised_by.insert((a, b));
-                }
                 Record::SpecImplementedBy {
                     from,
                     to,
@@ -1428,6 +1417,102 @@ fn ingest_records(
                     }
                     graph.subscribes.insert((a, b));
                 }
+                // Target-model relationships (schema-rework SPEC §4).
+                Record::Requires {
+                    from,
+                    to,
+                    properties,
+                } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
+                        skipped += 1;
+                        continue;
+                    }
+                    if !properties.is_empty() {
+                        graph
+                            .edge_properties
+                            .insert(("requires", a.clone(), b.clone()), properties);
+                    }
+                    graph.requires.insert((a, b));
+                }
+                Record::Reads {
+                    from,
+                    to,
+                    properties,
+                } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
+                        skipped += 1;
+                        continue;
+                    }
+                    if !properties.is_empty() {
+                        graph
+                            .edge_properties
+                            .insert(("reads", a.clone(), b.clone()), properties);
+                    }
+                    graph.reads.insert((a, b));
+                }
+                Record::Writes {
+                    from,
+                    to,
+                    properties,
+                } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
+                        skipped += 1;
+                        continue;
+                    }
+                    if !properties.is_empty() {
+                        graph
+                            .edge_properties
+                            .insert(("writes", a.clone(), b.clone()), properties);
+                    }
+                    graph.writes.insert((a, b));
+                }
+                Record::IsRole {
+                    from,
+                    to,
+                    properties,
+                } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
+                        skipped += 1;
+                        continue;
+                    }
+                    if !properties.is_empty() {
+                        graph
+                            .edge_properties
+                            .insert(("is-role", a.clone(), b.clone()), properties);
+                    }
+                    graph.is_role.insert((a, b));
+                }
+                Record::Realises {
+                    from,
+                    to,
+                    properties,
+                } => {
+                    let (a, b) = (resolve(&from), resolve(&to));
+                    if is_blacklisted(&a, None, &lang, opts)
+                        || is_blacklisted(&b, None, &lang, opts)
+                    {
+                        skipped += 1;
+                        continue;
+                    }
+                    if !properties.is_empty() {
+                        graph
+                            .edge_properties
+                            .insert(("realises", a.clone(), b.clone()), properties);
+                    }
+                    graph.realises.insert((a, b));
+                }
                 _ => unreachable!("non-edge record reached the edge pass"),
             }
         }
@@ -1458,13 +1543,12 @@ fn ingest_records(
 /// spool did not emit must not be pruned before the cached unit lands.
 pub(crate) fn finalize_graph(graph: &mut Graph) {
     // Drop edges whose endpoints do not exist (dangling ids, blacklisted nodes).
-    // Containment is a strict tree: the six code pairs (Module→Module,
-    // Module→File, File→Struct, File→Function, Struct→Struct, Struct→Function),
-    // the seven spec pairs (Spec→Requirement, Spec→Phase, Phase→Requirement,
-    // Spec→Decision, Spec→NonGoal, Spec→AcceptanceCriterion,
-    // Spec→VerificationItem), and the four plan pairs (Plan→PlanPhase,
-    // PlanPhase→Task, PlanPhase→AcceptanceCriterion, PlanPhase→VerificationItem)
-    // (SPEC §7, R2, R21).
+    // Containment is a strict tree: the code pairs (Language→Module,
+    // Module→Module, Module→File, File→Struct, File→Function, Struct→Struct,
+    // Struct→Function), the plan pairs (Plan→PlanPhase, PlanPhase→Task), the
+    // requirement decomposition (Requirement→Requirement), the domain
+    // ownership pairs (Group→Group/Entity/Service, Entity→Value), and the
+    // solution hierarchy (System→Container→Component) (SPEC §7, R2, R21).
     graph.contains.retain(|(a, b)| {
         graph.nodes.contains_key(a)
             && graph.nodes.contains_key(b)
@@ -1476,6 +1560,8 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
             && ((graph.nodes[a].kind == NodeKind::Function
                 && graph.nodes[b].kind == NodeKind::Function)
                 || (graph.nodes[a].kind == NodeKind::Service
+                    && graph.nodes[b].kind == NodeKind::Service)
+                || (graph.nodes[a].kind == NodeKind::Actor
                     && graph.nodes[b].kind == NodeKind::Service))
     });
     graph.uses.retain(|(a, b)| {
@@ -1484,7 +1570,7 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
             && ((graph.nodes[b].kind == NodeKind::Struct
                 && matches!(graph.nodes[a].kind, NodeKind::Function | NodeKind::Struct))
                 || (graph.nodes[a].kind == NodeKind::Person
-                    && graph.nodes[b].kind == NodeKind::System))
+                    && graph.nodes[b].kind == NodeKind::Component))
     });
     graph.unresolved_calls.retain(|(a, b, _)| {
         graph.nodes.contains_key(a)
@@ -1507,9 +1593,6 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     graph.reviews = filter_edges(graph, &graph.reviews, |g, a, b| {
         g.nodes.contains_key(a) && g.nodes.contains_key(b) && g.nodes[a].kind == NodeKind::Feedback
     });
-    graph.depends_on = filter_edges(graph, &graph.depends_on, |g, a, b| {
-        kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Requirement)
-    });
     graph.gates = filter_edges(graph, &graph.gates, |g, a, b| {
         kind_is(g, a, NodeKind::PlanPhase) && kind_is(g, b, NodeKind::PlanPhase)
     });
@@ -1518,31 +1601,21 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
     });
 
     // Spine edges (GraphModel-SPEC.md; PHASE_01). `drives` runs Requirement →
-    // Group/Entity/Value/Service; `represents` runs User → Entity and Entity →
-    // Person (both endpoints must exist and carry the tier kinds).
+    // Service; `represents` runs Actor → User and Person → Actor (both
+    // endpoints must exist and carry the tier kinds).
     graph.drives = filter_edges(graph, &graph.drives, |g, a, b| {
-        kind_is(g, a, NodeKind::Requirement)
-            && matches!(
-                g.nodes[b].kind,
-                NodeKind::Group | NodeKind::Entity | NodeKind::Value | NodeKind::Service
-            )
+        kind_is(g, a, NodeKind::Requirement) && kind_is(g, b, NodeKind::Service)
     });
     graph.represents = filter_edges(graph, &graph.represents, |g, a, b| {
-        (kind_is(g, a, NodeKind::User) && kind_is(g, b, NodeKind::Entity))
-            || (kind_is(g, a, NodeKind::Entity) && kind_is(g, b, NodeKind::Person))
+        (kind_is(g, a, NodeKind::Actor) && kind_is(g, b, NodeKind::User))
+            || (kind_is(g, a, NodeKind::Person) && kind_is(g, b, NodeKind::Actor))
     });
 
-    // New-model §3.3 spec edges (apg-projects). RealisedBy runs Group/Entity/
-    // Service → System/Container/Component; SpecImplementedBy runs System/
-    // Container/Component → code; Publishes/Subscribes run Service → Entity.
-    graph.realised_by = filter_edges(graph, &graph.realised_by, |g, a, b| {
-        matches!(
-            g.nodes[a].kind,
-            NodeKind::Group | NodeKind::Entity | NodeKind::Service
-        ) && is_solution_kind(g, b)
-    });
+    // New-model §3.3 spec edges (apg-projects). SpecImplementedBy runs
+    // Component → code; Publishes runs Service → Entity; Subscribes runs
+    // Service/Actor → Entity.
     graph.spec_implemented_by = filter_edges(graph, &graph.spec_implemented_by, |g, a, b| {
-        is_solution_kind(g, a)
+        kind_is(g, a, NodeKind::Component)
             && g.nodes.contains_key(b)
             && matches!(
                 g.nodes[b].kind,
@@ -1553,7 +1626,30 @@ pub(crate) fn finalize_graph(graph: &mut Graph) {
         kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
     });
     graph.subscribes = filter_edges(graph, &graph.subscribes, |g, a, b| {
+        (kind_is(g, a, NodeKind::Service) || kind_is(g, a, NodeKind::Actor))
+            && kind_is(g, b, NodeKind::Entity)
+    });
+
+    // Target-model §4 edges (schema-rework): the same dangling-drop and
+    // endpoint-kind hygiene as the sibling spec edges.
+    graph.requires = filter_edges(graph, &graph.requires, |g, a, b| {
+        (kind_is(g, a, NodeKind::Stakeholder) || kind_is(g, a, NodeKind::User))
+            && kind_is(g, b, NodeKind::Requirement)
+    });
+    graph.reads = filter_edges(graph, &graph.reads, |g, a, b| {
         kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
+    });
+    graph.writes = filter_edges(graph, &graph.writes, |g, a, b| {
+        kind_is(g, a, NodeKind::Service) && kind_is(g, b, NodeKind::Entity)
+    });
+    graph.is_role = filter_edges(graph, &graph.is_role, |g, a, b| {
+        matches!(
+            g.nodes.get(a).map(|n| n.kind),
+            Some(NodeKind::Container) | Some(NodeKind::Component)
+        ) && kind_is(g, b, NodeKind::Role)
+    });
+    graph.realises = filter_edges(graph, &graph.realises, |g, a, b| {
+        kind_is(g, a, NodeKind::Component) && kind_is(g, b, NodeKind::Service)
     });
 }
 

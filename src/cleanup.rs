@@ -71,15 +71,18 @@ pub fn cleanup(graph: &mut Graph, opts: &CleanupOptions) -> CleanupReport {
     for edges in [
         &mut graph.details,
         &mut graph.reviews,
-        &mut graph.depends_on,
         &mut graph.gates,
         &mut graph.satisfies,
         &mut graph.drives,
         &mut graph.represents,
-        &mut graph.realised_by,
         &mut graph.spec_implemented_by,
         &mut graph.publishes,
         &mut graph.subscribes,
+        &mut graph.requires,
+        &mut graph.reads,
+        &mut graph.writes,
+        &mut graph.is_role,
+        &mut graph.realises,
     ] {
         edges.retain(|(a, b)| is_removed(a) && is_removed(b));
     }

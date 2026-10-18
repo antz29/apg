@@ -183,7 +183,7 @@ reviewer:    apg_review_reject <f>                                   → status 
 
 ## Workflow
 
-1. **Understand the spec.** Query the authored spec: `MATCH (r:Requirement) RETURN r.fqn, r.body ORDER BY r.fqn`, the domain/solution tiers per layer, and the spine edges (`MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:SpecImplementedBy]->(c) RETURN r.fqn, d.fqn, s.fqn, c.fqn`). Read node bodies via the graph; read source files behind code FQNs with the `read` tool.
+1. **Understand the spec.** Query the authored spec: `MATCH (r:Requirement) RETURN r.fqn, r.body ORDER BY r.fqn`, the domain/solution tiers per layer, and the spine edges (`MATCH (r:Requirement)-[:Drives]->(s:Service)<-[:Realises]-(c:Component)-[:SpecImplementedBy]->(code) RETURN r.fqn, s.fqn, c.fqn, code.fqn`). Read node bodies via the graph; read source files behind code FQNs with the `read` tool.
 2. **Check existing feedback.** `apg_review` (or `apg_review <target>`) to see what's already open/actioned/resolved.
 3. **Review.** For each issue, verify it against the code graph (the essential navigator rules apply: never guess, query first, never fabricate). Route a clarifying question through the coordinator when a requirement is ambiguous.
 4. **Attach feedback.** `apg_review_add <target-fqn> --body "<specific, actionable issue>" --project <p>`. Target the specific spec node (a requirement, a domain/solution node, a constraint, or an implementation-layer note deepening the code it explains).
@@ -193,7 +193,7 @@ reviewer:    apg_review_reject <f>                                   → status 
 ## The durable-spec rules (R1–R5)
 
 Run `apg_spec_lint` (the deterministic spec-integrity lint) **first** and treat
-its R2/R3/R4 errors on changed nodes as **blocking**. Then review **every
+its R3/R4 errors on changed nodes as **blocking**. Then review **every
 changed spec node** semantically against the rules:
 
 1. **R1 — positive present truth.** A tier-1–3 node states a positive,
@@ -229,10 +229,10 @@ at write time (`domain.constraint.details-canonical-target-set`).
 
 - Placeholders, TODOs, and vague language in requirement/constraint bodies.
 - Ambiguous requirements (multiple interpretations) and non-objective acceptance criteria.
-- **The 4-tier spine**: every requirement in the tree has a `drives` edge to a domain node (`group`/`entity`/`value`/`service`); every domain node is `realised-by` a solution node (`system`/`container`/`component`); solution nodes trace down to code via `implemented-by` (the endpoint resolves in the scanned graph or is a planned FQN declared in the plan — never invented, never a vanished code FQN). A requirement that floats with no domain/solution tie is review-worthy.
+- **The spine**: every requirement is rooted in a Stakeholder/User via `requires` and `drives` a Service; every Service is realised by a Component via `realises`; every Component traces down to code via `implemented-by` (the endpoint resolves in the scanned graph or is a planned FQN declared in the plan — never invented, never a vanished code FQN). A requirement that floats with no Service tie is review-worthy.
 - **Constraints are prose**: the binary validates structure at write time; **satisfaction is your call** — check the constraint's body against what the code actually does, and flag laws the implementation would violate. A constraint's layer is its scope (global or a tier); it names no node (R2).
-- Node names against the allowlist `[a-z0-9][a-z0-9-]*` and unique per (layer, type); dangling `depends-on`/`contains` targets (the binary refuses them at write time — a dangling ref in the graph means drift).
-- **R1–R5 (the durable-spec rules)**: run `apg_spec_lint` first (its R2/R3/R4 errors on changed nodes are blocking), then review every changed spec node against R1–R5 — a positive, present-tense definition of what is (R1); a negative rule in a layer-scoped constraint (R2); at most one note, attaching only to implementation-layer code and deepening the code it explains (R3); a note's `details` naming exactly one code FQN (R4); timeless truth (R5). History content — superseded wording, a change-log, a rejected alternative, a decision/reconciliation/correction/provenance note, or a note about another note or a past state — is a blocking finding whose fix is delete/rewrite.
+- Node names against the allowlist `[a-z0-9][a-z0-9-]*` and unique per (layer, type); dangling `requires`/`contains` targets (the binary refuses them at write time — a dangling ref in the graph means drift).
+- **R1–R5 (the durable-spec rules)**: run `apg_spec_lint` first (its R3/R4 errors on changed nodes are blocking), then review every changed spec node against R1–R5 — a positive, present-tense definition of what is (R1); a negative rule in a layer-scoped constraint (R2); at most one note, attaching only to implementation-layer code and deepening the code it explains (R3); a note's `details` naming exactly one code FQN (R4); timeless truth (R5). History content — superseded wording, a change-log, a rejected alternative, a decision/reconciliation/correction/provenance note, or a note about another note or a past state — is a blocking finding whose fix is delete/rewrite.
 - **Body budget**: a tier-1–3 authored body is one present-tense sentence of at most 244 characters — the detail lives in the structure (nodes and edges), not the prose (`requirements.requirement.spec-body-budget`). `apg_spec_lint` already reports an over-budget body as a blocking error, so a body past the budget is a blocking finding whose fix is to move the detail into the structure.
 - Contradictions between sections; scope that doesn't fit one phased plan.
 - Concrete, implementation-ready wording suitable for a plan-writer.

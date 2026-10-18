@@ -9,10 +9,11 @@ use crate::layers::{NodeProperties, properties_from_json, properties_json};
 use crate::schema::Record;
 
 /// Whether a `(from, to)` kind pair is a valid `Contains` edge (SPEC §7, R2,
-/// R21): the six code pairs, the two plan pairs, the §3.1 requirements tree
-/// (Stakeholder/User/Requirement ⊃ Requirement), the plain-named domain
-/// hierarchy (Group ⊃ Group/Entity/Value/Service), and the solution hierarchy
-/// (System ⊃ Container ⊃ Component).
+/// R21): the six code pairs, the two plan pairs, the requirements tree
+/// (Requirement ⊃ Requirement; a Stakeholder/User roots a Requirement through
+/// `requires`), the plain-named domain hierarchy (Group ⊃ Group/Entity/Service
+/// and Entity ⊃ Value), and the solution hierarchy (System ⊃ Container ⊃
+/// Component).
 pub(crate) fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
     matches!(
         (a, b),
@@ -25,15 +26,13 @@ pub(crate) fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
             | (NodeKind::Struct, NodeKind::Function)
             | (NodeKind::Plan, NodeKind::PlanPhase)
             | (NodeKind::PlanPhase, NodeKind::Task)
-            // New-model §3.3 `contains` rows (apg-projects): the requirements
+            // New-model §3.3 `contains` rows (apg-projects): the requirement
             // tree and the plain-named domain hierarchy.
-            | (NodeKind::Stakeholder, NodeKind::Requirement)
-            | (NodeKind::User, NodeKind::Requirement)
             | (NodeKind::Requirement, NodeKind::Requirement)
             | (NodeKind::Group, NodeKind::Group)
             | (NodeKind::Group, NodeKind::Entity)
-            | (NodeKind::Group, NodeKind::Value)
             | (NodeKind::Group, NodeKind::Service)
+            | (NodeKind::Entity, NodeKind::Value)
             | (NodeKind::System, NodeKind::Container)
             | (NodeKind::Container, NodeKind::Component)
     )
@@ -41,16 +40,6 @@ pub(crate) fn valid_contains_pair(a: &NodeKind, b: &NodeKind) -> bool {
 
 pub(crate) fn kind_is(graph: &Graph, fqn: &str, k: NodeKind) -> bool {
     graph.nodes.get(fqn).is_some_and(|n| n.kind == k)
-}
-
-/// The Solution-tier (C4) node kinds: System, Container, Component.
-pub(crate) fn is_solution_kind(graph: &Graph, fqn: &str) -> bool {
-    graph.nodes.get(fqn).is_some_and(|n| {
-        matches!(
-            n.kind,
-            NodeKind::System | NodeKind::Container | NodeKind::Component
-        )
-    })
 }
 
 /// Returns the edges of `edges` that pass `keep`. A free function so each call
@@ -70,12 +59,14 @@ pub(crate) fn filter_edges(
 
 /// Binary spool format for edge records: one u8 tag (0 contains, 1 calls,
 /// 2 uses, 3 unresolved_call, 4 unresolved_use, 5 details, 6 reviews,
-/// 7 depends_on, 8 gates, 9 satisfies, 10 drives, 11 represents,
-/// 12 realised_by, 13 spec_implemented_by, 14 publishes, 15 subscribes)
-/// followed by four length-prefixed UTF-8 strings (from, to, target_type,
-/// properties; `target_type` is empty for most, `properties` is the canonical
-/// JSON of the edge record's full properties map — `"{}"` for a record that
-/// carries none, so the codec never drops an authored edge property).
+/// 8 gates, 9 satisfies, 10 drives, 11 represents, 13 spec_implemented_by,
+/// 14 publishes, 15 subscribes, 16 requires, 17 reads, 18 writes, 19 is_role,
+/// 20 realises) followed by four length-prefixed UTF-8 strings (from, to,
+/// target_type, properties; `target_type` is empty for most, `properties` is
+/// the canonical JSON of the edge record's full properties map — `"{}"` for a
+/// record that carries none, so the codec never drops an authored edge
+/// property). Tags 7 and 12 are retired: `depends_on` and `realised_by` are
+/// removed from the model.
 pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
     match r {
         Record::Contains {
@@ -109,11 +100,6 @@ pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
         Record::Reviews { from, to } => {
             write_edge_fields(w, 6, &from, &to, "", &NodeProperties::new())
         }
-        Record::DependsOn {
-            from,
-            to,
-            properties,
-        } => write_edge_fields(w, 7, &from, &to, "", &properties),
         Record::Gates { from, to } => {
             write_edge_fields(w, 8, &from, &to, "", &NodeProperties::new())
         }
@@ -130,11 +116,6 @@ pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
             to,
             properties,
         } => write_edge_fields(w, 11, &from, &to, "", &properties),
-        Record::RealisedBy {
-            from,
-            to,
-            properties,
-        } => write_edge_fields(w, 12, &from, &to, "", &properties),
         Record::SpecImplementedBy {
             from,
             to,
@@ -150,6 +131,31 @@ pub(crate) fn write_edge(w: &mut impl Write, r: Record) {
             to,
             properties,
         } => write_edge_fields(w, 15, &from, &to, "", &properties),
+        Record::Requires {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 16, &from, &to, "", &properties),
+        Record::Reads {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 17, &from, &to, "", &properties),
+        Record::Writes {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 18, &from, &to, "", &properties),
+        Record::IsRole {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 19, &from, &to, "", &properties),
+        Record::Realises {
+            from,
+            to,
+            properties,
+        } => write_edge_fields(w, 20, &from, &to, "", &properties),
         other => unreachable!("non-edge record reached the edge spool: {other:?}"),
     }
 }
@@ -218,11 +224,6 @@ impl<R: BufRead> EdgeReader<R> {
                 properties,
             },
             6 => Record::Reviews { from: a, to: b },
-            7 => Record::DependsOn {
-                from: a,
-                to: b,
-                properties,
-            },
             8 => Record::Gates { from: a, to: b },
             9 => Record::Satisfies { from: a, to: b },
             10 => Record::Drives {
@@ -231,11 +232,6 @@ impl<R: BufRead> EdgeReader<R> {
                 properties,
             },
             11 => Record::Represents {
-                from: a,
-                to: b,
-                properties,
-            },
-            12 => Record::RealisedBy {
                 from: a,
                 to: b,
                 properties,
@@ -251,6 +247,31 @@ impl<R: BufRead> EdgeReader<R> {
                 properties,
             },
             15 => Record::Subscribes {
+                from: a,
+                to: b,
+                properties,
+            },
+            16 => Record::Requires {
+                from: a,
+                to: b,
+                properties,
+            },
+            17 => Record::Reads {
+                from: a,
+                to: b,
+                properties,
+            },
+            18 => Record::Writes {
+                from: a,
+                to: b,
+                properties,
+            },
+            19 => Record::IsRole {
+                from: a,
+                to: b,
+                properties,
+            },
+            20 => Record::Realises {
                 from: a,
                 to: b,
                 properties,

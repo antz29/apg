@@ -225,24 +225,32 @@ enum Export {
         #[serde(skip_serializing_if = "String::is_empty")]
         body: String,
     },
+    Actor {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
+    Role {
+        fqn: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        name: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        body: String,
+    },
     Constraint {
         fqn: String,
         #[serde(skip_serializing_if = "String::is_empty")]
         name: String,
         #[serde(skip_serializing_if = "String::is_empty")]
         body: String,
-        #[serde(rename = "attaches-to", skip_serializing_if = "String::is_empty")]
-        attaches_to: String,
     },
     Details {
         from: String,
         to: String,
     },
     Reviews {
-        from: String,
-        to: String,
-    },
-    DependsOn {
         from: String,
         to: String,
     },
@@ -262,11 +270,6 @@ enum Export {
         from: String,
         to: String,
     },
-    #[serde(rename = "realised-by")]
-    RealisedBy {
-        from: String,
-        to: String,
-    },
     #[serde(rename = "implemented-by")]
     SpecImplementedBy {
         from: String,
@@ -277,6 +280,28 @@ enum Export {
         to: String,
     },
     Subscribes {
+        from: String,
+        to: String,
+    },
+    Requires {
+        from: String,
+        to: String,
+    },
+    Reads {
+        from: String,
+        to: String,
+    },
+    Writes {
+        from: String,
+        to: String,
+    },
+    #[serde(rename = "is-role")]
+    IsRole {
+        from: String,
+        to: String,
+    },
+    #[serde(rename = "realises")]
+    Realises {
         from: String,
         to: String,
     },
@@ -480,7 +505,16 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
                 fqn: fqn.clone(),
                 name: node.name.clone().unwrap_or_default(),
                 body: node.body.clone().unwrap_or_default(),
-                attaches_to: node.attaches_to.clone().unwrap_or_default(),
+            },
+            NodeKind::Actor => Export::Actor {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
+            },
+            NodeKind::Role => Export::Role {
+                fqn: fqn.clone(),
+                name: node.name.clone().unwrap_or_default(),
+                body: node.body.clone().unwrap_or_default(),
             },
         };
         write_line(&mut w, &rec)?;
@@ -549,15 +583,6 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             },
         )?;
     }
-    for (a, b) in &graph.depends_on {
-        write_line(
-            &mut w,
-            &Export::DependsOn {
-                from: a.clone(),
-                to: b.clone(),
-            },
-        )?;
-    }
     for (a, b) in &graph.gates {
         write_line(
             &mut w,
@@ -594,15 +619,6 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
             },
         )?;
     }
-    for (a, b) in &graph.realised_by {
-        write_line(
-            &mut w,
-            &Export::RealisedBy {
-                from: a.clone(),
-                to: b.clone(),
-            },
-        )?;
-    }
     for (a, b) in &graph.spec_implemented_by {
         write_line(
             &mut w,
@@ -625,6 +641,51 @@ pub fn write_graph_jsonl(graph: &Graph, path: &Path) -> anyhow::Result<()> {
         write_line(
             &mut w,
             &Export::Subscribes {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.requires {
+        write_line(
+            &mut w,
+            &Export::Requires {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.reads {
+        write_line(
+            &mut w,
+            &Export::Reads {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.writes {
+        write_line(
+            &mut w,
+            &Export::Writes {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.is_role {
+        write_line(
+            &mut w,
+            &Export::IsRole {
+                from: a.clone(),
+                to: b.clone(),
+            },
+        )?;
+    }
+    for (a, b) in &graph.realises {
+        write_line(
+            &mut w,
+            &Export::Realises {
                 from: a.clone(),
                 to: b.clone(),
             },

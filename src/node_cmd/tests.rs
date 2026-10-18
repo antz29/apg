@@ -47,20 +47,17 @@ mod unit {
     /// names the stored spelling.
     #[test]
     fn edit_properties_refuses_unset_of_absent_key() {
-        let base = BTreeMap::from([("attaches-to".to_string(), "domain.group.x".to_string())]);
-        let err = edit_properties(
-            &base,
-            &parse_args(&av(&["--unset-property", "attaches_to"])),
-        )
-        .unwrap_err()
-        .to_string();
+        let base = BTreeMap::from([("owner-team".to_string(), "domain.group.x".to_string())]);
+        let err = edit_properties(&base, &parse_args(&av(&["--unset-property", "owner_team"])))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("no such property"), "{err}");
-        assert!(err.contains("did you mean `attaches-to`"), "{err}");
+        assert!(err.contains("did you mean `owner-team`"), "{err}");
 
         let err = edit_properties(&base, &parse_args(&av(&["--unset-property", "zzz"])))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("present: [attaches-to]"), "{err}");
+        assert!(err.contains("present: [owner-team]"), "{err}");
         assert!(!err.contains("did you mean"), "{err}");
     }
 }

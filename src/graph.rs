@@ -18,24 +18,27 @@ pub struct Graph {
     /// Spec/plan edge sets (SPEC R2/R21). Endpoints are canonical FQNs.
     pub details: HashSet<(String, String)>,
     pub reviews: HashSet<(String, String)>,
-    pub depends_on: HashSet<(String, String)>,
     pub gates: HashSet<(String, String)>,
     pub satisfies: HashSet<(String, String)>,
     /// Spine edges (GraphModel-SPEC.md; PHASE_01): end-to-end why-to-code
     /// traceability through the Domain and Solution tiers. `drives`
-    /// (Requirement → Domain), `represents` (User → Entity, Entity → Person).
+    /// (Requirement → Service), `represents` (Actor → User, Person → Actor).
     pub drives: HashSet<(String, String)>,
     pub represents: HashSet<(String, String)>,
-    /// New-model §3.3 spec edges (apg-projects). The kebab spellings
-    /// (`realised-by`, `implemented-by`) are the §3.3 wire names.
-    /// `calls`/`uses`/`contains`/`drives`/`represents`/`details`/`depends-on`
-    /// reuse the scanner/spine sets above and are routed by endpoint node-kind
-    /// at load time (`depends-on` is the same Requirement→Requirement relation
-    /// as `DependsOn`).
-    pub realised_by: HashSet<(String, String)>,
+    /// New-model §3.3 spec edges (apg-projects). `implemented-by` keeps the
+    /// §3.3 wire spelling. `calls`/`uses`/`contains`/`drives`/`represents`/
+    /// `details` reuse the scanner/spine sets above and are routed by endpoint
+    /// node-kind at load time.
     pub spec_implemented_by: HashSet<(String, String)>,
     pub publishes: HashSet<(String, String)>,
     pub subscribes: HashSet<(String, String)>,
+    /// Target-model relationships (schema-rework SPEC §4): authored edge kinds,
+    /// endpoint-validated by a later phase.
+    pub requires: HashSet<(String, String)>,
+    pub reads: HashSet<(String, String)>,
+    pub writes: HashSet<(String, String)>,
+    pub is_role: HashSet<(String, String)>,
+    pub realises: HashSet<(String, String)>,
     /// The **full** node-file properties map of every durable authored edge,
     /// keyed by the node-file edge kind and its `(from, to)` endpoints (e.g.
     /// `("drives", "requirements.requirement.checkout", "domain.group.core")`).
@@ -90,8 +93,8 @@ pub enum NodeKind {
     /// `User` ⊂ Stakeholder — "a thing that uses the system" (requirements).
     User,
     /// `Group` — the hierarchical domain container (groups in groups;
-    /// attribute core/supporting/generic, optional root). BoundedContext/
-    /// Subdomain/Aggregate/DomainRule collapse into it.
+    /// attribute core/supporting/generic, optional root). It is the sole
+    /// privacy boundary; a leaf Group owns Services and Entities.
     Group,
     /// `Entity` — kind `entity` | `event` (domain).
     Entity,
@@ -105,6 +108,10 @@ pub enum NodeKind {
     Component,
     /// `Person` — the C4 view of User/Stakeholder (solution).
     Person,
+    /// `Actor` — a domain participation identity representing Users.
+    Actor,
+    /// `Role` — an architectural classification of Containers and Components.
+    Role,
     /// `Constraint` — declarative prose ("X must hold"); structure/reference
     /// validation only, satisfaction by review.
     Constraint,
@@ -138,34 +145,22 @@ pub struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub goal: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     /// The short name of a tier-1/2/3 spec node (Stakeholder/Domain/Entity/…).
     /// Distinct from the FQN's final segment only by spelling (e.g. a
     /// `value-object.Email` node's `name` is `Email`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// The aggregate-root entity name of an `Aggregate` node.
+    /// The optional root a `Group` node declares (the aggregate root name).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
     /// The `attribute` of a `Group` node (`core`/`supporting`/`generic`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attribute: Option<String>,
-    /// The `attaches-to` FQN of a `Constraint` node — the one tier-1–3 node a
-    /// local constraint constrains (a global constraint carries none).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attaches_to: Option<String>,
-    /// The `scope` of an `Invariant` node (the artifact kind it applies to:
-    /// spec/plan/review/code/…).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feature: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub number: Option<u32>,
     /// `Note.kind` string (background/design/...); distinct from the
@@ -193,8 +188,8 @@ pub struct Node {
     /// The node's lifecycle status. For the four Implementation node kinds a
     /// `Some("planned")` marks a plan-writer-authored placeholder (the code
     /// does not exist yet; the scanner replaces it on realization); the
-    /// scanner never emits a planned node. Feedback/Task/Invariant carry their
-    /// own statuses (open/resolved, pending/done, active/retired).
+    /// scanner never emits a planned node. Feedback/PlanPhase/Task carry their
+    /// own statuses (open/actioned/resolved, pending/done).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -234,16 +229,12 @@ impl Default for Node {
             category: None,
             code_type: String::new(),
             title: None,
-            goal: None,
             id: None,
             name: None,
             root: None,
             attribute: None,
-            attaches_to: None,
-            scope: None,
             feature: None,
             body: None,
-            summary: None,
             number: None,
             sub_kind: None,
             target: None,

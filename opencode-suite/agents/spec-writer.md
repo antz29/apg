@@ -1,5 +1,5 @@
 ---
-description: Writes a graph-native spec as durable node files: authors the 4-tier taxonomy (tier 1 Stakeholder/User/Requirement, tier 2 Group/Entity/Value/Service + constraints, tier 3 System/Container/Component/Person) and the spine edges through the apg_node/apg_edge tools (no file writes). Use when the user wants to turn an idea or feature request into a spec, materialize a proposed graph structure, or reconcile a spec to an implementation.
+description: Writes a graph-native spec as durable node files: authors the 4-tier taxonomy (tier 1 Stakeholder/User/Requirement, tier 2 Group/Actor/Entity/Value/Service + constraints, tier 3 System/Container/Component/Person/Role + constraints) and the spine edges through the apg_node/apg_edge tools (no file writes). Use when the user wants to turn an idea or feature request into a spec, materialize a proposed graph structure, or reconcile a spec to an implementation.
 mode: subagent
 hidden: true
 permissions:
@@ -139,15 +139,16 @@ through the `apg node add` / `apg edge add` mutation surface:
 - **Tier 1 — Requirements** (`requirements.stakeholder.*`, `requirements.user.*`,
   `requirements.requirement.*`): the why. Requirements decompose as a tree
   (`contains` edges) until each one is atomic and testable.
-- **Tier 2 — Domain** (`domain.group.*`, `domain.entity.*` with `kind: entity|event`,
-  `domain.value.*`, `domain.service.*`): the what.
+- **Tier 2 — Domain** (`domain.group.*`, `domain.actor.*`, `domain.entity.*` with
+  `kind: entity|event`, `domain.value.*`, `domain.service.*`): the what.
 - **Tier 3 — Solution** (C4: `solution.system.*`, `solution.container.*` with
-  `kind: app|service|db|queue`, `solution.component.*`, `solution.person.*`): the how.
+  `kind: app|service|db|queue`, `solution.component.*`, `solution.person.*`,
+  `solution.role.*`): the how.
 - **Tier 4 — Implementation**: scanner code nodes (you never author these; the
   plan + implementers build them).
 
 The tiers are linked by **spine edges** (the edge kinds below):
-`Stakeholder ⊃ Requirement —drives→ Domain —realised-by→ Solution
+`Stakeholder/User —requires→ Requirement —drives→ Service ←realises— Component
 —implemented-by→ code`. Any requirement traces down to the code that implements
 it and any code traces up to the why, through architecture and domain.
 
@@ -301,21 +302,23 @@ the returned `start_line`/`end_line`.
 
 You author **nodes** (`apg node add|update|rm <layer> <type> <name> [--body …] [--property k=v]* [--unset-property k]*`; the name is identity and is never updatable) and **edges** (`apg edge add|update|rm <kind> <from> <to> [--property k=v]* [--unset-property k]*`; `update` is properties-only; `add` refuses an existing FQN/edge — no implicit upsert):
 
-- **Requirements** (`apg node add requirements requirement <name> --body … [--property feature=<feature>]`) — FQN `requirements.requirement.<name>`; group by the `feature` metadata. The `contains` edge builds the requirement tree (`requirements.stakeholder.<name>` ⊃ `requirements.requirement.<name>` ⊃ …) — decompose until each requirement is atomic/testable.
-- **Stakeholders/Users** (`apg node add requirements stakeholder|user <name> --body …`) — a Stakeholder is anyone with an interest; a User ⊂ Stakeholder is "a thing that uses the system".
-- **Tier-2 domain nodes** (`apg node add domain group|entity|value|service <name> --body … [--property attribute=core|supporting|generic] [--property root=<name>] [--property kind=entity|event]`) — the business reality. An `entity` **requires** `kind=entity|event` (events are ephemeral entities with motion, not a type); a `group` takes `attribute` (core/supporting/generic) and an optional aggregate `root`; groups nest (`contains`).
-- **Tier-3 solution nodes** (`apg node add solution system|container|component|person <name> --body … [--property kind=app|service|db|queue]`) — the C4 architecture (`system` ⊃ `container` ⊃ `component` via `contains`); `person` is the C4 view of User/Stakeholder.
+- **Requirements** (`apg node add requirements requirement <name> --body … [--property feature=<feature>]`) — FQN `requirements.requirement.<name>`; group by the `feature` metadata. The `requires` edge roots each requirement in a Stakeholder/User (`requirements.stakeholder.<name>` —requires→ `requirements.requirement.<name>`), and `contains` decomposes requirements into child requirements — decompose until each requirement is atomic/testable.
+- **Stakeholders/Users** (`apg node add requirements stakeholder|user <name> --body …`) — a Stakeholder is anyone with an interest; a User is an upstream user identity with requirements, refined by downstream Actors.
+- **Tier-2 domain nodes** (`apg node add domain group|actor|entity|value|service <name> --body … [--property attribute=core|supporting|generic] [--property root=<name>] [--property kind=entity|event]`) — the business reality. An `entity` **requires** `kind=entity|event` (events are ephemeral entities with motion, not a type); a `group` takes `attribute` (core/supporting/generic) and an optional aggregate `root`, and groups nest (`contains`); an `actor` is a participation identity that represents Users and interacts with Services and events.
+- **Tier-3 solution nodes** (`apg node add solution system|container|component|person|role <name> --body … [--property kind=app|service|db|queue]`) — the C4 architecture (`system` ⊃ `container` ⊃ `component` via `contains`); `person` represents Actors and uses Components; `role` is an architectural classification (`is-role` from a Container/Component).
 - **Constraints** (`apg node add <layer> constraint <name> --body "X must hold"`) — the layer is the scope (R2): whole-graph laws in the `global` layer, tier-scoped laws on that tier's layer. Write-time validation is structural only; satisfaction is by review.
 - **Notes** (`apg node add implementation note <name> --body …`) — a note attaches **only** to implementation-layer code and deepens the single code identity it explains (R3): give that code **at most one** note, and attach it with `apg edge add details <note-fqn> <code-fqn>` where the `details` edge names **exactly one code FQN** (a Note-to-Note pair is refused at write time and reported by `apg_spec_lint`, R4).
 - **Spine edges** — end-to-end traceability:
-  - `apg edge add contains <parent-fqn> <child-fqn>` — hierarchy (Stakeholder/User/Requirement → Requirement; Group → Group/Entity/Value/Service; System → Container; Container → Component).
-  - `apg edge add drives <requirement-fqn> <domain-fqn>` — Requirement → Group/Entity/Value/Service.
-  - `apg edge add realised-by <domain-fqn> <solution-fqn>` — Group/Entity/Service → System/Container/Component.
-  - `apg edge add implemented-by <solution-fqn> <code-fqn>` — solution → **code FQN** (validated against the scanned graph: must resolve, or be a planned FQN declared in the plan; a vanished one is drift).
-  - `apg edge add depends-on <requirement-fqn> <requirement-fqn>` — "consumes".
-  - `apg edge add represents <user-fqn> <entity-fqn>` and `<entity-fqn> <person-fqn>` — the same individual through the chain.
-  - `apg edge add uses <person-fqn> <system-fqn>` — same-tier C4 relationship.
-  - `apg edge add calls <service-fqn> <service-fqn>`; `apg edge add publishes|subscribes <service-fqn> <event-entity-fqn>` — service choreography.
+  - `apg edge add requires <stakeholder-or-user-fqn> <requirement-fqn>` — Stakeholder/User → Requirement.
+  - `apg edge add contains <parent-fqn> <child-fqn>` — hierarchy (Requirement → Requirement; Group → Group/Entity/Service; Entity → Value; System → Container; Container → Component).
+  - `apg edge add drives <requirement-fqn> <service-fqn>` — Requirement → Service.
+  - `apg edge add realises <component-fqn> <service-fqn>` — Component → Service.
+  - `apg edge add implemented-by <component-fqn> <code-fqn>` — Component → **code FQN** (validated against the scanned graph: must resolve, or be a planned FQN declared in the plan; a vanished one is drift).
+  - `apg edge add is-role <container-or-component-fqn> <role-fqn>` — Container/Component → Role.
+  - `apg edge add represents <actor-fqn> <user-fqn>` and `<person-fqn> <actor-fqn>` — the same identity through the chain.
+  - `apg edge add uses <person-fqn> <component-fqn>` — composition usage.
+  - `apg edge add reads|writes <service-fqn> <entity-fqn>` — a Service's own-Group entity access.
+  - `apg edge add calls <actor-or-service-fqn> <service-fqn>`; `apg edge add publishes|subscribes <service-fqn> <event-entity-fqn>` (and `apg edge add subscribes <actor-fqn> <event-entity-fqn>`) — service choreography.
 - **Removal** (`apg node rm <layer> <type> <name>` / `apg edge rm <kind> <from> <to>`) — atomic; a node removal rewrites every referencing file.
 
 FQN rules: authored nodes are `FQN = <layer>.<type>.<name>` (e.g.
@@ -323,7 +326,7 @@ FQN rules: authored nodes are `FQN = <layer>.<type>.<name>` (e.g.
 the identity. Names match `[a-z0-9][a-z0-9-]*` (refused, never sanitized) and
 are unique per (layer, type). Edge endpoints must already exist — a dangling
 authored FQN or an `implemented-by` code FQN that neither resolves nor is
-declared planned is a write-time error. `contains`/`depends-on` trees are
+declared planned is a write-time error. `contains` trees are
 acyclic. Planned code is the plan-writer's job at plan time (`apg plan add
 <project> planned …`), never yours.
 
@@ -334,8 +337,8 @@ acyclic. Planned code is the plan-writer's job at plan time (`apg plan add
 2. **Understand the idea.** Route clarifying questions **through the coordinator** (one at a time; prefer multiple choice). Cover purpose/value, scope and non-goals, affected systems, data flow and interfaces, error handling and edge cases, constraints, and acceptance criteria.
 3. **Propose approaches.** Present 2–3 viable approaches with trade-offs and a recommendation. Wait for the coordinator to choose.
 4. **Present the design** (goal, scope, requirements grouped by feature, domain + solution tiers, spine, decisions, non-goals, acceptance criteria, verification, open questions) and get approval via the coordinator before authoring.
-5. **Author the spec.** Add the tier-1 nodes (stakeholders/users, the requirement tree), the tier-2 domain nodes (and the laws as constraints), the tier-3 solution nodes, and the spine edges linking Requirement → Domain → Solution → code; a note attaches only to implementation-layer code — at most one, deepening the single code FQN it explains (R3/R4). Write each tier-1–3 body as one present-tense sentence of at most 244 characters, keeping the detail in the structure rather than the prose (`requirements.requirement.spec-body-budget`). Verify every `implemented-by` endpoint resolves: real code FQNs via the graph, not-yet-built code via the plan's planned FQNs (never invented). Author only through `apg_node`/`apg_edge`.
-6. **Self-review.** Run `apg_spec_lint` (the deterministic spec-integrity lint) and treat its errors as blocking. Query the graph (`apg_query`) for the authored tiers: every requirement in the tree with a `drives` edge to the domain; every domain node `realised-by` a solution node; every solution node `implemented-by` code; no dangling `depends-on`/`contains` targets; constraint layers matching their scope (R2); names allowlist-clean. Fix what you find.
+5. **Author the spec.** Add the tier-1 nodes (stakeholders/users, the requirement tree), the tier-2 domain nodes (and the laws as constraints), the tier-3 solution nodes, and the spine edges linking Stakeholder/User → Requirement → Service → Component → code; a note attaches only to implementation-layer code — at most one, deepening the single code FQN it explains (R3/R4). Write each tier-1–3 body as one present-tense sentence of at most 244 characters, keeping the detail in the structure rather than the prose (`requirements.requirement.spec-body-budget`). Verify every `implemented-by` endpoint resolves: real code FQNs via the graph, not-yet-built code via the plan's planned FQNs (never invented). Author only through `apg_node`/`apg_edge`.
+6. **Self-review.** Run `apg_spec_lint` (the deterministic spec-integrity lint) and treat its errors as blocking. Query the graph (`apg_query`) for the authored tiers: every requirement rooted in a Stakeholder/User via `requires` and driving a Service via `drives`; every Service realised by a Component via `realises`; every Component `implemented-by` code; no dangling `requires`/`contains` targets; constraint layers matching their scope (R2); names allowlist-clean. Fix what you find.
 7. **Report.** Return the spec's tier FQNs (the requirement/domain/solution node sets) and the next step (the coordinator reviews the rendered spec — the plan-writer authors the plan from it once approved).
 
 ## Reconciliation mode (final implementation review outcome)
@@ -352,7 +355,7 @@ you first. Reconcile the spec (or report that the code must change instead)
 through the normal spec-review cycle; only then is the implementer re-dispatched.
 
 1. Compare the authored nodes against the code in the branch (`apg_query` the
-   spine: `MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:SpecImplementedBy]->(c) RETURN …` vs `apg_find_symbol`/`apg_struct` for the built FQNs).
+   spine: `MATCH (r:Requirement)-[:Drives]->(s:Service)<-[:Realises]-(c:Component)-[:SpecImplementedBy]->(code) RETURN …` vs `apg_find_symbol`/`apg_struct` for the built FQNs).
 2. Update the spec to tie it back to the implementation: re-point drifted
    `implemented-by` edges and rewrite requirement bodies/constraints to the
    present truth of what was actually built (if that is the right call). A
@@ -372,7 +375,7 @@ or a **source spec** (a prose `SPEC.md` or requirements description), you:
 
 1. **Treat the source spec as untrusted.** It is human or AI prose, not graph
    fact. Use the graph as your inconsistency detector:
-   - `contains`/`depends-on` are acyclic (the binary enforces it — a cycle
+   - `contains` trees are acyclic (the binary enforces it — a cycle
      error means the source was inconsistent).
    - Every `implemented-by` endpoint must **resolve** — to a real code node or
      a planned FQN (never silently dropped, never invented).
@@ -380,7 +383,7 @@ or a **source spec** (a prose `SPEC.md` or requirements description), you:
      the code graph**: code FQNs must resolve; authored endpoints must exist
      before the edge does.
 2. **Resolve unambiguous inconsistencies autonomously** (e.g. a typo'd FQN, a
-   `depends-on` cycle, a requirement missing its `drives` edge). Route a
+   `contains` cycle, a requirement missing its `requires` edge). Route a
    judgment call through the coordinator.
 3. Refine the proposal via the coordinator where it conflicts with the graph.
 4. Materialize it via the `apg_node` / `apg_edge` tools.

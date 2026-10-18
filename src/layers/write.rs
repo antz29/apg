@@ -22,8 +22,8 @@ use super::code_refs::validate_code_refs;
 use super::node_file::{NodeFile, fqn};
 use super::tree::ingest_nodes;
 use super::validate::{
-    PROP_ATTACHES_TO, check_edge_pairing, eval_constraint, parse_fqn, valid_name, validate_edges,
-    validate_node,
+    Context, check_edge_pairing, eval_constraint, parse_fqn, valid_name, validate_cardinalities,
+    validate_edges, validate_node,
 };
 use super::{layer_of, validate_assembled_rules};
 
@@ -244,11 +244,11 @@ fn identity_from_path(apg_root: &Path, path: &Path) -> Option<(Layer, String, St
 /// written"): every written node passes [`validate_node`], every written node's
 /// out-edge passes [`validate_edges`], the assembled post-mutation set
 /// (existing nodes minus deleted/overwritten, plus the writes) satisfies the
-/// property-aware §3.3 rules ([`validate_assembled_rules`]: acyclic
-/// contains/depends-on trees; `Entity (kind: event)` publishes/subscribes
+/// property-aware §4 rules ([`validate_assembled_rules`]: acyclic
+/// contains trees; `Entity (kind: event)` publishes/subscribes
 /// targets) and [`check_edge_pairing`], every written constraint passes
-/// [`eval_constraint`]'s structure rules and, because a constraint's scope is
-/// its layer (R2), declares no new/changed `attaches-to` reference, and — when
+/// [`eval_constraint`]'s structure rules (a constraint's scope is its layer and
+/// it carries no attachment), and — when
 /// the `graph.jsonl` export exists —
 /// every assembled `implemented-by` target is Real or Pending against the
 /// exported scanned graph ([`validate_code_refs`]; a Drift target aborts before
@@ -300,9 +300,9 @@ pub fn validate_change(
 /// — neither opens a second handle nor reads `apg/.trans/graph.jsonl`. Every
 /// check is otherwise identical to [`validate_change`] — per-node uniqueness,
 /// the out-edge matrix
-/// ([`validate_edges`]), the assembled §3.3 rules ([`validate_assembled_rules`]),
+/// ([`validate_edges`]), the assembled §4 rules ([`validate_assembled_rules`]),
 /// the `implemented-by` code-ref drift check ([`validate_code_refs`]), the
-/// constraint structure + `attaches-to` rules ([`eval_constraint`]), and edge
+/// constraint structure rules ([`eval_constraint`]), and edge
 /// pairing ([`check_edge_pairing`]) — so a buffered mutation validates against
 /// the state an earlier unsaved mutation produced: an edge to a node added
 /// earlier in the same run is accepted rather than rejected because it is absent
@@ -320,18 +320,6 @@ pub fn validate_change_over(
         let f = fqn(layer_of(&n.layer), &n.node_type, &n.name);
         existing.insert(f, n.clone());
     }
-
-    // Snapshot every existing constraint's `attaches-to` value BEFORE the
-    // retain below drops written/deleted FQNs: after it, a written constraint
-    // looks absent and has no prior node file to compare its `attaches-to`
-    // against. The write-surface refusal (below) tells a NEW constraint — or a
-    // rewrite that CHANGES the value — from a rewrite that leaves an existing
-    // `attaches-to` value unchanged.
-    let prior_attaches_to: BTreeMap<String, Option<String>> = existing
-        .iter()
-        .filter(|(_, n)| n.node_type == "constraint")
-        .map(|(f, n)| (f.clone(), n.properties.get(PROP_ATTACHES_TO).cloned()))
-        .collect();
 
     // Remove the deleted files and the overwritten files from the current set.
     let mut deleted_fqns: BTreeSet<String> = BTreeSet::new();
@@ -382,8 +370,8 @@ pub fn validate_change_over(
         assembled.insert(fqn(layer_of(&n.layer), &n.node_type, &n.name), n);
     }
 
-    // SPEC §3.3 property rules over the assembled set: contains/depends-on
-    // trees acyclic, and publishes/subscribes targets are Entity (kind: event).
+    // SPEC §4 property rules over the assembled set: `contains` trees acyclic,
+    // and publishes/subscribes targets are Entity (kind: event).
     // Both abort before anything is written.
     validate_assembled_rules(&assembled, &universe)?;
 
@@ -404,13 +392,9 @@ pub fn validate_change_over(
         .collect();
     validate_code_refs(&refs, scanned, planned)?;
 
-    // Constraint validation (R14 / R2): [`eval_constraint`] owns the structural
-    // rules (name allowlist, type-in-layer, uniqueness), and the off-model
-    // `attaches-to` property is refused HERE — a constraint's scope is its
-    // layer, so a NEW constraint (or one whose `attaches-to` value CHANGES) may
-    // not declare it. A rewrite that leaves an existing constraint's
-    // `attaches-to` value unchanged passes, so the tree's attached constraints
-    // stay authorable. Refused BEFORE anything is written.
+    // Constraint validation (SPEC §7.1): [`eval_constraint`] owns the
+    // structural rules (name allowlist, type-in-layer, uniqueness). A
+    // constraint's scope is its layer; it has no attachment property or edge.
     for n in writes {
         if n.node_type != "constraint" {
             continue;
@@ -419,20 +403,6 @@ pub fn validate_change_over(
         let mut own_universe = universe.clone();
         own_universe.remove(&(layer, n.node_type.clone(), n.name.clone()));
         eval_constraint(layer, &n.name, &n.properties, &own_universe)?;
-
-        // The write-surface `attaches-to` refusal: refuse iff the written
-        // constraint carries an `attaches-to` AND (its FQN is absent from the
-        // pre-mutation snapshot — a NEW constraint — OR its value differs from
-        // the snapshot's).
-        if let Some(attaches_to) = n.properties.get(PROP_ATTACHES_TO) {
-            let key = fqn(layer, &n.node_type, &n.name);
-            match prior_attaches_to.get(&key) {
-                Some(prior) if prior.as_deref() == Some(attaches_to.as_str()) => {}
-                _ => anyhow::bail!(
-                    "constraint `{key}` declares `{PROP_ATTACHES_TO}` ({attaches_to}) — a constraint's scope is its layer (R2), so a new or changed `attaches-to` is refused; author the constraint in the tier it binds"
-                ),
-            }
-        }
     }
 
     // Pairwise symmetry over the assembled post-mutation set.
@@ -440,6 +410,37 @@ pub fn validate_change_over(
     merged.extend(writes.iter().cloned());
     check_edge_pairing(&merged)?;
     Ok(())
+}
+
+/// The **whole-model save boundary** (SPEC §8.1): validate the entire buffered
+/// model — the effective post-save node set, i.e. the durable base with the
+/// write-back buffer folded over it — before `apg session save` makes anything
+/// durable. Intermediate session state may be incomplete: admission's
+/// per-mutation checks ([`validate_change_over`]) stay per-mutation, and only
+/// this boundary enforces the whole-model minimums, so a caller can assemble
+/// related nodes and edges across several unsaved mutations.
+///
+/// The assembled `FQN → NodeFile` map is built exactly as
+/// [`ingest_nodes`](super::tree::ingest_nodes) builds it, and the rules are
+/// [`validate_cardinalities`] — the SAME shared validator lint uses, never a
+/// fork — under `scope = None` (the whole model) and [`Context::Save`] (a
+/// Component's missing `implemented-by` claim is the sole deferred obligation,
+/// SPEC §8.2). Returns one message per violation, so the caller reports the
+/// complete set.
+pub fn validate_save_model(nodes: &[NodeFile]) -> anyhow::Result<()> {
+    let assembled: BTreeMap<String, &NodeFile> = nodes
+        .iter()
+        .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
+        .collect();
+    let errors = validate_cardinalities(&assembled, None, Context::Save);
+    if errors.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "session save refused: the buffered model is inconsistent ({} whole-model violation(s)):\n  {}",
+        errors.len(),
+        errors.join("\n  ")
+    )
 }
 
 /// Write a SET of node files atomically AND delete a set of node-file paths,

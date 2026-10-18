@@ -1609,8 +1609,8 @@ mod e2e {
 
         // A sample spine query (a bare scratch repo has no authored nodes, so
         // both sides are empty — the equality is still a real assertion).
-        let spine = "MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->\
-                     (:Container)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn";
+        let spine = "MATCH (r:Requirement)-[:Drives]->(:Service)<-[:Realises]-\
+                     (:Component)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn";
         assert_eq!(
             db_rows(&spliced_db, spine),
             db_rows(&db_path, spine),

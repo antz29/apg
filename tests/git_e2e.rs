@@ -910,16 +910,17 @@ mod e2e {
         let base = testutil::commit_count(&wt);
 
         // Logical mutations 1 + 2: each routed `apg node add` is admitted into
-        // the buffer — nothing durable lands.
-        run(&["node", "add", "requirements", "requirement", "one-a"]);
+        // the buffer — nothing durable lands. A Stakeholder `requires` a
+        // Requirement is the minimal whole-model-valid pair/edge (SPEC §8.1).
+        run(&["node", "add", "requirements", "stakeholder", "one-a"]);
         run(&["node", "add", "requirements", "requirement", "one-b"]);
         // Logical mutation 3: the edge add rewrites BOTH endpoint files in the
         // buffer.
         run(&[
             "edge",
             "add",
-            "depends-on",
-            "requirements.requirement.one-a",
+            "requires",
+            "requirements.stakeholder.one-a",
             "requirements.requirement.one-b",
         ]);
 
@@ -930,9 +931,12 @@ mod e2e {
             base,
             "a live session's buffered mutations must make no commit before save"
         );
-        for name in ["one-a", "one-b"] {
+        for (layer, node_type, name) in [
+            (Layer::Requirements, "stakeholder", "one-a"),
+            (Layer::Requirements, "requirement", "one-b"),
+        ] {
             assert!(
-                !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                !layers::node_file_path(&wt_apg, layer, node_type, name).exists(),
                 "a buffered add must not write the `{name}` node file before save"
             );
         }
@@ -961,10 +965,12 @@ mod e2e {
         }
         // Both buffered node files — the two halves of the edge — land in the
         // one save commit.
-        for name in ["one-a", "one-b"] {
-            let needle = format!("apg/layers/requirements/requirement/{name}.json");
+        for needle in [
+            "apg/layers/requirements/stakeholder/one-a.json",
+            "apg/layers/requirements/requirement/one-b.json",
+        ] {
             assert!(
-                save_paths.iter().any(|p| p == &needle),
+                save_paths.iter().any(|p| p.as_str() == needle),
                 "the save commit must stage {needle}: {save_paths:?}"
             );
         }

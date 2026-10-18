@@ -56,11 +56,14 @@ pub use write::*;
 // glob re-export (E0365); a parent cannot re-export a child's `pub(crate)`
 // item either (E0603). The cross-module helpers therefore carry `pub(crate)`
 // visibility in their own submodule and are re-exported explicitly here: the
-// production siblings (`write`/`tree`) reach `layer_of` and
-// `validate_assembled_rules`, and the unit/int tests reach
+// production siblings (`write`/`tree`) reach `layer_of`,
+// `validate_assembled_rules` and — through lint — `validate_cardinalities`,
+// its [`Context`] and `validate_event_targets`; and the unit/int tests reach
 // `validate_edge`/`EDGE_KINDS`/`MATRIX` through `use super::*`.
 pub(crate) use tree::layer_of;
-pub(crate) use validate::validate_assembled_rules;
+pub(crate) use validate::{
+    Context, validate_assembled_rules, validate_cardinalities, validate_event_targets,
+};
 #[cfg(test)]
 pub(crate) use validate::{EDGE_KINDS, MATRIX, validate_edge};
 

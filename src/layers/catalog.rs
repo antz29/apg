@@ -93,8 +93,15 @@ impl Layer {
     pub const fn node_types(self) -> &'static [&'static str] {
         match self {
             Layer::Requirements => &["stakeholder", "user", "requirement", "constraint"],
-            Layer::Domain => &["group", "entity", "value", "service", "constraint"],
-            Layer::Solution => &["system", "container", "component", "person", "constraint"],
+            Layer::Domain => &["group", "actor", "entity", "value", "service", "constraint"],
+            Layer::Solution => &[
+                "system",
+                "container",
+                "component",
+                "person",
+                "role",
+                "constraint",
+            ],
             Layer::Plans => &["plan-phase", "task", "module", "file", "struct", "function"],
             Layer::Implementation => &["note", "constraint"],
             Layer::Global => &["constraint"],
@@ -129,11 +136,18 @@ pub const LAYERS_TREE: &[(&str, &[&str])] = &[
     ),
     (
         "domain",
-        &["group", "entity", "value", "service", "constraint"],
+        &["group", "actor", "entity", "value", "service", "constraint"],
     ),
     (
         "solution",
-        &["system", "container", "component", "person", "constraint"],
+        &[
+            "system",
+            "container",
+            "component",
+            "person",
+            "role",
+            "constraint",
+        ],
     ),
     ("implementation", &["note", "constraint"]),
     ("global", &["constraint"]),

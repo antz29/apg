@@ -150,7 +150,8 @@ pub fn plan_verify_at(apg_root: &Path, project: &str) -> anyhow::Result<()> {
     // `Satisfies`'d by a plan phase ([`coverage_check`]). The delta is the one
     // impure read (the merge-base git diff); the coverage decision itself is
     // pure — a pre-existing unchanged claim is exempt, and the Requirement
-    // `Drives` Domain `RealisedBy` Solution spine is never walked. Task targets
+    // `drives` Service / Component `realises` Service / `implemented-by` code
+    // spine is never walked. Task targets
     // come from the transient plan records (note-26: the DB's Task table is
     // static — the plan JSONL is the source of truth). The suggestion names the
     // verb the uncovered FQN's status calls for: a `modifies` over code that
@@ -236,8 +237,8 @@ pub struct CoverageReport {
 
 /// The merge-base durable-spec delta the pure coverage decision consumes: the
 /// branch's `apg/layers/**` against the merge-base with the repo's default
-/// branch. It is the obligation set [`coverage_check`] reads, and the carrier
-/// phase 0's linter reuses as the one source of truth for the delta gates.
+/// branch. It is the obligation set [`coverage_check`] reads behind
+/// `apg plan verify` (ordinary lint excludes the delta gates, SPEC §9.3).
 /// Pure data — the impure git diff stays in the caller (`change_set_spec_delta`)
 /// so the coverage decision itself stays a pure fn.
 ///
@@ -278,7 +279,7 @@ pub struct SpecDelta {
 /// clauses 2-3/5/6, `domain.entity.plan-coverage`). This is the impure half of
 /// the coverage rule — it opens the repo's object database and reads the base
 /// tree — yielding the pure-data [`SpecDelta`] the pure [`coverage_check`]
-/// consumes (and phase 0's linter reuses).
+/// consumes behind `apg plan verify`.
 ///
 /// The delta carries:
 ///
@@ -501,9 +502,9 @@ pub fn change_set_spec_delta(apg_root: &Path) -> anyhow::Result<SpecDelta> {
 ///    `creates` over a still-planned FQN counts exactly like a `modifies` over
 ///    real code, and a renames/moves destination counts. FQNs are compared by
 ///    language-agnostic identity, so `rust.apg.x` ≡ `apg.x`. This walk never
-///    follows the Requirement `Drives` Domain `RealisedBy` Solution spine —
-///    ONLY the merge-base delta's claims widen scope; an unchanged pre-existing
-///    claim is exempt.
+///    follows the Requirement `drives` Service / Component `realises` Service /
+///    `implemented-by` code spine — ONLY the merge-base delta's claims widen
+///    scope; an unchanged pre-existing claim is exempt.
 ///
 /// 2. **Requirement-Satisfies gate** — every requirement the delta adds or
 ///    changes must be `Satisfies`'d by at least one plan phase (the phase

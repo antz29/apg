@@ -2,23 +2,184 @@
 //! classifier.
 //!
 //! `apg spec lint` is the read-only, whole-durable-spec integrity check that
-//! sits beside review. It reports the mechanical R2/R3/R4 violations, the
-//! tier-1-3 body-budget rule, and the spec-delta gates as **errors**, and emits
-//! non-blocking advisory wording warnings for tier-1-3 node bodies a reviewer
-//! is likely to reject.
+//! sits beside review. It reports the shared mechanical validator set (the
+//! SPEC §4 edge-kind matrix, the event-only `publishes`/`subscribes` target
+//! rule, and the whole-model cardinalities — the SAME functions the write path
+//! calls, never a reimplementation), the mechanical R2/R3/R4 violations, and
+//! the tier-1-3 body-budget rule as **errors**, and emits non-blocking advisory
+//! wording warnings for tier-1-3 node bodies a reviewer is likely to reject.
 //!
-//! The delta arm reuses phase 1's merge-base durable-spec delta
-//! (`crate::plan_cmd::change_set_spec_delta` / `SpecDelta`) and its
-//! requirement-Satisfies gate (`crate::plan_cmd::coverage_check`) — one source
-//! of truth, never a reimplementation. `wording_warning` is the single
-//! definition of the tier-1-3 wording advisory: the lint and the
-//! `apg node add` / `apg node update` write hooks all consume it. The linter is
-//! read-only — it never writes.
+//! **Scope** (`--tier`) and **context** are orthogonal (SPEC §9.2): a single
+//! tier scopes which rules run (its local structure plus the typed upstream
+//! spine paths it requires), while the context is always ordinary lint (a
+//! missing Component `implemented-by` is permitted, SPEC §8.2). Save and
+//! merge-strength contexts are internal caller choices of the shared
+//! validator's `Context`, never lint flags.
+//!
+//! Ordinary lint excludes the whole-model change-set delta coverage gates
+//! (SPEC §9.3): they are plan-verification concerns, owned by
+//! `crate::plan_cmd::change_set_spec_delta` / `coverage_check` behind
+//! `apg plan verify`, never additional lint structural rules.
+//! `wording_warning` is the single definition of the tier-1-3 wording advisory:
+//! the lint and the `apg node add` / `apg node update` write hooks all consume
+//! it. The linter is read-only — it never writes.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use crate::layers::NodeFile;
+use crate::layers::{
+    Context, Layer, NodeFile, fqn, layer_of, parse_fqn, validate_cardinalities, validate_edges,
+    validate_event_targets,
+};
+
+/// The `--tier` scope of one lint run (SPEC §9.4): absent means all tiers.
+const TIER_FLAG: &str = "--tier";
+
+/// Resolve a `--tier` value to its [`Layer`] (SPEC §9.4): `requirements`,
+/// `domain`, or `solution`. `implementation` is outside the tier-1-3
+/// specification this lint surface implements, so it is a usage error rather
+/// than a silent no-op; every other value is invalid.
+fn parse_tier(value: &str) -> anyhow::Result<Layer> {
+    match value {
+        "requirements" => Ok(Layer::Requirements),
+        "domain" => Ok(Layer::Domain),
+        "solution" => Ok(Layer::Solution),
+        "implementation" => anyhow::bail!(
+            "usage: `--tier implementation` is outside the tier-1-3 spec-lint surface — expected requirements|domain|solution"
+        ),
+        other => anyhow::bail!(
+            "usage: invalid `--tier` value `{other}` — expected requirements|domain|solution"
+        ),
+    }
+}
+
+/// Parse `apg spec lint`'s flags (SPEC §9.4): the optional `--tier <tier>`
+/// scope, or all tiers when omitted. Unknown flags, a repeated `--tier`, a
+/// missing/invalid tier value, and unexpected positional arguments are usage
+/// errors.
+fn parse_lint_args(args: &[String]) -> anyhow::Result<Option<Layer>> {
+    let mut tier: Option<Layer> = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            TIER_FLAG => {
+                if tier.is_some() {
+                    anyhow::bail!("usage: `--tier` may be given at most once");
+                }
+                let Some(value) = iter.next() else {
+                    anyhow::bail!(
+                        "usage: `--tier` requires a value (requirements|domain|solution)"
+                    );
+                };
+                tier = Some(parse_tier(value)?);
+            }
+            other if other.starts_with('-') => {
+                anyhow::bail!("usage: unknown flag `{other}` for `apg spec lint`")
+            }
+            other => anyhow::bail!(
+                "usage: unexpected argument `{other}` for `apg spec lint` — the surface is `apg spec lint [--tier requirements|domain|solution]`"
+            ),
+        }
+    }
+    Ok(tier)
+}
+
+/// The assembled FQN → node-file view the shared validators take.
+fn assembled_nodes(nodes: &[NodeFile]) -> BTreeMap<String, &NodeFile> {
+    nodes
+        .iter()
+        .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
+        .collect()
+}
+
+/// The shared mechanical validator set over the durable model (SPEC §9.1):
+/// the SPEC §4 edge-kind matrix ([`validate_edges`]), the event-only
+/// `publishes`/`subscribes` target rule ([`validate_event_targets`]) plus the
+/// whole-model cardinalities ([`validate_cardinalities`]) — the SAME functions
+/// the write path calls, never a reimplementation. Returns one message per
+/// violation.
+///
+/// `tier` is the **scope** ([`Layer`] or all tiers) and `context` is the
+/// **consistency boundary** (SPEC §9.2): scope selects which tier's rules are
+/// checked, context only governs the deferred Component `implemented-by`
+/// presence rule (SPEC §8.2).
+///
+/// A scoped run validates the edges whose source is in scope (the tier's local
+/// structure) plus the typed cross-tier edges whose target is in scope and
+/// whose source is an upstream tier (the upstream spine paths the tier
+/// requires — e.g. `drives` from a Requirement into a Domain Service). Every
+/// validated edge's authored endpoints must exist in the model — endpoint
+/// existence is structural (drift), not an out-of-scope "downstream
+/// completeness" question, so a single-tier run flags a dangling authored
+/// endpoint on the edges it validates (SPEC §9.2).
+/// Pure — no I/O.
+pub(crate) fn model_errors(
+    nodes: &[NodeFile],
+    tier: Option<Layer>,
+    context: Context,
+) -> Vec<String> {
+    let assembled = assembled_nodes(nodes);
+    let mut errors: Vec<String> = Vec::new();
+
+    // Tier rank for the upstream-spine filter: requirements < domain <
+    // solution. A cross-tier edge is upstream-facing when its source tier is
+    // earlier than its in-scope target tier.
+    let rank = |layer: Layer| match layer {
+        Layer::Requirements => Some(1u8),
+        Layer::Domain => Some(2u8),
+        Layer::Solution => Some(3u8),
+        _ => None,
+    };
+
+    let mut edges: Vec<(&str, &str, &str)> = Vec::new();
+    for (from, node) in &assembled {
+        let src_layer = layer_of(&node.layer);
+        for edge in &node.out {
+            let in_scope = tier.is_none_or(|scope| src_layer == scope);
+            let upstream = tier.is_some_and(|scope| {
+                parse_fqn(&edge.target).is_ok_and(|(dst_layer, _, _)| {
+                    dst_layer == scope
+                        && rank(src_layer)
+                            .zip(rank(dst_layer))
+                            .is_some_and(|(s, d)| s < d)
+                })
+            });
+            if in_scope || upstream {
+                edges.push((edge.kind.as_str(), from.as_str(), edge.target.as_str()));
+            }
+        }
+    }
+
+    // Matrix + endpoint identity/direction. One `validate_edges` call per edge
+    // so lint reports every violation (the write path's batch stops at the
+    // first) while still running the one shared implementation.
+    let mut missing: BTreeSet<String> = BTreeSet::new();
+    for triple in &edges {
+        if let Err(err) = validate_edges(std::slice::from_ref(triple)) {
+            errors.push(err.to_string());
+        }
+        // The property half of the `publishes`/`subscribes` matrix rows: an
+        // event-only target is not expressible in `validate_edges` (it never
+        // sees properties), so run the write path's shared
+        // `validate_event_targets` over the same selected edges — the lint
+        // reports the identical message the write surface does.
+        if let Err(err) = validate_event_targets(std::slice::from_ref(triple), &assembled) {
+            errors.push(err.to_string());
+        }
+        let (kind, source, target) = *triple;
+        for endpoint in [source, target] {
+            if parse_fqn(endpoint).is_ok() && !assembled.contains_key(endpoint) {
+                missing.insert(format!(
+                    "edge `{kind}` endpoint `{endpoint}` is not a node of the model (dangling authored reference)"
+                ));
+            }
+        }
+    }
+    errors.extend(missing);
+
+    errors.extend(validate_cardinalities(&assembled, tier, context));
+    errors
+}
 
 /// The advisory message [`wording_warning`] returns for likely-flagged
 /// tier-1-3 wording — the single source of truth both the lint and the
@@ -191,14 +352,24 @@ pub(crate) fn body_budget_errors(nodes: &[NodeFile]) -> Vec<String> {
 }
 
 /// The whole-durable-spec deterministic check. Returns `(errors, advisories)`:
-/// the blocking rule/delta-gate violations first, the non-blocking tier-1-3
-/// wording advisories second. Read-only — it reads the durable node files, the
-/// merge-base git tree, and the transient plan store, and never writes.
+/// the blocking rule violations first, the non-blocking tier-1-3 wording
+/// advisories second. Read-only — it reads the durable node files and never
+/// writes, nor does it read the merge-base tree or the plan store (the
+/// change-set delta coverage gates are plan-verification concerns, SPEC §9.3).
+///
+/// `tier` is the **scope** (SPEC §9.2/§9.4): `Some(layer)` restricts the local
+/// per-node rules, the shared mechanical validator set, and the advisories to
+/// that tier plus the typed upstream spine paths it requires; `None` checks all
+/// tiers. Scope is not context: lint always enforces the ordinary-lint
+/// `Context::Lint` boundary (a missing Component `implemented-by` is
+/// permitted, SPEC §8.2).
 ///
 /// Errors (blocking — `cmd_spec` reports them and exits non-zero):
-/// - **R2** — a constraint's layer is its scope and it names no node, so a
-///   constraint carrying `attaches-to` is a violation
-///   (`global.constraint.spec-constraint-scope`);
+/// - **the shared mechanical validator set** — [`model_errors`] runs the SPEC
+///   §4 edge-kind matrix ([`validate_edges`]), the event-only
+///   `publishes`/`subscribes` target rule ([`validate_event_targets`]) and the
+///   whole-model cardinalities ([`validate_cardinalities`]), the SAME functions
+///   the write path uses (SPEC §9.1);
 /// - **R3** — a node holds at most one note (two notes detailing one target);
 /// - **R4** — each note's `details` edge names exactly one **code** identity:
 ///   the single code FQN the note deepens, never another note and never any
@@ -212,19 +383,12 @@ pub(crate) fn body_budget_errors(nodes: &[NodeFile]) -> Vec<String> {
 ///   domain, or solution layer is one sentence of at most
 ///   [`TIER_BODY_BUDGET`] characters (counted in characters, never bytes), so
 ///   an over-budget body is a violation
-///   (`requirements.requirement.spec-body-budget`);
-/// - **the delta gates** — every `implemented-by` claim the change-set delta
-///   adds, re-points, or removes is touched by a plan task, and every
-///   requirement the delta adds or changes is `Satisfies`'d by a plan phase.
-///   Both arms reuse phase 1's `plan_cmd::change_set_spec_delta` /
-///   `plan_cmd::coverage_check` — never a reimplementation.
+///   (`requirements.requirement.spec-body-budget`).
 ///
 /// Advisories (non-blocking, R1/R5): [`wording_warning`] over every tier-1-3
 /// node body except a constraint (a negative rule legitimately lives in a
-/// layer-scoped constraint), plus the delta's claim-less solution nodes. The
-/// plan records are read from every `apg/.trans/plans/*.jsonl` file, so the
-/// requirement-Satisfies gate sees this branch's phase `Satisfies` set.
-pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+/// layer-scoped constraint).
+pub fn lint(apg_root: &Path, tier: Option<Layer>) -> anyhow::Result<(Vec<String>, Vec<String>)> {
     let nodes = crate::layers::read_existing_nodes(apg_root)?;
     let mut errors: Vec<String> = Vec::new();
     let mut advisories: Vec<String> = Vec::new();
@@ -232,23 +396,22 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
     let fqn_of =
         |n: &NodeFile| crate::layers::fqn(crate::layers::layer_of(&n.layer), &n.node_type, &n.name);
 
-    // R2 — every constraint's scope is its layer; a constraint names no node,
-    // so the off-model `attaches-to` property is a violation.
-    for n in &nodes {
-        if n.node_type == "constraint" && n.properties.contains_key(crate::layers::PROP_ATTACHES_TO)
-        {
-            errors.push(format!(
-                "R2: constraint `{}` declares `{}` — a constraint's layer is its scope and it names no node",
-                fqn_of(n),
-                crate::layers::PROP_ATTACHES_TO
-            ));
-        }
-    }
+    // Scope: the per-node rules and advisories see only the selected tier's
+    // nodes; the shared validator below sees the whole model (an in-scope node's
+    // spine path resolves against it) but reports only in-scope subjects.
+    let scoped: Vec<NodeFile> = match tier {
+        Some(scope) => nodes
+            .iter()
+            .filter(|n| layer_of(&n.layer) == scope)
+            .cloned()
+            .collect(),
+        None => nodes.clone(),
+    };
 
     // R3 — a node holds at most one note: count the notes detailing each target
     // (a note's `details` out-edge) and report every target with two or more.
     let mut notes_per_target: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for n in &nodes {
+    for n in &scoped {
         if n.node_type != "note" {
             continue;
         }
@@ -277,7 +440,7 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
     // authored-node FQN (`global.constraint.note-details-shape`,
     // `domain.constraint.details-canonical-target-set`). The pure helper is the
     // single source of truth, unit-pinned in `src/spec_lint/tests.rs`.
-    errors.extend(details_shape_errors(&nodes));
+    errors.extend(details_shape_errors(&scoped));
 
     // The note-confinement rule (`global.constraint.note-implementation-only`)
     // — a note attaches only to implementation-layer code, so a `note` node in
@@ -285,63 +448,54 @@ pub fn lint(apg_root: &Path) -> anyhow::Result<(Vec<String>, Vec<String>)> {
     // `read_existing_nodes` reads only durable layer files (plans holds no note
     // type and is never serialized under `apg/layers/`), so any note whose
     // layer is not `implementation` is off-model.
-    errors.extend(note_confinement_errors(&nodes));
+    errors.extend(note_confinement_errors(&scoped));
 
     // The tier-1-3 body budget (`requirements.requirement.spec-body-budget`) —
     // every authored requirement/domain/solution body is one sentence of at
     // most [`TIER_BODY_BUDGET`] characters (counted in characters). The pure
     // helper is the single source of truth, unit-pinned in
     // `src/spec_lint/tests.rs`.
-    errors.extend(body_budget_errors(&nodes));
+    errors.extend(body_budget_errors(&scoped));
+
+    // The shared mechanical validator set (SPEC §9.1): the SPEC §4 edge matrix
+    // plus the whole-model cardinalities, implemented once in `layers::validate`
+    // and shared with the write path. Lint enforces the ordinary-lint context
+    // (SPEC §8.2): a missing Component `implemented-by` claim is permitted; a
+    // present one is validated. The full model is passed so an in-scope node's
+    // upstream spine path resolves even under a single-tier scope.
+    errors.extend(model_errors(&nodes, tier, Context::Lint));
 
     // Advisories — tier-1-3 bodies a reviewer is likely to reject (R1/R5). The
     // shared [`tier_body_warning`] selection exempts a constraint: a negative
     // rule lives legitimately in a layer-scoped constraint.
-    for n in &nodes {
+    for n in &scoped {
         if let Some(msg) = tier_body_warning(&n.layer, &n.node_type, &n.body) {
             advisories.push(format!("{}: {msg}", fqn_of(n)));
         }
-    }
-
-    // Delta gates — reuse phase 1's merge-base delta and requirement-Satisfies
-    // check; the plan records supply the phase `Satisfies` set.
-    let delta = crate::plan_cmd::change_set_spec_delta(apg_root)?;
-    let mut plan_records: Vec<crate::schema::Record> = Vec::new();
-    for path in crate::specs::plan_files(apg_root) {
-        plan_records.extend(crate::specs::read_jsonl(&path)?);
-    }
-    let coverage = crate::plan_cmd::coverage_check(&plan_records, &delta);
-    for gap in &coverage.gaps {
-        errors.push(format!(
-            "delta gate: solution node `{}` implemented-by `{}` is touched by no plan task",
-            gap.solution, gap.fqn
-        ));
-    }
-    for req in &coverage.requirement_gaps {
-        errors.push(format!(
-            "delta gate: requirement `{req}` (added or changed by this change-set) is `Satisfies`'d by no plan phase"
-        ));
-    }
-    for fqn in &coverage.no_claims {
-        advisories.push(format!(
-            "solution node `{fqn}` has no implemented-by edge (exempt — no code claims it)"
-        ));
     }
 
     Ok((errors, advisories))
 }
 
 /// `apg spec lint` — the argv handler for the `spec` subcommand. The only valid
-/// subcommand is `lint`: resolve the layout root, run [`lint`], print the
-/// non-blocking advisories and then the blocking errors to stderr, and exit
-/// non-zero (via the returned error) when any error is found; a clean spec
-/// prints a one-line summary to stdout. Any other subcommand is a usage error.
-/// `pub` so the CLI dispatch in `main` wires it (`rust.apg.main`).
+/// subcommand is `lint`: parse the optional `--tier` scope
+/// (`requirements`/`domain`/`solution`; omitted = all tiers, SPEC §9.4),
+/// resolve the layout root, run [`lint`], print the non-blocking advisories and
+/// then the blocking errors to stderr, and exit non-zero (via the returned
+/// error) when any error is found; a clean spec prints a one-line summary to
+/// stdout. Unknown flags, a repeated `--tier`, a missing/invalid tier value,
+/// and unexpected positional arguments are usage errors. Any other subcommand
+/// is a usage error. `pub` so the CLI dispatch in `main` wires it
+/// (`rust.apg.main`).
 pub fn cmd_spec(args: &[String]) -> anyhow::Result<()> {
-    match args.first().map(String::as_str) {
-        Some("lint") => {
+    let Some((sub, rest)) = args.split_first() else {
+        anyhow::bail!("usage: apg spec lint [--tier requirements|domain|solution]");
+    };
+    match sub.as_str() {
+        "lint" => {
+            let tier = parse_lint_args(rest)?;
             let apg_root = crate::plan_cmd::require_apg_root()?;
-            let (errors, advisories) = lint(&apg_root)?;
+            let (errors, advisories) = lint(&apg_root, tier)?;
             for advisory in &advisories {
                 eprintln!("apg: warning: {advisory}");
             }
@@ -357,7 +511,7 @@ pub fn cmd_spec(args: &[String]) -> anyhow::Result<()> {
             }
             anyhow::bail!("spec lint found {} violation(s)", errors.len());
         }
-        other => anyhow::bail!("usage: apg spec lint (got `{}`)", other.unwrap_or("<none>")),
+        other => anyhow::bail!("usage: apg spec lint (got `{other}`)"),
     }
 }
 

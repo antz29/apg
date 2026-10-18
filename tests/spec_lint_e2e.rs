@@ -1,7 +1,9 @@
 //! Relocated e2e tests for the `spec_lint` module: the deterministic
-//! `apg spec lint` report (R2/R3/R4 + the change-set delta gates) and the
-//! write-surface advisory/refusal hooks (`apg node add` / `apg node update`).
-//! Real I/O only; every test is `#[ignore]`d and runs through `cargo test-e2e`.
+//! `apg spec lint` report (R2/R3/R4 and the shared validator set; the
+//! change-set delta gates are plan-verification concerns and are excluded,
+//! SPEC §9.3) and the write-surface advisory/refusal hooks (`apg node add` /
+//! `apg node update`). Real I/O only; every test is `#[ignore]`d and runs
+//! through `cargo test-e2e`.
 
 mod common;
 
@@ -37,26 +39,28 @@ fn wt_write(wt: &Path, rel: &str, content: &str) {
 mod e2e {
     use super::*;
 
-    /// `apg spec lint` reports the deterministic R2/R3/R4 violations and the
-    /// change-set delta gates as ERRORS against a scratch `/tmp` repo: R2 (a
-    /// constraint carrying `attaches-to`), R3 (two notes detailing one node),
-    /// R4 (a note whose `details` names no node), a delta-added requirement no
-    /// phase `Satisfies` (named by requirement FQN), and a delta-added
-    /// `implemented-by` claim no plan task touches.
+    /// `apg spec lint` reports the deterministic R3/R4 violations and the
+    /// shared whole-model cardinalities as ERRORS against a scratch `/tmp`
+    /// repo: R3 (two notes detailing one node) and R4 (a note whose `details`
+    /// names no node). Delta coverage is NOT lint's concern (SPEC §9.3): the
+    /// delta-added requirement and the delta-added `implemented-by` claim below
+    /// are touched by no plan phase/task, and lint stays silent about them —
+    /// that gate belongs to `apg plan verify`.
     ///
-    /// Every durable `node`/`edge` write is routed through one live
-    /// `apg session start` and staged in its write-back buffer; `apg session
-    /// save` is the single durability point the lint below observes. The
-    /// read-only lint leaves the durable graph authorable.
+    /// Lint inspects a deliberately-INVALID durable model, so the fixture writes
+    /// that model through the direct `write_project` primitive rather than a
+    /// live session: the SPEC §8.1 save boundary correctly refuses to persist an
+    /// inconsistent whole model (that refusal is pinned in `node_cmd_e2e`), while
+    /// lint's job is to READ and report such a model. The read-only lint leaves
+    /// the durable store authorable.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/db.lbug/git/process); run via cargo test-e2e"]
-    fn spec_lint_reports_r2_r3_r4_and_delta_gate_violations() {
+    fn spec_lint_reports_r3_r4_and_skips_delta_gates() {
         let (apg_root, repo, wt) = wt_fixture("report");
-        let home = repo.root.join("home");
 
         // Real scanned code: the branch gets a current `db.lbug`/`graph.jsonl`
         // and the solution node's `implemented-by` target (`go.fixture.mod.Store`)
-        // resolves against the scanned universe at session admission.
+        // resolves against the scanned universe.
         wt_write(
             &wt,
             "code/seed.scan.jsonl",
@@ -64,102 +68,47 @@ mod e2e {
         );
         wt_commit(&wt, &["code/seed.scan.jsonl"], "seed code");
 
-        // R2 — a constraint carrying the off-model `attaches-to` property. It is
-        // written RAW as a pre-existing fixture: the write surface refuses a NEW
-        // attached constraint (that refusal is pinned by
-        // `new_constraint_attaches_to_is_refused`), so it cannot be routed
-        // through the session.
-        let mut bad_scope = testutil::node("requirements", "constraint", "bad-scope");
-        bad_scope.properties.insert(
-            apg::layers::PROP_ATTACHES_TO.to_string(),
-            "domain.value.thing".to_string(),
-        );
-        apg::layers::write_node(&apg_root, &bad_scope).unwrap();
-
-        // Build the real branch DB/graph.jsonl over the authored tree (the R2
-        // fixture), so the delta claim's code target resolves at admission.
+        // Build the real branch DB/graph.jsonl over the seeded code, so the
+        // fixture's `implemented-by` code target resolves against the scanned
+        // universe.
         testutil::scan_checkout(&wt).unwrap();
 
-        // Durable mutations are mandatory-session: one live `apg session start`
-        // owns the DB AND the write-back buffer, so every `node`/`edge` write
-        // below is forwarded to it and staged (NON-durable until `apg session
-        // save`).
-        let session = testutil::start_session_process(&wt, &home);
-        assert!(
-            apg::session::live_session(&apg_root),
-            "the durable mutations must run under a live session"
-        );
-
-        // A routed durable write: the client forwards to the live session
-        // (buffered), with the isolated HOME the session was started under.
-        let run = |args: &[&str]| {
-            let out = testutil::ApgCommand::new(args)
-                .cwd(&wt)
-                .env("HOME", home.to_str().unwrap())
-                .output();
-            assert!(
-                out.status.success(),
-                "{args:?} failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-        };
-
+        // The intentionally-invalid durable model, written through the direct
+        // primitive (a whole-model-invalid store cannot be persisted through a
+        // session save — the save boundary refuses it). Both are the write-time
+        // legitimate halves the lint then reports:
+        //
         // R3 — two implementation-layer notes both detailing the same code node
-        // (paired halves): notes are confined to the implementation layer and a
-        // note deepens exactly one code FQN
-        // (`global.constraint.note-details-shape`), so both notes detail the
-        // scanned `go.fixture.mod.Store` and the node holds two notes.
+        // (`global.constraint.note-details-shape`), so the code node holds two
+        // notes; R4 — an implementation-layer note whose `details` names no node.
+        let mut nodes = Vec::new();
         for name in ["first", "second"] {
-            run(&["node", "add", "implementation", "note", name]);
-            let from = format!("implementation.note.{name}");
-            run(&[
-                "edge",
-                "add",
-                "details",
-                from.as_str(),
-                "go.fixture.mod.Store",
-            ]);
+            let mut note = testutil::node("implementation", "note", name);
+            note.out = vec![testutil::out_edge("details", "go.fixture.mod.Store")];
+            nodes.push(note);
         }
+        nodes.push(testutil::node("implementation", "note", "orphan"));
 
-        // R4 — an implementation-layer note whose `details` names no node
-        // (zero out-edges).
-        run(&["node", "add", "implementation", "note", "orphan"]);
+        // Delta coverage fixtures — with no plan store the whole branch spec is
+        // the merge-base delta (an empty base degenerates to the branch spec):
+        // this requirement is delta-added with no `Satisfies`'ing phase, and
+        // this solution node's claim is delta-added with no touching task.
+        // Ordinary lint excludes those gates (SPEC §9.3); the assertions below
+        // pin their absence — `apg plan verify` owns them.
+        nodes.push(testutil::node("requirements", "requirement", "uncovered"));
+        let mut claim = testutil::node("solution", "component", "claim");
+        claim.out = vec![testutil::out_edge("implemented-by", "go.fixture.mod.Store")];
+        nodes.push(claim);
+        apg::layers::write_project(&apg_root, &nodes, &[]).unwrap();
 
-        // Delta gates — with no plan store the whole branch spec is the
-        // merge-base delta (an empty base degenerates to the branch spec): this
-        // requirement is delta-added with no `Satisfies`'ing phase, and this
-        // solution node's claim is delta-added with no touching task.
-        run(&["node", "add", "requirements", "requirement", "uncovered"]);
-        run(&["node", "add", "solution", "system", "claim"]);
-        run(&[
-            "edge",
-            "add",
-            "implemented-by",
-            "solution.system.claim",
-            "go.fixture.mod.Store",
-        ]);
-
-        // The single durability point: `apg session save` flushes the buffered
-        // violation set into node files, so the read-only lint observes them.
-        let save = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            save.status.success(),
-            "{}",
-            String::from_utf8_lossy(&save.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&save.stdout).trim(),
-            "Session saved"
-        );
-
-        // The read-only evidence: capture the constraint file's bytes.
-        let bad_scope_path = apg::layers::node_file_path(
+        // The read-only evidence: capture the delta-added requirement's bytes.
+        let uncovered_path = apg::layers::node_file_path(
             &apg_root,
             apg::layers::Layer::Requirements,
-            "constraint",
-            "bad-scope",
+            "requirement",
+            "uncovered",
         );
-        let before = std::fs::read_to_string(&bad_scope_path).unwrap();
+        let before = std::fs::read_to_string(&uncovered_path).unwrap();
 
         let out = testutil::spawn_apg(&["spec", "lint"], &wt);
         assert!(
@@ -168,66 +117,57 @@ mod e2e {
         );
         let stderr = String::from_utf8_lossy(&out.stderr);
         for needle in [
-            "R2",
-            "requirements.constraint.bad-scope",
             "R3",
             "go.fixture.mod.Store",
             "implementation.note.first",
             "R4",
             "implementation.note.orphan",
-            "delta gate",
             "requirements.requirement.uncovered",
-            "solution.system.claim",
+            "solution.component.claim",
             "go.fixture.mod.Store",
+            // The shared whole-model cardinalities surface through lint too.
+            "realises no Service",
+            "not rooted in a Stakeholder or User",
         ] {
             assert!(
                 stderr.contains(needle),
                 "spec lint stderr must report `{needle}`:\n{stderr}"
             );
         }
+        // Delta coverage is a plan-verification concern (SPEC §9.3): ordinary
+        // lint reports neither the claim-coverage gap nor the requirement-
+        // Satisfies gap, though both are present in this fixture.
+        for absent in [
+            "delta gate",
+            "is touched by no plan task",
+            "Satisfies`'d by no plan phase",
+        ] {
+            assert!(
+                !stderr.contains(absent),
+                "spec lint must exclude the delta coverage gate `{absent}`:\n{stderr}"
+            );
+        }
 
         // Read-only: the lint never rewrites a durable node file...
         assert_eq!(
-            std::fs::read_to_string(&bad_scope_path).unwrap(),
+            std::fs::read_to_string(&uncovered_path).unwrap(),
             before,
             "apg spec lint is read-only — it must not rewrite node files"
         );
 
-        // ...and the graph stays authorable afterwards: the durable add is
-        // routed through the still-live session and saved, then the session
-        // ends cleanly.
-        let added = testutil::ApgCommand::new(&["node", "add", "requirements", "user", "auditor"])
-            .cwd(&wt)
-            .env("HOME", home.to_str().unwrap())
-            .output();
+        // ...and the store stays authorable afterwards: a further direct write
+        // (a lone, whole-model-valid `solution.role`) succeeds and leaves the
+        // model as it was otherwise.
+        apg::layers::write_project(
+            &apg_root,
+            &[testutil::node("solution", "role", "auditor")],
+            &[],
+        )
+        .unwrap();
         assert!(
-            added.status.success(),
-            "the durable graph must stay authorable after lint: {}",
-            String::from_utf8_lossy(&added.stderr)
-        );
-        let resave = testutil::spawn_apg(&["session", "save"], &wt);
-        assert!(
-            resave.status.success(),
-            "{}",
-            String::from_utf8_lossy(&resave.stderr)
-        );
-
-        // End the session cleanly.
-        let end = testutil::spawn_apg(&["session", "end"], &wt);
-        assert!(
-            end.status.success(),
-            "{}",
-            String::from_utf8_lossy(&end.stderr)
-        );
-        let sout = session.child.wait_with_output().unwrap();
-        assert!(
-            sout.status.success(),
-            "{}",
-            String::from_utf8_lossy(&sout.stderr)
-        );
-        assert!(
-            !apg::session::live_session(&apg_root),
-            "the session must be ended cleanly"
+            apg::layers::node_file_path(&apg_root, apg::layers::Layer::Solution, "role", "auditor")
+                .exists(),
+            "the durable store must stay authorable after a read-only lint"
         );
 
         testutil::remove(&repo);
@@ -251,15 +191,20 @@ mod e2e {
     fn node_add_and_update_emit_advisory_wording_warning() {
         let (apg_root, repo, wt) = wt_fixture("advisory");
         let home = repo.root.join("home");
-        let path =
-            apg::layers::node_file_path(&apg_root, apg::layers::Layer::Domain, "value", "demo-val");
+        let path = apg::layers::node_file_path(
+            &apg_root,
+            apg::layers::Layer::Solution,
+            "role",
+            "demo-val",
+        );
 
         // A session always holds a database, so seed a committed baseline and
         // scan it before opening the session — the same write-then-scan pattern
-        // the crash/reclaim test uses.
+        // the crash/reclaim test uses. The base node is a lone `solution.role`
+        // (unconstrained), so the seeded store is whole-model-valid (SPEC §8.1).
         apg::layers::write_project(
             &apg_root,
-            &[testutil::node("requirements", "requirement", "seed")],
+            &[testutil::node("solution", "role", "seed")],
             &[],
         )
         .unwrap();
@@ -299,8 +244,8 @@ mod e2e {
         let out = run(&[
             "node",
             "add",
-            "domain",
-            "value",
+            "solution",
+            "role",
             "demo-val",
             "--body",
             "The old flow was synchronous.",
@@ -315,7 +260,7 @@ mod e2e {
         // completes (the success assert above).
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("apg: warning: domain.value.demo-val:"),
+            stderr.contains("apg: warning: solution.role.demo-val:"),
             "the warning must name the mutated node on the client's stderr: {stderr}"
         );
         assert!(
@@ -333,8 +278,8 @@ mod e2e {
         let out = run(&[
             "node",
             "update",
-            "domain",
-            "value",
+            "solution",
+            "role",
             "demo-val",
             "--body",
             "The service will retry the request.",
@@ -348,7 +293,7 @@ mod e2e {
         // while the update completes.
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("apg: warning: domain.value.demo-val:"),
+            stderr.contains("apg: warning: solution.role.demo-val:"),
             "the warning must name the mutated node on the client's stderr: {stderr}"
         );
         assert!(
@@ -356,9 +301,13 @@ mod e2e {
             "the wording advisory must reach the client's stderr: {stderr}"
         );
         save(&wt);
-        let back =
-            apg::layers::read_node_file(&apg_root, apg::layers::Layer::Domain, "value", "demo-val")
-                .unwrap();
+        let back = apg::layers::read_node_file(
+            &apg_root,
+            apg::layers::Layer::Solution,
+            "role",
+            "demo-val",
+        )
+        .unwrap();
         assert_eq!(back.body, "The service will retry the request.");
 
         // Plain present-tense wording is accepted too; the body is stored. Its
@@ -367,8 +316,8 @@ mod e2e {
         let out = run(&[
             "node",
             "update",
-            "domain",
-            "value",
+            "solution",
+            "role",
             "demo-val",
             "--body",
             "The service stores the record.",
@@ -384,9 +333,13 @@ mod e2e {
             "plain wording must not print a warning: {stderr}"
         );
         save(&wt);
-        let back =
-            apg::layers::read_node_file(&apg_root, apg::layers::Layer::Domain, "value", "demo-val")
-                .unwrap();
+        let back = apg::layers::read_node_file(
+            &apg_root,
+            apg::layers::Layer::Solution,
+            "role",
+            "demo-val",
+        )
+        .unwrap();
         assert_eq!(back.body, "The service stores the record.");
 
         // End the session cleanly.
@@ -410,62 +363,216 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// The write-surface `attaches-to` refusal (`rust.apg.layers.write.validate_change`),
-    /// exercised under mandatory-session: a NEW constraint carrying
-    /// `attaches-to` is REFUSED by the session coordinator's admission
-    /// validation with no node file left behind; an EXISTING attached
-    /// constraint stays authorable (`node update` of its body succeeds,
-    /// because its `attaches-to` value is unchanged); and a NEW constraint
-    /// WITHOUT `attaches-to` (a plain tier-scoped `domain.constraint.*`)
-    /// SUCCEEDS and lands its file.
-    ///
-    /// No sub-scenario exercises an edge targeting the constraint: under the
-    /// code-only `details` model no durable edge kind admits an authored
-    /// constraint as an endpoint, so the former `details <note> <constraint>`
-    /// half-write is no longer expressible and the note it required is dropped.
+    /// Drop one out-edge (and its matching in half) from an in-memory model,
+    /// keeping the fixture pairing-consistent for `write_project`.
+    fn drop_edge(
+        nodes: &mut [apg::layers::NodeFile],
+        layer: &str,
+        node_type: &str,
+        name: &str,
+        kind: &str,
+        target: &str,
+    ) {
+        let source = format!("{layer}.{node_type}.{name}");
+        nodes
+            .iter_mut()
+            .find(|n| n.layer == layer && n.node_type == node_type && n.name == name)
+            .unwrap_or_else(|| panic!("fixture node {source} is missing"))
+            .out
+            .retain(|e| !(e.kind == kind && e.target == target));
+        nodes
+            .iter_mut()
+            .find(|n| format!("{}.{}.{}", n.layer, n.node_type, n.name) == target)
+            .unwrap_or_else(|| panic!("fixture node {target} is missing"))
+            .in_edges
+            .retain(|e| !(e.kind == kind && e.source == source));
+    }
+
+    /// The `--tier` scope is separate from context (SPEC §9.2/§9.4): a Domain
+    /// cardinality violation is reported by domain and all-tier lint and is
+    /// invisible to requirements lint; every tier scope passes the complete
+    /// new-model fixture. The shared validator's cardinality errors surface
+    /// through the binary, and the usage errors are refused.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
+    fn spec_lint_tier_scopes_domain_violations() {
+        let repo = Repo::new("speclint-tier-domain");
+        let wt = repo.start_project("foo");
+        let apg_root = wt.join(specs::LAYOUT);
+        testutil::seed_valid_model(&apg_root);
+
+        // The complete model passes every single-tier scope (a missing
+        // Component implemented-by is the sole deferred obligation, §8.2).
+        for tier in ["requirements", "domain", "solution"] {
+            let out = testutil::spawn_apg(&["spec", "lint", "--tier", tier], &wt);
+            assert!(
+                out.status.success(),
+                "the complete model must pass `--tier {tier}`: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        // Break the domain: the driving Requirement no longer points at its
+        // Service. Both endpoint files are rewritten so pairing stays intact.
+        let mut nodes = testutil::valid_model();
+        drop_edge(
+            &mut nodes,
+            "requirements",
+            "requirement",
+            "place-order",
+            "drives",
+            "domain.service.place-order",
+        );
+        let changed: Vec<apg::layers::NodeFile> = nodes
+            .into_iter()
+            .filter(|n| {
+                (n.layer == "requirements"
+                    && n.node_type == "requirement"
+                    && n.name == "place-order")
+                    || (n.layer == "domain" && n.node_type == "service" && n.name == "place-order")
+            })
+            .collect();
+        apg::layers::write_project(&apg_root, &changed, &[]).unwrap();
+
+        let rule = "Service `domain.service.place-order` is driven by no Requirement";
+        let domain = testutil::spawn_apg(&["spec", "lint", "--tier", "domain"], &wt);
+        assert!(!domain.status.success());
+        assert!(
+            String::from_utf8_lossy(&domain.stderr).contains(rule),
+            "domain lint must report the domain cardinality violation: {}",
+            String::from_utf8_lossy(&domain.stderr)
+        );
+
+        let requirements = testutil::spawn_apg(&["spec", "lint", "--tier", "requirements"], &wt);
+        assert!(
+            requirements.status.success(),
+            "requirements lint must not require domain completeness: {}",
+            String::from_utf8_lossy(&requirements.stderr)
+        );
+
+        // All-tier lint reports the same shared-validator error.
+        let all = testutil::spawn_apg(&["spec", "lint"], &wt);
+        assert!(!all.status.success());
+        assert!(
+            String::from_utf8_lossy(&all.stderr).contains(rule),
+            "all-tier lint must report the same error: {}",
+            String::from_utf8_lossy(&all.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// Scope, mirror image (SPEC §9.2): a Requirements cardinality violation is
+    /// reported by requirements and all-tier lint and is invisible to domain
+    /// lint.
+    #[test]
+    #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
+    fn spec_lint_tier_scopes_requirements_violations() {
+        let repo = Repo::new("speclint-tier-req");
+        let wt = repo.start_project("foo");
+        let apg_root = wt.join(specs::LAYOUT);
+        testutil::seed_valid_model(&apg_root);
+
+        // The User no longer requires a Requirement (its only `requires` edge).
+        let mut nodes = testutil::valid_model();
+        drop_edge(
+            &mut nodes,
+            "requirements",
+            "user",
+            "customer",
+            "requires",
+            "requirements.requirement.place-order",
+        );
+        let changed: Vec<apg::layers::NodeFile> = nodes
+            .into_iter()
+            .filter(|n| {
+                (n.layer == "requirements" && n.node_type == "user" && n.name == "customer")
+                    || (n.layer == "requirements"
+                        && n.node_type == "requirement"
+                        && n.name == "place-order")
+            })
+            .collect();
+        apg::layers::write_project(&apg_root, &changed, &[]).unwrap();
+
+        let rule = "`requirements.user.customer` requires no Requirement";
+        let requirements = testutil::spawn_apg(&["spec", "lint", "--tier", "requirements"], &wt);
+        assert!(!requirements.status.success());
+        assert!(
+            String::from_utf8_lossy(&requirements.stderr).contains(rule),
+            "requirements lint must report the requirements violation: {}",
+            String::from_utf8_lossy(&requirements.stderr)
+        );
+
+        let domain = testutil::spawn_apg(&["spec", "lint", "--tier", "domain"], &wt);
+        assert!(
+            domain.status.success(),
+            "domain lint must not require requirements completeness: {}",
+            String::from_utf8_lossy(&domain.stderr)
+        );
+
+        testutil::remove(&repo);
+    }
+
+    /// The `apg spec lint` usage surface (SPEC §9.4): unknown flags, a repeated
+    /// `--tier`, a missing/invalid value, and unexpected positionals are usage
+    /// errors; `--tier implementation` is outside the tier-1-3 document.
+    #[test]
+    #[ignore = "e2e tier: real I/O (process/git); run via cargo test-e2e"]
+    fn spec_lint_refuses_bad_tier_usage() {
+        let repo = Repo::new("speclint-tier-usage");
+        let wt = repo.start_project("foo");
+        for args in [
+            vec!["spec", "lint", "--tier"],
+            vec!["spec", "lint", "--tier", "implementation"],
+            vec!["spec", "lint", "--tier", "bogus"],
+            vec!["spec", "lint", "--tier", "domain", "--tier", "solution"],
+            vec!["spec", "lint", "--bogus"],
+            vec!["spec", "lint", "extra"],
+        ] {
+            let out = testutil::spawn_apg(&args, &wt);
+            assert!(!out.status.success(), "`{args:?}` must be a usage error");
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains("usage:"),
+                "`{args:?}` must report a usage error: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        testutil::remove(&repo);
+    }
+
+    /// A tier-scoped constraint is prose-only and needs no attachment: a NEW
+    /// `domain.constraint.*` with an arbitrary metadata property is ADMITTED
+    /// (the model has no constraint-attachment edge or property), and its node
+    /// file lands on save.
     ///
     /// Every durable `node` write is routed through one live `apg session
     /// start` and staged in its write-back buffer; `apg session save` is the
     /// single durability point the file/read-back assertions below observe.
     #[test]
     #[ignore = "e2e tier: real I/O (node files/git/process); run via cargo test-e2e"]
-    fn new_constraint_attaches_to_is_refused() {
+    fn tier_scoped_constraint_with_metadata_is_authorable() {
         let (apg_root, repo, wt) = wt_fixture("attaches");
         let home = repo.root.join("home");
 
-        // Seed an EXISTING attached constraint RAW and commit it: the write
-        // surface refuses a NEW attached constraint, so the legacy one predates
-        // the mutation under test.
-        let mut legacy = testutil::node("requirements", "constraint", "legacy");
-        legacy.properties.insert(
-            apg::layers::PROP_ATTACHES_TO.to_string(),
-            "domain.value.thing".to_string(),
-        );
-        apg::layers::write_node(&apg_root, &legacy).unwrap();
-        wt_commit(
-            &wt,
-            &["apg/layers/requirements/constraint/legacy.json"],
-            "seed the legacy attached constraint",
-        );
-
-        // A session always holds a database, so build one from the committed
-        // baseline (the legacy attached constraint) before opening the session —
-        // the same write-then-scan pattern the crash/reclaim test uses. The
-        // DB's reconstructed base carries the legacy node, so the existing-
-        // constraint admission assertions still bite.
+        // A session always holds a database, so seed a committed baseline and
+        // scan it before opening the session. The base node is a lone
+        // `solution.role` — an unconstrained type, so the seeded store is
+        // whole-model-valid (SPEC §8.1) on its own.
+        apg::layers::write_project(
+            &apg_root,
+            &[testutil::node("solution", "role", "seed")],
+            &[],
+        )
+        .unwrap();
         testutil::scan_checkout(&wt).unwrap();
 
-        // Durable mutations are mandatory-session: one live `apg session start`
-        // owns the DB AND the write-back buffer, so every `node` write below is
-        // forwarded to it and staged (NON-durable until `apg session save`).
+        // Durable mutations are mandatory-session.
         let session = testutil::start_session_process(&wt, &home);
         assert!(
             apg::session::live_session(&apg_root),
             "the durable mutations must run under a live session"
         );
 
-        // A routed durable write: the client forwards to the live session
-        // (buffered), with the isolated HOME the session was started under.
         let run = |args: &[&str]| -> std::process::Output {
             testutil::ApgCommand::new(args)
                 .cwd(&wt)
@@ -473,69 +580,26 @@ mod e2e {
                 .output()
         };
 
-        // A NEW constraint carrying `attaches-to` is REFUSED at admission — no
-        // buffered write, so no file can ever land.
-        let fresh_path = apg::layers::node_file_path(
-            &apg_root,
-            apg::layers::Layer::Requirements,
-            "constraint",
-            "fresh",
-        );
+        // A NEW domain-tier constraint, with arbitrary metadata, is accepted.
+        let law_path =
+            apg::layers::node_file_path(&apg_root, apg::layers::Layer::Domain, "constraint", "law");
         let out = run(&[
             "node",
             "add",
-            "requirements",
+            "domain",
             "constraint",
-            "fresh",
+            "law",
             "--property",
-            "attaches-to=domain.value.thing",
-        ]);
-        assert!(
-            !out.status.success(),
-            "a NEW attached constraint must be refused"
-        );
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(
-            stderr.contains("attaches-to"),
-            "the refusal must name `attaches-to`:\n{stderr}"
-        );
-        assert!(
-            !fresh_path.exists(),
-            "a refused constraint write must leave no node file behind"
-        );
-
-        // An EXISTING attached constraint stays authorable: `node update` of its
-        // body (attaches-to unchanged) is ADMITTED into the buffer.
-        let out = run(&[
-            "node",
-            "update",
-            "requirements",
-            "constraint",
-            "legacy",
-            "--body",
-            "The rule holds.",
+            "scope=global",
         ]);
         assert!(
             out.status.success(),
-            "an existing attached constraint must stay updatable: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-
-        // The positive case: a NEW constraint WITHOUT `attaches-to` is ADMITTED
-        // — the refusal targets only a newly-added attached constraint, never
-        // every new constraint.
-        let law_path =
-            apg::layers::node_file_path(&apg_root, apg::layers::Layer::Domain, "constraint", "law");
-        let out = run(&["node", "add", "domain", "constraint", "law"]);
-        assert!(
-            out.status.success(),
-            "a plain tier-scoped constraint must be authorable: {}",
+            "a tier-scoped constraint must be authorable: {}",
             String::from_utf8_lossy(&out.stderr)
         );
 
         // The single durability point: `apg session save` flushes the buffered
-        // set (the legacy update and the plain law) into node files in one
-        // commit.
+        // set (the plain law) into node files in one commit.
         let save = testutil::spawn_apg(&["session", "save"], &wt);
         assert!(
             save.status.success(),
@@ -547,30 +611,17 @@ mod e2e {
             "Session saved"
         );
 
-        // Durable result: the refused write left no file, while the legacy
-        // update (its `attaches-to` preserved) and the plain constraint landed.
-        assert!(
-            !fresh_path.exists(),
-            "a refused constraint write must leave no node file behind after save"
-        );
-        let back = apg::layers::read_node_file(
-            &apg_root,
-            apg::layers::Layer::Requirements,
-            "constraint",
-            "legacy",
-        )
-        .unwrap();
-        assert_eq!(
-            back.properties
-                .get(apg::layers::PROP_ATTACHES_TO)
-                .map(String::as_str),
-            Some("domain.value.thing"),
-            "the update must preserve the existing `attaches-to`"
-        );
-        assert_eq!(back.body, "The rule holds.");
+        // Durable result: the constraint's node file landed with its metadata.
         assert!(
             law_path.exists(),
             "the plain constraint's node file must land"
+        );
+        let back =
+            apg::layers::read_node_file(&apg_root, apg::layers::Layer::Domain, "constraint", "law")
+                .unwrap();
+        assert_eq!(
+            back.properties.get("scope").map(String::as_str),
+            Some("global")
         );
 
         // End the session cleanly.

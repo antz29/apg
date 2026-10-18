@@ -4,11 +4,6 @@ use apg::cache::*;
 use apg::graph::{Graph, Location, Node, NodeKind};
 use std::path::{Path, PathBuf};
 
-fn tmp_root(dir: &Path) -> PathBuf {
-    // The store root is nested; remove the whole scratch.
-    dir.parent().unwrap().to_path_buf()
-}
-
 /// e2e tier -- real I/O: every test here writes files / the content-addressed
 /// store under the temp dir. Each is `#[ignore]`d, so a plain `cargo test`
 /// never runs one; the only entry point is the named guard `cargo test-e2e`
@@ -153,7 +148,7 @@ mod e2e {
             ..Default::default()
         });
         assert!(!store.has("go", "a.go", "oid-a", &inputs, &drifted));
-        let _ = std::fs::remove_dir_all(tmp_root(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

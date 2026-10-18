@@ -389,8 +389,6 @@ mod e2e {
         g.details.insert(("foo/note-1".into(), "foo/plan".into()));
         g.reviews
             .insert(("foo/feedback-1".into(), "foo/spec.R1".into()));
-        g.depends_on
-            .insert(("foo/spec.R1".into(), "foo/spec.R1".into()));
         g.satisfies
             .insert(("foo/plan.phase-1".into(), "foo/spec.R1".into()));
 
@@ -495,11 +493,6 @@ mod e2e {
             .unwrap()
             .to_string();
         assert!(out.contains("foo/spec.R1"), "reviews: {out}");
-        let out = conn
-            .query("MATCH (a:Requirement)-[:DependsOn]->(b:Requirement) RETURN b.fqn")
-            .unwrap()
-            .to_string();
-        assert!(out.contains("foo/spec.R1"), "depends_on: {out}");
         let out = conn
             .query("MATCH (:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN r.fqn")
             .unwrap()
@@ -781,6 +774,20 @@ mod e2e {
                 ..sp(NodeKind::Person)
             },
         );
+        n(
+            "domain.actor.buyer",
+            Node {
+                name: Some("buyer".to_string()),
+                ..sp(NodeKind::Actor)
+            },
+        );
+        n(
+            "solution.role.app-service",
+            Node {
+                name: Some("app-service".to_string()),
+                ..sp(NodeKind::Role)
+            },
+        );
         // Tier 4: the code the component is implemented by.
         n(
             "mod.Gateway",
@@ -790,18 +797,10 @@ mod e2e {
                 ..Node::default()
             },
         );
-        // The §3.3 hierarchy + spine.
+        // The §3.3 hierarchy + target-model §4 spine.
         g.contains.extend([
-            (
-                "requirements.stakeholder.ops".into(),
-                "requirements.requirement.auth".into(),
-            ),
-            (
-                "requirements.user.customer".into(),
-                "requirements.requirement.auth".into(),
-            ),
             ("domain.group.sales".into(), "domain.entity.user".into()),
-            ("domain.group.sales".into(), "domain.value.money".into()),
+            ("domain.entity.user".into(), "domain.value.money".into()),
             (
                 "domain.group.sales".into(),
                 "domain.service.checkout".into(),
@@ -815,21 +814,41 @@ mod e2e {
                 "solution.component.gateway".into(),
             ),
         ]);
+        g.requires.insert((
+            "requirements.stakeholder.ops".to_string(),
+            "requirements.requirement.auth".to_string(),
+        ));
+        g.requires.insert((
+            "requirements.user.customer".to_string(),
+            "requirements.requirement.auth".to_string(),
+        ));
         g.drives.insert((
             "requirements.requirement.auth".to_string(),
-            "domain.group.sales".to_string(),
+            "domain.service.checkout".to_string(),
         ));
         g.represents.insert((
+            "domain.actor.buyer".to_string(),
             "requirements.user.customer".to_string(),
-            "domain.entity.user".to_string(),
         ));
         g.represents.insert((
-            "domain.entity.user".to_string(),
             "solution.person.alice".to_string(),
+            "domain.actor.buyer".to_string(),
         ));
-        g.realised_by.insert((
-            "domain.group.sales".to_string(),
-            "solution.system.platform".to_string(),
+        g.uses.insert((
+            "solution.person.alice".to_string(),
+            "solution.component.gateway".to_string(),
+        ));
+        g.realises.insert((
+            "solution.component.gateway".to_string(),
+            "domain.service.checkout".to_string(),
+        ));
+        g.reads.insert((
+            "domain.service.checkout".to_string(),
+            "domain.entity.user".to_string(),
+        ));
+        g.is_role.insert((
+            "solution.container.api".to_string(),
+            "solution.role.app-service".to_string(),
         ));
         g.spec_implemented_by.insert((
             "solution.component.gateway".to_string(),
@@ -863,7 +882,10 @@ mod e2e {
         for (name, a, b) in [
             ("drives", &back.drives, &g.drives),
             ("represents", &back.represents, &g.represents),
-            ("realised_by", &back.realised_by, &g.realised_by),
+            ("requires", &back.requires, &g.requires),
+            ("reads", &back.reads, &g.reads),
+            ("is_role", &back.is_role, &g.is_role),
+            ("realises", &back.realises, &g.realises),
             (
                 "spec_implemented_by",
                 &back.spec_implemented_by,
@@ -902,6 +924,8 @@ mod e2e {
             ("Container", "solution.container.api"),
             ("Component", "solution.component.gateway"),
             ("Person", "solution.person.alice"),
+            ("Actor", "domain.actor.buyer"),
+            ("Role", "solution.role.app-service"),
         ] {
             let out = conn
                 .query(&format!("MATCH (n:{label} {{fqn: '{fqn}'}}) RETURN n.fqn"))
@@ -914,7 +938,7 @@ mod e2e {
         }
         let out = conn
             .query(
-                "MATCH (:Requirement)-[:Drives]->(g:DomainGroup)-[:RealisedBy]->(:System)-[:Contains]->(:Container)-[:Contains]->(c:Component)-[:SpecImplementedBy]->(impl) RETURN impl.fqn",
+                "MATCH (:Stakeholder)-[:Requires]->(:Requirement)-[:Drives]->(:Service)<-[:Realises]-(c:Component)-[:SpecImplementedBy]->(impl) RETURN impl.fqn",
             )
             .unwrap()
             .to_string();

@@ -285,17 +285,37 @@ pub enum Record {
         properties: NodeProperties,
     },
 
-    /// `{"type":"constraint","fqn":"<layer>.constraint.<name>","name":"...","body":"...","attaches-to":"..."}`
-    /// `Constraint` — declarative prose ("X must hold"); `attaches-to` is the
-    /// optional FQN of the one tier-1–3 node a local constraint constrains
-    /// (a global constraint carries none).
+    /// `{"type":"actor","fqn":"domain.actor.<name>","name":"...","body":"..."}`
+    /// `Actor` — a domain participation identity representing Users.
+    Actor {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
+    },
+
+    /// `{"type":"role","fqn":"solution.role.<name>","name":"...","body":"..."}`
+    /// `Role` — an architectural classification assigned to Containers and
+    /// Components.
+    Role {
+        fqn: String,
+        name: String,
+        #[serde(default)]
+        body: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
+    },
+
+    /// `{"type":"constraint","fqn":"<layer>.constraint.<name>","name":"...","body":"..."}`
+    /// `Constraint` — declarative prose ("X must hold"); its layer declares
+    /// its tier scope, so it carries no attachment property.
     Constraint {
         fqn: String,
         name: String,
         #[serde(default)]
         body: String,
-        #[serde(rename = "attaches-to", default)]
-        attaches_to: String,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         properties: NodeProperties,
     },
@@ -379,12 +399,6 @@ pub enum Record {
         from: String,
         to: String,
     },
-    DependsOn {
-        from: String,
-        to: String,
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        properties: NodeProperties,
-    },
     Gates {
         from: String,
         to: String,
@@ -395,9 +409,9 @@ pub enum Record {
     },
 
     // --- Spine edges (GraphModel-SPEC.md; PHASE_01) ---
-    // End-to-end traceability from why to code. The §3.3 matrix (apg-projects)
-    // keeps `Drives` (Requirement → Group/Entity/Value/Service) and
-    // `Represents` (User → Entity, Entity → Person).
+    // End-to-end traceability from why to code. The target-model matrix keeps
+    // `Drives` (Requirement → Service) and `Represents` (Actor → User,
+    // Person → Actor).
     Drives {
         from: String,
         to: String,
@@ -411,25 +425,14 @@ pub enum Record {
         properties: NodeProperties,
     },
 
-    // --- New-model §3.3 spec edges (apg-projects). The kebab spellings are the
-    // §3.3 wire names — `Record`'s `rename_all = "snake_case"` would give
-    // `realised_by`/`implemented_by`, which is NOT the §3.3 spelling, so these
-    // carry explicit renames. `contains`/`drives`/`represents`/`details`/
-    // `calls`/`uses`/`depends-on` reuse the existing record variants and are
-    // routed by endpoint node-kind at load time (`depends-on` is the existing
-    // `DependsOn` Requirement→Requirement). ---
-    /// `{"type":"realised-by","from":"domain.service.<name>","to":"solution.system.<name>"}`
-    /// Domain Group/Entity/Service → Solution System/Container/Component.
-    #[serde(rename = "realised-by")]
-    RealisedBy {
-        from: String,
-        to: String,
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        properties: NodeProperties,
-    },
+    // --- New-model §3.3 spec edges (apg-projects). `implemented-by` is not
+    // the §3.3 spelling `Record`'s `snake_case` rename would give, so it
+    // carries an explicit rename. `contains`/`drives`/`represents`/`details`/
+    // `calls`/`uses` reuse the existing record variants and are routed by
+    // endpoint node-kind at load time. ---
     /// `{"type":"implemented-by","from":"solution.component.<name>","to":"<code fqn>"}`
-    /// Solution System/Container/Component → code FQN (validated vs the
-    /// scanned graph by `layers::validate_code_refs`).
+    /// Solution Component → code FQN (validated vs the scanned graph by
+    /// `layers::validate_code_refs`).
     #[serde(rename = "implemented-by")]
     SpecImplementedBy {
         from: String,
@@ -448,6 +451,52 @@ pub enum Record {
     /// `{"type":"subscribes","from":"domain.service.<name>","to":"domain.entity.<name>"}`
     /// Service → Entity (kind: event).
     Subscribes {
+        from: String,
+        to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
+    },
+
+    // --- Target-model relationships (schema-rework SPEC §4). Single-word
+    // kinds take `rename_all = "snake_case"`; the hyphenated spellings carry
+    // explicit renames. `requires`/`reads`/`writes` are reused across tiers
+    // and routed by endpoint node-kind at load time. ---
+    /// `{"type":"requires","from":"requirements.stakeholder.<name>","to":"requirements.requirement.<name>"}`
+    /// Stakeholder/User → Requirement.
+    Requires {
+        from: String,
+        to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
+    },
+    /// `{"type":"reads","from":"domain.service.<name>","to":"domain.entity.<name>"}`
+    /// Service → Entity (own leaf Group only).
+    Reads {
+        from: String,
+        to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
+    },
+    /// `{"type":"writes","from":"domain.service.<name>","to":"domain.entity.<name>"}`
+    /// Service → Entity (own leaf Group only).
+    Writes {
+        from: String,
+        to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
+    },
+    /// `{"type":"is-role","from":"solution.container.<name>","to":"solution.role.<name>"}`
+    /// Container/Component → Role.
+    #[serde(rename = "is-role")]
+    IsRole {
+        from: String,
+        to: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        properties: NodeProperties,
+    },
+    /// `{"type":"realises","from":"solution.component.<name>","to":"domain.service.<name>"}`
+    /// Component → Service.
+    Realises {
         from: String,
         to: String,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

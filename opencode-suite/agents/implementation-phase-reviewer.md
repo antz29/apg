@@ -331,14 +331,15 @@ reviewer:    apg_review_reject <f>                              → status = ope
   authored node labels (six layers; FQN `<layer>.<type>.<name>`; the name is
   the identity), authored by the spec-writer via the `apg_node`/`apg_edge`
   tools. In the graph it appears as labels: `Stakeholder`, `User`,
-  `Requirement`, `Note`, `Constraint` (requirements); `DomainGroup` (the domain
-  `group` type — the label differs from the FQN segment), `Entity`, `Value`,
-  `Service` (domain); `System`, `Container`, `Component`, `Person` (solution);
-  `Constraint`/`Note` attach to code (implementation) and guard the graph
-  (global).
-- The **spine** is strictly sequential: `Stakeholder ⊃ Requirement —Drives→
-  Domain —RealisedBy→ Solution —SpecImplementedBy→ code`. (`implemented-by` is
-  the authored edge kind; `SpecImplementedBy` is the DB rel-table name.)
+  `Requirement`, `Constraint` (requirements); `DomainGroup` (the domain
+  `group` type — the label differs from the FQN segment), `Actor`, `Entity`,
+  `Value`, `Service` (domain); `System`, `Container`, `Component`, `Person`,
+  `Role` (solution); `Constraint`/`Note` attach to code (implementation) and
+  guard the graph (global).
+- The **spine** is strictly sequential: `Stakeholder/User —Requires→
+  Requirement —Drives→ Service ←Realises— Component —SpecImplementedBy→ code`.
+  (`implemented-by` is the authored edge kind; `SpecImplementedBy` is the DB
+  rel-table name.)
 - **Constraints are prose** — the binary validates structure at write time;
   whether the prose holds is assessed by review. A constraint's layer is its
   scope (global or a tier: R2) and it names no node; constraints are the
@@ -366,7 +367,7 @@ Useful query patterns (via `apg_query`):
 -- the phase's Satisfies claims
 MATCH (pp:PlanPhase)-[:Satisfies]->(r:Requirement) RETURN pp.fqn, r.fqn, r.body;
 -- the spine from a requirement to code
-MATCH (r:Requirement)-[:Drives]->(d)-[:RealisedBy]->(s)-[:SpecImplementedBy]->(c) RETURN r.fqn, d.fqn, s.fqn, c.fqn;
+MATCH (r:Requirement)-[:Drives]->(s:Service)<-[:Realises]-(c:Component)-[:SpecImplementedBy]->(code) RETURN r.fqn, s.fqn, c.fqn, code.fqn;
 -- tier-scoped constraints (acceptance criteria) on the requirement tier
 MATCH (c:Constraint) WHERE c.fqn STARTS WITH 'requirements.constraint.' RETURN c.fqn, c.body;
 -- the node's note (at most one, R3/R4)
@@ -380,7 +381,7 @@ MATCH (fn:Function {fqn: '<fqn>'}) RETURN fn.path, fn.start_line, fn.end_line, f
 ## The durable-spec rules (R1–R5)
 
 The deterministic pre-pass (see *The review procedure* below; granted via
-`apg_spec_lint: allow`) runs `apg_spec_lint` first: treat its R2/R3/R4 errors on
+`apg_spec_lint: allow`) runs `apg_spec_lint` first: treat its R3/R4 errors on
 changed nodes as **blocking**.
 Then every phase review and the final implementation review examine **every
 changed spec node** semantically against the rules:

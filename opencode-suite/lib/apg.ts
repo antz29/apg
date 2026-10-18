@@ -593,7 +593,7 @@ export async function isPendingAnchor(context: ToolContext, fqn: string): Promis
     )
     if (out.split("\n").filter((l) => l.length > 0).length > 1) return true
   }
-  for (const label of ["System", "Container", "Component"]) {
+  for (const label of ["System", "Container", "Component", "Person", "Role"]) {
     const out = await runCypher(context, `MATCH (n:${label} {fqn: ${lit(fqn)}}) RETURN n.fqn`)
     if (out.split("\n").filter((l) => l.length > 0).length > 1) return true
   }

@@ -97,7 +97,6 @@ mod unit {
             r#"{"type":"contains","from":"foo/spec","to":"foo/spec.R1"}"#,
             r#"{"type":"details","from":"foo/note-1","to":"foo/spec"}"#,
             r#"{"type":"reviews","from":"foo/feedback-1","to":"foo/spec.R1"}"#,
-            r#"{"type":"depends_on","from":"foo/spec.R2","to":"foo/spec.R1"}"#,
             r#"{"type":"gates","from":"foo/plan.phase-02","to":"foo/plan.phase-01"}"#,
             r#"{"type":"satisfies","from":"foo/plan.phase-01","to":"foo/spec.R1"}"#,
         ];
@@ -105,9 +104,9 @@ mod unit {
             let _ = parse(l);
         }
         assert!(
-            matches!(parse(lines[4]), Record::Gates { from, to } if from == "foo/plan.phase-02" && to == "foo/plan.phase-01")
+            matches!(parse(lines[3]), Record::Gates { from, to } if from == "foo/plan.phase-02" && to == "foo/plan.phase-01")
         );
-        assert!(matches!(parse(lines[5]), Record::Satisfies { to, .. } if to == "foo/spec.R1"));
+        assert!(matches!(parse(lines[4]), Record::Satisfies { to, .. } if to == "foo/spec.R1"));
     }
 
     #[test]
@@ -194,7 +193,7 @@ mod unit {
             r#"{"type":"value","fqn":"domain.value.money","name":"money","body":"..."}"#,
             r#"{"type":"service","fqn":"domain.service.checkout","name":"checkout","body":"..."}"#,
             r#"{"type":"person","fqn":"solution.person.alice","name":"alice","body":"..."}"#,
-            r#"{"type":"constraint","fqn":"domain.constraint.law","name":"law","body":"X must hold","attaches-to":"domain.entity.customer"}"#,
+            r#"{"type":"constraint","fqn":"domain.constraint.law","name":"law","body":"X must hold"}"#,
         ];
         for l in lines {
             let _ = parse(l);
@@ -215,11 +214,8 @@ mod unit {
             other => panic!("expected group, got {other:?}"),
         }
         match parse(lines[5]) {
-            Record::Constraint {
-                fqn, attaches_to, ..
-            } => {
+            Record::Constraint { fqn, .. } => {
                 assert_eq!(fqn, "domain.constraint.law");
-                assert_eq!(attaches_to, "domain.entity.customer");
             }
             other => panic!("expected constraint, got {other:?}"),
         }
@@ -229,17 +225,14 @@ mod unit {
             matches!(g, Record::Group { ref attribute, ref root, ref body, .. }
             if attribute.is_empty() && root.is_empty() && body.is_empty())
         );
-        let c = parse(r#"{"type":"constraint","fqn":"global.constraint.law","name":"law"}"#);
-        assert!(matches!(c, Record::Constraint { ref attaches_to, .. } if attaches_to.is_empty()));
+        let _ = parse(r#"{"type":"constraint","fqn":"global.constraint.law","name":"law"}"#);
     }
 
     #[test]
     fn new_model_edge_records_use_kebab_wire_names() {
-        // The §3.3 matrix edges that are NEW verbs serialize with kebab wire
-        // names, NOT the snake_case `rename_all` spelling. `depends-on` is not
-        // here — it reuses the existing `DependsOn` (Requirement→Requirement).
+        // The §3.3 matrix edge that is a NEW verb (`implemented-by`) serializes
+        // with its kebab wire name, NOT the snake_case `rename_all` spelling.
         let lines = [
-            r#"{"type":"realised-by","from":"domain.group.sales","to":"solution.system.payments"}"#,
             r#"{"type":"implemented-by","from":"solution.component.checkout","to":"apg.layers.ingest_tree"}"#,
             r#"{"type":"publishes","from":"domain.service.orders","to":"domain.entity.order-placed"}"#,
             r#"{"type":"subscribes","from":"domain.service.shipping","to":"domain.entity.order-placed"}"#,
@@ -248,25 +241,57 @@ mod unit {
             let _ = parse(l);
         }
         assert!(
-            matches!(parse(lines[0]), Record::RealisedBy { ref from, ref to, .. }
-            if from == "domain.group.sales" && to == "solution.system.payments")
-        );
-        assert!(
-            matches!(parse(lines[1]), Record::SpecImplementedBy { ref to, .. }
+            matches!(parse(lines[0]), Record::SpecImplementedBy { ref to, .. }
             if to == "apg.layers.ingest_tree")
         );
         assert!(
-            matches!(parse(lines[2]), Record::Publishes { ref from, ref to, .. }
+            matches!(parse(lines[1]), Record::Publishes { ref from, ref to, .. }
             if from == "domain.service.orders" && to == "domain.entity.order-placed")
         );
-        assert!(matches!(parse(lines[3]), Record::Subscribes { ref to, .. }
+        assert!(matches!(parse(lines[2]), Record::Subscribes { ref to, .. }
             if to == "domain.entity.order-placed"));
         // Serialization round-trips the kebab wire name (not snake_case).
         let s = serde_json::to_string(&parse(lines[0])).unwrap();
-        assert!(s.contains(r#""type":"realised-by""#), "{s}");
-        assert!(!s.contains("realised_by"), "{s}");
-        let s = serde_json::to_string(&parse(lines[1])).unwrap();
         assert!(s.contains(r#""type":"implemented-by""#), "{s}");
         assert!(!s.contains("implemented_by"), "{s}");
+    }
+
+    /// The target-model vocabulary (schema-rework SPEC §3.2/§4): the `actor`/
+    /// `role` node records parse, and `is-role`/`realises` serialize with their
+    /// kebab wire names (not the snake_case `rename_all` spelling).
+    #[test]
+    fn target_model_node_and_edge_records_parse() {
+        let actor =
+            parse(r#"{"type":"actor","fqn":"domain.actor.buyer","name":"buyer","body":"..."}"#);
+        assert!(matches!(actor, Record::Actor { ref fqn, .. } if fqn == "domain.actor.buyer"));
+        let role = parse(
+            r#"{"type":"role","fqn":"solution.role.app-service","name":"app-service","body":"..."}"#,
+        );
+        assert!(matches!(role, Record::Role { ref fqn, .. } if fqn == "solution.role.app-service"));
+        for (line, kind) in [
+            (
+                r#"{"type":"requires","from":"requirements.user.u1","to":"requirements.requirement.r1"}"#,
+                "requires",
+            ),
+            (
+                r#"{"type":"reads","from":"domain.service.s1","to":"domain.entity.e1"}"#,
+                "reads",
+            ),
+            (
+                r#"{"type":"writes","from":"domain.service.s1","to":"domain.entity.e1"}"#,
+                "writes",
+            ),
+            (
+                r#"{"type":"is-role","from":"solution.container.c1","to":"solution.role.r1"}"#,
+                "is-role",
+            ),
+            (
+                r#"{"type":"realises","from":"solution.component.c1","to":"domain.service.s1"}"#,
+                "realises",
+            ),
+        ] {
+            let wire = serde_json::to_string(&parse(line)).unwrap();
+            assert!(wire.contains(&format!(r#""type":"{kind}""#)), "{wire}");
+        }
     }
 }

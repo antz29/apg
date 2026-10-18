@@ -519,10 +519,9 @@ impl ArtifactDb {
     /// **Fidelity.** The projection is lossless for the durable authored set:
     /// the serialized-properties column carries the full node/edge properties
     /// map (arbitrary and empty-valued keys, and an `Entity`'s `kind`), and the
-    /// named typed columns (kind/feature/attribute/root/attaches_to/…) are
-    /// merged back over it — no key is duplicated or lost. Edge properties are
-    /// read from the rel row and attached to **both** halves, so a node file
-    /// round-trips exactly.
+    /// named typed columns (kind/feature/attribute/root/…) are merged back over
+    /// it — no key is duplicated or lost. Edge properties are read from the rel
+    /// row and attached to **both** halves, so a node file round-trips exactly.
     pub fn node_files_from_db(&self) -> anyhow::Result<Vec<NodeFile>> {
         let conn = self.conn()?;
         let mut by_fqn: BTreeMap<String, NodeFile> = BTreeMap::new();
@@ -739,11 +738,6 @@ fn durable_edge_record(
             to,
             properties,
         },
-        "RealisedBy" => Record::RealisedBy {
-            from,
-            to,
-            properties,
-        },
         "SpecImplementedBy" => Record::SpecImplementedBy {
             from,
             to,
@@ -764,7 +758,27 @@ fn durable_edge_record(
             to,
             properties,
         },
-        "DependsOn" => Record::DependsOn {
+        "Requires" => Record::Requires {
+            from,
+            to,
+            properties,
+        },
+        "Reads" => Record::Reads {
+            from,
+            to,
+            properties,
+        },
+        "Writes" => Record::Writes {
+            from,
+            to,
+            properties,
+        },
+        "IsRole" => Record::IsRole {
+            from,
+            to,
+            properties,
+        },
+        "Realises" => Record::Realises {
             from,
             to,
             properties,
@@ -836,12 +850,7 @@ const DURABLE_NODE_TABLES: &[DurableNodeTable] = &[
         "body",
         &[("kind", "kind")],
     ),
-    (
-        "Constraint",
-        &["name", "body", "attaches_to", "properties"],
-        "body",
-        &[("attaches_to", "attaches-to")],
-    ),
+    ("Constraint", &["name", "body", "properties"], "body", &[]),
     (
         "DomainGroup",
         &["name", "attribute", "root", "body", "properties"],
@@ -860,21 +869,26 @@ const DURABLE_NODE_TABLES: &[DurableNodeTable] = &[
     ),
     ("Component", &["name", "body", "properties"], "body", &[]),
     ("Person", &["name", "body", "properties"], "body", &[]),
+    ("Actor", &["name", "body", "properties"], "body", &[]),
+    ("Role", &["name", "body", "properties"], "body", &[]),
 ];
 
 /// Every durable authored edge rel table and the node-file edge kind it
 /// carries. The shared `Contains`/`Calls`/`Uses` tables also hold code rows; a
 /// row whose source is not a durable node is skipped, so only authored pairs
 /// are reconstructed.
-const DURABLE_EDGE_TABLES: [(&str, &str); 11] = [
+const DURABLE_EDGE_TABLES: [(&str, &str); 14] = [
     ("Contains", "contains"),
     ("Drives", "drives"),
-    ("RealisedBy", "realised-by"),
     ("SpecImplementedBy", "implemented-by"),
     ("Calls", "calls"),
     ("Publishes", "publishes"),
     ("Subscribes", "subscribes"),
-    ("DependsOn", "depends-on"),
+    ("Requires", "requires"),
+    ("Reads", "reads"),
+    ("Writes", "writes"),
+    ("IsRole", "is-role"),
+    ("Realises", "realises"),
     ("Uses", "uses"),
     ("Represents", "represents"),
     ("Details", "details"),

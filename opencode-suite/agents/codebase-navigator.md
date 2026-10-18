@@ -447,8 +447,8 @@ identity). The six layers:
 | layer | types |
 |---|---|
 | `requirements` | `stakeholder`, `user`, `requirement`, `constraint` |
-| `domain` | `group`, `entity` (kind `entity`\|`event`), `value`, `service`, `constraint` |
-| `solution` | `system`, `container` (kind `app`\|`service`\|`db`\|`queue`), `component`, `person`, `constraint` |
+| `domain` | `group`, `actor`, `entity` (kind `entity`\|`event`), `value`, `service`, `constraint` |
+| `solution` | `system`, `container` (kind `app`\|`service`\|`db`\|`queue`), `component`, `person`, `role`, `constraint` |
 | `implementation` | `note`, `constraint` (attach-only — `note` attaches only to implementation-layer code; the real nodes are scanned code) |
 | `global` | `constraint` (the laws) |
 
@@ -457,19 +457,19 @@ whether the prose holds is assessed by review, never executed. The spine
 threads the tiers end to end:
 
 ```
-Stakeholder ⊃ Requirement —drives→ Domain —realised-by→ Solution —implemented-by→ code
+Stakeholder/User —requires→ Requirement —drives→ Service ←realises— Component —implemented-by→ code
 ```
 
-Authored edge kinds (SPEC §3.3): `contains`, `drives`, `realised-by`,
-`implemented-by`, `calls`, `publishes`, `subscribes`, `depends-on`, `uses`,
-`represents`, `details`. Transient plan/review edges: `gates`, `satisfies`,
-`reviews`.
+Authored edge kinds (SPEC §4): `requires`, `contains`, `drives`, `reads`,
+`writes`, `calls`, `publishes`, `subscribes`, `realises`, `is-role`, `uses`,
+`represents`, `implemented-by`, `details`. Transient plan/review edges: `gates`,
+`satisfies`, `reviews`.
 
 | Label             | Key properties                          | Description                          |
 |-------------------|-----------------------------------------|--------------------------------------|
 | Stakeholder / User / Requirement | fqn, body, feature (metadata) | Tier 1 — the why (`requirements.requirement.<name>`) |
-| Group / Entity / Value / Service | fqn, body, kind/attribute (metadata) | Tier 2 — the what (domain) |
-| System / Container / Component / Person | fqn, body, kind (metadata) | Tier 3 — the how (C4 solution) |
+| Group / Actor / Entity / Value / Service | fqn, body, kind/attribute (metadata) | Tier 2 — the what (domain) |
+| System / Container / Component / Person / Role | fqn, body, kind (metadata) | Tier 3 — the how (C4 solution) |
 | Constraint        | fqn, body                               | Prose laws; a constraint's layer is its scope (global or a tier) |
 | Note              | fqn, body                               | Implementation-layer only: deepens the single code FQN it explains; `details` names exactly one code FQN (R3/R4) |
 | Plan / PlanPhase / Task | fqn, title/strategy/number/deliverable, tier/status | The transient plan (`<project>/plan…`) |
@@ -517,7 +517,7 @@ up empty.
 | Units a diff hunk touches | `apg_hunk {path, startLine, endLine}` |
 | What couldn't the scanner resolve for a unit/file? | `apg_unresolved {fqn}` or `{path}` |
 | The authored spec (layer nodes) | `apg_query "MATCH (n) WHERE n.fqn STARTS WITH 'requirements.' RETURN n.fqn, n.body"` etc. per layer |
-| Trace the spine to code | `apg_query "MATCH (r:Requirement)-[:Drives]->(:Entity)-[:RealisedBy]->(:Container)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn"` |
+| Trace the spine to code | `apg_query "MATCH (r:Requirement)-[:Drives]->(:Service)<-[:Realises]-(:Component)-[:SpecImplementedBy]->(c) RETURN r.fqn, c.fqn"` |
 | Plan overview / phases / tasks | `apg_plan`, `apg_plan_phases`, `apg_plan_tasks` |
 | Pre-merge coherence gate | `apg_plan_verify {project}` |
 | List review feedback | `apg_review {target?}` |
@@ -886,11 +886,12 @@ When the user supplies an existing spec — a prose `SPEC.md` in the platform
 template style, or any requirements description — read it (via `read` and/or
 `apg_query`) and **propose a spec graph structure** that represents it: the
 decomposition into `requirements.requirement.<name>` nodes (grouped by
-`feature` metadata), the tier-2 domain nodes (`group`/`entity`/`value`/
-`service`), the tier-3 solution nodes (`system`/`container`/`component`/
-`person`), the **spine** edges (`drives` → `realised-by` → `implemented-by`),
-`constraint` nodes for the laws, `note` nodes that deepen implementation-layer
-code (at most one per code identity, R3/R4), and `depends-on`/`contains` edges.
+`feature` metadata), the tier-2 domain nodes (`group`/`actor`/`entity`/
+`value`/`service`), the tier-3 solution nodes (`system`/`container`/
+`component`/`person`/`role`), the **spine** edges (`requires` → `drives` →
+`realises` → `implemented-by`), `constraint` nodes for the laws, `note` nodes
+that deepen implementation-layer code (at most one per code identity, R3/R4),
+and `contains` edges.
 Not-yet-built code is not a spec placeholder:
 the spec's solution tier ends at `implemented-by` code FQNs that resolve in
 the graph, and tier-4 additions are declared as **planned Implementation
@@ -905,7 +906,7 @@ call — and materializes it via the `apg_node`/`apg_edge` tools to the present
 truth of the source). You never author the graph yourself.
 
 After the spec-writer returns, **verify the materialization**: re-check the
-spine and `depends-on` edges against the source (no lost requirements, no
+spine and `contains` edges against the source (no lost requirements, no
 cycles) via `apg_query`.
 
 ### Tips

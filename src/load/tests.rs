@@ -13,11 +13,12 @@ mod unit {
     fn merge_guard_sees_authored_calls_and_uses_but_the_load_path_does_not() {
         let pairs = rel_table_pairs();
         assert!(pairs.contains(&("Calls", "Service", "Service")));
-        assert!(pairs.contains(&("Uses", "Person", "System")));
+        assert!(pairs.contains(&("Calls", "Actor", "Service")));
+        assert!(pairs.contains(&("Uses", "Person", "Component")));
         assert!(
             !spec_rel_pairs().iter().any(|(t, f, to)| {
                 (*t == "Calls" && *f == NodeKind::Service && *to == NodeKind::Service)
-                    || (*t == "Uses" && *f == NodeKind::Person && *to == NodeKind::System)
+                    || (*t == "Uses" && *f == NodeKind::Person && *to == NodeKind::Component)
             }),
             "spec_rel_pairs feeds build_load_files/copy_from — the authored pairs must stay out"
         );

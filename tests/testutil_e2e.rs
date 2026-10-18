@@ -63,7 +63,7 @@ mod e2e {
 
         // --- (1) CLEAN RUN: a node saved before the kill loses nothing. -----
         let session = start_session_process(&wt, &home);
-        let saved_add = ApgCommand::new(&["node", "add", "requirements", "requirement", "saved"])
+        let saved_add = ApgCommand::new(&["node", "add", "solution", "role", "saved"])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
             .output();
@@ -85,7 +85,7 @@ mod e2e {
             "Session saved"
         );
         assert!(
-            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "saved").exists(),
+            layers::node_file_path(&wt_apg, Layer::Solution, "role", "saved").exists(),
             "save must write the saved node file"
         );
         let saved_commits = commit_count(&wt);
@@ -113,7 +113,7 @@ mod e2e {
         let q_saved = spawn_apg(
             &[
                 "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.saved'}) RETURN count(n)",
+                "MATCH (n:Role {fqn: 'solution.role.saved'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -131,7 +131,7 @@ mod e2e {
             "the rebuilt index must keep the saved node"
         );
         assert!(
-            layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "saved").exists(),
+            layers::node_file_path(&wt_apg, Layer::Solution, "role", "saved").exists(),
             "the recovery must not lose the saved node file"
         );
         assert_eq!(
@@ -164,7 +164,7 @@ mod e2e {
         // One routed mutation is admitted into the live session's write-back
         // buffer and projected into the held index, so it must NOT touch
         // `apg/layers/**` before a save — but a routed read DOES see it.
-        let add = ApgCommand::new(&["node", "add", "requirements", "requirement", "survivor"])
+        let add = ApgCommand::new(&["node", "add", "solution", "role", "survivor"])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
             .output();
@@ -176,7 +176,7 @@ mod e2e {
         let routed = spawn_apg(
             &[
                 "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.survivor'}) RETURN count(n)",
+                "MATCH (n:Role {fqn: 'solution.role.survivor'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -194,8 +194,7 @@ mod e2e {
             "the live session's index must carry the buffered projection"
         );
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "survivor")
-                .exists(),
+            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "survivor").exists(),
             "a buffered add must not write a node file before save"
         );
 
@@ -224,8 +223,7 @@ mod e2e {
         // (a) no half-written node file: the buffered `survivor` never became
         // durable, so the store is still exactly its last saved state.
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "survivor")
-                .exists(),
+            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "survivor").exists(),
             "the killed session left a durable node file it should not have"
         );
         // (b) no paired edge half mismatched (the store still pairs cleanly).
@@ -236,11 +234,11 @@ mod e2e {
         {
             let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
             assert!(
-                db.has_node("requirements.requirement.saved"),
+                db.has_node("solution.role.saved"),
                 "the stale index must carry the last-saved node"
             );
             assert!(
-                db.has_node("requirements.requirement.survivor"),
+                db.has_node("solution.role.survivor"),
                 "the stale index must carry the phantom buffered projection"
             );
         }
@@ -252,7 +250,7 @@ mod e2e {
         // phantom projection is never served.
         let session2 = start_session_process(&wt, &home);
         let q = spawn_apg(
-            &["query", "MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn"],
+            &["query", "MATCH (n:Role) RETURN n.fqn ORDER BY n.fqn"],
             &wt,
         );
         assert!(
@@ -268,7 +266,7 @@ mod e2e {
             .collect();
         assert_eq!(
             rows,
-            vec!["n.fqn", "requirements.requirement.saved"],
+            vec!["n.fqn", "solution.role.saved"],
             "the recovered query must serve only the last-saved state"
         );
         assert!(
@@ -276,8 +274,7 @@ mod e2e {
             "the recovered query must never serve the phantom projection"
         );
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "survivor")
-                .exists(),
+            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "survivor").exists(),
             "the discarded buffer must never write a node file"
         );
         assert_eq!(
@@ -322,7 +319,7 @@ mod e2e {
         // One routed mutation is admitted into the live session's write-back
         // buffer and projected into the held index — a routed read sees it,
         // but it never reaches `apg/layers/**` before a save.
-        let add = ApgCommand::new(&["node", "add", "requirements", "requirement", "phantom"])
+        let add = ApgCommand::new(&["node", "add", "solution", "role", "phantom"])
             .cwd(&wt)
             .env("HOME", home.to_str().unwrap())
             .output();
@@ -334,7 +331,7 @@ mod e2e {
         let routed = spawn_apg(
             &[
                 "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.phantom'}) RETURN count(n)",
+                "MATCH (n:Role {fqn: 'solution.role.phantom'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -352,8 +349,7 @@ mod e2e {
             "the live session's index must carry the buffered projection"
         );
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "phantom")
-                .exists(),
+            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "phantom").exists(),
             "a buffered add must not write a node file before save"
         );
 
@@ -384,11 +380,11 @@ mod e2e {
         {
             let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
             assert!(
-                db.has_node("requirements.requirement.saved"),
+                db.has_node("solution.role.saved"),
                 "the stale index must carry the last-saved node"
             );
             assert!(
-                db.has_node("requirements.requirement.phantom"),
+                db.has_node("solution.role.phantom"),
                 "the stale index must carry the phantom buffered projection"
             );
         }
@@ -417,7 +413,7 @@ mod e2e {
         // The rebuilt index serves only the last-saved durable state: the
         // phantom is gone, the saved node survives.
         let q = spawn_apg(
-            &["query", "MATCH (n:Requirement) RETURN n.fqn ORDER BY n.fqn"],
+            &["query", "MATCH (n:Role) RETURN n.fqn ORDER BY n.fqn"],
             &wt,
         );
         assert!(
@@ -433,7 +429,7 @@ mod e2e {
             .collect();
         assert_eq!(
             rows,
-            vec!["n.fqn", "requirements.requirement.saved"],
+            vec!["n.fqn", "solution.role.saved"],
             "the save-triggered rebuild must serve only the last-saved state"
         );
         assert!(
@@ -443,8 +439,7 @@ mod e2e {
 
         // The durable store, commits and HEAD stay at their last-saved state.
         assert!(
-            !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", "phantom")
-                .exists(),
+            !layers::node_file_path(&wt_apg, Layer::Solution, "role", "phantom").exists(),
             "the discarded buffer must never write a node file"
         );
         assert_eq!(
@@ -493,9 +488,10 @@ mod e2e {
         let session = start_session_process(&wt, &home);
 
         // Two routed node adds and the routed edge between them, all admitted
-        // into the live session's write-back buffer.
-        for name in ["crash-a", "crash-b"] {
-            let add = ApgCommand::new(&["node", "add", "requirements", "requirement", name])
+        // into the live session's write-back buffer. A Stakeholder `requires` a
+        // Requirement — the minimal whole-model-valid pair/edge (SPEC §8.1).
+        for (node_type, name) in [("stakeholder", "crash-a"), ("requirement", "crash-b")] {
+            let add = ApgCommand::new(&["node", "add", "requirements", node_type, name])
                 .cwd(&wt)
                 .env("HOME", home.to_str().unwrap())
                 .output();
@@ -508,8 +504,8 @@ mod e2e {
         let edge = ApgCommand::new(&[
             "edge",
             "add",
-            "depends-on",
-            "requirements.requirement.crash-a",
+            "requires",
+            "requirements.stakeholder.crash-a",
             "requirements.requirement.crash-b",
         ])
         .cwd(&wt)
@@ -535,9 +531,9 @@ mod e2e {
         };
         let before_commits = commit_count(&wt);
         let before_head = head_sha(&wt);
-        for name in ["crash-a", "crash-b"] {
+        for (node_type, name) in [("stakeholder", "crash-a"), ("requirement", "crash-b")] {
             assert!(
-                !layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                !layers::node_file_path(&wt_apg, Layer::Requirements, node_type, name).exists(),
                 "a buffered add must not write a node file for `{name}` before save"
             );
         }
@@ -564,9 +560,9 @@ mod e2e {
             String::from_utf8_lossy(&save.stdout).trim(),
             "Session saved"
         );
-        for name in ["crash-a", "crash-b"] {
+        for (node_type, name) in [("stakeholder", "crash-a"), ("requirement", "crash-b")] {
             assert!(
-                layers::node_file_path(&wt_apg, Layer::Requirements, "requirement", name).exists(),
+                layers::node_file_path(&wt_apg, Layer::Requirements, node_type, name).exists(),
                 "save must write the `{name}` node file"
             );
         }
@@ -588,9 +584,8 @@ mod e2e {
 
         // (c) no half-written node file after the crash: every expected file
         // parses with its identity intact.
-        for name in ["crash-a", "crash-b"] {
-            let nf =
-                layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", name).unwrap();
+        for (node_type, name) in [("stakeholder", "crash-a"), ("requirement", "crash-b")] {
+            let nf = layers::read_node_file(&wt_apg, Layer::Requirements, node_type, name).unwrap();
             assert_eq!(nf.name, name, "node file {name} must be complete");
         }
 
@@ -599,19 +594,19 @@ mod e2e {
         let all = layers::read_existing_nodes(&wt_apg).unwrap();
         layers::check_edge_pairing(&all).unwrap();
         let a =
-            layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "crash-a").unwrap();
+            layers::read_node_file(&wt_apg, Layer::Requirements, "stakeholder", "crash-a").unwrap();
         assert!(
-            a.out.iter().any(
-                |oe| oe.kind == "depends-on" && oe.target == "requirements.requirement.crash-b"
-            ),
+            a.out
+                .iter()
+                .any(|oe| oe.kind == "requires" && oe.target == "requirements.requirement.crash-b"),
             "the source out-half must be present and complete"
         );
         let b =
             layers::read_node_file(&wt_apg, Layer::Requirements, "requirement", "crash-b").unwrap();
         assert!(
-            b.in_edges.iter().any(
-                |ie| ie.kind == "depends-on" && ie.source == "requirements.requirement.crash-a"
-            ),
+            b.in_edges
+                .iter()
+                .any(|ie| ie.kind == "requires" && ie.source == "requirements.stakeholder.crash-a"),
             "the target in-half must be present and match the out-half"
         );
 
@@ -619,7 +614,7 @@ mod e2e {
         // (the SIGKILL released the OS lock) and the derived DB is consistent
         // with the saved store.
         let db = apg::artifacts::ArtifactDb::open(&wt_apg).unwrap();
-        assert!(db.has_node("requirements.requirement.crash-a"));
+        assert!(db.has_node("requirements.stakeholder.crash-a"));
         assert!(db.has_node("requirements.requirement.crash-b"));
         drop(db);
 

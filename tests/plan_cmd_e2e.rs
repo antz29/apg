@@ -3059,7 +3059,7 @@ mod e2e {
     fn plan_verify_at_ignores_spine_and_supplies_merge_base_delta() {
         // plan_verify_at computes the MERGE-BASE delta against the repo's
         // default branch and hands it to coverage_check. It does NOT walk the
-        // Requirement Drives Domain RealisedBy Solution spine and does NOT read
+        // Requirement Drives Service Realises Component spine and does NOT read
         // the phase Satisfies set for implemented-by coverage: an UNCHANGED
         // pre-existing claim (committed on `main` BEFORE the branch) is exempt
         // and forces no gap, while the branch's changed claim must be touched.
@@ -3109,7 +3109,7 @@ mod e2e {
         db_at(&wt);
         let apg_root = wt.join(specs::LAYOUT);
 
-        // The branch's requirement (the Satisfies-gate input), an entity it
+        // The branch's requirement (the Satisfies-gate input), a service it
         // drives (the spine is IGNORED by coverage), and two branch-added
         // solution nodes: one with a claim (required), one with no claim (a
         // `no_claims` warning, never a blocker).
@@ -3118,18 +3118,9 @@ mod e2e {
             "requirements",
             "requirement",
             "cr",
-            &[("drives", "domain.entity.plan-record")],
+            &[("drives", "domain.service.plan-record")],
         );
-        write_node_file(
-            &apg_root,
-            "domain",
-            "entity",
-            "plan-record",
-            &[(
-                "realised-by",
-                "solution.component.coverage-spine-validation",
-            )],
-        );
+        write_node_file(&apg_root, "domain", "service", "plan-record", &[]);
         write_solution_node(
             &apg_root,
             "component",
@@ -3141,7 +3132,7 @@ mod e2e {
             &wt,
             &[
                 "apg/layers/requirements/requirement/cr.json",
-                "apg/layers/domain/entity/plan-record.json",
+                "apg/layers/domain/service/plan-record.json",
                 "apg/layers/solution/component/coverage-spine-validation.json",
                 "apg/layers/solution/component/plan-store-atomic-rewrite.json",
             ],

@@ -240,7 +240,7 @@ reviewer:    apg_review_reject <f>                                  → status =
 ## The durable-spec rules (R1–R5)
 
 The deterministic `apg_spec_lint` pass (already granted and specified above)
-runs **first**: treat its R2/R3/R4 errors on changed nodes as **blocking**.
+runs **first**: treat its R3/R4 errors on changed nodes as **blocking**.
 Then review **every changed spec node** semantically against the rules:
 
 1. **R1 — positive present truth.** A tier-1–3 node states a positive,

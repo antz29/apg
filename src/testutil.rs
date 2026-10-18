@@ -364,6 +364,222 @@ pub fn in_edge(kind: &str, source: &str) -> InEdge {
     }
 }
 
+/// A complete, cardinality-consistent new-model fixture (SPEC §4): one leaf
+/// Group with a Service and an Entity (owning a Value), a Stakeholder/User
+/// requiring the driving Requirement, an Actor representing the User and
+/// calling the Service, a System/Container/Component with one Role, and a
+/// Person representing the Actor and using the Component.
+///
+/// Every out-edge carries its matching in half, so the fixture also satisfies
+/// the in/out pairing invariant and can be written straight to `apg/layers/`
+/// with `layers::write_project` (a pure builder shared by the unit/int and
+/// e2e tiers).
+pub fn valid_model() -> Vec<NodeFile> {
+    let mut nodes = vec![
+        node("requirements", "stakeholder", "owner"),
+        node("requirements", "user", "customer"),
+        node("requirements", "requirement", "place-order"),
+        node("requirements", "requirement", "refund"),
+        node("domain", "group", "ordering"),
+        node("domain", "service", "place-order"),
+        node("domain", "entity", "order"),
+        node("domain", "value", "order-number"),
+        node("domain", "actor", "buyer"),
+        node("solution", "system", "commerce"),
+        node("solution", "container", "order-api"),
+        node("solution", "component", "order-handler"),
+        node("solution", "role", "application-service"),
+        node("solution", "person", "web-customer"),
+    ];
+    let edges: &[(&str, &str, &str, &str, &str)] = &[
+        (
+            "stakeholder",
+            "owner",
+            "requires",
+            "requirements.requirement.place-order",
+            "requirements",
+        ),
+        (
+            "user",
+            "customer",
+            "requires",
+            "requirements.requirement.place-order",
+            "requirements",
+        ),
+        (
+            "requirement",
+            "place-order",
+            "contains",
+            "requirements.requirement.refund",
+            "requirements",
+        ),
+        (
+            "requirement",
+            "place-order",
+            "drives",
+            "domain.service.place-order",
+            "requirements",
+        ),
+        (
+            "group",
+            "ordering",
+            "contains",
+            "domain.service.place-order",
+            "domain",
+        ),
+        (
+            "group",
+            "ordering",
+            "contains",
+            "domain.entity.order",
+            "domain",
+        ),
+        (
+            "entity",
+            "order",
+            "contains",
+            "domain.value.order-number",
+            "domain",
+        ),
+        (
+            "actor",
+            "buyer",
+            "represents",
+            "requirements.user.customer",
+            "domain",
+        ),
+        (
+            "actor",
+            "buyer",
+            "calls",
+            "domain.service.place-order",
+            "domain",
+        ),
+        (
+            "service",
+            "place-order",
+            "reads",
+            "domain.entity.order",
+            "domain",
+        ),
+        (
+            "service",
+            "place-order",
+            "writes",
+            "domain.entity.order",
+            "domain",
+        ),
+        (
+            "system",
+            "commerce",
+            "contains",
+            "solution.container.order-api",
+            "solution",
+        ),
+        (
+            "container",
+            "order-api",
+            "contains",
+            "solution.component.order-handler",
+            "solution",
+        ),
+        (
+            "container",
+            "order-api",
+            "is-role",
+            "solution.role.application-service",
+            "solution",
+        ),
+        (
+            "component",
+            "order-handler",
+            "is-role",
+            "solution.role.application-service",
+            "solution",
+        ),
+        (
+            "component",
+            "order-handler",
+            "realises",
+            "domain.service.place-order",
+            "solution",
+        ),
+        (
+            "person",
+            "web-customer",
+            "represents",
+            "domain.actor.buyer",
+            "solution",
+        ),
+        (
+            "person",
+            "web-customer",
+            "uses",
+            "solution.component.order-handler",
+            "solution",
+        ),
+    ];
+    // The one required node property in the fixture: an Entity's `kind`
+    // (SPEC §4 node rules).
+    nodes
+        .iter_mut()
+        .find(|n| n.node_type == "entity")
+        .unwrap()
+        .properties
+        .insert("kind".to_string(), "entity".to_string());
+    for &(node_type, name, kind, target, layer) in edges {
+        add_out(&mut nodes, layer, node_type, name, kind, target);
+    }
+    // Mirror every out half into the target's in-edge list: an edge appears in
+    // BOTH endpoint files (SPEC §4.1).
+    let outs: Vec<(String, String, String)> = nodes
+        .iter()
+        .flat_map(|n| {
+            let from = format!("{}.{}.{}", n.layer, n.node_type, n.name);
+            n.out
+                .iter()
+                .map(move |e| (from.clone(), e.kind.clone(), e.target.clone()))
+        })
+        .collect();
+    for (source, kind, target) in outs {
+        nodes
+            .iter_mut()
+            .find(|n| format!("{}.{}.{}", n.layer, n.node_type, n.name) == target)
+            .unwrap_or_else(|| panic!("fixture node {target} is missing"))
+            .in_edges
+            .push(in_edge(&kind, &source));
+    }
+    nodes
+}
+
+/// Seed [`valid_model`] into `apg_root`'s durable `apg/layers/**` tree through
+/// the direct [`write_project`](crate::layers::write_project) path — the shared
+/// whole-model-valid base the SPEC §8.1 save boundary requires of a semantic
+/// fixture (a test then adds its specific nodes/edges on top). A pure I/O
+/// helper shared by the relocated e2e crates; it panics on any write failure so
+/// a broken fixture is loud.
+pub fn seed_valid_model(apg_root: &Path) {
+    crate::layers::write_project(apg_root, &valid_model(), &[]).unwrap();
+}
+
+/// Push an out-edge onto the fixture node identified by its
+/// (layer, type, name) — a helper of [`valid_model`], never a test.
+fn add_out(
+    nodes: &mut [NodeFile],
+    layer: &str,
+    node_type: &str,
+    name: &str,
+    kind: &str,
+    target: &str,
+) {
+    nodes
+        .iter_mut()
+        .find(|n| n.layer == layer && n.node_type == node_type && n.name == name)
+        .unwrap_or_else(|| panic!("fixture node {layer}.{node_type}.{name} is missing"))
+        .out
+        .push(out_edge(kind, target));
+}
+
 /// A caller-supplied code-FQN universe: the scanned set or the planned set,
 /// both plain [`BTreeSet`]s of opaque FQN strings. A pure builder shared by the
 /// unit/int and e2e tiers.
@@ -681,6 +897,28 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
                     },
                 );
             }
+            "actor" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Actor,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
+            "role" => {
+                g.nodes.insert(
+                    s("fqn"),
+                    Node {
+                        kind: NodeKind::Role,
+                        name: o("name"),
+                        body: o("body"),
+                        ..Node::default()
+                    },
+                );
+            }
             "constraint" => {
                 g.nodes.insert(
                     s("fqn"),
@@ -688,7 +926,6 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
                         kind: NodeKind::Constraint,
                         name: o("name"),
                         body: o("body"),
-                        attaches_to: o("attaches-to"),
                         ..Node::default()
                     },
                 );
@@ -715,9 +952,6 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
             "reviews" => {
                 g.reviews.insert((s("from"), s("to")));
             }
-            "depends_on" => {
-                g.depends_on.insert((s("from"), s("to")));
-            }
             "gates" => {
                 g.gates.insert((s("from"), s("to")));
             }
@@ -730,9 +964,6 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
             "represents" => {
                 g.represents.insert((s("from"), s("to")));
             }
-            "realised-by" => {
-                g.realised_by.insert((s("from"), s("to")));
-            }
             "implemented-by" => {
                 g.spec_implemented_by.insert((s("from"), s("to")));
             }
@@ -741,6 +972,21 @@ pub fn read_graph_jsonl(path: &Path) -> anyhow::Result<Graph> {
             }
             "subscribes" => {
                 g.subscribes.insert((s("from"), s("to")));
+            }
+            "requires" => {
+                g.requires.insert((s("from"), s("to")));
+            }
+            "reads" => {
+                g.reads.insert((s("from"), s("to")));
+            }
+            "writes" => {
+                g.writes.insert((s("from"), s("to")));
+            }
+            "is-role" => {
+                g.is_role.insert((s("from"), s("to")));
+            }
+            "realises" => {
+                g.realises.insert((s("from"), s("to")));
             }
             other => {
                 anyhow::bail!("graph.jsonl record with unknown type `{other}`");

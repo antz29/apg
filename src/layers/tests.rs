@@ -1,6 +1,58 @@
 use super::*;
 use crate::schema::Record;
-use crate::testutil::{code_universe, in_edge, node, out_edge};
+use crate::testutil::{code_universe, in_edge, node, out_edge, valid_model};
+
+/// Fixture helper: push an out-edge onto the node identified by its
+/// (layer, type, name). Not a test, so it stays outside the tier submodule.
+fn add_out(
+    nodes: &mut [NodeFile],
+    layer: &str,
+    node_type: &str,
+    name: &str,
+    kind: &str,
+    target: &str,
+) {
+    nodes
+        .iter_mut()
+        .find(|n| n.layer == layer && n.node_type == node_type && n.name == name)
+        .unwrap_or_else(|| panic!("fixture node {layer}.{node_type}.{name} is missing"))
+        .out
+        .push(out_edge(kind, target));
+}
+
+/// Fixture helper: drop one out-edge from the named node.
+fn remove_out(
+    nodes: &mut [NodeFile],
+    layer: &str,
+    node_type: &str,
+    name: &str,
+    kind: &str,
+    target: &str,
+) {
+    nodes
+        .iter_mut()
+        .find(|n| n.layer == layer && n.node_type == node_type && n.name == name)
+        .unwrap_or_else(|| panic!("fixture node {layer}.{node_type}.{name} is missing"))
+        .out
+        .retain(|edge| !(edge.kind == kind && edge.target == target));
+}
+
+/// The FQN → node-file view [`validate_cardinalities`] takes.
+fn assembled_of(nodes: &[NodeFile]) -> BTreeMap<String, &NodeFile> {
+    nodes
+        .iter()
+        .map(|n| (fqn(layer_of(&n.layer), &n.node_type, &n.name), n))
+        .collect()
+}
+
+/// Assert the cardinality errors contain exactly the named rule fragment.
+fn assert_error(nodes: &[NodeFile], fragment: &str) {
+    let errors = validate_cardinalities(&assembled_of(nodes), None, Context::Save);
+    assert!(
+        errors.iter().any(|e| e.contains(fragment)),
+        "expected an error containing `{fragment}`, got {errors:?}"
+    );
+}
 
 /// unit tier -- pure in-memory: no filesystem, database, git or process.
 mod unit {
@@ -24,11 +76,18 @@ mod unit {
                 ),
                 (
                     "domain",
-                    &["group", "entity", "value", "service", "constraint"][..]
+                    &["group", "actor", "entity", "value", "service", "constraint"][..]
                 ),
                 (
                     "solution",
-                    &["system", "container", "component", "person", "constraint"][..]
+                    &[
+                        "system",
+                        "container",
+                        "component",
+                        "person",
+                        "role",
+                        "constraint"
+                    ][..]
                 ),
                 (
                     "plans",
@@ -344,11 +403,11 @@ mod unit {
         assert!(err.to_string().contains("duplicate"), "{err}");
     }
 
-    /// contains/depends-on trees must be acyclic (SPEC §3.3). The helper
-    /// validates the per-change edge set; every endpoint must resolve into
-    /// the change universe (existing nodes plus co-proposed nodes).
+    /// contains/requirement-decomposition trees must be acyclic (SPEC §4). The
+    /// helper validates the per-change edge set; every endpoint must resolve
+    /// into the change universe (existing nodes plus co-proposed nodes).
     #[test]
-    fn tree_acyclicity_refuses_contains_and_depends_on_cycles() {
+    fn tree_acyclicity_refuses_contains_cycles() {
         let universe: BTreeSet<(Layer, String, String)> = BTreeSet::from([
             (
                 Layer::Requirements,
@@ -375,13 +434,13 @@ mod unit {
         ];
         let err = validate_trees_acyclic(contains_cycle, &universe).unwrap_err();
         assert!(err.to_string().contains("cycle"), "{err}");
-        // A depends-on cycle (Requirement) is refused.
-        let depends_cycle: &[(&str, &str)] = &[
+        // A requirement-decomposition cycle is refused.
+        let requirement_cycle: &[(&str, &str)] = &[
             ("requirements.requirement.r1", "requirements.requirement.r2"),
             ("requirements.requirement.r2", "requirements.requirement.r3"),
             ("requirements.requirement.r3", "requirements.requirement.r1"),
         ];
-        let err = validate_trees_acyclic(depends_cycle, &universe).unwrap_err();
+        let err = validate_trees_acyclic(requirement_cycle, &universe).unwrap_err();
         assert!(err.to_string().contains("cycle"), "{err}");
         // A self-loop is a cycle too ("a node cannot contain itself").
         let self_loop: &[(&str, &str)] =
@@ -405,19 +464,19 @@ mod unit {
         );
     }
 
-    /// Every §3.3 edge kind accepts at least one valid (source, target) shape:
+    /// Every §4 edge kind accepts at least one valid (source, target) shape:
     /// each matrix row, both code-exempt kinds (`implemented-by` and `details`,
-    /// each with a code-FQN target), and the `represents` pair.
+    /// each with a code-FQN target), and both `represents` rows.
     #[test]
     fn every_edge_kind_accepts_a_valid_shape() {
         let ok: &[(&str, &str, &str)] = &[
             (
-                "contains",
+                "requires",
                 "requirements.stakeholder.s1",
                 "requirements.requirement.r1",
             ),
             (
-                "contains",
+                "requires",
                 "requirements.user.u1",
                 "requirements.requirement.r1",
             ),
@@ -428,51 +487,37 @@ mod unit {
             ),
             ("contains", "domain.group.g1", "domain.group.g2"),
             ("contains", "domain.group.g1", "domain.entity.e1"),
-            ("contains", "domain.group.g1", "domain.value.v1"),
             ("contains", "domain.group.g1", "domain.service.svc1"),
+            ("contains", "domain.entity.e1", "domain.value.v1"),
             ("contains", "solution.system.sys1", "solution.container.c1"),
             (
                 "contains",
                 "solution.container.c1",
                 "solution.component.cmp1",
             ),
-            ("drives", "requirements.requirement.r1", "domain.group.g1"),
-            ("drives", "requirements.requirement.r1", "domain.entity.e1"),
-            ("drives", "requirements.requirement.r1", "domain.value.v1"),
             (
                 "drives",
                 "requirements.requirement.r1",
                 "domain.service.svc1",
             ),
-            ("realised-by", "domain.group.g1", "solution.system.sys1"),
-            ("realised-by", "domain.entity.e1", "solution.container.c1"),
-            (
-                "realised-by",
-                "domain.service.svc1",
-                "solution.component.cmp1",
-            ),
-            (
-                "implemented-by",
-                "solution.system.sys1",
-                "apg.artifacts.write_jsonl_and_reingest",
-            ),
-            (
-                "implemented-by",
-                "solution.container.c1",
-                "apg.layers.validate_edges",
-            ),
-            ("implemented-by", "solution.component.cmp1", "apg.main"),
+            ("reads", "domain.service.svc1", "domain.entity.e1"),
+            ("writes", "domain.service.svc1", "domain.entity.e1"),
+            ("calls", "domain.actor.a1", "domain.service.svc1"),
             ("calls", "domain.service.svc1", "domain.service.svc2"),
             ("publishes", "domain.service.svc1", "domain.entity.e1"),
+            ("subscribes", "domain.actor.a1", "domain.entity.e1"),
             ("subscribes", "domain.service.svc1", "domain.entity.e1"),
+            ("realises", "solution.component.cmp1", "domain.service.svc1"),
+            ("is-role", "solution.container.c1", "solution.role.r1"),
+            ("is-role", "solution.component.cmp1", "solution.role.r1"),
+            ("uses", "solution.person.p1", "solution.component.cmp1"),
+            ("represents", "domain.actor.a1", "requirements.user.u1"),
+            ("represents", "solution.person.p1", "domain.actor.a1"),
             (
-                "depends-on",
-                "requirements.requirement.r1",
-                "requirements.requirement.r2",
+                "implemented-by",
+                "solution.component.cmp1",
+                "apg.artifacts.write_jsonl_and_reingest",
             ),
-            ("uses", "solution.person.p1", "solution.system.sys1"),
-            ("represents", "requirements.user.u1", "domain.entity.e1"),
-            ("represents", "domain.entity.e1", "solution.person.p1"),
             (
                 "details",
                 "implementation.note.n1",
@@ -492,36 +537,38 @@ mod unit {
     #[test]
     fn rejected_shapes_name_kind_source_and_target() {
         let bad: &[(&str, &str, &str)] = &[
-            // calls from an Entity (not Service).
+            // calls from an Entity (not Service/Actor).
             ("calls", "domain.entity.e1", "domain.service.svc1"),
-            // drives from a Group — a tier skip (Domain → Solution).
-            ("drives", "domain.group.g1", "solution.system.sys1"),
+            // drives from a Group — the stored direction is Requirement → Service.
+            ("drives", "domain.group.g1", "domain.service.svc1"),
+            // drives to a Group — a Service is the only target.
+            ("drives", "requirements.requirement.r1", "domain.group.g1"),
             // contains from a Container to a Requirement — a tier skip.
             (
                 "contains",
                 "solution.container.c1",
                 "requirements.requirement.r1",
             ),
-            // depends-on from a Domain entity.
-            (
-                "depends-on",
-                "domain.entity.e1",
-                "requirements.requirement.r1",
-            ),
-            // realised-by from a Requirement — a tier skip.
-            (
-                "realised-by",
-                "requirements.requirement.r1",
-                "solution.system.sys1",
-            ),
-            // uses from a Service (must be Person).
-            ("uses", "domain.service.svc1", "solution.system.sys1"),
+            // contains Group → Value — a Value is owned by an Entity.
+            ("contains", "domain.group.g1", "domain.value.v1"),
+            // reads to a Group (target must be an Entity).
+            ("reads", "domain.service.svc1", "domain.group.g1"),
+            // writes from an Actor (Actors have no direct Entity reads/writes).
+            ("writes", "domain.actor.a1", "domain.entity.e1"),
+            // uses from a Service (must be Person → Component).
+            ("uses", "domain.service.svc1", "solution.component.cmp1"),
+            // uses Person → System (target must be a Component).
+            ("uses", "solution.person.p1", "solution.system.sys1"),
             // publishes from a Group (must be Service).
             ("publishes", "domain.group.g1", "domain.entity.e1"),
             // subscribes to a Group (target must be an Entity).
             ("subscribes", "domain.service.svc1", "domain.group.g1"),
-            // represents Entity → System (must be Entity → Person).
-            ("represents", "domain.entity.e1", "solution.system.sys1"),
+            // realises from a Service (must be Component → Service).
+            ("realises", "domain.service.svc1", "domain.service.svc2"),
+            // is-role from a Person (must be Container/Component).
+            ("is-role", "solution.person.p1", "solution.role.r1"),
+            // represents Actor → Entity (must be Actor → User).
+            ("represents", "domain.actor.a1", "domain.entity.e1"),
         ];
         for &(kind, src, dst) in bad {
             let msg = validate_edge(kind, src, dst).unwrap_err().to_string();
@@ -532,29 +579,26 @@ mod unit {
     }
 
     /// `implemented-by` accepts a code-FQN target (exempt — `validate_code_refs`
-    /// owns it, task-10) and refuses any non-Solution source.
+    /// owns it, task-10) and refuses any non-Component source (SPEC §4.4).
     #[test]
-    fn implemented_by_accepts_code_fqn_target_and_refuses_non_solution_source() {
+    fn implemented_by_accepts_code_fqn_target_and_refuses_non_component_source() {
+        assert!(
+            validate_edge(
+                "implemented-by",
+                "solution.component.checkout",
+                "apg.artifacts.write_jsonl_and_reingest"
+            )
+            .is_ok(),
+            "a Component must be a valid implemented-by source"
+        );
         for src in [
             "solution.system.payments",
             "solution.container.api",
-            "solution.component.checkout",
-        ] {
-            assert!(
-                validate_edge(
-                    "implemented-by",
-                    src,
-                    "apg.artifacts.write_jsonl_and_reingest"
-                )
-                .is_ok(),
-                "{src} must be a valid implemented-by source"
-            );
-        }
-        for src in [
             "domain.service.checkout",
             "requirements.requirement.r1",
             "domain.entity.customer",
             "solution.person.p1",
+            "solution.role.application-service",
         ] {
             let msg = validate_edge("implemented-by", src, "apg.main")
                 .unwrap_err()
@@ -693,18 +737,18 @@ mod unit {
         }
     }
 
-    /// `represents` has exactly the two matrix rows — User → Entity and Entity
-    /// → Person; an Entity → System hop is refused (that would be a tier skip).
+    /// `represents` has exactly the two matrix rows — Actor → User and Person
+    /// → Actor; the old User → Entity / Entity → Person hops are refused.
     #[test]
     fn represents_both_rows_and_refuses_tier_skips() {
-        assert!(validate_edge("represents", "requirements.user.u1", "domain.entity.e1").is_ok());
-        assert!(validate_edge("represents", "domain.entity.e1", "solution.person.p1").is_ok());
-        let msg = validate_edge("represents", "domain.entity.e1", "solution.system.sys1")
+        assert!(validate_edge("represents", "domain.actor.a1", "requirements.user.u1").is_ok());
+        assert!(validate_edge("represents", "solution.person.p1", "domain.actor.a1").is_ok());
+        let msg = validate_edge("represents", "requirements.user.u1", "solution.person.p1")
             .unwrap_err()
             .to_string();
         assert!(msg.contains("represents"), "{msg}");
-        assert!(msg.contains("domain.entity.e1"), "{msg}");
-        assert!(msg.contains("solution.system.sys1"), "{msg}");
+        assert!(msg.contains("requirements.user.u1"), "{msg}");
+        assert!(msg.contains("solution.person.p1"), "{msg}");
     }
 
     /// The batch entry point loops [`validate_edge`] over every edge; any bad
@@ -717,7 +761,11 @@ mod unit {
                 "requirements.requirement.r1",
                 "requirements.requirement.r2",
             ),
-            ("drives", "requirements.requirement.r1", "domain.group.g1"),
+            (
+                "drives",
+                "requirements.requirement.r1",
+                "domain.service.svc1",
+            ),
         ];
         assert!(validate_edges(ok).is_ok());
         let bad: &[(&str, &str, &str)] = &[
@@ -726,7 +774,7 @@ mod unit {
                 "requirements.requirement.r1",
                 "requirements.requirement.r2",
             ),
-            ("drives", "domain.group.g1", "solution.system.sys1"),
+            ("drives", "domain.group.g1", "domain.service.svc1"),
         ];
         let msg = validate_edges(bad).unwrap_err().to_string();
         assert!(msg.contains("drives"), "{msg}");
@@ -759,8 +807,7 @@ mod unit {
     /// A `requirement` node is the ONE requirement type at every depth (SPEC
     /// §3.1: theme/epic/story/feature are not types — everything is
     /// `requirement`); a four-level requirement tree validates acyclically,
-    /// and `contains`/`depends-on` between requirement nodes are both
-    /// matrix-legal at any depth.
+    /// and `contains` between requirement nodes is matrix-legal at any depth.
     #[test]
     fn requirement_tree_at_all_depths_is_one_node_type() {
         let empty = BTreeSet::new();
@@ -782,21 +829,14 @@ mod unit {
                 )
             })
             .collect();
-        // Four levels of contains, plus a depends-on cross-link — still a DAG.
+        // Four levels of contains — still a DAG.
         let contains: &[(&str, &str)] = &[
             ("requirements.requirement.r1", "requirements.requirement.r2"),
             ("requirements.requirement.r2", "requirements.requirement.r3"),
             ("requirements.requirement.r3", "requirements.requirement.r4"),
         ];
-        let depends: &[(&str, &str)] =
-            &[("requirements.requirement.r1", "requirements.requirement.r4")];
-        let all: Vec<(&str, &str)> = contains
-            .iter()
-            .copied()
-            .chain(depends.iter().copied())
-            .collect();
         assert!(
-            validate_trees_acyclic(&all, &universe).is_ok(),
+            validate_trees_acyclic(contains, &universe).is_ok(),
             "a four-level requirement tree must stay acyclic"
         );
         for &(src, dst) in contains {
@@ -805,36 +845,50 @@ mod unit {
                 "contains {src} -> {dst} must be matrix-legal"
             );
         }
-        for &(src, dst) in depends {
-            assert!(
-                validate_edge("depends-on", src, dst).is_ok(),
-                "depends-on {src} -> {dst} must be matrix-legal"
-            );
-        }
     }
 
-    /// The sequential spine (SPEC §3.2) is tier-locked by the matrix: the
-    /// full legal chain Requirement --drives--> Domain --realised-by-->
-    /// Solution --implemented-by--> code passes hop-by-hop, and a tier skip
-    /// (Requirement directly realised-by a Solution — no Domain hop) is
-    /// refused.
+    /// The spine (SPEC §6) is tier-locked by the matrix: the full legal chain
+    /// Stakeholder/User --requires--> Requirement --drives--> Service, and
+    /// Component --realises--> Service --implemented-by--> code passes
+    /// hop-by-hop; a tier skip is refused.
     #[test]
     fn sequential_spine_is_tier_locked() {
-        // The full, legal spine from Requirement to code.
-        assert!(validate_edge("drives", "requirements.requirement.r1", "domain.group.g1").is_ok());
-        assert!(validate_edge("realised-by", "domain.group.g1", "solution.system.sys1").is_ok());
-        assert!(validate_edge("implemented-by", "solution.system.sys1", "apg.main").is_ok());
-        // A tier skip: Requirement realised-by Solution, skipping the Domain hop.
+        assert!(
+            validate_edge(
+                "requires",
+                "requirements.stakeholder.owner",
+                "requirements.requirement.r1"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_edge(
+                "drives",
+                "requirements.requirement.r1",
+                "domain.service.svc1"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_edge("realises", "solution.component.cmp1", "domain.service.svc1").is_ok()
+        );
+        assert!(validate_edge("implemented-by", "solution.component.cmp1", "apg.main").is_ok());
+        // Tier skips: a Requirement may not realise a Service, and a
+        // Requirement may not drive an Entity.
         let msg = validate_edge(
-            "realised-by",
+            "realises",
             "requirements.requirement.r1",
-            "solution.system.sys1",
+            "domain.service.svc1",
         )
         .unwrap_err()
         .to_string();
-        assert!(msg.contains("realised-by"), "{msg}");
+        assert!(msg.contains("realises"), "{msg}");
         assert!(msg.contains("requirements.requirement.r1"), "{msg}");
-        assert!(msg.contains("solution.system.sys1"), "{msg}");
+        assert!(msg.contains("domain.service.svc1"), "{msg}");
+        let msg = validate_edge("drives", "requirements.requirement.r1", "domain.entity.e1")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("drives"), "{msg}");
     }
 
     /// The §3.3 edge-kind matrix is complete and internally consistent: its
@@ -1149,7 +1203,7 @@ mod unit {
     /// constraint binds the whole durable spec (R2 /
     /// global.constraint.spec-constraint-scope) — and satisfaction is
     /// review-only (R14): the binary reads neither the prose body nor any
-    /// `attaches-to`.
+    /// metadata property.
     #[test]
     fn global_constraint_needs_no_attachment() {
         let empty = BTreeSet::new();
@@ -1158,12 +1212,11 @@ mod unit {
 
     /// A local constraint (requirements/domain/solution) is well-formed on
     /// structure alone: its layer hosts the constraint type and its name is
-    /// allowlisted. A present `attaches-to` property is IGNORED by
-    /// `eval_constraint` — this function NAME is a legacy misnomer. Scope is
-    /// declared by the layer (R2 / global.constraint.spec-constraint-scope) and
-    /// satisfaction is review-only (R14).
+    /// allowlisted. An arbitrary metadata property (such as `owner`) is
+    /// IGNORED by `eval_constraint`. Scope is declared by the layer (SPEC §7.1)
+    /// and satisfaction is review-only.
     #[test]
-    fn local_constraint_with_resolving_attachment_is_well_formed() {
+    fn local_constraint_with_metadata_is_well_formed() {
         let existing: BTreeSet<(Layer, String, String)> = BTreeSet::from([
             (
                 Layer::Requirements,
@@ -1185,15 +1238,15 @@ mod unit {
             (Layer::Domain, "domain.entity.customer".to_string()),
             (Layer::Solution, "solution.system.payments".to_string()),
         ] {
-            // The `attaches-to` value is present but irrelevant: the structure
+            // The metadata value is present but irrelevant: the structure
             // check passes with or without it.
-            let props = BTreeMap::from([(PROP_ATTACHES_TO.to_string(), target.clone())]);
+            let props = BTreeMap::from([("owner".to_string(), target.clone())]);
             assert!(
                 eval_constraint(layer, "law", &props, &existing).is_ok(),
                 "{layer:?} as a constraint must validate on structure"
             );
         }
-        // A local constraint without an attachment is equally fine.
+        // A local constraint without any metadata is equally fine.
         assert!(eval_constraint(Layer::Domain, "law", &BTreeMap::new(), &existing).is_ok());
     }
 
@@ -1213,7 +1266,7 @@ mod unit {
     /// Satisfaction is NEVER evaluated: there is no constraint-expression
     /// language, and `eval_constraint` takes no prose input (the prose `body`
     /// is the node-file's top-level field, never read here) and ignores any
-    /// `attaches-to`. A constraint whose prose "would fail" — contradictory, or
+    /// metadata property. A constraint whose prose "would fail" — contradictory, or
     /// even expression-looking — still passes structure validation regardless,
     /// because satisfaction is assessed by review only (R14).
     #[test]
@@ -1223,10 +1276,7 @@ mod unit {
         // Contradictory prose (stands in for the top-level `body`) — the binary
         // never reads or evaluates it, and structure validation ignores it.
         let props = BTreeMap::from([
-            (
-                PROP_ATTACHES_TO.to_string(),
-                "domain.entity.customer".to_string(),
-            ),
+            ("owner".to_string(), "domain.entity.customer".to_string()),
             (
                 "body".to_string(),
                 "every order has a customer AND every order has no customer".to_string(),
@@ -1754,14 +1804,14 @@ mod unit {
     /// present, so no code-ref validation fires.
     #[test]
     fn ingest_nodes_emits_records_for_an_in_memory_node_set() {
-        // A paired authored edge: `a` depends-on `b` (out in a's file, the
+        // A paired authored edge: `a` contains `b` (out in a's file, the
         // matching in-edge in b's).
         let mut a = node("requirements", "requirement", "a");
         a.out
-            .push(out_edge("depends-on", "requirements.requirement.b"));
+            .push(out_edge("contains", "requirements.requirement.b"));
         let mut b = node("requirements", "requirement", "b");
         b.in_edges
-            .push(in_edge("depends-on", "requirements.requirement.a"));
+            .push(in_edge("contains", "requirements.requirement.a"));
 
         let empty = BTreeSet::new();
         let records = ingest_nodes(&[a, b], &empty, &empty).expect("a paired set ingests");
@@ -1779,7 +1829,7 @@ mod unit {
                     feature: String::new(),
                     properties: NodeProperties::default(),
                 },
-                Record::DependsOn {
+                Record::Contains {
                     from: "requirements.requirement.a".to_string(),
                     to: "requirements.requirement.b".to_string(),
                     properties: NodeProperties::default(),
@@ -1800,13 +1850,13 @@ mod unit {
         // (the same gate `ingest_tree` runs).
         let mut c = node("requirements", "requirement", "c");
         c.out
-            .push(out_edge("depends-on", "requirements.requirement.d"));
+            .push(out_edge("contains", "requirements.requirement.d"));
         let d = node("requirements", "requirement", "d");
         let msg = ingest_nodes(&[c, d], &empty, &empty)
             .unwrap_err()
             .to_string();
         assert!(msg.contains("requirements.requirement.c"), "{msg}");
-        assert!(msg.contains("depends-on"), "{msg}");
+        assert!(msg.contains("contains"), "{msg}");
         assert!(msg.contains("BOTH endpoint files"), "{msg}");
     }
 
@@ -1828,9 +1878,9 @@ mod unit {
         // this shape.
         let mut a = node("requirements", "requirement", "a");
         a.out
-            .push(out_edge("depends-on", "requirements.requirement.b"));
+            .push(out_edge("contains", "requirements.requirement.b"));
         a.out
-            .push(out_edge("depends-on", "requirements.requirement.c"));
+            .push(out_edge("contains", "requirements.requirement.c"));
         let nodes = vec![a];
 
         // The partial builder succeeds: node `a`'s record, then exactly one
@@ -1848,12 +1898,12 @@ mod unit {
                     feature: String::new(),
                     properties: NodeProperties::default(),
                 },
-                Record::DependsOn {
+                Record::Contains {
                     from: "requirements.requirement.a".to_string(),
                     to: "requirements.requirement.b".to_string(),
                     properties: NodeProperties::default(),
                 },
-                Record::DependsOn {
+                Record::Contains {
                     from: "requirements.requirement.a".to_string(),
                     to: "requirements.requirement.c".to_string(),
                     properties: NodeProperties::default(),
@@ -1870,7 +1920,7 @@ mod unit {
             .unwrap_err()
             .to_string();
         assert!(msg.contains("requirements.requirement.a"), "{msg}");
-        assert!(msg.contains("depends-on"), "{msg}");
+        assert!(msg.contains("contains"), "{msg}");
         assert!(msg.contains("no node file supplies it"), "{msg}");
     }
 
@@ -2001,5 +2051,510 @@ mod unit {
                 "`{raw}` must be refused"
             );
         }
+    }
+
+    /// A complete model passes every whole-model cardinality (SPEC §4/§8.1).
+    #[test]
+    fn valid_model_satisfies_every_cardinality() {
+        let nodes = valid_model();
+        let errors = validate_cardinalities(&assembled_of(&nodes), None, Context::Save);
+        assert!(errors.is_empty(), "a complete model must pass: {errors:?}");
+    }
+
+    /// A Service has exactly one `contains` owner (SPEC §4.2).
+    #[test]
+    fn service_must_have_exactly_one_group_owner() {
+        let mut multiple = valid_model();
+        multiple.push(node("domain", "group", "other"));
+        add_out(
+            &mut multiple,
+            "domain",
+            "group",
+            "other",
+            "contains",
+            "domain.service.place-order",
+        );
+        assert_error(&multiple, "must be contained by exactly one Group");
+
+        let mut unowned = valid_model();
+        remove_out(
+            &mut unowned,
+            "domain",
+            "group",
+            "ordering",
+            "contains",
+            "domain.service.place-order",
+        );
+        assert_error(&unowned, "found 0 `contains` owners");
+    }
+
+    /// A Value is owned by exactly one Entity, never by a Group (SPEC §4.2).
+    #[test]
+    fn value_must_be_owned_by_an_entity_not_a_group() {
+        let mut nodes = valid_model();
+        remove_out(
+            &mut nodes,
+            "domain",
+            "entity",
+            "order",
+            "contains",
+            "domain.value.order-number",
+        );
+        add_out(
+            &mut nodes,
+            "domain",
+            "group",
+            "ordering",
+            "contains",
+            "domain.value.order-number",
+        );
+        assert_error(&nodes, "a Value is owned only by an Entity, never a Group");
+    }
+
+    /// A leaf Group contains at least one Service; a Group with subgroups
+    /// contains no direct Service/Entity (SPEC §4.2).
+    #[test]
+    fn group_modes_are_exclusive_and_a_leaf_needs_a_service() {
+        let mut empty_leaf = valid_model();
+        empty_leaf.push(node("domain", "group", "empty"));
+        assert_error(
+            &empty_leaf,
+            "leaf Group `domain.group.empty` contains no Service",
+        );
+
+        let mut mixed = valid_model();
+        mixed.push(node("domain", "group", "parent"));
+        add_out(
+            &mut mixed,
+            "domain",
+            "group",
+            "ordering",
+            "contains",
+            "domain.group.parent",
+        );
+        assert_error(
+            &mixed,
+            "mixes subgroups with direct Service/Entity contents",
+        );
+    }
+
+    /// Every Entity owns at least one Value (SPEC §4.2).
+    #[test]
+    fn entity_must_own_a_value() {
+        let mut nodes = valid_model();
+        remove_out(
+            &mut nodes,
+            "domain",
+            "entity",
+            "order",
+            "contains",
+            "domain.value.order-number",
+        );
+        assert_error(&nodes, "Entity `domain.entity.order` contains no Value");
+    }
+
+    /// Every Service is driven by at least one Requirement (SPEC §4.3).
+    #[test]
+    fn service_must_be_driven_by_a_requirement() {
+        let mut nodes = valid_model();
+        remove_out(
+            &mut nodes,
+            "requirements",
+            "requirement",
+            "place-order",
+            "drives",
+            "domain.service.place-order",
+        );
+        assert_error(
+            &nodes,
+            "Service `domain.service.place-order` is driven by no Requirement",
+        );
+    }
+
+    /// Every Component realises at least one Service (SPEC §4.4).
+    #[test]
+    fn component_must_realise_a_service() {
+        let mut nodes = valid_model();
+        remove_out(
+            &mut nodes,
+            "solution",
+            "component",
+            "order-handler",
+            "realises",
+            "domain.service.place-order",
+        );
+        assert_error(
+            &nodes,
+            "Component `solution.component.order-handler` realises no Service",
+        );
+    }
+
+    /// Every Container and Component has exactly one Role (SPEC §4.4).
+    #[test]
+    fn container_and_component_have_exactly_one_role() {
+        let mut container_without = valid_model();
+        remove_out(
+            &mut container_without,
+            "solution",
+            "container",
+            "order-api",
+            "is-role",
+            "solution.role.application-service",
+        );
+        assert_error(
+            &container_without,
+            "`solution.container.order-api` `is-role` 0 Role(s)",
+        );
+
+        let mut component_with_two = valid_model();
+        component_with_two.push(node("solution", "role", "other-role"));
+        add_out(
+            &mut component_with_two,
+            "solution",
+            "component",
+            "order-handler",
+            "is-role",
+            "solution.role.other-role",
+        );
+        assert_error(
+            &component_with_two,
+            "`solution.component.order-handler` `is-role` 2 Role(s)",
+        );
+    }
+
+    /// A Service may read only Entities in its own leaf Group (SPEC §5).
+    #[test]
+    fn cross_group_read_is_refused() {
+        let mut nodes = valid_model();
+        nodes.push(node("domain", "group", "audit"));
+        nodes.push(node("domain", "entity", "audit-entry"));
+        add_out(
+            &mut nodes,
+            "domain",
+            "group",
+            "audit",
+            "contains",
+            "domain.entity.audit-entry",
+        );
+        add_out(
+            &mut nodes,
+            "domain",
+            "service",
+            "place-order",
+            "reads",
+            "domain.entity.audit-entry",
+        );
+        assert_error(
+            &nodes,
+            "Service `domain.service.place-order` reads Entity `domain.entity.audit-entry` across Group boundaries",
+        );
+    }
+
+    /// A Service may write only Entities in its own leaf Group (SPEC §5).
+    #[test]
+    fn cross_group_write_is_refused() {
+        let mut nodes = valid_model();
+        nodes.push(node("domain", "group", "audit"));
+        nodes.push(node("domain", "entity", "audit-entry"));
+        add_out(
+            &mut nodes,
+            "domain",
+            "group",
+            "audit",
+            "contains",
+            "domain.entity.audit-entry",
+        );
+        add_out(
+            &mut nodes,
+            "domain",
+            "service",
+            "place-order",
+            "writes",
+            "domain.entity.audit-entry",
+        );
+        assert_error(
+            &nodes,
+            "Service `domain.service.place-order` writes Entity `domain.entity.audit-entry` across Group boundaries",
+        );
+    }
+
+    /// Containment is acyclic (SPEC §4.2/§4.4).
+    #[test]
+    fn containments_must_be_acyclic() {
+        let mut nodes = valid_model();
+        add_out(
+            &mut nodes,
+            "requirements",
+            "requirement",
+            "refund",
+            "contains",
+            "requirements.requirement.place-order",
+        );
+        assert_error(&nodes, "cycle");
+    }
+
+    /// Stakeholder and User each require at least one Requirement, and every
+    /// Requirement is rooted directly or through decomposition (SPEC §4.1).
+    #[test]
+    fn requirements_are_rooted_in_an_upstream_identity() {
+        let mut stakeholder_without = valid_model();
+        remove_out(
+            &mut stakeholder_without,
+            "requirements",
+            "stakeholder",
+            "owner",
+            "requires",
+            "requirements.requirement.place-order",
+        );
+        assert_error(
+            &stakeholder_without,
+            "`requirements.stakeholder.owner` requires no Requirement",
+        );
+
+        let mut user_without = valid_model();
+        remove_out(
+            &mut user_without,
+            "requirements",
+            "user",
+            "customer",
+            "requires",
+            "requirements.requirement.place-order",
+        );
+        assert_error(
+            &user_without,
+            "`requirements.user.customer` requires no Requirement",
+        );
+
+        let mut orphan = valid_model();
+        orphan.push(node("requirements", "requirement", "orphan"));
+        assert_error(
+            &orphan,
+            "Requirement `requirements.requirement.orphan` is not rooted",
+        );
+    }
+
+    /// Every Actor represents a User and calls a Service (SPEC §4.1/§4.3).
+    #[test]
+    fn actor_must_represent_a_user_and_call_a_service() {
+        let mut no_user = valid_model();
+        remove_out(
+            &mut no_user,
+            "domain",
+            "actor",
+            "buyer",
+            "represents",
+            "requirements.user.customer",
+        );
+        assert_error(&no_user, "Actor `domain.actor.buyer` represents no User");
+
+        let mut no_service = valid_model();
+        remove_out(
+            &mut no_service,
+            "domain",
+            "actor",
+            "buyer",
+            "calls",
+            "domain.service.place-order",
+        );
+        assert_error(&no_service, "Actor `domain.actor.buyer` calls no Service");
+    }
+
+    /// Every Person represents an Actor and uses a Component (SPEC §4.1/§4.4).
+    #[test]
+    fn person_must_represent_an_actor_and_use_a_component() {
+        let mut no_actor = valid_model();
+        remove_out(
+            &mut no_actor,
+            "solution",
+            "person",
+            "web-customer",
+            "represents",
+            "domain.actor.buyer",
+        );
+        assert_error(
+            &no_actor,
+            "Person `solution.person.web-customer` represents no Actor",
+        );
+
+        let mut no_component = valid_model();
+        remove_out(
+            &mut no_component,
+            "solution",
+            "person",
+            "web-customer",
+            "uses",
+            "solution.component.order-handler",
+        );
+        assert_error(
+            &no_component,
+            "Person `solution.person.web-customer` uses no Component",
+        );
+    }
+
+    /// A System contains at least one Container, and a Container contains at
+    /// least one Component (SPEC §4.4).
+    #[test]
+    fn solution_containment_minimums_hold() {
+        let mut system_without = valid_model();
+        remove_out(
+            &mut system_without,
+            "solution",
+            "system",
+            "commerce",
+            "contains",
+            "solution.container.order-api",
+        );
+        assert_error(
+            &system_without,
+            "System `solution.system.commerce` contains no Container",
+        );
+
+        let mut container_without = valid_model();
+        remove_out(
+            &mut container_without,
+            "solution",
+            "container",
+            "order-api",
+            "contains",
+            "solution.component.order-handler",
+        );
+        assert_error(
+            &container_without,
+            "Container `solution.container.order-api` contains no Component",
+        );
+    }
+
+    /// A Component has at most one `implemented-by` claim (SPEC §4.4/§8.2).
+    #[test]
+    fn component_has_at_most_one_implementation_claim() {
+        let mut nodes = valid_model();
+        add_out(
+            &mut nodes,
+            "solution",
+            "component",
+            "order-handler",
+            "implemented-by",
+            "apg.main",
+        );
+        add_out(
+            &mut nodes,
+            "solution",
+            "component",
+            "order-handler",
+            "implemented-by",
+            "apg.layers.validate_edges",
+        );
+        assert_error(
+            &nodes,
+            "Component `solution.component.order-handler` carries 2 `implemented-by` claims",
+        );
+    }
+
+    /// The sole deferred obligation (SPEC §8.2): the same validator permits a
+    /// missing Component `implemented-by` claim under `Save`/`Lint` and refuses
+    /// it under `MergeStrength`; one present claim satisfies merge strength.
+    #[test]
+    fn component_implementation_presence_is_context_dependent() {
+        let mut nodes = valid_model();
+        for context in [Context::Save, Context::Lint] {
+            let errors = validate_cardinalities(&assembled_of(&nodes), None, context);
+            assert!(
+                errors.is_empty(),
+                "a missing claim is deferred under {context:?}: {errors:?}"
+            );
+        }
+        let errors = validate_cardinalities(&assembled_of(&nodes), None, Context::MergeStrength);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("has no `implemented-by` claim")),
+            "merge strength must refuse a missing claim: {errors:?}"
+        );
+
+        add_out(
+            &mut nodes,
+            "solution",
+            "component",
+            "order-handler",
+            "implemented-by",
+            "apg.main",
+        );
+        assert!(
+            validate_cardinalities(&assembled_of(&nodes), None, Context::MergeStrength).is_empty(),
+            "one present claim satisfies merge strength"
+        );
+    }
+
+    /// SPEC §8.1: the save boundary runs the shared cardinality validator, not a
+    /// fork — every refusal message is byte-identical to
+    /// `validate_cardinalities(.., None, Context::Save)`'s. `Context::Save`
+    /// keeps SPEC §8.2's sole deferral: a Component's missing `implemented-by`
+    /// claim is permitted, while a leaf Group with no Service refuses the save.
+    #[test]
+    fn save_boundary_delegates_to_the_shared_cardinality_validator() {
+        // The complete new-model fixture carries a Component with NO
+        // `implemented-by` claim — the one obligation save defers (§8.2).
+        let nodes = valid_model();
+        if let Err(err) = validate_save_model(&nodes) {
+            panic!("a missing Component `implemented-by` is deferred at save: {err:#}");
+        }
+
+        // A leaf Group with no Service is a whole-model violation save refuses.
+        let mut broken = valid_model();
+        remove_out(
+            &mut broken,
+            "domain",
+            "group",
+            "ordering",
+            "contains",
+            "domain.service.place-order",
+        );
+        let expected = validate_cardinalities(&assembled_of(&broken), None, Context::Save);
+        assert!(
+            !expected.is_empty(),
+            "the fixture must violate a whole-model rule"
+        );
+        let err = validate_save_model(&broken).unwrap_err().to_string();
+        for message in &expected {
+            assert!(
+                err.contains(message.as_str()),
+                "the save gate must report the shared validator's message `{message}` verbatim: {err}"
+            );
+        }
+        assert!(
+            err.contains("leaf Group `domain.group.ordering` contains no Service"),
+            "{err}"
+        );
+    }
+
+    /// Cardinality scope (SPEC §9.2): a single-tier run reports only that
+    /// tier's violations. A missing `drives` edge is a Domain error and is
+    /// invisible to the Requirements scope.
+    #[test]
+    fn cardinality_scope_limits_reported_tiers() {
+        let mut nodes = valid_model();
+        remove_out(
+            &mut nodes,
+            "requirements",
+            "requirement",
+            "place-order",
+            "drives",
+            "domain.service.place-order",
+        );
+        let rule = "Service `domain.service.place-order` is driven by no Requirement";
+        let all = validate_cardinalities(&assembled_of(&nodes), None, Context::Lint);
+        assert!(all.iter().any(|e| e.contains(rule)), "{all:?}");
+        let domain =
+            validate_cardinalities(&assembled_of(&nodes), Some(Layer::Domain), Context::Lint);
+        assert!(domain.iter().any(|e| e.contains(rule)), "{domain:?}");
+        let requirements = validate_cardinalities(
+            &assembled_of(&nodes),
+            Some(Layer::Requirements),
+            Context::Lint,
+        );
+        assert!(
+            requirements.is_empty(),
+            "the requirements scope must not report a domain violation: {requirements:?}"
+        );
     }
 }

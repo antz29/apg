@@ -316,13 +316,26 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
                 row.push(empty(&node.name));
                 row.push(empty(&node.body));
             }
+            NodeKind::Actor => {
+                row.push("N".into());
+                row.push("Actor".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
+            NodeKind::Role => {
+                row.push("N".into());
+                row.push("Role".into());
+                row.push(fqn.into());
+                row.push(empty(&node.name));
+                row.push(empty(&node.body));
+            }
             NodeKind::Constraint => {
                 row.push("N".into());
                 row.push("Constraint".into());
                 row.push(fqn.into());
                 row.push(empty(&node.name));
                 row.push(empty(&node.body));
-                row.push(empty(&node.attaches_to));
             }
             _ => return None,
         }
@@ -348,6 +361,8 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
                 | NodeKind::Container
                 | NodeKind::Component
                 | NodeKind::Person
+                | NodeKind::Actor
+                | NodeKind::Role
                 | NodeKind::Constraint
         )
     };
@@ -405,15 +420,18 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
     add_edges("Uses", &graph.uses);
     add_edges("Details", &graph.details);
     add_edges("Reviews", &graph.reviews);
-    add_edges("DependsOn", &graph.depends_on);
     add_edges("Gates", &graph.gates);
     add_edges("Satisfies", &graph.satisfies);
     add_edges("Drives", &graph.drives);
     add_edges("Represents", &graph.represents);
-    add_edges("RealisedBy", &graph.realised_by);
     add_edges("SpecImplementedBy", &graph.spec_implemented_by);
     add_edges("Publishes", &graph.publishes);
     add_edges("Subscribes", &graph.subscribes);
+    add_edges("Requires", &graph.requires);
+    add_edges("Reads", &graph.reads);
+    add_edges("Writes", &graph.writes);
+    add_edges("IsRole", &graph.is_role);
+    add_edges("Realises", &graph.realises);
 
     // Order-independent: sort before folding, then include the row separator so
     // adjacent rows can never run together ambiguously.
@@ -435,9 +453,9 @@ pub fn assembled_authored_identity(graph: &Graph) -> String {
 ///
 /// Opens `previous` read-only and reproduces, from the DB's own rows, the exact
 /// canonical form [`assembled_authored_identity`] computes from an assembled
-/// [`Graph`]: one row per authored/transient node — the seventeen
+/// [`Graph`]: one row per authored/transient node — the nineteen
 /// layer/plan/feedback tables, whose columns are projected in `create_schema`
-/// order — and one row per edge in the fourteen authored/transient rel tables
+/// order — and one row per edge in the seventeen authored/transient rel tables
 /// whose SOURCE FQN belongs to one of those tables. Each row is a JSON array of
 /// strings; the rows are sorted and folded into the same 64-bit FNV-1a digest.
 ///
@@ -455,7 +473,7 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
 
     // Every authored/transient node table and its columns in `create_schema`
     // order — the exact table/column vocabulary `build_load_files` writes.
-    let node_tables: [(&str, &[&str]); 17] = [
+    let node_tables: [(&str, &[&str]); 19] = [
         ("Requirement", &["fqn", "id", "title", "body", "feature"]),
         ("Note", &["fqn", "body", "kind"]),
         ("Feedback", &["fqn", "body", "status", "disposition"]),
@@ -480,7 +498,9 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
         ("Value", &["fqn", "name", "body"]),
         ("Service", &["fqn", "name", "body"]),
         ("Person", &["fqn", "name", "body"]),
-        ("Constraint", &["fqn", "name", "body", "attaches_to"]),
+        ("Actor", &["fqn", "name", "body"]),
+        ("Role", &["fqn", "name", "body"]),
+        ("Constraint", &["fqn", "name", "body"]),
     ];
 
     let mut authored: HashSet<String> = HashSet::new();
@@ -510,21 +530,24 @@ pub fn seed_authored_identity(previous: &Path) -> anyhow::Result<String> {
     // `Contains`/`Calls`/`Uses` tables' code pairs while retaining authored
     // edges whose target is a code FQN (`Details`, `Reviews`,
     // `SpecImplementedBy`).
-    let rel_tables: [&str; 14] = [
+    let rel_tables: [&str; 17] = [
         "Contains",
         "Calls",
         "Uses",
         "Details",
         "Reviews",
-        "DependsOn",
         "Gates",
         "Satisfies",
         "Drives",
         "Represents",
-        "RealisedBy",
         "SpecImplementedBy",
         "Publishes",
         "Subscribes",
+        "Requires",
+        "Reads",
+        "Writes",
+        "IsRole",
+        "Realises",
     ];
     for table in rel_tables {
         let (_, edge_rows) = query_rows(

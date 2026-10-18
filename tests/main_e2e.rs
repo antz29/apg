@@ -2939,6 +2939,23 @@ mod e2e {
     fn strict_surface_top_level_dispatch_refuses_existing_and_absent_rm() {
         let (apg_root, repo, wt) = strict_surface_fixture("dispatch-refusal");
         let home = repo.root.join("home");
+
+        // A whole-model-valid base (SPEC §8.1): a Stakeholder requiring an
+        // anchor Requirement. The two requirements added below are rooted by
+        // routed `requires` edges from `owner`, so removing one leaves the
+        // other rooted and the model valid.
+        let mut owner = testutil::node("requirements", "stakeholder", "owner");
+        owner.out = vec![testutil::out_edge(
+            "requires",
+            "requirements.requirement.anchor",
+        )];
+        let mut anchor = testutil::node("requirements", "requirement", "anchor");
+        anchor.in_edges = vec![testutil::in_edge(
+            "requires",
+            "requirements.stakeholder.owner",
+        )];
+        apg::layers::write_project(&apg_root, &[owner, anchor], &[]).unwrap();
+
         let before_commits = testutil::commit_count(&wt);
 
         // A routed read helper: while the session is live the DB is owned by
@@ -2973,6 +2990,16 @@ mod e2e {
             node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r1"]))
         })
         .unwrap();
+        // Root r1 under the seeded Stakeholder (SPEC §8.1).
+        with_cwd(&wt, || {
+            node_cmd::cmd_edge(&argv(&[
+                "add",
+                "requires",
+                "requirements.stakeholder.owner",
+                "requirements.requirement.r1",
+            ]))
+        })
+        .unwrap();
         // The admitted write is visible to a routed read at admission but stays
         // buffered: no node file lands until `apg session save`.
         let r1_path =
@@ -3004,9 +3031,19 @@ mod e2e {
             node_cmd::cmd_node(&argv(&["add", "requirements", "requirement", "r2"]))
         })
         .unwrap();
+        // Root r2 under the seeded Stakeholder too.
+        with_cwd(&wt, || {
+            node_cmd::cmd_edge(&argv(&[
+                "add",
+                "requires",
+                "requirements.stakeholder.owner",
+                "requirements.requirement.r2",
+            ]))
+        })
+        .unwrap();
         let edge = argv(&[
             "add",
-            "depends-on",
+            "contains",
             "requirements.requirement.r1",
             "requirements.requirement.r2",
         ]);
@@ -3019,7 +3056,7 @@ mod e2e {
         // The duplicate added neither a second out-half nor an in-half.
         assert_eq!(
             query(
-                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->(:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)"
+                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:Contains]->(:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)"
             ),
             "1"
         );
@@ -3092,8 +3129,16 @@ mod e2e {
             layers::read_node_file(&apg_root, layers::Layer::Requirements, "requirement", "r2")
                 .unwrap();
         assert!(
-            r2.in_edges.is_empty(),
-            "the saved `rm r1` must drop r2's incident in-half"
+            !r2.in_edges
+                .iter()
+                .any(|e| e.kind == "contains" && e.source == "requirements.requirement.r1"),
+            "the saved `rm r1` must drop r2's incident `contains` in-half"
+        );
+        assert!(
+            r2.in_edges
+                .iter()
+                .any(|e| e.kind == "requires" && e.source == "requirements.stakeholder.owner"),
+            "r2's `requires` in-half from the seeded Stakeholder must survive"
         );
         assert_eq!(
             testutil::commit_count(&wt),
@@ -3460,21 +3505,21 @@ mod e2e {
 
         // A routed mutation lands in the write-back buffer and is projected
         // write-through into the session-held DB — but it is NOT yet durable.
-        let add = testutil::spawn_apg(&["node", "add", "requirements", "requirement", "live"], &wt);
+        // A lone `solution.role` keeps the model whole-model-valid (SPEC §8.1).
+        let add = testutil::spawn_apg(&["node", "add", "solution", "role", "live"], &wt);
         assert!(
             add.status.success(),
             "{}",
             String::from_utf8_lossy(&add.stderr)
         );
         assert!(
-            !layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "live")
-                .exists(),
+            !layers::node_file_path(&wt_apg, layers::Layer::Solution, "role", "live").exists(),
             "a routed mutation must stay buffered (unsaved) until `session save`"
         );
 
         // Routed read: the session's route exposes the UNSAVED buffered change
         // (read-your-writes), with no lock error and no wait for end.
-        let query = "MATCH (n:Requirement {fqn: 'requirements.requirement.live'}) RETURN count(n)";
+        let query = "MATCH (n:Role {fqn: 'solution.role.live'}) RETURN count(n)";
         let routed = testutil::spawn_apg(&["query", query], &wt);
         assert!(
             routed.status.success(),
@@ -3510,8 +3555,7 @@ mod e2e {
             String::from_utf8_lossy(&save.stderr)
         );
         assert!(
-            layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "live")
-                .exists(),
+            layers::node_file_path(&wt_apg, layers::Layer::Solution, "role", "live").exists(),
             "save must land the buffered node file"
         );
 
@@ -3573,6 +3617,21 @@ mod e2e {
 
         let (repo, wt, wt_apg) = testutil::project_with_db("no-rescan");
         let home = repo.root.join("home");
+
+        // A whole-model-valid base (SPEC §8.1): a Stakeholder requiring an
+        // anchor Requirement. The durable `r2` and `reviewed` requirements
+        // below are rooted by routed `requires` edges from `owner`.
+        let mut owner = testutil::node("requirements", "stakeholder", "owner");
+        owner.out = vec![testutil::out_edge(
+            "requires",
+            "requirements.requirement.anchor",
+        )];
+        let mut anchor = testutil::node("requirements", "requirement", "anchor");
+        anchor.in_edges = vec![testutil::in_edge(
+            "requires",
+            "requirements.stakeholder.owner",
+        )];
+        layers::write_project(&wt_apg, &[owner, anchor], &[]).unwrap();
 
         let db_path = wt_apg.join(specs::TRANS).join("db.lbug");
         let graph_path = wt_apg.join(specs::TRANS).join("graph.jsonl");
@@ -3646,26 +3705,33 @@ mod e2e {
         mutate(&[
             "edge",
             "add",
-            "depends-on",
+            "requires",
+            "requirements.stakeholder.owner",
+            "requirements.requirement.r2",
+        ]);
+        mutate(&[
+            "edge",
+            "add",
+            "contains",
             "requirements.requirement.r1",
             "requirements.requirement.r2",
         ]);
         assert_eq!(
             query(
-                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->(:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)"
+                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:Contains]->(:Requirement {fqn: 'requirements.requirement.r2'}) RETURN count(*)"
             ),
             "1"
         );
         mutate(&[
             "edge",
             "rm",
-            "depends-on",
+            "contains",
             "requirements.requirement.r1",
             "requirements.requirement.r2",
         ]);
         assert_eq!(
             query(
-                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:DependsOn]->() RETURN count(*)"
+                "MATCH (:Requirement {fqn: 'requirements.requirement.r1'})-[:Contains]->() RETURN count(*)"
             ),
             "0"
         );
@@ -3684,6 +3750,13 @@ mod e2e {
             ),
             "1"
         );
+        mutate(&[
+            "edge",
+            "add",
+            "requires",
+            "requirements.stakeholder.owner",
+            "requirements.requirement.reviewed",
+        ]);
 
         // The writes stay BUFFERED: no node file has landed and no commit has
         // been made — `apg session save` is the one durability point.
@@ -3944,15 +4017,16 @@ mod e2e {
         let before_commits = testutil::commit_count(&wt);
 
         // (1) The durable mutations return successfully, admitted into the
-        // session's buffer.
+        // session's buffer. A Stakeholder `requires` a Requirement — the minimal
+        // whole-model-valid authored pair/edge (SPEC §8.1).
         for args in [
-            ["node", "add", "requirements", "requirement", "foo"],
+            ["node", "add", "requirements", "stakeholder", "foo"],
             ["node", "add", "requirements", "requirement", "bar"],
             [
                 "edge",
                 "add",
-                "depends-on",
-                "requirements.requirement.foo",
+                "requires",
+                "requirements.stakeholder.foo",
                 "requirements.requirement.bar",
             ],
         ] {
@@ -3967,7 +4041,7 @@ mod e2e {
         // The mutations stay BUFFERED: no node file has landed and no commit has
         // been made — `apg session save` is the one durability point.
         let foo_file =
-            layers::node_file_path(&wt_apg, layers::Layer::Requirements, "requirement", "foo");
+            layers::node_file_path(&wt_apg, layers::Layer::Requirements, "stakeholder", "foo");
         assert!(
             !foo_file.exists(),
             "the mutation must stay buffered until save"
@@ -3983,7 +4057,7 @@ mod e2e {
         let q = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+                "MATCH (n:Stakeholder {fqn: 'requirements.stakeholder.foo'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -3999,7 +4073,7 @@ mod e2e {
         let edge_q = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (:Requirement {fqn: 'requirements.requirement.foo'})-[:DependsOn]->(b) RETURN count(*)",
+                "MATCH (:Stakeholder {fqn: 'requirements.stakeholder.foo'})-[:Requires]->(b) RETURN count(*)",
             ],
             &wt,
         );
@@ -4073,7 +4147,7 @@ mod e2e {
         let direct = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+                "MATCH (n:Stakeholder {fqn: 'requirements.stakeholder.foo'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -4188,7 +4262,24 @@ mod e2e {
         let before_commits = testutil::commit_count(&wt);
 
         const N: usize = 6;
+        // A Stakeholder requiring `hub` roots the hub and (via the burst's
+        // `contains hub -> leaf-i`) every leaf, keeping the model
+        // whole-model-valid at save (SPEC §8.1).
+        run_in(
+            &wt,
+            &["node", "add", "requirements", "stakeholder", "owner"],
+        );
         run_in(&wt, &["node", "add", "requirements", "requirement", "hub"]);
+        run_in(
+            &wt,
+            &[
+                "edge",
+                "add",
+                "requires",
+                "requirements.stakeholder.owner",
+                "requirements.requirement.hub",
+            ],
+        );
         for i in 0..N {
             let name = format!("leaf-{i}");
             run_in(
@@ -4203,7 +4294,7 @@ mod e2e {
             let child = testutil::ApgCommand::new(&[
                 "edge",
                 "add",
-                "depends-on",
+                "contains",
                 "requirements.requirement.hub",
                 to.as_str(),
             ])
@@ -4250,7 +4341,7 @@ mod e2e {
         let burst_read = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (:Requirement {fqn: 'requirements.requirement.hub'})-[:DependsOn]->(b) RETURN count(*)",
+                "MATCH (:Requirement {fqn: 'requirements.requirement.hub'})-[:Contains]->(b) RETURN count(*)",
             ],
             &wt,
         );
@@ -4269,11 +4360,12 @@ mod e2e {
         );
 
         // An immediate read-your-writes across the real CLI, still unsaved.
-        run_in(&wt, &["node", "add", "requirements", "requirement", "foo"]);
+        // `foo` is a lone `solution.role` (unconstrained: whole-model-valid).
+        run_in(&wt, &["node", "add", "solution", "role", "foo"]);
         let q = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+                "MATCH (n:Role {fqn: 'solution.role.foo'}) RETURN count(n)",
             ],
             &wt,
         );
@@ -4342,7 +4434,7 @@ mod e2e {
         let direct = testutil::spawn_apg(
             &[
                 "query",
-                "MATCH (n:Requirement {fqn: 'requirements.requirement.foo'}) RETURN count(n)",
+                "MATCH (n:Role {fqn: 'solution.role.foo'}) RETURN count(n)",
             ],
             &wt,
         );

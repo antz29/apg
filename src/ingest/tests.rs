@@ -317,6 +317,31 @@ mod unit {
                 from: "n1".to_string(),
                 to: "java.util.List".to_string(),
             },
+            Record::Requires {
+                from: "requirements.stakeholder.owner".to_string(),
+                to: "requirements.requirement.r1".to_string(),
+                properties: NodeProperties::default(),
+            },
+            Record::Reads {
+                from: "domain.service.s1".to_string(),
+                to: "domain.entity.e1".to_string(),
+                properties: NodeProperties::default(),
+            },
+            Record::Writes {
+                from: "domain.service.s1".to_string(),
+                to: "domain.entity.e1".to_string(),
+                properties: NodeProperties::default(),
+            },
+            Record::IsRole {
+                from: "solution.container.api".to_string(),
+                to: "solution.role.app-service".to_string(),
+                properties: NodeProperties::default(),
+            },
+            Record::Realises {
+                from: "solution.component.gateway".to_string(),
+                to: "domain.service.checkout".to_string(),
+                properties: NodeProperties::default(),
+            },
         ];
         let mut buf: Vec<u8> = Vec::new();
         for e in &edges {

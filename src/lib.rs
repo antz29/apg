@@ -106,8 +106,8 @@ USAGE:
                               add/action/resolve/reject/list
   apg spec <sub> …            Deterministic, read-only durable-spec lint:
                               lint — report the R2/R3/R4 rule violations and
-                              the change-set delta gates as errors, plus the
-                              non-blocking tier-1-3 wording advisories
+                              the shared structural validator set as errors,
+                              plus the non-blocking tier-1-3 wording advisories
   apg node <sub> …            Durable node-file model mutations:
                               add/update/rm (type-as-argument, writes apg/layers;
                               the name is identity and is never updatable)

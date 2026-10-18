@@ -9,7 +9,7 @@ export default Plugin.define({
         name: "apg_edge",
         options: { codemode: false },
         description:
-          "Durable node-file edge mutations (`apg edge add|update|rm <kind> <from> <to> [--property k=v]*`). A durable `apg edge` mutation requires a live session (`apg session start`): it is projected at admission into the session's write-back buffer and is not durable until `apg session save`, which writes BOTH endpoint files in one atomic `apg/layers/**` write and exactly one commit — the out half in the source's file, the matching in half in the target's; with no live session it refuses. Kinds (SPEC §3.3): contains, drives, realised-by, implemented-by, calls, publishes, subscribes, depends-on, uses, represents, details. Endpoints are authored FQNs (`<layer>.<type>.<name>`) or, for implemented-by/details targets, code FQNs validated against the scanned graph (a planned code FQN is pending; a vanished one is drift and refused). Both endpoints must already exist. `add` refuses an identical `(kind,from,to)` already on the source (no implicit upsert); `update` is properties-only (kind/from/to are identity: it MERGEs `--property` and applies `--unset-property` (an absent key is refused), rewriting both halves to the same map) and refuses an absent edge; `rm` removes the edge from both endpoint files.",
+          "Durable node-file edge mutations (`apg edge add|update|rm <kind> <from> <to> [--property k=v]*`). A durable `apg edge` mutation requires a live session (`apg session start`): it is projected at admission into the session's write-back buffer and is not durable until `apg session save`, which writes BOTH endpoint files in one atomic `apg/layers/**` write and exactly one commit — the out half in the source's file, the matching in half in the target's; with no live session it refuses. Kinds (SPEC §4): requires, contains, drives, reads, writes, calls, publishes, subscribes, realises, is-role, uses, represents, implemented-by, details. Endpoints are authored FQNs (`<layer>.<type>.<name>`) or, for implemented-by/details targets, code FQNs validated against the scanned graph (a planned code FQN is pending; a vanished one is drift and refused). Both endpoints must already exist. `add` refuses an identical `(kind,from,to)` already on the source (no implicit upsert); `update` is properties-only (kind/from/to are identity: it MERGEs `--property` and applies `--unset-property` (an absent key is refused), rewriting both halves to the same map) and refuses an absent edge; `rm` removes the edge from both endpoint files.",
         input: {
           type: "object",
           properties: {
@@ -21,7 +21,7 @@ export default Plugin.define({
             kind: {
               type: "string",
               description:
-                "Edge kind: contains, drives, realised-by, implemented-by, calls, publishes, subscribes, depends-on, uses, represents, details (required).",
+                "Edge kind: requires, contains, drives, reads, writes, calls, publishes, subscribes, realises, is-role, uses, represents, implemented-by, details (required).",
             },
             from: { type: "string", description: "Source FQN (required)." },
             to: {

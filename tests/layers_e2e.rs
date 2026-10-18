@@ -76,22 +76,22 @@ fn write_tree(root: &Path, nodes: &[NodeFile]) {
     }
 }
 
-/// A sample spine tree: a requirement `drives` a group, the group is
-/// `realised-by` a system, the system is `implemented-by` a code FQN.
+/// A sample spine tree: a requirement `drives` a service, a component
+/// `realises` the service, and the component is `implemented-by` a code FQN.
 /// Fully paired in/out halves.
 fn sample_tree() -> Vec<NodeFile> {
     let mut req = node("requirements", "requirement", "place-order");
-    req.out.push(out_edge("drives", "domain.group.sales"));
-    let mut grp = node("domain", "group", "sales");
-    grp.in_edges
+    req.out.push(out_edge("drives", "domain.service.checkout"));
+    let mut svc = node("domain", "service", "checkout");
+    svc.in_edges
         .push(in_edge("drives", "requirements.requirement.place-order"));
-    grp.out
-        .push(out_edge("realised-by", "solution.system.payments"));
-    let mut sys = node("solution", "system", "payments");
-    sys.in_edges
-        .push(in_edge("realised-by", "domain.group.sales"));
-    sys.out.push(out_edge("implemented-by", "apg.main"));
-    vec![req, grp, sys]
+    svc.in_edges
+        .push(in_edge("realises", "solution.component.payments"));
+    let mut comp = node("solution", "component", "payments");
+    comp.out
+        .push(out_edge("realises", "domain.service.checkout"));
+    comp.out.push(out_edge("implemented-by", "apg.main"));
+    vec![req, svc, comp]
 }
 
 /// A real project context for `write_project` tests: the scan fixture's
@@ -520,8 +520,8 @@ mod e2e {
 
     /// `ingest_tree` on a small tree produces the right records: the three
     /// node records at their derived `<layer>.<type>.<name>` FQNs, the three
-    /// edge records (drives / realised-by / implemented-by), and nothing from
-    /// the in-edge halves (out is canonical).
+    /// edge records (drives / realises / implemented-by), and nothing from the
+    /// in-edge halves (out is canonical).
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn ingest_tree_produces_node_and_edge_records() {
@@ -535,21 +535,21 @@ mod e2e {
         let has_node = |fqn: &str| {
             records.iter().any(|r| match r {
                 Record::Requirement { fqn: f, .. }
-                | Record::Group { fqn: f, .. }
-                | Record::System { fqn: f, .. } => f == fqn,
+                | Record::Service { fqn: f, .. }
+                | Record::Component { fqn: f, .. } => f == fqn,
                 _ => false,
             })
         };
         assert!(has_node("requirements.requirement.place-order"));
-        assert!(has_node("domain.group.sales"));
-        assert!(has_node("solution.system.payments"));
-        // Exactly three node records (the group carries no attribute/root).
+        assert!(has_node("domain.service.checkout"));
+        assert!(has_node("solution.component.payments"));
+        // Exactly three node records.
         assert_eq!(
             records
                 .iter()
                 .filter(|r| matches!(
                     r,
-                    Record::Requirement { .. } | Record::Group { .. } | Record::System { .. }
+                    Record::Requirement { .. } | Record::Service { .. } | Record::Component { .. }
                 ))
                 .count(),
             3
@@ -558,22 +558,23 @@ mod e2e {
         assert!(records.iter().any(|r| matches!(
             r,
             Record::Drives { from, to, .. }
-                if from == "requirements.requirement.place-order" && to == "domain.group.sales"
+                if from == "requirements.requirement.place-order"
+                    && to == "domain.service.checkout"
         )));
         assert!(records.iter().any(|r| matches!(
             r,
-            Record::RealisedBy { from, to, .. }
-                if from == "domain.group.sales" && to == "solution.system.payments"
+            Record::Realises { from, to, .. }
+                if from == "solution.component.payments" && to == "domain.service.checkout"
         )));
         assert!(records.iter().any(|r| matches!(
             r,
             Record::SpecImplementedBy { from, to, .. }
-                if from == "solution.system.payments" && to == "apg.main"
+                if from == "solution.component.payments" && to == "apg.main"
         )));
         // The in-edge halves are never emitted (out is canonical).
         assert!(!records.iter().any(|r| matches!(
             r,
-            Record::RealisedBy { from, .. } if from == "solution.system.payments"
+            Record::Realises { from, .. } if from == "domain.service.checkout"
         )));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -616,19 +617,19 @@ mod e2e {
         assert!(records.iter().any(|r| matches!(
             r,
             Record::SpecImplementedBy { from, to, .. }
-                if from == "solution.system.payments" && to == "apg.main"
+                if from == "solution.component.payments" && to == "apg.main"
         )));
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// SPEC §3.3 "contains/depends-on trees acyclic": the scan leg refuses a
-    /// cycle in either edge kind at ingestion. Pairing alone would pass (both
-    /// halves of every edge are present) — the acyclicity rule is what stops
-    /// it.
+    /// SPEC §3.3 "contains trees acyclic": the scan leg refuses a cycle in the
+    /// edge kind at ingestion. Pairing alone would pass (both halves of every
+    /// edge are present) — the acyclicity rule is what stops it.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
-    fn ingest_tree_refuses_contains_and_depends_on_cycles() {
-        for kind in ["contains", "depends-on"] {
+    fn ingest_tree_refuses_contains_cycles() {
+        {
+            let kind = "contains";
             let root = temp_root(&format!("ingest-cycle-{kind}"));
             let a_fqn = "requirements.requirement.a";
             let b_fqn = "requirements.requirement.b";
@@ -710,14 +711,15 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// SPEC §3.3 "contains/depends-on trees acyclic" on the write path: a
-    /// cycle closed by the proposed change is refused by `validate_change`
-    /// over the assembled post-mutation edge set (pairing alone passes — both
-    /// halves of every edge are present), and nothing is written.
+    /// SPEC §3.3 "contains trees acyclic" on the write path: a cycle closed by
+    /// the proposed change is refused by `validate_change` over the assembled
+    /// post-mutation edge set (pairing alone passes — both halves of every edge
+    /// are present), and nothing is written.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
-    fn validate_change_refuses_contains_and_depends_on_cycles() {
-        for kind in ["contains", "depends-on"] {
+    fn validate_change_refuses_contains_cycles() {
+        {
+            let kind = "contains";
             let root = temp_root(&format!("write-cycle-{kind}"));
             // A --kind--> B already on disk, both halves.
             let mut a = node("requirements", "requirement", "a");
@@ -799,7 +801,7 @@ mod e2e {
         let (wt_apg, repo, wt) = mutation_fixture("write-drift");
 
         // (a) implemented-by -> a FQN neither scanned nor planned: drift.
-        let mut ghost = node("solution", "system", "ghost-sys");
+        let mut ghost = node("solution", "component", "ghost-sys");
         ghost
             .out
             .push(out_edge("implemented-by", "fixture.mod.Gone"));
@@ -814,7 +816,7 @@ mod e2e {
         let msg = format!("{err:#}");
         assert!(msg.contains("spec drift"), "{msg}");
         assert!(msg.contains("fixture.mod.Gone"), "{msg}");
-        let ghost_path = node_file_path(&wt_apg, Layer::Solution, "system", "ghost-sys");
+        let ghost_path = node_file_path(&wt_apg, Layer::Solution, "component", "ghost-sys");
         assert!(
             !ghost_path.exists(),
             "a refused drift write must not land a file"
@@ -850,12 +852,12 @@ mod e2e {
         .unwrap();
         testutil::scan_checkout(&wt).unwrap();
 
-        let mut pending = node("solution", "system", "pending-sys");
+        let mut pending = node("solution", "component", "pending-sys");
         pending
             .out
             .push(out_edge("implemented-by", "fixture.mod.Widget"));
         write_project(&wt_apg, &[pending], &[]).unwrap();
-        let back = read_node_file(&wt_apg, "solution", "system", "pending-sys");
+        let back = read_node_file(&wt_apg, "solution", "component", "pending-sys");
         assert!(
             back.out
                 .iter()
@@ -1023,7 +1025,7 @@ mod e2e {
         testutil::remove(&repo);
     }
 
-    /// SPEC §3.3 "contains/depends-on trees acyclic": a cycle between node
+    /// SPEC §3.3 "contains trees acyclic": a cycle between node
     /// files FAILS the scan at ingestion. Pairing alone would pass (all four
     /// halves are present) — the acyclicity rule is what stops the scan,
     /// proving it is wired into the scan leg.
@@ -1077,9 +1079,10 @@ mod e2e {
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_fails_on_implemented_by_drift_and_ingests_transient_planned_pending() {
         let repo = scan_repo("scan-drift");
-        let mut sys = node("solution", "system", "payments");
-        sys.out.push(out_edge("implemented-by", "fixture.mod.Gone"));
-        write_tree(&repo.apg_root(), &[sys]);
+        let mut comp = node("solution", "component", "payments");
+        comp.out
+            .push(out_edge("implemented-by", "fixture.mod.Gone"));
+        write_tree(&repo.apg_root(), &[comp]);
 
         // Gone from both the scanned graph and .trans -> spec drift; the scan
         // fails naming the FQN.
@@ -1111,16 +1114,15 @@ mod e2e {
             db.is_planned("fixture.mod.Gone"),
             "a .trans planned FQN must ingest as pending"
         );
-        assert!(db.has_node("solution.system.payments"));
+        assert!(db.has_node("solution.component.payments"));
         testutil::remove(&repo);
     }
 
-    /// Prose satisfaction is never executed, and the scan no longer validates a
-    /// constraint's `attaches-to` reference: `eval_constraint` is structure-only
-    /// (name allowlist, type-in-layer, uniqueness), so a constraint whose body
-    /// LOOKS like an expression (and is contradictory), and whose `attaches-to`
-    /// is even UNRESOLVABLE, still ingests. Satisfaction is assessed by review
-    /// only (R14).
+    /// Prose satisfaction is never executed, and the scan does not evaluate a
+    /// constraint's body: `eval_constraint` is structure-only (name allowlist,
+    /// type-in-layer, uniqueness), so a constraint whose body LOOKS like an
+    /// expression (and is contradictory) still ingests. Satisfaction is
+    /// assessed by review only (R14).
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn scan_never_evaluates_constraint_prose() {
@@ -1129,10 +1131,6 @@ mod e2e {
         ent.properties
             .insert("kind".to_string(), "entity".to_string());
         let mut c = node("requirements", "constraint", "law");
-        c.properties.insert(
-            PROP_ATTACHES_TO.to_string(),
-            "domain.entity.ghost".to_string(),
-        );
         c.body = "count(entities) == 0 AND count(entities) > 0".to_string();
         write_tree(&repo.apg_root(), &[ent, c]);
 
@@ -1276,11 +1274,11 @@ mod e2e {
         std::fs::remove_file(&export_path).unwrap();
 
         // Structural reference validation still runs (no artifacts needed): a
-        // dangling authored `depends-on` target is refused (no file, no commit).
+        // dangling authored `contains` target is refused (no file, no commit).
         let mut dangling = node("requirements", "requirement", "dangling");
         dangling
             .out
-            .push(out_edge("depends-on", "requirements.requirement.ghost"));
+            .push(out_edge("contains", "requirements.requirement.ghost"));
         let err = write_project(&wt_apg, &[dangling], &[]).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
@@ -1295,12 +1293,12 @@ mod e2e {
 
         // A code-FQN implemented-by to an unscanned FQN succeeds with both
         // artifacts gone: recorded unvalidated (no export ⇒ no code identity).
-        let mut unvalidated = node("solution", "system", "unknown-sys");
+        let mut unvalidated = node("solution", "component", "unknown-sys");
         unvalidated
             .out
             .push(out_edge("implemented-by", "fixture.mod.NotScanned"));
         write_project(&wt_apg, &[unvalidated], &[]).unwrap();
-        let back = read_node_file(&wt_apg, "solution", "system", "unknown-sys");
+        let back = read_node_file(&wt_apg, "solution", "component", "unknown-sys");
         assert!(
             back.out
                 .iter()
@@ -1316,7 +1314,7 @@ mod e2e {
         // Hold the DB read-write, so any DB open on the validation path would
         // fail with an lbug lock error instead of the drift refusal.
         let held = artifacts::ArtifactDb::open(&wt_apg).unwrap();
-        let mut drift = node("solution", "system", "drift-sys");
+        let mut drift = node("solution", "component", "drift-sys");
         drift
             .out
             .push(out_edge("implemented-by", "fixture.mod.Gone"));
@@ -1328,20 +1326,20 @@ mod e2e {
             !msg.contains("Could not set lock"),
             "validation must never open db.lbug: {msg}"
         );
-        let drift_path = node_file_path(&wt_apg, Layer::Solution, "system", "drift-sys");
+        let drift_path = node_file_path(&wt_apg, Layer::Solution, "component", "drift-sys");
         assert!(!drift_path.exists(), "a refused drift write lands nothing");
         drop(held);
 
         // A valid implemented-by to scanned code is accepted, and the
         // projection delta is applied write-through to the live DB.
-        let mut known = node("solution", "system", "known-sys");
+        let mut known = node("solution", "component", "known-sys");
         known
             .out
             .push(out_edge("implemented-by", "go.fixture.mod.Store"));
         write_project(&wt_apg, &[known], &[]).unwrap();
         let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
         assert!(
-            db.has_node("solution.system.known-sys"),
+            db.has_node("solution.component.known-sys"),
             "the projection delta must be applied write-through"
         );
         drop(db);
@@ -1432,11 +1430,12 @@ mod e2e {
 
     /// Phase-05 task-9: projection-equals-sources as a TWO-WAY equality over
     /// NODES AND EDGES — `db − sources = ∅` AND `sources − db = ∅` — covering
-    /// every authored edge kind (Contains/Drives/RealisedBy/SpecImplementedBy/
-    /// Uses/Represents/Details/DependsOn) plus the transient Satisfies/Gates/
-    /// Reviews, with no duplicate rows per `(label, fqn)`. Scoped to BOTH the
-    /// durable (`write_project`) and transient (`write_jsonl_and_reingest`)
-    /// paths; **no scan runs** to reach this state.
+    /// every authored edge kind (Contains/Requires/Drives/Realises/
+    /// SpecImplementedBy/Uses/Represents/IsRole/Reads/Writes/Details) plus the
+    /// transient Satisfies/Gates/Reviews, with no duplicate rows per
+    /// `(label, fqn)`. Scoped to BOTH the durable (`write_project`) and
+    /// transient (`write_jsonl_and_reingest`) paths; **no scan runs** to reach
+    /// this state.
     #[test]
     #[ignore = "e2e tier: real I/O (temp dir/db.lbug/git); run via cargo test-e2e"]
     fn projection_equals_sources_two_way_nodes_and_edges() {
@@ -1451,23 +1450,25 @@ mod e2e {
             .properties
             .insert(PROP_KIND.to_string(), "entity".to_string());
         let mut checkout = node("domain", "service", "checkout");
-        let mut portal = node("solution", "system", "portal");
+        let mut gateway = node("solution", "component", "gateway");
+        let mut role = node("solution", "role", "app-service");
         let mut alice = node("solution", "person", "alice");
+        let mut buyer = node("domain", "actor", "buyer");
         let mut notes = node("implementation", "note", "notes");
 
-        // contains: User ⊃ Requirement
-        user.out
-            .push(out_edge("contains", "requirements.requirement.timer"));
-        timer
-            .in_edges
-            .push(in_edge("contains", "requirements.user.customer"));
-        // depends-on: Requirement → Requirement
+        // contains: Requirement ⊃ Requirement
         timer
             .out
-            .push(out_edge("depends-on", "requirements.requirement.clock"));
+            .push(out_edge("contains", "requirements.requirement.clock"));
         clock
             .in_edges
-            .push(in_edge("depends-on", "requirements.requirement.timer"));
+            .push(in_edge("contains", "requirements.requirement.timer"));
+        // requires: User → Requirement
+        user.out
+            .push(out_edge("requires", "requirements.requirement.timer"));
+        timer
+            .in_edges
+            .push(in_edge("requires", "requirements.user.customer"));
         // drives: Requirement → Service
         timer
             .out
@@ -1475,27 +1476,49 @@ mod e2e {
         checkout
             .in_edges
             .push(in_edge("drives", "requirements.requirement.timer"));
-        // realised-by: Service → System
-        checkout
+        // realises: Component → Service
+        gateway
             .out
-            .push(out_edge("realised-by", "solution.system.portal"));
-        portal
+            .push(out_edge("realises", "domain.service.checkout"));
+        checkout
             .in_edges
-            .push(in_edge("realised-by", "domain.service.checkout"));
-        // implemented-by: System → code (no in-half — code has no node file)
-        portal
+            .push(in_edge("realises", "solution.component.gateway"));
+        // implemented-by: Component → code (no in-half — code has no node file)
+        gateway
             .out
             .push(out_edge("implemented-by", "go.fixture.mod.Store"));
-        // represents: User → Entity
-        user.out.push(out_edge("represents", "domain.entity.order"));
-        order
+        // represents: Actor → User; Person → Actor
+        buyer
+            .out
+            .push(out_edge("represents", "requirements.user.customer"));
+        user.in_edges
+            .push(in_edge("represents", "domain.actor.buyer"));
+        alice.out.push(out_edge("represents", "domain.actor.buyer"));
+        buyer
             .in_edges
-            .push(in_edge("represents", "requirements.user.customer"));
-        // uses: Person → System
-        alice.out.push(out_edge("uses", "solution.system.portal"));
-        portal
+            .push(in_edge("represents", "solution.person.alice"));
+        // uses: Person → Component
+        alice
+            .out
+            .push(out_edge("uses", "solution.component.gateway"));
+        gateway
             .in_edges
             .push(in_edge("uses", "solution.person.alice"));
+        // is-role: Component → Role
+        gateway
+            .out
+            .push(out_edge("is-role", "solution.role.app-service"));
+        role.in_edges
+            .push(in_edge("is-role", "solution.component.gateway"));
+        // reads/writes: Service → Entity (own leaf Group only)
+        checkout.out.push(out_edge("reads", "domain.entity.order"));
+        order
+            .in_edges
+            .push(in_edge("reads", "domain.service.checkout"));
+        checkout.out.push(out_edge("writes", "domain.entity.order"));
+        order
+            .in_edges
+            .push(in_edge("writes", "domain.service.checkout"));
         // details: an implementation-layer note attaches to the code it
         // explains (`global.constraint.note-implementation-only`) — notes live
         // only in the implementation layer, so the `details` edge names the
@@ -1505,7 +1528,9 @@ mod e2e {
 
         write_project(
             &wt_apg,
-            &[user, timer, clock, order, checkout, portal, alice, notes],
+            &[
+                user, timer, clock, order, checkout, gateway, role, alice, buyer, notes,
+            ],
             &[],
         )
         .unwrap();
@@ -1593,7 +1618,7 @@ mod e2e {
             .collect();
 
         // --- db → observed sets, scoped to the metadata labels/tables ---
-        const METADATA_LABELS: [&str; 17] = [
+        const METADATA_LABELS: [&str; 19] = [
             "Requirement",
             "Note",
             "Feedback",
@@ -1610,6 +1635,8 @@ mod e2e {
             "Value",
             "Service",
             "Person",
+            "Actor",
+            "Role",
             "Constraint",
         ];
         let db = artifacts::ArtifactDb::open(&wt_apg).unwrap();
@@ -1633,15 +1660,18 @@ mod e2e {
             "no duplicate node row per (label, fqn): {db_rows:?}"
         );
 
-        const EDGE_TABLES: [&str; 14] = [
+        const EDGE_TABLES: [&str; 17] = [
             "Contains",
+            "Requires",
             "Drives",
-            "RealisedBy",
+            "Realises",
             "SpecImplementedBy",
             "Uses",
             "Represents",
+            "IsRole",
+            "Reads",
+            "Writes",
             "Details",
-            "DependsOn",
             "Gates",
             "Satisfies",
             "Reviews",
