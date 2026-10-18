@@ -16,8 +16,8 @@ class ApgPy < Formula
 
   bottle do
     root_url "https://github.com/antz29/apg/releases/download/v0.23.2"
-    rebuild 42
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "482ddcf808fca7c7ce12a3d39444f66ce67738f5847cb70fd704e89b352a4b94"
+    rebuild 43
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "e00c1a488fd63c32f8620317235eeca7c79eca65196938ffeb74fcd54723497e"
   end
 
   # A bottle block is merged here by the bottle workflow once this formula is
