@@ -9,6 +9,11 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.23.2
+
+Re-cut of v0.23.1 (same fix) with correctly-versioned bottles; the v0.23.1 bottles
+were accidentally built at v0.23.0. No durable-spec model change.
+
 ## v0.23.1
 
 Patch release: `apg init` writes the migration guide only when the layout version
