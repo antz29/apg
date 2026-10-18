@@ -712,10 +712,14 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     let old_version = version_gate::config_version(&apg_dir);
     // The changelog-sliced migration guide (best-effort): the migration-agent
     // reads it from the repo's apg/ dir and works the tasks for the delta. It
-    // is written BEFORE the version bump below, so a failed guide write leaves
-    // the layout on its old version — re-running `apg init` then re-slices the
-    // same (old, new] range instead of a no-op that loses the tasks.
-    write_migration_guide(&apg_dir, old_version.as_deref());
+    // is written ONLY when the layout version actually advances — a same-version
+    // re-init is a no-op and must not clobber a still-pending guide. It is also
+    // written BEFORE the version bump below, so a failed guide write leaves the
+    // layout on its old version and re-running `apg init` re-slices the same
+    // (old, new] range.
+    if old_version.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
+        write_migration_guide(&apg_dir, old_version.as_deref());
+    }
     version_gate::ensure_config_version(&apg_dir, env!("CARGO_PKG_VERSION"))?;
 
     let opencode_dir = user_opencode_dir()?;

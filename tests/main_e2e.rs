@@ -2117,13 +2117,13 @@ mod e2e {
             "the version write captured the old version first, then moved on"
         );
 
-        // Idempotent: a re-run at the current version rewrites only its own
-        // (empty-range) no-op guide.
+        // Idempotent: a same-version re-run is a no-op — it must NOT clobber the
+        // still-pending guide written by the upgrade above.
         run_init();
         assert_eq!(
             std::fs::read_to_string(&guide_path).unwrap(),
-            render_migration_guide(CHANGELOG, Some(version), version),
-            "re-running init at the same version is a no-op"
+            upgraded,
+            "a same-version re-init leaves the pending migration guide untouched"
         );
 
         let _ = std::fs::remove_dir_all(&base);
