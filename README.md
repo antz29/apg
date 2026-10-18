@@ -113,11 +113,11 @@ brew install antz29/apg/scanner antz29/apg/apg-go   # Go only
 Verify:
 
 ```sh
-apg --version   # apg 0.22.x
+apg --version   # apg 0.23.x
 apg --help
 ```
 
-The stable install tracks the current `0.22.x` release tag. If you want the
+The stable install tracks the current `0.23.x` release tag. If you want the
 latest unreleased code instead, pass `--HEAD`:
 
 ```sh
@@ -154,7 +154,7 @@ curl -fsSL https://raw.githubusercontent.com/antz29/apg/main/install.sh | sh -s 
 The installer verifies sha256 checksums for each component against `sha256sums.txt`.
 
 Options:
-- `--version 0.22.x`: pin a specific release tag
+- `--version 0.23.x`: pin a specific release tag
 - `--user`: install under `~/.local` (no root required)
 - `--prefix DIR`: choose a custom install location (default `/usr/local`)
 - `--frontends L,L...`: comma-separated list of frontends to install
@@ -167,7 +167,7 @@ The binary links OpenSSL dynamically, so `libssl.so.3` must be present (it is on
 Verify:
 
 ```sh
-apg --version   # apg 0.22.x
+apg --version   # apg 0.23.x
 apg --help
 ```
 
@@ -216,9 +216,9 @@ available in chat.
 The suite targets opencode **2.x** and installs at the opencode 2.x global
 config root `~/.config/opencode/`; `apg init` neither reads nor writes the V1
 user-level root. Each apg release line supports exactly one opencode major:
-**apg 0.21.x** pairs with opencode **v1** only, and **apg 0.22.x** pairs with
+**apg 0.21.x** pairs with opencode **v1** only, and **apg 0.22.x and later** pairs with
 opencode **v2** only — the `~/.config/opencode/` layout and the
-`@opencode/plugin` dependency belong to the 0.22.x line.
+`@opencode/plugin` dependency belong to the opencode-v2 line (0.22.x and later).
 
 ### 2. `apg scan [dir] [options]`
 

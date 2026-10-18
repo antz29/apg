@@ -213,9 +213,9 @@ when a lookup comes up empty (overloads carry `(params)` suffixes).
 The suite targets opencode **2.x** and installs at the opencode 2.x global
 config root `~/.config/opencode/`; `apg init` neither reads nor writes the V1
 user-level root. Each apg release line supports exactly one opencode major:
-**apg 0.21.x** pairs with opencode **v1** only, and **apg 0.22.x** pairs with
+**apg 0.21.x** pairs with opencode **v1** only, and **apg 0.22.x and later** pairs with
 opencode **v2** only — the `~/.config/opencode/` layout and the
-`@opencode/plugin` dependency belong to the 0.22.x line.
+`@opencode/plugin` dependency belong to the opencode-v2 line (0.22.x and later).
 
 The `apg` binary is brew-installable via split formulae (tap
 `https://github.com/antz29/apg.git`): the base `scanner` formula (the binary

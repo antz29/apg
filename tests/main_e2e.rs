@@ -15,7 +15,7 @@ use std::process::Command;
 /// the `[package] version` line on every release: the assertions below fail
 /// on any drift (manifest/lockfile/compiled constant ahead of or behind the
 /// advertised release), so a bump commit cannot silently skip it.
-const RELEASE_VERSION: &str = "0.22.2";
+const RELEASE_VERSION: &str = "0.23.0";
 
 /// The `version = "..."` declared directly under a Cargo.toml `[package]`
 /// header.
@@ -2826,12 +2826,12 @@ mod e2e {
     fn readme_documents_release_version() {
         let readme =
             std::fs::read_to_string(format!("{}/README.md", env!("CARGO_MANIFEST_DIR"))).unwrap();
-        // The README pins the 0.22.x line, not an exact patch, so patch releases
+        // The README pins the 0.23.x line, not an exact patch, so patch releases
         // don't require a README edit.
-        assert!(readme.contains("apg 0.22.x"), "README --version examples");
-        assert!(readme.contains("0.22.x"), "README tagged-release prose");
+        assert!(readme.contains("apg 0.23.x"), "README --version examples");
+        assert!(readme.contains("0.23.x"), "README tagged-release prose");
         assert!(
-            readme.contains("--version 0.22.x"),
+            readme.contains("--version 0.23.x"),
             "README Linux installer pin option"
         );
         // No stale release records: the previous versions must be fully replaced.
