@@ -1,11 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "agents": {
-    "agent-builder": { "model": "github-copilot/claude-opus-5.5" },
-    "implementation-phase-reviewer": { "model": "github-copilot/claude-opus-5.5" },
-    "plan-review": { "model": "github-copilot/claude-opus-5.5" },
+    "agent-builder": { "model": "ollama-cloud/deepseek-v4-pro" },
+    "implementation-phase-reviewer": { "model": "ollama-cloud/deepseek-v4-pro" },
+    "plan-review": { "model": "ollama-cloud/deepseek-v4-pro" },
     "plan-writer": { "model": "opencode-go/deepseek-v4.1-flash" },
-    "spec-review": { "model": "github-copilot/claude-opus-5.5" },
+    "spec-review": { "model": "ollama-cloud/deepseek-v4-pro" },
     "spec-writer": { "model": "opencode-go/deepseek-v4.1-flash" },
     "build-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
     "cpp-frontend-implementer": { "model": "opencode-go/deepseek-v4.1-flash" },
