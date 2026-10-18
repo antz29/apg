@@ -9,6 +9,12 @@ move from the previous model to the new one. `apg init` slices those sections fo
 the `(old layout version, running binary version]` range and writes them into the
 repo's `apg/migration-guide.md`, which the **migration-agent** reads and works.
 
+## v0.23.1
+
+Patch release: `apg init` writes the migration guide only when the layout version
+actually advances, so a same-version re-init no longer overwrites a still-pending
+migration guide with "no migration required". No durable-spec model change.
+
 ## v0.23.0
 
 Re-worked the durable-spec model: the domain → solution spine runs through
