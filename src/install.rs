@@ -277,10 +277,11 @@ a repo never created by `apg init` has no versioned layout at all.
 const CODEBASE_NAVIGATOR_AGENT: &str =
     include_str!("../opencode-suite/agents/codebase-navigator.md");
 
-/// The seven distributed agents that `apg init` installs into
-/// `~/.config/opencode/agents/` (SPEC R13/R15): the navigator plus the six
-/// spec/plan/review/builder agents — including the `implementation-phase-reviewer`
-/// — single-sourced from the repo's `opencode-suite/agents/`.
+/// The eight distributed agents that `apg init` installs into
+/// `~/.config/opencode/agents/` (SPEC R13/R15): the navigator plus the seven
+/// spec/plan/review/builder/migration agents — including the
+/// `implementation-phase-reviewer` — single-sourced from the repo's
+/// `opencode-suite/agents/`.
 pub const AGENTS: &[(&str, &str)] = &[
     ("codebase-navigator.md", CODEBASE_NAVIGATOR_AGENT),
     (
@@ -307,9 +308,13 @@ pub const AGENTS: &[(&str, &str)] = &[
         "agent-builder.md",
         include_str!("../opencode-suite/agents/agent-builder.md"),
     ),
+    (
+        "migration-agent.md",
+        include_str!("../opencode-suite/agents/migration-agent.md"),
+    ),
 ];
 
-/// The seven distributed agent filenames — the apg-owned names in
+/// The eight distributed agent filenames — the apg-owned names in
 /// `~/.config/opencode/agents/`. `apg init` prunes any of these that a newer release
 /// dropped from the suite (a user's own same-named agent is the accepted edge).
 const KNOWN_AGENT_FILES: &[&str] = &[
@@ -320,7 +325,19 @@ const KNOWN_AGENT_FILES: &[&str] = &[
     "plan-review.md",
     "implementation-phase-reviewer.md",
     "agent-builder.md",
+    "migration-agent.md",
 ];
+
+/// The committed changelog at the repo root, embedded so the binary carries the
+/// migration convention: a `## vX.Y.Z` header per release, an optional
+/// `### Migration` subsection holding the tasks a layout upgrade across that
+/// version must perform. `apg init` slices the `(old layout version, binary
+/// version]` range into `apg/migration-guide.md` for the migration-agent to work.
+pub const CHANGELOG: &str = include_str!("../CHANGELOG.md");
+
+/// The migration-guide filename `apg init` writes into the committed `apg/`
+/// layout dir (`apg/migration-guide.md`) and the migration-agent reads.
+pub const MIGRATION_GUIDE: &str = "migration-guide.md";
 
 /// The `package.json` written by `apg init` into `~/.config/opencode/` when
 /// none exists, so the plugin files' `@opencode/plugin` import resolves.
@@ -457,7 +474,7 @@ pub fn prune_stale_suite(opencode_dir: &Path) -> std::io::Result<usize> {
 /// Installs (or updates) the apg suite into the V2 `opencode_dir` layout: every
 /// `SUITE_TOOLS` plugin file into `plugins/`, the shared lib + upgrade guide
 /// into `lib/` (beside the plugins, outside opencode's plugin discovery), the
-/// seven distributed agents into `agents/`, and `package.json` at the root —
+/// eight distributed agents into `agents/`, and `package.json` at the root —
 /// each written only when missing or changed — then prunes stale apg-owned
 /// files. Returns `(suite files written/updated, agents written/updated, files
 /// pruned)` — the two populations counted separately. `cmd_init` calls it
@@ -513,9 +530,149 @@ pub fn install_suite(opencode_dir: &Path) -> anyhow::Result<(usize, usize, usize
     Ok((suite_files, agents, pruned))
 }
 
+/// One `## vX.Y.Z` changelog entry: its parsed version, the version token as
+/// written, and the raw content of its optional `### Migration` subsection
+/// (empty when the entry has none).
+struct ChangelogEntry {
+    version: (u64, u64, u64),
+    version_text: String,
+    migration: String,
+}
+
+/// Parses the leading `X.Y[.Z]` of a version into a comparable tuple (a missing
+/// patch is `0`). `None` for anything that is not at least two numeric
+/// dot-separated components — a malformed changelog header costs its entry, not
+/// the whole guide.
+fn parse_semver(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version.trim().split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
+}
+
+/// Parses the changelog by convention (pure and infallible): a `## vX.Y.Z` line
+/// whose version token parses starts an entry, and a `### Migration` line inside
+/// an entry opens its migration content, which runs to the next heading. Prose
+/// that merely mentions the heading is not one, and an unparseable version
+/// header is skipped rather than fatal.
+fn parse_changelog(changelog: &str) -> Vec<ChangelogEntry> {
+    let mut entries: Vec<ChangelogEntry> = Vec::new();
+    let mut in_migration = false;
+    for line in changelog.lines() {
+        let trimmed = line.trim();
+        if let Some(token) = trimmed
+            .strip_prefix("## v")
+            .and_then(|rest| rest.split_whitespace().next())
+            && let Some(version) = parse_semver(token)
+        {
+            entries.push(ChangelogEntry {
+                version,
+                version_text: token.to_string(),
+                migration: String::new(),
+            });
+            in_migration = false;
+            continue;
+        }
+        let Some(entry) = entries.last_mut() else {
+            continue;
+        };
+        if trimmed == "### Migration" {
+            in_migration = true;
+        } else if trimmed.starts_with('#') {
+            in_migration = false;
+        } else if in_migration {
+            entry.migration.push_str(line);
+            entry.migration.push('\n');
+        }
+    }
+    for entry in &mut entries {
+        entry.migration = entry.migration.trim().to_string();
+    }
+    entries
+}
+
+/// Renders the `apg/migration-guide.md` body for a layout upgrading from
+/// `old_version` to `new_version` over `changelog` — the pure, unit-tested core
+/// of [`write_migration_guide`]. It selects every entry with
+/// `old_version < version <= new_version` that carries a `### Migration`
+/// section, ascending, and concatenates them under a header naming the range;
+/// when none does — or the layout records no prior version (a fresh
+/// `apg init`) — the guide says so instead of listing tasks.
+pub fn render_migration_guide(
+    changelog: &str,
+    old_version: Option<&str>,
+    new_version: &str,
+) -> String {
+    let new = parse_semver(new_version).unwrap_or((u64::MAX, u64::MAX, u64::MAX));
+    // A malformed old version is treated as the floor: the guide errs toward
+    // listing the migration rather than silently skipping it.
+    let old = old_version.map(|v| parse_semver(v).unwrap_or((0, 0, 0)));
+
+    let entries = parse_changelog(changelog);
+    let mut selected: Vec<&ChangelogEntry> = entries
+        .iter()
+        .filter(|e| {
+            !e.migration.is_empty() && old.is_some_and(|o| e.version > o) && e.version <= new
+        })
+        .collect();
+    selected.sort_by_key(|e| e.version);
+
+    let mut out = String::from(
+        "# apg migration guide\n\n\
+         Written by `apg init`; read and worked by the **migration-agent**, which \
+         finds it here in the repo's `apg/` dir.\n\n",
+    );
+    let Some(from) = old_version else {
+        out.push_str(&format!(
+            "No migration required: this layout records no prior version (a fresh \
+             `apg init` at apg {new_version}), so there is nothing to migrate.\n"
+        ));
+        return out;
+    };
+    if selected.is_empty() {
+        out.push_str(&format!(
+            "No migration required: the changelog records no `### Migration` section \
+             in the range ({from}, {new_version}] — no durable-spec change lands \
+             between the layout version and apg {new_version}.\n"
+        ));
+        return out;
+    }
+    out.push_str(&format!(
+        "The layout was at apg {from}; this binary is apg {new_version}. Run the \
+         **migration-agent** to work the tasks below, then re-run `apg scan`.\n\n\
+         ## Migration: {from} → {new_version}\n"
+    ));
+    for entry in selected {
+        out.push_str(&format!(
+            "\n### v{}\n\n{}\n",
+            entry.version_text, entry.migration
+        ));
+    }
+    out
+}
+
+/// Writes the guide [`render_migration_guide`] describes into
+/// `apg/migration-guide.md`, best-effort — an unwritable `apg/` warns rather
+/// than failing init (mirrors the upgrade-guide install). `old_version` is the
+/// layout version captured **before** [`version_gate::ensure_config_version`]
+/// rewrote it; `None` on a fresh init. Idempotent: an unchanged body leaves the
+/// file alone.
+fn write_migration_guide(apg_dir: &Path, old_version: Option<&str>) {
+    let body = render_migration_guide(CHANGELOG, old_version, env!("CARGO_PKG_VERSION"));
+    let path = apg_dir.join(MIGRATION_GUIDE);
+    if let Err(e) = write_if_changed(&path, &body) {
+        eprintln!(
+            "warning: could not write {} ({e}); re-run `apg init` once the location is writable",
+            path.display()
+        );
+    }
+}
+
 /// `apg init [dir]`: create the committed `apg/` layout (config.json carrying
 /// the binary-managed layout `version` + `.trans/` + the project-worktrees
-/// dir), install (or update) the opencode apg tool suite + the seven
+/// dir + the changelog-sliced `migration-guide.md`), install (or update) the
+/// opencode apg tool suite + the eight
 /// distributed agents + the upgrade guide into `~/.config/opencode/`, scaffold the
 /// repo `.gitignore` for the apg layout entries (`apg/.trans/`,
 /// `apg/.worktrees/`), and warn loudly about any project-local `.opencode/`
@@ -550,6 +707,15 @@ pub(crate) fn cmd_init(args: &[String]) -> anyhow::Result<()> {
     }
     // The binary-managed version field (R9): init is the layout's upgrade
     // act — write-through on every init, idempotent when already current.
+    // Capture the PREVIOUS version first (before the write overwrites it): it
+    // is the "from" bound of the migration guide written next.
+    let old_version = version_gate::config_version(&apg_dir);
+    // The changelog-sliced migration guide (best-effort): the migration-agent
+    // reads it from the repo's apg/ dir and works the tasks for the delta. It
+    // is written BEFORE the version bump below, so a failed guide write leaves
+    // the layout on its old version — re-running `apg init` then re-slices the
+    // same (old, new] range instead of a no-op that loses the tasks.
+    write_migration_guide(&apg_dir, old_version.as_deref());
     version_gate::ensure_config_version(&apg_dir, env!("CARGO_PKG_VERSION"))?;
 
     let opencode_dir = user_opencode_dir()?;
@@ -668,3 +834,6 @@ pub fn scaffold_gitignore(dir: &Path) -> anyhow::Result<bool> {
     std::fs::write(&p, out)?;
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests;

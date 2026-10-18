@@ -2038,6 +2038,97 @@ mod e2e {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// `apg init` writes the changelog-sliced migration guide into the committed
+    /// `apg/` dir (the migration-agent's input): a fresh init (no prior layout
+    /// version) gets the "no migration required" note, and an upgrade from an
+    /// older layout version gets the delta — the guide equals the pure slice for
+    /// the same range, and the version write captured the old version first so
+    /// `config.json` ends on the binary's version.
+    #[test]
+    #[ignore = "e2e tier: real I/O (scratch repo/isolated HOME/spawned apg/fs writes); run via cargo test-e2e"]
+    fn init_writes_the_changelog_sliced_migration_guide() {
+        let base = std::env::temp_dir().join(format!("apg-migration-guide-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo_dir = base.join("repo");
+        let home = base.join("home");
+        // Isolated HOME with the suite dependency dir pre-created so `apg init`
+        // never shells out to `bun install`.
+        std::fs::create_dir_all(home.join(".config/opencode/node_modules/@opencode/plugin"))
+            .unwrap();
+        scratch_repo_init(&repo_dir);
+        std::fs::write(repo_dir.join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        scratch_commit_all(&repo_dir, "init source");
+
+        let version = env!("CARGO_PKG_VERSION");
+        let apg_dir = repo_dir.join(specs::LAYOUT);
+        let guide_path = apg_dir.join(MIGRATION_GUIDE);
+        let run_init = || {
+            let out = testutil::ApgCommand::new(&["init", "."])
+                .cwd(&repo_dir)
+                .env("HOME", home.to_str().unwrap())
+                .output();
+            assert!(
+                out.status.success(),
+                "apg init failed in {}: {}{}",
+                repo_dir.display(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
+        // Fresh init: the layout records no prior version → nothing to migrate.
+        run_init();
+        let fresh =
+            std::fs::read_to_string(&guide_path).expect("apg init writes apg/migration-guide.md");
+        assert!(
+            fresh.contains("No migration required"),
+            "a fresh init needs no migration: {fresh}"
+        );
+        assert_eq!(
+            apg::version_gate::config_version(&apg_dir).as_deref(),
+            Some(version),
+            "init writes the binary version into config.json"
+        );
+
+        // Simulate an upgrade: a layout written by an older apg. Re-running init
+        // slices the changelog for the delta (0.0.0, binary version].
+        std::fs::write(
+            apg_dir.join("config.json"),
+            "{\n  \"default\": \"src\",\n  \"types\": [],\n  \"version\": \"0.0.0\"\n}\n",
+        )
+        .unwrap();
+        run_init();
+        let upgraded = std::fs::read_to_string(&guide_path).unwrap();
+        assert_eq!(
+            upgraded,
+            render_migration_guide(CHANGELOG, Some("0.0.0"), version),
+            "the guide is the changelog slice for (0.0.0, {version}]"
+        );
+        assert!(
+            upgraded.contains("0.0.0"),
+            "the guide names the from-version: {upgraded}"
+        );
+        // The guide reflects the layout's starting version (it differs from the
+        // fresh-init note) — that is what makes it a migration guide.
+        assert_ne!(upgraded, fresh, "the guide reflects the starting version");
+        assert_eq!(
+            apg::version_gate::config_version(&apg_dir).as_deref(),
+            Some(version),
+            "the version write captured the old version first, then moved on"
+        );
+
+        // Idempotent: a re-run at the current version rewrites only its own
+        // (empty-range) no-op guide.
+        run_init();
+        assert_eq!(
+            std::fs::read_to_string(&guide_path).unwrap(),
+            render_migration_guide(CHANGELOG, Some(version), version),
+            "re-running init at the same version is a no-op"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// The read-guard prose holds for exactly the six prompts this change
     /// touches: the four distributed agents rewritten by read-guard-prose
     /// (spec-review/spec-writer/plan-writer/plan-review), the newly distributed
